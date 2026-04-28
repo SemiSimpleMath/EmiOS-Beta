@@ -449,7 +449,7 @@ def mark_dayflow_requests_ingested(requests: List[Dict[str, Any]]) -> None:
             session.execute(
                 update(UnifiedLog2026)
                 .where(UnifiedLog2026.id == row_id)
-                .values(metadata_json=json.dumps(meta, ensure_ascii=False))
+                .values(metadata_json=meta)
             )
     logger.info("mark_dayflow_requests_ingested: stamped %d request(s).", len(requests))
 
