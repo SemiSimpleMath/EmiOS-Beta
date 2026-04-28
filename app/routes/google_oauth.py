@@ -224,6 +224,15 @@ def start_oauth():
             'account_id': account_id,
         })
 
+    except FileNotFoundError as e:
+        # Credentials file missing — user-actionable, not a server bug.
+        # Surface the full message (it includes the path + Google Cloud Console hint).
+        logger.info("OAuth start blocked — credentials missing: %s", e)
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'reason': 'credentials_missing',
+        }), 400
     except Exception as e:
         logger.error("Failed to start OAuth flow: %s", e)
         logger.debug("start_oauth exception details", exc_info=True)
