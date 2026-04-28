@@ -85,3 +85,6 @@ chromadb>=1.0.0
 # - spacy (NLP for RAG chunking)
 # - scikit-learn, scipy (ML libraries)
 diff-match-patch
+
+# Markdown rendering (used by wiki_viewer + dev_wiki Flask routes)
+markdown>=3.7
