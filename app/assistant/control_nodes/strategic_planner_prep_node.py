@@ -107,11 +107,17 @@ def _load_active_tickets() -> List[Dict[str, Any]]:
     for t in active:
         if (getattr(t, "ticket_type", "") or "").lower() not in _DAYFLOW_TYPES:
             continue
+        trigger_context = getattr(t, "trigger_context", None) or {}
+        if not isinstance(trigger_context, dict):
+            trigger_context = {}
+        acted_on = trigger_context.get("acted_on_item_ids", [])
+        if not isinstance(acted_on, list):
+            acted_on = []
         result.append({
             "title": str(getattr(t, "title", "") or "").strip(),
             "message": str(getattr(t, "message", "") or "").strip(),
             "suggestion_type": str(getattr(t, "suggestion_type", "") or "").strip(),
-            "source_task_ids": getattr(t, "source_task_ids", None) or [],
+            "acted_on_item_ids": acted_on,
         })
     return result
 

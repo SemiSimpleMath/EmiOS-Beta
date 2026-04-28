@@ -51,8 +51,8 @@ Route based on blackboard state:
 
 ### Dayflow-Specific Nodes
 
-- **`dayflow_switchboard_arguments_node.py`** — Validates action, persists dispatch records (`action_dispatch:UUID` items), stamps `dispatched_at` on acted-on tasks, then routes to tool
-- **`dayflow_ticket_builder_router_node.py`** — Routes ticket_builder output into `create_dayflow_ticket` dispatch with `trigger_context.source_task_ids` for feedback loop
+- **`dayflow_switchboard_arguments_node.py`** — Validates action, persists dispatch records (`action_dispatch:UUID` items), stamps every acted-on item to `state="dispatched"` with `dispatched_at`, injects `trigger_context.acted_on_item_ids` into the outgoing tool arguments, then routes to tool
+- **`post_room_finalize_node.py`** — Closes acted_on items with `state="closed"`, persists state mutations, writes action log entries, materializes plan synopses
 
 ## Blackboard Interaction
 

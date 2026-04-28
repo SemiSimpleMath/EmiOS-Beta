@@ -131,8 +131,8 @@ No active plans.
 {%- for t in active_tickets[:20] %}
 - [{{ t.get("suggestion_type","") }}] {{ t.get("title","") }}
   {{ t.get("message","") }}{% if t.get("snooze_until_local","") %}
-  snoozed until {{ t.get("snooze_until_local") }}{% endif %}{% if t.get("source_task_ids") %}
-  tasks: {{ t.get("source_task_ids")|join(", ") }}{% endif %}
+  snoozed until {{ t.get("snooze_until_local") }}{% endif %}{% if t.get("acted_on_item_ids") %}
+  tasks: {{ t.get("acted_on_item_ids")|join(", ") }}{% endif %}
 {%- endfor %}
 {%- endif %}
 
@@ -154,8 +154,8 @@ No active plans.
 {%- for t in recent_responded_tickets.get(category)[:10] %}
 - [{{ t.get("responded_at_local","") }}] {{ label }}: {{ t.get("title","") }}
   {{ t.get("message","") }}{% if t.get("user_comment") %}
-  user: "{{ t.get("user_comment") }}"{% endif %}{% if t.get("source_task_ids") %}
-  tasks: {{ t.get("source_task_ids")|join(", ") }}{% endif %}{% if label == "SNOOZED" and t.get("snooze_until_local") %}
+  user: "{{ t.get("user_comment") }}"{% endif %}{% if t.get("acted_on_item_ids") %}
+  tasks: {{ t.get("acted_on_item_ids")|join(", ") }}{% endif %}{% if label == "SNOOZED" and t.get("snooze_until_local") %}
   until: {{ t.get("snooze_until_local") }}{% endif %}
 {%- endfor %}
 {%- endif %}

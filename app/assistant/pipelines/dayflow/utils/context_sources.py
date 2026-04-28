@@ -794,9 +794,9 @@ def _format_ticket_for_context(ticket) -> Dict[str, Any]:
     trigger_context = getattr(ticket, "trigger_context", None) or {}
     if not isinstance(trigger_context, dict):
         trigger_context = {}
-    source_task_ids = trigger_context.get("source_task_ids")
-    if not isinstance(source_task_ids, list):
-        source_task_ids = []
+    acted_on_item_ids = trigger_context.get("acted_on_item_ids")
+    if not isinstance(acted_on_item_ids, list):
+        acted_on_item_ids = []
 
     return {
         "title": ticket.title or "",
@@ -805,7 +805,7 @@ def _format_ticket_for_context(ticket) -> Dict[str, Any]:
         "responded_at_local": responded_local.strftime("%I:%M %p") if responded_local else "",
         "snooze_until_local": snooze_until_local.strftime("%I:%M %p") if snooze_until_local else "",
         "user_comment": ticket.user_text or "",
-        "source_task_ids": source_task_ids,
+        "acted_on_item_ids": acted_on_item_ids,
         "execution_result": getattr(ticket, "execution_result", "") or "",
     }
 
