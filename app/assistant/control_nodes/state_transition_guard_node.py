@@ -4,28 +4,22 @@ from typing import Any, Dict, List
 
 from app.assistant.control_nodes.control_node import ControlNode
 from app.assistant.dayflow_orchestrator.contracts import get_meta
-from app.assistant.dayflow_orchestrator.dayflow_item_writer import resolve_short_id, write_dayflow_item
+from app.assistant.dayflow_orchestrator.dayflow_item_writer import (
+    ALLOWED_TRANSITIONS,
+    resolve_short_id,
+    write_dayflow_item,
+)
 from app.assistant.dayflow_orchestrator.state_store import get_dayflow_items
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.time_utils import local_to_utc
 
 logger = get_logger(__name__)
 
-_ALLOWED_ITEM_STATES = {
-    "new",
-    "artifact",
-    "needs_planning",
-    "important_open",
-    "actionable",
-    "watching",
-    "waiting",
-    "acted_on",
-    "suppressed",
-    "closed",
-}
+# Single source of truth: every state in the transition map except plan-synopsis-only.
+_ALLOWED_ITEM_STATES = frozenset(ALLOWED_TRANSITIONS) - {"active"}
 
-_STATE_MOVER_FORBIDDEN_TARGETS = frozenset({"acted_on", "closed"})
-_STATE_MOVER_FORBIDDEN_SOURCES = frozenset({"dispatched", "acted_on", "closed"})
+_STATE_MOVER_FORBIDDEN_TARGETS = frozenset({"closed"})
+_STATE_MOVER_FORBIDDEN_SOURCES = frozenset({"dispatched", "closed"})
 
 
 def _normalize_reactivate_at(mutations: List[Dict[str, Any]]) -> None:

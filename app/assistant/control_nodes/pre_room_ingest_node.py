@@ -13,8 +13,6 @@ from app.assistant.utils.time_utils import parse_iso_utc_strict
 
 logger = get_logger(__name__)
 
-_ACTED_ON_TTL_HOURS = 6
-_SUPPRESSED_TTL_HOURS = 24
 _ARTIFACT_TTL_HOURS = 24
 _NEEDS_PLANNING_TTL_HOURS = 12
 
@@ -23,7 +21,7 @@ class PreRoomIngestNode(ControlNode):
     """
     Deterministic pre-room normalization hook.
 
-    1) Sweeps stale suppressed items to closed.
+    1) Sweeps stale artifact and needs_planning items to closed.
     2) Seeds ingestion keys used by intake/state agents and validates core payload shape.
     """
 
@@ -32,13 +30,10 @@ class PreRoomIngestNode(ControlNode):
         if not existing:
             return 0
 
-        acted_on_cutoff = now_utc - timedelta(hours=_ACTED_ON_TTL_HOURS)
-        suppressed_cutoff = now_utc - timedelta(hours=_SUPPRESSED_TTL_HOURS)
         artifact_cutoff = now_utc - timedelta(hours=_ARTIFACT_TTL_HOURS)
         needs_planning_cutoff = now_utc - timedelta(hours=_NEEDS_PLANNING_TTL_HOURS)
 
         stale_mutations: List[Dict[str, Any]] = []
-        stale_ids: set = set()
 
         for item in existing:
             if not isinstance(item, dict):
@@ -54,30 +49,20 @@ class PreRoomIngestNode(ControlNode):
                 continue
             last_reviewed = parse_iso_utc_strict(raw_reviewed, label=f"last_reviewed_at[{item_id}]")
 
-            if state == "suppressed" and last_reviewed < suppressed_cutoff:
-                stale_mutations.append({
-                    "item_id": item_id,
-                    "from_state": "suppressed",
-                    "to_state": "closed",
-                    "reason": f"stale_sweep_suppressed_{_SUPPRESSED_TTL_HOURS}h",
-                })
-                stale_ids.add(item_id)
-            elif state == "artifact" and last_reviewed < artifact_cutoff:
+            if state == "artifact" and last_reviewed < artifact_cutoff:
                 stale_mutations.append({
                     "item_id": item_id,
                     "from_state": "artifact",
                     "to_state": "closed",
                     "reason": f"stale_sweep_artifact_{_ARTIFACT_TTL_HOURS}h",
                 })
-                stale_ids.add(item_id)
             elif state == "needs_planning" and last_reviewed < needs_planning_cutoff:
                 stale_mutations.append({
                     "item_id": item_id,
                     "from_state": "needs_planning",
-                    "to_state": "artifact",
+                    "to_state": "closed",
                     "reason": f"stale_sweep_needs_planning_{_NEEDS_PLANNING_TTL_HOURS}h",
                 })
-                stale_ids.add(item_id)
 
         if not stale_mutations:
             return 0
@@ -91,13 +76,13 @@ class PreRoomIngestNode(ControlNode):
             )
 
         logger.info(
-            "[%s] stale sweep: closed %d item(s) (acted_on>%dh=%d, suppressed>%dh=%d).",
+            "[%s] stale sweep: closed %d item(s) (artifact>%dh=%d, needs_planning>%dh=%d).",
             self.name,
             len(stale_mutations),
-            _ACTED_ON_TTL_HOURS,
-            sum(1 for m in stale_mutations if m["from_state"] == "acted_on"),
-            _SUPPRESSED_TTL_HOURS,
-            sum(1 for m in stale_mutations if m["from_state"] == "suppressed"),
+            _ARTIFACT_TTL_HOURS,
+            sum(1 for m in stale_mutations if m["from_state"] == "artifact"),
+            _NEEDS_PLANNING_TTL_HOURS,
+            sum(1 for m in stale_mutations if m["from_state"] == "needs_planning"),
         )
         return len(stale_mutations)
 

@@ -18,17 +18,14 @@ from app.models.db_manager import get_db_manager
 
 logger = get_logger(__name__)
 
-DAYFLOW_ITEM_SOURCE = "dayflow_item"
-DAYFLOW_ROOM_ID = "dayflow_orchestrator"
+from app.assistant.dayflow_orchestrator.dayflow_item_writer import (
+    DAYFLOW_ITEM_SOURCE,
+    DAYFLOW_ROOM_ID,
+    DONE_STATES,
+    RESOLVED_STATES,
+    TERMINAL_STATES,
+)
 
-# Canonical state sets — import these instead of redefining locally.
-# RESOLVED: item is done, no further action needed from action_selector.
-RESOLVED_STATES = frozenset({"closed", "suppressed"})
-# DONE: item completed. Not yet forgotten.
-DONE_STATES = frozenset({"closed"})
-# TERMINAL: item is permanently invisible. Only the relevance cleaner
-# moves items here after confirming they won't be erroneously recreated.
-TERMINAL_STATES = frozenset({"suppressed"})
 _EXTENDED_MUTATION_KEYS = ("wait_reason", "reactivate_at_utc", "priority_on_wake")
 
 
