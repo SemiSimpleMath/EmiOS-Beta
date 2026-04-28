@@ -383,7 +383,10 @@ class BeliefStore:
 
         surviving_record = store.upsert_belief(req)
 
-        # Boost observation count by transferred support.
+        # Boost observation count by transferred support. The increment is a
+        # SQL-level expression (UserBelief.observation_count + transferred_obs)
+        # so SQLite reads-and-adds in one statement — no read-modify-write race
+        # against another writer touching the same key.
         if transferred_obs > 0:
             now = _now_iso()
             session = get_session()
@@ -391,7 +394,7 @@ class BeliefStore:
                 session.query(UserBelief).filter(
                     UserBelief.belief_key == surviving_key
                 ).update(
-                    {"observation_count": surviving_record.observation_count + transferred_obs,
+                    {"observation_count": UserBelief.observation_count + transferred_obs,
                      "updated_at": now},
                     synchronize_session=False,
                 )
