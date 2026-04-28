@@ -70,7 +70,7 @@ def export_beliefs(*, domain: Optional[str] = None) -> Path:
 
     out_path = _OUTPUT_DIR / _OUTPUT_FILE
 
-    # Only write if beliefs content actually changed (ignore metadata timestamp)
+    # Only write if beliefs content actually changed (ignore metadata timestamp).
     new_content = json.dumps({"beliefs": entries}, sort_keys=True, ensure_ascii=False)
     if out_path.exists():
         try:
@@ -79,10 +79,20 @@ def export_beliefs(*, domain: Optional[str] = None) -> Path:
             if existing_content == new_content:
                 logger.debug("[export_beliefs] No changes detected — skipping write (%d beliefs)", len(entries))
                 return out_path
-        except Exception:
-            pass  # If we can't read/parse existing, just overwrite
+        except Exception as e:
+            # Existing file is unreadable / corrupt — fall through to overwrite,
+            # but make the corruption visible.
+            logger.warning(
+                "[export_beliefs] could not parse existing %s (%s); overwriting",
+                out_path, e, exc_info=True,
+            )
 
-    out_path.write_text(json.dumps(resource, ensure_ascii=False, indent=2), encoding="utf-8")
+    # Atomic write: temp file in the same dir, then rename. A crash between
+    # write_text and replace leaves the previous good file in place; the
+    # replace is atomic on the same filesystem.
+    tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
+    tmp_path.write_text(json.dumps(resource, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp_path.replace(out_path)
     logger.info("[export_beliefs] Wrote %d beliefs → %s", len(entries), out_path)
     return out_path
 
