@@ -4,21 +4,16 @@ Dayflow blackboard context builder (minimal).
 Per-agent pre-LLM nodes now call ``get_dayflow_items()`` directly for
 context, and wait_interrupt_promoter_node reads active dispatches via
 ``dispatch_sweeper.list_active_dispatches()`` at the point of use. This
-module only handles:
-
-1. ``day_of_week`` — trivial.
-2. Ticket response feedback — mutates item state in DB.
+module only emits ``day_of_week``.
 
 The ``enrich_items_with_local_times`` helper is kept for backward
 compatibility with callers that import it from here.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Dict, List
 
-from app.assistant.dayflow_orchestrator.state_store import get_dayflow_items
-from app.assistant.dayflow_orchestrator.ticket_feedback import apply_ticket_response_feedback
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.time_utils import get_local_timezone
 
@@ -73,9 +68,8 @@ def build_dayflow_blackboard_extras() -> Dict[str, Any]:
     """Build the minimal context dict for the dayflow orchestrator blackboard.
 
     Most agent context is now prepared by per-agent pre-LLM nodes and by
-    dispatch_sweeper.list_active_dispatches(). This function handles only:
-    - day_of_week
-    - ticket response feedback (DB mutations as a side effect)
+    dispatch_sweeper.list_active_dispatches(). This function emits only
+    day_of_week.
     """
     from zoneinfo import ZoneInfo
 
@@ -83,20 +77,6 @@ def build_dayflow_blackboard_extras() -> Dict[str, Any]:
     local_tz = ZoneInfo("America/Los_Angeles")
     now_local = now_utc.astimezone(local_tz)
 
-    extras: Dict[str, Any] = {
+    return {
         "day_of_week": now_local.strftime("%A"),
     }
-
-    feedback_since = now_utc - timedelta(hours=2)
-    existing_for_feedback = get_dayflow_items()
-    feedback_count = apply_ticket_response_feedback(
-        existing_items=existing_for_feedback,
-        since_utc=feedback_since,
-    )
-    if feedback_count:
-        logger.info(
-            "build_dayflow_blackboard_extras: applied %d ticket feedback mutation(s).",
-            feedback_count,
-        )
-
-    return extras

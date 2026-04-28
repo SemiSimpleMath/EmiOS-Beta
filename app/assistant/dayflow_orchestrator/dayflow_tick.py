@@ -3,8 +3,7 @@ Dayflow orchestrator cadence tick — entry point.
 
 The heavy lifting is in sibling modules:
 - orchestrator_status.py  — status resource CRUD, master-room blocking
-- ticket_feedback.py      — user accept/decline/snooze → item state mutations
-- blackboard_builder.py   — builds the 14+ data-source context dict for agents
+- blackboard_builder.py   — emits day_of_week (per-agent prep nodes own the rest)
 """
 from __future__ import annotations
 
