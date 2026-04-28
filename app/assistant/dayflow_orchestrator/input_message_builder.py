@@ -6,7 +6,6 @@ from typing import Any, Dict, List, Optional
 
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.routine_manager.utils import write_json_file
-from app.assistant.ticket_manager.ticket import TicketState
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_configs_dir, get_resources_dir
 from app.assistant.utils.pydantic_classes import Message
@@ -25,68 +24,6 @@ def _build_item_id(prefix: str, *parts: str) -> str:
     normalized = "|".join(str(p or "").strip().lower() for p in parts)
     digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
     return f"{prefix}:{digest}"
-
-
-def _ticket_state_to_item_state(ticket_state: str) -> str:
-    state = str(ticket_state or "").strip().lower()
-    if state in {TicketState.PENDING.value, TicketState.PROPOSED.value}:
-        return "closed"
-    if state == TicketState.SNOOZED.value:
-        return "suppressed"
-    if state in {TicketState.ACCEPTED.value, TicketState.EXECUTING.value}:
-        return "closed"
-    if state in {
-        TicketState.COMPLETED.value,
-        TicketState.DISMISSED.value,
-        TicketState.EXPIRED.value,
-        TicketState.FAILED.value,
-    }:
-        return "closed"
-    raise ValueError(f"Unhandled ticket state for dayflow item mapping: '{ticket_state}'")
-
-
-def _build_ticket_message(ticket: Any, now_utc: datetime) -> Message:
-    ticket_id = str(getattr(ticket, "ticket_id", "") or "").strip()
-    if not ticket_id:
-        raise ValueError("Ticket is missing ticket_id.")
-    title = str(getattr(ticket, "title", "") or "").strip()
-    if not title:
-        raise ValueError(f"Ticket '{ticket_id}' is missing title.")
-    source_state = str(getattr(ticket, "state", "") or "").strip().lower()
-    if not source_state:
-        raise ValueError(f"Ticket '{ticket_id}' is missing state.")
-
-    source_lifecycle_state = _ticket_state_to_item_state(source_state)
-    snooze_until = getattr(ticket, "snooze_until", None)
-    metadata: Dict[str, Any] = {
-        "item_id": f"ticket:{ticket_id}",
-        "source_type": "ticket",
-        "event_type": "ticket_state_snapshot",
-        "created_at": _to_iso(getattr(ticket, "created_at", None)) or now_utc.isoformat(),
-        "summary": title,
-        "importance": "medium",
-        "actionability": "actionable",
-        "state": "new",
-        "source_lifecycle_state": source_lifecycle_state,
-        "state_reason": f"ticket_state:{source_state}",
-        "last_reviewed_at": now_utc.isoformat(),
-        "cooldown_until": _to_iso(snooze_until),
-        "linked_item_ids": [],
-        "source_ticket_id": ticket_id,
-        "source_ticket_type": str(getattr(ticket, "ticket_type", "") or "").strip(),
-        "source_suggestion_type": str(getattr(ticket, "suggestion_type", "") or "").strip(),
-    }
-
-    return Message(
-        id=metadata["item_id"],
-        data_type="dayflow_input_item",
-        sub_data_type=["dayflow_orchestrator", "input_layer", "new", "ticket", "dayflow_artifact"],
-        sender="ticket_manager",
-        content=title,
-        timestamp=now_utc,
-        room_id="dayflow_orchestrator",
-        metadata=metadata,
-    )
 
 
 def _build_calendar_message_from_structured(*, event: Dict[str, Any], now_utc: datetime) -> Message:
@@ -561,56 +498,6 @@ def _build_delegation_message(*, request: Dict[str, Any], now_utc: datetime) -> 
         room_id="dayflow_orchestrator",
         metadata=metadata,
     )
-
-
-def build_dayflow_input_messages(
-    *, now_utc: Optional[datetime] = None, max_tickets: int = 50,
-) -> tuple[List[Message], List[Dict[str, Any]]]:
-    """
-    Build normalized Message items for dayflow orchestrator stateful input.
-
-    Returns (messages, ingested_requests) where ingested_requests is a list
-    of raw request dicts that were loaded from the DB and should be marked
-    as ingested after the pipeline processes them.
-    """
-    now = now_utc or datetime.now(timezone.utc)
-    output: List[Message] = []
-
-    from app.assistant.ticket_manager import get_ticket_manager
-    from app.assistant.ticket_manager.ticket import TicketType
-
-    _ACTIVE_TICKET_STATES = [TicketState.PENDING, TicketState.PROPOSED, TicketState.SNOOZED]
-    _DAYFLOW_TICKET_TYPES = [
-        TicketType.DAYFLOW_ADVICE,
-        TicketType.DAYFLOW_NOTIFY,
-        TicketType.DAYFLOW_DECISION,
-    ]
-    tm = get_ticket_manager()
-    for tt in _DAYFLOW_TICKET_TYPES:
-        tickets = tm.get_tickets(
-            states=_ACTIVE_TICKET_STATES,
-            ticket_type=tt.value,
-            limit=max_tickets,
-            order_by="updated_at",
-        )
-        for ticket in tickets:
-            output.append(_build_ticket_message(ticket, now))
-
-    # Calendar events are NOT ingested as dayflow items. The planner
-    # already sees them via resource_expected_calendar and creates
-    # plans from them. Ingesting them as items just creates noise.
-
-    email_events = _load_emails_from_event_repo(now_utc=now)
-    for email_data in email_events:
-        output.append(_build_email_message(email_data=email_data, now_utc=now))
-
-    # User delegation requests from master_room.
-    delegation_requests = _load_dayflow_requests(now_utc=now)
-    for req in delegation_requests:
-        output.append(_build_delegation_message(request=req, now_utc=now))
-
-    output.sort(key=lambda m: getattr(m, "timestamp", now))
-    return output, delegation_requests
 
 
 def serialize_messages(messages: List[Message]) -> List[Dict[str, Any]]:

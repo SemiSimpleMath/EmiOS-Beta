@@ -19,7 +19,6 @@ from app.assistant.dayflow_orchestrator.contracts import assign_short_ids, get_m
 from app.assistant.dayflow_orchestrator.input_message_builder import (
     _build_email_message,
     _build_delegation_message,
-    _build_ticket_message,
     _load_dayflow_requests,
     _load_emails_from_event_repo,
     mark_dayflow_requests_ingested,
@@ -139,36 +138,6 @@ def _ingest_emails(
     return new
 
 
-def _ingest_tickets(
-    existing_ids: set[str], now_utc: datetime,
-) -> list[Message]:
-    """Ingest active dayflow tickets as dayflow items."""
-    from app.assistant.ticket_manager import get_ticket_manager
-    from app.assistant.ticket_manager.ticket import TicketState, TicketType
-
-    active_states = [TicketState.PENDING, TicketState.PROPOSED, TicketState.SNOOZED]
-    dayflow_types = [
-        TicketType.DAYFLOW_ADVICE,
-        TicketType.DAYFLOW_NOTIFY,
-        TicketType.DAYFLOW_DECISION,
-    ]
-    tm = get_ticket_manager()
-    new: list[Message] = []
-    for tt in dayflow_types:
-        tickets = tm.get_tickets(
-            states=active_states,
-            ticket_type=tt.value,
-            limit=50,
-            order_by="updated_at",
-        )
-        for ticket in tickets:
-            msg = _build_ticket_message(ticket, now_utc)
-            item_id = str(getattr(msg, "id", "") or "").strip()
-            if item_id not in existing_ids:
-                new.append(msg)
-    return new
-
-
 def _ingest_delegation_requests(
     existing_ids: set[str], now_utc: datetime,
 ) -> tuple[list[Message], list[Dict[str, Any]]]:
@@ -209,15 +178,14 @@ def run_dayflow_ingestion(
     # 2. Collect new items from each source.
     chat_items = _ingest_chat(existing_ids, now)
     email_items = _ingest_emails(existing_ids, now)
-    ticket_items = _ingest_tickets(existing_ids, now)
     delegation_items, delegation_requests = _ingest_delegation_requests(existing_ids, now)
 
-    all_new = chat_items + email_items + ticket_items + delegation_items
+    all_new = chat_items + email_items + delegation_items
 
     if not all_new:
         logger.info("run_dayflow_ingestion: no new items to ingest.")
         return {
-            "chat": 0, "email": 0, "ticket": 0, "delegation": 0, "total": 0,
+            "chat": 0, "email": 0, "delegation": 0, "total": 0,
         }
 
     # 3. Assign short_ids.
@@ -275,13 +243,11 @@ def run_dayflow_ingestion(
     summary = {
         "chat": len(chat_items),
         "email": len(email_items),
-        "ticket": len(ticket_items),
         "delegation": len(delegation_items),
         "total": len(all_new),
     }
     logger.info(
-        "run_dayflow_ingestion: ingested %d item(s) — chat=%d email=%d ticket=%d delegation=%d",
-        summary["total"], summary["chat"], summary["email"],
-        summary["ticket"], summary["delegation"],
+        "run_dayflow_ingestion: ingested %d item(s) — chat=%d email=%d delegation=%d",
+        summary["total"], summary["chat"], summary["email"], summary["delegation"],
     )
     return summary
