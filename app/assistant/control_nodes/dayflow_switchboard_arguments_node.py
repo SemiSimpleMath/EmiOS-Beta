@@ -172,16 +172,11 @@ class DayflowSwitchboardArgumentsNode(RoomSwitchboardArgumentsNode):
                 }
             )
 
-        # Stamp dispatched_at and move state to "dispatched" via write_dayflow_item.
-        # TODO revisit the source_type gate — "plan" was dead code and removed;
-        # whether other source types (chat/email/calendar observations) should
-        # also transition to "dispatched" on dispatch is an open design question.
-        _STAMPABLE_SOURCES = frozenset({"plan_task"})
-        stamped_count = 0
+        # Stamp dispatched_at and move state to "dispatched" for every acted-on
+        # item. The room invocation owns the in-flight window; post_room_finalize
+        # will close the item when the tool returns.
         for acted_id in resolved_ids:
             source_meta = meta_by_id.get(acted_id, {})
-            if str(source_meta.get("source_type") or "").strip().lower() not in _STAMPABLE_SOURCES:
-                continue
             updates = {
                 "dispatched_at": now_utc.isoformat(),
                 "dispatched_at_local": created_local,
@@ -196,7 +191,7 @@ class DayflowSwitchboardArgumentsNode(RoomSwitchboardArgumentsNode):
             source_meta.update(updates)
             source_meta["state"] = "dispatched"
             source_meta["state_reason"] = "action_dispatched"
-            stamped_count += 1
+        stamped_count = len(resolved_ids)
 
         # Dispatch records are new items — batch write.
         if dispatch_messages:
