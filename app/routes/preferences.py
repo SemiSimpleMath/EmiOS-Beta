@@ -43,6 +43,50 @@ _IMPORTANT_RESOURCE_SPECS = {
         "path": ("assistant", "resource_chat_guidelines_data.json"),
         "kind": "json_blob",
     },
+    "resource_orchestrator_user_prefs": {
+        "title": "Orchestrator Preferences (Dayflow)",
+        "description": (
+            "Personal directives the dayflow orchestrator and chat_gate read as context."
+        ),
+        "path": ("instructions", "resource_orchestrator_user_prefs.md"),
+        "kind": "markdown",
+    },
+    "resource_assistant_guidelines": {
+        "title": "Top-level Assistant Guidelines",
+        "description": "Complexity ladder (C1-C5), operational guardrails (B1-B5), execution logic.",
+        "path": ("instructions", "resource_assistant_guidelines.md"),
+        "kind": "markdown",
+    },
+    "resource_auto_planner_instructions": {
+        "title": "Auto-Planner Instructions",
+        "description": "Guidelines for when the planner should ask first vs. take action.",
+        "path": ("instructions", "resource_auto_planner_instructions.md"),
+        "kind": "markdown",
+    },
+    "resource_activity_log": {
+        "title": "Activity Log Behavior",
+        "description": "Guidelines for the desktop activity tracker.",
+        "path": ("instructions", "resource_activity_log.md"),
+        "kind": "markdown",
+    },
+    "resource_bbc_guidelines": {
+        "title": "BBC Browser Hints",
+        "description": "Site-specific hints for the playwright agent on BBC News.",
+        "path": ("instructions", "resource_bbc_guidelines.md"),
+        "kind": "markdown",
+    },
+    "resource_cnn_guidelines": {
+        "title": "CNN Browser Hints",
+        "description": "Site-specific hints for the playwright agent on CNN.",
+        "path": ("instructions", "resource_cnn_guidelines.md"),
+        "kind": "markdown",
+    },
+    "resource_doordash_guidelines": {
+        "title": "DoorDash Browser Hints",
+        "description": "Site-specific hints for the playwright agent ordering food on DoorDash.",
+        "path": ("instructions", "resource_doordash_guidelines.md"),
+        "kind": "markdown",
+    },
 }
 
 def get_resources_dir():
@@ -542,16 +586,31 @@ def _read_important_resource(resource_id: str) -> dict:
     path.parent.mkdir(parents=True, exist_ok=True)
 
     kind = str(spec.get("kind") or "").strip()
-    if kind not in {"json_content", "json_blob"}:
+    if kind not in {"json_content", "json_blob", "markdown"}:
         raise ValueError(f"Unsupported important resource kind for {resource_id}: {kind}")
 
     if not path.exists():
-        default_content = "" if kind == "json_content" else "{}"
+        default_content = "" if kind in ("json_content", "markdown") else "{}"
         return {
             "id": resource_id,
             "title": str(spec.get("title") or resource_id),
             "description": str(spec.get("description") or ""),
             "content": default_content,
+            "path": str(path),
+            "kind": kind,
+        }
+
+    if kind == "markdown":
+        try:
+            content = path.read_text(encoding="utf-8")
+        except Exception as e:
+            logger.error("Failed reading markdown resource '%s': %s", resource_id, e)
+            raise
+        return {
+            "id": resource_id,
+            "title": str(spec.get("title") or resource_id),
+            "description": str(spec.get("description") or ""),
+            "content": content,
             "path": str(path),
             "kind": kind,
         }
@@ -589,6 +648,19 @@ def _write_important_resource(resource_id: str, content: str) -> None:
     path = _important_resource_abs_path(resource_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     kind = str(spec.get("kind") or "").strip()
+    if kind == "markdown":
+        try:
+            path.write_text(str(content or ""), encoding="utf-8")
+        except Exception as e:
+            logger.error("Failed writing markdown resource '%s': %s", resource_id, e)
+            raise
+        try:
+            if hasattr(DI, "resource_manager") and DI.resource_manager:
+                DI.resource_manager.compile_templates("resources")
+        except Exception as e:
+            logger.error("Failed refreshing resource manager for markdown '%s': %s", resource_id, e)
+        return
+
     if kind == "json_content":
         payload = {"content": str(content or "")}
     elif kind == "json_blob":
