@@ -1,175 +1,135 @@
-# EmiOS — Your Personal AI Assistant
+# EmiOS
 
-EmiOS is a local-first, multi-agent AI assistant that learns about you over time
-through a knowledge graph, daily context tracking, and long-term memory.  It runs
-entirely on your machine — your data never leaves your computer.
+A local-first personal AI assistant. Runs on your laptop, builds a knowledge graph of things you tell it, and writes a personal wiki of your life over time.
 
-> **Alpha release** — expect rough edges.  Feedback and bug reports are welcome
-> via GitHub Issues.
-
----
+This README covers install only. For the first-week walkthrough, troubleshooting, and how it works day-to-day, see [`BETA.md`](BETA.md).
 
 ## Prerequisites
 
-| Requirement | Notes |
-|---|---|
-| **Python 3.10+** | Check with `python --version` |
-| **Git** | To clone the repository |
-| **An LLM API key** | OpenAI, Google Gemini (free tier available), or Anthropic Claude |
+- **Python 3.10 or newer.** Check with `python --version` (or `python3 --version` on Linux/Mac).
+- **About 1 GB of disk space** (mostly the `.venv` and a small embedding-model cache).
+- **One LLM API key** — at least one of:
+  - `OPENAI_API_KEY` — easiest, most tested
+  - `ANTHROPIC_API_KEY`
+  - `GOOGLE_API_KEY` (for Gemini)
+- **15 minutes** for first install.
 
-Google Calendar, Gmail, and Tasks integration is optional and requires a Google
-Cloud OAuth `credentials.json` file.  The setup wizard will guide you through
-this if you want it.
+Optional integrations (Google Calendar/Gmail, Twilio SMS, Slack, Telegram, OpenWeather) are configured later from the in-app Settings page.
 
----
+## Install
 
-## Installation
+### Windows
 
-```bash
-git clone https://github.com/SemiSimpleMath/EmiOS-Alpha.git
-cd EmiOS-Alpha
-git checkout master
-python setup.py
-```
+1. Install Python 3.10+ from [python.org](https://www.python.org/downloads/). Tick **"Add Python to PATH"** during install.
+2. If pip complains about Visual C++ build tools, install **Microsoft C++ Build Tools** from Microsoft's site (free), restart, retry.
+3. Clone and set up:
+   ```cmd
+   git clone https://github.com/SemiSimpleMath/EmiOS-Beta.git
+   cd EmiOS-Beta
+   python setup.py
+   ```
+4. Launch:
+   ```cmd
+   .\emi.bat
+   ```
+   Or double-click `emi.bat` from Explorer. Browser opens to `http://localhost:8000` automatically.
 
-> **Note:** The active development branch is `master`. Make sure you're on it — `main` is outdated.
+### macOS
 
-The setup script handles everything automatically:
+1. Python 3.10+ usually ships with macOS. If you need a newer version, install via [python.org](https://www.python.org/downloads/) or `brew install python@3.12`.
+2. On Apple Silicon (M1/M2/M3), if pip complains about Xcode tools:
+   ```bash
+   xcode-select --install
+   ```
+3. Clone and set up:
+   ```bash
+   git clone https://github.com/SemiSimpleMath/EmiOS-Beta.git
+   cd EmiOS-Beta
+   python3 setup.py
+   ```
+4. Launch:
+   ```bash
+   ./emi.command
+   ```
+   Or double-click `emi.command` from Finder.
 
-1. Verifies Python version
-2. Creates a `.venv` virtual environment
-3. Installs all dependencies (including Knowledge Graph support via ONNX — no
-   PyTorch required)
-4. Initialises the SQLite database
-5. Seeds the KG taxonomy
-6. Creates a desktop shortcut (`EmiOS`)
+### Linux (Ubuntu / Debian)
 
-When setup completes, launch EmiOS using the desktop shortcut or from the
-terminal:
+1. Install Python and the system libraries the dependencies need:
+   ```bash
+   sudo apt update
+   sudo apt install python3-venv python3-pip lsof \
+                    build-essential libssl-dev libffi-dev \
+                    libxml2-dev libxslt1-dev
+   ```
+   `python3-venv` is not bundled by default on Ubuntu — without it `python3 -m venv` fails silently.
+2. Clone and set up:
+   ```bash
+   git clone https://github.com/SemiSimpleMath/EmiOS-Beta.git
+   cd EmiOS-Beta
+   python3 setup.py
+   ```
+3. Launch:
+   ```bash
+   chmod +x emi.command   # one-time, git doesn't preserve the bit
+   ./emi.command
+   ```
+   Or run `python3 start.py` directly. Browser opens to `http://localhost:8000`.
 
-```bash
-# Windows
-.\emi.bat
+### Windows Subsystem for Linux (WSL)
 
-# macOS / Linux
-./emi.command
-```
+Install Emi inside a WSL Ubuntu distro. Two notes specific to WSL:
 
-On first launch the **setup wizard** opens in your browser at
-`http://localhost:8000/setup` and walks you through:
+- **Use Ubuntu, not Alpine.** Several heavy dependencies (chromadb, onnxruntime, numpy, lxml) ship glibc-only wheels on PyPI. On Alpine's musl libc they fall back to source builds and onnxruntime in particular doesn't compile cleanly. Save yourself the headache.
+- **Keep the project on the Linux filesystem.** Clone into `~/EmiOS-Beta`, not `/mnt/c/...` or `/mnt/e/...`. Running Python out of `/mnt/...` is 5–10× slower because of the WSL↔NTFS bridge, and SQLite locking misbehaves.
 
-- Your name, pronouns, and timezone
-- Choosing an LLM provider and entering your API key
-- Naming and personalising your assistant
-- (Optional) Adding important people for the knowledge graph
+Steps:
 
-After the wizard finishes you're dropped into the chat UI.  Subsequent launches
-skip the wizard and go straight to chat.
+1. From Windows PowerShell:
+   ```powershell
+   wsl --install -d Ubuntu
+   ```
+   First launch will prompt for a username and password.
 
----
+2. Inside the Ubuntu shell, install system dependencies (same as Linux above):
+   ```bash
+   sudo apt update
+   sudo apt install python3-venv python3-pip lsof \
+                    build-essential libssl-dev libffi-dev \
+                    libxml2-dev libxslt1-dev
+   ```
 
-## Running EmiOS
+3. Clone and set up:
+   ```bash
+   cd ~
+   git clone https://github.com/SemiSimpleMath/EmiOS-Beta.git
+   cd ~/EmiOS-Beta
+   python3 setup.py
+   ```
 
-**Desktop shortcut (recommended):** Double-click the `EmiOS` shortcut on your
-Desktop.  If the server is already running it simply opens the browser.
+4. Launch:
+   ```bash
+   chmod +x emi.command
+   ./emi.command
+   ```
+   `xdg-open` will fail because WSL has no GUI — that's expected. Open `http://localhost:8000` in your **Windows** browser. WSL2 forwards localhost to Windows automatically.
 
-**Terminal:**
+## After install
 
-```bash
-# Windows
-.\emi.bat
+On first launch you'll land on a setup wizard that walks you through your profile, your assistant's name and personality, and your API keys. About 10 minutes.
 
-# macOS / Linux
-./emi.command
+For what to try in your first week, the in-app menus, scheduled jobs, settings, resetting, and how to file feedback, read [`BETA.md`](BETA.md).
 
-# Or directly:
-python start.py
-```
+## Resetting
 
-The app runs at **http://localhost:8000**.
+If something gets corrupted or you want to start over:
 
----
+1. Stop Emi (close the terminal window or use the menu's Shut Down option).
+2. Delete `emi.db`, the `chroma_db/` folder, and the `resources/` folder.
+3. Re-run the launcher. The setup wizard will re-trigger.
 
-## What's Included
-
-| Feature | Description |
-|---|---|
-| **Multi-agent chat** | Conversation routed through specialised agents (triage, planner, one-shot, etc.) |
-| **Knowledge Graph** | Automatically extracts entities and relationships from your conversations |
-| **Entity Cards** | Auto-generated profiles for people, places, and concepts you discuss |
-| **Daily Context** | Dayflow pipeline tracks your schedule, status, and daily themes |
-| **Expected Calendar** | Enriched view of today's schedule with status tracking |
-| **Background Data Fetch** | Periodic email, calendar, weather, news, and task updates |
-| **KG Visualiser** | Interactive graph viewer (Dev menu) |
-| **Google Integration** | Gmail, Calendar, and Tasks (requires OAuth setup) |
-| **Telegram Bot** | Optional — connect via Telegram |
-| **Music / DJ** | Spotify and Apple Music integration (optional) |
-
----
-
-## Configuration
-
-All configuration lives in a `.env` file at the project root (created by the
-setup wizard).  See `.env.example` for the full list of available variables.
-
-Agent-level LLM routing is configured per-agent in each agent's `config.yaml`.
-The `DEFAULT_LLM_PROVIDER` in `.env` is only a fallback.
-
-User preferences and feature toggles are managed through the **Settings** page
-in the UI (gear icon).
-
----
-
-## Project Structure (Key Directories)
-
-```
-EmiOS-Alpha/
-├── setup.py                  # First-time setup script
-├── start.py                  # Launcher (auto-detects venv)
-├── run_flask.py              # Flask application entry point
-├── emi.bat / emi.command     # OS-specific launcher with toggle logic
-├── requirements_alpha.txt    # Python dependencies
-├── .env.example              # Environment variable reference
-├── app/
-│   ├── templates/            # HTML templates (chat UI, settings, etc.)
-│   ├── static/               # CSS, JS, images
-│   ├── routes/               # Flask route handlers
-│   ├── models/               # SQLAlchemy models
-│   ├── assistant/
-│   │   ├── agents/           # Agent definitions (config.yaml + prompts)
-│   │   ├── pipelines/        # Data pipelines (dayflow, KG, entity cards)
-│   │   ├── kg/               # Knowledge graph core
-│   │   ├── background_task_manager/
-│   │   └── routine_manager/  # Scheduled routine execution
-│   └── graph_visualizer/     # KG visualiser (React frontend, pre-built)
-├── resources/                # User data, assistant config, context files
-├── configs/                  # Routine definitions, tool configs
-└── day_context/              # Daily pipeline outputs (auto-generated)
-```
-
----
-
-## Troubleshooting
-
-**"provider=not set" at startup** — Add `DEFAULT_LLM_PROVIDER=openai` (or
-`gemini` / `anthropic`) to your `.env` file.  This is cosmetic; agents use their
-own `config.yaml` for LLM routing.
-
-**Setup wizard keeps appearing** — Make sure `SETUP_COMPLETE=true` is in your
-`.env` file.
-
-**KG tables missing / merge errors** — Delete `emi.db` and restart.  Tables are
-recreated automatically on boot.
-
-**Calendar widget empty** — Calendar data requires either Google OAuth
-(Calendar integration) or an active dayflow pipeline run.  Check Settings to
-ensure the calendar feature is enabled.
-
-**Port 8000 already in use** — Another instance may be running.  The launcher
-scripts detect this and open the browser instead of starting a second server.
-
----
+Your `.venv` and installed packages stay; only your data gets wiped.
 
 ## License
 
-This project is released under the [MIT License](LICENSE).
+MIT. See [`LICENSE`](LICENSE).
