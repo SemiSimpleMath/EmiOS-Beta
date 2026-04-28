@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 
+from app.assistant.lib.google_auth import oauth_registry
+
 
 def _env(name: str, default: str) -> str:
     value = str(os.getenv(name, default) or "").strip()
@@ -10,9 +12,22 @@ def _env(name: str, default: str) -> str:
     return value
 
 
-DEFAULT_GOOGLE_ACCOUNT_ID = _env("EMI_GOOGLE_DEFAULT_ACCOUNT_ID", "google_user_primary")
-GMAIL_GOOGLE_ACCOUNT_ID = _env("EMI_GOOGLE_GMAIL_ACCOUNT_ID", DEFAULT_GOOGLE_ACCOUNT_ID)
-CALENDAR_GOOGLE_ACCOUNT_ID = _env("EMI_GOOGLE_CALENDAR_ACCOUNT_ID", DEFAULT_GOOGLE_ACCOUNT_ID)
-TASKS_GOOGLE_ACCOUNT_ID = _env("EMI_GOOGLE_TASKS_ACCOUNT_ID", DEFAULT_GOOGLE_ACCOUNT_ID)
-NEST_GOOGLE_ACCOUNT_ID = _env("EMI_GOOGLE_NEST_ACCOUNT_ID", "google_nest")
+def _validated(env_name: str, default: str) -> str:
+    value = _env(env_name, default)
+    if not oauth_registry.is_known_account(value):
+        known = sorted(oauth_registry.list_accounts().keys())
+        source = "environment" if os.getenv(env_name) else "default"
+        raise RuntimeError(
+            f"{env_name}={value!r} (from {source}) is not in the OAuth registry. "
+            f"Either add it to configs/oauth_accounts.json or unset/correct the "
+            f"environment variable. Known accounts: {known}."
+        )
+    return value
+
+
+DEFAULT_GOOGLE_ACCOUNT_ID = _validated("EMI_GOOGLE_DEFAULT_ACCOUNT_ID", "google_user_primary")
+GMAIL_GOOGLE_ACCOUNT_ID = _validated("EMI_GOOGLE_GMAIL_ACCOUNT_ID", DEFAULT_GOOGLE_ACCOUNT_ID)
+CALENDAR_GOOGLE_ACCOUNT_ID = _validated("EMI_GOOGLE_CALENDAR_ACCOUNT_ID", DEFAULT_GOOGLE_ACCOUNT_ID)
+TASKS_GOOGLE_ACCOUNT_ID = _validated("EMI_GOOGLE_TASKS_ACCOUNT_ID", DEFAULT_GOOGLE_ACCOUNT_ID)
+NEST_GOOGLE_ACCOUNT_ID = _validated("EMI_GOOGLE_NEST_ACCOUNT_ID", "google_nest")
 

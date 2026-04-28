@@ -188,13 +188,13 @@ Atomic actions:
   - produces=[{id: "artifact_1", kind: "artifact", description: "Sam email summary and notification result"}]
 
 Second example:
-User intent (short): "Run one conversation handling pass in emi_team_manager, then wait for Marcus reply. Stop for the day after 22:00. Reply to jouko@example.com from google_emi. Use jouko_bio.md and task_guidelines.md for context."
+User intent (short): "Run one conversation handling pass in emi_team_manager, then wait for Marcus reply. Stop for the day after 22:00. Reply to jouko@example.com from google_user_primary. Use jouko_bio.md and task_guidelines.md for context."
 
-The spec mentions jouko@example.com, google_emi, jouko_bio.md, task_guidelines.md - these are all concrete values that already exist before the task runs. Assign them ids and treat as pre-provided. Do not emit any action to load or resolve them.
+The spec mentions jouko@example.com, google_user_primary, jouko_bio.md, task_guidelines.md - these are all concrete values that already exist before the task runs. Assign them ids and treat as pre-provided. Do not emit any action to load or resolve them.
 
 Pre-provided (identified by common sense from spec prose):
 - fact_1: jouko@example.com (recipient email)
-- fact_2: google_emi (sender account)
+- fact_2: google_user_primary (sender account)
 - artifact_1: jouko_bio.md
 - artifact_2: task_guidelines.md
 
