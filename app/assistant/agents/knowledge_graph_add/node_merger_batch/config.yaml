@@ -1,0 +1,20 @@
+name: knowledge_graph_add::node_merger_batch
+class_name: Agent
+llm_params:
+  engine: gpt-5.4
+  model_tier: "powerful"
+  timeout: 240
+  llm_provider: "openai"
+allowed_tools: []
+except_tools: []
+user_context_items:
+- batch_entries
+- entity_level_0
+system_context_items:
+- resource_assistant_data
+- resource_user_data
+type: agent
+
+entity_scan_keys: [batch_entries]
+entity_detection_keys:
+  - batch_entries

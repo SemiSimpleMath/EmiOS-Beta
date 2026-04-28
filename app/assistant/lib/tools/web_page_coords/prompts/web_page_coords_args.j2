@@ -1,0 +1,14 @@
+Fill arguments for `web_page_coords`:
+
+- question (optional): a short question to help vision focus (e.g., "Find and close cookie modal").
+- strict (recommended in dev): true to FAIL LOUD if marks/vision output is unexpected (default true).
+
+Return JSON like:
+{
+  "tool_name": "web_page_coords",
+  "arguments": {
+    "question": "Find and close the cookie modal",
+    "strict": true
+  }
+}
+

@@ -1,0 +1,17 @@
+name: belief_engine::belief_canonicalizer
+class_name: Agent
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.2"
+  model_tier: "strong"
+
+allowed_tools: []
+except_tools: []
+
+user_context_items:
+  - clusters_block
+  - domain
+
+system_context_items:
+  - resource_user_data
+  - resource_assistant_data

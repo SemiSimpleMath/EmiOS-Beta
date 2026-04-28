@@ -1,0 +1,78 @@
+{
+  "name": "install_tool",
+  "description": "Install a trusted MCP tool and register it for immediate use.",
+  "inputs": [
+    {
+      "name": "tool_name",
+      "type": "string",
+      "required": false,
+      "description": "Namespaced MCP tool (mcp::<server_id>::<tool_name>)."
+    },
+    {
+      "name": "server_id",
+      "type": "string",
+      "required": false,
+      "description": "Trusted MCP server identifier."
+    },
+    {
+      "name": "mcp_tool_name",
+      "type": "string",
+      "required": false,
+      "description": "MCP tool name under the server."
+    },
+    {
+      "name": "install_source",
+      "type": "string",
+      "required": false,
+      "description": "Install source metadata tag."
+    },
+    {
+      "name": "launch_id",
+      "type": "string",
+      "required": false,
+      "description": "Optional launch option id."
+    },
+    {
+      "name": "timeout_s",
+      "type": "number",
+      "required": false,
+      "description": "Refresh timeout when cache is missing."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "data.tool_name",
+      "type": "tool_name",
+      "description": "Installed namespaced MCP tool."
+    },
+    {
+      "path": "data.ready_for_planner",
+      "type": "boolean",
+      "description": "True when tool is registered and discoverable."
+    },
+    {
+      "path": "data.cache_refreshed",
+      "type": "boolean",
+      "description": "True when install triggered cache refresh."
+    }
+  ],
+  "arguments_prompt": "{\"tool_name\": \"mcp::npm/server-google-maps::maps_distance_matrix\", \"install_source\": \"agent\", \"timeout_s\": 15.0}",
+  "metadata": {
+    "category": "tooling",
+    "verbs": [
+      "install"
+    ],
+    "entities": [
+      "tooling"
+    ],
+    "risk_level": "high",
+    "side_effects": "writes_data",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": true,
+    "room_visibility_default": "show",
+    "approval_required": true
+  }
+}

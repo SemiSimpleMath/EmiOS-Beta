@@ -1,0 +1,216 @@
+{% extends 'base.html' %}
+
+{% block title %}Music - Emi{% endblock %}
+
+{% block optional_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/music.css') }}">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+<div class="music-container">
+    <!-- Header -->
+    <header class="music-header">
+        <a href="/" class="back-btn">
+            <i class="fas fa-arrow-left"></i>
+        </a>
+        <h1>Music</h1>
+        <div class="status-indicator" id="status-indicator">
+            <span class="status-dot"></span>
+            <span class="status-text">Initializing...</span>
+        </div>
+    </header>
+
+    <!-- Authorization Section -->
+    <section class="auth-section" id="auth-section">
+        <div class="auth-card">
+            <i class="fas fa-music auth-icon"></i>
+            <h2>Connect Apple Music</h2>
+            <p>Sign in to your Apple Music account to start playing music.</p>
+            <button id="authorize-btn" class="btn btn-primary" disabled>
+                <i class="fab fa-apple"></i>
+                <span>Authorize Apple Music</span>
+            </button>
+        </div>
+    </section>
+
+    <!-- Player Section (hidden until authorized) -->
+    <section class="player-section hidden" id="player-section">
+        <!-- Now Playing -->
+        <div class="now-playing">
+            <div class="album-art" id="album-art">
+                <i class="fas fa-music placeholder-icon"></i>
+            </div>
+            <div class="track-info">
+                <h2 class="track-title" id="track-title">No Track Playing</h2>
+                <p class="track-artist" id="track-artist">--</p>
+                <p class="track-album" id="track-album">--</p>
+            </div>
+        </div>
+
+        <!-- Progress Bar -->
+        <div class="progress-container">
+            <span class="time-current" id="time-current">0:00</span>
+            <div class="progress-bar" id="progress-bar">
+                <div class="progress-fill" id="progress-fill"></div>
+            </div>
+            <span class="time-total" id="time-total">0:00</span>
+        </div>
+
+        <!-- Controls -->
+        <div class="controls">
+            <button class="control-btn" id="btn-previous" title="Previous">
+                <i class="fas fa-step-backward"></i>
+            </button>
+            <button class="control-btn control-btn-main" id="btn-play-pause" title="Play/Pause">
+                <i class="fas fa-play" id="play-pause-icon"></i>
+            </button>
+            <button class="control-btn" id="btn-next" title="Next">
+                <i class="fas fa-step-forward"></i>
+            </button>
+        </div>
+
+        <!-- Volume -->
+        <div class="volume-container">
+            <i class="fas fa-volume-down"></i>
+            <input type="range" id="volume-slider" min="0" max="100" value="100">
+            <i class="fas fa-volume-up"></i>
+        </div>
+
+        <!-- Song Metadata / Controls (hidden by default; shown when matched) -->
+        <div class="song-meta-card hidden" id="song-meta-card">
+            <div class="song-meta-header">
+                <div class="song-meta-title">Song meta (dataset)</div>
+                <div class="song-meta-sub" id="song-meta-sub">--</div>
+            </div>
+            <div class="song-meta-grid" id="song-meta-grid">
+                <!-- populated by JS -->
+            </div>
+            <!-- Stats are provided by the DJ payload; no read-lookups needed. -->
+            <div class="song-meta-actions">
+                <button class="meta-btn" id="btn-incr-track" title="Increase weight for this song (+0.1)">
+                    <i class="fas fa-arrow-up"></i> Song
+                </button>
+                <button class="meta-btn" id="btn-incr-artist" title="Increase weight for this artist (+0.1)">
+                    <i class="fas fa-arrow-up"></i> Artist
+                </button>
+                <button class="meta-btn" id="btn-incr-genre" title="Increase weight for this genre (+0.1)">
+                    <i class="fas fa-arrow-up"></i> Genre
+                </button>
+            </div>
+            <div class="song-meta-actions">
+                <button class="meta-btn" id="btn-decr-track" title="Lower weight for this song (-0.1)">
+                    <i class="fas fa-arrow-down"></i> Song
+                </button>
+                <button class="meta-btn" id="btn-decr-artist" title="Lower weight for this artist (-0.1)">
+                    <i class="fas fa-arrow-down"></i> Artist
+                </button>
+                <button class="meta-btn" id="btn-decr-genre" title="Lower weight for this genre (-0.1)">
+                    <i class="fas fa-arrow-down"></i> Genre
+                </button>
+            </div>
+            <div class="song-meta-actions song-meta-actions-ban">
+                <button class="meta-btn meta-btn-danger" id="btn-ban-track" title="Ban this song (set weight to 0)">
+                    <i class="fas fa-ban"></i> Ban Song
+                </button>
+                <button class="meta-btn meta-btn-danger" id="btn-ban-artist" title="Ban this artist (set weight to 0)">
+                    <i class="fas fa-ban"></i> Ban Artist
+                </button>
+                <button class="meta-btn meta-btn-danger" id="btn-ban-genre" title="Ban this genre (set weight to 0)">
+                    <i class="fas fa-ban"></i> Ban Genre
+                </button>
+            </div>
+            <div class="song-meta-hint">
+                Click ▲/▼ to adjust weight by ±0.1. ▼ won’t go below a small floor; use Ban to set weight to 0.
+            </div>
+        </div>
+
+        <!-- DJ Mode Toggle -->
+        <div class="dj-mode-section">
+            <div class="dj-toggle-row">
+                <div class="dj-info">
+                    <i class="fas fa-robot"></i>
+                    <div>
+                        <span class="dj-label">DJ Mode</span>
+                        <span class="dj-description">Auto pause when AFK, resume when back</span>
+                    </div>
+                </div>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="dj-mode-toggle">
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+            <div class="dj-toggle-row dj-setting-row">
+                <div class="dj-info">
+                    <i class="fas fa-bed"></i>
+                    <div>
+                        <span class="dj-label">Pause on AFK</span>
+                        <span class="dj-description">When you go AFK, DJ pauses/resumes playback</span>
+                    </div>
+                </div>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="dj-pause-on-afk-toggle" checked>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+            <div class="dj-actions" id="dj-actions">
+                <button id="dj-pick-btn" class="btn btn-secondary dj-pick-btn">
+                    <i class="fas fa-magic"></i>
+                    <span>Let DJ Pick</span>
+                </button>
+            </div>
+            <div class="dj-thinking hidden" id="dj-thinking">
+                Thinking...
+            </div>
+            <div class="dj-stats hidden" id="dj-stats">
+                <span id="dj-stats-text">Pauses: 0 | Resumes: 0</span>
+            </div>
+        </div>
+
+        <!-- Fetch Taste Section -->
+        <div class="fetch-taste-section">
+            <button id="fetch-taste-btn" class="btn btn-secondary">
+                <i class="fas fa-heart"></i>
+                <span>Fetch My Music Taste</span>
+            </button>
+            <div class="taste-results hidden" id="taste-results">
+                <h4>Your Heavy Rotation</h4>
+                <pre id="taste-output"></pre>
+                <button id="copy-taste-btn" class="btn btn-secondary">
+                    <i class="fas fa-copy"></i> Copy to Clipboard
+                </button>
+            </div>
+        </div>
+
+        <!-- Quick Play Section -->
+        <div class="quick-play">
+            <h3>Quick Play</h3>
+            <div class="search-box">
+                <input type="text" id="search-input" placeholder="Search for a song...">
+                <button id="search-btn" class="btn btn-secondary">
+                    <i class="fas fa-search"></i>
+                </button>
+            </div>
+            <div class="search-results" id="search-results">
+                <!-- Results will be populated here -->
+            </div>
+        </div>
+    </section>
+
+    <!-- Error Section -->
+    <section class="error-section hidden" id="error-section">
+        <div class="error-card">
+            <i class="fas fa-exclamation-triangle"></i>
+            <h2>Configuration Error</h2>
+            <p id="error-message">MusicKit is not properly configured.</p>
+        </div>
+    </section>
+</div>
+{% endblock %}
+
+{% block optional_js %}
+<script src="https://js-cdn.music.apple.com/musickit/v3/musickit.js" async></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.min.js"></script>
+<script src="{{ url_for('static', filename='js/emi/socket_heartbeat.js') }}?v={{ static_v }}"></script>
+<script src="{{ url_for('static', filename='js/music_player.js') }}"></script>
+{% endblock %}

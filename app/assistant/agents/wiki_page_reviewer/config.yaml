@@ -1,0 +1,18 @@
+name: wiki_page_reviewer
+class_name: Agent
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.4"
+  model_tier: "smart"
+  timeout: 240
+allowed_tools: []
+except_tools: []
+user_context_items:
+  - entity_name
+  - entity_type
+  - prose_page
+  - rough_page
+  - neighbor_summaries
+system_context_items:
+  - resource_user_data
+type: agent

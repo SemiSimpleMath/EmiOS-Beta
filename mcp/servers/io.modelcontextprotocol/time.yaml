@@ -1,0 +1,57 @@
+# Curated MCP server entry: Time
+#
+# Source documentation:
+# - `https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/time/README.md`
+#
+# Notes:
+# - This is intended to be a **safe “hello world” MCP** (read-only, no side effects).
+# - This file is metadata only; do NOT put secrets here.
+
+schema_version: 1
+server_id: io.modelcontextprotocol/time
+display_name: Time (official)
+source: official_reference_server
+
+enabled: true
+
+# How this server is typically run. We keep multiple launch options so the host can pick.
+# (At runtime, EmiAi can choose one compatible with the environment.)
+launch_options:
+  - id: uvx
+    transport: stdio
+    command: uvx
+    args:
+      # Some environments/packages have been observed to miss the `mcp` runtime dependency.
+      # `--with mcp` forces it into the tool environment so `from mcp.server import Server` works.
+      - --with
+      - mcp
+      - mcp-server-time
+
+  - id: pip
+    transport: stdio
+    command: python
+    args:
+      - -m
+      - mcp_server_time
+
+  - id: docker
+    transport: stdio
+    command: docker
+    args:
+      - run
+      - -i
+      - --rm
+      - mcp/time
+
+# Policy is host-enforced (not trusted server-provided text).
+policy:
+  default_requires_approval: false
+  max_concurrent_calls: 2
+  call_timeout_seconds: 20
+  max_result_bytes: 200000
+
+# Optional allowlist for tool names (empty means “accept whatever server advertises”).
+# For large scale deployments, pinning tool names can reduce surprise changes.
+tool_allowlist:
+  - get_current_time
+

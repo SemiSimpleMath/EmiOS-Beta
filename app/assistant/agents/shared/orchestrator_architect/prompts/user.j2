@@ -1,0 +1,42 @@
+Today is {{ date_time }}.
+
+User objective:
+{{ task }}
+
+{% if information %}
+Additional info:
+{{ information }}
+{% endif %}
+
+Facts (v{{ orchestrator_facts_version }}):
+{{ orchestrator_facts }}
+
+Allowed managers (manager_type must be one of these):
+{{ orchestrator_allowed_child_managers }}
+
+Allowed manager catalog (name -> description):
+{{ orchestrator_allowed_manager_catalog }}
+
+Allowed child orchestrators:
+{{ orchestrator_allowed_child_orchestrators }}
+
+{% if orchestrator_job_bundle %}
+Job bundle (authoritative tasks list):
+{{ orchestrator_job_bundle }}
+{% endif %}
+
+Recent child results:
+{{ orchestrator_results }}
+
+Existing job map (avoid duplicating already-completed work; advance to missing stages only):
+{{ orchestrator_job_map }}
+
+Missing requirements (if any; spawn jobs to satisfy these):
+{{ orchestrator_missing_requirements }}
+
+Tick: {{ orchestrator_tick }}
+
+Design the next-phase execution DAG by splitting concerns across managers.
+Only split into multiple jobs when it materially reduces total time or addresses distinct sub-domains. If this is a simple lookup, spawn ONE job.
+Output jobs as 'spawn' items.
+

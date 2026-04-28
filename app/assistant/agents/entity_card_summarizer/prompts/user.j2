@@ -1,0 +1,23 @@
+Subject: **{{ entity_name }}** ({{ entity_type }})
+
+{% if entity_description %}
+Description: {{ entity_description }}
+{% endif %}
+
+{% if entity_aliases %}
+Aliases: {{ entity_aliases }}
+{% endif %}
+
+{% if known_contacts %}
+## Contacts already extracted from the KG (pass through verbatim; add more if the bullets reveal them)
+
+{{ known_contacts }}
+{% endif %}
+
+## Bullets grouped by biographical section
+
+{{ tagged_bullets }}
+
+---
+
+Produce the card for {{ resource_user_data.first_name }}. Lead with the single most defining fact about how **{{ entity_name }}** relates to {{ resource_user_data.first_name }}. Return JSON matching the AgentForm schema.

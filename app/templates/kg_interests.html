@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}KG Interests{% endblock %}
+
+{% block optional_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/kg_interests.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="kg-interests-page">
+  <h1>What to track in the Knowledge Graph</h1>
+  <p class="kg-interests-intro">
+    This list defines the categories of content the extraction pipeline considers worth
+    recording. The <code>window_critic</code> agent reads this before every
+    conversation window — if a user sentence concerns any of these categories,
+    the window gets routed to the fact extractor. Remove a category to stop the graph
+    from growing in that direction; add one to capture something new.
+  </p>
+
+  <label class="kg-field">
+    <span>Description (visible to the agent as context)</span>
+    <textarea id="kg-description" rows="3">{{ description }}</textarea>
+  </label>
+
+  <div class="kg-categories-header">
+    <h2>Categories</h2>
+    <button type="button" id="kg-add-category" class="kg-btn kg-btn-secondary">+ Add category</button>
+  </div>
+
+  <ol id="kg-categories-list" class="kg-categories-list">
+    {% for cat in categories %}
+    <li class="kg-category-row">
+      <textarea rows="2" class="kg-category-input">{{ cat }}</textarea>
+      <button type="button" class="kg-category-remove" title="Remove this category">×</button>
+    </li>
+    {% endfor %}
+  </ol>
+
+  <div class="kg-interests-actions">
+    <button type="button" id="kg-save-btn" class="kg-btn kg-btn-primary">Save</button>
+    <span id="kg-save-status" class="kg-save-status"></span>
+  </div>
+</div>
+
+<script>
+(function () {
+  const list = document.getElementById("kg-categories-list");
+  const addBtn = document.getElementById("kg-add-category");
+  const saveBtn = document.getElementById("kg-save-btn");
+  const status = document.getElementById("kg-save-status");
+  const descField = document.getElementById("kg-description");
+
+  function makeRow(text) {
+    const li = document.createElement("li");
+    li.className = "kg-category-row";
+    const ta = document.createElement("textarea");
+    ta.rows = 2;
+    ta.className = "kg-category-input";
+    ta.value = text || "";
+    const rm = document.createElement("button");
+    rm.type = "button";
+    rm.className = "kg-category-remove";
+    rm.title = "Remove this category";
+    rm.textContent = "×";
+    rm.addEventListener("click", () => li.remove());
+    li.appendChild(ta);
+    li.appendChild(rm);
+    return li;
+  }
+
+  // Wire existing remove buttons
+  list.querySelectorAll(".kg-category-remove").forEach(btn => {
+    btn.addEventListener("click", () => btn.closest(".kg-category-row").remove());
+  });
+
+  addBtn.addEventListener("click", () => {
+    const row = makeRow("");
+    list.appendChild(row);
+    row.querySelector("textarea").focus();
+  });
+
+  saveBtn.addEventListener("click", async () => {
+    const cats = Array.from(list.querySelectorAll(".kg-category-input"))
+      .map(ta => ta.value.trim())
+      .filter(Boolean);
+    if (cats.length === 0) {
+      status.textContent = "Add at least one category before saving.";
+      status.className = "kg-save-status error";
+      return;
+    }
+    status.textContent = "Saving...";
+    status.className = "kg-save-status";
+    try {
+      const resp = await fetch("/kg-interests", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          description: descField.value.trim(),
+          categories: cats,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.ok) {
+        status.textContent = "Error: " + (data.error || resp.statusText);
+        status.className = "kg-save-status error";
+        return;
+      }
+      status.textContent = "Saved. Restart Flask for agents to reload the prompt.";
+      status.className = "kg-save-status ok";
+    } catch (e) {
+      status.textContent = "Error: " + e.message;
+      status.className = "kg-save-status error";
+    }
+  });
+})();
+</script>
+{% endblock %}

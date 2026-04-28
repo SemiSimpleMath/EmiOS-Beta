@@ -1,0 +1,35 @@
+Current time: {{ date_time }}
+Build a complete location timeline for the next {{ days_to_predict }} days.
+
+{% if calendar_events %}
+**Calendar Events** (you must infer locations from event names):
+{% for event in calendar_events %}
+- {{ event.date }} | {{ event.start_time }} - {{ event.end_time }} | "{{ event.event_name }}"{% if event.location_if_specified %} [Location: {{ event.location_if_specified }}]{% endif %}
+
+{% endfor %}
+{% else %}
+No calendar events found.
+{% endif %}
+
+**Your Task**:
+Analyze each event name and infer where the user will be. Use the guidelines you were given about:
+- Known locations (e.g., "Jamie's Broadway Arts" = Lake Forest, 25 min away)
+- Work from home pattern
+- Drop-off -> Home -> Pick-up pattern for kids' activities
+- Travel times between locations
+
+Build a COMPLETE timeline showing where the user will be at all times, including:
+1. Time at home before leaving for events
+2. Travel time TO events (leave early enough!)
+3. Time at the event location
+4. Travel time back home (or to next event)
+5. Time at home between events
+
+Each entry needs: start time, end time, location label, and brief reasoning.
+
+IMPORTANT TIME RULES:
+- You MUST output start_local/end_local in LOCAL time only.
+- Format: YYYY-MM-DDTHH:MM:SS
+- Do NOT include "Z"
+- Do NOT include timezone offsets like -08:00
+- Python will convert local time to UTC after you respond.

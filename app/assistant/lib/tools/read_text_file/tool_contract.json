@@ -1,0 +1,62 @@
+{
+  "name": "read_text_file",
+  "description": "Read text file content from the repository.",
+  "inputs": [
+    {
+      "name": "file_path",
+      "type": "path",
+      "required": true,
+      "description": "Path to file."
+    },
+    {
+      "name": "start_marker",
+      "type": "string",
+      "required": false,
+      "description": "Optional section start marker."
+    },
+    {
+      "name": "end_marker",
+      "type": "string",
+      "required": false,
+      "description": "Optional section end marker."
+    },
+    {
+      "name": "include_markers",
+      "type": "boolean",
+      "required": false,
+      "description": "Include markers in output when true."
+    },
+    {
+      "name": "max_chars",
+      "type": "integer",
+      "required": false,
+      "description": "Optional max characters to return."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Read content text."
+    }
+  ],
+  "arguments_prompt": "{\"file_path\": \"resources/dayflow_pipeline_outputs/resource_desktop_activity_recent.md\"}",
+  "metadata": {
+    "category": "files",
+    "verbs": [
+      "read"
+    ],
+    "entities": [
+      "file"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

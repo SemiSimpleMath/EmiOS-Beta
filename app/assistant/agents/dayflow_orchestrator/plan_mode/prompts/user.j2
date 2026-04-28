@@ -1,0 +1,42 @@
+########## CURRENT STATE ##########
+**Current Time:** {{ date_time }}
+
+########## INBOUND MESSAGE ##########
+{% if task %}
+{{ task }}
+{% endif %}
+
+{% if information %}
+**Additional information:**
+{{ information }}
+{% endif %}
+
+########## ROOM CONTEXT (read-only) ##########
+{% if room_allowed_resource_context %}
+**Resources:**
+{{ room_allowed_resource_context }}
+{% endif %}
+
+{% if room_allow_images is not none %}
+**Images allowed:** {{ room_allow_images }}
+{% endif %}
+
+{% if room_allowed_entity_cards %}
+**Entity cards:**
+{{ room_allowed_entity_cards }}
+{% endif %}
+
+{% if room_pinned_entities %}
+**Pinned entities:**
+{{ room_pinned_entities }}
+{% endif %}
+
+{% if entity_card %}
+**Entity context:**
+{{ entity_card }}
+{% endif %}
+
+########## CONVERSATION HISTORY ##########
+{% if recent_history %}
+{{ recent_history }}
+{% endif %}

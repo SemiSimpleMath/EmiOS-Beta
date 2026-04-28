@@ -1,0 +1,73 @@
+{
+  "name": "nest_home_control",
+  "description": "Read and control the Nest thermostat.",
+  "inputs": [
+    {
+      "name": "action",
+      "type": "string",
+      "required": true,
+      "description": "Choose ONE based on user intent:\n- ``set_target_temperature`` — when the user asks to CHANGE THE TEMPERATURE (e.g. 'set to 70', 'make it cooler', '70F'). Requires ``target_temperature``. This is the most common action.\n- ``set_mode`` — when the user asks to CHANGE THE MODE (heating vs cooling vs off). Requires ``mode``. Rare.\n- ``set_fan_mode`` — when the user asks about the FAN. Requires ``fan_mode``.\n- ``set_eco_mode`` — when the user asks to turn eco on/off. Requires ``enabled``.\n- ``get_status`` — read current state; no other args.\n\nHEURISTIC: if the user mentions a number of degrees, use ``set_target_temperature``, NOT ``set_mode``."
+    },
+    {
+      "name": "mode",
+      "type": "string",
+      "required": false,
+      "description": "Required ONLY for action=set_mode. Pass the canonical uppercase value with NO underscore/hyphen/space:\n- ``HEAT`` — heating only. User says 'set to heat', 'turn the heat on', 'heat mode'.\n- ``COOL`` — cooling only (A/C). User says 'set to cool', 'turn on the A/C', 'cooling mode', 'AC'.\n- ``HEATCOOL`` — auto heat-or-cool (year-round auto). User says 'auto', 'auto mode', 'heat and cool'.\n- ``OFF`` — thermostat off. User says 'turn it off', 'shut it off'.\n\nDo NOT pass lowercase ('heat', 'cool'), underscored ('heat_cool'), or extra spacing — the bridge normalizes these but the canonical value above is what you should emit.\n\nDo NOT provide this for action=set_target_temperature."
+    },
+    {
+      "name": "target_temperature",
+      "type": "number",
+      "required": false,
+      "description": "Required for action=set_target_temperature. A single numeric value in Fahrenheit (e.g. 70 for '70F'). Do NOT leave this null when the user asked to change the temperature."
+    },
+    {
+      "name": "enabled",
+      "type": "boolean",
+      "required": false,
+      "description": "Required for set_eco_mode."
+    },
+    {
+      "name": "fan_mode",
+      "type": "string",
+      "required": false,
+      "description": "Required ONLY for action=set_fan_mode. Canonical uppercase values:\n- ``ON`` — fan always on.\n- ``AUTO`` — fan cycles with system.\n- ``OFF`` — fan off."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable outcome."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Smart-home gateway response payload."
+    }
+  ],
+  "metadata": {
+    "domain": "smart_home",
+    "actions": [
+      "read",
+      "control",
+      "set"
+    ],
+    "selectors": [
+      "mode",
+      "temperature",
+      "fan_mode"
+    ],
+    "risk_level": "medium",
+    "side_effects": "external_action",
+    "requires_auth": [
+      "smart_home_gateway"
+    ],
+    "requires_network": true,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false,
+    "approval_min_authority": 95
+  }
+}

@@ -1,0 +1,192 @@
+{% from "shared/macros/dayflow_items.j2" import task_line, task_block, plan_task_line %}
+
+########## CURRENT STATE ##########
+**Current Time:** {{ date_time }}
+**Day:** {{ day_of_week }}
+{%- if resource_weather and resource_weather.current %}
+**Weather:** {{ resource_weather.location.city }}: {{ resource_weather.current.temperature }} F, {{ resource_weather.current.condition }}
+{%- endif %}
+{%- if resource_afk_statistics_output %}
+{%- if resource_afk_statistics_output.is_afk %}
+**Computer:** AWAY — idle {{ resource_afk_statistics_output.idle_minutes | default(0) | round | int }} min
+{%- else %}
+**Computer:** AT KEYBOARD — session {{ resource_afk_statistics_output.current_session_minutes | default(resource_afk_statistics_output.active_work_session_minutes) | default(0) | round(1) }} min
+{%- endif %}
+{%- endif %}
+{%- if location_summary %}
+**Location:** {{ location_summary }}
+{%- endif %}
+{%- if health_status_summary %}
+**Health:** {{ health_status_summary }}
+{%- endif %}
+
+########## TODAY'S SCHEDULE ##########
+{%- if resource_expected_calendar and resource_expected_calendar.expected_schedule %}
+{%- for entry in resource_expected_calendar.expected_schedule %}
+- {{ entry.title }} {{ entry.start_local }}{% if entry.end_local %} - {{ entry.end_local }}{% endif %} ({{ entry.status }})
+{%- endfor %}
+{%- else %}
+No schedule available.
+{%- endif %}
+{% if resource_daily_context_generator_output and resource_daily_context_generator_output.day_theme %}
+
+########## DAY THEME ##########
+{{ resource_daily_context_generator_output.day_theme }}
+{% endif %}
+{% if resource_daily_context_generator_output and resource_daily_context_generator_output.current_status %}
+
+########## STATUS ##########
+{{ resource_daily_context_generator_output.current_status }}
+{% endif %}
+{% if resource_daily_context_generator_output and resource_daily_context_generator_output.milestones %}
+
+########## MILESTONES ##########
+{% for m in resource_daily_context_generator_output.milestones %}
+- {% if m.time %}[{{ m.time }}] {% endif %}{{ m.description }}{% if m.ongoing %} (ongoing){% endif %}
+{% endfor %}
+{% endif %}
+{% if resource_dayflow_routine %}
+
+########## ROUTINE ##########
+{{ resource_dayflow_routine }}
+{% endif %}
+
+########## NEW ARTIFACTS (triage admitted — review for planning) ##########
+{%- set all_artifacts = [] %}
+{%- set seen_art_ids = [] %}
+{%- for m in (admitted_artifacts or []) %}
+{%- set meta = m.get("metadata", {}) %}
+{%- if meta.get("state","") in ["artifact", "needs_planning", "new"] and meta.get("item_id","") not in seen_art_ids %}{% if all_artifacts.append(m) %}{% endif %}{% if seen_art_ids.append(meta.get("item_id","")) %}{% endif %}{% endif %}
+{%- endfor %}
+{%- for ex in (active_dayflow_items or []) %}
+{%- set meta = ex.get("metadata", {}) %}
+{%- if meta.get("state","") in ["artifact", "needs_planning", "new"] and not meta.get("plan_id") and meta.get("item_id","") not in seen_art_ids %}{% if all_artifacts.append(ex) %}{% endif %}{% endif %}
+{%- endfor %}
+{%- if all_artifacts %}
+{%- for m in all_artifacts[:40] %}
+{%- set meta = m.get("metadata", {}) %}
+{%- if meta.get("source_type","") == "email" %}
+- Email{% if meta.get("created_at_local") %} received {{ meta.get("created_at_local") }}{% endif %} from {{ meta.get("email_sender","Unknown") }}: "{{ meta.get("email_subject", meta.get("summary","")) }}"{% if meta.get("email_summary") %} — {{ meta.get("email_summary") }}{% endif %}{% if meta.get("importance","") not in ["medium", ""] %} — {{ meta.get("importance") }}{% endif %}
+  artifact_id: {{ meta.get("short_id", meta.get("item_id","")) }}
+{%- else %}
+- {{ meta.get("summary","(no summary)") }}{% if meta.get("importance","") not in ["medium", ""] %} — {{ meta.get("importance") }}{% endif %} ({{ meta.get("source_type","") }})
+  artifact_id: {{ meta.get("short_id", meta.get("item_id","")) }}
+{%- endif %}
+{%- if meta.get("enrichment") %}
+  **Context:** {{ meta.get("enrichment") }}
+{%- endif %}
+{%- endfor %}
+{%- else %}
+None
+{%- endif %}
+
+{%- set active_plans = [] %}
+{%- set closed_plans = [] %}
+{%- for plan in (plan_task_status or []) %}
+{%- set has_open = [] %}
+{%- for t in plan.get("remaining_tasks", []) %}{% if has_open.append(1) %}{% endif %}{% endfor %}
+{%- if plan.get("plan_state","active") in ["closed", "suppressed"] and not has_open %}{% if closed_plans.append(plan) %}{% endif %}
+{%- else %}{% if active_plans.append(plan) %}{% endif %}
+{%- endif %}
+{%- endfor %}
+
+########## CURRENT PLANS ##########
+{%- if active_plans %}
+{%- for plan in active_plans %}
+##### [{{ plan.get("plan_id","") }}]
+{{ plan.get("synopsis","") }}
+{%- set all_tasks = plan.get("completed_tasks", []) + plan.get("remaining_tasks", []) %}
+{%- if all_tasks %}
+{%- for t in all_tasks %}
+{{ plan_task_line(t) }}
+{%- endfor %}
+{%- else %}
+No tasks. Close this plan if objective is complete, or add tasks if not.
+{%- endif %}
+{% endfor %}
+{%- else %}
+No active plans.
+{%- endif %}
+
+{%- set non_plan_open = [] %}
+{%- set non_plan_closed = [] %}
+{%- for ex in (active_dayflow_items or []) %}
+{%- set m = ex.get("metadata", {}) %}
+{%- if not m.get("plan_id") %}
+{%- if m.get("state","") in ["important_open", "actionable", "dispatched", "waiting", "watching"] %}{% if non_plan_open.append(ex) %}{% endif %}
+{%- elif m.get("state","") in ["closed"] %}{% if non_plan_closed.append(ex) %}{% endif %}
+{%- endif %}
+{%- endif %}
+{%- endfor %}
+
+{%- if non_plan_open %}
+
+########## NON-PLAN OPEN TASKS ##########
+{{ task_block(non_plan_open, "Open Tasks", 30) }}
+{%- endif %}
+
+{%- if active_tickets %}
+
+########## ACTIVE TICKETS (pending user response) ##########
+{%- for t in active_tickets[:20] %}
+- [{{ t.get("suggestion_type","") }}] {{ t.get("title","") }}
+  {{ t.get("message","") }}{% if t.get("snooze_until_local","") %}
+  snoozed until {{ t.get("snooze_until_local") }}{% endif %}{% if t.get("source_task_ids") %}
+  tasks: {{ t.get("source_task_ids")|join(", ") }}{% endif %}
+{%- endfor %}
+{%- endif %}
+
+{%- if recent_changes %}
+
+########## RECENT CHANGES (since last planner run) ##########
+{%- for change in recent_changes %}
+- {{ change }}
+{%- endfor %}
+{%- endif %}
+
+{%- if recent_responded_tickets %}
+{%- set has_responses = recent_responded_tickets.get("accepted") or recent_responded_tickets.get("declined") or recent_responded_tickets.get("snoozed") %}
+{%- if has_responses %}
+
+########## TICKET RESPONSES (user directives — obey these) ##########
+{%- for category, label in [("accepted", "ACCEPTED"), ("declined", "DECLINED"), ("snoozed", "SNOOZED")] %}
+{%- if recent_responded_tickets.get(category) %}
+{%- for t in recent_responded_tickets.get(category)[:10] %}
+- [{{ t.get("responded_at_local","") }}] {{ label }}: {{ t.get("title","") }}
+  {{ t.get("message","") }}{% if t.get("user_comment") %}
+  user: "{{ t.get("user_comment") }}"{% endif %}{% if t.get("source_task_ids") %}
+  tasks: {{ t.get("source_task_ids")|join(", ") }}{% endif %}{% if label == "SNOOZED" and t.get("snooze_until_local") %}
+  until: {{ t.get("snooze_until_local") }}{% endif %}
+{%- endfor %}
+{%- endif %}
+{%- endfor %}
+{%- endif %}
+{%- endif %}
+
+{%- if closed_plans %}
+
+########## RECENTLY CLOSED PLANS (do not recreate) ##########
+{%- for plan in closed_plans %}
+- [{{ plan.get("plan_id","") }}] {{ plan.get("synopsis","") }}
+{%- endfor %}
+{%- endif %}
+
+{%- if non_plan_closed %}
+
+########## NON-PLAN CLOSED TASKS ##########
+{{ task_block(non_plan_closed, "Closed Tasks", 15) }}
+{%- endif %}
+
+{%- if recent_dayflow_chat_history %}
+
+########## CHAT HISTORY ##########
+{%- for c in recent_dayflow_chat_history[-20:] %}
+- [{{ c.get("time_local","") }}] {{ c.get("summary","") }}
+{%- endfor %}
+{%- endif %}
+
+{%- if entity_card %}
+
+##### Entity Context
+{{ entity_card }}
+{%- endif %}

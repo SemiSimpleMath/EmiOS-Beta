@@ -1,0 +1,30 @@
+name: dayflow_orchestrator::state_mover
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5-mini"
+  model_tier: "mini"
+
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+entity_scan_keys: [planner_summary, planned_tasks, active_dayflow_items]
+entity_card_level: 0
+
+user_context_items:
+  - date_time
+  - day_of_week
+  - planned_tasks
+  - active_plan_synopses
+  - active_dayflow_items
+  - resource_expected_calendar
+  - resource_afk_statistics_output
+  - recent_dayflow_chat_history
+  - recent_responded_tickets
+  - location_summary
+  - resource_weather
+  - health_status_summary
+  - entity_card
+
+system_context_items: []

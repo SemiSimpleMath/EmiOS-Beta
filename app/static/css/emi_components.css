@@ -1,0 +1,178 @@
+/* ============================================================
+   EmiOS Shared Components — menus, bubbles, notify, utilities
+   Used by both vertical and horizontal layouts.
+   Layout-specific overrides go in emi.css or emi_desktop.css.
+   ============================================================ */
+
+/* ---- Utilities ---- */
+.hidden { display: none !important; }
+
+/* ---- Dropdown Menus ---- */
+.dropdown-menu {
+  position: fixed;
+  left: 0;
+  width: 280px;
+  background-color: var(--widget-background);
+  border-right: 1px solid var(--border-color);
+  box-shadow: 4px 0 12px rgba(0, 0, 0, 0.2);
+  z-index: 99;
+  overflow-y: auto;
+  transform: translateX(-100%);
+  transition: transform 0.3s ease;
+}
+.dropdown-menu:not(.hidden) { transform: translateX(0); }
+
+.dropdown-menu--right {
+  left: auto;
+  right: 0;
+  transform: translateX(100%);
+}
+.dropdown-menu--right:not(.hidden) { transform: translateX(0); }
+
+.menu-list { list-style: none; padding: 0; margin: 0; }
+.menu-item { border-bottom: 1px solid var(--border-color); }
+
+.menu-item.menu-divider {
+  height: 1px;
+  background-color: var(--border-color);
+  margin: 0.5rem 0;
+}
+
+.menu-btn {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+  padding: 0.75rem 1.25rem;
+  background: none;
+  border: none;
+  color: var(--text-color);
+  text-align: left;
+  cursor: pointer;
+  font-size: var(--font-md);
+  font-family: inherit;
+  transition: background-color var(--transition-speed);
+  text-decoration: none;
+}
+.menu-btn:hover { background-color: var(--widget-background-hover); }
+.menu-btn i { width: 1.25rem; text-align: center; color: var(--accent-color); }
+.menu-btn span { flex: 1; }
+
+.menu-btn[data-active="true"] i { color: #4caf50; }
+.menu-btn[data-active="true"] { background-color: rgba(76, 175, 80, 0.1); }
+
+/* Submenu */
+.menu-submenu { position: relative; }
+.submenu-toggle { position: relative; }
+.submenu-arrow { font-size: var(--font-sm); margin-left: auto; transition: transform 0.3s ease; }
+.menu-submenu.open .submenu-arrow { transform: rotate(180deg); }
+
+.submenu {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 0;
+  overflow: hidden;
+  background-color: var(--input-background);
+  transition: max-height 0.3s ease;
+}
+.menu-submenu.open .submenu { max-height: min(75vh, 1100px); overflow-y: auto; overflow-x: hidden; }
+
+.submenu-item { border-bottom: 1px solid var(--border-color); }
+.submenu-item:last-child { border-bottom: none; }
+.submenu-item .menu-btn { padding-left: 3rem; font-size: var(--font-base); }
+.submenu-item .menu-btn i { font-size: var(--font-base); }
+
+.menu-item--danger { border-top: 1px solid var(--border-color); margin-top: 0.5rem; padding-top: 0.5rem; }
+.menu-btn--danger { color: #e74c3c !important; }
+.menu-btn--danger i { color: #e74c3c !important; }
+.menu-btn--danger:hover { background-color: rgba(231, 76, 60, 0.12) !important; }
+
+#theme-toggle { display: none; }
+
+/* ---- Chat Bubbles ---- */
+.bot-bubble {
+  width: 100%;
+  margin-right: auto;
+  background-color: transparent;
+  box-shadow: none;
+  padding: 7px;
+  border-radius: 8px;
+  margin-bottom: 7px;
+  line-height: 1.4;
+  color: #FFFFFF;
+}
+.bot-bubble p { margin: 0; font-size: var(--font-md); }
+
+/* Proactive conversation starter bubble */
+.bot-bubble-proactive {
+  border-left: 3px solid #7eb8f7;
+  background-color: rgba(126, 184, 247, 0.06);
+  color: #b8d4f0;
+}
+
+/* Markdown content inside bot bubbles */
+.bot-bubble h1, .bot-bubble h2, .bot-bubble h3, .bot-bubble h4 { color: var(--heading-color); margin: 0.5em 0 0.3em; font-size: var(--font-lg); }
+.bot-bubble h1 { font-size: var(--font-xl); }
+.bot-bubble ul, .bot-bubble ol { padding-left: 1.2em; margin: 0.3em 0; }
+.bot-bubble li { padding: 0.1em 0; border-bottom: none; }
+.bot-bubble code { background: rgba(255,255,255,0.1); padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.9em; }
+.bot-bubble pre { background: rgba(0,0,0,0.3); padding: 0.5em; border-radius: 4px; overflow-x: auto; margin: 0.3em 0; }
+.bot-bubble pre code { background: none; padding: 0; }
+.bot-bubble hr { border: none; border-top: 1px solid var(--border-color); margin: 0.5em 0; }
+.bot-bubble a { color: var(--accent-color); text-decoration: underline; }
+.bot-bubble strong { color: var(--heading-color); }
+.bot-bubble blockquote { border-left: 3px solid var(--accent-color); padding-left: 0.5em; margin: 0.3em 0; color: var(--text-muted); }
+
+/* ---- Connection Status ---- */
+.connection-banner {
+  text-align: center;
+  padding: 6px;
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+  opacity: 0.7;
+  animation: pulse-opacity 1.5s ease-in-out infinite;
+}
+@keyframes pulse-opacity { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
+
+.user-bubble {
+  width: 60%;
+  margin-left: auto;
+  background: var(--accent-color);
+  color: #ECEFF4;
+  padding: 7px;
+  border-radius: 8px;
+  box-shadow: 1px 1px 2px rgba(0,0,0,0.1);
+  margin-bottom: 7px;
+  line-height: 1.4;
+  display: flex;
+  align-items: center;
+}
+.user-bubble p { margin: 0; font-size: var(--font-md); display: flex; align-items: center; }
+
+/* ---- Notify / Ask User ---- */
+.notify_user,
+.ask_user {
+  background-color: var(--widget-background);
+  border-left: 4px solid var(--accent-color);
+  padding: 0.75rem;
+  margin: 0.75rem 0;
+  border-radius: 6px;
+}
+.notify_user h3, .ask_user h3 { color: var(--heading-color); margin-bottom: 0.3rem; font-size: var(--font-base); font-weight: 600; }
+.notify_user p, .ask_user p { color: var(--text-color); font-size: var(--font-base); line-height: 1.4; }
+
+/* ---- Image Attachments ---- */
+.pending-image-preview {
+  margin: 0 0 0.75rem 0;
+  padding: 0.5rem;
+  border: 1px dashed var(--border-color);
+  border-radius: 6px;
+  background-color: rgba(94, 129, 172, 0.08);
+}
+.pending-image-preview__inner { display: flex; align-items: center; gap: 0.75rem; }
+.pending-image-thumb { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border-color); }
+
+/* ---- Generic list items ---- */
+li { border-bottom: 1px solid var(--border-color); }
+li:last-child { border-bottom: none; }

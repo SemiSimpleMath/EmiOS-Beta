@@ -1,0 +1,918 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KG Review Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #f5f7fa;
+            color: #333;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px 40px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .header h1 {
+            font-size: 28px;
+            font-weight: 600;
+        }
+        
+        .header p {
+            margin-top: 5px;
+            opacity: 0.9;
+        }
+        
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            padding: 20px 40px;
+        }
+        
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .stat-card h3 {
+            font-size: 14px;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .stat-card .number {
+            font-size: 32px;
+            font-weight: 700;
+            color: #667eea;
+            margin-top: 10px;
+        }
+        
+        .container {
+            padding: 20px 40px;
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+        
+        .controls {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        
+        .controls label {
+            font-weight: 500;
+            margin-right: 5px;
+        }
+        
+        select, input, button {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background 0.3s;
+        }
+        
+        button:hover {
+            background: #5568d3;
+        }
+        
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        button.secondary {
+            background: #48bb78;
+        }
+        
+        button.secondary:hover {
+            background: #38a169;
+        }
+        
+        button.danger {
+            background: #f56565;
+        }
+        
+        button.danger:hover {
+            background: #e53e3e;
+        }
+        
+        .batch-actions {
+            display: flex;
+            gap: 10px;
+            margin-left: auto;
+        }
+        
+        .reviews-container {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .review-item {
+            border-bottom: 1px solid #f0f0f0;
+            padding: 20px;
+            transition: background 0.2s;
+        }
+        
+        .review-item:hover {
+            background: #f9fafb;
+        }
+        
+        .review-item:last-child {
+            border-bottom: none;
+        }
+        
+        .review-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+            gap: 15px;
+        }
+        
+        .review-checkbox {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+        }
+        
+        .review-node {
+            flex: 1;
+        }
+        
+        .review-node h3 {
+            font-size: 18px;
+            color: #333;
+            margin-bottom: 5px;
+        }
+        
+        .review-meta {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        
+        .badge.pending { background: #feebc8; color: #c05621; }
+        .badge.approved { background: #c6f6d5; color: #276749; }
+        .badge.rejected { background: #fed7d7; color: #c53030; }
+        .badge.completed { background: #bee3f8; color: #2c5282; }
+        .badge.implementing { background: #e9d8fd; color: #6b46c1; }
+        
+        .badge.high { background: #fed7d7; color: #c53030; }
+        .badge.medium { background: #feebc8; color: #c05621; }
+        .badge.low { background: #bee3f8; color: #2c5282; }
+        
+        .review-problem {
+            margin: 15px 0;
+            padding: 12px;
+            background: #fef5e7;
+            border-left: 4px solid #f59e0b;
+            border-radius: 4px;
+        }
+        
+        .review-suggestion {
+            margin: 15px 0;
+            padding: 12px;
+            background: #e0f2fe;
+            border-left: 4px solid #0ea5e9;
+            border-radius: 4px;
+        }
+        
+        .review-suggestion h4 {
+            font-size: 14px;
+            margin-bottom: 8px;
+            color: #0c4a6e;
+        }
+        
+        textarea {
+            width: 100%;
+            min-height: 80px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: inherit;
+            resize: vertical;
+            margin-bottom: 10px;
+        }
+        
+        .review-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .review-actions button {
+            padding: 6px 12px;
+            font-size: 13px;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #666;
+        }
+        
+        .empty-state h2 {
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+        
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #48bb78;
+            color: white;
+            padding: 15px 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            z-index: 1000;
+            animation: slideIn 0.3s ease;
+        }
+        
+        .toast.error {
+            background: #f56565;
+        }
+        
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        .context-section {
+            margin: 15px 0;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        .context-toggle {
+            background: #f8f9fa;
+            padding: 10px 15px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border: none;
+            width: 100%;
+            text-align: left;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+        
+        .context-toggle:hover {
+            background: #e9ecef;
+        }
+        
+        .context-content {
+            padding: 15px;
+            background: white;
+            border-top: 1px solid #e0e0e0;
+        }
+        
+        .context-content.collapsed {
+            display: none;
+        }
+        
+        .context-item {
+            margin-bottom: 10px;
+        }
+        
+        .context-item strong {
+            color: #495057;
+            display: inline-block;
+            min-width: 150px;
+        }
+        
+        .context-edges {
+            margin-top: 5px;
+            padding-left: 20px;
+        }
+        
+        .context-edges li {
+            margin: 8px 0;
+            color: #495057;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🔍 KG Review Dashboard</h1>
+        <p>Review and manage knowledge graph improvements</p>
+    </div>
+    
+    <div class="stats" id="stats-container">
+        <!-- Stats will be populated by JavaScript -->
+    </div>
+    
+    <div class="container">
+        <div class="controls">
+            <div>
+                <label for="filter-status">Status:</label>
+                <select id="filter-status">
+                    <option value="">All</option>
+                    <option value="pending" selected>Pending</option>
+                    <option value="under_review">Under Review</option>
+                    <option value="approved">Approved</option>
+                    <option value="rejected">Rejected</option>
+                    <option value="completed">Completed</option>
+                    <option value="failed">Failed</option>
+                </select>
+            </div>
+            
+            <div>
+                <label for="filter-source">Source:</label>
+                <select id="filter-source">
+                    <option value="">All</option>
+                    <option value="repair_pipeline">Repair Pipeline</option>
+                    <option value="explorer">Explorer</option>
+                    <option value="maintenance">Maintenance</option>
+                </select>
+            </div>
+            
+            <div>
+                <label for="filter-priority">Priority:</label>
+                <select id="filter-priority">
+                    <option value="">All</option>
+                    <option value="high">High</option>
+                    <option value="medium">Medium</option>
+                    <option value="low">Low</option>
+                </select>
+            </div>
+            
+            <button onclick="loadReviews()">🔄 Refresh</button>
+            
+            <div class="batch-actions">
+                <button onclick="selectAll()">Select All</button>
+                <button class="secondary" onclick="batchApprove()">✓ Approve Selected</button>
+                <button class="danger" onclick="batchReject()">✗ Reject Selected</button>
+                <button class="secondary" onclick="batchExecute()">⚡ Execute Approved</button>
+            </div>
+        </div>
+        
+        <div class="reviews-container">
+            <div id="reviews-list" class="loading">
+                Loading reviews...
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let reviews = [];
+        let selectedReviewIds = new Set();
+        
+        // Load stats and reviews on page load
+        window.onload = function() {
+            loadStats();
+            loadReviews();
+        };
+        
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/stats');
+                const data = await response.json();
+                
+                if (data.success) {
+                    displayStats(data.stats);
+                }
+            } catch (error) {
+                console.error('Error loading stats:', error);
+            }
+        }
+        
+        function displayStats(stats) {
+            const statsContainer = document.getElementById('stats-container');
+            statsContainer.innerHTML = `
+                <div class="stat-card">
+                    <h3>Total Reviews</h3>
+                    <div class="number">${stats.total || 0}</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Pending</h3>
+                    <div class="number">${stats.by_status?.pending || 0}</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Approved</h3>
+                    <div class="number">${stats.by_status?.approved || 0}</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Completed</h3>
+                    <div class="number">${stats.by_status?.completed || 0}</div>
+                </div>
+            `;
+        }
+        
+        async function loadReviews() {
+            const status = document.getElementById('filter-status').value;
+            const source = document.getElementById('filter-source').value;
+            const priority = document.getElementById('filter-priority').value;
+            
+            const params = new URLSearchParams();
+            if (status) params.append('status', status);
+            if (source) params.append('source', source);
+            if (priority) params.append('priority', priority);
+            params.append('limit', 100);
+            
+            try {
+                const response = await fetch(`/api/reviews?${params}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    reviews = data.reviews;
+                    displayReviews(reviews);
+                    loadStats(); // Refresh stats
+                } else {
+                    showToast('Error loading reviews: ' + data.error, 'error');
+                }
+            } catch (error) {
+                console.error('Error loading reviews:', error);
+                showToast('Error loading reviews', 'error');
+            }
+        }
+        
+        function displayReviews(reviews) {
+            const container = document.getElementById('reviews-list');
+            
+            if (reviews.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <h2>No reviews found</h2>
+                        <p>Try adjusting your filters or run the repair pipeline to generate reviews.</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            container.innerHTML = reviews.map(review => `
+                <div class="review-item" data-review-id="${review.id}">
+                    <div class="review-header">
+                        <input type="checkbox" 
+                               class="review-checkbox" 
+                               onchange="toggleSelection('${review.id}')"
+                               ${selectedReviewIds.has(review.id) ? 'checked' : ''}>
+                        <div class="review-node">
+                            <h3>${escapeHtml(review.node_label || 'Unknown Node')}</h3>
+                            <div class="review-meta">
+                                <span class="badge ${review.status}">${review.status}</span>
+                                <span class="badge ${review.priority}">${review.priority}</span>
+                                <span class="badge">${review.source}</span>
+                                ${review.node_type ? `<span class="badge">${review.node_type}</span>` : ''}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="review-problem">
+                        <strong>Problem:</strong> ${escapeHtml(review.problem_description)}
+                    </div>
+                    
+                    ${generateContextSection(review)}
+                    
+                    ${review.critic_suggestion ? `
+                    <div class="review-suggestion">
+                        <h4>💡 Suggested Fix:</h4>
+                        <div>${escapeHtml(review.critic_suggestion)}</div>
+                    </div>
+                    ` : ''}
+                    
+                    ${review.status === 'pending' || review.status === 'under_review' ? `
+                    <div>
+                        <textarea 
+                            id="notes-${review.id}" 
+                            placeholder="Add your notes here..."
+                        >${escapeHtml(review.user_notes || '')}</textarea>
+                        <textarea 
+                            id="instructions-${review.id}" 
+                            placeholder="Implementation instructions for kg_team (e.g., 'Change label to X', 'Add description Y')..."
+                        >${escapeHtml(review.user_instructions || review.critic_suggestion || '')}</textarea>
+                    </div>
+                    
+                    <div class="review-actions">
+                        <button class="secondary" onclick="approveReview('${review.id}')">✓ Approve</button>
+                        <button class="danger" onclick="rejectReview('${review.id}')">✗ Reject</button>
+                        <button onclick="saveNotes('${review.id}')">💾 Save Notes</button>
+                    </div>
+                    ` : ''}
+                    
+                    ${review.status === 'approved' ? `
+                    <div class="review-actions">
+                        <button class="secondary" onclick="executeReview('${review.id}')">⚡ Execute Now</button>
+                        <button onclick="revertToUnreviewed('${review.id}')">↩️ Revert to Pending</button>
+                    </div>
+                    ` : ''}
+                    
+                    ${review.implementation_result ? `
+                    <div class="review-suggestion">
+                        <h4>✅ Implementation Result:</h4>
+                        <div>${escapeHtml(review.implementation_result)}</div>
+                    </div>
+                    ` : ''}
+                    
+                    ${review.implementation_error ? `
+                    <div class="review-problem">
+                        <strong>❌ Implementation Error:</strong> ${escapeHtml(review.implementation_error)}
+                    </div>
+                    ` : ''}
+                </div>
+            `).join('');
+        }
+        
+        function toggleSelection(reviewId) {
+            if (selectedReviewIds.has(reviewId)) {
+                selectedReviewIds.delete(reviewId);
+            } else {
+                selectedReviewIds.add(reviewId);
+            }
+        }
+        
+        function selectAll() {
+            const checkboxes = document.querySelectorAll('.review-checkbox');
+            const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+            
+            checkboxes.forEach(cb => {
+                cb.checked = !allChecked;
+                const reviewId = cb.closest('.review-item').dataset.reviewId;
+                if (!allChecked) {
+                    selectedReviewIds.add(reviewId);
+                } else {
+                    selectedReviewIds.delete(reviewId);
+                }
+            });
+        }
+        
+        async function saveNotes(reviewId) {
+            const notes = document.getElementById(`notes-${reviewId}`).value;
+            const instructions = document.getElementById(`instructions-${reviewId}`).value;
+            
+            try {
+                const response = await fetch(`/api/review/${reviewId}`, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        user_notes: notes,
+                        user_instructions: instructions
+                    })
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    showToast('Notes saved successfully');
+                } else {
+                    showToast('Error saving notes: ' + data.error, 'error');
+                }
+            } catch (error) {
+                showToast('Error saving notes', 'error');
+            }
+        }
+        
+        async function approveReview(reviewId) {
+            const instructions = document.getElementById(`instructions-${reviewId}`)?.value;
+            
+            try {
+                const response = await fetch(`/api/review/${reviewId}/approve`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        user_instructions: instructions,
+                        reviewed_by: 'user'
+                    })
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    showToast('Review approved');
+                    loadReviews();
+                } else {
+                    showToast('Error approving review: ' + data.error, 'error');
+                }
+            } catch (error) {
+                showToast('Error approving review', 'error');
+            }
+        }
+        
+        async function rejectReview(reviewId) {
+            if (!confirm('Are you sure you want to reject this review?')) return;
+            
+            try {
+                const response = await fetch(`/api/review/${reviewId}/reject`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({reviewed_by: 'user'})
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    showToast('Review rejected');
+                    loadReviews();
+                } else {
+                    showToast('Error rejecting review: ' + data.error, 'error');
+                }
+            } catch (error) {
+                showToast('Error rejecting review', 'error');
+            }
+        }
+        
+        async function executeReview(reviewId) {
+            if (!confirm('Execute this review now? This will apply changes to the knowledge graph.')) return;
+            
+            showToast('Executing review... this may take a moment');
+            
+            try {
+                const response = await fetch(`/api/review/${reviewId}/execute`, {
+                    method: 'POST'
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    showToast('✅ Review executed successfully');
+                    loadReviews();
+                } else {
+                    showToast('❌ Execution failed: ' + data.error, 'error');
+                    loadReviews();
+                }
+            } catch (error) {
+                showToast('Error executing review', 'error');
+            }
+        }
+        
+        async function revertToUnreviewed(reviewId) {
+            try {
+                const response = await fetch(`/api/review/${reviewId}`, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({status: 'pending'})
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    showToast('Reverted to pending');
+                    loadReviews();
+                } else {
+                    showToast('Error reverting review: ' + data.error, 'error');
+                }
+            } catch (error) {
+                showToast('Error reverting review', 'error');
+            }
+        }
+        
+        async function batchApprove() {
+            const selected = Array.from(selectedReviewIds);
+            if (selected.length === 0) {
+                showToast('No reviews selected', 'error');
+                return;
+            }
+            
+            if (!confirm(`Approve ${selected.length} selected reviews?`)) return;
+            
+            try {
+                const response = await fetch('/api/batch/approve', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        review_ids: selected,
+                        reviewed_by: 'user'
+                    })
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    showToast(`Approved ${selected.length} reviews`);
+                    selectedReviewIds.clear();
+                    loadReviews();
+                } else {
+                    showToast('Error in batch approve: ' + data.error, 'error');
+                }
+            } catch (error) {
+                showToast('Error in batch approve', 'error');
+            }
+        }
+        
+        async function batchReject() {
+            const selected = Array.from(selectedReviewIds);
+            if (selected.length === 0) {
+                showToast('No reviews selected', 'error');
+                return;
+            }
+            
+            if (!confirm(`Reject ${selected.length} selected reviews?`)) return;
+            
+            try {
+                const response = await fetch('/api/batch/reject', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        review_ids: selected,
+                        reviewed_by: 'user'
+                    })
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    showToast(`Rejected ${selected.length} reviews`);
+                    selectedReviewIds.clear();
+                    loadReviews();
+                } else {
+                    showToast('Error in batch reject: ' + data.error, 'error');
+                }
+            } catch (error) {
+                showToast('Error in batch reject', 'error');
+            }
+        }
+        
+        async function batchExecute() {
+            const approvedReviews = reviews.filter(r => r.status === 'approved').map(r => r.id);
+            
+            if (approvedReviews.length === 0) {
+                showToast('No approved reviews to execute', 'error');
+                return;
+            }
+            
+            if (!confirm(`Execute ${approvedReviews.length} approved reviews? This will apply changes to the knowledge graph.`)) return;
+            
+            showToast(`Executing ${approvedReviews.length} reviews... this may take a while`);
+            
+            try {
+                const response = await fetch('/api/batch/execute', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({review_ids: approvedReviews})
+                });
+                
+                const data = await response.json();
+                if (data.total) {
+                    showToast(`✅ Completed: ${data.succeeded} succeeded, ${data.failed} failed`);
+                    loadReviews();
+                } else {
+                    showToast('Error in batch execution', 'error');
+                }
+            } catch (error) {
+                showToast('Error in batch execution', 'error');
+            }
+        }
+        
+        function showToast(message, type = 'success') {
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.remove();
+            }, 4000);
+        }
+        
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function generateContextSection(review) {
+            const context = review.context_data || {};
+            
+            // Build context items
+            const items = [];
+            
+            // Current description
+            if (context.description) {
+                items.push(`<div class="context-item"><strong>Current Description:</strong> ${escapeHtml(context.description)}</div>`);
+            }
+            
+            // Temporal information
+            if (context.start_date || context.end_date) {
+                let temporal = '<div class="context-item"><strong>Temporal:</strong> ';
+                if (context.start_date) {
+                    temporal += `Start: ${escapeHtml(context.start_date)}`;
+                    if (context.start_date_confidence) {
+                        temporal += ` (${escapeHtml(context.start_date_confidence)} confidence)`;
+                    }
+                }
+                if (context.end_date) {
+                    if (context.start_date) temporal += ', ';
+                    temporal += `End: ${escapeHtml(context.end_date)}`;
+                    if (context.end_date_confidence) {
+                        temporal += ` (${escapeHtml(context.end_date_confidence)} confidence)`;
+                    }
+                }
+                if (context.valid_during) {
+                    temporal += `, Valid: ${escapeHtml(context.valid_during)}`;
+                }
+                temporal += '</div>';
+                items.push(temporal);
+            }
+            
+            // Goal status
+            if (context.status) {
+                items.push(`<div class="context-item"><strong>Status:</strong> ${escapeHtml(context.status)}</div>`);
+            }
+            
+            // Edge connections with source sentences
+            if (context.edges_summary && context.edges_summary.length > 0) {
+                let edges = '<div class="context-item"><strong>Connected to:</strong><ul class="context-edges">';
+                context.edges_summary.forEach(edge => {
+                    if (typeof edge === 'string') {
+                        // Legacy format (just string)
+                        edges += `<li>${escapeHtml(edge)}</li>`;
+                    } else {
+                        // New format with sentence
+                        edges += `<li><strong>${escapeHtml(edge.relationship)}</strong> → ${escapeHtml(edge.target)}`;
+                        if (edge.sentence) {
+                            edges += `<br><span style="color: #6c757d; font-size: 0.9em; font-style: italic;">└─ "${escapeHtml(edge.sentence)}"</span>`;
+                        }
+                        edges += '</li>';
+                    }
+                });
+                edges += '</ul></div>';
+                items.push(edges);
+            }
+            
+            // If no context items, don't show section
+            if (items.length === 0) {
+                return '';
+            }
+            
+            const contextId = `context-${review.id}`;
+            return `
+                <div class="context-section">
+                    <button class="context-toggle" onclick="toggleContext('${contextId}')">
+                        <span>📋 Node Context (${items.length} items)</span>
+                        <span id="${contextId}-icon">▼</span>
+                    </button>
+                    <div id="${contextId}" class="context-content collapsed">
+                        ${items.join('')}
+                    </div>
+                </div>
+            `;
+        }
+        
+        function toggleContext(contextId) {
+            const content = document.getElementById(contextId);
+            const icon = document.getElementById(`${contextId}-icon`);
+            
+            if (content.classList.contains('collapsed')) {
+                content.classList.remove('collapsed');
+                icon.textContent = '▲';
+            } else {
+                content.classList.add('collapsed');
+                icon.textContent = '▼';
+            }
+        }
+    </script>
+</body>
+</html>
+

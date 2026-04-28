@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "installed_tools": [
+    {
+      "server_id": "npm/server-google-maps",
+      "tool_name": "maps_geocode",
+      "namespaced_tool_name": "mcp::npm/server-google-maps::maps_geocode",
+      "installed_at_utc": "2026-02-21T17:50:00+00:00",
+      "install_source": "manual_seed",
+      "enabled": true
+    },
+    {
+      "server_id": "npm/server-google-maps",
+      "tool_name": "maps_distance_matrix",
+      "namespaced_tool_name": "mcp::npm/server-google-maps::maps_distance_matrix",
+      "installed_at_utc": "2026-02-23T06:30:51.340239+00:00",
+      "install_source": "agent",
+      "enabled": true
+    },
+    {
+      "server_id": "npm/playwright-mcp",
+      "tool_name": "browser_evaluate",
+      "namespaced_tool_name": "mcp::npm/playwright-mcp::browser_evaluate",
+      "installed_at_utc": "2026-02-17T03:55:05.959970+00:00",
+      "install_source": "planner",
+      "enabled": true
+    }
+  ]
+}

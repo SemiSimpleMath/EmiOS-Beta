@@ -1,0 +1,19 @@
+Originally message was recorded on:
+{{ message_timestamp }}
+
+{% if entity_level_0 %}
+#### ADDITIONAL KNOWN CONTEXT ####
+These are facts already recorded in the knowledge graph about entities mentioned below.
+Use them to better assess importance, temporal relevance, and biographical significance of each node.
+{{ entity_level_0 }}
+#### END OF ADDITIONAL KNOWN CONTEXT ####
+{% endif %}
+
+These are nodes you need to enrich:
+{{ nodes }}
+
+Here is the conversation window the nodes came from. Entity references are already expanded to canonical names. Use this to capture aliases that appear anywhere in the window: when one sentence creates a node for an entity and another sentence in the same window names a nickname, term of address, or alternate form for that entity, emit the alternate form as an alias on that node.
+{{ resolved_window }}
+
+
+

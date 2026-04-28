@@ -1,0 +1,11 @@
+{% if entity_card %}
+#### KNOWN ENTITY CARDS ####
+These are the full entity cards already recorded in the knowledge graph for entities mentioned in the sentences.
+If a sentence merely restates a fact, relationship, or detail already captured here, REJECT it as redundant.
+{{ entity_card }}
+#### END OF KNOWN ENTITY CARDS ####
+{% endif %}
+
+Review the following parsed sentences and decide KEEP or REJECT for each one.
+
+{{ sentences }}

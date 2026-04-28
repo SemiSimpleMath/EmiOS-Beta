@@ -1,0 +1,83 @@
+{
+  "name": "playwright_browse",
+  "description": "Render a web page using Playwright (JS-capable browser) and return the extracted text.\n\n- Use this for JS-heavy pages that normal HTTP scraping can’t read.\n- Provide `query` to extract only the relevant parts (uses Emi’s existing `scraper` agent).\n- Set `dry_run: true` to validate orchestration without launching a browser (good for tests).",
+  "inputs": [
+    {
+      "name": "url",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "query",
+      "type": "string",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "wait_until",
+      "type": "string",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "timeout_ms",
+      "type": "integer",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "post_wait_ms",
+      "type": "integer",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "max_chars",
+      "type": "integer",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "dry_run",
+      "type": "boolean",
+      "required": false,
+      "description": ""
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "Provide arguments for the `playwright_browse` tool.\n\nArguments:\n- url (required): page to open\n- query (optional): what to extract from the page (leave empty to return full page text)\n- wait_until (optional): Playwright navigation wait strategy (default: \"domcontentloaded\")\n- timeout_ms (optional): navigation timeout in ms (default: 30000)\n- post_wait_ms (optional): extra wait after navigation in ms (default: 0)\n- max_chars (optional): truncate output to this many chars (default: 50000)\n- dry_run (optional): if true, do NOT launch a browser (default: false)\n\nExample:\n{\"url\": \"https://example.com\", \"query\": \"Find hours and phone number\", \"dry_run\": true}",
+  "metadata": {
+    "domain": "browser",
+    "actions": [
+      "browse",
+      "navigate",
+      "read",
+      "extract"
+    ],
+    "selectors": [
+      "url",
+      "query"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "high",
+    "latency_class": "slow",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

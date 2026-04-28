@@ -1,0 +1,15 @@
+name: kg_investigation::final_answer
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.1"
+  model_tier: "smart"
+
+allowed_tools: []
+except_tools: []
+
+user_context_items:
+  - task
+  - information
+  - recent_history

@@ -1,0 +1,131 @@
+name: room_manager
+class_name: MultiAgentManager
+description: "Room manager with chat gate plus tool execution flow."
+max_cycles: 30
+
+role_bindings:
+  delegator: room::delegator
+  tool_selector: shared::tool_selector
+
+agents:
+  - name: room::delegator
+    class: Delegator
+  - name: room::chat_gate
+    class: Agent
+  - name: room::switchboard
+    class: Agent
+  - name: room::response_formatter
+    class: Agent
+
+control_nodes:
+  - name: chat_task_router_node
+    class: ChatTaskRouterNode
+  - name: room_switchboard_arguments_node
+    class: RoomSwitchboardArgumentsNode
+  - name: room_tool_caller
+    class: RoomToolCaller
+  - name: return_control
+    class: ReturnControlNode
+  - name: final_answer_node
+    class: FinalAnswerNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+  - name: graceful_exit_control_node
+    class: GracefulExitControlNode
+
+tools:
+  # Start broad, then constrain per room policy with task_allowed_tools / task_except_tools.
+  allowed_tools:
+    - get_important_emails
+    - send_email
+    - find_calendar_event_by_name
+    - get_calendar_events
+    - create_calendar_event
+    - create_repeating_calendar_event
+    - delete_calendar_event
+    - delete_repeating_calendar_event
+    - update_calendar_event
+    - get_todo_tasks
+    - create_todo_task
+    - delete_todo_task
+    - update_todo_task
+    - web_manager
+    - personal_admin_manager
+    - ask_user
+    - notify_user
+    - playwright_manager
+    - kg_team_manager
+    - ask_kg
+    - read_text_file
+    - append_text_file
+    - write_text_file
+    - find_tool
+    - set_screen_capture_enabled
+    - capture_and_describe_monitors
+    - capture_monitor_screenshot
+    - vision_image_scout
+    - vision_image_describe
+    - one_shot_tool_runner
+  except_tools: []
+scope_contract:
+  tools:
+    allowed_tools:
+      - get_important_emails
+      - send_email
+      - find_calendar_event_by_name
+      - get_calendar_events
+      - create_calendar_event
+      - create_repeating_calendar_event
+      - delete_calendar_event
+      - delete_repeating_calendar_event
+      - update_calendar_event
+      - get_todo_tasks
+      - create_todo_task
+      - delete_todo_task
+      - update_todo_task
+      - web_manager
+      - personal_admin_manager
+      - ask_user
+      - notify_user
+      - playwright_manager
+      - kg_team_manager
+      - ask_kg
+      - read_text_file
+      - append_text_file
+      - write_text_file
+      - find_tool
+      - set_screen_capture_enabled
+      - capture_and_describe_monitors
+      - capture_monitor_screenshot
+      - vision_image_scout
+      - vision_image_describe
+      - one_shot_tool_runner
+    blocked_tools:
+      - install_tool
+      - mcp::npm/playwright-mcp::browser_run_code
+    requires_approval_tools:
+      - playwright_manager
+
+flow_config:
+  strict_routing: true
+  chat_gate:
+    source_agent: "room::chat_gate"
+    switchboard_agent: "room::switchboard"
+    final_node: "final_answer_node"
+    exit_flag_key: "handoff_tf"
+    no_op_flag_key: "no_op_tf"
+    chat_response_key: "chat_response"
+    switchboard_task_key: "switchboard_task"
+    switchboard_information_key: "switchboard_information"
+  state_map:
+    "room::delegator": "room::chat_gate"
+    "room::chat_gate": "chat_task_router_node"
+    "chat_task_router_node": "room::switchboard"
+    "room::switchboard": "room_switchboard_arguments_node"
+    "room_switchboard_arguments_node": "room_tool_caller"
+    "room_tool_caller": "room::response_formatter"
+    "room::response_formatter": "final_answer_node"
+    "room::switchboard_return_control": "final_answer_node"
+    "final_answer_node": "manager_exit_node"
+    "graceful_exit": "graceful_exit_control_node"
+    "graceful_exit_control_node": "final_answer_node"

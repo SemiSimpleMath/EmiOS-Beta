@@ -1,0 +1,68 @@
+{
+  "name": "send_email",
+  "description": "Sends an email.  Needs a To email address and body, subject is optional but nice to have. Can be used to send text message using SMS.\nDo not use email to communicate with the user directly unless instructed to do so.",
+  "inputs": [
+    {
+      "name": "to",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "subject",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "body",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "account_id",
+      "type": "string",
+      "required": false,
+      "description": "Optional Google OAuth account id for per-call sender selection (default \"google_user_primary\")."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "Arguments for sending an email:\nto: str\nsubject: Optional[str]\nbody: Optional[str]\naccount_id: Optional[str]  # Use to choose sender account per call",
+  "metadata": {
+    "domain": "email",
+    "actions": [
+      "send",
+      "compose",
+      "create"
+    ],
+    "selectors": [
+      "recipient",
+      "subject",
+      "body"
+    ],
+    "risk_level": "medium",
+    "side_effects": "external_action",
+    "requires_auth": [
+      "google"
+    ],
+    "requires_network": true,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false,
+    "planner_description": "Send an email (or SMS via email gateway)."
+  }
+}

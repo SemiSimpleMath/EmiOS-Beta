@@ -1,0 +1,39 @@
+Today is {{ date_time }}.
+
+Task:
+{{ task }}
+
+Pending tool call (what the planner is about to execute):
+pending_tool_name={{ pending_tool_name }}
+pending_tool_arguments={{ pending_tool_arguments }}
+critic_intended_action_input={{ critic_intended_action_input }}
+
+Recent history (chronological, oldest to newest). Each entry is one action or agent response.
+Tool calls are summarized in a single block with args, result id, and summary.
+Recent history:
+{{ recent_history }}
+
+{% if playwright_critic_image %}
+Screenshot:
+[emi_image: {{ playwright_critic_image }}]
+{% endif %}
+
+{% if critic_payload %}
+Critic payload:
+{{ critic_payload }}
+{% endif %}
+
+Return a structured critique:
+- critic_diagnosis: short, concrete diagnosis of what's going wrong (1-4 sentences)
+- critic_actionable_change: Clear actionable instruction on what to do next.
+- must_revise_plan: true if the pending tool call should be cancelled and the planner should re-plan
+- critic_confidence: number 0-1
+
+Examples of critic_actionable_change:
+- "Press Escape once with `mcp::npm/playwright-mcp::browser_press_key` and key='Escape'
+- "Call `web_page_coords` with question='Find and close the cookie modal' and click the returned close/accept target."
+- "List tabs with `mcp::npm/playwright-mcp::browser_tabs`, select the newest tab."
+- If things are going wrong repeatedly and you are not sure why, recommend using vision_scout
+- Prefer search boxes over scrolling images or long lists.  Sometimes it is necessary to scroll down for images.
+
+

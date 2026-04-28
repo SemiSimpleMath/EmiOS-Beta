@@ -1,0 +1,20 @@
+{
+  "step_id": "conversation_starter",
+  "description": "Initiate a short conversation a few times per day (heavy context, light output).",
+  "max_per_day": 3,
+  "min_interval_minutes": 180,
+  "quiet_hours_local": [],
+  "calendar_veto": {
+    "veto_if_meeting_now": true,
+    "veto_if_event_starts_within_minutes": 10
+  },
+  "presence_veto": {
+    "veto_if_afk": true,
+    "veto_if_potentially_afk": true
+  },
+  "randomization": {
+    "probability": 0.20,
+    "bucket_minutes": 15
+  }
+}
+

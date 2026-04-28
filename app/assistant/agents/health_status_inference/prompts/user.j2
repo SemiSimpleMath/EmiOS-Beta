@@ -1,0 +1,86 @@
+########## CURRENT STATE ##########
+**Current Time:** {{ date_time }}
+
+########## USER BASELINE ##########
+**Health Profile:**
+{{ resource_user_health_status }}
+
+**Daily Routine & Energy Patterns:**
+{{ resource_dayflow_routine }}
+
+########## SYSTEM TELEMETRY ##########
+**Sleep:**
+- Total Sleep (last 24h): {{ resource_sleep_output.total_sleep_minutes }} min
+- Last night: {{ resource_sleep_output.last_night_sleep_minutes }} min
+- Quality: {{ resource_sleep_output.sleep_quality }}{% if resource_sleep_output.fragmented %} (Fragmented){% endif %}
+- Time in bed: {{ resource_sleep_output.time_in_bed_minutes }} min
+- Wake minutes: {{ resource_sleep_output.total_wake_minutes }} min
+- Bedtime: {{ resource_sleep_output.bedtime_previous_local | default(resource_sleep_output.bedtime_previous) }}
+- Wake time: {{ resource_sleep_output.wake_time_today_local | default(resource_sleep_output.wake_time_today) }}
+{% if resource_sleep_output.timezone %}- Timezone: {{ resource_sleep_output.timezone }}{% endif %}
+
+{% if resource_sleep_output.sleep_periods %}
+**Sleep Periods:**
+{% for p in resource_sleep_output.sleep_periods %}
+- {{ p.start_local | default(p.start) }} -> {{ p.end_local | default(p.end) }} ({{ p.duration_minutes }} min) [{{ p.type }}]
+{% endfor %}
+{% endif %}
+
+**Activity Timers:**
+| Activity | Time Ago | Threshold | Status |
+| :--- | :--- | :--- | :--- |
+{% for key, activity in resource_tracked_activities_output.activities.items() %}
+{% set mins = time_since["minutes_since_" ~ key] %}
+{% set threshold = activity.threshold_minutes | default(none) %}
+| {{ activity.display_name }} | {{ mins if mins is not none else "Unknown" }} min | {{ threshold if threshold is not none else "-" }} | {% if threshold is not none and mins is not none and mins > threshold %}OVERDUE{% else %}OK{% endif %} |
+{% endfor %}
+| Coffees today | {{ time_since.coffee_count_today | default(0) }} | - | - |
+
+**Calendar:**
+{% if resource_expected_calendar and resource_expected_calendar.expected_schedule %}
+{% for event in resource_expected_calendar.expected_schedule %}
+- {{ event.start_local }}{% if event.end_local %}-{{ event.end_local }}{% endif %}: {{ event.title }}{% if event.status %} ({{ event.status }}){% endif %}
+{% endfor %}
+{% else %}
+[Clear Schedule]
+{% endif %}
+
+########## TICKET STATE ##########
+{% if recent_responded_tickets.accepted %}
+**ACCEPTED** (user accepted the ticket action, e.g. stretch, drink water):
+{% for t in recent_responded_tickets.accepted %}
+- {{ t.message or t.title }} [{{ t.responded_at_local }}]
+{% endfor %}
+{% endif %}
+{% if recent_responded_tickets.acknowledged %}
+**ACKNOWLEDGED:**
+{% for t in recent_responded_tickets.acknowledged %}
+- {{ t.message or t.title }} [{{ t.responded_at_local }}]{% if t.user_comment %} - {{ t.user_comment }}{% endif %}
+{% endfor %}
+{% endif %}
+{% if recent_responded_tickets.declined %}
+**DECLINED:**
+{% for t in recent_responded_tickets.declined %}
+- {{ t.message or t.title }} [{{ t.responded_at_local }}]{% if t.user_comment %} - {{ t.user_comment }}{% endif %}
+{% endfor %}
+{% endif %}
+{% if recent_responded_tickets.snoozed %}
+**SNOOZED:**
+{% for t in recent_responded_tickets.snoozed %}
+- {{ t.message or t.title }} [{{ t.responded_at_local }}{% if t.snooze_until_local %}, until {{ t.snooze_until_local }}{% endif %}]{% if t.user_comment %} - {{ t.user_comment }}{% endif %}
+{% endfor %}
+{% endif %}
+
+########## CHAT HISTORY ##########
+{{ recent_chat_history }}
+
+########## YOUR TASK ##########
+Synthesize baseline, telemetry, tickets, and chat into a structured state snapshot.
+
+1. **Physical:** Energy level, pain. Is a chronic condition flaring (OVERDUE timers + chat keywords)?
+2. **Cognitive:** Load from calendar density and chat tone.
+3. **Mental:** Mood and stress from chat content and context.
+4. **Physiological:** Hunger/thirst probability from timers and chat.
+5. **Ticket Signals:** If user recently declined/snoozed multiple items -> interruption tolerance is LOW.
+
+Output the JSON only.

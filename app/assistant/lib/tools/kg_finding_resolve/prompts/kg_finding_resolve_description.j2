@@ -1,0 +1,4 @@
+Mark a kg_maintenance_finding as executed. Call this AFTER the
+corresponding KG mutation succeeded (or after deciding the finding
+requires no KG change). Records action + notes in execution_notes
+for audit. Always pass a non-empty `reason`.

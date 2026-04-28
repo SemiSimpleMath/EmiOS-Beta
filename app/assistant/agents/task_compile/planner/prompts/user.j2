@@ -1,0 +1,56 @@
+Task:
+{{ task }}
+
+Additional information:
+{{ information }}
+
+Compile seed (must be preserved in result header fields):
+{{ compile_seed }}
+
+Available manager catalog (use these for step executors):
+{{ task_compile_manager_catalog }}
+
+Compile contract (global rules + enums + event guidance):
+{{ task_compile_contract }}
+
+Compile instructions:
+1) Break task into execution units.
+2) Introduce `wait_for_event` steps for explicit pauses/triggers.
+3) Introduce `decision` steps only when branching is clearly implied.
+4) Use `next_step` links for linear flow.
+5) End with a terminal `end` step.
+6) If the task specifies a manager/executor to use, use that manager. Otherwise choose the best fit from the manager catalog.
+7) Keep same-manager work together in one action step unless manager surface changes.
+8) Keep each action instruction minimal and high-level; do not over-specify manager internals.
+
+Compound wait guidance (task_ir_v1):
+- `wait_for_event` supports one `event_name` only. Do NOT invent `wait_mode`, `triggers[]`, or new step kinds.
+- For "wait for X OR Y", compile to:
+  a) an `action` step that registers a composite watch and emits one canonical event (for example `signal_router.watch.any_x_or_y`),
+  b) one `wait_for_event` step on that canonical event,
+  c) a `decision` step that branches using explicit `event_<n>` booleans or deterministic facts.
+- For "wait for X until T", use a canonical watch/timeout event and branch after wake:
+  a) register watch with timeout semantics in an action step,
+  b) wait on one canonical event,
+  c) decision branch using explicit `event_<n>` booleans or deterministic facts for event vs timeout.
+- Use only condition expressions that the runtime evaluator can parse:
+  - booleans must be `True` / `False`,
+  - string literals must be quoted,
+  - compare deterministic ids only (`event_<n>`, `fact_<n>`, `artifact_<n>`).
+
+Ambiguity resolution policy (required):
+- When user prose is vague, compile deterministically using defaults below and note assumptions in `final_answer_answer`.
+- Trigger logic defaults:
+  - "X or Y" -> OR semantics.
+  - "X and Y" -> AND semantics.
+  - mixed phrases like "X and Y or Z" must be parenthesized explicitly in your plan assumption (default: `(X and Y) or Z`).
+- In task_ir_v1, represent compound logic via canonical watch + post-wake decision tree:
+  - register one composite watch event in an action step,
+  - wait on the canonical event,
+  - decision steps branch by deterministic ids (`event_<n>`, `fact_<n>`, `artifact_<n>`).
+- Time defaults:
+  - If user says "until <time>", treat it as a hard stop bound.
+  - For any wait crossing that bound, include a timeout branch to end/stop path.
+- If required identifiers are missing (for example recipient email unresolved), create a branch to explicit clarification/lookup action before side effects.
+
+Set `final_answer_answer` to a short sentence confirming compilation.

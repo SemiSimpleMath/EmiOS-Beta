@@ -1,0 +1,12 @@
+web_scroll:
+Scroll the page (or focused scroll container) using simple direction semantics.
+
+Use this instead of raw `browser_mouse_wheel` deltas.
+
+Arguments:
+- direction: "down" or "up"
+- amount: pixels per step (default 420)
+- steps: number of steps (default 1)
+- settle_ms: wait after each step (default 120)
+- capture_snapshot: include browser_snapshot after scrolling (default true)
+

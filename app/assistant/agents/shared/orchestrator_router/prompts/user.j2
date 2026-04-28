@@ -1,0 +1,66 @@
+Today is {{ date_time }}.
+
+Task:
+{{ task }}
+
+{% if information %}
+Information:
+{{ information }}
+{% endif %}
+
+Curator done state:
+- is_done: {{ is_done }}
+- done_reason: {{ done_reason }}
+- missing_requirements: {{ missing_requirements }}
+
+Facts (v{{ orchestrator_facts_version }}):
+{{ orchestrator_facts }}
+
+Job map (job_id -> contract/status):
+{{ orchestrator_job_map }}
+
+Recent child results:
+{{ orchestrator_results }}
+
+Progress inbox (newest last):
+{{ orchestrator_progress_inbox }}
+
+Broadcast history (newest last):
+{{ orchestrator_broadcast_history }}
+
+Tick: {{ orchestrator_tick }}
+
+Decide routing, cancellations, and whether we should replan/advance stage.
+
+Today is {{ date_time }}.
+
+Task:
+{{ task }}
+
+{% if information %}
+Information:
+{{ information }}
+{% endif %}
+
+Facts (v{{ orchestrator_facts_version }}):
+{{ orchestrator_facts }}
+
+Recent child results:
+{{ orchestrator_results }}
+
+Progress inbox (partial updates; newest last):
+{{ orchestrator_progress_inbox }}
+
+Job map (job_id -> status/task/depends):
+{{ orchestrator_job_map }}
+
+Broadcast history (newest last):
+{{ orchestrator_broadcast_history }}
+
+Tick: {{ orchestrator_tick }}
+
+Decide routing:
+- broadcast to other running jobs only if they need the new info
+- cancel jobs if moot/blocked
+- replan_needed=true only if a missing stage/job must be scheduled (advance) or major change is required
+

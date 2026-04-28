@@ -1,0 +1,19 @@
+Create a one-time reminder event. Current time is {{ date_time }}.
+
+Required fields:
+- title: short name for the reminder
+- start_date: when to fire, format YYYY-MM-DD HH:MM:SS (local time)
+- payload_message: what to remind about
+
+Defaults (omit unless you have a reason to change):
+- task_type: "reminder"
+- importance: 3
+- sound: "default"
+
+Example:
+title: Laundry reminder
+start_date: 2024-11-05 14:30:00
+payload_message: Remind Bob to pick up laundry
+task_type: reminder
+importance: 3
+sound: default

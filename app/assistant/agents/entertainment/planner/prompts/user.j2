@@ -1,0 +1,47 @@
+Today is {{ date_time }}.
+{% if task %}
+Task you have been given: {{ task }}
+{% endif %}
+
+{% if information %}
+Additional information: {{ information }}
+{% endif %}
+
+{% if task_includes %}
+Included rules and context:
+{{ task_includes }}
+{% endif %}
+
+{% if task_resource_context %}
+Task resources:
+{{ task_resource_context }}
+{% endif %}
+
+{{ entity_level_0 }}
+
+{% if checklist %}
+This is our previous checklist that you have to now update. You may also add sub-goals to the checklist. Do not get stuck thinking you must check off every single part. Often main goal can be achieved by abandoning some goals or sub-goals or deciding that a check item has been closely enough satisfied.
+{{ checklist }}
+{% else %}
+This is our first action. We have not done anything yet. We just need to come up with a plan and action.
+{% endif %}
+
+
+{% if progress_report %}
+Current accumulated progress_report (append-only; do NOT repeat items already listed here):
+{{ progress_report }}
+{% endif %}
+
+{% if recent_history %}
+Things that happened since last time you made a plan from oldest to latest. Last thing is most recent tool result that you have to evaluate:
+{{ recent_history }}
+Use the latest tool result to update checklist/progress and choose the next action.
+{% endif %}
+
+{% if action_count %}
+**Action Count:** {{ action_count }}/20 (You have {{ 20 - action_count }} actions remaining)
+{% endif %}
+
+{% if action_count and action_count >= 20 %}
+CRITICAL: You have reached the 20-action limit! You must now wrap up and complete your task even if not fully done. No more tool calls - set action to return_control.
+{% endif %}

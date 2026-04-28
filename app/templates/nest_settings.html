@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nest Thermostat</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/setup_wizard.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="setup-container">
+        <div class="setup-header">
+            <h1><i class="fas fa-thermometer-half"></i> Nest Thermostat</h1>
+            <p>Control your Nest thermostat via Google SDM API</p>
+            <a href="/settings/integrations" class="back-link"><i class="fas fa-arrow-left"></i> Back to Integrations</a>
+        </div>
+
+        <div class="settings-section">
+            <h2><i class="fab fa-google"></i> Nest Google Account</h2>
+            <p class="step-description">Connect a Google account with Nest (SDM) permissions.</p>
+            <div id="nest-oauth-status-container"></div>
+        </div>
+
+        <div class="settings-section">
+            <h2><i class="fas fa-cog"></i> Configuration</h2>
+            <div class="feature-card">
+                <div class="feature-info">
+                    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+                        <label class="feature-toggle">
+                            <input type="checkbox" id="nest_enabled">
+                            <div class="toggle-slider"></div>
+                        </label>
+                        <strong>Enable Nest integration</strong>
+                        <span id="nest_token_status" class="feature-status disabled">Token not set</span>
+                    </div>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px;">
+                        <div>
+                            <label for="nest_endpoint_url"><strong>Endpoint URL</strong></label>
+                            <input id="nest_endpoint_url" type="text" style="width:100%;padding:8px;" placeholder="http://127.0.0.1:8787/smart-home/nest">
+                        </div>
+                        <div>
+                            <label for="nest_token_env_var"><strong>Token env var</strong></label>
+                            <input id="nest_token_env_var" type="text" style="width:100%;padding:8px;" placeholder="EMI_SMARTHOME_NEST_TOKEN">
+                        </div>
+                        <div>
+                            <label for="nest_timeout_seconds"><strong>Timeout seconds</strong></label>
+                            <input id="nest_timeout_seconds" type="number" min="1" style="width:100%;padding:8px;" placeholder="20">
+                        </div>
+                    </div>
+                    <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+                        <button type="button" id="nest_save_config_btn" class="oauth-connect-btn"><i class="fas fa-save"></i> Save</button>
+                        <button type="button" id="nest_refresh_status_btn" class="oauth-connect-btn"><i class="fas fa-sync-alt"></i> Refresh</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="settings-section">
+            <h2><i class="fas fa-gamepad"></i> Quick Actions</h2>
+            <div class="feature-card">
+                <div class="feature-info">
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+                        <button type="button" id="nest_get_status_btn" class="oauth-connect-btn">Get Status</button>
+                        <button type="button" id="nest_set_heat_btn" class="oauth-connect-btn">Heat Mode</button>
+                        <button type="button" id="nest_set_cool_btn" class="oauth-connect-btn">Cool Mode</button>
+                        <button type="button" id="nest_set_eco_on_btn" class="oauth-connect-btn">Eco On</button>
+                        <button type="button" id="nest_set_eco_off_btn" class="oauth-connect-btn">Eco Off</button>
+                    </div>
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                        <input id="nest_temp_c_input" type="number" step="0.5" placeholder="Target C (e.g. 21.5)" style="padding:8px;max-width:180px;">
+                        <button type="button" id="nest_set_temp_btn" class="oauth-connect-btn">Set Temp</button>
+                    </div>
+                    <pre id="nest_action_result" style="margin-top:12px;white-space:pre-wrap;background:#0f172a;color:#e2e8f0;padding:10px;border-radius:6px;max-height:280px;overflow:auto;"></pre>
+                </div>
+            </div>
+        </div>
+
+        <div id="error-message" class="error-message" style="display: none;"></div>
+        <div id="success-message" class="success-message" style="display: none;"></div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/integrations_shared.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/nest_settings.js') }}"></script>
+</body>
+</html>

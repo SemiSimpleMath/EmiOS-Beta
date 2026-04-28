@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quiet Mode Settings</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/setup_wizard.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="setup-container">
+        <div class="setup-header">
+            <h1><i class="fas fa-moon"></i> Quiet Mode Settings</h1>
+            <p>Control when background tasks and notifications are active</p>
+            <a href="/chat_bot" class="back-link"><i class="fas fa-arrow-left"></i> Back to Chat</a>
+        </div>
+
+        <form id="quietModeForm">
+            <!-- Global Quiet Mode Toggle -->
+            <div class="settings-section">
+                <h2><i class="fas fa-toggle-on"></i> Global Quiet Mode</h2>
+                <p class="step-description">Enable or disable quiet mode for all features at once.</p>
+                
+                <div class="feature-card global-toggle-card">
+                    <label class="feature-toggle">
+                        <input type="checkbox" id="enable_quiet_mode">
+                        <div class="toggle-slider"></div>
+                    </label>
+                    <div class="feature-info">
+                        <h3><i class="fas fa-moon"></i> Quiet Mode</h3>
+                        <p>When enabled, background tasks will pause during configured quiet hours</p>
+                        <span class="feature-status" id="status_quiet_mode"></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Universal Quiet Hours -->
+            <div class="settings-section" id="universal-hours-section">
+                <h2><i class="fas fa-clock"></i> Universal Quiet Hours</h2>
+                <p class="step-description">Set default quiet hours that apply to all features (unless overridden below).</p>
+                
+                <div class="time-settings-card">
+                    <div class="time-input-group">
+                        <div class="time-input-field">
+                            <label for="universal_start"><i class="fas fa-moon"></i> Start Time</label>
+                            <input type="time" id="universal_start" value="23:00">
+                        </div>
+                        <div class="time-input-field">
+                            <label for="universal_end"><i class="fas fa-sun"></i> End Time</label>
+                            <input type="time" id="universal_end" value="07:00">
+                        </div>
+                    </div>
+                    <p class="help-text"><i class="fas fa-info-circle"></i> Example: 23:00 to 07:00 means quiet from 11 PM to 7 AM</p>
+                </div>
+            </div>
+
+            <!-- Per-Feature Quiet Hours -->
+            <div class="settings-section" id="per-feature-section">
+                <h2><i class="fas fa-sliders-h"></i> Per-Feature Quiet Hours</h2>
+                <p class="step-description">Customize quiet hours for individual features. Leave disabled to use universal hours. Toggle on to set custom hours for that feature.</p>
+                
+                <div class="feature-grid">
+                    <!-- Email -->
+                    <div class="feature-card quiet-feature-card">
+                        <label class="feature-toggle">
+                            <input type="checkbox" id="enable_email_quiet" data-feature="email">
+                            <div class="toggle-slider"></div>
+                        </label>
+                        <div class="feature-info">
+                            <h3><i class="fas fa-envelope"></i> Email</h3>
+                            <p>Custom quiet hours for email checking</p>
+                        </div>
+                        <div class="feature-time-settings" id="email_time_settings" style="display: none;">
+                            <div class="time-input-group-small">
+                                <input type="time" id="email_start" value="23:00">
+                                <span>to</span>
+                                <input type="time" id="email_end" value="07:00">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Calendar -->
+                    <div class="feature-card quiet-feature-card">
+                        <label class="feature-toggle">
+                            <input type="checkbox" id="enable_calendar_quiet" data-feature="calendar">
+                            <div class="toggle-slider"></div>
+                        </label>
+                        <div class="feature-info">
+                            <h3><i class="fas fa-calendar"></i> Calendar</h3>
+                            <p>Custom quiet hours for calendar sync</p>
+                        </div>
+                        <div class="feature-time-settings" id="calendar_time_settings" style="display: none;">
+                            <div class="time-input-group-small">
+                                <input type="time" id="calendar_start" value="23:00">
+                                <span>to</span>
+                                <input type="time" id="calendar_end" value="07:00">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Tasks -->
+                    <div class="feature-card quiet-feature-card">
+                        <label class="feature-toggle">
+                            <input type="checkbox" id="enable_tasks_quiet" data-feature="tasks">
+                            <div class="toggle-slider"></div>
+                        </label>
+                        <div class="feature-info">
+                            <h3><i class="fas fa-tasks"></i> Tasks</h3>
+                            <p>Custom quiet hours for task sync</p>
+                        </div>
+                        <div class="feature-time-settings" id="tasks_time_settings" style="display: none;">
+                            <div class="time-input-group-small">
+                                <input type="time" id="tasks_start" value="23:00">
+                                <span>to</span>
+                                <input type="time" id="tasks_end" value="07:00">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Scheduler/Reminders -->
+                    <div class="feature-card quiet-feature-card">
+                        <label class="feature-toggle">
+                            <input type="checkbox" id="enable_scheduler_quiet" data-feature="scheduler">
+                            <div class="toggle-slider"></div>
+                        </label>
+                        <div class="feature-info">
+                            <h3><i class="fas fa-bell"></i> Reminders</h3>
+                            <p>Custom quiet hours for reminders</p>
+                        </div>
+                        <div class="feature-time-settings" id="scheduler_time_settings" style="display: none;">
+                            <div class="time-input-group-small">
+                                <input type="time" id="scheduler_start" value="23:00">
+                                <span>to</span>
+                                <input type="time" id="scheduler_end" value="07:00">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Weather -->
+                    <div class="feature-card quiet-feature-card">
+                        <label class="feature-toggle">
+                            <input type="checkbox" id="enable_weather_quiet" data-feature="weather">
+                            <div class="toggle-slider"></div>
+                        </label>
+                        <div class="feature-info">
+                            <h3><i class="fas fa-cloud-sun"></i> Weather</h3>
+                            <p>Custom quiet hours for weather updates</p>
+                        </div>
+                        <div class="feature-time-settings" id="weather_time_settings" style="display: none;">
+                            <div class="time-input-group-small">
+                                <input type="time" id="weather_start" value="23:00">
+                                <span>to</span>
+                                <input type="time" id="weather_end" value="07:00">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- News -->
+                    <div class="feature-card quiet-feature-card">
+                        <label class="feature-toggle">
+                            <input type="checkbox" id="enable_news_quiet" data-feature="news">
+                            <div class="toggle-slider"></div>
+                        </label>
+                        <div class="feature-info">
+                            <h3><i class="fas fa-newspaper"></i> News</h3>
+                            <p>Custom quiet hours for news updates</p>
+                        </div>
+                        <div class="feature-time-settings" id="news_time_settings" style="display: none;">
+                            <div class="time-input-group-small">
+                                <input type="time" id="news_start" value="23:00">
+                                <span>to</span>
+                                <input type="time" id="news_end" value="07:00">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Knowledge Graph -->
+                    <div class="feature-card quiet-feature-card">
+                        <label class="feature-toggle">
+                            <input type="checkbox" id="enable_kg_quiet" data-feature="kg">
+                            <div class="toggle-slider"></div>
+                        </label>
+                        <div class="feature-info">
+                            <h3><i class="fas fa-project-diagram"></i> Knowledge Graph</h3>
+                            <p>Custom quiet hours for KG processing</p>
+                        </div>
+                        <div class="feature-time-settings" id="kg_time_settings" style="display: none;">
+                            <div class="time-input-group-small">
+                                <input type="time" id="kg_start" value="23:00">
+                                <span>to</span>
+                                <input type="time" id="kg_end" value="07:00">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Taxonomy -->
+                    <div class="feature-card quiet-feature-card" style="opacity: 0.4; pointer-events: none;">
+                        <label class="feature-toggle">
+                            <input type="checkbox" id="enable_taxonomy_quiet" data-feature="taxonomy" disabled>
+                            <div class="toggle-slider"></div>
+                        </label>
+                        <div class="feature-info">
+                            <h3><i class="fas fa-sitemap"></i> Taxonomy</h3>
+                            <p>Coming soon</p>
+                        </div>
+                        <div class="feature-time-settings" id="taxonomy_time_settings" style="display: none;">
+                            <div class="time-input-group-small">
+                                <input type="time" id="taxonomy_start" value="23:00">
+                                <span>to</span>
+                                <input type="time" id="taxonomy_end" value="07:00">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Entity Cards -->
+                    <div class="feature-card quiet-feature-card">
+                        <label class="feature-toggle">
+                            <input type="checkbox" id="enable_entity_cards_quiet" data-feature="entity_cards">
+                            <div class="toggle-slider"></div>
+                        </label>
+                        <div class="feature-info">
+                            <h3><i class="fas fa-address-card"></i> Entity Cards</h3>
+                            <p>Custom quiet hours for entity card updates</p>
+                        </div>
+                        <div class="feature-time-settings" id="entity_cards_time_settings" style="display: none;">
+                            <div class="time-input-group-small">
+                                <input type="time" id="entity_cards_start" value="23:00">
+                                <span>to</span>
+                                <input type="time" id="entity_cards_end" value="07:00">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="error-message" class="error-message" style="display: none;"></div>
+            <div id="success-message" class="success-message" style="display: none;"></div>
+        </form>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/quiet_mode_settings.js') }}"></script>
+</body>
+</html>
+

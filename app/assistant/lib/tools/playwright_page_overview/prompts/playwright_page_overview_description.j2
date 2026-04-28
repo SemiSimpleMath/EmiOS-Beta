@@ -1,0 +1,8 @@
+- **Purpose**: For Playwright browsing, capture a quick top/bottom visual summary after a navigation.
+- **Arguments**:
+  - `wait_seconds` (float, optional): Seconds to wait for page load settle (default 5).
+  - `wait_for_dom_ready` (bool, optional): If true, poll `document.readyState` up to wait_seconds (default true).
+  - `scroll_pause_seconds` (float, optional): Seconds to pause after scroll (default 0.8).
+  - `resize_viewport` (bool, optional): Temporarily resize viewport for capture (default false).
+  - `top_question` (str, optional): Prompt for the top-of-page visual description.
+  - `bottom_question` (str, optional): Prompt for the bottom-of-page visual description.

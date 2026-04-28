@@ -1,0 +1,18 @@
+name: knowledge_graph_add::taxonomy_branch_selector
+class_name: Agent
+llm_params:
+  engine: gpt-5.4-mini
+  model_tier: "mini"
+  llm_provider: "openai"
+description: "Selects the most promising taxonomy branches to explore at each level"
+
+user_context_items:
+  - node_label
+  - node_category
+  - node_sentence
+  - node_type
+  - current_path
+  - child_descriptions
+  - mode
+allowed_tools: []
+except_tools: []

@@ -1,0 +1,116 @@
+name: kg_investigation_manager
+class_name: MultiAgentManager
+description: "Read-only KG investigator. Composes SQL queries against emi.db to diagnose flagged findings, audit nodes/edges, trace provenance, and produce structured investigation reports. Performs no mutations."
+max_cycles: 40
+role_bindings:
+  delegator: emi_team::delegator
+  tool_selector: shared::tool_selector
+
+agents:
+  - name: emi_team::delegator
+    class: Delegator
+  - name: kg_investigation::planner
+    class: Planner
+  - name: emi_team::summary
+    class: Agent
+  - name: kg_investigation::final_answer
+    class: Agent
+
+control_nodes:
+  - name: tool_return_router
+    class: ToolReturnRouter
+  - name: summary_pre_node
+    class: SummaryPreNode
+    config:
+      enabled: true
+      summary_agent: "emi_team::summary"
+      resume_agent: "kg_investigation::planner"
+      planner_agent: "kg_investigation::planner"
+      cadence_every_actions: 4
+      min_messages: 20
+      trigger_on_large_result_chars: 4000
+      allow_summarize_latest_tool_result: false
+      protect_last_n_results: 3
+  - name: summary_post_node
+    class: SummaryPostNode
+    config:
+      summary_agent: "emi_team::summary"
+      resume_agent: "kg_investigation::planner"
+  - name: tool_caller
+    class: ToolCaller
+  - name: tool_result_handler
+    class: ToolResultHandler
+  - name: return_control
+    class: ReturnControlNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+  - name: graceful_exit_control_node
+    class: GracefulExitControlNode
+
+tool_visibility:
+  always_show:
+    - kg_query
+    - pod_search
+    - pod_fetch
+    - ask_user
+  use_narrower: false
+
+tools:
+  allowed_tools:
+    - kg_query
+    - pod_search
+    - pod_fetch
+    - ask_user
+  except_tools: []
+
+scope_contract:
+  tools:
+    allowed_tools:
+      - kg_query
+      - pod_search
+      - pod_fetch
+      - ask_user
+    blocked_tools:
+      - install_tool
+      - mcp::npm/playwright-mcp::browser_run_code
+      - kg_update_node
+      - kg_create_node
+      - kg_create_edge
+      - kg_delete_node
+      - kg_delete_edge
+    requires_approval_tools: []
+    allow_external_side_effects: false
+  writes:
+    write_kg: false
+    allow_fact_extraction: false
+
+flow_config:
+  strict_routing: true
+  tool_return:
+    tool_call_result_handler_node: "tool_result_handler"
+  summary:
+    enabled: true
+    source_agent: "tool_return_router"
+    summary_agent: "emi_team::summary"
+    resume_agent: "kg_investigation::planner"
+    planner_agent: "kg_investigation::planner"
+    cadence_every_actions: 4
+    action_count_state_key: "{planner_agent}_action_count"
+    min_messages: 20
+    trigger_on_large_result_chars: 4000
+    payload_key: "summary_payload"
+    payload_recent_history_messages: 80
+    allow_summarize_latest_tool_result: false
+    protect_last_n_results: 3
+  state_map:
+    "emi_team::delegator": "kg_investigation::planner"
+    "kg_investigation::planner": "tool_caller"
+    "tool_result_handler": "tool_return_router"
+    "tool_return_router": "summary_pre_node"
+    "summary_pre_node": "kg_investigation::planner"
+    "emi_team::summary": "summary_post_node"
+    "summary_post_node": "kg_investigation::planner"
+    "kg_investigation::planner_return_control": "kg_investigation::final_answer"
+    "kg_investigation::final_answer": "manager_exit_node"
+    "graceful_exit": "graceful_exit_control_node"
+    "graceful_exit_control_node": "kg_investigation::final_answer"

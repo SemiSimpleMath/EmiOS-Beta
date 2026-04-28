@@ -1,0 +1,105 @@
+{
+  "name": "create_dayflow_ticket",
+  "description": "Create and propose a ticket to the user with explicit ticket fields.",
+  "inputs": [
+    {
+      "name": "ticket_kind",
+      "type": "string",
+      "required": true,
+      "description": "Strict UI kind. Must be one of: notify, decision, advice."
+    },
+    {
+      "name": "suggestion_type",
+      "type": "string",
+      "required": true,
+      "description": "Suggestion subtype for dedupe and analytics."
+    },
+    {
+      "name": "title",
+      "type": "string",
+      "required": true,
+      "description": "Short title shown to the user."
+    },
+    {
+      "name": "message",
+      "type": "string",
+      "required": true,
+      "description": "Main suggestion message shown to the user."
+    },
+    {
+      "name": "action_type",
+      "type": "string",
+      "required": false,
+      "description": "Action key to run if the user accepts."
+    },
+    {
+      "name": "action_params",
+      "type": "object",
+      "required": false,
+      "description": "Structured params for action execution."
+    },
+    {
+      "name": "trigger_context",
+      "type": "object",
+      "required": false,
+      "description": "Structured context that explains why this ticket was created."
+    },
+    {
+      "name": "trigger_reason",
+      "type": "string",
+      "required": false,
+      "description": "Short natural language reason for the trigger."
+    },
+    {
+      "name": "valid_hours",
+      "type": "integer",
+      "required": false,
+      "description": "How long the ticket remains valid."
+    },
+    {
+      "name": "status_effect",
+      "type": "array",
+      "required": false,
+      "description": "Status effect tags associated with this suggestion."
+    },
+    {
+      "name": "speak_tts",
+      "type": "boolean",
+      "required": false,
+      "description": "Whether to publish a TTS user message."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable ticket creation result."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Created ticket payload."
+    }
+  ],
+  "arguments_prompt": "{\n  \"ticket_kind\": \"decision\",\n  \"suggestion_type\": \"monitor_email\",\n  \"title\": \"Monitor Mark email today\",\n  \"message\": \"I can keep watch for replies from Mark and alert you.\",\n  \"action_type\": \"monitor_email\",\n  \"action_params\": {\n    \"participant_email\": \"contact@example.com\"\n  },\n  \"trigger_reason\": \"User asked to monitor this sender today\",\n  \"valid_hours\": 12,\n  \"speak_tts\": true\n}",
+  "metadata": {
+    "category": "workflow",
+    "verbs": [
+      "create",
+      "propose"
+    ],
+    "entities": [
+      "ticket",
+      "user"
+    ],
+    "risk_level": "medium",
+    "side_effects": "external_action",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": true,
+    "room_visibility_default": "show",
+    "approval_required": false
+  }
+}

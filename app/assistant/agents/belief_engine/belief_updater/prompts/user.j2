@@ -1,0 +1,23 @@
+﻿{{ task }}
+
+## New evidence
+
+{% if evidence_block %}
+{{ evidence_block }}
+{% else %}
+(no evidence provided)
+{% endif %}
+
+---
+
+## Existing beliefs that may be affected
+
+{% if existing_beliefs_block %}
+{{ existing_beliefs_block }}
+{% else %}
+(no existing beliefs - this may be a cold-start run)
+{% endif %}
+
+---
+
+Based on the evidence above, output your belief decisions.

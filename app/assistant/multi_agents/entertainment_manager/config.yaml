@@ -1,0 +1,184 @@
+name: entertainment_manager
+class_name: MultiAgentManager
+description: "Life-domain research manager for entertainment, leisure, dining, and hobbies. Uses KG tools and web search to research user preferences and produce personalized suggestions."
+max_cycles: 80
+role_bindings:
+  delegator: emi_team::delegator
+  tool_selector: shared::tool_selector
+
+agents:
+  - name: emi_team::delegator
+    class: Delegator
+  - name: entertainment::planner
+    class: Planner
+  - name: emi_team::critic
+    class: PlaywrightAgent
+  - name: emi_team::summary
+    class: Agent
+  - name: entertainment::final_answer
+    class: Agent
+
+control_nodes:
+  - name: tool_return_router
+    class: ToolReturnRouter
+  - name: critic_pre_node
+    class: CriticPreNode
+    config:
+      enabled: true
+      critic_agent: "emi_team::critic"
+      continue_agent: "tool_caller"
+  - name: critic_post_node
+    class: CriticPostNode
+    config:
+      critic_agent: "emi_team::critic"
+  - name: summary_pre_node
+    class: SummaryPreNode
+    config:
+      enabled: true
+      summary_agent: "emi_team::summary"
+      resume_agent: "entertainment::planner"
+  - name: summary_post_node
+    class: SummaryPostNode
+    config:
+      summary_agent: "emi_team::summary"
+      resume_agent: "entertainment::planner"
+  - name: tool_caller
+    class: ToolCaller
+  - name: tool_result_handler
+    class: ToolResultHandler
+  - name: tool_approve_node
+    class: ToolApproveNode
+  - name: return_control
+    class: ReturnControlNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+  - name: graceful_exit_control_node
+    class: GracefulExitControlNode
+
+tools:
+  allowed_tools: [all]
+  except_tools: [entertainment_manager, emi_team_manager, run_routine]
+scope_contract:
+  tools:
+    requires_approval_tools:
+      - playwright_manager
+tool_visibility:
+  always_show: [kg_team_manager, web_manager, ask_user]
+  use_narrower: true
+  hidden_tools:
+    # --- personal_admin_manager leaf tools (not needed for entertainment) ---
+    - get_email
+    - get_important_emails
+    - get_email_thread
+    - get_email_messages
+    - send_email
+    - find_calendar_event_by_name
+    - get_calendar_events
+    - create_calendar_event
+    - create_repeating_calendar_event
+    - update_calendar_event
+    - delete_calendar_event
+    - delete_repeating_calendar_event
+    - get_todo_tasks
+    - create_todo_task
+    - update_todo_task
+    - delete_todo_task
+    - get_scheduler_events
+    - create_scheduler_event
+    - create_repeating_scheduler_event
+    - delete_scheduler_event
+    - notify_user
+
+    # --- web_manager leaf tools (call the manager instead) ---
+    - search_web
+    - scrape_url
+    - get_news
+    - get_weather
+    - summarize_link
+    - peak_at_link
+    - mcp::npm/server-google-maps::maps_distance_matrix
+    - mcp::npm/server-google-maps::maps_search_places
+    - mcp::npm/server-google-maps::maps_place_details
+
+    # --- playwright_manager leaf tools (call the manager instead) ---
+    - web_navigate_snapshot
+    - web_navigate_back_snapshot
+    - web_click_ref_snapshot
+    - web_click_xy_snapshot
+    - web_fill_xy
+    - web_type_focused
+    - web_page_coords
+    - web_scroll
+    - web_spatial_snapshot
+    - web_visual_scout
+    - playwright_page_overview
+    - playwright_browse
+    - mcp::npm/playwright-mcp::browser_take_screenshot
+    - mcp::npm/playwright-mcp::browser_wait_for
+    - mcp::npm/playwright-mcp::browser_tabs
+    - mcp::npm/playwright-mcp::browser_click
+    - mcp::npm/playwright-mcp::browser_type
+    - mcp::npm/playwright-mcp::browser_mouse_click_xy
+    - mcp::npm/playwright-mcp::browser_hover
+    - mcp::npm/playwright-mcp::browser_run_code
+
+    # --- kg_team_manager leaf tools (call the manager instead) ---
+    - kg_find_node
+    - kg_find_edge
+    - kg_find_edge
+    - kg_describe_node
+    - kg_describe_edge
+    - ask_kg
+    - kg_update_node
+    - kg_create_node
+    - kg_create_edge
+    - kg_delete_node
+    - kg_delete_edge
+    - taxonomy_path_finder
+
+    # --- taxonomy_team_manager leaf tools (call the manager instead) ---
+    - taxonomy_merge_categories
+    - taxonomy_rename_category
+    - taxonomy_move_category
+    - taxonomy_update_description
+    - taxonomy_create_category
+
+    # --- Specialist sub-managers not needed for entertainment ---
+    - personal_admin_manager
+    - kg_query_manager
+    - kg_explorer_manager
+    - event_manager
+    - fast_tool_manager
+    - daily_summary
+    - task_compile_manager
+    - playwright_manager
+
+    # --- Low-level system / file tools ---
+    - read_text_file
+    - write_text_file
+    - append_text_file
+    - write_task_outputs
+    - write_declared_task_outputs
+    - read_tool_result
+    - capture_and_describe_monitors
+    - capture_monitor_screenshot
+    - move_foreground_window
+    - set_screen_capture_enabled
+    - set_ui_mute
+    - link_children_to_parent
+    - get_event_hierarchy
+    - create_dayflow_ticket
+    - cancel_event_tree
+
+flow_config:
+  tool_return:
+    tool_call_result_handler_node: "tool_result_handler"
+  state_map:
+    "emi_team::delegator": "entertainment::planner"
+    "entertainment::planner": "critic_pre_node"
+    "emi_team::critic": "critic_post_node"
+    "tool_result_handler": "tool_return_router"
+    "entertainment::planner_return_control": "entertainment::final_answer"
+    "entertainment::final_answer": "manager_exit_node"
+    "graceful_exit": "graceful_exit_control_node"
+    "graceful_exit_control_node": "entertainment::final_answer"

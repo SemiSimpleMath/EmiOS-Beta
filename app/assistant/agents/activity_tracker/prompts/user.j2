@@ -1,0 +1,36 @@
+Today is: {{date_time}}
+Tracked activities (use these exact field_name values):
+{% for key, a in resource_tracked_activities_output.activities.items() %}
+- {{ a.display_name }} ({{ key }}){% if a.threshold_minutes %}: {{ a.threshold_minutes }} min{% endif %}{% if a.guidance %} ({{ a.guidance }}){% endif %}
+{% endfor %}
+
+Current activity counts today:
+Change only counts we have evidence for.  Otherwise copy over the count value unchanged.
+{% if current_activity_counts %}
+{% for activity, count in current_activity_counts.items() %}
+- {{ activity }}: {{ count }}
+{% endfor %}
+{% else %}
+All counts are 0.
+{% endif %}
+
+Recent chat messages:
+{% if recent_chat_excerpts %}
+{% for chat in recent_chat_excerpts %}
+- [{{ chat.time_local }}] {{ chat.sender }}: {{ chat.content }}
+{% endfor %}
+{% else %}
+No recent chat messages.
+{% endif %}
+
+Completed calendar events:
+{% if calendar_events_completed %}
+{% for event in calendar_events_completed %}
+- {{ event.event_name }} (ended at {{ event.end_time }})
+{% endfor %}
+{% else %}
+No recently completed calendar events.
+{% endif %}
+
+Recently accepted tickets:
+Not used here (ticket processing handled elsewhere).

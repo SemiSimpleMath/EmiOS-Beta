@@ -1,0 +1,62 @@
+{
+  "name": "find_tool",
+  "description": "Find candidate tools by name or purpose. tool_kind must be exactly one of: all, local, installed_mcp, mcp_available (default 'all').",
+  "inputs": [
+    {
+      "name": "query",
+      "type": "string",
+      "required": false,
+      "description": "Tool search query. Required for mcp_available searches."
+    },
+    {
+      "name": "tool_kind",
+      "type": "string",
+      "required": false,
+      "description": "Tool set to search. Must be exactly one of: 'all' (default), 'local', 'installed_mcp', 'mcp_available'. No other values accepted."
+    },
+    {
+      "name": "limit",
+      "type": "integer",
+      "required": false,
+      "description": "Maximum number of matches."
+    },
+    {
+      "name": "include_descriptions",
+      "type": "boolean",
+      "required": false,
+      "description": "Deprecated. Descriptions are always included."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "data.best_match",
+      "type": "tool_name",
+      "description": "Top matching tool."
+    },
+    {
+      "path": "data.matches",
+      "type": "array",
+      "description": "Ranked match list."
+    }
+  ],
+  "arguments_prompt": "{\"query\": \"capture screenshot\", \"tool_kind\": \"all\", \"limit\": 5}",
+  "metadata": {
+    "category": "tooling",
+    "verbs": [
+      "search"
+    ],
+    "entities": [
+      "tooling"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": true,
+    "room_visibility_default": "show",
+    "approval_required": false,
+    "planner_description": "Find candidate tools by name or purpose. tool_kind must be exactly one of: all, local, installed_mcp, mcp_available."
+  }
+}

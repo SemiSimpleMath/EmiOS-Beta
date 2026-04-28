@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <link rel="icon" href="{{ url_for('static', filename='images/logo5.png') }}" type="image/png">
+    <title>Emi - Document Editor</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/doc_editor.css') }}?v={{ static_v }}">
+</head>
+<body>
+<div class="de-layout">
+
+  <!-- Header -->
+  <header class="de-header">
+    <div class="de-header__left">
+      <a href="/chat_bot" class="de-header__back" title="Back to chat">&larr;</a>
+      <span class="de-header__title">Document Editor</span>
+      <span class="de-header__docname" id="de-doc-name"></span>
+    </div>
+    <div class="de-header__actions">
+      <button id="de-new-btn" class="de-btn de-btn--ghost">New</button>
+      <button id="de-save-btn" class="de-btn de-btn--primary">Save</button>
+    </div>
+  </header>
+
+  <!-- Two-column body -->
+  <div class="de-body">
+
+    <!-- Left: Chat -->
+    <div class="de-chat">
+      <div class="de-chat__messages" id="de-chat-messages">
+        <div class="de-chat__placeholder">Tell me what document you'd like to create or paste content to edit.</div>
+      </div>
+      <div class="de-chat__input-area">
+        <textarea id="de-chat-input" class="de-chat__input"
+                  placeholder="Describe what you want to write or change..."
+                  rows="2"></textarea>
+        <button id="de-chat-send" class="de-btn de-btn--send">Send</button>
+      </div>
+    </div>
+
+    <!-- Right: Document preview -->
+    <div class="de-doc">
+      <div class="de-doc__header">
+        <span class="de-doc__label">Document</span>
+        <span class="de-doc__status" id="de-doc-status"></span>
+      </div>
+      <div class="de-doc__content" id="de-doc-content">
+        <div class="de-doc__placeholder">Your document will appear here as you describe it.</div>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js" crossorigin="anonymous"></script>
+<script src="{{ url_for('static', filename='js/emi/socket_heartbeat.js') }}?v={{ static_v }}"></script>
+<script src="{{ url_for('static', filename='js/emi/doc_editor_page.js') }}?v={{ static_v }}"></script>
+</body>
+</html>

@@ -1,0 +1,49 @@
+{
+  "name": "event_manager",
+  "description": "(Also called scheduler) Is used to manage reminders.  These are not calendar events.  These are events that trigger and will cause something to happen.\nEvent manager can retrieve, edit or delete reminders.\nEvent manager takes as input a description of the task.  It is heavy duty multi-agent system and can schedule multiple reminders or do complex\ntasks with reminders including creating, deleting or modifying multiple events.  There is no need to call this manager piece-meal.  You can give it\nall reminder tasks to be done at once.",
+  "inputs": [
+    {
+      "name": "task",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "information",
+      "type": "string",
+      "required": true,
+      "description": ""
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "Arguments to event_manager are:\n-task: instructions for creating the even, routine, reminder or doing any operations on them like deleting etc.\n-information: Optional extra information that maybe relevant to creating the event.",
+  "metadata": {
+    "category": "orchestration",
+    "verbs": [
+      "orchestrate"
+    ],
+    "entities": [
+      "workflow"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "medium",
+    "latency_class": "moderate",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

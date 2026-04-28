@@ -1,0 +1,65 @@
+name: kg_cold_start_orchestrator
+class_name: Orchestrator
+
+architect_agent: shared::orchestrator_architect
+facts_curator_agent: shared::orchestrator_facts_curator
+router_agent: shared::orchestrator_router
+
+max_depth: 2
+max_children_total: 8
+max_children_concurrent: 6
+default_child_budget:
+  max_cycles: 10
+  timeout_seconds: 120
+
+allowed_child_managers:
+  - emi_team_manager
+allowed_child_orchestrators: []
+
+# These inputs are merged into every child job's data payload (lowest priority —
+# the architect can override any key by setting it explicitly in spec.inputs).
+default_child_inputs:
+  visible_tools:
+    - ask_kg
+    - ask_user
+  task_llm_params:
+    llm_provider: "gemini"
+    engine: "gemini-3-flash-preview"
+    model_tier: "mini"
+
+global_guidance:
+  - >
+    You are orchestrating a cold-start investigation into a visitor mentioned by the user.
+    The convergence briefing in the information field contains pre-computed KG nodes shared
+    between the visitor and the user. Use it as the foundation — do not re-discover what is
+    already there.
+  - >
+    WAVE 1 — spawn 5-6 parallel emi_team_manager jobs, each focused on ONE specific question.
+    Each child should be given exactly one narrow, answerable question. Suggested split:
+      1. Relationship: What is the exact relationship label between the visitor and the user?
+      2. Shared history: What shared history, timeline, or milestones connect them?
+      3. Shared academic world: What academic overlap exists (degrees, advisors, institutions)?
+      4. Pending actions: What goals, tasks, or open loops already exist related to this visit?
+      5. Missing edges: What relationships are structurally implied but not explicitly recorded?
+      6. Visit purpose: Why is this person visiting now — what is the context and timing?
+    All wave-1 jobs are independent — set depends_on=[] so they run concurrently.
+    Each child receives the full convergence briefing and may call ask_kg for ONE targeted
+    follow-up if the briefing is insufficient. Children must NOT re-explore already-described nodes.
+  - >
+    WAVE 2 — after all wave-1 jobs complete, spawn exactly ONE synthesis job.
+    The synthesis job receives all wave-1 results and produces:
+      1. A concise context summary of the visitor and what's relevant to this visit.
+      2. Structurally implied but unrecorded edges worth noting.
+      3. The 1-2 most valuable questions to ask the user right now.
+      4. Any actionable steps that can be taken immediately.
+    The synthesis job must NOT call ask_kg — it synthesizes from wave-1 results only.
+  - >
+    HARD CONSTRAINTS:
+    - Never spawn a job to "diagnose", "fix", or "test" tools or infrastructure.
+      If ask_kg fails in a child, note it as a gap and move on.
+    - Maximum 7 total jobs (6 wave-1 + 1 synthesis). Never exceed this.
+    - Each wave-1 child handles ONE question only — do not combine questions.
+    - The synthesis job is mandatory. Always reserve the last slot for it.
+    - If wave-1 results collectively cover all angles even partially, proceed to synthesis.
+
+progress_threshold: 6

@@ -1,0 +1,51 @@
+{
+  "name": "kg_explorer_manager",
+  "description": "kg_explorer_manager: Orchestrates relationship discovery and temporal reasoning on the knowledge graph.\n\n**Purpose:** Discover implicit relationships, infer missing connections, and perform temporal reasoning to enhance the knowledge graph.\n\n**Parameters:**\n- task (required): The exploration task to perform\n- information (optional): Additional context or information\n- node_id (optional): Specific node ID to explore\n- exploration_type (optional): Type of exploration (relationship_discovery, temporal_reasoning, or general)\n- parameters (optional): Additional parameters for the exploration\n\n**Returns:**\n- success: Whether the exploration succeeded\n- discoveries: List of discovered relationships or temporal inferences\n- suggested_actions: List of suggested actions to take\n- confidence: Confidence level in the discoveries",
+  "inputs": [
+    {
+      "name": "task",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "information",
+      "type": "string",
+      "required": true,
+      "description": ""
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "Arguments for kg_explorer_manager:\n\ntask (required): The exploration task to perform (e.g., \"Discover relationships for node X\", \"Find temporal connections\", \"Analyze family relationships\")\n\ninformation (optional): Additional context or information about what to look for\n\nnode_id (optional): Specific node ID to explore. If not provided, will select an interesting node automatically\n\nexploration_type (optional): Type of exploration to perform:\n- relationship_discovery: Focus on finding implicit relationships\n- temporal_reasoning: Focus on temporal inference and date calculation\n- general: General exploration of the node and its context\n\nparameters (optional): Additional parameters for the exploration as a JSON string, such as:\n- {\"max_depth\": 3, \"focus_areas\": [\"family\", \"work\"], \"temporal_anchors\": [\"1990-03-01\"]}",
+  "metadata": {
+    "category": "knowledge_graph",
+    "verbs": [
+      "orchestrate"
+    ],
+    "entities": [
+      "edge",
+      "graph",
+      "node"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "medium",
+    "latency_class": "moderate",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

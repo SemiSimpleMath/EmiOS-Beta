@@ -1,0 +1,27 @@
+{% if pre_context %}
+########## PRE-CONTEXT (reference only) ##########
+
+The following messages happened BEFORE the sections you are annotating.
+Use them to resolve implicit references ("the game", "she", "Bonnie")
+when inserting parentheticals. Do NOT reproduce pre-context content in
+your output.
+
+{{ pre_context }}
+
+{% endif %}
+{% if entity_card %}
+########## ENTITY CARDS (reference only) ##########
+
+{{ entity_card }}
+
+{% endif %}
+########## SECTIONS TO ANNOTATE ##########
+
+Below is a JSON-like list of section strings. Return `annotated_sections`
+as a list of the same length, same order, with parentheticals inserted
+per the rules. Preserve each string exactly — only add parentheses.
+
+{% for section in sections %}
+--- section {{ loop.index }} ---
+{{ section }}
+{% endfor %}

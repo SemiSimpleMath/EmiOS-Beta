@@ -1,0 +1,14 @@
+{
+  "allowed_global_resources": [
+    "all"
+  ],
+  "allowed_entity_cards": [
+    "all"
+  ],
+  "pinned_entities": [],
+  "blocked_entities": ["Jukka"],
+  "rag_scopes": [
+    "chat",
+    "memory"
+  ]
+}

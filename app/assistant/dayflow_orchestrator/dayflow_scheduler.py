@@ -1,0 +1,271 @@
+"""
+DayflowScheduler — Event-driven scheduling for the dayflow orchestrator.
+
+Instead of polling on a fixed interval, the scheduler listens for events
+that indicate new data is available (emails, calendar changes, user ticket
+responses, AFK return) and runs the orchestrator after a debounce window.
+
+Guarantees:
+- At most one orchestrator tick runs at a time (mutual exclusion).
+- Minimum gap between runs (MIN_GAP_SECONDS) is enforced.
+- Rapid-fire pokes are debounced (DEBOUNCE_SECONDS).
+- Uses APScheduler one-shot jobs for precise timing.
+"""
+from __future__ import annotations
+
+import threading
+import uuid
+from datetime import datetime, timedelta, timezone
+from typing import Any, Optional
+
+from app.assistant.dayflow_orchestrator.contracts import get_meta
+from app.assistant.utils.logging_config import get_logger
+from app.assistant.utils.path_utils import setup_complete
+from app.assistant.utils.pydantic_classes import Message
+
+logger = get_logger(__name__)
+
+JOB_ID = "dayflow_scheduler_next_tick"
+DEBOUNCE_SECONDS = 60
+MIN_GAP_SECONDS = 120
+MAX_CEILING_SECONDS = 1800
+
+
+class DayflowScheduler:
+
+    def __init__(self, *, timing_engine: Any, app: Any) -> None:
+        self._timing_engine = timing_engine
+        self._scheduler = timing_engine.scheduler
+        self._app = app
+
+        self._lock = threading.Lock()
+        self._running = False
+        self._last_run_finished_utc: Optional[datetime] = None
+        self._pending_poke_reason: Optional[str] = None
+        self._started = False
+
+    def start(self) -> None:
+        if self._started:
+            return
+        self._started = True
+        self._subscribe_events()
+        self._schedule_tick(delay_seconds=10, reason="startup")
+        logger.info("[DayflowScheduler] Started — initial tick in 10s")
+
+    def stop(self) -> None:
+        self._started = False
+        try:
+            self._scheduler.remove_job(JOB_ID)
+        except Exception as e:
+            logger.error("[DayflowScheduler] Failed to remove scheduled job during stop: %s", e)
+            logger.debug("[DayflowScheduler] stop exception details", exc_info=True)
+            raise
+        logger.info("[DayflowScheduler] Stopped")
+
+    def poke(self, reason: str = "unknown") -> None:
+        """
+        Signal that new data is available and the orchestrator should run.
+
+        The actual run is debounced: if multiple pokes arrive within
+        DEBOUNCE_SECONDS, only one run fires after the window.
+        """
+        if not self._started:
+            return
+
+        with self._lock:
+            if self._running:
+                self._pending_poke_reason = reason
+                logger.info(
+                    "[DayflowScheduler] Poked (%s) while running — will re-run after current tick",
+                    reason,
+                )
+                return
+
+        self._schedule_tick(delay_seconds=DEBOUNCE_SECONDS, reason=reason)
+
+    def _schedule_tick(self, *, delay_seconds: float, reason: str) -> None:
+        now_utc = datetime.now(timezone.utc)
+
+        with self._lock:
+            if self._last_run_finished_utc is not None:
+                earliest = self._last_run_finished_utc + timedelta(seconds=MIN_GAP_SECONDS)
+                candidate = now_utc + timedelta(seconds=delay_seconds)
+                run_date = max(candidate, earliest)
+            else:
+                run_date = now_utc + timedelta(seconds=delay_seconds)
+
+        try:
+            self._scheduler.add_job(
+                func=self._execute_tick,
+                trigger="date",
+                run_date=run_date,
+                args=[reason],
+                id=JOB_ID,
+                replace_existing=True,
+                misfire_grace_time=300,
+            )
+            delta = (run_date - now_utc).total_seconds()
+            logger.info(
+                "[DayflowScheduler] Scheduled tick in %.0fs (reason=%s, run_date=%s)",
+                delta, reason, run_date.isoformat(),
+            )
+        except Exception as e:
+            logger.error("[DayflowScheduler] Failed to schedule tick: %s", e)
+            logger.debug("[DayflowScheduler] schedule tick exception details", exc_info=True)
+            raise
+
+    def _execute_tick(self, reason: str) -> None:
+        if not setup_complete():
+            logger.info("[DayflowScheduler] Setup not complete; skipping tick.")
+            return
+
+        try:
+            from app.models.db_manager import get_db_manager
+            from app.assistant.database.db_handler import UnifiedLog2026
+            with get_db_manager().read_session() as session:
+                has_history = session.query(UnifiedLog2026.id).limit(1).scalar() is not None
+            if not has_history:
+                logger.info("[DayflowScheduler] No chat history yet; skipping tick.")
+                return
+        except Exception as e:
+            logger.debug("[DayflowScheduler] History check failed (skipping tick): %s", e, exc_info=True)
+            return
+
+        with self._lock:
+            if self._running:
+                self._pending_poke_reason = reason
+                logger.info(
+                    "[DayflowScheduler] Tick skipped (already running), queued poke: %s",
+                    reason,
+                )
+                return
+            self._running = True
+            self._pending_poke_reason = None
+
+        run_id = uuid.uuid4().hex[:8]
+        logger.info(
+            "[DayflowScheduler] === TICK START === run_id=%s reason=%s",
+            run_id, reason,
+        )
+        try:
+            with self._app.app_context():
+                from app.assistant.dayflow_orchestrator.dayflow_tick import (
+                    dayflow_orchestrator_cadence_tick,
+                )
+                dayflow_orchestrator_cadence_tick(routine=_SchedulerRoutineStub(run_id))
+        except Exception as e:
+            logger.error(
+                "[DayflowScheduler] Tick failed run_id=%s: %s", run_id, e,
+            )
+            logger.debug("[DayflowScheduler] tick exception details", exc_info=True)
+            raise
+        finally:
+            with self._lock:
+                self._running = False
+                self._last_run_finished_utc = datetime.now(timezone.utc)
+                pending = self._pending_poke_reason
+                self._pending_poke_reason = None
+
+            logger.info("[DayflowScheduler] === TICK END === run_id=%s", run_id)
+
+            if pending:
+                logger.info(
+                    "[DayflowScheduler] Re-scheduling from queued poke: %s", pending,
+                )
+                self._schedule_tick(delay_seconds=DEBOUNCE_SECONDS, reason=f"queued:{pending}")
+            else:
+                self._schedule_next_from_items()
+
+    def _subscribe_events(self) -> None:
+        from app.assistant.ServiceLocator.service_locator import DI
+
+        event_hub = DI.event_hub
+
+        event_hub.register_event("repo_update", self._on_repo_update)
+        event_hub.register_event("afk_state_changed", self._on_afk_state_changed)
+        event_hub.register_event("dayflow_ticket_responded", self._on_ticket_responded)
+
+        logger.info("[DayflowScheduler] Subscribed to event hub topics")
+
+    def _schedule_next_from_items(self) -> None:
+        """
+        Scan dayflow items for the earliest reactivate_at_utc and schedule
+        a tick at that time. If nothing is pending, schedule the ceiling tick.
+        """
+        try:
+            from app.assistant.dayflow_orchestrator.state_store import load_existing_dayflow_items
+
+            now_utc = datetime.now(timezone.utc)
+            earliest: Optional[datetime] = None
+
+            items = load_existing_dayflow_items()
+            for item in items:
+                meta = get_meta(item)
+                state = str(meta.get("state") or "").strip().lower()
+                if state not in ("waiting", "watching"):
+                    continue
+                raw = str(meta.get("reactivate_at_utc") or "").strip()
+                if not raw:
+                    continue
+                try:
+                    parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                    if parsed.tzinfo is None:
+                        parsed = parsed.replace(tzinfo=timezone.utc)
+                    parsed = parsed.astimezone(timezone.utc)
+                except Exception as e:
+                    logger.error(
+                        "[DayflowScheduler] Invalid reactivate_at_utc for item_id=%s: %r (%s)",
+                        meta.get("item_id", "?"),
+                        raw,
+                        e,
+                    )
+                    logger.debug("[DayflowScheduler] reactivate_at_utc parse exception details", exc_info=True)
+                    raise
+                if parsed <= now_utc:
+                    earliest = now_utc + timedelta(seconds=MIN_GAP_SECONDS)
+                    break
+                if earliest is None or parsed < earliest:
+                    earliest = parsed
+
+            if earliest is not None:
+                delay = max(MIN_GAP_SECONDS, (earliest - now_utc).total_seconds())
+                delay = min(delay, MAX_CEILING_SECONDS)
+                self._schedule_tick(delay_seconds=delay, reason="item_timer")
+                logger.info(
+                    "[DayflowScheduler] Next item timer in %.0fs (%s)",
+                    delay, earliest.isoformat(),
+                )
+            else:
+                self._schedule_tick(delay_seconds=MAX_CEILING_SECONDS, reason="ceiling")
+                logger.info(
+                    "[DayflowScheduler] No item timers found — ceiling tick in %ds",
+                    MAX_CEILING_SECONDS,
+                )
+        except Exception as e:
+            logger.error("[DayflowScheduler] Failed scanning items for next wake: %s", e)
+            logger.debug("[DayflowScheduler] item scan exception details", exc_info=True)
+            raise
+
+    # Data types that justify waking the orchestrator.
+    _ACTIONABLE_REPO_TYPES = {"email", "calendar", "todo_task", "scheduler_events"}
+
+    def _on_repo_update(self, message: Message) -> None:
+        data_type = str(getattr(message, "content", "") or "").strip().lower()
+        if data_type not in self._ACTIONABLE_REPO_TYPES:
+            return
+        self.poke(reason=f"repo_update:{data_type}")
+
+    def _on_afk_state_changed(self, message: Message) -> None:
+        content = str(getattr(message, "content", "") or "").strip().lower()
+        if content == "active":
+            self.poke(reason="afk_returned")
+
+    def _on_ticket_responded(self, message: Message) -> None:
+        self.poke(reason="ticket_responded")
+
+
+class _SchedulerRoutineStub:
+    """Mimics the routine object that dayflow_orchestrator_cadence_tick expects."""
+
+    def __init__(self, run_id: str) -> None:
+        self.routine_id = f"dayflow_scheduler::{run_id}"

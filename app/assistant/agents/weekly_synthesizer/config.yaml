@@ -1,0 +1,16 @@
+name: weekly_synthesizer
+class_name: Agent
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-4.1"
+  model_tier: "smart"
+
+allowed_tools: []
+except_tools: []
+
+user_context_items:
+  - task
+  - weekly_summaries_block
+
+system_context_items:
+  - resource_user_data

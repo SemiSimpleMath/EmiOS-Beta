@@ -1,0 +1,16 @@
+{
+  "description": "Categories of content the user wants recorded in the knowledge graph. Edit this list to shape what the window_critic decides is worth extracting. The rule for extraction is: a user sentence is usable if it concerns any of these categories. Remove a category to stop the graph from growing in that direction; add one to capture something the defaults miss.",
+  "categories": [
+    "People in your life — family, friends, colleagues, neighbors, acquaintances, pets",
+    "Places — where you live, work, grew up, visit, or interact with regularly",
+    "Events — things that happened, things planned, discrete occurrences in time",
+    "Relationships between people, places, or things in your life",
+    "Routines and habits — recurring patterns of daily, weekly, or seasonal activity",
+    "Preferences — what you like, dislike, favor, or avoid",
+    "Beliefs, opinions, and values — what you think is true, right, important",
+    "Plans, goals, and aspirations — what you're working toward",
+    "Feelings, moods, health, and wellbeing",
+    "Work, projects, and what you're building",
+    "Possessions, tools, and objects that play a role in your life"
+  ]
+}

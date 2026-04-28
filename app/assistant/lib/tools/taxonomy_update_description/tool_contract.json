@@ -1,0 +1,50 @@
+{
+  "name": "taxonomy_update_description",
+  "description": "taxonomy_update_description: Update the description of a taxonomy category.\n\n**Purpose:** Add or update the description text for a taxonomy category.\n\n**Parameters:**\n- category_id (required): ID of the category to update\n- new_description (required): New description text (use empty string to clear the description)\n\n**Use this when:**\n- Adding missing descriptions to important categories\n- Clarifying what a category represents\n- Improving taxonomy documentation\n\n**Returns:**\n- success: Whether the operation succeeded\n- message: Description of what was done\n- category_id: ID of the updated category\n- label: Label of the category\n- old_description: Previous description\n- new_description: New description\n\n**Safety:** This is a safe operation. Only the description text is modified.",
+  "inputs": [
+    {
+      "name": "category_id",
+      "type": "integer",
+      "required": true,
+      "description": "ID of the category to update"
+    },
+    {
+      "name": "new_description",
+      "type": "string",
+      "required": true,
+      "description": "New description for the category (empty string to clear)"
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "metadata": {
+    "category": "knowledge_graph",
+    "verbs": [
+      "operate"
+    ],
+    "entities": [
+      "edge",
+      "graph",
+      "node"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "medium",
+    "latency_class": "moderate",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

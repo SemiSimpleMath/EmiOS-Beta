@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KG Maintenance</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --panel-soft: #1f2937;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --ok: #10b981;
+      --warn: #f59e0b;
+      --bad: #ef4444;
+      --info: #60a5fa;
+      --line: #374151;
+      --chip: #334155;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; font-size: 14px; }
+    .container { max-width: 1440px; margin: 0 auto; padding: 20px; }
+
+    /* header */
+    .topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; flex-wrap: wrap; gap: 12px; }
+    .topbar h1 { font-size: 22px; font-weight: 600; }
+    .topbar .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    /* summary chips */
+    .summary-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 24px; }
+    .chip {
+      background: var(--chip);
+      border-radius: 8px;
+      padding: 10px 16px;
+      min-width: 140px;
+      cursor: pointer;
+      border: 2px solid transparent;
+      transition: border-color 0.15s;
+    }
+    .chip:hover, .chip.active { border-color: var(--info); }
+    .chip .chip-title { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+    .chip .chip-count { font-size: 26px; font-weight: 700; margin-top: 2px; }
+    .chip.type-duplicate_node  .chip-count { color: var(--warn); }
+    .chip.type-suspect_node    .chip-count { color: var(--bad); }
+    .chip.type-orphan_node     .chip-count { color: var(--muted); }
+    .chip.type-missing_description .chip-count { color: var(--info); }
+
+    /* filters */
+    .filters { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; align-items: center; }
+    .filters select, .filters input { background: var(--panel-soft); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; }
+    .filters select:focus, .filters input:focus { outline: 2px solid var(--info); }
+
+    /* table */
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    thead th { background: var(--panel); font-weight: 600; padding: 10px 14px; text-align: left; border-bottom: 2px solid var(--line); white-space: nowrap; }
+    tbody tr { border-bottom: 1px solid var(--line); }
+    tbody tr:hover { background: var(--panel-soft); }
+    td { padding: 9px 14px; vertical-align: top; }
+
+    /* badges */
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+    .badge-duplicate_node    { background: #451a03; color: var(--warn); }
+    .badge-suspect_node      { background: #450a0a; color: var(--bad); }
+    .badge-orphan_node       { background: #1e293b; color: var(--muted); }
+    .badge-missing_description { background: #1e3a5f; color: var(--info); }
+    .badge-high              { background: #450a0a; color: var(--bad); }
+    .badge-medium            { background: #451a03; color: var(--warn); }
+    .badge-low               { background: #1e293b; color: var(--muted); }
+    .badge-pending           { background: #1e3a5f; color: var(--info); }
+    .badge-approved          { background: #052e16; color: var(--ok); }
+    .badge-rejected          { background: #1e293b; color: var(--muted); }
+    .badge-executed          { background: #052e16; color: var(--ok); }
+    .badge-execute_error     { background: #450a0a; color: var(--bad); }
+
+    /* node display */
+    .node-box { display: inline-block; }
+    .node-label { font-weight: 600; font-size: 13px; }
+    .node-meta { font-size: 10px; color: var(--muted); display: block; }
+    .node-id { font-family: monospace; font-size: 10px; color: var(--muted); }
+    .merge-arrow { color: var(--warn); font-weight: 700; margin: 0 6px; font-size: 14px; vertical-align: middle; }
+
+    /* reason cell */
+    .reason { max-width: 420px; color: var(--muted); font-size: 13px; }
+
+    /* evidence toggle */
+    .evidence-block { display: none; margin-top: 6px; font-size: 12px; color: var(--muted); background: var(--bg); padding: 8px; border-radius: 4px; white-space: pre-wrap; max-height: 300px; overflow-y: auto; }
+    .toggle-evidence { background: none; border: none; color: var(--info); cursor: pointer; font-size: 11px; padding: 0; }
+
+    /* action buttons */
+    .btn { padding: 5px 12px; border-radius: 5px; border: none; cursor: pointer; font-size: 12px; font-weight: 600; }
+    .btn-execute  { background: #1d4ed8; color: #fff; }
+    .btn-approve  { background: #065f46; color: #a7f3d0; }
+    .btn-reject   { background: #7f1d1d; color: #fca5a5; }
+    .btn-primary  { background: #1d4ed8; color: #fff; }
+    .btn-danger   { background: #991b1b; color: #fff; }
+    .btn:hover    { opacity: 0.85; }
+    .btn:disabled { opacity: 0.4; cursor: default; }
+    .action-btns { display: flex; gap: 4px; flex-wrap: nowrap; }
+
+    /* checkbox col */
+    .cb-col { width: 32px; }
+    input[type=checkbox] { width: 15px; height: 15px; cursor: pointer; accent-color: var(--info); }
+
+    /* execution notes */
+    .exec-notes { font-size: 11px; color: var(--ok); margin-top: 4px; }
+    .exec-notes.error { color: var(--bad); }
+
+    /* empty state */
+    .empty { text-align: center; padding: 60px; color: var(--muted); font-size: 16px; }
+
+    /* toast */
+    #toast { position: fixed; bottom: 24px; right: 24px; background: #1f2937; border: 1px solid var(--line); border-radius: 8px; padding: 12px 18px; color: var(--text); display: none; z-index: 9999; max-width: 500px; }
+    #toast.show { display: block; }
+
+    /* spinner */
+    .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--info); border-radius: 50%; animation: spin .6s linear infinite; vertical-align: middle; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* confirmation dialog */
+    .confirm-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none;
+      justify-content: center; align-items: center; z-index: 10000;
+    }
+    .confirm-overlay.show { display: flex; }
+    .confirm-box {
+      background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+      padding: 24px; max-width: 500px; width: 90%;
+    }
+    .confirm-box h3 { margin-bottom: 12px; font-size: 16px; }
+    .confirm-box p { color: var(--muted); margin-bottom: 16px; line-height: 1.5; }
+    .confirm-box .confirm-actions { display: flex; gap: 8px; justify-content: flex-end; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <div class="topbar">
+    <h1>KG Maintenance</h1>
+    <div class="actions">
+      <button class="btn btn-primary" id="btn-run-structural" title="Orphan scan + PageRank (fast, no LLM)">Structural scan</button>
+      <button class="btn btn-danger" id="btn-run-full" title="Full scan with LLM duplicate detection — slow">Full scan</button>
+      <button class="btn btn-execute" id="btn-execute-approved" title="Execute all approved merges and deletions" style="display:none">Execute approved</button>
+    </div>
+  </div>
+
+  <div class="summary-row" id="summary-row">
+    <div class="chip" id="chip-all" onclick="filterType('')">
+      <div class="chip-title">Total pending</div>
+      <div class="chip-count" id="chip-count-all">&ndash;</div>
+    </div>
+  </div>
+
+  <div class="filters">
+    <select id="filter-status" onchange="loadFindings()">
+      <option value="pending">Pending</option>
+      <option value="approved">Approved</option>
+      <option value="executed">Executed</option>
+      <option value="rejected">Rejected</option>
+      <option value="execute_error">Errors</option>
+    </select>
+    <select id="filter-type" onchange="loadFindings()">
+      <option value="">All types</option>
+      <option value="duplicate_node">Duplicate node</option>
+      <option value="orphan_node">Orphan node</option>
+      <option value="missing_description">Missing description</option>
+    </select>
+    <select id="filter-priority" onchange="loadFindings()">
+      <option value="">All priorities</option>
+      <option value="high">High</option>
+      <option value="medium">Medium</option>
+      <option value="low">Low</option>
+    </select>
+    <div style="margin-left:auto; display:flex; gap:6px;">
+      <a href="/kg-maintenance/queue" class="btn btn-primary" style="text-decoration:none">View action queue →</a>
+      <button class="btn btn-approve" onclick="bulkAction('approve')">Flag selected for action</button>
+      <button class="btn btn-reject" onclick="bulkAction('reject')">Reject selected</button>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table id="findings-table">
+      <thead>
+        <tr>
+          <th class="cb-col"><input type="checkbox" id="select-all" onchange="toggleSelectAll(this)"></th>
+          <th>Type</th>
+          <th>Priority</th>
+          <th>Status</th>
+          <th>Nodes</th>
+          <th>Action</th>
+          <th>Reason</th>
+          <th>Conf.</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="findings-body">
+        <tr><td colspan="9" class="empty"><span class="spinner"></span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+<div id="toast"></div>
+
+<div class="confirm-overlay" id="confirm-overlay">
+  <div class="confirm-box">
+    <h3 id="confirm-title">Confirm execution</h3>
+    <p id="confirm-body"></p>
+    <div class="confirm-actions">
+      <button class="btn btn-reject" onclick="closeConfirm()">Cancel</button>
+      <button class="btn btn-execute" id="confirm-ok">Execute</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  let allFindings = [];
+  let selectedIds = new Set();
+  let approvedCount = 0;
+
+  document.addEventListener('DOMContentLoaded', () => {
+    loadSummary();
+    loadFindings();
+  });
+
+  // -- Summary --
+  async function loadSummary() {
+    try {
+      const res = await fetch('/kg-maintenance/api/summary');
+      const data = await res.json();
+      document.getElementById('chip-count-all').textContent = data.total_pending ?? 0;
+
+      const row = document.getElementById('summary-row');
+      row.querySelectorAll('.chip.type-chip').forEach(c => c.remove());
+
+      approvedCount = 0;
+      const byType = data.by_type || {};
+      for (const [type, statuses] of Object.entries(byType)) {
+        const pending = statuses['pending'] || 0;
+        const approved = statuses['approved'] || 0;
+        approvedCount += approved;
+        if (pending === 0 && approved === 0) continue;
+        const chip = document.createElement('div');
+        chip.className = `chip type-chip type-${type}`;
+        let countDisplay = pending > 0 ? pending : '';
+        if (approved > 0) countDisplay += (countDisplay ? ' / ' : '') + approved + ' approved';
+        chip.innerHTML = `<div class="chip-title">${type.replace(/_/g,' ')}</div><div class="chip-count">${countDisplay || 0}</div>`;
+        chip.addEventListener('click', () => filterType(type));
+        row.appendChild(chip);
+      }
+
+      const execBtn = document.getElementById('btn-execute-approved');
+      if (approvedCount > 0) {
+        execBtn.style.display = '';
+        execBtn.textContent = `Execute ${approvedCount} approved`;
+      } else {
+        execBtn.style.display = 'none';
+      }
+    } catch(e) { console.error('summary failed', e); }
+  }
+
+  function filterType(type) {
+    document.getElementById('filter-type').value = type;
+    loadFindings();
+  }
+
+  // -- Findings table --
+  async function loadFindings() {
+    const status   = document.getElementById('filter-status').value;
+    const type     = document.getElementById('filter-type').value;
+    const priority = document.getElementById('filter-priority').value;
+
+    let url = `/kg-maintenance/api/findings?status=${status}`;
+    if (type)     url += `&type=${type}`;
+    if (priority) url += `&priority=${priority}`;
+
+    const tbody = document.getElementById('findings-body');
+    tbody.innerHTML = `<tr><td colspan="9" class="empty"><span class="spinner"></span></td></tr>`;
+
+    try {
+      const res = await fetch(url);
+      allFindings = await res.json();
+      renderFindings(allFindings);
+    } catch(e) {
+      tbody.innerHTML = `<tr><td colspan="9" class="empty" style="color:var(--bad)">Failed to load</td></tr>`;
+    }
+  }
+
+  function renderFindings(findings) {
+    const tbody = document.getElementById('findings-body');
+    selectedIds.clear();
+    updateSelectAll();
+
+    if (!findings.length) {
+      tbody.innerHTML = `<tr><td colspan="9" class="empty">No findings</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = findings.map(f => renderRow(f)).join('');
+  }
+
+  function actionLabels(finding) {
+    // Approve = "flag for action": leaves the finding in the user's work queue
+    // (status=approved) for either the auto-executor or a human to handle.
+    // Execute = "run the suggested action right now" — only offered for
+    // finding types the auto-executor supports.
+    const action = (finding && finding.suggested_action) || '';
+    switch (action) {
+      case 'merge':            return { exec: 'Merge now',  approve: 'Flag for action', reject: 'Reject' };
+      case 'delete':           return { exec: 'Delete now', approve: 'Flag for action', reject: 'Keep node' };
+      case 'add_description':  return { exec: '',           approve: 'Flag for action', reject: 'Dismiss' };
+      case 'retype':           return { exec: '',           approve: 'Flag for action', reject: 'Dismiss' };
+      case 'review':           return { exec: '',           approve: 'Flag for action', reject: 'Dismiss' };
+      default:                 return { exec: '',           approve: 'Flag for action', reject: 'Reject' };
+    }
+  }
+
+  function renderRow(f) {
+    const conf = f.confidence != null ? (f.confidence * 100).toFixed(0) + '%' : '';
+    const canAct = (f.status === 'pending' || f.status === 'approved');
+    const canExec = (f.status === 'pending' || f.status === 'approved') &&
+                    (f.finding_type === 'duplicate_node' || f.finding_type === 'orphan_node');
+    const labels = actionLabels(f);
+
+    const evJson = f.evidence_json ? JSON.stringify(f.evidence_json, null, 2) : '';
+    const toggleId = `ev-${f.id}`;
+    const evidenceBtn = evJson
+      ? `<button class="toggle-evidence" onclick="toggleEvidence('${toggleId}')">details</button><div id="${toggleId}" class="evidence-block">${esc(evJson)}</div>`
+      : '';
+
+    const execNotes = f.execution_notes
+      ? `<div class="exec-notes ${f.status === 'execute_error' ? 'error' : ''}">${esc(f.execution_notes)}</div>`
+      : '';
+
+    return `<tr id="row-${f.id}">
+      <td class="cb-col"><input type="checkbox" class="row-cb" value="${f.id}" onchange="toggleRowCb(this)" ${canAct ? '' : 'disabled'}></td>
+      <td><span class="badge badge-${f.finding_type}">${f.finding_type.replace(/_/g,' ')}</span></td>
+      <td><span class="badge badge-${f.priority}">${f.priority}</span></td>
+      <td><span class="badge badge-${f.status}">${f.status}</span></td>
+      <td>${renderNodes(f)}</td>
+      <td><code style="font-size:11px">${f.suggested_action}</code></td>
+      <td class="reason">${esc(f.reason || '')}${evidenceBtn}${execNotes}</td>
+      <td>${conf}</td>
+      <td>
+        <div class="action-btns">
+          ${canExec && labels.exec ? `<button class="btn btn-execute" onclick="confirmExecute('${f.id}')">${labels.exec}</button>` : ''}
+          ${f.status === 'pending' ? `<button class="btn btn-approve" onclick="singleAction('${f.id}','approve')">${labels.approve}</button>` : ''}
+          ${canAct ? `
+            <button class="btn btn-reject" onclick="singleAction('${f.id}','reject')">${labels.reject}</button>
+          ` : ''}
+        </div>
+      </td>
+    </tr>`;
+  }
+
+  function renderNodes(f) {
+    const pLabel = f.primary_label || trunc(f.primary_node_id, 12);
+    const pType  = f.primary_node_type || '';
+    const pEdges = f.primary_edge_count != null ? f.primary_edge_count + ' edges' : '';
+    const pMeta  = [pType, pEdges].filter(Boolean).join(' · ');
+
+    let html = `<div class="node-box">
+      <span class="node-label">${esc(pLabel)}</span>
+      ${pMeta ? `<span class="node-meta">${esc(pMeta)}</span>` : ''}
+      <span class="node-id">${trunc(f.primary_node_id, 12)}</span>
+    </div>`;
+
+    if (f.secondary_node_id) {
+      const sLabel = f.secondary_label || trunc(f.secondary_node_id, 12);
+      const sType  = f.secondary_node_type || '';
+      const sEdges = f.secondary_edge_count != null ? f.secondary_edge_count + ' edges' : '';
+      const sMeta  = [sType, sEdges].filter(Boolean).join(' · ');
+
+      html += `<span class="merge-arrow">&harr;</span>`;
+      html += `<div class="node-box">
+        <span class="node-label">${esc(sLabel)}</span>
+        ${sMeta ? `<span class="node-meta">${esc(sMeta)}</span>` : ''}
+        <span class="node-id">${trunc(f.secondary_node_id, 12)}</span>
+      </div>`;
+    }
+
+    return html;
+  }
+
+  function toggleEvidence(id) {
+    const el = document.getElementById(id);
+    el.style.display = el.style.display === 'block' ? 'none' : 'block';
+  }
+
+  // -- Selection --
+  function toggleSelectAll(cb) {
+    document.querySelectorAll('.row-cb:not(:disabled)').forEach(el => {
+      el.checked = cb.checked;
+      cb.checked ? selectedIds.add(el.value) : selectedIds.delete(el.value);
+    });
+  }
+
+  function toggleRowCb(cb) {
+    cb.checked ? selectedIds.add(cb.value) : selectedIds.delete(cb.value);
+    updateSelectAll();
+  }
+
+  function updateSelectAll() {
+    const all = document.querySelectorAll('.row-cb:not(:disabled)');
+    const checked = document.querySelectorAll('.row-cb:not(:disabled):checked');
+    const sa = document.getElementById('select-all');
+    if (sa) {
+      sa.indeterminate = checked.length > 0 && checked.length < all.length;
+      sa.checked = all.length > 0 && checked.length === all.length;
+    }
+  }
+
+  // -- Single action --
+  async function singleAction(id, action) {
+    try {
+      const res = await fetch('/kg-maintenance/api/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action })
+      });
+      if (!res.ok) throw new Error(await res.text());
+      showToast(`${action} done`);
+      loadFindings();
+      loadSummary();
+    } catch(e) {
+      showToast('Error: ' + e.message, true);
+    }
+  }
+
+  // -- Execute single finding with confirmation --
+  function confirmExecute(id) {
+    const f = allFindings.find(x => x.id === id);
+    if (!f) return;
+
+    const pLabel = f.primary_label || trunc(f.primary_node_id, 12);
+    let body = '';
+
+    if (f.finding_type === 'duplicate_node' && f.secondary_node_id) {
+      const sLabel = f.secondary_label || trunc(f.secondary_node_id, 12);
+      const pEdges = f.primary_edge_count != null ? ` (${f.primary_edge_count} edges)` : '';
+      const sEdges = f.secondary_edge_count != null ? ` (${f.secondary_edge_count} edges)` : '';
+      body = `Merge duplicate nodes:<br><br>` +
+        `The system will keep the node with more edges/higher PageRank and absorb ` +
+        `the other. Edges will be rerouted, aliases and fields merged.<br><br>` +
+        `<strong>${esc(pLabel)}</strong>${pEdges}<br>` +
+        `<strong>${esc(sLabel)}</strong>${sEdges}`;
+    } else if (f.finding_type === 'orphan_node') {
+      body = `Delete orphan node <strong>${esc(pLabel)}</strong> (0 edges).`;
+    } else {
+      body = `Execute "${f.suggested_action}" on <strong>${esc(pLabel)}</strong>.`;
+    }
+
+    document.getElementById('confirm-title').textContent = `Execute: ${f.finding_type.replace(/_/g, ' ')}`;
+    document.getElementById('confirm-body').innerHTML = body;
+    document.getElementById('confirm-ok').onclick = () => { closeConfirm(); executeOne(id); };
+    document.getElementById('confirm-overlay').classList.add('show');
+  }
+
+  function closeConfirm() {
+    document.getElementById('confirm-overlay').classList.remove('show');
+  }
+
+  async function executeOne(id) {
+    try {
+      const res = await fetch('/kg-maintenance/api/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action: 'execute' })
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      const detail = data.execute_result?.detail || data.execution_notes || 'Done';
+      showToast(detail);
+      loadFindings();
+      loadSummary();
+    } catch(e) {
+      showToast('Execute failed: ' + e.message, true);
+    }
+  }
+
+  // -- Bulk actions --
+  async function bulkAction(action) {
+    const ids = [...selectedIds];
+    if (!ids.length) { showToast('Select at least one finding'); return; }
+    try {
+      const res = await fetch('/kg-maintenance/api/bulk_action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids, action })
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
+      const data = await res.json();
+      showToast(`${action}: ${data.updated} updated`);
+      loadFindings();
+      loadSummary();
+    } catch(e) {
+      showToast('Error: ' + e.message, true);
+    }
+  }
+
+  // -- Execute all approved --
+  document.getElementById('btn-execute-approved').addEventListener('click', async () => {
+    if (!confirm(`Execute all ${approvedCount} approved items? This will merge duplicate nodes and delete orphans as approved.`)) return;
+    const btn = document.getElementById('btn-execute-approved');
+    btn.disabled = true;
+    btn.textContent = 'Executing...';
+    try {
+      const res = await fetch('/kg-maintenance/api/execute_approved', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}'
+      });
+      const data = await res.json();
+      showToast(`Executed: ${data.executed}, errors: ${data.errors}`);
+      loadFindings();
+      loadSummary();
+    } catch(e) {
+      showToast('Error: ' + e.message, true);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // -- Pipeline triggers --
+  document.getElementById('btn-run-structural').addEventListener('click', async () => {
+    const btn = document.getElementById('btn-run-structural');
+    btn.disabled = true;
+    btn.textContent = 'Scanning...';
+    try {
+      const res = await fetch('/kg-maintenance/api/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ skip_steps: ['duplicate_scan', 'description_fill'] })
+      });
+      const data = await res.json();
+      showToast('Structural scan complete');
+      loadFindings();
+      loadSummary();
+    } catch(e) {
+      showToast('Error: ' + e.message, true);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Structural scan';
+    }
+  });
+
+  document.getElementById('btn-run-full').addEventListener('click', async () => {
+    if (!confirm('Full scan includes LLM-based duplicate detection and can take several minutes. Continue?')) return;
+    const btn = document.getElementById('btn-run-full');
+    btn.disabled = true;
+    btn.textContent = 'Scanning...';
+    try {
+      const res = await fetch('/kg-maintenance/api/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ skip_steps: [] })
+      });
+      const data = await res.json();
+      showToast('Full scan complete');
+      loadFindings();
+      loadSummary();
+    } catch(e) {
+      showToast('Error: ' + e.message, true);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Full scan';
+    }
+  });
+
+  // -- Utilities --
+  function showToast(msg, isError = false) {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.style.borderColor = isError ? 'var(--bad)' : 'var(--ok)';
+    el.classList.add('show');
+    setTimeout(() => el.classList.remove('show'), 4000);
+  }
+
+  function esc(str) {
+    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function trunc(str, n) {
+    if (!str) return '\u2013';
+    return str.length > n ? str.slice(0, n) + '\u2026' : str;
+  }
+</script>
+</body>
+</html>

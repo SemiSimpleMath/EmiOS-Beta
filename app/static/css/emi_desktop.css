@@ -1,0 +1,443 @@
+/* ============================================================
+   EmiOS Desktop Horizontal Layout
+   Imports shared tokens, defines desktop-specific layout
+   ============================================================ */
+
+@import url('emi_tokens.css');
+@import url('emi_components.css');
+
+/* Desktop layout overrides */
+:root {
+  --desktop-header-height: 28px;
+  --desktop-gap: 12px;
+
+  /* Typography scale — change these to resize everything */
+  /* 8pt ≈ 0.5rem at 16px root. Scale everything from there. */
+  --font-xs: 0.4rem;    /* dates, meta, secondary labels */
+  --font-sm: 0.45rem;   /* timestamps, details, sub-text */
+  --font-base: 0.5rem;  /* default body/widget text (~8pt) */
+  --font-md: 0.55rem;   /* chat text, input fields */
+  --font-lg: 0.65rem;   /* header title */
+  --icon-sm: 0.5rem;    /* card title icons */
+  --icon-base: 0.6rem;  /* header icons */
+  --icon-lg: 0.7rem;    /* menu toggle */
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; font-family: inherit; }
+
+body, main {
+  font-family: var(--font-family);
+  background: var(--background-color);
+  color: var(--text-color);
+  height: 100vh;
+  overflow: hidden;
+  font-size: var(--font-md);
+}
+
+.visually-hidden {
+  position: absolute;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+/* ---- Header ---- */
+header.d-header {
+  height: var(--desktop-header-height);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  background: var(--header-footer-color);
+  border-bottom: 1px solid var(--border-color);
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+}
+
+.d-header__title {
+  font-size: var(--font-lg);
+  font-weight: 600;
+  color: var(--accent-color);
+  cursor: pointer;
+}
+
+.d-header__controls {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Header buttons — NO absolute positioning */
+header.d-header .menu-toggle-btn,
+header.d-header .dev-menu-toggle-btn,
+header.d-header .life-menu-toggle-btn,
+header.d-header #menu-toggle-btn,
+header.d-header #dev-menu-toggle-btn,
+header.d-header #life-menu-toggle-btn {
+  position: static;
+  transform: none;
+  background: none;
+  border: none;
+  color: var(--text-color);
+  font-size: var(--icon-lg);
+  cursor: pointer;
+  padding: 6px 10px;
+  border-radius: 4px;
+}
+
+header.d-header .menu-toggle-btn:hover {
+  background: var(--widget-background-hover);
+}
+
+header.d-header .dev-menu-toggle-btn,
+header.d-header #dev-menu-toggle-btn {
+  opacity: 0.6;
+  font-size: var(--icon-base);
+}
+header.d-header .dev-menu-toggle-btn:hover,
+header.d-header #dev-menu-toggle-btn:hover {
+  opacity: 1;
+}
+
+header.d-header .life-menu-toggle-btn,
+header.d-header #life-menu-toggle-btn {
+  opacity: 0.8;
+  font-size: var(--icon-base);
+}
+header.d-header .life-menu-toggle-btn:hover,
+header.d-header #life-menu-toggle-btn:hover {
+  opacity: 1;
+}
+
+header.d-header #mute-btn-container {
+  position: static;
+  cursor: pointer;
+  font-size: var(--icon-base);
+  color: var(--text-muted);
+}
+header.d-header #mute-btn-container i {
+  color: var(--text-color);
+  font-size: var(--icon-base);
+  transition: color 0.3s ease;
+}
+header.d-header #mute-btn-container i:hover {
+  color: var(--accent-color);
+}
+
+/* Menu/dropdown defined in emi_components.css — desktop overrides only */
+.dropdown-menu {
+  top: var(--desktop-header-height);
+  max-height: calc(100vh - var(--desktop-header-height));
+}
+
+/* ---- Main Layout: 3-column (left rail | chat | right rail) ---- */
+.d-main {
+  display: flex;
+  gap: var(--desktop-gap);
+  padding: var(--desktop-gap) 12px;
+  padding-top: calc(var(--desktop-header-height) + var(--desktop-gap));
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ---- Left Rail: Day State ---- */
+.d-rail-left {
+  flex: 0 0 22%;
+  max-width: 22%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--desktop-gap);
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.d-rail-left::-webkit-scrollbar { width: 4px; }
+.d-rail-left::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 2px; }
+
+/* ---- Center: Chat ---- */
+.d-chat {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--widget-background);
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  overflow: hidden;
+  min-width: 0;
+  position: relative;
+}
+
+/* ---- Right Rail: Feeds ---- */
+.d-rail-right {
+  flex: 0 0 24%;
+  max-width: 24%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--desktop-gap);
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.d-rail-right::-webkit-scrollbar { width: 4px; }
+.d-rail-right::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 2px; }
+
+/* Cards in rails share available height equally and scroll internally */
+.d-rail-left .d-card,
+.d-rail-right .d-card {
+  flex: 1 1 0;
+  min-height: 80px;
+  max-height: 100%;
+  overflow: hidden;
+}
+
+/* Weather card: fixed compact height, no scroll needed */
+.d-rail-left .d-card--weather {
+  flex: 0 0 auto;
+  max-height: none;
+}
+
+/* ---- Tickets: top of chat instead of top-right corner ---- */
+.proactive-popup {
+  position: absolute !important;
+  top: 0 !important;
+  right: auto !important;
+  left: 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  border-radius: 0 0 12px 12px !important;
+  z-index: 50;
+}
+
+.d-chat__log {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px;
+  scroll-behavior: smooth;
+  font-size: var(--font-md);
+}
+.d-chat__log::-webkit-scrollbar { width: 6px; }
+.d-chat__log::-webkit-scrollbar-track { background: transparent; }
+.d-chat__log::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+
+.d-chat__composer {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-color);
+  background: var(--widget-background);
+}
+
+.d-chat__form, .chat-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.d-chat__form textarea, .chat-form textarea {
+  flex: 1;
+  background: var(--input-background);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-color);
+  padding: 10px 14px;
+  font-size: 0.8rem;
+  font-family: inherit;
+  resize: none;
+  min-height: 48px;
+  max-height: 150px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.d-chat__form textarea:focus, .chat-form textarea:focus { border-color: var(--accent-color); }
+.d-chat__form textarea::placeholder, .chat-form textarea::placeholder { color: var(--text-muted); }
+
+.d-chat__form button, .chat-form button {
+  background: none;
+  border: none;
+  color: var(--accent-color);
+  font-size: var(--icon-lg);
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 6px;
+  transition: background 0.15s;
+}
+.d-chat__form button:hover, .chat-form button:hover { background: var(--widget-background-hover); }
+
+/* Chat bubbles/image attachments defined in emi_components.css — desktop overrides */
+.bot-bubble { padding: 10px; border-radius: 12px; margin-bottom: 10px; }
+.bot-bubble p { font-size: 0.8rem; }
+.user-bubble { padding: 10px; border-radius: 12px; margin-bottom: 10px; }
+.user-bubble p { font-size: 0.8rem; }
+
+/* (old .d-rail grid replaced by .d-rail-left / .d-rail-right columns) */
+
+/* ---- Rail Cards ---- */
+.d-card {
+  background: var(--widget-background);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: transform var(--transition-speed), box-shadow var(--transition-speed), background-color var(--transition-speed);
+}
+
+.d-card:hover {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15);
+  background-color: var(--widget-background-hover);
+}
+
+.d-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 14px;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.d-card__title {
+  font-size: var(--font-base);
+  font-weight: 600;
+  color: var(--heading-color);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.d-card__title i { color: var(--accent-color); font-size: var(--font-base); }
+
+.d-card__body {
+  padding: 8px 10px 10px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex: 1;
+  font-size: var(--font-base);
+  line-height: 1.5;
+}
+.d-card__body::-webkit-scrollbar { width: 4px; }
+.d-card__body::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 2px; }
+.d-card__body *:not(.weather-box):not(.weather-box *) { max-width: 100%; word-wrap: break-word; }
+.d-card__body ul { list-style: none; padding: 0; margin: 0; }
+
+/* Weather overrides moved to weather_desktop.css */
+.d-card--weather { padding: 0; overflow: hidden; }
+
+/* ---- Checkbox scaling ---- */
+.todo-item input[type="checkbox"] {
+  width: 0.85em;
+  height: 0.85em;
+  margin: 0;
+}
+
+/* ---- Calendar ---- */
+.calendar__item--minimal {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.4rem;
+  align-items: start;
+  padding: 0.15rem 0;
+  border-bottom: 1px solid var(--border-color);
+  font-size: var(--font-base);
+}
+.calendar__event-title { font-weight: normal; color: var(--text-color); word-break: break-word; }
+.calendar__event-time { font-size: var(--font-base); color: var(--text-muted); text-align: right; white-space: nowrap; }
+.calendar__item--details { font-size: var(--font-sm); line-height: 1.4; }
+.calendar__item--details p { margin: 0.2rem 0; }
+.calendar__item--details.hidden { display: none; }
+
+.calendar-navigation, .scheduler-navigation {
+  display: flex; align-items: center; justify-content: center; gap: 0.5em; margin-bottom: 0.5em;
+}
+.calendar-navigation button, .scheduler-navigation button {
+  background-color: var(--accent-color); border: none; color: var(--button-text-color);
+  padding: 0.15em 0.3em; font-size: 0.5rem; cursor: pointer; border-radius: 3px;
+}
+.calendar-navigation button:hover, .scheduler-navigation button:hover { background-color: var(--hover-accent-color); }
+#calendar-current-date, #scheduler-current-date { font-size: var(--font-sm) !important; font-weight: 500; white-space: nowrap; }
+
+/* ---- Scheduler / Reminders ---- */
+.scheduler__item--minimal {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 0.15em 0; cursor: pointer; border-bottom: 1px solid var(--border-color); font-size: var(--font-base);
+}
+.scheduler__item:last-child .scheduler__item--minimal { border-bottom: none; }
+.scheduler__task-title { font-weight: normal; color: var(--text-color); }
+.scheduler__task-deadline { font-size: var(--font-base); color: var(--text-muted); margin-left: 0.5em; white-space: nowrap; }
+.scheduler__item--details { margin-top: 0.4em; font-size: var(--font-sm); line-height: 1.4; overflow: hidden; max-height: 0; transition: max-height 0.3s ease; }
+.scheduler__item--details:not(.hidden) { max-height: 500px; padding: 0.4em 0; }
+.scheduler__item--details.hidden { display: none; }
+.scheduler__item--details p { margin: 0.2em 0; }
+
+/* ---- ToDo ---- */
+.todo-item { padding: 0.3rem 0; border-bottom: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 0.15rem; }
+.todo-item input[type="checkbox"] { min-width: initial; }
+.todo-label { display: flex; align-items: center; gap: 0.4rem; }
+.todo-task { font-weight: normal; font-size: var(--font-base); color: var(--text-color); }
+.todo-meta { display: flex; flex-direction: row; gap: 0.5rem; font-size: var(--font-xs); color: var(--text-muted); margin-left: 1.5rem; }
+.completed .todo-task { text-decoration: line-through; opacity: 0.6; }
+
+/* ---- Email ---- */
+.email__item { padding: 0.2rem 0.5rem; border-bottom: 1px solid var(--border-color); cursor: pointer; font-size: var(--font-base); }
+.email__item:hover { background-color: var(--widget-background-hover); }
+.email__item--minimal { display: flex; justify-content: space-between; align-items: flex-start; gap: 0.4rem; }
+.email__meta { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; flex: 1; }
+.email__sender { font-size: var(--font-base); color: var(--heading-color); font-weight: normal; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.email__subject { font-size: var(--font-base); color: var(--text-color); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.email__toggle-indicator { font-size: var(--font-base); color: var(--accent-color); }
+.email__item--details { margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--border-color); font-size: var(--font-sm); line-height: 1.4; overflow: hidden; }
+.email__item--details p { margin: 0.2rem 0; font-size: var(--font-sm); color: var(--text-color); }
+.email__item--details p strong { display: inline; font-weight: 500; color: var(--heading-color); margin-right: 0.4rem; }
+.email__item--details.hidden { display: none; }
+
+/* ---- News ---- */
+.news-item { padding: 0.3rem; border-bottom: 1px solid var(--border-color); }
+.news-item h3 a { font-size: var(--font-base); font-weight: 400; color: var(--news-headline-color); text-decoration: none; line-height: 1.2; }
+.news-item h3 a:hover { color: var(--accent-color); }
+.news-item p { font-size: var(--font-sm); margin: 0.05rem 0; line-height: 1.2; color: var(--text-color); }
+.news-item p.news-date { font-size: 0.38rem; color: var(--news-date-color); font-style: italic; }
+.news-item p.news-source { font-size: 0.38rem; font-weight: 400; color: var(--accent-color); display: inline; }
+.news-item { padding: 0.3rem 0.4rem; }
+.news-item img { display: none; }
+.news-item p { display: none; }
+.news-item p.news-date { display: inline; }
+.news-item p.news-source { display: inline; }
+.news-item .news-footer { display: inline; }
+.news-footer { display: inline; }
+.news-actions { display: inline-flex; align-items: center; gap: 0.05rem; margin-left: 0.2rem; vertical-align: middle; }
+.news-actions button { background: transparent; border: none; cursor: pointer; padding: 0.05rem; font-size: var(--font-xs); color: var(--text-muted); border-radius: 0.25rem; min-width: auto; min-height: auto; line-height: 1; }
+.news-actions button:hover { color: var(--accent-color); }
+.news-actions button.thumbs-up.active { color: #4caf50; background: rgba(76, 175, 80, 0.15); }
+.news-actions button.thumbs-down.active { color: #BF616A; background: rgba(191, 97, 106, 0.15); }
+.news-item a { color: #A0BBD8; text-decoration: none; }
+.news-item a:hover { color: var(--accent-color); }
+
+/* ---- Feed (hidden in horizontal) ---- */
+.feed-list { list-style: none; padding: 0; margin: 0; }
+.feed__item { padding: 0.4em 0.75em; border-bottom: 1px solid var(--border-color); font-size: var(--font-base); }
+.feed__meta { font-size: var(--font-xs); color: var(--text-muted); margin-bottom: 0.15em; }
+.feed__message { font-size: var(--font-base); line-height: 1.4; }
+
+/* Notify/ask_user and generic li defined in emi_components.css */
+
+/* ---- Responsive ---- */
+@media (max-width: 1100px) {
+  .d-rail-left { flex: 0 0 20%; }
+  .d-rail-right { flex: 0 0 20%; }
+}
+
+@media (max-width: 800px) {
+  .d-main { flex-direction: column; overflow-y: auto; }
+  .d-rail-left { flex: none; flex-direction: row; overflow-y: visible; overflow-x: auto; }
+  .d-chat { flex: none; height: 50vh; }
+  .d-rail-right { flex: none; flex-direction: row; overflow-y: visible; overflow-x: auto; }
+  .d-rail-left .d-card,
+  .d-rail-right .d-card { flex: 0 0 280px; min-height: 200px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; transform: none !important; }
+}

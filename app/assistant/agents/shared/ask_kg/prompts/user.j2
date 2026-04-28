@@ -1,0 +1,23 @@
+Today is {{ date_time }}.
+
+Task:
+{{ task }}
+
+{% if engine %}
+Engine: {{ engine }}
+{% endif %}
+
+{% if timeout %}
+Timeout: {{ timeout }}
+{% endif %}
+
+Question:
+{{ question }}
+
+Evidence (node-local KG pack):
+{{ evidence }}
+
+Return JSON with:
+- answer: concise answer grounded in evidence
+- confidence: float 0..1
+- citations: list of {ref_kind, ref_id, note}

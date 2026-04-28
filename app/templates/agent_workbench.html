@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Workbench</title>
+<style>
+:root {
+  --bg: #1a1a2e;
+  --card-bg: #16213e;
+  --card-bg-alt: #1a2744;
+  --text: #eee;
+  --muted: #8892b0;
+  --accent: #e94560;
+  --accent-green: #4ecca3;
+  --accent-blue: #4a9fd4;
+  --border: #30363d;
+  --mono: 'Consolas','Monaco','Courier New',monospace;
+  --sans: 'Segoe UI',system-ui,sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; }
+.container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+h1 { font-size: 22px; font-weight: 700; margin-bottom: 16px; color: #c8d0df; }
+h2 { font-size: 15px; font-weight: 600; color: var(--muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em; }
+h3 { font-size: 13px; font-weight: 600; color: var(--accent-blue); margin-bottom: 6px; }
+
+.card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 12px; }
+.row { display: flex; gap: 12px; align-items: flex-start; }
+.col { flex: 1; min-width: 0; }
+.col-narrow { flex: 0 0 320px; }
+
+/* Agent picker */
+.agent-search { width: 100%; padding: 10px 14px; background: var(--card-bg-alt); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 14px; outline: none; }
+.agent-search:focus { border-color: var(--accent-blue); }
+.agent-list { max-height: 300px; overflow-y: auto; margin-top: 8px; }
+.agent-item { padding: 8px 12px; cursor: pointer; border-radius: 6px; font-size: 13px; color: var(--muted); transition: background 0.1s; }
+.agent-item:hover { background: var(--card-bg-alt); color: var(--text); }
+.agent-item.selected { background: #1a3a5a; color: var(--accent-blue); font-weight: 600; }
+.agent-meta { font-size: 11px; color: #556; margin-top: 2px; }
+
+/* Prompt editors */
+.prompt-area { width: 100%; min-height: 300px; background: #0d1117; border: 1px solid var(--border); border-radius: 8px; color: #c9d1d9; font-family: var(--mono); font-size: 12px; line-height: 1.6; padding: 12px; resize: vertical; outline: none; tab-size: 2; }
+.prompt-area:focus { border-color: var(--accent-blue); }
+.prompt-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.toggle-btn { background: none; border: 1px solid var(--border); color: var(--muted); padding: 4px 10px; border-radius: 4px; font-size: 11px; cursor: pointer; }
+.toggle-btn.active { border-color: var(--accent-blue); color: var(--accent-blue); }
+
+/* Context items */
+.ctx-item { display: flex; gap: 8px; align-items: flex-start; padding: 6px 0; border-bottom: 1px solid #1e2535; }
+.ctx-key { font-family: var(--mono); font-size: 12px; color: var(--accent-blue); min-width: 160px; flex-shrink: 0; }
+.ctx-value { font-size: 12px; color: var(--muted); word-break: break-all; max-height: 80px; overflow: hidden; cursor: pointer; }
+.ctx-value.expanded { max-height: none; }
+.ctx-override { width: 100%; padding: 4px 8px; background: #0d1117; border: 1px solid var(--border); border-radius: 4px; color: var(--text); font-family: var(--mono); font-size: 11px; margin-top: 4px; display: none; }
+.ctx-item.editing .ctx-override { display: block; }
+
+/* Output schema */
+.schema-field { display: flex; gap: 8px; padding: 4px 0; font-size: 12px; }
+.schema-name { font-family: var(--mono); color: var(--accent-green); min-width: 200px; }
+.schema-desc { color: var(--muted); }
+.schema-req { color: var(--accent); font-size: 10px; }
+
+/* Buttons */
+.btn { padding: 10px 20px; border: none; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; transition: background 0.15s; }
+.btn-run { background: var(--accent); color: white; }
+.btn-run:hover { background: #c73850; }
+.btn-run:disabled { background: #553; cursor: default; }
+.btn-resolve { background: #0f4c75; color: var(--text); }
+.btn-resolve:hover { background: #1a6a9a; }
+.btn-secondary { background: var(--card-bg-alt); color: var(--muted); border: 1px solid var(--border); }
+.btn-secondary:hover { color: var(--text); border-color: var(--accent-blue); }
+.btn-bar { display: flex; gap: 10px; margin: 12px 0; align-items: center; }
+
+/* Result display */
+.result-json { background: #0d1117; border: 1px solid var(--border); border-radius: 8px; padding: 12px; font-family: var(--mono); font-size: 12px; line-height: 1.5; color: #c9d1d9; white-space: pre-wrap; word-break: break-word; max-height: 500px; overflow-y: auto; }
+.result-meta { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+.result-meta span { color: var(--accent-green); font-weight: 600; }
+
+/* Status */
+.status { font-size: 12px; color: var(--muted); }
+.status.error { color: #ff7b72; }
+.status.success { color: var(--accent-green); }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: #2a3040; border-radius: 3px; }
+
+/* Run history */
+.history-item { padding: 8px; border-bottom: 1px solid #1e2535; cursor: pointer; font-size: 12px; }
+.history-item:hover { background: var(--card-bg-alt); }
+.history-item .ts { color: var(--muted); }
+.history-item .agent { color: var(--accent-blue); }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Agent Workbench</h1>
+
+  <div class="row">
+    <!-- Left: Agent Picker -->
+    <div class="col-narrow">
+      <div class="card">
+        <h2>Select Agent</h2>
+        <input type="text" class="agent-search" id="agentSearch" placeholder="Search agents..." oninput="filterAgents()">
+        <div class="agent-list" id="agentList"></div>
+      </div>
+
+      <div class="card" id="configCard" style="display:none">
+        <h2>Agent Config</h2>
+        <div id="configDisplay" style="font-family:var(--mono);font-size:11px;color:var(--muted);white-space:pre-wrap;max-height:200px;overflow-y:auto"></div>
+      </div>
+
+      <div class="card" id="schemaCard" style="display:none">
+        <h2>Output Schema (agent_form.py)</h2>
+        <div id="schemaFields"></div>
+        <pre id="formSource" style="font-family:var(--mono);font-size:11px;color:#c9d1d9;background:#0d1117;border-radius:6px;padding:10px;margin-top:8px;max-height:200px;overflow-y:auto;display:none"></pre>
+      </div>
+
+      <div class="card" id="contextCard" style="display:none">
+        <h2>Context Items</h2>
+        <div id="contextItems"></div>
+      </div>
+
+      <div class="card">
+        <h2>Run History</h2>
+        <div id="runHistory"><span class="status">No runs yet.</span></div>
+      </div>
+    </div>
+
+    <!-- Right: Prompts + Output -->
+    <div class="col">
+      <div class="row">
+        <div class="col">
+          <div class="card">
+            <div class="prompt-header">
+              <h2>System Prompt</h2>
+              <div>
+                <button class="toggle-btn active" onclick="toggleView('system','resolved')">Resolved</button>
+                <button class="toggle-btn" onclick="toggleView('system','raw')">Raw Template</button>
+              </div>
+            </div>
+            <textarea class="prompt-area" id="systemPrompt" placeholder="Select an agent to see its system prompt..."></textarea>
+          </div>
+        </div>
+        <div class="col">
+          <div class="card">
+            <div class="prompt-header">
+              <h2>User Prompt</h2>
+              <div>
+                <button class="toggle-btn active" onclick="toggleView('user','resolved')">Resolved</button>
+                <button class="toggle-btn" onclick="toggleView('user','raw')">Raw Template</button>
+              </div>
+            </div>
+            <textarea class="prompt-area" id="userPrompt" placeholder="Select an agent to see its user prompt..."></textarea>
+          </div>
+        </div>
+      </div>
+
+      <div class="btn-bar">
+        <button class="btn btn-resolve" onclick="resolvePrompts()">Resolve Prompts</button>
+        <button class="btn btn-run" id="runBtn" onclick="runAgent()" disabled>Run Agent</button>
+        <span class="status" id="statusMsg"></span>
+      </div>
+
+      <div class="card" id="resultCard" style="display:none">
+        <h2>Result</h2>
+        <div class="result-meta" id="resultMeta"></div>
+        <div class="result-json" id="resultJson"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let state = {
+  agents: [],
+  selectedAgent: null,
+  prompts: null,
+  promptView: { system: 'resolved', user: 'resolved' },
+  history: [],
+};
+
+// --- Data loading ---
+async function loadAgents() {
+  try {
+    const res = await fetch('/debug/agent-workbench/agents');
+    const data = await res.json();
+    state.agents = data.agents || [];
+    renderAgentList();
+    setStatus('Loaded ' + state.agents.length + ' agents.');
+  } catch (err) {
+    setStatus('Failed to load agents: ' + err.message, true);
+  }
+}
+
+async function selectAgent(name) {
+  state.selectedAgent = name;
+  renderAgentList();
+  setStatus('Loading ' + name + '...');
+  document.getElementById('runBtn').disabled = false;
+
+  // Load form fields.
+  try {
+    const formRes = await fetch('/debug/agent-workbench/form', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_name: name }),
+    });
+    const formData = await formRes.json();
+    renderSchema(formData.fields || []);
+  } catch (err) {
+    renderSchema([]);
+  }
+
+  // Resolve prompts.
+  await resolvePrompts();
+}
+
+async function resolvePrompts() {
+  if (!state.selectedAgent) return;
+  setStatus('Resolving prompts...');
+  try {
+    const overrides = gatherContextOverrides();
+    const res = await fetch('/debug/agent-workbench/resolve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent_name: state.selectedAgent, context_overrides: overrides }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      setStatus('Error: ' + data.error, true);
+      return;
+    }
+    state.prompts = data;
+    renderPrompts();
+    renderContextItems(data);
+    renderConfig(data.agent_config);
+    renderFormSource(data.agent_form_source);
+    setStatus('Prompts resolved.', false, true);
+  } catch (err) {
+    setStatus('Failed: ' + err.message, true);
+  }
+}
+
+async function runAgent() {
+  if (!state.selectedAgent) return;
+  const btn = document.getElementById('runBtn');
+  btn.disabled = true;
+  btn.textContent = 'Running...';
+  setStatus('Running ' + state.selectedAgent + '...');
+
+  try {
+    const overrides = gatherContextOverrides();
+    const systemEl = document.getElementById('systemPrompt');
+    const userEl = document.getElementById('userPrompt');
+
+    const body = { agent_name: state.selectedAgent, context_overrides: overrides };
+
+    // If user edited the prompt, send overrides.
+    if (state.prompts) {
+      const currentSystem = systemEl.value;
+      const currentUser = userEl.value;
+      const origSystem = state.promptView.system === 'resolved'
+        ? state.prompts.system_prompt_resolved
+        : state.prompts.system_prompt_raw;
+      const origUser = state.promptView.user === 'resolved'
+        ? state.prompts.user_prompt_resolved
+        : state.prompts.user_prompt_raw;
+
+      if (currentSystem !== origSystem) body.system_prompt_override = currentSystem;
+      if (currentUser !== origUser) body.user_prompt_override = currentUser;
+    }
+
+    const res = await fetch('/debug/agent-workbench/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (data.error) {
+      setStatus('Error: ' + data.error, true);
+    } else {
+      renderResult(data);
+      addToHistory(data);
+      setStatus('Done in ' + data.elapsed_seconds + 's.', false, true);
+    }
+  } catch (err) {
+    setStatus('Run failed: ' + err.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Run Agent';
+  }
+}
+
+// --- Rendering ---
+function renderAgentList() {
+  const el = document.getElementById('agentList');
+  const query = document.getElementById('agentSearch').value.toLowerCase();
+  const filtered = state.agents.filter(a => a.name.toLowerCase().includes(query));
+
+  // Group by namespace.
+  const groups = {};
+  for (const a of filtered) {
+    const parts = a.name.split('::');
+    const ns = parts.length > 1 ? parts[0] : 'other';
+    if (!groups[ns]) groups[ns] = [];
+    groups[ns].push(a);
+  }
+
+  let html = '';
+  for (const [ns, agents] of Object.entries(groups).sort()) {
+    html += '<div style="padding:4px 8px;font-size:11px;color:#556;margin-top:6px;text-transform:uppercase;letter-spacing:0.05em">' + ns + '</div>';
+    for (const a of agents) {
+      const sel = a.name === state.selectedAgent ? ' selected' : '';
+      html += '<div class="agent-item' + sel + '" onclick="selectAgent(\'' + a.name.replace(/'/g, "\\'") + '\')">'
+        + a.name
+        + '<div class="agent-meta">' + (a.provider || '') + ' / ' + (a.engine || '') + '</div>'
+        + '</div>';
+    }
+  }
+  el.innerHTML = html || '<span class="status">No agents found.</span>';
+}
+
+function filterAgents() { renderAgentList(); }
+
+function renderPrompts() {
+  if (!state.prompts) return;
+  const sysEl = document.getElementById('systemPrompt');
+  const usrEl = document.getElementById('userPrompt');
+
+  sysEl.value = state.promptView.system === 'resolved'
+    ? state.prompts.system_prompt_resolved
+    : state.prompts.system_prompt_raw;
+  usrEl.value = state.promptView.user === 'resolved'
+    ? state.prompts.user_prompt_resolved
+    : state.prompts.user_prompt_raw;
+}
+
+function toggleView(which, mode) {
+  state.promptView[which] = mode;
+  renderPrompts();
+  // Update button styles.
+  const header = which === 'system'
+    ? document.getElementById('systemPrompt').parentElement.querySelector('.prompt-header')
+    : document.getElementById('userPrompt').parentElement.querySelector('.prompt-header');
+  header.querySelectorAll('.toggle-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.textContent.toLowerCase().includes(mode));
+  });
+}
+
+function renderSchema(fields) {
+  const card = document.getElementById('schemaCard');
+  const el = document.getElementById('schemaFields');
+  if (!fields.length) {
+    card.style.display = 'none';
+    return;
+  }
+  card.style.display = 'block';
+  el.innerHTML = fields.map(f =>
+    '<div class="schema-field">'
+    + '<span class="schema-name">' + f.name + (f.required ? ' <span class="schema-req">*</span>' : '') + '</span>'
+    + '<span class="schema-desc">' + (f.description || f.type || '') + '</span>'
+    + '</div>'
+  ).join('');
+}
+
+function renderContextItems(data) {
+  const card = document.getElementById('contextCard');
+  // We don't have resolved values per-item yet, just show the list.
+  const agent = state.agents.find(a => a.name === state.selectedAgent);
+  if (!agent) { card.style.display = 'none'; return; }
+
+  const allCtx = [...(agent.user_context_items || []), ...(agent.system_context_items || [])];
+  if (!allCtx.length) { card.style.display = 'none'; return; }
+
+  card.style.display = 'block';
+  document.getElementById('contextItems').innerHTML = allCtx.map(key =>
+    '<div class="ctx-item" onclick="this.classList.toggle(\'editing\')">'
+    + '<span class="ctx-key">' + key + '</span>'
+    + '<span class="ctx-value">(click to override)</span>'
+    + '<input class="ctx-override" data-key="' + key + '" placeholder="Override value...">'
+    + '</div>'
+  ).join('');
+}
+
+function renderConfig(config) {
+  const card = document.getElementById('configCard');
+  const el = document.getElementById('configDisplay');
+  if (!config || !Object.keys(config).length) { card.style.display = 'none'; return; }
+  card.style.display = 'block';
+  el.textContent = JSON.stringify(config, null, 2);
+}
+
+function renderFormSource(source) {
+  const el = document.getElementById('formSource');
+  if (!source) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  el.textContent = source;
+}
+
+function gatherContextOverrides() {
+  const overrides = {};
+  document.querySelectorAll('.ctx-override').forEach(input => {
+    const val = input.value.trim();
+    if (val) {
+      try { overrides[input.dataset.key] = JSON.parse(val); }
+      catch { overrides[input.dataset.key] = val; }
+    }
+  });
+  return overrides;
+}
+
+function renderResult(data) {
+  const card = document.getElementById('resultCard');
+  const meta = document.getElementById('resultMeta');
+  const json = document.getElementById('resultJson');
+  card.style.display = 'block';
+  meta.innerHTML = '<span>' + data.agent_name + '</span> &mdash; ' + data.elapsed_seconds + 's';
+  json.textContent = JSON.stringify(data.result, null, 2);
+}
+
+function addToHistory(data) {
+  state.history.unshift({
+    agent: data.agent_name,
+    time: new Date().toLocaleTimeString(),
+    result: data.result,
+    elapsed: data.elapsed_seconds,
+  });
+  if (state.history.length > 20) state.history.pop();
+  renderHistory();
+}
+
+function renderHistory() {
+  const el = document.getElementById('runHistory');
+  if (!state.history.length) {
+    el.innerHTML = '<span class="status">No runs yet.</span>';
+    return;
+  }
+  el.innerHTML = state.history.map((h, i) =>
+    '<div class="history-item" onclick="showHistoryResult(' + i + ')">'
+    + '<span class="ts">' + h.time + '</span> '
+    + '<span class="agent">' + h.agent + '</span> '
+    + '<span class="status">' + h.elapsed + 's</span>'
+    + '</div>'
+  ).join('');
+}
+
+function showHistoryResult(idx) {
+  const h = state.history[idx];
+  if (!h) return;
+  const card = document.getElementById('resultCard');
+  const meta = document.getElementById('resultMeta');
+  const json = document.getElementById('resultJson');
+  card.style.display = 'block';
+  meta.innerHTML = '<span>' + h.agent + '</span> &mdash; ' + h.elapsed + 's (from history)';
+  json.textContent = JSON.stringify(h.result, null, 2);
+}
+
+function setStatus(msg, isError, isSuccess) {
+  const el = document.getElementById('statusMsg');
+  el.textContent = msg;
+  el.className = 'status' + (isError ? ' error' : '') + (isSuccess ? ' success' : '');
+}
+
+// --- Init ---
+loadAgents();
+</script>
+</body>
+</html>

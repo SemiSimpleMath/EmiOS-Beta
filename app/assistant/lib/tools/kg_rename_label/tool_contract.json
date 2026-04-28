@@ -1,0 +1,30 @@
+{
+  "name": "kg_rename_label",
+  "description": "Rename a KG node's label. Use this for typo / spelling fixes when there is NO existing node with the new label (otherwise it would be a merge, not a rename). The old label is preserved as an alias so existing references still resolve. Refuses to rename if another node of the same node_type already has the new label — in that case use kg_merge_nodes. Always pass a non-empty `reason`. Pass `dry_run: true` to preview.",
+  "inputs": [
+    {"name": "node_id",   "type": "string",  "required": true,  "description": "Target node id."},
+    {"name": "new_label", "type": "string",  "required": true,  "description": "New canonical label."},
+    {"name": "reason",    "type": "string",  "required": true,  "description": "Why the rename is correct. Goes into kg_revision_log."},
+    {"name": "dry_run",   "type": "boolean", "required": false, "description": "Preview only; default false."},
+    {"name": "finding_id","type": "string",  "required": false, "description": "Source kg_maintenance_finding.id, if any."}
+  ],
+  "outputs": [
+    {"path": "content", "type": "text",   "description": "One-line summary of what happened."},
+    {"path": "data",    "type": "object", "description": "{ok, revision_log_id, old_label, new_label} on commit; {ok, dry_run, before, after} on dry_run."}
+  ],
+  "arguments_prompt": "Arguments for kg_rename_label:\n- node_id (required)\n- new_label (required)\n- reason (required)\n- dry_run (optional): preview only\n- finding_id (optional)",
+  "metadata": {
+    "category": "knowledge_graph",
+    "verbs": ["mutate", "rename"],
+    "entities": ["node"],
+    "risk_level": "medium",
+    "side_effects": "writes_kg",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

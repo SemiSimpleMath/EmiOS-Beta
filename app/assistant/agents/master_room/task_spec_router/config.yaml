@@ -1,0 +1,15 @@
+name: master_room::task_spec_router
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "gemini"
+  engine: "gemini-3-flash-preview"
+  model_tier: "mini"
+  temperature: 0.0
+
+allowed_tools: []
+
+user_context_items:
+  - agent_input
+
+system_context_items: []

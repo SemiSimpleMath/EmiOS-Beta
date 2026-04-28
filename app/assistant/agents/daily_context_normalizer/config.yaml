@@ -1,0 +1,15 @@
+name: daily_context_normalizer
+class_name: Agent
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.2"
+  model_tier: "strong"
+
+allowed_tools: []
+except_tools: []
+
+user_context_items:
+  - daily_context
+  - task
+
+system_context_items: []

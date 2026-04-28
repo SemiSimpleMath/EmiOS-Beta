@@ -1,0 +1,55 @@
+{
+  "name": "write_text_file",
+  "description": "Write text content to file (overwrite).",
+  "inputs": [
+    {
+      "name": "file_path",
+      "type": "path",
+      "required": true,
+      "description": "Target file path."
+    },
+    {
+      "name": "content",
+      "type": "text",
+      "required": true,
+      "description": "Content to write."
+    },
+    {
+      "name": "ensure_newline",
+      "type": "boolean",
+      "required": false,
+      "description": "Ensure trailing newline."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "data.file_path",
+      "type": "path",
+      "description": "Resolved written file path."
+    },
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Write status text."
+    }
+  ],
+  "arguments_prompt": "{\"file_path\": \"resources/dayflow_pipeline_outputs/resource_desktop_activity_recent.md\", \"content\": \"...\", \"ensure_newline\": true}",
+  "metadata": {
+    "category": "files",
+    "verbs": [
+      "write"
+    ],
+    "entities": [
+      "file"
+    ],
+    "risk_level": "medium",
+    "side_effects": "writes_data",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

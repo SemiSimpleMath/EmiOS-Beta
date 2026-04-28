@@ -1,0 +1,17 @@
+This tool can find nodes based on multitude of criterion.  You can search labels by semantic match.  You can search all nodes of given type.
+You can perform temporal searches by specifying start/end_date.  If a node has no known start/end_date it is assumed to be valid for all time (back or forward).
+You can specify number of max results in order to not be overwhelmed.  To reduce search space you can filter by demanding connection to known node.  You can request a random sample of a given size if you anticipate
+full results to be too numerous.
+All filters are optional.
+Available filters:
+start_date,
+end_date,
+node_types Must be one of: (entity, event, state, goal, property, concept) or empty for no filter,
+node_id (to restrict to neighborhood of single id),
+max_hops,
+label (filters nodes by their labels),
+taxonomy_path - most powerful filter to restrict to only nodes that have this classification.
+
+Critical: If you ask this node to find you results IT WILL FIND THEM.  IF IT GIVES NO RESULTS.  THERE IS NO NODE MATCHING WHAT YOU ARE LOOKING FOR.
+
+id of a node for filtering is UUID. If you give a UUID it will filter to the neighborhood of that node.

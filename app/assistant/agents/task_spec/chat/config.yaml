@@ -1,0 +1,22 @@
+name: task_spec::chat
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "gemini"
+  engine: "gemini-3-flash-preview"
+  model_tier: "mini"
+
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+entity_scan_keys: [incoming_message, task, information, recent_history]
+
+user_context_items:
+  - date_time
+  - task
+  - information
+  - task_creation_session_id
+  - spec
+  - recent_history
+
+system_context_items: []

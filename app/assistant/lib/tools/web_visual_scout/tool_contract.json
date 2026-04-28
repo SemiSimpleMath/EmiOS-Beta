@@ -1,0 +1,50 @@
+{
+  "name": "web_visual_scout",
+  "description": "web_visual_scout:\n\nTake a screenshot of the current page and return a detailed prose description of:\n- layout and navigation structure\n- blockers/modals/overlays intercepting clicks\n- carousels/slide windows and other complex UI\n- what looks clickable even if it’s an image tile\n\nThis tool does NOT return coordinates. Use it when progress stalls and you need a “human-like” view of the UI.",
+  "inputs": [
+    {
+      "name": "question",
+      "type": "string",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "full_page",
+      "type": "boolean",
+      "required": false,
+      "description": ""
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "Fill arguments for `web_visual_scout`:\n\n- question (optional): a short question to focus the prose scout (e.g., \"Describe the restaurant menu UI and any carousels\").\n- full_page (optional): true only if you need below-the-fold elements; default false.\n\nReturn JSON like:\n{\n  \"tool_name\": \"web_visual_scout\",\n  \"arguments\": {\n    \"question\": \"Describe the page and any blockers. Do NOT give coordinates.\",\n    \"full_page\": false\n  }\n}",
+  "metadata": {
+    "domain": "browser",
+    "actions": [
+      "describe",
+      "analyze"
+    ],
+    "selectors": [
+      "question"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "high",
+    "latency_class": "slow",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "name": "kg_query",
+  "description": "Run one read-only SQL SELECT against the live emi.db knowledge graph + supporting tables. Use this to investigate the KG the way a developer would: count things, follow provenance, find duplicates, compare nodes, walk windows back to source messages.\n\nThe statement MUST start with SELECT or WITH. PRAGMA table_info('<table>') and PRAGMA foreign_key_list('<table>') are also allowed for schema discovery. Anything else (INSERT, UPDATE, DELETE, ATTACH, etc.) is rejected. The connection is opened read-only at the SQLite level — writes are not possible.\n\nReturns rows as both a markdown table (in `content`) and structured `data.rows`. Default cap is 200 rows; pass `max_rows` up to 5000 if needed. Long cells are truncated to 200 chars in the rendered table; full values stay in `data.rows`.\n\nSchema cheatsheet:\n- kg_node_metadata(id, label, node_type, category, aliases, description, original_sentence, start_date, end_date, importance, pagerank_score, window_id, source, created_at)\n- kg_edge_metadata(id, source_id, target_id, relationship_type, sentence, window_id, source, created_at)\n- kg_node_evidence(id, node_id, source_table, source_id, derived_sentence, message_timestamp, window_id, merge_action, created_at)\n- kg_window(id, start_unified_log_id, end_unified_log_id, start_timestamp, end_timestamp, message_count, summary, standalone, related_previous_window_ids)\n- kg_window_message(window_id, unified_log_id, item_order)\n- kg_resolved_message(id, unified_log_id, unified_timestamp, resolved_text)\n- unified_log_2026(id, timestamp, role, speaker_name, message, room_id, source)\n- claim_proposal(id, status, claim_type, confidence, representative_sentence, observation_count, first_observed_at, last_observed_at)\n- claim_proposal_node(id, proposal_id, label, node_type, category, sentence, attributes_json, valid_from, valid_to, resolved_node_id, resolution_action)\n- claim_proposal_edge(id, proposal_id, source_node_id, target_node_id, predicate, sentence)\n- claim_proposal_evidence(id, proposal_id, window_id, enrichment_id, unified_log_id, raw_text, observed_at)\n- entity_cards(id, entity_name, source_node_id, summary, key_facts, aliases, updated_at)\n- pod_store(pod_id, kind, tags_json, one_liner, body, source_refs_json, created_at)\n\nLegacy storage (still queryable for older nodes): kg_chat_conversation_window, kg_chat_conversation_window_item.",
+  "inputs": [
+    {
+      "name": "sql",
+      "type": "string",
+      "required": true,
+      "description": "One SELECT (or WITH ... SELECT) statement. PRAGMA table_info()/foreign_key_list() also allowed for schema discovery. No semicolon-chained statements."
+    },
+    {
+      "name": "max_rows",
+      "type": "integer",
+      "required": false,
+      "description": "Row cap (default 200, absolute max 5000). One extra row is fetched to detect truncation."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Summary line + markdown table of rows."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "{columns: [string], rows: [object], row_count: int, truncated: bool, elapsed_ms: int}"
+    }
+  ],
+  "arguments_prompt": "Arguments for kg_query:\n- sql (required): one SELECT or WITH ... SELECT statement\n- max_rows (optional): default 200, max 5000",
+  "metadata": {
+    "category": "knowledge_graph",
+    "verbs": ["read", "investigate"],
+    "entities": ["node", "edge", "proposal", "window", "card", "pod"],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

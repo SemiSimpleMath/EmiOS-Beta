@@ -1,0 +1,45 @@
+Today is {{ date_time }}.
+
+{% if plan_session_id %}
+Planning session: {{ plan_session_id }}
+{% endif %}
+{% if plan_ticket_id %}
+Ticket context: {{ plan_ticket_id }}
+{% endif %}
+
+{% if task %}
+Inbound message:
+{{ task }}
+{% endif %}
+
+{% if information %}
+Additional information:
+{{ information }}
+{% endif %}
+
+{% if room_allowed_resource_context %}
+Allowed resource context:
+{{ room_allowed_resource_context }}
+{% endif %}
+
+{% if room_allow_images is not none %}
+Images allowed in this room: {{ room_allow_images }}
+{% endif %}
+
+{% if room_allowed_entity_cards %}
+Allowed entity cards:
+{{ room_allowed_entity_cards }}
+{% endif %}
+
+{% if room_pinned_entities %}
+Pinned entities:
+{{ room_pinned_entities }}
+{% endif %}
+
+Entity context:
+{{ entity_info }}
+
+{% if recent_history %}
+Current run history:
+{{ recent_history }}
+{% endif %}

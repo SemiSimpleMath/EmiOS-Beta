@@ -1,0 +1,14 @@
+Today is {{ date_time }}.
+
+Task:
+{{ task }}
+
+Image (caller must pass `agent_input.image` as an absolute path to a PNG file):
+[emi_image: {{ image }}]
+
+Return JSON with:
+- page_overview: 5-12 sentences describing the visible UI and what's clickable
+- blockers: list of strings describing blockers/interceptors (or empty)
+- suggested_next_steps: list of concrete next steps (no coords)
+- things_to_look_for_in_snapshot: list of strings the planner should search for in the next browser_snapshot
+

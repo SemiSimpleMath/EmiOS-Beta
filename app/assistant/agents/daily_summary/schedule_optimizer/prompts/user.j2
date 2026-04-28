@@ -1,0 +1,34 @@
+Current date and time: {{ date_time }}
+
+Task: {{ task }}
+Information: {{ information }}
+
+Recent history: {{ recent_history }}
+
+Calendar analysis: {{ calendar_analysis }}
+Todo analysis: {{ todo_analysis }}
+Web analysis: {{ web_analysis }}
+
+Available tools:
+{% for tool_name, tool_description in tool_descriptions.items() %}
+- **{{ tool_name }}**: {{ tool_description }}
+{% endfor %}
+
+Create an optimized daily schedule that balances all the information gathered. Consider timing recommendations for activities, meal times, breaks, and how to best organize the day for maximum productivity and balance.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

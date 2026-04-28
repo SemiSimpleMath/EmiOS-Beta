@@ -1,0 +1,65 @@
+{
+  "name": "ring_camera_control",
+  "description": "Read and control Ring camera devices through the smart-home gateway.",
+  "inputs": [
+    {
+      "name": "action",
+      "type": "string",
+      "required": true,
+      "description": "One of: list_cameras, get_snapshot, get_recent_events, set_siren, set_light."
+    },
+    {
+      "name": "camera_id",
+      "type": "string",
+      "required": false,
+      "description": "Required for all actions except list_cameras."
+    },
+    {
+      "name": "lookback_minutes",
+      "type": "integer",
+      "required": false,
+      "description": "Optional for get_recent_events. Must be > 0."
+    },
+    {
+      "name": "enabled",
+      "type": "boolean",
+      "required": false,
+      "description": "Required for set_siren and set_light."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable outcome."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Smart-home gateway response payload."
+    }
+  ],
+  "metadata": {
+    "domain": "smart_home",
+    "actions": [
+      "read",
+      "control"
+    ],
+    "selectors": [
+      "camera_id",
+      "siren",
+      "light"
+    ],
+    "risk_level": "high",
+    "side_effects": "external_action",
+    "requires_auth": [
+      "smart_home_gateway"
+    ],
+    "requires_network": true,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": true
+  }
+}

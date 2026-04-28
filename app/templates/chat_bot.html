@@ -1,0 +1,594 @@
+{% extends 'base.html' %}
+
+{% block optional_css %}
+<!-- External CSS -->
+<link rel="stylesheet" href="{{ url_for('static', filename='css/emi.css') }}?v={{ static_v }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/weather.css') }}?v={{ static_v }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/proactive_popup.css') }}?v={{ static_v }}">
+<!-- Google Fonts -->
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+<!-- Font Awesome for Icons -->
+<link
+        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css"
+        rel="stylesheet"
+        crossorigin="anonymous"
+        referrerpolicy="no-referrer"
+/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.css" />
+{% endblock %}
+
+{% block content %}
+<!-- Header Section -->
+<header id="header">
+  <!-- Hamburger Menu Button -->
+  <button id="menu-toggle-btn" class="menu-toggle-btn" aria-label="Toggle Menu">
+    <i class="fas fa-bars"></i>
+  </button>
+
+  <h1 class="header__title">
+    <span
+      id="tts-toggle"
+      class="header-title-text tts-toggle"
+      role="button"
+      tabindex="0"
+      aria-label="Toggle text-to-speech"
+      aria-pressed="false"
+      title="Click to turn on speak mode"
+    >{{ assistant_name }}</span>
+  </h1>
+  
+  <!-- Chat Mode Indicator -->
+  <div id="mode-indicator" class="mode-indicator"></div>
+  
+  <div id="mute-btn-container">
+    <!-- Mute Icon -->
+    <i class="fas fa-volume-down" id="mute-icon"></i>
+    <!-- Unmute Icon -->
+    <i class="fas fa-volume-mute hidden" id="unmute-icon"></i>
+  </div>
+
+  <!-- My Life (KG + Wiki) Menu Button -->
+  <button id="life-menu-toggle-btn" class="menu-toggle-btn life-menu-toggle-btn" aria-label="Toggle My Life Menu" title="My Life">
+    <i class="fas fa-book-open"></i>
+  </button>
+
+  <!-- Dev Menu Button -->
+  <button id="dev-menu-toggle-btn" class="menu-toggle-btn dev-menu-toggle-btn" aria-label="Toggle Dev Menu">
+    <i class="fas fa-wrench"></i>
+  </button>
+
+  <!-- User Dropdown Menu (left hamburger) -->
+  <div id="dropdown-menu" class="dropdown-menu hidden">
+    <ul class="menu-list">
+      <li class="menu-item">
+        <button id="menu-theme-toggle" class="menu-btn">
+          <i class="fas fa-sun"></i>
+          <span>Light/Dark Mode</span>
+        </button>
+      </li>
+      <li class="menu-item">
+        <button id="menu-speak-mode" class="menu-btn" aria-pressed="false">
+          <i class="fas fa-microphone"></i>
+          <span>Speak Mode: Off</span>
+        </button>
+      </li>
+      <li class="menu-item">
+        <button id="menu-quiet-mode" class="menu-btn" aria-pressed="false">
+          <i class="fas fa-moon"></i>
+          <span>Quiet Mode: Off</span>
+        </button>
+      </li>
+      <li class="menu-item">
+        <a href="/daily_summary" target="_blank" class="menu-btn">
+          <i class="fas fa-calendar-day"></i>
+          <span>Daily Summary</span>
+        </a>
+      </li>
+      <li class="menu-item">
+        <a href="/doc/editor" target="_blank" class="menu-btn">
+          <i class="fas fa-file-alt"></i>
+          <span>Document Editor</span>
+        </a>
+      </li>
+      <li class="menu-item">
+        <a href="/insights" target="_blank" class="menu-btn">
+          <i class="fas fa-brain"></i>
+          <span>Insights</span>
+        </a>
+      </li>
+      <li class="menu-item">
+        <a href="/routines" target="_blank" class="menu-btn">
+          <i class="fas fa-clock"></i>
+          <span>Routines &amp; Schedule</span>
+        </a>
+      </li>
+      {% if music_enabled %}
+      <li class="menu-item">
+        <a href="/music" target="_blank" class="menu-btn">
+          <i class="fas fa-music"></i>
+          <span>Music</span>
+        </a>
+      </li>
+      {% endif %}
+      <li class="menu-item menu-submenu">
+        <button class="menu-btn submenu-toggle">
+          <i class="fas fa-cogs"></i>
+          <span>Settings</span>
+          <i class="fas fa-chevron-down submenu-arrow"></i>
+        </button>
+        <ul class="submenu">
+          <li class="submenu-item">
+            <a href="/preferences/general" class="menu-btn">
+              <i class="fas fa-user"></i>
+              <span>About You</span>
+            </a>
+          </li>
+          <li class="submenu-item">
+            <a href="/settings/user-bio" class="menu-btn">
+              <i class="fas fa-user-pen"></i>
+              <span>Your Bio</span>
+            </a>
+          </li>
+          <li class="submenu-item">
+            <a href="/settings/assistant" class="menu-btn">
+              <i class="fas fa-robot"></i>
+              <span>Assistant</span>
+            </a>
+          </li>
+          <li class="submenu-item">
+            <a href="/settings/wellness" class="menu-btn">
+              <i class="fas fa-heartbeat"></i>
+              <span>Wellness</span>
+            </a>
+          </li>
+          <li class="submenu-item">
+            <a href="/settings/quiet-mode" class="menu-btn">
+              <i class="fas fa-moon"></i>
+              <span>Quiet Mode</span>
+            </a>
+          </li>
+          <li class="submenu-item">
+            <a href="/settings/important-resources" class="menu-btn">
+              <i class="fas fa-file-pen"></i>
+              <span>Important Resources</span>
+            </a>
+          </li>
+        </ul>
+      </li>
+      <li class="menu-item menu-submenu">
+        <button class="menu-btn submenu-toggle">
+          <i class="fas fa-plug"></i>
+          <span>Integrations</span>
+          <i class="fas fa-chevron-down submenu-arrow"></i>
+        </button>
+        <ul class="submenu">
+          <li class="submenu-item">
+            <a href="/settings/features" class="menu-btn">
+              <i class="fas fa-toggle-on"></i>
+              <span>Features</span>
+            </a>
+          </li>
+          <li class="submenu-item">
+            <a href="/settings/integrations" class="menu-btn">
+              <i class="fas fa-plug"></i>
+              <span>Integrations</span>
+            </a>
+          </li>
+          <li class="submenu-item">
+            <a href="/settings/integrations/google" class="menu-btn">
+              <i class="fab fa-google"></i>
+              <span>Google OAuth</span>
+            </a>
+          </li>
+          <li class="submenu-item">
+            <a href="/settings/api-keys" class="menu-btn">
+              <i class="fas fa-key"></i>
+              <span>API Keys</span>
+            </a>
+          </li>
+          <li class="submenu-item">
+            <a href="/agent-directives" class="menu-btn">
+              <i class="fas fa-scroll"></i>
+              <span>Agent Directives</span>
+            </a>
+          </li>
+        </ul>
+      </li>
+      <li class="menu-item menu-item--danger">
+        <button id="menu-shutdown" class="menu-btn menu-btn--danger">
+          <i class="fas fa-power-off"></i>
+          <span>Shut Down EmiOS</span>
+        </button>
+      </li>
+    </ul>
+  </div>
+
+  <!-- Dev Dropdown Menu (right wrench) -->
+  <div id="dev-dropdown-menu" class="dropdown-menu dropdown-menu--right hidden">
+    <ul class="menu-list">
+      {% if dev_tools_enabled %}
+      <li class="menu-item">
+        <button id="menu-screen-capture-toggle" type="button" class="menu-btn" data-active="false" aria-pressed="false">
+          <i class="fas fa-camera"></i>
+          <span>Screen Capture: Disarmed</span>
+        </button>
+      </li>
+      {% endif %}
+      <li class="menu-item">
+        <button id="menu-verbose-log-toggle" class="menu-btn" data-active="false" aria-pressed="false">
+          <i class="fas fa-scroll"></i>
+          <span>Verbose Logs: Off</span>
+        </button>
+      </li>
+      <li class="menu-item">
+        <a href="/dev/subsystems" target="_blank" class="menu-btn">
+          <i class="fas fa-toggle-on"></i>
+          <span>Subsystem Controls</span>
+        </a>
+      </li>
+      <li class="menu-item">
+        <a href="/dev-wiki/" target="_blank" class="menu-btn">
+          <i class="fas fa-book-reader"></i>
+          <span>Dev Wiki (local)</span>
+        </a>
+      </li>
+      <li class="menu-item">
+        <a href="https://github.com/SemiSimpleMath/EmiOS-Alpha/blob/master/docs/INDEX.md" target="_blank" rel="noopener" class="menu-btn">
+          <i class="fab fa-github"></i>
+          <span>Dev Wiki on GitHub</span>
+        </a>
+      </li>
+      <li class="menu-item menu-submenu">
+        <button class="menu-btn submenu-toggle">
+          <i class="fas fa-bug"></i>
+          <span>Debug</span>
+          <i class="fas fa-chevron-down submenu-arrow"></i>
+        </button>
+        <ul class="submenu">
+          <li class="submenu-item">
+            <a href="/debug/status" target="_blank" class="menu-btn">
+              <i class="fas fa-heartbeat"></i>
+              <span>Day Flow Pipeline (JSON)</span>
+            </a>
+          </li>
+          <li class="submenu-item">
+            <a href="/debug/runtime/concurrency" target="_blank" class="menu-btn">
+              <i class="fas fa-network-wired"></i>
+              <span>Runtime Concurrency</span>
+            </a>
+          </li>
+          <li class="submenu-item">
+            <a href="/debug/logging" target="_blank" class="menu-btn">
+              <i class="fas fa-stream"></i>
+              <span>Logging Controls</span>
+            </a>
+          </li>
+          <li class="submenu-item">
+            <a href="/debug/agent-prompts" target="_blank" class="menu-btn">
+              <i class="fas fa-terminal"></i>
+              <span>Agent Prompt Debug</span>
+            </a>
+          </li>
+          <li class="submenu-item">
+            <a href="/debug/agent-workbench" target="_blank" class="menu-btn">
+              <i class="fas fa-flask"></i>
+              <span>Agent Workbench</span>
+            </a>
+          </li>
+          <li class="submenu-item">
+            <a href="/progress" target="_blank" class="menu-btn">
+              <i class="fas fa-route"></i>
+              <span>Agent Progress</span>
+            </a>
+          </li>
+        </ul>
+      </li>
+    </ul>
+  </div>
+
+  <!-- My Life Dropdown Menu (KG + Wiki + Entities) -->
+  <div id="life-dropdown-menu" class="dropdown-menu dropdown-menu--right hidden">
+    <ul class="menu-list">
+      <li class="menu-item">
+        <a href="/wiki/" target="_blank" class="menu-btn">
+          <i class="fas fa-book"></i>
+          <span>Wiki</span>
+        </a>
+      </li>
+      <li class="menu-item">
+        <a href="/kg-visualizer" target="_blank" class="menu-btn">
+          <i class="fas fa-project-diagram"></i>
+          <span>KG Visualizer</span>
+        </a>
+      </li>
+      <li class="menu-item">
+        <a href="/kg-interests" target="_blank" class="menu-btn">
+          <i class="fas fa-sliders-h"></i>
+          <span>KG Interests (what to track)</span>
+        </a>
+      </li>
+      <li class="menu-item">
+        <a href="/kg-proposals/" target="_blank" class="menu-btn">
+          <i class="fas fa-clipboard-list"></i>
+          <span>Shadow KG / Proposals</span>
+        </a>
+      </li>
+      <li class="menu-item">
+        <a href="/entity_cards" target="_blank" class="menu-btn">
+          <i class="fas fa-address-card"></i>
+          <span>Entity Cards</span>
+        </a>
+      </li>
+      <li class="menu-item">
+        <a href="/entity-cards-admin" target="_blank" class="menu-btn">
+          <i class="fas fa-sync-alt"></i>
+          <span>Entity Cards Admin (regen)</span>
+        </a>
+      </li>
+      <li class="menu-item">
+        <a href="/entity-card-maintenance" target="_blank" class="menu-btn">
+          <i class="fas fa-broom"></i>
+          <span>Entity Card Maintenance</span>
+        </a>
+      </li>
+      <li class="menu-item">
+        <a href="/kg-maintenance" target="_blank" class="menu-btn">
+          <i class="fas fa-stethoscope"></i>
+          <span>KG Maintenance</span>
+        </a>
+      </li>
+      <li class="menu-item">
+        <a href="/taxonomy_webviewer" target="_blank" class="menu-btn">
+          <i class="fas fa-sitemap"></i>
+          <span>Taxonomy Viewer</span>
+        </a>
+      </li>
+    </ul>
+  </div>
+</header>
+
+<!-- Main Dashboard -->
+<div class="dashboard">
+  <!-- Chat Widget -->
+  <section class="widget widget--chat" aria-labelledby="chat-heading">
+    <h2 id="chat-heading">Chat</h2>
+    <!-- Audio Elements -->
+    <audio
+            id="chat-bot-audio"
+            preload="auto"
+            style="display:none"
+    ></audio>
+
+    <audio id="notificationSound" src="{{ url_for('static', filename='sounds/youve-got-mail-sound.mp3') }}" preload="auto"></audio>
+    <!-- Chat Area -->
+    <div class="chat-area" role="log" aria-live="polite" id="chat-box">
+      <!-- Existing Chat Messages will appear here -->
+    </div>
+    <!-- Pending image attachment preview (paste/drag/drop) -->
+    <div id="pending-image-preview" class="pending-image-preview hidden" aria-live="polite">
+      <div class="pending-image-preview__inner">
+        <img id="pending-image-thumb" class="pending-image-thumb" alt="Pending image attachment preview" />
+        <div class="pending-image-preview__meta">
+          <div id="pending-image-name" class="pending-image-name"></div>
+          <button type="button" id="pending-image-remove" class="pending-image-remove" aria-label="Remove image attachment">
+            Remove
+          </button>
+        </div>
+      </div>
+    </div>
+    <!-- Chat Form -->
+    <form class="chat-form" aria-label="Send a message">
+      <label for="chat-input" class="visually-hidden">Message input</label>
+      <textarea
+              id="chat-input"
+              placeholder="Enter Your Message"
+              required
+              autocomplete="off"
+              aria-label="Message input"
+              rows="1"
+              style="resize: none;"
+      ></textarea>
+      <button type="button" id="record-btn-icon" aria-label="Start Recording">
+        <!-- Microphone Icon (Record Off) -->
+        <i class="fa-solid fa-microphone" id="record-btn-off"></i>
+
+        <!-- Stop Icon (Record On) -->
+        <i class="fa-solid fa-stop hidden" id="record-btn-on"></i>
+      </button>
+
+
+
+    </form>
+    <!-- Audio Playback Buttons -->
+    <div class="chat-box-header">
+    </div>
+  </section>
+
+  <aside class="widget widget--feed" aria-labelledby="feed-heading">
+    <h2 id="feed-heading">Feed</h2>
+    <ul id="feed-list" class="feed-list">
+      <!-- Feed items will be dynamically added here -->
+    </ul>
+  </aside>
+
+  <aside class="widget widget--todo" aria-labelledby="todo-heading">
+    <h2 id="todo-heading">ToDo List</h2>
+    <ul id="todo-list" class="todo-list">
+      <!-- Dynamic To-Do Items Will Be Injected Here -->
+    </ul>
+    <!-- To-Do Item Template (Hidden) -->
+    <template id="todo-item-template">
+      <li class="todo-item">
+        <label class="todo-label">
+          <input type="checkbox">
+          <span class="todo-task"></span>
+        </label>
+        <div class="todo-meta">
+          <span class="todo-due"></span>
+          <span class="todo-notes"></span>
+        </div>
+      </li>
+    </template>
+
+  </aside>
+
+  <!-- Calendar Widget -->
+  <section class="widget widget--calendar" aria-labelledby="calendar-heading">
+    <h2 id="calendar-heading">Calendar</h2>
+    <!-- Calendar Navigation -->
+    <div class="calendar-navigation">
+      <button id="calendar-prev-btn" aria-label="Previous Day">&lt;</button>
+      <span id="calendar-current-date">{{ current_date }}</span>
+      <button id="calendar-next-btn" aria-label="Next Day">&gt;</button>
+    </div>
+    <ul id="calendar-list" class="calendar-list">
+      <!-- Dynamic Calendar Events Will Be Injected Here -->
+    </ul>
+    <!-- Calendar Item Template (Hidden) -->
+    <template id="calendar-item-template">
+      <li class="calendar__item">
+        <div class="calendar__item--minimal">
+          <span class="calendar__event-title"></span>
+          <span class="calendar__event-time"></span>
+        </div>
+        <div class="calendar__item--details hidden">
+          <!-- Detailed fields will be injected here by JavaScript -->
+        </div>
+      </li>
+    </template>
+  </section>
+
+  <!-- Reminders Widget (Scheduler) -->
+  <section class="widget widget--scheduler" aria-labelledby="scheduler-heading">
+    <h2 id="scheduler-heading">Reminders</h2>
+    <!-- Navigation -->
+    <div class="scheduler-navigation">
+      <button id="scheduler-prev-btn" aria-label="Previous Day">&lt;</button>
+      <span id="scheduler-current-date"></span>
+      <button id="scheduler-next-btn" aria-label="Next Day">&gt;</button>
+    </div>
+    <!-- Reminder Items List -->
+    <ul id="scheduler-list" class="scheduler-list">
+      <!-- Dynamic reminder items will be injected here -->
+    </ul>
+    <!-- Scheduler Item Template -->
+    <template id="scheduler-item-template">
+      <li class="scheduler__item">
+        <div class="scheduler__item--minimal" tabindex="0" role="button" aria-expanded="false" aria-controls="scheduler-details">
+          <span class="scheduler__task-title"></span>
+          <span class="scheduler__task-deadline"></span>
+        </div>
+        <div class="scheduler__item--details hidden" id="scheduler-details">
+          <!-- Detailed information will be injected here -->
+        </div>
+      </li>
+    </template>
+  </section>
+
+
+  <!-- News Widget -->
+  <section class="widget widget--news" aria-labelledby="news-heading">
+    <h2>Latest News</h2>
+    <div id="news-widget" class="widget--news">
+    </div>
+  </section>
+
+  <!-- Weather Widget -->
+  <section class="widget weather">
+    {% include 'weather_widget.html' %}
+  </section>
+
+  <section class="widget widget--email" aria-labelledby="email-heading">
+    <h2 id="email-heading">Email</h2>
+    <ul id="email-list" class="email-list">
+      <!-- Dynamic Email Items Will Be Injected Here -->
+    </ul>
+
+    <template id="email-item-template">
+      <li class="email__item">
+        <div class="email__item--minimal">
+          <div class="email__meta">
+            <span class="email__sender">Sender: Unknown</span>
+            <span class="email__subject">No subject</span>
+          </div>
+          <span class="email__toggle-indicator">▼</span>
+        </div>
+        <div class="email__item--details hidden">
+          <!-- More detailed info goes here -->
+        </div>
+      </li>
+    </template>
+  </section>
+
+
+</div>
+
+<!-- Footer Section -->
+<footer id="footer">
+  <p>&copy; 2026 EmiOS. Released under the <a href="https://opensource.org/licenses/MIT" target="_blank" style="color: var(--accent-color); text-decoration: none;">MIT License</a>.</p>
+</footer>
+{% endblock %}
+
+{% block optional_js %}
+<!-- jQuery Library -->
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"
+        crossorigin="anonymous"></script>
+<!-- Socket.IO -->
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"
+        crossorigin="anonymous"></script>
+<!-- Markdown rendering for chat bubbles -->
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+<!-- External JavaScript -->
+<script>
+  // Move proactive popup into chat widget so it appears at top of chat
+  var _movePopup = setInterval(function() {
+    var popup = document.getElementById('proactive-popup');
+    var chat = document.querySelector('.widget--chat');
+    if (popup && chat && popup.parentNode !== chat) {
+      chat.insertBefore(popup, chat.firstChild);
+    }
+  }, 500);
+
+  // only on iOS Safari
+  if (/iP(hone|ad|od)/.test(navigator.userAgent)) {
+    const player = document.getElementById('chat-bot-audio');
+    const SILENT =
+      "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=";
+    function unlock() {
+      player.src = SILENT;
+      player.play()
+        .then(()=>{ player.pause(); player.src = ""; })
+        .catch(e=>console.warn("Audio unlock failed", e));
+      document.removeEventListener("touchend", unlock, true);
+    }
+    document.addEventListener("touchend", unlock, true);
+  }
+</script>
+<script src="{{ url_for('static', filename='js/emi/chat_render.js') }}?v={{ static_v }}"></script>
+  <script src="{{ url_for('static', filename='js/emi/audio.js') }}?v={{ static_v }}"></script>
+  <script src="{{ url_for('static', filename='js/emi/attachments.js') }}?v={{ static_v }}"></script>
+  <script src="{{ url_for('static', filename='js/emi/composer.js') }}?v={{ static_v }}"></script>
+  <script src="{{ url_for('static', filename='js/emi/chat_mode.js') }}?v={{ static_v }}"></script>
+  <script src="{{ url_for('static', filename='js/emi/request_sender.js') }}?v={{ static_v }}"></script>
+  <script src="{{ url_for('static', filename='js/emi/recorder.js') }}?v={{ static_v }}"></script>
+  <script src="{{ url_for('static', filename='js/emi/idle_manager.js') }}?v={{ static_v }}"></script>
+  <script src="{{ url_for('static', filename='js/emi/menu_controls.js') }}?v={{ static_v }}"></script>
+  <script src="{{ url_for('static', filename='js/emi/calendar_widgets.js') }}?v={{ static_v }}"></script>
+  <script src="{{ url_for('static', filename='js/emi/scheduler_widgets.js') }}?v={{ static_v }}"></script>
+  <script src="{{ url_for('static', filename='js/emi/ui_state.js') }}?v={{ static_v }}"></script>
+  <script src="{{ url_for('static', filename='js/emi/todo_widgets.js') }}?v={{ static_v }}"></script>
+  <script src="{{ url_for('static', filename='js/emi/email_widgets.js') }}?v={{ static_v }}"></script>
+  <script src="{{ url_for('static', filename='js/emi/news_weather_widgets.js') }}?v={{ static_v }}"></script>
+  <script src="{{ url_for('static', filename='js/emi/widget_contract.js') }}?v={{ static_v }}"></script>
+  <script src="{{ url_for('static', filename='js/emi/widget_handlers.js') }}?v={{ static_v }}"></script>
+  <script src="{{ url_for('static', filename='js/emi/socket_ingress.js') }}?v={{ static_v }}"></script>
+  <script src="{{ url_for('static', filename='js/emi/task_create_panel.js') }}?v={{ static_v }}"></script>
+  <script src="{{ url_for('static', filename='js/emi/doc_create_panel.js') }}?v={{ static_v }}"></script>
+  <script src="{{ url_for('static', filename='js/emi/geoguessr_panel.js') }}?v={{ static_v }}"></script>
+  <script src="{{ url_for('static', filename='js/emi/socket_heartbeat.js') }}?v={{ static_v }}"></script>
+  <script src="{{ url_for('static', filename='js/Emi.js') }}?v={{ static_v }}"></script>
+  <script src="{{ url_for('static', filename='js/weather.js') }}?v={{ static_v }}"></script>
+  <script>window.EMI_ASSISTANT_NAME = {{ assistant_name | tojson }};</script>
+  <script src="{{ url_for('static', filename='js/proactive_popup.js') }}?v={{ static_v }}"></script>
+{% endblock %}

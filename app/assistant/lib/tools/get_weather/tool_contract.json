@@ -1,0 +1,50 @@
+{
+  "name": "get_weather",
+  "description": "Fetch current weather conditions and forecast data. Defaults to the user's current location if no city is specified.",
+  "inputs": [
+    {
+      "name": "city",
+      "type": "string",
+      "required": false,
+      "description": "City name to look up. Defaults to user's current location."
+    },
+    {
+      "name": "forecast_type",
+      "type": "string",
+      "required": false,
+      "description": "Type of forecast: 'current' (default) for current conditions, or 'five_day' for a 5-day forecast."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable weather summary."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured weather data payload."
+    }
+  ],
+  "metadata": {
+    "domain": "weather",
+    "actions": [
+      "read",
+      "fetch"
+    ],
+    "selectors": [
+      "location",
+      "forecast"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "name": "vision_image_scout",
+  "description": "Run a vision agent on a provided image file path and return a concise prose description.",
+  "inputs": [
+    {
+      "name": "image_path",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "question",
+      "type": "string",
+      "required": false,
+      "description": ""
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "Arguments:\n{\n  \"image_path\": \"uploads/temp/monitor_1_20260208_141000_ab12cd.png\",\n  \"question\": \"Describe this screen in 1-2 sentences.\"\n}",
+  "metadata": {
+    "category": "vision",
+    "verbs": [
+      "operate"
+    ],
+    "entities": [
+      "vision"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "high",
+    "latency_class": "slow",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

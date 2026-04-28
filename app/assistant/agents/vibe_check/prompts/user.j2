@@ -1,0 +1,116 @@
+﻿########## CURRENT STATE ##########
+**Current Time:** {{ date_time }} ({{ day_of_week }})
+
+{% if resource_afk_statistics_output %}
+**Computer Presence:**
+{% if resource_afk_statistics_output.get("is_afk", False) %}
+[AWAY] - Idle: {{ resource_afk_statistics_output.get("idle_minutes", 0) | default(0) | round | int }} minutes
+{% else %}
+[AT KEYBOARD] - Active: {{ resource_afk_statistics_output.get("active_work_session_minutes", 0) | default(0) | round(1) }} minutes
+{% endif %}
+{% endif %}
+
+{%- if previous_state %}
+
+########## PREVIOUS PLAN STATE (maintain continuity) ##########
+**Previous Plan:** {{ previous_state.verbal_plan }}
+**Context Block:** {{ previous_state.context_block }}
+**Elapsed:** {{ previous_state.elapsed_minutes }} / {{ previous_state.plan_duration_minutes }} minutes
+{% if previous_state.current_targets %}
+**Current Targets (0-100 sliders):**
+- Energy: {{ previous_state.current_targets.energy }}
+- Valence: {{ previous_state.current_targets.valence }}
+- Loudness: {{ previous_state.current_targets.loudness }}
+- Speechiness: {{ previous_state.current_targets.speechiness }}
+- Acousticness: {{ previous_state.current_targets.acousticness }}
+- Instrumentalness: {{ previous_state.current_targets.instrumentalness }}
+- Liveness: {{ previous_state.current_targets.liveness }}
+- Tempo: {{ previous_state.current_targets.tempo }}
+{% endif %}
+{% if previous_state.current_phase_note %}**Current Phase:** {{ previous_state.current_phase_note }}{% endif %}
+
+**CONTINUITY RULE**: Unless something significant changed (health inference, user input, schedule change), your new plan should:
+1. Start from the CURRENT targets (0-100 sliders) shown above
+2. Continue in the same general direction as the previous plan
+3. Not make sudden jumps (typically max +/-10 energy and +/-10 valence from current, unless there is a strong reason)
+{% endif %}
+
+########## DAILY CONTEXT ##########
+{% if resource_daily_context_generator_output %}
+**Expected Schedule:**
+{% for item in resource_expected_calendar.get("expected_schedule", []) %}
+- {{ item.title }} {{ item.start_local }}{% if item.end_local %} - {{ item.end_local }}{% endif %} ({{ item.status }})
+{% endfor %}
+**Current Status:** {{ resource_daily_context_generator_output.get("current_status", "") }}
+**Day Theme:** {{ resource_daily_context_generator_output.get("day_theme", "") }}
+{% endif %}
+
+{% if resource_health_inference_output %}
+**User State (health inference):**
+- Mood: {{ (resource_health_inference_output.get("mental", {}) or {}).get("mood", "") }} | Stress: {{ (resource_health_inference_output.get("mental", {}) or {}).get("stress_load", "") }} | Anxiety: {{ (resource_health_inference_output.get("mental", {}) or {}).get("anxiety", "") }} | Mental Energy: {{ (resource_health_inference_output.get("mental", {}) or {}).get("mental_energy", "") }}
+- Physical Energy: {{ (resource_health_inference_output.get("physical", {}) or {}).get("energy_level", "") }}{% set pain = (resource_health_inference_output.get("physical", {}) or {}).get("pain_level", "") %}{% if pain and pain != "none" %} | Pain: {{ pain }}{% endif %}
+- Cognitive Load: {{ (resource_health_inference_output.get("cognitive", {}) or {}).get("load", "") }} | Focus: {{ (resource_health_inference_output.get("cognitive", {}) or {}).get("focus_depth", "") }}
+{% if resource_health_inference_output.get("general_health_assessment") %}
+- Assessment: {{ resource_health_inference_output.get("general_health_assessment", "") }}
+{% endif %}
+{% endif %}
+
+{% if calendar_events %}
+**Upcoming Calendar:**
+{% for event in calendar_events %}
+- {{ event.get("event_name", event.get("summary", "")) }}: {{ event.get("start_time", event.get("start", "")) }} - {{ event.get("end_time", event.get("end", "")) }}
+{% endfor %}
+{% endif %}
+
+########## USER PREFERENCES (read-only) ##########
+{% if resource_dayflow_routine %}
+**Routine:**
+{{ resource_dayflow_routine }}
+{% endif %}
+
+{% if resource_music_preferences %}
+**Music Preferences:**
+{{ resource_music_preferences }}
+{% endif %}
+
+{% if entity_info %}
+**Entity Cards:**
+{{ entity_info }}
+{% endif %}
+
+########## RECENT CONVERSATION ##########
+{% if recent_chat %}
+{% for msg in recent_chat %}
+[{{ msg.get("time_local", "") }}] {{ msg.get("sender", "") }}: {{ msg.get("content", "") }}
+{% endfor %}
+{% endif %}
+
+########## YOUR TASK ##########
+{% if previous_state %}
+**THIS IS A RECHECK** - maintain continuity unless something significant changed.
+
+1. **Check if anything significant changed:**
+   - Did user say something that changes the vibe?
+   - Did health inference change dramatically?
+   - Did the context block change?
+2. **If nothing significant changed:** Set `is_continuation: true`, start from current targets, continue smoothly.
+3. **If something significant changed:** Set `is_continuation: false`, explain in `change_reason`, still transition gradually unless user explicitly requested a change.
+{% else %}
+**THIS IS A NEW PLAN** - no previous state, create fresh.
+
+1. Identify the current context block from the expected schedule.
+2. Determine when it ends (start of the next block, or a reasonable horizon).
+3. Assess current state from health data.
+4. Create a verbal plan for the next 30-60 minutes.
+5. Define 1-3 phases with numeric targets.
+{% endif %}
+
+Remember:
+- Plan duration should be min(60 minutes, time until context block ends).
+- Be realistic about mood changes (valence is 0-100; typical change is ~10-25 points per 30 min unless there is a strong reason).
+- Consider user patterns (post-lunch dip, evening wind-down, etc.).
+- Honor the mood when appropriate - don't always try to "fix" negative states.
+
+If the user explicitly requested a specific kind of music (artist/genre/keyword) in recent chat:
+- Set `music_filters` to reflect that request (include_artists/include_genres/include_keywords).
+

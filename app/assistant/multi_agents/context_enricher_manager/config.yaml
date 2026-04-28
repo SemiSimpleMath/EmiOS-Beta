@@ -1,0 +1,35 @@
+name: context_enricher_manager
+class_name: MultiAgentManager
+description: "Context enrichment agent that reasons about items using pre-fetched Knowledge Graph context to add annotations, resolve ambiguities, and prevent misinterpretation by downstream agents."
+max_cycles: 5
+
+role_bindings:
+  delegator: shared::delegator
+
+agents:
+  - name: shared::delegator
+    class: Delegator
+  - name: context_enricher::planner
+    class: Agent
+  - name: shared::final_answer
+    class: Agent
+
+control_nodes:
+  - name: return_control
+    class: ReturnControlNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+  - name: graceful_exit_control_node
+    class: GracefulExitControlNode
+
+tools:
+  allowed_tools: []
+  except_tools: []
+
+flow_config:
+  state_map:
+    "shared::delegator": "context_enricher::planner"
+    "context_enricher::planner": "shared::final_answer"
+    "shared::final_answer": "manager_exit_node"
+    "graceful_exit": "graceful_exit_control_node"
+    "graceful_exit_control_node": "shared::final_answer"

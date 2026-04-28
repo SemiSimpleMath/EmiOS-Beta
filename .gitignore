@@ -1,0 +1,357 @@
+# ── Setup flag ────────────────────────────────────────────────────────────────
+.setup_complete
+
+# ── Claude Code ───────────────────────────────────────────────────────────────
+.claude/
+
+# ── EmiOS Website ─────────────────────────────────────────────────────────────
+EmiOS Web/
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.Python
+
+# ── Virtual environments ──────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+
+# ── Environment & secrets ─────────────────────────────────────────────────────
+.env
+.env.local
+# Keep .env.example tracked — it documents required keys for new installs
+
+# ── Credentials & OAuth tokens ────────────────────────────────────────────────
+app/assistant/lib/credentials/token.pickle
+app/assistant/lib/credentials/token.json
+app/assistant/lib/credentials/*.pickle
+app/assistant/lib/credentials/google_*.json
+app/assistant/lib/core_tools/credentials/
+app/certs/
+*.pickle
+
+# ── Databases (runtime-generated) ────────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+*.db-wal
+*.db-shm
+*.db-journal
+# Renamed / dated DB backups (e.g. emi.db.before_cleanup_20260418)
+emi.db.*
+*.db.before_*
+*.db.backup_*
+instance/
+chroma_db/
+app/chroma_db/
+# Dated Chroma backup directories
+chroma_db_backup*/
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+*.log.*
+logs/
+
+# ── Audio (TTS output) ────────────────────────────────────────────────────────
+app/static/temp_audio/
+temp_audio/
+*.wav
+*.mp3
+*.flac
+*.m4a
+
+# ── Uploads & temp ────────────────────────────────────────────────────────────
+uploads/
+temp/
+tmp/
+
+# ── OS files ──────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.iml
+*.swp
+
+# ── Node / frontend builds ────────────────────────────────────────────────────
+node_modules/
+app/graph_visualizer/frontend/node_modules/
+app/graph_visualizer/frontend/build/
+app/agent_flow/node_modules/
+
+# ── Test & coverage artifacts ─────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ── Archive folders (old code, debug scripts, migration artifacts) ─────────────
+_archive/
+**/*.archive
+
+# ── Temp scratch scripts ─────────────────────────────────────────────────────
+tmp_*.py
+tmp_*.json
+
+# ── Personal scratch / debug / one-off artifacts at repo root ────────────────
+/scratch_*
+/kg_churn_review.md
+/test_*.py
+/OPEN_SOURCE_RELEASE_PLAN.md
+
+# ── Personal task definitions (templates at tasks/ root remain) ──────────────
+/tasks/*/
+
+# ── IDE / editor configuration (personal) ────────────────────────────────────
+.cursor/
+.vscode/
+.idea/
+
+# ── Stale alpha-era / implementation-journal root docs ───────────────────────
+/ALPHA_PACKAGE_CONTENTS.md
+/ALPHA_PACKAGE_SUMMARY.md
+/ALPHA_RELEASE.md
+/CHROMADB_IMPLEMENTATION.md
+/GOOGLE_OAUTH_IMPLEMENTATION.md
+/CREDENTIALS_SETUP_INSTRUCTIONS.md
+/INSTALL.md
+/QUICK_START.md
+/RESET_GUIDE.md
+/user_activity.md
+
+# ── Secrets, certs, and auth keys ────────────────────────────────────────────
+*.pem
+*.p8
+musickit/
+/app/assistant/lib/credentials/
+/app/services/gemini_structured_output_test.py
+
+# ── Personal data dumps and migration backups ────────────────────────────────
+/old_kg_db.txt
+/backups/
+
+# ── Archived code (plan called for deletion) and disabled tools ──────────────
+*.archive
+*. archive
+**/.disabled
+
+# ── Orphan templates / stale alpha-era / one-shot scripts ────────────────────
+/templates/
+/app/TODO.txt
+/create_alpha_package.py
+/backup_entity_cards.py
+/setup_full.py
+/requirements_full.txt
+
+# ── Audit artifact (regenerate with: git ls-files | python ... > tracked_tree.txt) ──
+/tracked_tree.txt
+
+# ── Personal __main__ debug scripts (run against live DB, not portable tests) ─
+/app/assistant/utils/debug_injection.py
+/app/assistant/entity_management/ENTITY_CARD_INJECTION_README.md
+/app/assistant/tests/entity_management/test_alias_injection.py
+/app/assistant/tests/entity_management/test_entity_card_injection.py
+/app/assistant/tests/entity_management/test_injection_flow.py
+/app/assistant/tests/entity_management/test_simple_matcher.py
+/app/assistant/tests/entity_management/test_word_matching.py
+/app/assistant/tests/agent_tests/knowledge_parser/knowledge_parser.py
+/app/assistant/tests/agent_tests/context_extractor/context_extractor_test.py
+/app/assistant/tests/generic_agent/generic_agent.py
+/app/assistant/tests/manager_tests/context_enricher/context_enricher_test.py
+/app/assistant/test/agent_tests/test_web_planner_timing.py
+
+# ── Deprecated test files (intentionally pytest-skipped, plan called for delete) ─
+/app/assistant/test/agent_tests/test_memory_final_answer_agent.py
+/app/assistant/test/agent_tests/test_memory_decider_agent.py
+/app/assistant/test/agent_tests/test_memory_json_finder_agent.py
+/app/assistant/test/agent_tests/test_memory_json_editor_agent.py
+
+# ── Dead memory pipeline (every subdir has empty .ignore marker) ─────────────
+/app/assistant/agents/memory/
+/app/assistant/tests/agent_tests/memory_apply_fact/
+/app/assistant/tests/agent_tests/memory_belief_arbiter/
+/app/assistant/tests/agent_tests/memory_decider/
+/app/assistant/tests/agent_tests/memory_final_answer/
+/app/assistant/tests/agent_tests/memory_json_editor/
+/app/assistant/tests/agent_tests/memory_json_finder/
+/app/assistant/tests/manager_tests/memory_manager/
+
+# ── Personal data dumps and orphan test artifacts ────────────────────────────
+/app/assistant/maintenance_manager/daily_summaries/
+/app/assistant/tests/kg_query_analysis_report.json
+
+# ── Orphan static assets (not referenced by any template/CSS) ────────────────
+/app/static/sounds/Snaptik.app_*.mp4
+/app/static/images/img.png
+/app/static/images/logo4.png
+/app/static/images/slack/
+/emi_logo/
+
+# ── Stale prompt backups ─────────────────────────────────────────────────────
+/app/assistant/agents/web/planner/prompts/backup_user.j2
+
+# ── Tracked tmp_test_*.py that pre-dated the tmp_*.py rule ───────────────────
+/app/assistant/test/tmp_test_playwright_navigation.py
+/app/assistant/test/tmp_test_tool_planner.py
+
+# ── MCP generated cache ───────────────────────────────────────────────────────
+mcp/tool_cache/
+
+# ── Large / local data ────────────────────────────────────────────────────────
+data/music_data/
+data/chroma_chat_memory/
+data/execution_traces/
+data/playwright_profile/
+data/kg_projection/
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PERSONAL DATA — nothing below this line should ever be in a public repo
+# ─────────────────────────────────────────────────────────────────────────────
+# Strategy: real .json files are gitignored; .json.example files are tracked.
+# On first run, bootstrap copies .example -> .json if the .json is missing.
+
+# User profile (contains real name, birthdate, family, address, job)
+resources/user/resource_user_data.json
+resources/user/.setup_draft.json
+
+# Assistant core & personality (contains your personal identity setup)
+resources/assistant/assistant_core.json
+resources/assistant/resource_assistant_data.json
+resources/assistant/resource_assistant_personality_data.json
+resources/assistant/resource_chat_guidelines_data.json
+resources/assistant/resource_relationship_config.json
+# resource_assistant_limits_data.json is generic security policy — safe to track
+
+# User settings (API keys, voice preferences, provider config)
+app/assistant/user_settings_manager/user_settings_data/user_settings.json
+
+# Runtime-generated resource outputs (personal health, sleep, activity, routines)
+resources/dayflow_pipeline_outputs/
+resources/daily_insights_pipeline_outputs/
+resources/memory/
+resources/kg_derived/
+resources/status/
+resources/day_context/
+
+# Location & runtime context data (personal — stays gitignored)
+# Ignore everything in resources/context/user/ (personal data)
+resources/context/user/*
+resources/context/global/resource_weather.json
+resources/resource_routine_status.json
+resources/resource_user_location.json
+resources/resource_current_location.json
+
+# resource_subscriptions.json is structural config (no personal data) — keep tracked
+# so a fresh clone has a working default and the app doesn't crash on first message.
+
+# Compiled instruction files (rendered from templates, may contain personal data)
+resources/instructions/*
+# Exceptions: non-personal structural instruction files that are safe to ship
+!resources/instructions/resource_activity_log.md
+!resources/instructions/resource_assistant_guidelines.md
+!resources/instructions/resource_auto_planner_instructions.md
+!resources/instructions/resource_orchestrator_user_prefs.md
+!resources/instructions/resource_bbc_guidelines.md
+!resources/instructions/resource_cnn_guidelines.md
+!resources/instructions/resource_doordash_guidelines.md
+
+# Personal soul/identity doc
+SOUL.md
+
+# Rooms — personal contact rooms (contain real names, relationships, private context)
+# The structural templates and system rooms ARE tracked (master_room, dayflow_orchestrator,
+# 1234, _templates) — only personal contact rooms are excluded.
+app/assistant/rooms/justin/
+app/assistant/rooms/katy/
+app/assistant/rooms/phil/
+app/assistant/rooms/tg_*/
+app/assistant/rooms/telegram/
+app/assistant/rooms/slack/
+app/assistant/rooms/sms/
+
+# Room resource_*.json files are runtime-generated from assistant_core.json on first save.
+# They contain the owner's name and personal identity — gitignored for all rooms.
+app/assistant/rooms/*/resource_*.json
+app/assistant/rooms/**/resource_*.json
+# Exception: telegram_standard template uses {{PLACEHOLDER}} tokens, not personal data.
+!app/assistant/rooms/_templates/telegram_standard/resource_*.json
+!app/assistant/rooms/_templates/slack_standard/resource_*.json
+
+# Room live conversation history (runtime-generated)
+app/assistant/rooms/*/conversation.json
+app/assistant/rooms/**/conversation.json
+
+# Test outputs (contain personal KG/pipeline data)
+app/assistant/test/outputs/
+
+# User settings at repo root (legacy path, still needs ignoring)
+user_settings.json
+
+# Test resource fixtures that contain personal preference data
+resources/tests/
+
+# Day context archive (historical per-day pipeline outputs, personal health/sleep data)
+day_context/
+
+# Pipeline state pointers (runtime-generated)
+resources/pointers/
+
+# Personal tasks (contain real contact names and private instructions)
+tasks/auto_reply_*/
+
+# Personal test/simulation scripts
+app/assistant/tests/manager_tests/room/run_phil_twilio_simulate.py
+
+# Docs archive with personal content
+docs/archived/user_sleep_current.md
+docs/archived/user_interaction_instructions.archive
+
+# Compiled instruction outputs (rendered from Jinja templates, may contain personal data)
+resources/templates/instructions/*.md
+
+# Desktop activity snapshot (personal, runtime-generated)
+resource_desktop_activity_recent.md
+/app/daily_summaries/
+/tools/
+/tests/
+/postgresql_to_sqlite_migration/
+# (note: /emi_logo/ is also covered above in "Orphan static assets")
+# docs/ is tracked. Personal scratch subdirs are not.
+/docs/drafts/
+/docs/audits/
+/week_context/2026/10/pipeline_runs/
+/todo list 2026.txt
+/week_context/
+/app/assistant/pipelines/kg_chat_pipeline/kg_pipeline_reset_stuck.py
+/app/assistant/tests/agent_tests/dayflow_agent_repro/
+/app/assistant/tests/agent_tests/gemini_intake_triage_repro/
+# Old-architecture test harnesses with personal fixture data
+/app/assistant/tests/agent_tests/blackboard/
+/app/assistant/tests/agent_tests/checklist/
+/app/assistant/tests/agent_tests/planner/
+/app/assistant/tests/agent_tests/writer/
+
+# KG repair pipeline outputs (contain personal KG data from pipeline runs)
+app/assistant/kg_repair_pipeline/results/*.json
+/jukka_profile.txt
+/app/open_source_cleanup.md
+/app/assistant/database/migrations/
+/kg_pipeline_v2/
+# Root-level scratch/debug scripts and outputs (underscore-prefixed)
+/_*.py
+/_*.txt
+/_*.json
+/=
+/run_kg_reprocess_parallel.py
+/app/_ascii_normalize_diff.txt
+
+# ── CSS backups & drafts ─────────────────────────────────────────────────────
+*_backup_*.css
+emi_shared.css

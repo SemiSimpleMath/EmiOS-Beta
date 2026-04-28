@@ -1,0 +1,58 @@
+{
+  "name": "web_get_content",
+  "description": "Extract readable text content from the current browser page. Use this for reading, research, and content extraction — not for navigation. Returns the page's visible text with scripts, styles, and navigation elements removed. Ideal for extracting headlines, article text, prices, or any textual data from a page already loaded in the browser.",
+  "inputs": [
+    {
+      "name": "max_chars",
+      "type": "number",
+      "required": false,
+      "description": "Maximum characters of text to return. Default 15000. Range: 1000-50000."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Page URL, title, and extracted text content."
+    },
+    {
+      "path": "data.url",
+      "type": "string",
+      "description": "Current page URL."
+    },
+    {
+      "path": "data.title",
+      "type": "string",
+      "description": "Page title."
+    },
+    {
+      "path": "data.text",
+      "type": "string",
+      "description": "Extracted readable text content."
+    },
+    {
+      "path": "data.truncated",
+      "type": "boolean",
+      "description": "True if text was truncated to max_chars."
+    }
+  ],
+  "metadata": {
+    "domain": "browser",
+    "actions": [
+      "read",
+      "extract"
+    ],
+    "selectors": [
+      "max_chars"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

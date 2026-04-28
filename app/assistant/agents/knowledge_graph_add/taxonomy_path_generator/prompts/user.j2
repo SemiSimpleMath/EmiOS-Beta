@@ -1,0 +1,12 @@
+Extract type concepts for this node:
+
+**Label:** {{ node_label }}
+**Type:** {{ node_type }}
+{% if node_sentence %}**Context:** {{ node_sentence }}{% endif %}
+
+What type concepts describe what this node IS? (1-5 concepts)
+
+Return:
+- sub_path: List of type concept strings
+- confidence: 0.0-1.0
+- reasoning: Why these concepts?

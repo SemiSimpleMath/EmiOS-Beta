@@ -1,0 +1,44 @@
+{
+  "name": "notify_user",
+  "description": "Use this tool to alert the user some information that might be important to them.  You will not get an answer back other than success result.",
+  "inputs": [
+    {
+      "name": "notify_info",
+      "type": "string",
+      "required": true,
+      "description": ""
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "Argument to inform_user is anything that you want to relay to the user.\n\nnotify_info: str",
+  "metadata": {
+    "domain": "user_interaction",
+    "actions": [
+      "notify",
+      "alert"
+    ],
+    "selectors": [
+      "text"
+    ],
+    "risk_level": "medium",
+    "side_effects": "external_action",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": true,
+    "room_visibility_default": "show",
+    "approval_required": false
+  }
+}

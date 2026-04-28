@@ -1,0 +1,102 @@
+{
+  "name": "create_calendar_event",
+  "description": "Creates a single calendar event. Supports attendees, location, description, links, and scheduling metadata (flexibility, blocking).",
+  "inputs": [
+    {
+      "name": "event_name",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "start",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "end",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "time_zone",
+      "type": "string",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "description",
+      "type": "string",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "location",
+      "type": "string",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "link",
+      "type": "string",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "participants",
+      "type": "array",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "flexibility",
+      "type": "string",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "blocking",
+      "type": "boolean",
+      "required": false,
+      "description": ""
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "Arguments to this tool are the name of the event, start time string and end time string. Optional fields include description, location, link, attendees, and flexibility.\n\n**Required:**\nevent_name: str - Name/title of the event\nstart: str - Start time in ISO format (e.g., \"2025-11-15T12:00:00\")\nend: str - End time in ISO format (e.g., \"2025-11-15T13:00:00\")\n\n**Optional:**\ndescription: str - Description or notes for the event\nlocation: str - Physical location or address\nlink: str - URL link (will be appended to description)\nparticipants: list[dict] - List of attendees, each with 'email' (required) and 'name' (optional)\n  Example: [{\"email\": \"user@example.com\", \"name\": \"John Doe\"}]\nflexibility: str - How moveable this event is. \"fixed\" (default), \"flexible\", \"soft_block\", or \"aspirational\".\nblocking: bool - True (default) blocks time on calendar, False shows as available.\n\n[WARNING] Avoid ambiguity at midnight: Times exactly at 00:00:00 can be misinterpreted as either the start or end of a day. When setting boundaries, explicitly choose 23:59:59 (end of the previous day) or 00:01:00 (start of the new day) for clarity.",
+  "metadata": {
+    "domain": "calendar",
+    "actions": [
+      "create"
+    ],
+    "selectors": [
+      "title",
+      "date_range",
+      "participant",
+      "location"
+    ],
+    "risk_level": "medium",
+    "side_effects": "writes_data",
+    "requires_auth": [
+      "google"
+    ],
+    "requires_network": true,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

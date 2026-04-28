@@ -1,0 +1,23 @@
+name: dayflow_orchestrator::intake_triage
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5-mini"
+  model_tier: "mini"
+
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+entity_scan_keys: [eligible_items_now, active_dayflow_items, resource_expected_calendar]
+entity_card_level: 0
+
+user_context_items:
+  - eligible_items_now
+  - active_dayflow_items
+  - active_plan_synopses
+  - recently_completed_items
+  - resource_expected_calendar
+  - entity_card
+
+system_context_items: []

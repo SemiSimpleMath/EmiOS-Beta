@@ -1,0 +1,21 @@
+name: shared::final_answer_lite
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5-mini"
+  model_tier: "mini"
+
+allowed_tools: []
+except_tools: []
+
+user_context_items:
+  - date_time
+  - task
+  - information
+  - recent_history
+  - checklist
+  - final_answer_content
+
+system_context_items: []
+

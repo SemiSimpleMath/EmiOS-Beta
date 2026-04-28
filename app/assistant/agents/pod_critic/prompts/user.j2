@@ -1,0 +1,26 @@
+########## CANDIDATE POD ##########
+
+**one_liner:** {{ one_liner }}
+**tags:** {{ tags }}
+
+**sections:**
+{% for section in sections %}
+--- section {{ loop.index }} ---
+{{ section }}
+{% endfor %}
+
+{% if pre_context %}
+########## PRE-CONTEXT (reference only) ##########
+
+Messages from the same room just before this pod. Use this to decide
+whether the pod is derivative (the signal is already established)
+versus introducing something new.
+
+{{ pre_context }}
+
+{% endif %}
+########## YOUR TASK ##########
+
+Decide: accept or reject this candidate pod? Pick a content_type
+(knowledge / preference / memory / actionable / none) and give a
+one-sentence reason.

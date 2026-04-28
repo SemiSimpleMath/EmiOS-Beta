@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent Prompt Debug</title>
+    <style>
+        :root {
+            --bg: #1a1a2e;
+            --card-bg: #16213e;
+            --text: #eee;
+            --muted: #8892b0;
+            --accent: #e94560;
+            --accent-green: #4ecca3;
+            --border: #30363d;
+            --mono: 'Consolas', 'Monaco', monospace;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: var(--accent);
+            margin-bottom: 14px;
+            font-size: 1.7rem;
+        }
+
+        .sub {
+            color: var(--muted);
+            margin-bottom: 18px;
+            font-size: 13px;
+            line-height: 1.4;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+
+        .row {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        label { font-size: 13px; color: var(--muted); }
+
+        input[type="checkbox"] {
+            transform: scale(1.1);
+        }
+
+        button {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 9px 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        button.secondary { background: #0f4c75; }
+        button:disabled { opacity: 0.55; cursor: not-allowed; }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        th, td {
+            text-align: left;
+            padding: 10px 8px;
+            border-bottom: 1px solid rgba(255,255,255,0.07);
+            font-size: 13px;
+            vertical-align: middle;
+        }
+        th { color: var(--muted); font-weight: 600; }
+        td.name { font-family: var(--mono); font-size: 12px; }
+
+        .status {
+            font-size: 12px;
+            color: var(--muted);
+            margin-top: 10px;
+        }
+        .status.error { color: #ff7b72; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Agent Prompt Debug</h1>
+        <div class="sub">
+            Toggle per-agent printing of system and user prompts at runtime.
+            Global env override <code>EMI_PRINT_PROMPTS=1</code> still forces all prompts.
+        </div>
+
+        <div class="card">
+            <div class="row">
+                <div>
+                    <label>Default system prompt printing</label><br/>
+                    <input id="defaultSystem" type="checkbox"/>
+                </div>
+                <div>
+                    <label>Default user prompt printing</label><br/>
+                    <input id="defaultUser" type="checkbox"/>
+                </div>
+                <div>
+                    <label>Default LLM result printing</label><br/>
+                    <input id="defaultResults" type="checkbox"/>
+                </div>
+                <div style="margin-top: 18px;">
+                    <button id="saveDefaultBtn" class="secondary" onclick="saveDefault()">Save Defaults</button>
+                </div>
+                <div style="margin-top: 18px;">
+                    <button id="refreshBtn" class="secondary" onclick="refresh()">Refresh</button>
+                </div>
+            </div>
+            <div class="status" id="status"></div>
+        </div>
+
+        <div class="card">
+            <div class="row" style="justify-content: space-between;">
+                <div>
+                    <strong>Per-agent overrides</strong>
+                    <div class="sub" style="margin: 6px 0 0 0;">
+                        Overrides take precedence over defaults.
+                    </div>
+                </div>
+            </div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Agent</th>
+                        <th>System</th>
+                        <th>User</th>
+                        <th>Results</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="agentRows"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        let state = { agents: [], prompt_debug: { default: { system: false, user: false }, agents: {} } };
+
+        function setStatus(msg, isError=false) {
+            const el = document.getElementById('status');
+            el.textContent = msg || '';
+            el.className = isError ? 'status error' : 'status';
+        }
+
+        async function refresh() {
+            setStatus('Loading...');
+            try {
+                const res = await fetch('/debug/agent-prompts/data');
+                const data = await res.json();
+                state = data || state;
+                render();
+                setStatus('Loaded');
+            } catch (err) {
+                setStatus('Failed to load data', true);
+            }
+        }
+
+        function render() {
+            const def = (state.prompt_debug && state.prompt_debug.default) || { system: false, user: false, results: false };
+            document.getElementById('defaultSystem').checked = !!def.system;
+            document.getElementById('defaultUser').checked = !!def.user;
+            document.getElementById('defaultResults').checked = !!def.results;
+
+            const rows = document.getElementById('agentRows');
+            rows.innerHTML = '';
+            const agents = state.agents || [];
+            const overrides = (state.prompt_debug && state.prompt_debug.agents) || {};
+
+            agents.forEach(agent => {
+                const name = agent.name;
+                const override = overrides[name];
+                const sysVal = override ? !!override.system : false;
+                const userVal = override ? !!override.user : false;
+                const resVal = override ? !!override.results : false;
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td class="name">${name}</td>
+                    <td><input type="checkbox" data-name="${name}" data-kind="system" ${sysVal ? 'checked' : ''}></td>
+                    <td><input type="checkbox" data-name="${name}" data-kind="user" ${userVal ? 'checked' : ''}></td>
+                    <td><input type="checkbox" data-name="${name}" data-kind="results" ${resVal ? 'checked' : ''}></td>
+                    <td>
+                        <button class="secondary" data-action="save" data-name="${name}">Save</button>
+                        <button data-action="clear" data-name="${name}">Clear</button>
+                    </td>
+                `;
+                rows.appendChild(tr);
+            });
+
+            rows.querySelectorAll('button').forEach(btn => {
+                btn.addEventListener('click', (e) => handleRowAction(e.target));
+            });
+        }
+
+        async function saveDefault() {
+            const system = document.getElementById('defaultSystem').checked;
+            const user = document.getElementById('defaultUser').checked;
+            const results = document.getElementById('defaultResults').checked;
+            setStatus('Saving defaults...');
+            try {
+                const res = await fetch('/debug/agent-prompts/default', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ system, user, results })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Failed');
+                state.prompt_debug = data.prompt_debug;
+                setStatus('Defaults saved');
+            } catch (err) {
+                setStatus('Failed to save defaults', true);
+            }
+        }
+
+        async function handleRowAction(target) {
+            const action = target.getAttribute('data-action');
+            const name = target.getAttribute('data-name');
+            if (!name) return;
+            if (action === 'clear') {
+                await updateAgent(name, null, null, null, true);
+                return;
+            }
+            const sys = document.querySelector(`input[data-name="${name}"][data-kind="system"]`).checked;
+            const usr = document.querySelector(`input[data-name="${name}"][data-kind="user"]`).checked;
+            const res = document.querySelector(`input[data-name="${name}"][data-kind="results"]`).checked;
+            await updateAgent(name, sys, usr, res, false);
+        }
+
+        async function updateAgent(agent_name, system, user, results, remove) {
+            setStatus('Saving...');
+            try {
+                const payload = { agent_name, remove: !!remove };
+                if (!remove) {
+                    payload.system = !!system;
+                    payload.user = !!user;
+                    payload.results = !!results;
+                }
+                const res = await fetch('/debug/agent-prompts/agent', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Failed');
+                state.prompt_debug = data.prompt_debug;
+                render();
+                setStatus('Saved');
+            } catch (err) {
+                setStatus('Failed to save', true);
+            }
+        }
+
+        refresh();
+    </script>
+</body>
+</html>

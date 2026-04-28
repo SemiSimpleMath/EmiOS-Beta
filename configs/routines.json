@@ -1,0 +1,517 @@
+{
+  "schema_version": 3,
+  "enabled": true,
+  "max_workers": 20,
+  "state_resource_file": "resource_routine_status.json",
+  "routines": [
+    {
+      "id": "morning_briefing",
+      "enabled": false,
+      "_comment": "Example task-based routine. Provide your own tasks/morning_briefing/task_spec.md and flip enabled to use.",
+      "name": "Morning Briefing",
+      "aliases": [
+        "morning briefing",
+        "daily briefing"
+      ],
+      "run_policy": {
+        "type": "daily",
+        "time_local": "05:30"
+      },
+      "runner": "task",
+      "spec": {
+        "task_file": "tasks/morning_briefing/task_spec.md",
+        "compiled_file": "tasks/morning_briefing/morning_briefing.json",
+        "execution_mode": "compiled_task"
+      },
+      "notes": "Compiled task: playwright headlines, emails, todos, daily summary agent, save to storage."
+    },
+    {
+      "id": "sample_morning_routine",
+      "enabled": false,
+      "run_policy": {
+        "type": "daily",
+        "time_local": "07:00"
+      },
+      "runner": "task",
+      "spec": {
+        "task_file": "tasks/morning_routine/task_spec.md"
+      },
+      "notes": "Example routine. Enable and adjust time to use."
+    },
+    {
+      "id": "daily_insights_pipeline",
+      "enabled": true,
+      "name": "Daily insights pipeline",
+      "aliases": [
+        "daily pipeline",
+        "nightly pipeline",
+        "daily insights",
+        "insights pipeline"
+      ],
+      "runner": "pipeline",
+      "spec": {
+        "pipeline_id": "daily_insights"
+      },
+      "run_policy": {
+        "type": "daily",
+        "time_local": "00:05"
+      },
+      "notes": "Nightly pipeline: archive context + tickets, build timeline, extract insights, apply to resource files, build assessment + summary. Runs steps sequentially in-process."
+    },
+    {
+      "id": "dayflow_pipeline",
+      "enabled": true,
+      "name": "Day flow pipeline",
+      "aliases": [
+        "dayflow",
+        "day flow",
+        "physical pipeline",
+        "wellness pipeline"
+      ],
+      "runner": "pipeline",
+      "spec": {
+        "pipeline_id": "dayflow"
+      },
+      "run_policy": {
+        "type": "interval",
+        "min_interval_seconds": 60
+      },
+      "notes": "Step-based DayFlow pipeline."
+    },
+    {
+      "id": "dayflow_orchestrator_room_tick",
+      "enabled": false,
+      "name": "Dayflow orchestrator room cadence (REPLACED by DayflowScheduler)",
+      "aliases": [
+        "dayflow orchestrator tick",
+        "dayflow room cadence"
+      ],
+      "runner": "function",
+      "spec": {
+        "function_name": "dayflow_orchestrator_cadence_tick"
+      },
+      "run_policy": {
+        "type": "interval",
+        "min_interval_seconds": 300
+      },
+      "notes": "DISABLED: Replaced by event-driven DayflowScheduler. Kept for reference."
+    },
+    {
+      "id": "kg_pipeline",
+      "enabled": true,
+      "name": "KG pipeline",
+      "aliases": [
+        "kg pipeline",
+        "knowledge graph pipeline",
+        "kg chat pipeline"
+      ],
+      "runner": "pipeline",
+      "spec": {
+        "pipeline_id": "kg_pipeline"
+      },
+      "run_policy": {
+        "type": "quiet_hours",
+        "feature": "kg"
+      },
+      "notes": "Ingests chat messages into the knowledge graph (2026-04-25 refactor — bucket-per-stage architecture). Runs once per day during the KG quiet hours window configured in Settings → Quiet Mode."
+    },
+    {
+      "id": "entity_cards_pipeline",
+      "enabled": true,
+      "name": "Entity cards pipeline",
+      "aliases": [
+        "entity pipeline",
+        "entity cards",
+        "entity-cards pipeline"
+      ],
+      "runner": "pipeline",
+      "spec": {
+        "pipeline_id": "entity_cards"
+      },
+      "run_policy": {
+        "type": "daily",
+        "time_local": "00:20"
+      },
+      "notes": "Nightly maintenance: generate missing entity cards (no overwrites of core cards) and produce a conservative pruning dry-run report."
+    },
+    {
+      "id": "activity_log",
+      "enabled": false,
+      "_comment": "Example task-based routine. Provide your own tasks/activity_log/task_spec.md and flip enabled to use.",
+      "name": "Activity log (screenshots)",
+      "aliases": [
+        "activity logger",
+        "desktop activity log",
+        "screen log"
+      ],
+      "runner": "task",
+      "spec": {
+        "task_file": "tasks/activity_log/task_spec.md",
+        "execution_mode": "compiled_task",
+        "compiled_file": "tasks/activity_log/activity_log_screen_caps_2026_02_08.json",
+        "information": "Scheduled activity log capture. Task spec applies work-hours gating and writes resource_desktop_activity_recent.md for daily_context."
+      },
+      "manual_toggle": {
+        "resource_file": "resource_screen_capture_control.json",
+        "auto_off_time_local": "08:30"
+      },
+      "afk_guard": {
+        "skip_when_afk": true,
+        "skip_when_potentially_afk": true
+      },
+      "run_policy": {
+        "type": "interval",
+        "min_interval_seconds": 600
+      },
+      "notes": "Runs the activity_log task on an interval (cron-style). The task spec enforces work-hours skip (09:00-16:30)."
+    },
+    {
+      "id": "weekly_insights_pipeline",
+      "enabled": true,
+      "name": "Weekly insights pipeline",
+      "aliases": [
+        "weekly pipeline",
+        "weekly insights",
+        "weekly synthesis",
+        "week review"
+      ],
+      "runner": "pipeline",
+      "spec": {
+        "pipeline_id": "weekly_insights"
+      },
+      "run_policy": {
+        "type": "weekly",
+        "day_of_week": "Monday",
+        "time_local": "00:10"
+      },
+      "notes": "Reads the 7 most recent daily assessment summaries and synthesizes cross-day patterns and belief candidates."
+    },
+    {
+      "id": "timesheet_routine",
+      "enabled": false,
+      "name": "Timesheet routine",
+      "aliases": [
+        "timesheet routine",
+        "timesheets routine",
+        "timesheet"
+      ],
+      "runner": "task",
+      "spec": {
+        "task_file": "tasks/timesheet/task_spec.md",
+        "execution_mode": "compiled_task",
+        "compiled_file": "tasks/timesheet/timesheet_narratives_v1.json",
+        "information": "Generate timesheet narratives from dated timesheet log and write canonical narratives output."
+      },
+      "run_policy": {
+        "type": "daily",
+        "time_local": "09:00"
+      },
+      "notes": "Manual/on-demand timesheet narrative routine. Scheduled execution remains disabled by default."
+    },
+    {
+      "id": "belief_engine",
+      "enabled": true,
+      "name": "Belief engine — all enabled domains",
+      "aliases": [
+        "belief engine",
+        "beliefs",
+        "update beliefs"
+      ],
+      "runner": "pipeline",
+      "spec": {
+        "pipeline_id": "belief_engine"
+      },
+      "run_policy": {
+        "type": "daily",
+        "time_local": "00:30"
+      },
+      "notes": "Loops over every domain marked enabled in configs/belief_domains.yaml and updates that domain's beliefs from the last 14 days of daily insights + ticket signals. Adding / disabling a domain is a YAML edit, not a code change. Domain failures are logged but don't abort the rest. The export step (belief_engine_export, 01:00) merges all active beliefs into resource_user_beliefs.json afterward."
+    },
+    {
+      "id": "belief_engine_export",
+      "enabled": true,
+      "name": "Belief engine — export all beliefs",
+      "aliases": [
+        "belief export",
+        "beliefs export",
+        "export beliefs"
+      ],
+      "runner": "pipeline",
+      "spec": {
+        "pipeline_id": "belief_engine_export"
+      },
+      "run_policy": {
+        "type": "daily",
+        "time_local": "01:00"
+      },
+      "notes": "Runs once daily after all domain pipelines complete. Exports all active beliefs to resource_user_beliefs.json. Content-guarded — file is only rewritten if beliefs changed."
+    },
+    {
+      "id": "kg_maintenance_pipeline",
+      "enabled": true,
+      "name": "KG maintenance pipeline",
+      "aliases": [
+        "kg maintenance",
+        "kg repair",
+        "knowledge graph maintenance",
+        "kg cleanup"
+      ],
+      "runner": "pipeline",
+      "spec": {
+        "pipeline_id": "kg_maintenance_pipeline"
+      },
+      "run_policy": {
+        "type": "weekly",
+        "day_of_week": "Monday",
+        "time_local": "02:00"
+      },
+      "notes": "Weekly KG maintenance scan: orphan nodes, missing descriptions, suspect nodes (LLM), duplicate pairs (LLM random sampling). All findings are written to kg_maintenance_finding table for review at /kg-maintenance."
+    },
+    {
+      "id": "entity_card_maintenance_pipeline",
+      "enabled": true,
+      "name": "Entity card maintenance pipeline",
+      "aliases": [
+        "entity card maintenance",
+        "entity cards maintenance",
+        "card maintenance",
+        "prune entity cards"
+      ],
+      "runner": "pipeline",
+      "spec": {
+        "pipeline_id": "entity_card_maintenance_pipeline"
+      },
+      "run_policy": {
+        "type": "weekly",
+        "day_of_week": "Tuesday",
+        "time_local": "02:00"
+      },
+      "notes": "Weekly entity card quality scan: broken KG links, junk names, blank content, low confidence, stale content, no KG link. All findings written to entity_card_maintenance_finding for review at /entity-card-maintenance."
+    },
+    {
+      "id": "fetch_email",
+      "enabled": true,
+      "name": "Fetch email",
+      "aliases": [
+        "email fetch",
+        "get email"
+      ],
+      "runner": "tool",
+      "spec": {
+        "tool_name": "get_email",
+        "arguments": {
+          "unseen": true,
+          "repo_update": true,
+          "all_accounts": true,
+          "lookback_hours": 10
+        }
+      },
+      "feature_guard": "email",
+      "run_policy": {
+        "type": "interval",
+        "min_interval_seconds": 300
+      },
+      "notes": "Periodic email fetch across all active Gmail OAuth accounts. Replaces BackgroundTaskManager round-robin data_fetch."
+    },
+    {
+      "id": "fetch_calendar_events",
+      "enabled": true,
+      "name": "Fetch calendar events",
+      "aliases": [
+        "calendar fetch",
+        "get calendar"
+      ],
+      "runner": "tool",
+      "spec": {
+        "tool_name": "get_calendar_events",
+        "arguments": {
+          "calendar_names": [
+            "primary",
+            "birthday",
+            "holidays in united states",
+            "family",
+            "work",
+            "food"
+          ],
+          "single_events": true,
+          "repo_update": true
+        }
+      },
+      "feature_guard": "calendar",
+      "run_policy": {
+        "type": "interval",
+        "min_interval_seconds": 1620
+      },
+      "notes": "Periodic calendar sync. Defaults to local midnight → +7 days when no dates provided."
+    },
+    {
+      "id": "fetch_todo_tasks",
+      "enabled": true,
+      "name": "Fetch todo tasks",
+      "aliases": [
+        "tasks fetch",
+        "get tasks",
+        "get todo"
+      ],
+      "runner": "tool",
+      "spec": {
+        "tool_name": "get_todo_tasks",
+        "arguments": {
+          "include_completed": false,
+          "repo_update": true
+        }
+      },
+      "feature_guard": "tasks",
+      "run_policy": {
+        "type": "interval",
+        "min_interval_seconds": 1860
+      },
+      "notes": "Periodic Google Tasks sync."
+    },
+    {
+      "id": "fetch_weather",
+      "enabled": true,
+      "name": "Fetch weather",
+      "aliases": [
+        "weather fetch",
+        "get weather"
+      ],
+      "runner": "tool",
+      "spec": {
+        "tool_name": "get_weather",
+        "arguments": {
+          "forecast_type": "current"
+        }
+      },
+      "feature_guard": "weather",
+      "run_policy": {
+        "type": "interval",
+        "min_interval_seconds": 660
+      },
+      "notes": "Periodic weather update. City defaults from resource_current_location.json."
+    },
+    {
+      "id": "fetch_news",
+      "enabled": true,
+      "name": "Fetch news",
+      "aliases": [
+        "news fetch",
+        "get news"
+      ],
+      "runner": "tool",
+      "spec": {
+        "tool_name": "get_news",
+        "arguments": {
+          "feed_urls": []
+        }
+      },
+      "feature_guard": "news",
+      "run_policy": {
+        "type": "interval",
+        "min_interval_seconds": 1380
+      },
+      "notes": "Periodic news fetch from configured RSS feeds. Empty feed_urls falls back to DEFAULT_FEEDS."
+    },
+    {
+      "id": "fetch_scheduler_events",
+      "enabled": true,
+      "name": "Fetch scheduler events",
+      "aliases": [
+        "scheduler fetch",
+        "get scheduler events"
+      ],
+      "runner": "tool",
+      "spec": {
+        "tool_name": "get_scheduler_events",
+        "arguments": {}
+      },
+      "feature_guard": "scheduler",
+      "run_policy": {
+        "type": "interval",
+        "min_interval_seconds": 180
+      },
+      "notes": "Periodic internal scheduler event sync. Defaults to midnight → +7 days."
+    },
+    {
+      "id": "situation_audit",
+      "enabled": true,
+      "name": "Situation Auditor",
+      "aliases": [],
+      "runner": "function",
+      "spec": {
+        "function_name": "situation_audit"
+      },
+      "run_policy": {
+        "type": "interval",
+        "min_interval_seconds": 1800
+      },
+      "notes": "Periodic background audit of all active context. Checks for contradictions, conflicts, and anomalies across data sources. Notifies user of findings via chat. Passive observer only — does not modify plans or tasks."
+    },
+    {
+      "id": "location_refresh",
+      "enabled": true,
+      "name": "Location Refresh",
+      "aliases": [],
+      "runner": "function",
+      "spec": {
+        "function_name": "location_refresh"
+      },
+      "run_policy": {
+        "type": "interval",
+        "min_interval_seconds": 900
+      },
+      "notes": "Rebuilds user location timeline from calendar events and updates resource_current_location.json. Used by weather tool and location_summary context."
+    },
+    {
+      "id": "chat_memory_index",
+      "enabled": true,
+      "name": "Chat Memory Indexer",
+      "aliases": [],
+      "runner": "function",
+      "spec": {
+        "function_name": "chat_memory_index"
+      },
+      "run_policy": {
+        "type": "interval",
+        "min_interval_seconds": 3600
+      },
+      "notes": "Indexes recent chat summaries and user messages into ChromaDB for conversational memory RAG. Summaries indexed over 90 days, user messages over 14 days."
+    },
+    {
+      "id": "proposal_promoter",
+      "enabled": true,
+      "name": "Claim Proposal Promoter (nightly)",
+      "aliases": [],
+      "runner": "function",
+      "spec": {
+        "function_name": "proposal_promoter",
+        "commit": true,
+        "limit": 500
+      },
+      "run_policy": {
+        "type": "daily",
+        "time_local": "02:30",
+        "quiet_hours_ok": true
+      },
+      "notes": "Nightly sweep over pending claim_proposals. Auto-promotes anything resolvable + conflict-free. Held proposals (conflicts, lock violations, placeholders) stay in the review queue. Manual trigger: POST /kg-proposals/run-promoter (dry-run) or ?commit=1."
+    },
+    {
+      "id": "wiki_nightly_refresh",
+      "enabled": true,
+      "name": "Wiki nightly refresh",
+      "aliases": [],
+      "runner": "function",
+      "spec": {
+        "function_name": "wiki_nightly_refresh",
+        "run_critic": true,
+        "vault_path": ""
+      },
+      "run_policy": {
+        "type": "daily",
+        "time_local": "03:00",
+        "quiet_hours_ok": true
+      },
+      "notes": "Scans the vault, regenerates only sections affected by KG node/edge updates since each page's generated_at, then runs the consistency critic. Runs after proposal_promoter (02:30) so newly-promoted nodes flow into the wiki the same night."
+    }
+  ]
+}

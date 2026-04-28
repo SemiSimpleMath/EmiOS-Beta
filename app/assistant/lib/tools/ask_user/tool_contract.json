@@ -1,0 +1,45 @@
+{
+  "name": "ask_user",
+  "description": "ask_user is the sole tool to ask user questions, request decisions, or clarify information. Use this tool for any required interaction with the user.",
+  "inputs": [
+    {
+      "name": "text",
+      "type": "string",
+      "required": true,
+      "description": ""
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "Argument to pass_info to user is all the text provided in the BEGIN ARGUMENTS SECTION.  You must pass all this text verbatim in the \"text\" str.",
+  "metadata": {
+    "domain": "user_interaction",
+    "actions": [
+      "ask",
+      "clarify",
+      "confirm"
+    ],
+    "selectors": [
+      "text"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": true,
+    "room_visibility_default": "show",
+    "approval_required": false
+  }
+}

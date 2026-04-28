@@ -1,0 +1,25 @@
+name: daily_summary
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5-mini"
+  model_tier: "mini"
+  
+
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+
+user_context_items:
+  - date_time
+  - task
+  - information
+  - resource_expected_calendar
+  - resource_weather
+  - resource_daily_context_generator_output
+
+system_context_items:
+  - resource_user_data
+
+

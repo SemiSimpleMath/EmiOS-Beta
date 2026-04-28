@@ -1,0 +1,15 @@
+{
+  "step_id": "dayflow_cron_tickets",
+  "description": "Owns small timer/cron ticket creation from cron candidate suggestions. Suggestion types derived from config_tracked_activities.json.",
+  "run_policy": {
+    "type": "always",
+    "min_interval_seconds": 60
+  },
+  "afk_guard": {
+    "skip_when_afk": true,
+    "skip_when_potentially_afk": true
+  },
+  "daily_reset": {
+    "description": "No per-day reset required; stage processes each source batch once."
+  }
+}

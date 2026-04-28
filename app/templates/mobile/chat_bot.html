@@ -1,0 +1,108 @@
+{% extends 'base.html' %}
+
+{% block optional_css %}
+<!-- Mobile-first Chat UI -->
+<link rel="stylesheet" href="{{ url_for('static', filename='mobile/css/chat_bot_mobile.css', v='20260213b') }}">
+<!-- Fonts / Icons (kept consistent with desktop) -->
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+<link
+  href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css"
+  rel="stylesheet"
+  crossorigin="anonymous"
+  referrerpolicy="no-referrer"
+/>
+{% endblock %}
+
+{% block content %}
+<header class="m-header" role="banner">
+  <h1 class="m-title">
+    <span
+      id="tts-toggle"
+      class="m-title__text"
+      role="button"
+      tabindex="0"
+      aria-label="Toggle text-to-speech"
+      aria-pressed="false"
+      title="Toggle text-to-speech"
+    >{{ assistant_name }}</span>
+  </h1>
+
+  <div id="mute-btn-container" class="m-mute" role="button" tabindex="0" aria-label="Toggle site mute">
+    <i class="fas fa-volume-down" id="mute-icon"></i>
+    <i class="fas fa-volume-mute hidden" id="unmute-icon"></i>
+  </div>
+</header>
+
+<main class="m-main" role="main">
+  <!-- Audio Elements -->
+  <audio id="chat-bot-audio" preload="auto" style="display:none"></audio>
+  <audio id="notificationSound" preload="auto"></audio>
+
+  <!-- Chat -->
+  <section class="m-chat" aria-label="Chat">
+    <div class="m-chat__log" role="log" aria-live="polite" id="chat-box"></div>
+
+    <!-- Composer -->
+    <div class="m-composer">
+      <form class="m-composer__form chat-form" aria-label="Send a message">
+        <label for="chat-input" class="visually-hidden">Message input</label>
+        <textarea
+          id="chat-input"
+          placeholder="Message Emi"
+          autocomplete="off"
+          aria-label="Message input"
+          rows="1"
+        ></textarea>
+        <label id="image-attach-btn" for="image-attach-input" class="m-attach" aria-label="Attach image" role="button" tabindex="0">
+          <i class="fa-regular fa-image"></i>
+        </label>
+        <input id="image-attach-input" type="file" accept="image/*" class="visually-hidden" />
+        <button type="submit" class="m-send" aria-label="Send message">
+          <i class="fa-solid fa-paper-plane"></i>
+        </button>
+      </form>
+
+      <div id="pending-image-preview" class="m-image-preview hidden" aria-live="polite">
+        <img id="pending-image-thumb" class="m-image-preview__thumb" alt="Pending image preview" />
+        <div class="m-image-preview__meta">
+          <div id="pending-image-name" class="m-image-preview__name"></div>
+        </div>
+        <button id="pending-image-remove" type="button" class="m-image-preview__remove" aria-label="Remove attached image">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <!-- Big Push-to-talk -->
+      <button id="ptt-btn" type="button" class="m-ptt" aria-label="Hold to talk" aria-pressed="false">
+        <span class="m-ptt__icon"><i class="fa-solid fa-microphone"></i></span>
+        <span class="m-ptt__text" id="ptt-label">Hold to talk</span>
+      </button>
+
+      <div class="m-ptt-hint" id="ptt-hint">Tap to toggle. Hold to record.</div>
+    </div>
+  </section>
+</main>
+{% endblock %}
+
+{% block optional_js %}
+<!-- Socket.IO -->
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js" crossorigin="anonymous"></script>
+<!-- iOS Safari: unlock audio on first gesture -->
+<script>
+  if (/iP(hone|ad|od)/.test(navigator.userAgent)) {
+    const player = document.getElementById('chat-bot-audio');
+    const SILENT = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=";
+    function unlock() {
+      if (!player) return;
+      player.src = SILENT;
+      player.play()
+        .then(()=>{ player.pause(); player.src = ""; })
+        .catch(()=>{ /* best-effort */ });
+      document.removeEventListener("touchend", unlock, true);
+    }
+    document.addEventListener("touchend", unlock, true);
+  }
+</script>
+<script src="{{ url_for('static', filename='mobile/js/emi_mobile.js', v='20260213b') }}"></script>
+{% endblock %}
+

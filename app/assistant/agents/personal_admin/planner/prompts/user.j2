@@ -1,0 +1,37 @@
+Today is {{ date_time }}.
+
+Task:
+{{ task }}
+
+{% if information %}
+Information:
+{{ information }}
+{% endif %}
+
+{% if resource_user_email %}
+## Email Identity & Operations Instructions
+{% if resource_user_email is mapping and resource_user_email.content %}
+{{ resource_user_email.content }}
+{% else %}
+{{ resource_user_email }}
+{% endif %}
+{% endif %}
+
+{% if entity_card %}
+Entity context:
+{{ entity_card }}
+{% endif %}
+
+{% if referenced_pods_block %}
+{{ referenced_pods_block }}
+{% endif %}
+
+{% if recent_history %}
+Recent history (oldest to latest):
+{{ recent_history }}
+{% endif %}
+
+Available tools:
+{% for tool_name, tool_description in tool_descriptions.items() %}
+- {{ tool_name }}: {{ tool_description }}
+{% endfor %}

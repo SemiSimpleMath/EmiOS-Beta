@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dev Wiki · {{ rel_path }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/dev_wiki.css') }}?v={{ static_v }}">
+</head>
+<body>
+  <div class="container">
+    <header class="topbar">
+      <a class="brand" href="{{ index_url }}">EmiOS Dev Wiki</a>
+      <nav class="breadcrumb">
+        {% for crumb in breadcrumb %}
+          {% if crumb.href %}<a href="{{ crumb.href }}">{{ crumb.label }}</a>{% else %}<span>{{ crumb.label }}</span>{% endif %}
+          {% if not loop.last %} <span class="sep">›</span> {% endif %}
+        {% endfor %}
+      </nav>
+    </header>
+
+    <main class="doc">
+      {{ body_html | safe }}
+    </main>
+
+    <footer class="footer">
+      <span>Reading: <code>docs/{{ rel_path }}</code></span>
+      <span class="footer-actions">
+        <a href="{{ github_url }}" target="_blank" rel="noopener">View on GitHub ↗</a>
+        {% if not is_index %}<a href="{{ index_url }}">← Back to Index</a>{% endif %}
+      </span>
+    </footer>
+  </div>
+</body>
+</html>

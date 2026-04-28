@@ -1,0 +1,72 @@
+{
+  "name": "create_todo_task",
+  "description": "Use this tool to create a todo task. {{ todo_list_names }}",
+  "inputs": [
+    {
+      "name": "task_name",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "due_date",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "priority",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "tasklist_name",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "parent_task_id",
+      "type": "string",
+      "required": true,
+      "description": ""
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "- **Purpose**: Create a new to-do task.\n- **Arguments**:\n  - `task_name` (str, required): The name/title of the task.\n  - `description` (str, optional): Detailed description of the task.\n  - `due_date` (str, optional): Deadline for the task in ISO 8601 format (e.g., \"2024-12-31T17:00:00\").\n  - `priority` (str, optional): Priority level of the task. Allowed values: `\"high\"`, `\"normal\"`, `\"low\"`. Default is `\"normal\"`.\n  - `estimated_time` (float, optional): Estimated time to complete the task in hours.\n  - `tasklist_name` (str, optional): Name of the task list to add the task to.\n\nArguments to this tool are the name of the task, due date string and description string\n\ntask_name: str\ndue_date: str\ndescription: str\n\n[WARNING] Avoid ambiguity at midnight: Times exactly at 00:00:00 can be misinterpreted as either the start or end of a day. When setting boundaries, explicitly choose 23:59:59 (end of the previous day) or 00:01:00 (start of the new day) for clarity.",
+  "metadata": {
+    "domain": "todo",
+    "actions": [
+      "create"
+    ],
+    "selectors": [
+      "title",
+      "due_date",
+      "priority",
+      "tasklist"
+    ],
+    "risk_level": "medium",
+    "side_effects": "writes_data",
+    "requires_auth": [
+      "google"
+    ],
+    "requires_network": true,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

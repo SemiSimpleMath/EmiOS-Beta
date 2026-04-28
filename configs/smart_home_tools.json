@@ -1,0 +1,22 @@
+{
+  "nest": {
+    "enabled": false,
+    "endpoint_url": "http://127.0.0.1:8000/api/smart-home/nest",
+    "token_env_var": "EMI_SMARTHOME_NEST_TOKEN",
+    "timeout_seconds": 20
+  },
+  "lights": {
+    "enabled": false,
+    "endpoint_url": "http://127.0.0.1:8000/api/smart-home/lights",
+    "token_env_var": "EMI_SMARTHOME_LIGHTS_TOKEN",
+    "timeout_seconds": 20,
+    "kasa_device_hosts": [],
+    "kasa_discovery_timeout_seconds": 4
+  },
+  "ring": {
+    "enabled": false,
+    "endpoint_url": "http://127.0.0.1:8000/api/smart-home/ring",
+    "token_env_var": "EMI_SMARTHOME_RING_TOKEN",
+    "timeout_seconds": 20
+  }
+}

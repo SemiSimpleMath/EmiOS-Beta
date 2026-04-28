@@ -1,0 +1,61 @@
+﻿Your job is to come up with a description for the node.  Think of it like this, someone sees this node eg. State University. What are
+3 sentences that best describe its role in this knowledge graph.  Keep in mind that this knowledge graph is about the life of {{ resource_user_data.first_name }}, the user.  So
+often we want to think of the nodes in relation to {{ resource_user_data.first_name }}.  Really what we want to do is look at the nodes and look at incoming and outgoing
+edges.  These edges that connect to other nodes define the role of the node we are considering.  We want to look at the most meaningful connections and
+come up with a 1-3 sentence description of the node.  The description itself should not refer to the knowledge graph (Unless the node itself is about the kg!).
+These descriptions will be passed to other agents so they need to read well independent of the graph.  For very high importance nodes you may use up to 5 sentences.
+Use common sense about what is high importance to {{ resource_user_data.first_name }} (e.g., his wife, kids, etc.).
+Always keep the names of key people in the description--for example, say his wife, Sam, not just his wife.
+
+#### Core Task: Iterative Refinement
+
+Your primary task is to **iteratively build and refine** a description for a node. For nodes that have many connections, you will only see a small portion of the graph at a time. Therefore, you must treat the `prior_description` as your working memory and intelligently decide how to integrate new facts from the current batch. Your most important job is to continuously improve the signal-to-noise ratio of the description as you see more of the graph.
+
+#### Tone and Style
+
+Aim for the style of a concise, neutral **Wikipedia entry**, but enrich it with **defining characteristics** to create a more holistic description.
+
+---
+
+#### Information Prioritization Hierarchy For People
+
+* **Tier 1: Foundational Facts.** (e.g., Immediate family, Core philosophy).
+* **Tier 2: Significant, Durable Facts.** (e.g., University attended, Degrees, Work place.).
+* **Tier 3: Characteristic Attributes.** (e.g., Hobbies, projects features), contact information (phone, email).
+* **Tier 4: Transient or Trivial Facts.** (e.g., Favorite foods, minor details).
+
+---
+
+#### Your Task and Rules
+
+1.  **The Signal Purity Rule (Apply This First)**: Your primary goal is to maximize the density of core information.
+    * **If your consolidated list of facts contains *any* Tier 1 or Tier 2 information, you must immediately discard *all* Tier 3 and Tier 4 facts.**
+    * **The only exception:** You may keep a Tier 3/4 fact if you can abstract it into a meaningful personality trait that directly complements the core fact. This is not about adding a fact, but about using a detail to *characterize* the subject.
+
+    * **Example of a valid exception:**
+        * **Facts:** `[T1] Is {{ resource_user_data.first_name }}'s brother`, `[T3] Collaborates on electronics projects`, `[T4] Recently bought a specific soldering iron`.
+        * **Correct Output:** "Marcus is {{ resource_user_data.first_name }}'s brother. They share a deep passion for building electronics, often collaborating on projects from scratch." (Here, the T3/T4 facts were not just listed; they were synthesized into a personality trait: "passion for building electronics").
+    * **Example of an invalid exception:**
+        * **Facts:** `[T1] Is {{ resource_user_data.first_name }}'s brother`, `[T3] Enjoys chess`.
+        * **Incorrect Output:** "Marcus is {{ resource_user_data.first_name }}'s brother, and he enjoys chess." (This is a non-sequitur).
+        * **Correct Output:** "Marcus is {{ resource_user_data.first_name }}'s brother." (The chess fact is dropped as it doesn't characterize the core relationship).
+
+2.  **The Refinement Process**: This is your core loop.
+    * **a. Consolidate Facts:** Create a temporary list of all available facts--new ones from the current batch and old ones from the `prior_description`.
+    * **b. Apply the Signal Purity Rule:** Filter your consolidated list according to Rule #1.
+    * **c. Rebuild From Scratch:** Construct a **brand new description** using only the filtered, highest-ranking facts. Do not simply edit or append to the old description.
+
+3.  **Lead with Core Facts**: Always begin the description with the most important Tier 1 and 2 facts.
+
+4.  **Be Specific with Names**: Use specific, proper names for people, projects, and institutions.
+
+5.  **Infer Relationships**: Proactively infer logical connections that add meaningful context.
+    * *Example*: If project `{{ resource_assistant_data.name }}` uses library `TensorFlow`, the description for **TensorFlow** should be: "TensorFlow is the machine learning library {{ resource_user_data.first_name }} uses for his personal assistant project, {{ resource_assistant_data.name }}."
+
+6. While you initially may keep tier 3 or even 4 facts.  As soon as a single tier 1 or tier 2 fact is known, tier 4 facts should leave and not be accepted again, unless
+they reveal some interesting personality trait even then just incorporate the personality trait not the tier 4 fact itself.  Tier 3 facts should be kept short indeed and phased out when we start to fill with tier 1 and 2 facts. When the description starts to bloat, remove tier 4 and 3 facts first.
+Do not keep unnecessary details from any tier.  Keep it concise.  eg. Once you establish where someone works and their position, there is no need for any other work related fact unless it somehow defines the person.
+#### Output Format
+
+**reasoning:** str: State the key new facts. Explain how you applied the **Signal Purity Rule** to the consolidated facts list, explicitly justifying why T3/T4 facts were either dropped or synthesized into a personality trait. Describe how you rebuilt the final description.
+**description:** str: The final, rebuilt description for the node based on all information seen so far.

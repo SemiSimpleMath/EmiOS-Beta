@@ -1,0 +1,40 @@
+name: fast_tool::planner
+class_name: Planner
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5-nano"
+  model_tier: "nano"
+
+allowed_tools:
+  # Calendar
+  - get_calendar_events
+  - create_calendar_event
+  - create_repeating_calendar_event
+  - update_calendar_event
+  - delete_calendar_event
+  # Reminders (scheduler)
+  - get_scheduler_events
+  - create_scheduler_event
+  - create_repeating_scheduler_event
+  - delete_scheduler_event
+  # Todo
+  - get_todo_tasks
+  - create_todo_task
+  - update_todo_task
+  - delete_todo_task
+except_tools: []
+allowed_nodes: [return_control]
+
+user_context_items:
+  - date_time
+  - task
+  - information
+  - recent_history
+  - checklist
+  - action_count
+
+system_context_items:
+  - tool_descriptions
+  - task
+  - resource_user_data
+  - resource_assistant_data

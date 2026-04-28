@@ -1,0 +1,412 @@
+"""
+Central node-merge helper and dependent-id registry.
+
+Every node merge (loser → winner) must:
+
+  1. Reroute loser's edges to winner (dropping duplicates).
+  2. Rebind every dependent-table pointer from loser_id to winner_id.
+  3. Write a ``kg_merge_log`` row with full snapshots, so the merge can be
+     undone later.
+  4. Delete the loser node.
+
+Point 2 is what this module primarily owns — previously each merge call site
+knew only about edges, so any other table holding ``source_node_id`` /
+``node_id`` was silently orphaned at merge time (most visibly: entity_cards).
+
+``NODE_ID_REFERENCES`` is the single source of truth for "tables that store a
+KG node id." Add new entries here when a new table starts referencing nodes;
+all merge paths pick them up automatically.
+
+Deliberately EXCLUDED from the registry (do not rebind):
+  - ``kg_edge_metadata.(source_id, target_id)``: handled by edge rerouting.
+  - ``kg_chat_merged_node_ref.node_id``: historical breadcrumb — rewriting
+    would misrepresent what the extractor decided at merge time.
+  - ``kg_maintenance_finding.(primary_node_id, secondary_node_id)``: findings
+    are time-stamped observations about specific nodes; they should not be
+    silently rewritten. Resolve or dismiss pending findings through the
+    maintenance UI instead.
+  - ``kg_node_evidence.source_id`` / ``kg_edge_evidence.source_id``: these
+    point at message rows (unified_log, etc.), NOT at KG nodes.
+"""
+from __future__ import annotations
+
+import json
+import uuid
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Tuple
+
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+from app.assistant.database.kg_merge_log import KGMergeLog
+from app.assistant.utils.logging_config import get_logger
+from app.models.base import Base
+
+logger = get_logger(__name__)
+
+
+# (table_name, column_name) pairs that store a kg_node_metadata.id and should
+# be rebound from loser → winner during a merge. The rebind is a simple
+# ``UPDATE <table> SET <column> = :winner WHERE <column> = :loser``. Counts
+# and rows_touched are returned so the merge log can record what happened.
+NODE_ID_REFERENCES: List[Tuple[str, str]] = [
+    ("entity_cards", "source_node_id"),
+    ("node_taxonomy_links", "node_id"),
+    ("node_taxonomy_review_queue", "node_id"),
+    ("event_nodes", "node_id"),
+    ("event_nodes", "parent_event_node_id"),
+    ("event_nodes", "root_event_node_id"),
+    ("event_node_sources", "event_node_id"),
+    ("node_analysis_tracking", "node_id"),
+    ("kg_node_evidence", "node_id"),
+    ("claim_proposal_node", "resolved_node_id"),
+    ("claim_proposal_edge", "source_node_id"),
+    ("claim_proposal_edge", "target_node_id"),
+]
+
+
+def ensure_merge_log_table(session: Session) -> None:
+    """Create the kg_merge_log table if it doesn't exist yet. Idempotent."""
+    Base.metadata.create_all(session.get_bind(), tables=[KGMergeLog.__table__], checkfirst=True)
+
+
+def snapshot_node(node) -> Dict[str, Any]:
+    """Full pre-merge snapshot of a Node row, JSON-safe for the merge log."""
+    def _iso(dt):
+        if dt is None:
+            return None
+        if hasattr(dt, "isoformat"):
+            return dt.isoformat()
+        return str(dt)
+
+    return {
+        "id": str(node.id),
+        "label": node.label,
+        "node_type": node.node_type,
+        "description": node.description,
+        "aliases": list(node.aliases or []),
+        "hash_tags": list(node.hash_tags or []),
+        "semantic_label": node.semantic_label,
+        "goal_status": node.goal_status,
+        "valid_during": node.valid_during,
+        "category": node.category,
+        "attributes": node.attributes,
+        "start_date": _iso(node.start_date),
+        "end_date": _iso(node.end_date),
+        "start_date_confidence": node.start_date_confidence,
+        "end_date_confidence": node.end_date_confidence,
+        "start_date_prose": getattr(node, "start_date_prose", None),
+        "end_date_prose": getattr(node, "end_date_prose", None),
+        "confidence": node.confidence,
+        "importance": node.importance,
+        "source": node.source,
+        "pagerank_score": node.pagerank_score,
+        "window_id": getattr(node, "window_id", None),
+        "original_message_id": getattr(node, "original_message_id", None),
+        "original_sentence": getattr(node, "original_sentence", None),
+        "sentence_id": getattr(node, "sentence_id", None),
+        "created_at": _iso(getattr(node, "created_at", None)),
+        "updated_at": _iso(getattr(node, "updated_at", None)),
+    }
+
+
+def snapshot_edge(edge) -> Dict[str, Any]:
+    """Full snapshot of an Edge row. Used for dropped-duplicate edges so
+    unmerge can re-INSERT them."""
+    def _iso(dt):
+        if dt is None:
+            return None
+        if hasattr(dt, "isoformat"):
+            return dt.isoformat()
+        return str(dt)
+
+    return {
+        "id": str(edge.id),
+        "source_id": str(edge.source_id) if edge.source_id else None,
+        "target_id": str(edge.target_id) if edge.target_id else None,
+        "relationship_type": edge.relationship_type,
+        "relationship_descriptor": edge.relationship_descriptor,
+        "attributes": edge.attributes,
+        "original_message_id": getattr(edge, "original_message_id", None),
+        "sentence_id": getattr(edge, "sentence_id", None),
+        "sentence": getattr(edge, "sentence", None),
+        "original_message_timestamp": _iso(getattr(edge, "original_message_timestamp", None)),
+        "confidence": edge.confidence,
+        "importance": getattr(edge, "importance", None),
+        "source": edge.source,
+        "window_id": getattr(edge, "window_id", None),
+    }
+
+
+def reroute_edges(
+    session: Session, loser_id: str, winner_id: str
+) -> Tuple[List[str], List[Dict[str, Any]]]:
+    """
+    Move loser's edges to winner. Drop duplicates (when winner already has
+    the same (source, target, relationship_type)).
+
+    Returns (rerouted_edge_ids, dropped_edge_snapshots).
+
+    Entirely raw-SQL — intentionally does NOT load Edge ORM instances. If we
+    loaded via ORM, SQLAlchemy's back_populates would populate
+    ``loser.outgoing_edges`` / ``incoming_edges`` with those instances, and
+    any later ``session.flush`` would try to re-persist them against loser
+    (reverting our raw-SQL rewrites). Bypassing the ORM for edge writes is
+    the clean way to avoid that whole class of drift.
+    """
+    loser_id = str(loser_id)
+    winner_id = str(winner_id)
+
+    # Winner's existing (src, tgt, rel) keys — needed to detect duplicates.
+    existing_keys: set[tuple[str, str, str]] = set()
+    for row in session.execute(
+        text(
+            "SELECT source_id, target_id, relationship_type FROM kg_edge_metadata "
+            "WHERE source_id = :winner OR target_id = :winner"
+        ),
+        {"winner": winner_id},
+    ).fetchall():
+        existing_keys.add((str(row[0]), str(row[1]), row[2]))
+
+    # All of loser's edges — every column (we need snapshots for the dropped ones).
+    loser_edge_rows = session.execute(
+        text(
+            "SELECT id, source_id, target_id, relationship_type, relationship_descriptor, "
+            "attributes, original_message_id, sentence_id, sentence, "
+            "original_message_timestamp, confidence, importance, source, window_id "
+            "FROM kg_edge_metadata "
+            "WHERE source_id = :loser OR target_id = :loser"
+        ),
+        {"loser": loser_id},
+    ).mappings().fetchall()
+
+    rerouted: List[str] = []
+    dropped_snapshots: List[Dict[str, Any]] = []
+
+    for row in loser_edge_rows:
+        edge_id = str(row["id"])
+        src = str(row["source_id"]) if row["source_id"] else None
+        tgt = str(row["target_id"]) if row["target_id"] else None
+        rel = row["relationship_type"]
+
+        new_src = winner_id if src == loser_id else src
+        new_tgt = winner_id if tgt == loser_id else tgt
+
+        # Self-loop after collapse, or duplicate vs. existing winner edge.
+        if new_src == new_tgt or (new_src, new_tgt, rel) in existing_keys:
+            dropped_snapshots.append({
+                "id": edge_id,
+                "source_id": src,
+                "target_id": tgt,
+                "relationship_type": rel,
+                "relationship_descriptor": row["relationship_descriptor"],
+                "attributes": row["attributes"],
+                "original_message_id": row["original_message_id"],
+                "sentence_id": row["sentence_id"],
+                "sentence": row["sentence"],
+                "original_message_timestamp": (
+                    row["original_message_timestamp"].isoformat()
+                    if row["original_message_timestamp"] and hasattr(row["original_message_timestamp"], "isoformat")
+                    else row["original_message_timestamp"]
+                ),
+                "confidence": row["confidence"],
+                "importance": row["importance"],
+                "source": row["source"],
+                "window_id": row["window_id"],
+            })
+            session.execute(
+                text("DELETE FROM kg_edge_metadata WHERE id = :eid"),
+                {"eid": edge_id},
+            )
+            continue
+
+        session.execute(
+            text(
+                "UPDATE kg_edge_metadata "
+                "SET source_id = :new_src, target_id = :new_tgt "
+                "WHERE id = :eid"
+            ),
+            {"new_src": new_src, "new_tgt": new_tgt, "eid": edge_id},
+        )
+        existing_keys.add((new_src, new_tgt, rel))
+        rerouted.append(edge_id)
+
+    session.flush()
+    return rerouted, dropped_snapshots
+
+
+def rebind_node_references(
+    session: Session, loser_id: str, winner_id: str
+) -> List[Dict[str, Any]]:
+    """
+    Walk NODE_ID_REFERENCES and rewrite every dependent pointer from
+    loser_id to winner_id. Returns a list of rebind records for the merge log:
+
+        [{"table": "entity_cards", "column": "source_node_id",
+          "row_ids": [...], "count": N}, ...]
+
+    Row-level ids are captured (up to a safety cap) so unmerge can target
+    exactly the rows that were rewritten, not every row that currently points
+    at the winner. A table that doesn't exist is skipped quietly — rebinding
+    only runs against tables that exist in this DB.
+    """
+    loser_id = str(loser_id)
+    winner_id = str(winner_id)
+
+    # Use the session's transaction (not a fresh engine connection) to list
+    # tables. sqlalchemy's Inspector opens its own connection, which on
+    # SQLite can end up rolling back in-flight raw SQL writes from the
+    # session's transaction. Read sqlite_master directly instead.
+    existing_tables = {
+        str(r[0])
+        for r in session.execute(
+            text("SELECT name FROM sqlite_master WHERE type = 'table'")
+        ).fetchall()
+    }
+
+    rebinds: List[Dict[str, Any]] = []
+    for table_name, column_name in NODE_ID_REFERENCES:
+        if table_name not in existing_tables:
+            continue
+        # Capture row ids first so unmerge can target exactly these rows.
+        # Cap the captured list; if something is stupendously large, record a
+        # count-only rebind entry. Unmerge in that case falls back to
+        # "reverse by (table, column, old_id → new_id)" matching.
+        pk_rows = session.execute(
+            text(f"SELECT id FROM {table_name} WHERE {column_name} = :loser"),
+            {"loser": loser_id},
+        ).fetchall()
+        row_ids = [str(r[0]) for r in pk_rows]
+        if not row_ids:
+            continue
+
+        result = session.execute(
+            text(
+                f"UPDATE {table_name} SET {column_name} = :winner "
+                f"WHERE {column_name} = :loser"
+            ),
+            {"winner": winner_id, "loser": loser_id},
+        )
+        count = result.rowcount if result.rowcount is not None else len(row_ids)
+
+        # Row ids captured only up to 500; beyond that, rely on (table, column,
+        # old→new) inverse-update during unmerge. This is a pragmatic ceiling
+        # to keep merge log entries from blowing up.
+        row_ids_for_log = row_ids[:500]
+        truncated = len(row_ids) > len(row_ids_for_log)
+
+        rebinds.append({
+            "table": table_name,
+            "column": column_name,
+            "row_ids": row_ids_for_log,
+            "row_ids_truncated": truncated,
+            "count": count,
+        })
+        logger.info(
+            "[node_merge] rebound %d row(s) in %s.%s from %s → %s",
+            count, table_name, column_name, loser_id[:8], winner_id[:8],
+        )
+
+    session.flush()
+    return rebinds
+
+
+def record_merge(
+    session: Session,
+    *,
+    loser_snapshot: Dict[str, Any],
+    winner_pre_snapshot: Dict[str, Any],
+    rerouted_edge_ids: List[str],
+    dropped_edge_snapshots: List[Dict[str, Any]],
+    rebinds: List[Dict[str, Any]],
+    merge_actor: str,
+    notes: str | None = None,
+) -> str:
+    """Insert a merge-log row with the full undo playbook. Returns its id."""
+    ensure_merge_log_table(session)
+    row = KGMergeLog(
+        id=str(uuid.uuid4()),
+        loser_id=str(loser_snapshot["id"]),
+        winner_id=str(winner_pre_snapshot["id"]),
+        merge_actor=merge_actor,
+        notes=notes,
+        loser_snapshot_json=loser_snapshot,
+        winner_pre_snapshot_json=winner_pre_snapshot,
+        rerouted_edge_ids_json=rerouted_edge_ids,
+        dropped_edge_snapshots_json=dropped_edge_snapshots,
+        rebinds_json=rebinds,
+    )
+    session.add(row)
+    session.flush()
+    logger.info(
+        "[node_merge] recorded merge_log id=%s loser=%s winner=%s "
+        "rerouted=%d dropped=%d rebinds=%d",
+        row.id, row.loser_id[:8], row.winner_id[:8],
+        len(rerouted_edge_ids), len(dropped_edge_snapshots), len(rebinds),
+    )
+    return row.id
+
+
+def merge_nodes_in_session(
+    session: Session,
+    *,
+    loser_node,
+    winner_node,
+    merge_actor: str,
+    notes: str | None = None,
+    winner_pre_snapshot: Dict[str, Any] | None = None,
+) -> str:
+    """
+    Orchestrate the full merge in an already-open session:
+      1. Snapshot loser (winner snapshot optional — caller may have captured
+         it BEFORE applying field-merge mutations; if not provided we snapshot
+         the current winner state, which already reflects the merge).
+      2. Reroute edges (loser → winner), capturing dropped duplicates.
+      3. Rebind dependent-table pointers via the registry.
+      4. Write merge-log row.
+      5. Delete the loser node.
+
+    Does NOT commit — caller controls transaction boundary.
+    Returns the merge_log row id.
+    """
+    loser_id = str(loser_node.id)
+    winner_id = str(winner_node.id)
+
+    loser_snapshot = snapshot_node(loser_node)
+    if winner_pre_snapshot is None:
+        winner_pre_snapshot = snapshot_node(winner_node)
+
+    rerouted, dropped = reroute_edges(session, loser_id, winner_id)
+    rebinds = rebind_node_references(session, loser_id, winner_id)
+
+    log_id = record_merge(
+        session,
+        loser_snapshot=loser_snapshot,
+        winner_pre_snapshot=winner_pre_snapshot,
+        rerouted_edge_ids=rerouted,
+        dropped_edge_snapshots=dropped,
+        rebinds=rebinds,
+        merge_actor=merge_actor,
+        notes=notes,
+    )
+
+    # Delete the loser via raw SQL rather than ORM. With back_populates on
+    # Node.outgoing_edges / incoming_edges, ORM delete walks the relationship
+    # collection and tries to NULL-out the FKs of any in-memory edges that
+    # were linked to loser. After reroute the DB no longer has any edges
+    # referencing loser, but the ORM's cached collections may still hold the
+    # pre-reroute Edge instances, and SQLAlchemy's nullify path tries to
+    # flush source_id=NULL updates that violate NOT NULL. Raw SQL DELETE
+    # bypasses the ORM entirely; the DB-level ON DELETE CASCADE handles any
+    # leftover edges (there should be none).
+    # Delete loser via raw SQL so SQLAlchemy doesn't walk any ORM
+    # relationship collections (which can still hold pre-reroute edge
+    # instances via back_populates). The DB's ON DELETE CASCADE handles any
+    # stragglers at the FK level — there should be none after reroute.
+    session.expunge(loser_node)
+    session.execute(
+        text("DELETE FROM kg_node_metadata WHERE id = :id"),
+        {"id": loser_id},
+    )
+    session.flush()
+    return log_id

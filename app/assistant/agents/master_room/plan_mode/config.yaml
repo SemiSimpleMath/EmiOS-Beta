@@ -1,0 +1,28 @@
+name: master_room::plan_mode
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "gemini"
+  engine: "gemini-3-flash-preview"
+  model_tier: "mini"
+
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+entity_scan_keys: [incoming_message, task, information, recent_history]
+
+user_context_items:
+  - date_time
+  - task
+  - information
+  - plan_session_id
+  - plan_ticket_id
+  - room_allowed_resource_context
+  - room_allow_images
+  - room_allowed_entity_cards
+  - room_pinned_entities
+  - entity_summary
+  - entity_metadata
+  - recent_history
+
+system_context_items: []

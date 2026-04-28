@@ -1,0 +1,41 @@
+Today is {{ date_time }}
+
+{% if original_message_timestamp %}
+The original message was recorded on: {{ original_message_timestamp }}
+{% endif %}
+
+{%- if _keyword_injected_resources %}
+{%- for res in _keyword_injected_resources %}
+
+## {{ res.label }}
+{%- if res.content is string %}
+{{ res.content }}
+{%- else %}
+{{ res.content }}
+{%- endif %}
+{%- endfor %}
+{%- endif %}
+
+{% if entity_level_0 %}
+#### ADDITIONAL KNOWN CONTEXT ####
+These are facts already recorded in the knowledge graph about entities mentioned below.
+Use them to produce accurate, consistent node labels and to avoid creating duplicates of existing knowledge.
+{{ entity_level_0 }}
+#### END OF ADDITIONAL KNOWN CONTEXT ####
+{% endif %}
+
+{% if full_conversation %}
+#### FULL CONVERSATION (for context only) ####
+The assistant's lines are shown here to help you understand what the user is referring to, responding to, or being asked. Use this ONLY as context.
+Do NOT create nodes or edges out of anything the assistant says.
+Do NOT attribute statements the assistant makes as facts the user has confirmed unless the user's own text confirms them.
+{{ full_conversation }}
+#### END OF FULL CONVERSATION ####
+
+#### EXTRACT NODES AND EDGES ONLY FROM THESE USER UTTERANCES ####
+{{ text }}
+{% else %}
+Analyze the following text and extract all nodes and edges that should be recorded in a knowledge graph:
+
+{{ text }}
+{% endif %}

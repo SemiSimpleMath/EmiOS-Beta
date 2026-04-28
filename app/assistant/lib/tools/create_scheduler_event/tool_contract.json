@@ -1,0 +1,76 @@
+{
+  "name": "create_scheduler_event",
+  "description": "This is used for one time reminders for the user. Example: Remind me at 2pm to pick up coffee.",
+  "inputs": [
+    {
+      "name": "title",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "start_date",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "task_type",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "payload_message",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "importance",
+      "type": "integer",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "sound",
+      "type": "string",
+      "required": true,
+      "description": ""
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "Create a one-time reminder event.\n\nRequired fields:\n- title: short name for the reminder\n- start_date: when to fire, format YYYY-MM-DD HH:MM:SS (local time)\n- payload_message: what to remind about\n\nDefaults (omit unless you have a reason to change):\n- task_type: \"reminder\"\n- importance: 3\n- sound: \"default\"\n\nExample:\ntitle: Laundry reminder\nstart_date: 2024-11-05 14:30:00\npayload_message: Remind Bob to pick up laundry\ntask_type: reminder\nimportance: 3\nsound: default",
+  "metadata": {
+    "domain": "reminder",
+    "actions": [
+      "create",
+      "remind"
+    ],
+    "selectors": [
+      "title",
+      "date_time",
+      "payload"
+    ],
+    "risk_level": "medium",
+    "side_effects": "writes_data",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

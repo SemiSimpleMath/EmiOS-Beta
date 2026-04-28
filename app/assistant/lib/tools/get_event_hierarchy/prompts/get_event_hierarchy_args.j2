@@ -1,0 +1,26 @@
+## get_event_hierarchy
+
+Get the full hierarchy for an event.
+
+### Arguments:
+
+- **source** (required): Event reference in format "source_system:source_id"
+  - Examples: "google_calendar:abc123xyz", "scheduler:reminder_001"
+
+### Returns:
+- The event's node info
+- Ancestors (parent chain up to root)
+- Direct children
+- Full subtree (all descendants)
+
+### Example:
+
+```json
+{
+  "tool_name": "get_event_hierarchy",
+  "arguments": {
+    "source": "google_calendar:abc123xyz"
+  }
+}
+```
+

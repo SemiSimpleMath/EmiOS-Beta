@@ -1,0 +1,15 @@
+Arguments for kg_explorer_manager:
+
+task (required): The exploration task to perform (e.g., "Discover relationships for node X", "Find temporal connections", "Analyze family relationships")
+
+information (optional): Additional context or information about what to look for
+
+node_id (optional): Specific node ID to explore. If not provided, will select an interesting node automatically
+
+exploration_type (optional): Type of exploration to perform:
+- relationship_discovery: Focus on finding implicit relationships
+- temporal_reasoning: Focus on temporal inference and date calculation
+- general: General exploration of the node and its context
+
+parameters (optional): Additional parameters for the exploration as a JSON string, such as:
+- {"max_depth": 3, "focus_areas": ["family", "work"], "temporal_anchors": ["1990-03-01"]}

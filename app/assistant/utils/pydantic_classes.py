@@ -1,0 +1,314 @@
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from typing import Dict, Any, Optional, List, Union, Literal
+from datetime import datetime, timezone
+import uuid
+
+from app.assistant.pod_store.contracts import PodHeader
+
+
+class ScopeBaseModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class ScopeHistoryPolicy(ScopeBaseModel):
+    mode: Literal["none", "recent_only", "summary_plus_recent"] = "recent_only"
+    source: Literal["scope_local", "unified_log"] = "unified_log"
+    include_room_scoped: bool = False
+    lookback_hours: Optional[int] = None
+    max_messages: Optional[int] = None
+    max_chars_per_message: Optional[int] = None
+
+
+class ScopeResourcePolicy(ScopeBaseModel):
+    allowed_global_resources: List[str] = Field(default_factory=list)
+    allowed_room_resources: List[str] = Field(default_factory=list)
+    denied_resources: List[str] = Field(default_factory=list)
+    resource_groups: List[str] = Field(default_factory=list)
+
+
+class ScopeToolPolicy(ScopeBaseModel):
+    allowed_tools: List[str] = Field(default_factory=lambda: ["all"])
+    blocked_tools: List[str] = Field(default_factory=list)
+    requires_approval_tools: List[str] = Field(default_factory=list)
+    allow_external_side_effects: bool = False
+
+    @field_validator("allowed_tools")
+    @classmethod
+    def validate_allowed_tools_semantics(cls, v: List[str]) -> List[str]:
+        cleaned = [str(item).strip() for item in (v or []) if isinstance(item, str) and str(item).strip()]
+        if "all" in cleaned and len(cleaned) > 1:
+            raise ValueError("tools.allowed_tools cannot mix 'all' with specific tool names.")
+        return cleaned
+
+
+class ScopeEntityPolicy(ScopeBaseModel):
+    enabled: bool = True
+    allowed_entity_cards: List[str] = Field(default_factory=list)
+    pinned_entities: List[str] = Field(default_factory=list)
+    entity_lookback_messages: Optional[int] = None
+    entity_lookback_seconds: Optional[int] = None
+
+
+class ScopeCardPolicy(ScopeBaseModel):
+    enabled: bool = True
+    allowed_cards: List[str] = Field(default_factory=list)
+    max_cards_per_turn: Optional[int] = None
+    max_total_chars: Optional[int] = None
+
+
+class ScopeWritePolicy(ScopeBaseModel):
+    write_unified_log: bool = True
+    write_kg: bool = False
+    allow_fact_extraction: bool = False
+    writable_state_keys: List[str] = Field(default_factory=list)
+
+
+class ScopeDeliveryPolicy(ScopeBaseModel):
+    auto_send: bool = True
+    allow_initiation: bool = False
+    allowed_reply_types: List[str] = Field(default_factory=list)
+
+
+class ScopeApprovalPolicy(ScopeBaseModel):
+    authority_level: int = Field(default=0, ge=0, le=100)
+
+
+class ScopeRetentionPolicy(ScopeBaseModel):
+    persist_chat: bool = True
+    persist_tool_results: bool = True
+    allow_context_summarization: bool = True
+    redact_before_persist: bool = False
+
+
+class ScopeExecutionPolicy(ScopeBaseModel):
+    max_turns: Optional[int] = None
+    max_tool_calls: Optional[int] = None
+    timeout_seconds: Optional[int] = None
+    allowed_models: List[str] = Field(default_factory=list)
+
+
+class ScopeDelegationPolicy(ScopeBaseModel):
+    pass
+
+
+class ScopeContext(ScopeBaseModel):
+    schema_version: Literal["scope_context_v1"] = "scope_context_v1"
+
+    # Identity and tenancy
+    scope_id: str
+    owner_id: str
+    actor_id: str
+    surface: str
+    room_id: Optional[str] = None
+    room_context_id: Optional[str] = None
+    visibility: Literal["owner_only", "room_shared", "global_shared"] = "owner_only"
+    policy_id: Optional[str] = None
+
+    # Scope dimensions
+    history: ScopeHistoryPolicy = Field(default_factory=ScopeHistoryPolicy)
+    resources: ScopeResourcePolicy = Field(default_factory=ScopeResourcePolicy)
+    tools: ScopeToolPolicy = Field(default_factory=ScopeToolPolicy)
+    entities: ScopeEntityPolicy = Field(default_factory=ScopeEntityPolicy)
+    cards: ScopeCardPolicy = Field(default_factory=ScopeCardPolicy)
+    writes: ScopeWritePolicy = Field(default_factory=ScopeWritePolicy)
+    delivery: ScopeDeliveryPolicy = Field(default_factory=ScopeDeliveryPolicy)
+    approval: ScopeApprovalPolicy = Field(default_factory=ScopeApprovalPolicy)
+    retention: ScopeRetentionPolicy = Field(default_factory=ScopeRetentionPolicy)
+    execution: ScopeExecutionPolicy = Field(default_factory=ScopeExecutionPolicy)
+    delegation: ScopeDelegationPolicy = Field(default_factory=ScopeDelegationPolicy)
+
+
+# Define the Message class using Pydantic
+class Message(BaseModel):
+    data_type: Optional[str] = None  # e.g., 'init_agent', 'agent_msg', 'tool_result', 'agent_selection_request', 'agent_selection_response'
+    # Additional classification flexibility:
+    # This is intentionally a LIST so a message can carry multiple tags for routing/scoping.
+    # Example: ["chat", "slash_command", "music"]
+    sub_data_type: List[str] = Field(default_factory=list)
+    sender: Optional[str] = None  # Name of the agent or 'User'
+    receiver: Optional[str] = None
+    content: Optional[str] = None
+    data: Optional[Dict[str, Any]] = None
+    task: Optional[str] = ""
+    ask_user_id: Optional[str] = None
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    scope_id: Optional[str] = None
+    group_id: Optional[int] = None
+    information: Optional[str] = ""
+    request_id: Optional[str] = None
+    role: Optional[str] = None
+    notification: Optional[bool] = False
+    is_chat: Optional[bool] = False
+    agent_input: Optional[Union[str, Dict[str, Any]]] = None
+    event_topic: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None  # For storing additional metadata like entity names
+    test_mode: Optional[bool] = False
+    memo_mode: Optional[bool] = False
+
+    # Room-scoped messaging contract (optional, backward-compatible)
+    room_id: Optional[str] = None
+    room_surface: Optional[str] = None
+    room_context_id: Optional[str] = None
+    room_visibility: Optional[str] = None  # owner_only | room_shared
+    room_policy_id: Optional[str] = None
+
+    # Per-message room semantics
+    room_message_direction: Optional[str] = None  # inbound | outbound
+    room_initiated_by: Optional[str] = None  # user | agent | system
+    room_delivery_mode: Optional[str] = None  # auto_send | approved | draft
+
+    # Multi-speaker room identity
+    room_speaker_id: Optional[str] = None
+    room_speaker_name: Optional[str] = None
+    room_speaker_role: Optional[str] = None  # owner | participant | assistant | system
+    room_speaker_external_id: Optional[str] = None
+    room_actor_id: Optional[str] = None
+
+    # Transport-level identifiers
+    transport_message_id: Optional[str] = None
+    transport_from: Optional[str] = None
+    transport_to: Optional[str] = None
+    transport_channel_id: Optional[str] = None
+    transport_thread_id: Optional[str] = None
+
+    # Canonical scope contract for scoped entities.
+    scope_context: Optional[ScopeContext] = None
+
+    # Pod references hydrated from message text (populated by PodInjector).
+    # Non-empty list means hydration has already run for this message.
+    referenced_pods: List[PodHeader] = Field(default_factory=list)
+
+
+class PlanStruct(Message):
+    plan: str
+    current_step: str
+    action: str
+    action_input: str
+    status: int
+    complete: bool
+
+class ToolResult(BaseModel):
+    result_type: Optional[str] = None
+    content: str = ""
+    data_list: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
+    data: Optional[Any] = None
+
+
+class ToolMessage(Message):  # Assuming Message is similar to BaseModel
+    tool_name: str  # Name of the tool being invoked
+    tool_data: Optional[Dict[str, Any]] = None # Arguments passed to the tool
+    tool_result: Optional[ToolResult] = None  # Result of the tool execution
+    request_id: Optional[str] = None
+
+
+class PipelineToolOp(BaseModel):
+    name: Optional[str] = None
+    arguments: Optional[Dict[str, Any]] = None
+    action_input: Optional[Any] = None
+    calling_agent: Optional[str] = None
+    kind: Optional[str] = None  # tool | agent | control_node
+
+
+class PipelineState(BaseModel):
+    stage: Optional[str] = None
+    pending_tool: Optional[PipelineToolOp] = None
+    last_tool_result_ref: Optional[Dict[str, str]] = None
+    last_tool_result_meta: Optional[Dict[str, Any]] = None
+    resume_target: Optional[str] = None
+    flags: Dict[str, Any] = Field(default_factory=dict)
+    scratch: Dict[str, Any] = Field(default_factory=dict)
+
+
+RESULT_TYPE_HANDLERS = {
+    "fetch_email": "handle_fetch_email_result",
+    "SearchResult": "handle_search_result",
+    "SendEmailTool": "handle_send_email_result",
+    "search1": "handle_search1_result",
+    "scrape": "handle_scrape_result",
+    "success": "handle_success_result",
+    "error": "handle_error_result",
+    "final_answer": "handle_final_answer",
+    "calendar_events": "handle_get_calendar_event_result",
+    "scheduler_events": "handle_fetch_scheduler_events_result",
+    "weather": "handle_get_weather_result",
+    "news": "handle_get_news_result",
+    "todo_tasks": "handle_get_todo_tasks",
+    "ask_user_response": "handle_ask_user_response",
+    "tool_success": "handle_tool_success",
+    "tool_failure": "handle_tool_failure"
+
+}
+
+RESULT_TYPE_HANDLERS_NEW = {
+    "fetch_email": "handle_fetch_email_result",
+    "search_result": "handle_search_result",
+    "send_email": "handle_send_email_result",
+    "search1": "handle_search1_result",
+    "scrape": "handle_scrape_result",
+    "success": "handle_success_result",
+    "error": "handle_error_result",
+    "final_answer": "handle_final_answer",
+    "calendar_events": "handle_calendar_event_result",
+    "scheduler_events": "handle_scheduler_events_result",
+    "weather": "handle_weather_result",
+    "news": "handle_news_result",
+    "todo_tasks": "handle_todo_tasks_result",
+    "ask_user_response": "handle_ask_user_response",
+    "tool_success": "handle_tool_success",
+    "tool_failure": "handle_tool_failure"
+}
+
+
+
+class EventMessage(Message):
+    event_payload: Dict[str, Any]
+
+class UserMessageData(BaseModel):
+    feed: Optional[str] = None
+    chat: Optional[str] = None
+    widget_data: Optional[List[Dict[str,Any]]] = None
+    sound: Optional[str] = None
+    importance: Optional[int] = 2
+    generic_type: Optional[str] = None
+    tts: Optional[bool] = False
+    tts_text: Optional[str] = None
+
+class UserMessage(Message):
+    user_message_data: UserMessageData
+
+
+def require_scope_context(message: Message) -> ScopeContext:
+    scope = getattr(message, "scope_context", None)
+    if isinstance(scope, ScopeContext):
+        return scope
+    raise ValueError("Missing required scope_context on scoped message.")
+
+
+# Not sure if these are needed putting these here for safe keeping
+
+class EmailData(BaseModel):
+    id: str  # Unique identifier for the email
+    sender: Optional[str] = None
+    receiver: Optional[List[str]] = None
+    cc: Optional[List[str]] = None
+    bcc: Optional[List[str]] = None
+    subject: Optional[str] = None
+    body: Optional[str] = None
+    datetime_received: Optional[str] = None  # ISO 8601 format
+    has_attachment: Optional[bool] = None
+
+
+class CalendarEventData(BaseModel):
+    id: str  # Unique identifier for the event
+    title: Optional[str] = None
+    description: Optional[str] = None
+    start_time: Optional[str] = None  # ISO 8601 format
+    end_time: Optional[str] = None  # ISO 8601 format
+    time_zone: Optional[str] = None
+    location: Optional[str] = None
+    attendees: Optional[List[str]] = None
+    recurrence_rule: Optional[str] = None
+    link: Optional[str] = None
+    metadata: Optional[Dict] = None  # Extra information for flexibility
+

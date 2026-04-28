@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Taxonomy Reviewer</title>
+    <link rel="stylesheet" href="{{ url_for('taxonomy_viewer.static', filename='css/taxonomy_reviewer.css') }}">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <h1>🏷️ Taxonomy Reviewer</h1>
+                    <p>Review taxonomy classifications, approve suggestions, and manage the taxonomy hierarchy</p>
+                </div>
+                <div style="display: flex; gap: 10px;">
+                    <button onclick="exportTaxonomy('tree')" class="btn-primary" title="Export hierarchical taxonomy to JSON">
+                        💾 Export JSON
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Statistics Panel -->
+        <div class="stats-panel">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <h3 id="stat-total-types">-</h3>
+                    <p>Taxonomy Types</p>
+                </div>
+                <div class="stat-card success">
+                    <h3 id="stat-classified">-</h3>
+                    <p>Classified Nodes</p>
+                </div>
+                <div class="stat-card warning">
+                    <h3 id="stat-unclassified">-</h3>
+                    <p>Unclassified Nodes</p>
+                </div>
+                <div class="stat-card info">
+                    <h3 id="stat-pending-suggestions">-</h3>
+                    <p>Pending Suggestions</p>
+                </div>
+                <div class="stat-card warning">
+                    <h3 id="stat-pending-reviews">-</h3>
+                    <p>Pending Reviews</p>
+                </div>
+                <div class="stat-card">
+                    <h3 id="stat-provisional">-</h3>
+                    <p>Provisional Classifications</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tabs -->
+        <div class="tabs">
+            <div class="tab-buttons">
+                <button class="tab-btn active" data-tab="tree">Taxonomy Tree</button>
+                <button class="tab-btn" data-tab="node-search">🔍 Node Search</button>
+                <button class="tab-btn" data-tab="suggestions">New Type Suggestions (<span id="suggestions-count">0</span>)</button>
+                <button class="tab-btn" data-tab="reviews">Node Reviews (<span id="reviews-count">0</span>)</button>
+            </div>
+
+            <!-- Taxonomy Tree Tab -->
+            <div id="tree-tab" class="tab-content active">
+                <!-- Search Box -->
+                <div style="margin-bottom: 15px;">
+                    <input 
+                        type="text" 
+                        id="tree-search" 
+                        placeholder="🔍 Search taxonomy (type to filter)..." 
+                        style="width: 100%; padding: 10px; border: 2px solid #3498db; border-radius: 5px; font-size: 14px;"
+                    />
+                    <div id="search-results" style="margin-top: 10px; color: #7f8c8d; font-size: 13px;"></div>
+                </div>
+                
+                <div class="taxonomy-tree" id="taxonomy-tree">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p>Loading taxonomy tree...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Node Search Tab -->
+            <div id="node-search-tab" class="tab-content">
+                <div style="margin-bottom: 20px;">
+                    <input 
+                        type="text" 
+                        id="node-search-input" 
+                        placeholder="🔍 Search by node label or UUID..." 
+                        style="width: 100%; padding: 12px; border: 2px solid #3498db; border-radius: 5px; font-size: 15px;"
+                        onkeypress="if(event.key === 'Enter') searchNodes()"
+                    />
+                    <button 
+                        onclick="searchNodes()" 
+                        style="margin-top: 10px; padding: 10px 20px; background: #3498db; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;"
+                    >
+                        Search
+                    </button>
+                </div>
+                <div id="node-search-results"></div>
+            </div>
+
+            <!-- Suggestions Tab -->
+            <div id="suggestions-tab" class="tab-content">
+                <div class="review-list" id="suggestions-list">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p>Loading suggestions...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Reviews Tab -->
+            <div id="reviews-tab" class="tab-content">
+                <div class="review-list" id="reviews-list">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p>Loading reviews...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Modal -->
+    <div id="editModal" class="modal">
+        <div class="modal-content">
+            <h2>Edit Taxonomy Category</h2>
+            <p style="color: #7f8c8d; margin-bottom: 5px;">
+                <strong>Current Path:</strong> <span id="editPath"></span>
+            </p>
+            <p style="color: #7f8c8d; margin-bottom: 5px;">
+                <strong>Category ID:</strong> <span id="editNodeIdDisplay"></span>
+            </p>
+            <p style="color: #7f8c8d; margin-bottom: 15px;">
+                <strong>Current Parent:</strong> <span id="editCurrentParentDisplay"></span>
+            </p>
+            <input type="hidden" id="editNodeId">
+            <input type="hidden" id="editCurrentParentId">
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 600;">Category Label:</label>
+                <input type="text" id="editLabel" class="form-input" placeholder="Enter new label" 
+                       style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px;">
+            </div>
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 600;">Description:</label>
+                <textarea id="editDescription" class="form-input" placeholder="Enter category description (optional)" 
+                       style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px; min-height: 80px; resize: vertical; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;"></textarea>
+                <small style="color: #7f8c8d; margin-top: 5px; display: block;">
+                    Describe what this category represents to help agents make better classification decisions
+                </small>
+            </div>
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 600;">New Parent ID:</label>
+                <input type="number" id="editParent" class="form-input" placeholder="Enter parent taxonomy ID" 
+                       style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px;">
+                <small style="color: #7f8c8d; margin-top: 5px; display: block;">
+                    Enter the taxonomy ID of the new parent, or leave empty to make this a root category
+                </small>
+            </div>
+            <div style="display: flex; gap: 10px; justify-content: space-between;">
+                <button onclick="deleteCategory()" class="btn-danger" title="Delete this category and all its children">
+                    🗑️ Delete Category
+                </button>
+                <div style="display: flex; gap: 10px;">
+                    <button onclick="closeEditModal()" class="btn-secondary">Cancel</button>
+                    <button onclick="submitEdit()" class="btn-primary">Save Changes</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Child Modal -->
+    <div id="addChildModal" class="modal">
+        <div class="modal-content">
+            <h2>Add Child Category</h2>
+            <p style="color: #7f8c8d; margin-bottom: 15px;">Parent: <strong id="parentPath"></strong></p>
+            <input type="hidden" id="parentNodeId">
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 600;">New Child Label:</label>
+                <input type="text" id="newChildLabel" class="form-input" placeholder="Enter child category label" 
+                       style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px;">
+            </div>
+            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                <button onclick="closeAddChildModal()" class="btn-secondary">Cancel</button>
+                <button onclick="submitAddChild()" class="btn-primary">Add Child</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Suggestion Modal -->
+    <div id="editSuggestionModal" class="modal">
+        <div class="modal-content">
+            <h2>Edit Taxonomy Suggestion</h2>
+            <input type="hidden" id="suggestionId">
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 600;">Parent Path:</label>
+                <input type="text" id="suggestionParentPath" class="form-input" placeholder="e.g., event > communication > conversation" 
+                       style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px;">
+                <small style="color: #7f8c8d; margin-top: 5px; display: block;">
+                    The full path where this new category should be added
+                </small>
+            </div>
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 600;">Suggested Label:</label>
+                <input type="text" id="suggestionLabel" class="form-input" placeholder="Enter taxonomy label" 
+                       style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px;">
+                <small style="color: #7f8c8d; margin-top: 5px; display: block;">
+                    The new category name to add (e.g., "question")
+                </small>
+            </div>
+            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                <button onclick="closeEditSuggestionModal()" class="btn-secondary">Cancel</button>
+                <button onclick="saveSuggestion()" class="btn-primary">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Review Modal -->
+    <div id="editReviewModal" class="modal">
+        <div class="modal-content">
+            <h2>Edit Node Classification</h2>
+            <p style="color: #7f8c8d; margin-bottom: 15px;">Node: <strong id="reviewNodeLabel"></strong></p>
+            <input type="hidden" id="reviewId">
+            <div style="margin-bottom: 15px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 600;">Taxonomy Path:</label>
+                <input type="text" id="reviewPath" class="form-input" placeholder="e.g., entity > person > user" 
+                       style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px;">
+                <small style="color: #7f8c8d;">Format: parent > child > grandchild</small>
+            </div>
+            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                <button onclick="closeEditReviewModal()" class="btn-secondary">Cancel</button>
+                <button onclick="saveReview()" class="btn-primary">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Node Taxonomy Modal (from search) -->
+    <div id="editNodeTaxonomyModal" class="modal">
+        <div class="modal-content">
+            <h2>Edit Node Taxonomy</h2>
+            <input type="hidden" id="editNodeTaxonomyNodeId" />
+            <input type="hidden" id="editNodeTaxonomyOldId" />
+            
+            <div style="margin-bottom: 15px;">
+                <strong>Node:</strong>
+                <div id="editNodeTaxonomyNodeLabel" style="color: #3498db; font-size: 16px; margin-top: 5px;"></div>
+            </div>
+            
+            <div style="margin-bottom: 15px;">
+                <strong>New Taxonomy Path:</strong>
+                <input 
+                    type="text" 
+                    id="editNodeTaxonomyPath" 
+                    placeholder="entity > person > user" 
+                    style="width: 100%; padding: 8px; margin-top: 5px; font-size: 14px;"
+                />
+                <div style="margin-top: 5px; font-size: 12px; color: #7f8c8d;">
+                    Use format: entity > person > user
+                </div>
+            </div>
+            
+            <div class="modal-buttons">
+                <button onclick="saveNodeTaxonomy()" class="btn-primary">💾 Save</button>
+                <button onclick="closeEditNodeTaxonomyModal()" class="btn-secondary">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('taxonomy_viewer.static', filename='js/taxonomy_reviewer.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,230 @@
+.kg-node-page {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 16px 64px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: #1a1a1a;
+  line-height: 1.45;
+}
+
+.kg-node-header {
+  margin-bottom: 24px;
+  padding-bottom: 12px;
+  border-bottom: 2px solid #eee;
+}
+.kg-node-header h1 {
+  margin: 0 0 6px;
+  font-size: 28px;
+}
+.kg-node-meta {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.kg-pill {
+  background: #eef3ff;
+  color: #1f3e85;
+  padding: 2px 9px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.kg-node-id {
+  color: #888;
+  font-family: "SF Mono", Monaco, Consolas, monospace;
+  font-size: 12px;
+}
+
+.kg-card {
+  background: #fafafa;
+  border: 1px solid #eaeaea;
+  border-radius: 6px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+}
+.kg-card h2 {
+  margin: 0 0 10px;
+  font-size: 16px;
+  color: #444;
+}
+.kg-card h3 {
+  margin: 12px 0 6px;
+  font-size: 14px;
+  color: #555;
+  font-family: "SF Mono", Monaco, Consolas, monospace;
+}
+
+.kg-dl {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 6px 16px;
+  margin: 0;
+}
+.kg-dl dt {
+  color: #666;
+  font-size: 13px;
+}
+.kg-dl dd {
+  margin: 0;
+  font-size: 14px;
+  word-break: break-word;
+}
+
+.kg-muted { color: #999; font-size: 12px; }
+
+.kg-edges { list-style: none; padding: 0; margin: 0; }
+.kg-edges li {
+  padding: 6px 0;
+  border-bottom: 1px dashed #e3e3e3;
+  font-size: 14px;
+}
+.kg-edges li:last-child { border-bottom: none; }
+.kg-edges a { color: #1f3e85; text-decoration: none; }
+.kg-edges a:hover { text-decoration: underline; }
+.kg-rel {
+  font-family: "SF Mono", Monaco, Consolas, monospace;
+  color: #8a5a00;
+  font-size: 13px;
+}
+.kg-sent {
+  margin-top: 2px;
+  padding-left: 16px;
+  color: #555;
+  font-size: 13px;
+  font-style: italic;
+}
+
+.kg-window {
+  background: #fff;
+  border-left: 3px solid #cfd8ff;
+  padding: 10px 16px;
+  margin: 10px 0;
+}
+.kg-evidence {
+  background: #fffdf2;
+  padding: 6px 10px;
+  border-radius: 4px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+.kg-ev-line { padding: 2px 0; }
+.kg-window-items {
+  padding-left: 20px;
+  margin: 6px 0;
+  font-size: 13px;
+}
+.kg-window-items li { padding: 3px 0; }
+.kg-role {
+  font-family: "SF Mono", Monaco, Consolas, monospace;
+  color: #555;
+  font-size: 12px;
+}
+
+.kg-proposals {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.kg-proposal-item {
+  padding: 8px 10px;
+  border-bottom: 1px solid #eaecf0;
+  font-size: 13px;
+}
+.kg-proposal-item code {
+  background: #f1f3f4;
+  padding: 1px 5px;
+  border-radius: 2px;
+  font-size: 12px;
+}
+.kg-proposal-status {
+  display: inline-block;
+  padding: 1px 6px;
+  font-size: 11px;
+  border-radius: 10px;
+  margin-left: 6px;
+  background: #eaecf0;
+  color: #54595d;
+}
+.kg-status-promoted { background: #e3f2e3; color: #1b5e20; }
+.kg-status-pending { background: #fff3e0; color: #e65100; }
+.kg-status-contradicted { background: #fce4ec; color: #880e4f; }
+.kg-status-retracted { background: #f5f5f5; color: #666; text-decoration: line-through; }
+.kg-proposal-type {
+  font-size: 11px;
+  color: #8a5a00;
+  margin-left: 4px;
+}
+.kg-proposal-role {
+  font-size: 11px;
+  color: #888;
+  margin-left: 6px;
+  font-style: italic;
+}
+.kg-proposal-sentence {
+  color: #202122;
+  font-style: italic;
+  padding: 4px 8px;
+  border-left: 2px solid #c8ccd1;
+  margin: 4px 0;
+}
+.kg-edit-card details > summary {
+  cursor: pointer;
+  padding: 4px 0;
+  user-select: none;
+}
+.kg-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+.kg-edit-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: #333;
+}
+.kg-edit-form input[type="text"],
+.kg-edit-form input[type="number"],
+.kg-edit-form textarea {
+  padding: 6px 8px;
+  font-size: 14px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-family: inherit;
+}
+.kg-edit-form textarea {
+  resize: vertical;
+}
+.kg-edit-row {
+  display: flex;
+  gap: 16px;
+}
+.kg-edit-row label {
+  flex: 1;
+}
+.kg-edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.kg-edit-actions button {
+  padding: 6px 18px;
+  font-size: 14px;
+  background: #1f3e85;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.kg-edit-actions button:hover {
+  background: #2a4fa3;
+}
+
+.kg-proposal-time {
+  font-size: 11px;
+  color: #888;
+  font-family: "SF Mono", Monaco, Consolas, monospace;
+}

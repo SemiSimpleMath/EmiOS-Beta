@@ -1,0 +1,30 @@
+## Proposed Label to Verify
+
+**Proposal**: {{ proposal_text }}
+**Node Type**: {{ node_type }}
+
+## Existing Canonical Labels (in same node_type bucket)
+
+{% if candidates and candidates|length > 0 %}
+{% for candidate in candidates %}
+{{ loop.index }}. **{{ candidate.text }}** (ID: {{ candidate.id }})
+{% endfor %}
+{% else %}
+No existing canonical labels in this bucket.
+{% endif %}
+
+## Policy Constraints
+
+{{ policy }}
+
+---
+
+**Task**: Decide if the proposal should map to an existing canonical, create a new canonical, or be queued for human review.
+
+Consider:
+- Is the proposal semantically equivalent to any existing canonical?
+- Does it represent a distinct concept that warrants a new canonical?
+- Is there significant uncertainty requiring human review?
+
+Return: decision, target_id (if mapping), confidence, reason
+

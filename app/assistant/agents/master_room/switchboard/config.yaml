@@ -1,0 +1,29 @@
+name: master_room::switchboard
+class_name: Agent
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5-mini"
+  model_tier: "mini"
+
+allowed_tools:
+  - personal_admin_manager
+  - one_shot_tool_runner
+  - run_task
+  - task_compile_manager
+  - web_manager
+  - playwright_manager
+  - emi_team_manager
+  - devices_manager
+except_tools: []
+allowed_nodes: []
+entity_scan_keys: [incoming_message, task, information]
+
+user_context_items:
+  - date_time
+  - task
+  - information
+
+system_context_items:
+  - resource_assistant_data
+  - tool_descriptions
+  - room_participant_facts

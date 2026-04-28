@@ -1,0 +1,19 @@
+{
+  "step_id": "afk_statistics",
+  "description": "Computes AFK statistics and realtime AFK overlay.",
+  "daily_reset": {
+    "boundary_hour_local": 5,
+    "output_resource_defaults": {
+      "is_afk": false,
+      "idle_minutes": 0,
+      "total_active_time_today": 0,
+      "total_afk_time_today": 0,
+      "afk_count_today": 0,
+      "total_active_time_since_wake": 0,
+      "total_afk_time_since_wake": 0,
+      "active_work_session_minutes": 0,
+      "current_afk_minutes": 0
+    }
+  }
+}
+

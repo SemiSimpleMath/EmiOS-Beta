@@ -1,0 +1,26 @@
+Today is {{ date_time }}.
+
+Task:
+{{ task }}
+
+{% if information %}
+Information:
+{{ information }}
+{% endif %}
+
+Current facts (v{{ orchestrator_facts_version }}):
+{{ orchestrator_facts }}
+
+Recent child results:
+{{ orchestrator_results }}
+
+Progress inbox (batched partial updates from running jobs; newest last):
+{{ orchestrator_progress_inbox }}
+
+Job map (job_id -> task/success_criteria/status; use this to judge whether new info is already within a running job's scope):
+{{ orchestrator_job_map }}
+
+Tick: {{ orchestrator_tick }}
+
+Update facts_patch and decide if we are done.
+

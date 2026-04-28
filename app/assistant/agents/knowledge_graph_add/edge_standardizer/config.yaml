@@ -1,0 +1,21 @@
+name: knowledge_graph_add::edge_standardizer
+class_name: Agent
+llm_params:
+  engine: gpt-4.1
+  model_tier: "smart"
+  temperature: .1
+  llm_provider: "openai"
+allowed_tools: []
+except_tools: []
+user_context_items:
+- source_label
+- target_label
+- relationship_type
+- relationship_descriptor
+- sentence
+- known_edge_variants
+- context_text
+system_context_items:
+  - resource_user_data
+type: agent
+

@@ -1,0 +1,13 @@
+When updating a task, you must provide arguments that match the `UpdateTaskArgs` schema:
+- **task_id** (required): The unique ID of the task.
+- **due_date** (optional): The new due date in **ISO 8601 format** (e.g., "2025-03-10T15:00:00Z").
+- **priority** (optional): The new priority level as a **string** (e.g., "high", "medium", "low").
+- **days_offset** (optional): An **integer** representing the number of days to shift the due date (**positive to push forward, negative to move earlier**).
+- **tasklist_name** (optional): The name of the task list the task belongs to.
+- **completed** (optional): A **boolean** (`true` or `false`) indicating whether the task should be marked as complete.
+
+Rules:
+- Ensure `task_id` is always included.
+- If `completed` is `true`, do **not** modify `due_date` or `days_offset` (a completed task does not need a due date change).
+- If both `due_date` and `days_offset` are provided, `days_offset` should be ignored in favor of `due_date`.
+

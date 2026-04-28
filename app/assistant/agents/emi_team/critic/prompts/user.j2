@@ -1,0 +1,52 @@
+Today is {{ date_time }}.
+
+Task:
+{{ task }}
+
+{% if information %}
+Information:
+{{ information }}
+{% endif %}
+
+Available tools:
+{% for tool_name, tool_description in tool_descriptions.items() %}
+- {{ tool_name }}: {{ tool_description }}
+{% endfor %}
+
+Available agents:
+{% for agent in allowed_nodes %}
+- {{ agent.name }}: {{ agent.description }}
+{% endfor %}
+
+{% if manager_loop_number is not none %}
+Manager loop: {{ manager_loop_number }} (count={{ manager_loop_count }})
+{% endif %}
+
+Planned tool call proposed by planner (NOT executed yet):
+- planned_tool_name: {{ planned_tool_name }}
+- planned_tool_arguments: {{ planned_tool_arguments }}
+
+{% if web_critic_image %}
+Latest screenshot (if available):
+[emi_image: {{ web_critic_image }}]
+{% endif %}
+
+{% if emi_team_critic_trigger_reason %}
+Critic trigger reason: {{ emi_team_critic_trigger_reason }}
+{% endif %}
+
+{% if critic_payload %}
+Critic payload:
+{{ critic_payload }}
+{% endif %}
+
+{% if critic_intended_action_input %}
+Intended action input (raw planner proposal):
+{{ critic_intended_action_input }}
+{% endif %}
+
+Recent history:
+{{ recent_history }}
+
+Critique this situation now. If the planned tool call is likely wrong or wasteful, set must_revise_plan=true and give one actionable change.
+When applicable, explicitly recommend a better tool by exact name (for example: `find_tool` to discover the correct tool, then the selected tool).

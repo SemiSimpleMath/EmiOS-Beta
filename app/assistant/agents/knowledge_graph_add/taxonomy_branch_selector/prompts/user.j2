@@ -1,0 +1,26 @@
+Select the most promising taxonomy branches to explore:
+
+**Node to classify:**
+- Label: {{ node_label }}
+{% if node_category %}- Category: {{ node_category }}{% endif %}
+- Type: {{ node_type }}
+{% if node_sentence %}- Context: {{ node_sentence }}{% endif %}
+
+**Current taxonomy path:** {{ current_path }}
+
+**Available child categories ({{ child_descriptions|length }} total):**
+{% for child_desc in child_descriptions %}
+- {{ child_desc }}
+{% endfor %}
+
+{% if mode == 'select_top_2' %}
+Select the TOP 2 most relevant children. (Select ONLY from the list above)
+{% else %}
+Which 0-2 children should we explore? Provide relevance scores for each. (Select ONLY from the list above)
+{% endif %}
+
+Return:
+- selected_branches: List of objects with label (just the category name, not the description) and relevance score (e.g., [{"label": "creative_work", "relevance": 0.95}])
+- confidence: 0.0-1.0
+- reasoning: Why these branches and their scores?
+

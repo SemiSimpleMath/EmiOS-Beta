@@ -1,0 +1,18 @@
+name: diet_tracker
+class_name: Agent
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.4-mini"
+  model_tier: "mini"
+
+allowed_tools: []
+except_tools: []
+
+system_context_items:
+  - resource_user_data
+
+user_context_items:
+  - date_time
+  - current_diet_log
+  - new_food_pods_block
+  - new_tickets_block

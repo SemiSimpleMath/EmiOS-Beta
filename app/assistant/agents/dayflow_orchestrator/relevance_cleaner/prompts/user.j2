@@ -1,0 +1,53 @@
+{%- from "shared/macros/dayflow_items.j2" import task_line, task_block %}
+**Current Time:** {{ date_time }}
+**Day:** {{ day_of_week }}
+
+########## PLANS ##########
+{%- if plan_task_status %}
+{%- for plan in plan_task_status %}
+- [{{ plan.get("plan_id","") }}] {{ plan.get("plan_state","active") | upper }} — {{ plan.get("objective","") }}
+  completed: {{ plan.get("completed_count", 0) }} | remaining: {{ plan.get("remaining_count", 0) }}
+  {%- if plan.get("closed_ago") %}
+  closed: {{ plan.get("closed_ago") }}
+  {%- endif %}
+{%- endfor %}
+{%- else %}
+No plans.
+{%- endif %}
+
+########## TRACKED ITEMS ##########
+{%- if active_dayflow_items %}
+{%- set actionable = [] %}
+{%- set dispatched = [] %}
+{%- set closed_items = [] %}
+{%- set other = [] %}
+{%- for ex in active_dayflow_items %}
+{%- set m = ex.get("metadata", {}) %}
+{%- if m.get("state","") in ["important_open", "actionable"] %}{% if actionable.append(ex) %}{% endif %}
+{%- elif m.get("state","") == "dispatched" %}{% if dispatched.append(ex) %}{% endif %}
+{%- elif m.get("state","") == "closed" %}{% if closed_items.append(ex) %}{% endif %}
+{%- elif m.get("state","") in ["artifact", "new", "watching", "needs_planning"] %}{% if other.append(ex) %}{% endif %}
+{%- endif %}
+{%- endfor %}
+
+{{ task_block(actionable, "Actionable Tasks", 30) }}
+{{ task_block(dispatched, "Dispatched Tasks", 20) }}
+{%- if closed_items %}
+
++++++ Closed Items (review for suppression) +++++
+{%- for ex in closed_items[:60] %}
+{%- set meta = ex.get("metadata", {}) %}
+- task: {{ meta.get("short_id", "") }}
+  {%- if meta.get("plan_id") %} | plan: {{ meta.get("plan_id") }}{% endif %}
+  {%- if meta.get("source_type") %} | {{ meta.get("source_type") }}{% endif %}
+  {%- if meta.get("closed_ago") %} | closed: {{ meta.get("closed_ago") }}{% endif %}
+  {%- if meta.get("closed_at_local") %} ({{ meta.get("closed_at_local") }}){% endif %}
+  {{ meta.get("summary", "") }}
+{%- endfor %}
+{%- endif %}
+
+{{ task_block(other, "Other Items (review for cleanup)", 30) }}
+{%- endif %}
+
+{# Action log removed — the cleaner only needs tracked items, not dispatch history.
+   Showing task IDs in the action log caused the LLM to try suppressing already-suppressed items. #}

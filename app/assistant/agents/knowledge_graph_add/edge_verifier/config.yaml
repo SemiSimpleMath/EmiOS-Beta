@@ -1,0 +1,18 @@
+name: knowledge_graph_add::edge_verifier
+class_name: Agent
+llm_params:
+  engine: gpt-4.1
+  model_tier: "smart"
+  temperature: .1
+  llm_provider: "openai"
+allowed_tools: []
+except_tools: []
+user_context_items:
+- proposal_text
+- domain_type
+- range_type
+- candidates
+- policy
+system_context_items: []
+type: agent
+

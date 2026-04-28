@@ -1,0 +1,28 @@
+name: entertainment::planner
+class_name: Planner
+llm_params:
+  llm_provider: "gemini"
+  engine: "gemini-3-flash-preview"
+  model_tier: "mini"
+
+allowed_tools: all
+except_tools: [entertainment_manager]
+allowed_nodes: [return_control]
+entity_scan_keys: [incoming_message, task, information, recent_history]
+
+user_context_items:
+  - date_time
+  - task
+  - information
+  - task_includes
+  - task_resource_context
+  - recent_history
+  - checklist
+  - progress_report
+  - action_count
+  - entity_level_0
+
+system_context_items:
+  - tool_descriptions
+  - allowed_nodes
+  - task

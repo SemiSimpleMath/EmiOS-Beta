@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Keys & Settings</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/setup_wizard.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="setup-container">
+        <div class="setup-header">
+            <h1>API Keys & Settings</h1>
+            <p>Configure your API keys and system settings</p>
+            <a href="/chat_bot" class="back-link"><i class="fas fa-arrow-left"></i> Back to Chat</a>
+        </div>
+
+        <div class="info-note">
+            ⚠️ Note: API keys are stored in your `.env` file and loaded as environment variables. Changes may require restarting the application to take effect.
+        </div>
+
+        <form id="apiKeysForm">
+            <!-- Core Settings -->
+            <div class="settings-section">
+                <h2>Core Settings</h2>
+                
+                <div class="form-group">
+                    <label for="openai_api_key">
+                        OpenAI API Key <span class="required">*</span>
+                        <span class="key-status" id="openai_status"></span>
+                    </label>
+                    <input type="password" id="openai_api_key" placeholder="sk-...">
+                    <small>Get one at <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com</a></small>
+                </div>
+                
+                <div class="form-group">
+                    <label for="timezone">Your Timezone <span class="required">*</span></label>
+                    <select id="timezone" required>
+                        <option value="">Select...</option>
+                        <option value="America/New_York">Eastern Time</option>
+                        <option value="America/Chicago">Central Time</option>
+                        <option value="America/Denver">Mountain Time</option>
+                        <option value="America/Los_Angeles">Pacific Time</option>
+                        <option value="America/Anchorage">Alaska</option>
+                        <option value="Pacific/Honolulu">Hawaii</option>
+                        <option value="Europe/London">London</option>
+                        <option value="Europe/Paris">Paris</option>
+                        <option value="Asia/Tokyo">Tokyo</option>
+                        <option value="UTC">UTC</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Optional Integrations -->
+            <div class="settings-section">
+                <h2>Optional Integrations</h2>
+                
+                <div class="form-group">
+                    <label for="google_api_key">
+                        Google API Key
+                        <span class="key-status" id="google_status"></span>
+                    </label>
+                    <input type="password" id="google_api_key" placeholder="Optional">
+                    <small>For Google services (Gmail, Calendar, Tasks)</small>
+                </div>
+                
+                <div class="form-group">
+                    <label for="gmail_address">Gmail Address</label>
+                    <input type="email" id="gmail_address" placeholder="your.email@gmail.com">
+                </div>
+                
+                <div class="form-group">
+                    <label for="gmail_app_password">
+                        Gmail App Password
+                    </label>
+                    <input type="password" id="gmail_app_password" placeholder="xxxx xxxx xxxx xxxx">
+                    <small><a href="https://myaccount.google.com/apppasswords" target="_blank">Generate app password</a></small>
+                </div>
+                
+                <div class="form-group">
+                    <label for="anthropic_api_key">
+                        Anthropic API Key
+                        <span class="key-status" id="anthropic_status"></span>
+                    </label>
+                    <input type="password" id="anthropic_api_key" placeholder="Optional">
+                    <small>For Claude models</small>
+                </div>
+                
+                <div class="form-group">
+                    <label for="elevenlabs_api_key">
+                        ElevenLabs API Key
+                        <span class="key-status" id="elevenlabs_status"></span>
+                    </label>
+                    <input type="password" id="elevenlabs_api_key" placeholder="Optional">
+                    <small>For text-to-speech</small>
+                </div>
+                
+                <div class="form-group">
+                    <label for="deepgram_api_key">
+                        Deepgram API Key
+                        <span class="key-status" id="deepgram_status"></span>
+                    </label>
+                    <input type="password" id="deepgram_api_key" placeholder="Optional">
+                    <small>For speech-to-text</small>
+                </div>
+            </div>
+
+            <!-- Save Button -->
+            <div class="settings-actions">
+                <button type="submit" class="btn-primary">
+                    <i class="fas fa-save"></i> Save API Keys
+                </button>
+            </div>
+
+            <div id="error-message" class="error-message" style="display: none;"></div>
+            <div id="success-message" class="success-message" style="display: none;"></div>
+            <div id="loading" class="loading" style="display: none;">
+                <div class="spinner"></div>
+                <p>Saving...</p>
+            </div>
+        </form>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/api_keys_settings.js') }}"></script>
+</body>
+</html>
+
+

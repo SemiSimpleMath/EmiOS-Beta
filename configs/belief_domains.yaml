@@ -1,0 +1,84 @@
+# Belief-engine domain configuration.
+#
+# Each domain is an LLM pass over the past N days of evidence (daily insights
+# + ticket signals + KG edges) producing/updating beliefs in its own bucket.
+# The unified pipeline runs all `enabled` domains in sequence, then the
+# export step merges all active beliefs into resource_user_beliefs.json.
+#
+# This file is also the SOURCE OF TRUTH for the tag vocabulary the
+# daily_timeline_insights LLM agent is allowed to emit. The union of every
+# domain's `tags` field is computed at runtime and passed to that agent as
+# memory_available_tags (see archive_daily_insights.py). Adding a tag here
+# also teaches the upstream LLM that the tag is producible.
+#
+# Adding a new domain:
+#   - Add a row below.
+#   - Set `enabled: true`.
+#   - Pick `tags` that you want the daily_timeline_insights agent to start
+#     producing for items in that domain. Keep tags short and intuitive —
+#     the LLM has to choose them from prompts.
+#   - Optionally `ticket_types` if your domain has dayflow ticket signals
+#     you want to incorporate.
+#
+# IDs become the `domain` column on belief rows. Renaming a domain breaks
+# existing rows — prefer adding a new one and retiring the old.
+#
+# Adding a tag:
+#   - Add it to the relevant domain's `tags`. The LLM gets it on its next
+#     run; downstream filtering picks it up immediately.
+#   - Tags can appear in multiple domains — items tagged with a shared tag
+#     fan out to every matching domain.
+
+domains:
+  - id: routine
+    enabled: true
+    tags: [routine, schedule, general]
+    ticket_types:
+      - standing_break
+      - finger_stretch
+      - hydration
+      - coffee
+      - walk
+      - dog_walk
+      - movement
+      - stretch
+
+  - id: health
+    enabled: true
+    tags: [health, wellness, sleep, nutrition]
+    ticket_types:
+      - standing_break
+      - finger_stretch
+      - hydration
+      - sleep
+      - exercise
+
+  - id: food
+    enabled: true
+    tags: [food, nutrition]
+    ticket_types:
+      - coffee
+      - hydration
+      - meal
+      - snack
+
+  - id: communication
+    enabled: true
+    tags: [communication]
+    ticket_types: []
+
+  - id: sleep
+    enabled: true
+    tags: [sleep]
+    ticket_types:
+      - sleep
+
+  - id: work
+    enabled: true
+    tags: [work]
+    ticket_types: []
+
+  - id: general
+    enabled: true
+    tags: [general, family]
+    ticket_types: []

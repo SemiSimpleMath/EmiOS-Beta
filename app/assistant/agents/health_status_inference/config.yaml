@@ -1,0 +1,22 @@
+name: health_status_inference
+class_name: Agent
+llm_params:
+  llm_provider: "gemini"
+  engine: "gemini-3-flash-preview"
+  model_tier: "mini"
+  temperature: 0.8
+
+system_context_items: []
+# No resources needed in system prompt
+
+user_context_items:
+- date_time
+- resource_expected_calendar
+- time_since
+- resource_sleep_output
+- resource_tracked_activities_output
+- recent_responded_tickets
+- recent_chat_history
+- resource_user_health_status
+- resource_dayflow_routine
+

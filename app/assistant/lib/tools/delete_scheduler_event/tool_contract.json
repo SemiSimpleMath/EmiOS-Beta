@@ -1,0 +1,52 @@
+{
+  "name": "delete_scheduler_event",
+  "description": "This is a tool for deleting scheduler events.  It needs an event id.",
+  "inputs": [
+    {
+      "name": "event_id",
+      "type": "string",
+      "required": true,
+      "description": "The scheduler event ID to delete"
+    },
+    {
+      "name": "cascade",
+      "type": "boolean",
+      "required": false,
+      "description": "If True, also delete all linked children (reminders, sub-events) from the event hierarchy"
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "## delete_scheduler_event\n\nDelete a scheduler event (reminder).\n\n### Arguments:\n\n- **event_id** (required): The scheduler event ID to delete\n\n- **cascade** (optional, default: false): If true, also delete all linked children \n  from the event hierarchy. Use this when deleting an event that has related \n  sub-events or reminders that should also be removed.\n\n### Example without cascade:\n```json\n{\n  \"tool_name\": \"delete_scheduler_event\",\n  \"arguments\": {\n    \"event_id\": \"reminder_001\"\n  }\n}\n```\n\n### Example with cascade:\n```json\n{\n  \"tool_name\": \"delete_scheduler_event\",\n  \"arguments\": {\n    \"event_id\": \"reminder_001\",\n    \"cascade\": true\n  }\n}\n```",
+  "metadata": {
+    "domain": "reminder",
+    "actions": [
+      "delete",
+      "cancel"
+    ],
+    "selectors": [
+      "event_id"
+    ],
+    "risk_level": "high",
+    "side_effects": "destructive",
+    "requires_auth": [
+      "google"
+    ],
+    "requires_network": true,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "hide",
+    "approval_required": true
+  }
+}

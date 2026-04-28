@@ -1,0 +1,9 @@
+Merge two KG nodes of the same node_type. The fold_id node is folded
+into keep_id: every edge pointing at fold_id gets rewritten to point at
+keep_id, the fold node's label + aliases are added to keep's aliases,
+and the fold node is deleted. Atomic. Reversible via the kg_revision_log
+entry. Refuses to merge across different node_types.
+
+Use for the duplicate / typo-variant case (e.g. "Aleks" should be
+merged into "Alex"). Always pass a non-empty `reason`. Pass
+`dry_run: true` to see the diff without committing.

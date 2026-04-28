@@ -1,0 +1,16 @@
+{
+  "step_id": "activity_tracker",
+  "description": "Tracks accepted tickets and chat-reported activities; maintains tracked activity counters and minutes-since.",
+  "run_policy": {
+    "type": "always",
+    "min_interval_seconds": 60
+  },
+  "afk_guard": {
+    "skip_when_afk": true,
+    "skip_when_potentially_afk": true
+  },
+  "daily_reset": {
+    "description": "Reset tracked quantities at 5AM boundary"
+  }
+}
+

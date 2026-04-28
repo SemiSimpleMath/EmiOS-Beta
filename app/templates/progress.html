@@ -1,0 +1,43 @@
+{% extends 'base.html' %}
+
+{% block title %}Agent Progress - Emi{% endblock %}
+
+{% block optional_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/progress.css') }}">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+<div class="progress-container">
+  <header class="progress-header">
+    <a href="/" class="back-btn" title="Back to dashboard">
+      <i class="fas fa-arrow-left"></i>
+    </a>
+    <h1>Agent Progress</h1>
+    <div class="status-indicator" id="status-indicator">
+      <span class="status-dot"></span>
+      <span class="status-text">Connecting...</span>
+    </div>
+  </header>
+
+  <section class="controls">
+    <label for="progress-agent-filter">Observing</label>
+    <select id="progress-agent-filter">
+      <option value="__all__">All</option>
+    </select>
+    <button id="btn-clear" class="btn-secondary" type="button">Clear</button>
+  </section>
+
+  <section class="timeline">
+    <ul id="progress-list"></ul>
+  </section>
+</div>
+{% endblock %}
+
+{% block optional_js %}
+<!-- Socket.IO -->
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js" crossorigin="anonymous"></script>
+<script src="{{ url_for('static', filename='js/emi/socket_heartbeat.js') }}?v={{ static_v }}"></script>
+<script src="{{ url_for('static', filename='js/progress.js') }}"></script>
+{% endblock %}
+

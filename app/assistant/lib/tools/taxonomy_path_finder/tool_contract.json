@@ -1,0 +1,57 @@
+{
+  "name": "taxonomy_path_finder",
+  "description": "Find the most relevant taxonomy paths within a specific top-level category based on a description.\n\n**Input:**\n- `top_level_taxonomy`: The root taxonomy category to search within (e.g., \"entity\", \"state\", \"event\")\n- `description`: Description of what kind of paths to find (e.g., \"paths related to robots and machines\")\n\n**Output:**\nReturns a ranked list of the most relevant taxonomy paths that match the description, with relevance scores and reasoning.\n\n**Example:**\n- Input: `top_level_taxonomy=\"entity\"`, `description=\"paths related to robots and machines\"`, `keywords=[machine, robot, battlebots]`\n- Output: `[\"entity > artifact > machine > robot\", \"entity > artifact > product > physical_product > machine\", ...]`\n\nThis tool is useful for discovering relevant taxonomy paths when you know the general domain but need to find specific categories that match your use case.",
+  "inputs": [
+    {
+      "name": "top_level_taxonomy",
+      "type": "string",
+      "required": true,
+      "description": "The top-level taxonomy category to search within (e.g., 'entity', 'state', 'event')"
+    },
+    {
+      "name": "description",
+      "type": "string",
+      "required": true,
+      "description": "Description of what kind of paths to look for (e.g., 'paths related to robots and machines')"
+    },
+    {
+      "name": "keywords",
+      "type": "array",
+      "required": false,
+      "description": "List of keywords to filter taxonomy paths (e.g., ['robot', 'machine', 'automation'])"
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "Arguments for taxonomy_path_finder:\n\nquery (required): Search query to find taxonomy paths\n\nExample:\n{\n    \"query\": \"software developer\"\n}",
+  "metadata": {
+    "category": "knowledge_graph",
+    "verbs": [
+      "operate"
+    ],
+    "entities": [
+      "edge",
+      "graph",
+      "node"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "medium",
+    "latency_class": "moderate",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

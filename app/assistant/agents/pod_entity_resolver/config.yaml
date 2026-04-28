@@ -1,0 +1,23 @@
+name: pod_entity_resolver
+class_name: Agent
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.4-mini"
+  model_tier: "mini"
+
+allowed_tools: []
+except_tools: []
+
+# Scan the joined section text + pre-context for named entities so their
+# cards get injected. `sections_text` is the sections list joined into a
+# single string — entity_scan only looks at string values, not lists.
+entity_scan_keys: [sections_text, pre_context]
+entity_card_level: 1
+
+user_context_items:
+  - sections
+  - sections_text
+  - pre_context
+  - entity_card
+system_context_items: []
+type: agent

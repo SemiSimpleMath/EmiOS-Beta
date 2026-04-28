@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Playwright Modal Test</title>
+  <style>
+    body { margin: 0; font-family: Arial, sans-serif; background: #f6f7fb; color: #111827; }
+    .overlay { position: fixed; inset: 0; background: rgba(17, 24, 39, 0.56); display: flex; align-items: center; justify-content: center; padding: 24px; }
+    .modal { width: min(620px, 96vw); max-height: 84vh; background: #fff; border-radius: 14px; border: 1px solid #d1d5db; overflow: hidden; display: flex; flex-direction: column; }
+    .modal-header { padding: 14px 16px; border-bottom: 1px solid #d1d5db; font-size: 18px; font-weight: 700; }
+    .modal-body { overflow-y: auto; padding: 14px 16px 22px; background: #fff; }
+    .group { border: 1px solid #d1d5db; border-radius: 10px; padding: 12px; margin-bottom: 14px; }
+    .group h3 { margin: 0 0 8px; font-size: 16px; }
+    .choice { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: 15px; }
+    .text-row { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+    .text-row label { font-size: 14px; color: #111827; }
+    .text-row input[type="text"] { border: 1px solid #9ca3af; border-radius: 8px; padding: 9px 10px; font-size: 14px; }
+    .spacer { height: 220px; border: 1px dashed #d1d5db; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #4b5563; margin: 6px 0 14px; font-size: 14px; }
+    .modal-footer { padding: 12px 16px; border-top: 1px solid #d1d5db; display: flex; justify-content: flex-end; background: #fff; }
+    .primary { background: #2563eb; border: 1px solid #2563eb; color: #fff; border-radius: 8px; padding: 10px 14px; font-weight: 600; }
+    #result { position: fixed; left: 20px; bottom: 12px; color: #166534; font-weight: 700; background: #fff; border: 1px solid #d1d5db; border-radius: 8px; padding: 8px 12px; }
+  </style>
+</head>
+<body>
+  <div class="overlay" id="overlay" data-testid="modal-overlay">
+    <div class="modal" role="dialog" aria-modal="true" aria-label="Customize Yellow Chicken Curry" data-testid="customize-modal">
+      <div class="modal-header">Playwright Modal Scroll Test</div>
+      <div class="modal-body" id="modal-body" data-testid="modal-body-scroll">
+        <div class="group" data-testid="group-spice">
+          <h3>Spice level (required)</h3>
+          <label class="choice"><input type="radio" name="spice" value="mild"> Mild</label>
+          <label class="choice"><input type="radio" name="spice" value="medium"> Medium spice</label>
+          <label class="choice"><input type="radio" name="spice" value="hot"> Hot</label>
+          <label class="choice"><input type="radio" name="spice" value="thai-hot"> Thai hot</label>
+          <div class="text-row" data-testid="special-instructions-row">
+            <label for="special-instructions">Special instructions (optional)</label>
+            <input
+              id="special-instructions"
+              type="text"
+              name="special_instructions"
+              aria-label="Special instructions"
+              placeholder="Example: extra napkins"
+              autocomplete="off"
+              title="Special instructions"
+            >
+          </div>
+        </div>
+
+        <div class="spacer" data-testid="scroll-spacer-top">Scroll down to reveal required groups</div>
+
+        <div class="group" data-testid="group-rice">
+          <h3>Rice option (required)</h3>
+          <label class="choice"><input type="radio" name="rice" value="white"> White rice</label>
+          <label class="choice"><input type="radio" name="rice" value="brown"> Brown rice</label>
+          <label class="choice"><input type="radio" name="rice" value="none"> No rice</label>
+          <div class="text-row" data-testid="delivery-note-row">
+            <label for="delivery-note">Delivery note (optional)</label>
+            <input
+              id="delivery-note"
+              type="text"
+              name="delivery_note"
+              aria-label="Delivery note"
+              placeholder="Example: ring bell once"
+              autocomplete="off"
+              title="Delivery note"
+            >
+          </div>
+        </div>
+
+        <div class="group" data-testid="group-placement">
+          <h3>Placement (required)</h3>
+          <label class="choice"><input type="radio" name="placement" value="on-side"> On the side</label>
+          <label class="choice"><input type="radio" name="placement" value="mixed-in"> Mixed in</label>
+          <label class="choice"><input type="radio" name="placement" value="separate-container"> Separate container</label>
+        </div>
+
+        <div class="spacer">Add button is at the bottom footer</div>
+      </div>
+      <div class="modal-footer">
+        <button id="add-btn" class="primary" disabled data-testid="add-to-cart-btn">Add to cart</button>
+      </div>
+    </div>
+  </div>
+  <div id="result"></div>
+  <script>
+    (function() {
+      const addBtn = document.getElementById("add-btn");
+      const result = document.getElementById("result");
+
+      function selected(name) {
+        const e = document.querySelector(`input[name="${name}"]:checked`);
+        return e ? e.value : null;
+      }
+      function update() {
+        addBtn.disabled = !(selected("spice") && selected("rice") && selected("placement"));
+      }
+
+      document.querySelectorAll('input[type="radio"]').forEach((el) => {
+        el.addEventListener("change", update);
+      });
+      addBtn.addEventListener("click", () => {
+        result.textContent = "Added item: success";
+      });
+      update();
+    })();
+  </script>
+</body>
+</html>
+

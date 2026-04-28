@@ -1,0 +1,75 @@
+{
+  "name": "kg_create_edge",
+  "description": "kg_create_edge: Creates a relationship (edge) between two nodes in the knowledge graph.\n\n**Purpose:** Establish a connection or relationship between two existing nodes.\n\n**Parameters:**\n- source_id (required): UUID of the source node\n- target_id (required): UUID of the target node\n- relationship_type (required): Type of relationship. Common types:\n  * attended: For event participation\n  * located_at: For location relationships\n  * works_for: For employment\n  * has_child / has_parent: For family relationships\n  * friend_of / spouse: For social relationships\n  * part_of: For hierarchical relationships\n  * occurred_at: For time/place of events\n- attributes (optional): Additional key-value pairs for the relationship\n- sentence (optional): Natural language description\n- confidence (optional): Confidence score (0.0-1.0)\n- importance (optional): Importance score (0.0-1.0)\n\n**Returns:**\n- success: Whether the creation succeeded\n- edge_id: UUID of the created edge\n- relationship_type: Type of the relationship\n- status: \"created\" or \"found\" (if edge already existed)\n- message: Description of what was done\n\n**Example Usage:**\n\nConnect person to event:\n```\nkg_create_edge(\n    source_id=\"person-uuid\",\n    target_id=\"event-uuid\",\n    relationship_type=\"attended\",\n    sentence=\"Jukka attended the wedding ceremony\"\n)\n```\n\nConnect person to organization:\n```\nkg_create_edge(\n    source_id=\"person-uuid\",\n    target_id=\"company-uuid\",\n    relationship_type=\"works_for\",\n    attributes={\"role\": \"Software Engineer\", \"since\": \"2020-01-15\"}\n)\n```\n\n**Note:** Both source and target nodes must already exist. Use kg_create_node first if needed.",
+  "inputs": [
+    {
+      "name": "source_id",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "target_id",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "relationship_type",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "sentence",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "confidence",
+      "type": "number",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "importance",
+      "type": "number",
+      "required": true,
+      "description": ""
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "Arguments for kg_create_edge:\n\nsource_id (required): UUID of the source node\ntarget_id (required): UUID of the target node\nrelationship_type (required): Type of relationship (e.g., 'attended', 'works_for', 'located_at')\nattributes (optional): Additional key-value pairs for the relationship\nsentence (optional): Natural language description of the relationship\nconfidence (optional): Confidence score 0.0-1.0\nimportance (optional): Importance score 0.0-1.0\n\nExample:\n{\n    \"source_id\": \"abc-123-def-456\",\n    \"target_id\": \"xyz-789-uvw-012\",\n    \"relationship_type\": \"attended\",\n    \"sentence\": \"Jukka attended the wedding\"\n}",
+  "metadata": {
+    "category": "knowledge_graph",
+    "verbs": [
+      "operate"
+    ],
+    "entities": [
+      "edge",
+      "graph",
+      "node"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "medium",
+    "latency_class": "moderate",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

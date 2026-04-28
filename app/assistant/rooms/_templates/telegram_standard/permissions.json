@@ -1,0 +1,11 @@
+{
+  "tool_classes": {
+    "informational": true,
+    "transformational": false,
+    "external_action": false,
+    "sensitive": false
+  },
+  "allowed_tools": [],
+  "blocked_tools": [],
+  "allow_images": false
+}

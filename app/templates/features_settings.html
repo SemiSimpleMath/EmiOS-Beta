@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Feature Settings</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/setup_wizard.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="setup-container">
+        <div class="setup-header">
+            <h1>Feature Settings</h1>
+            <p>Enable or disable automatic data fetching and features</p>
+            <a href="/chat_bot" class="back-link"><i class="fas fa-arrow-left"></i> Back to Chat</a>
+        </div>
+
+        <form id="featuresForm">
+            <!-- Google OAuth — moved to its own page -->
+            <div class="settings-section">
+                <h2><i class="fab fa-google"></i> Google OAuth Accounts</h2>
+                <p class="step-description">
+                    Manage Google account connections on the <a href="/settings/integrations/google">Google OAuth</a> page,
+                    or browse all integrations on the <a href="/settings/integrations">Integrations</a> page.
+                </p>
+            </div>
+
+            <!-- Automatic Tools -->
+            <div class="settings-section">
+                <h2><i class="fas fa-robot"></i> Automatic Tools</h2>
+                <p class="step-description">These tools automatically fetch data in the background at regular intervals.</p>
+                
+                <div class="feature-grid">
+                    <div class="feature-card">
+                        <label class="feature-toggle">
+                            <input type="checkbox" id="enable_email" data-feature="email">
+                            <div class="toggle-slider"></div>
+                        </label>
+                        <div class="feature-info">
+                            <h3><i class="fas fa-envelope"></i> Email</h3>
+                            <p>Automatically check Gmail for new important emails</p>
+                            <span class="feature-status" id="status_email"></span>
+                        </div>
+                    </div>
+
+                    <div class="feature-card">
+                        <label class="feature-toggle">
+                            <input type="checkbox" id="enable_calendar" data-feature="calendar">
+                            <div class="toggle-slider"></div>
+                        </label>
+                        <div class="feature-info">
+                            <h3><i class="fas fa-calendar"></i> Calendar</h3>
+                            <p>Automatically fetch upcoming calendar events</p>
+                            <span class="feature-status" id="status_calendar"></span>
+                        </div>
+                    </div>
+
+                    <div class="feature-card">
+                        <label class="feature-toggle">
+                            <input type="checkbox" id="enable_tasks" data-feature="tasks">
+                            <div class="toggle-slider"></div>
+                        </label>
+                        <div class="feature-info">
+                            <h3><i class="fas fa-tasks"></i> To-Do Tasks</h3>
+                            <p>Automatically fetch your to-do tasks from Google Tasks</p>
+                            <span class="feature-status" id="status_tasks"></span>
+                        </div>
+                    </div>
+
+                    <div class="feature-card">
+                        <label class="feature-toggle">
+                            <input type="checkbox" id="enable_scheduler" data-feature="scheduler">
+                            <div class="toggle-slider"></div>
+                        </label>
+                        <div class="feature-info">
+                            <h3><i class="fas fa-bell"></i> Reminders</h3>
+                            <p>Automatically check and trigger reminders</p>
+                            <span class="feature-status" id="status_scheduler"></span>
+                        </div>
+                    </div>
+
+                    <div class="feature-card">
+                        <label class="feature-toggle">
+                            <input type="checkbox" id="enable_weather" data-feature="weather">
+                            <div class="toggle-slider"></div>
+                        </label>
+                        <div class="feature-info">
+                            <h3><i class="fas fa-cloud-sun"></i> Weather</h3>
+                            <p>Automatically fetch weather updates</p>
+                            <span class="feature-status" id="status_weather"></span>
+                        </div>
+                    </div>
+
+                    <div class="feature-card">
+                        <label class="feature-toggle">
+                            <input type="checkbox" id="enable_news" data-feature="news">
+                            <div class="toggle-slider"></div>
+                        </label>
+                        <div class="feature-info">
+                            <h3><i class="fas fa-newspaper"></i> News</h3>
+                            <p>Automatically fetch news updates</p>
+                            <span class="feature-status" id="status_news"></span>
+                        </div>
+                    </div>
+
+                    <div class="feature-card">
+                        <label class="feature-toggle">
+                            <input type="checkbox" id="enable_music" data-feature="music">
+                            <div class="toggle-slider"></div>
+                        </label>
+                        <div class="feature-info">
+                            <h3><i class="fas fa-music"></i> Music</h3>
+                            <p>DJ and music control (requires Apple Music API credentials)</p>
+                            <span class="feature-status" id="status_music"></span>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- Core Features -->
+            <div class="settings-section">
+                <h2><i class="fas fa-cogs"></i> Core Features</h2>
+                <p class="step-description">Advanced features that enhance the assistant's capabilities.</p>
+                
+                <div class="feature-grid">
+                    <div class="feature-card">
+                        <label class="feature-toggle">
+                            <input type="checkbox" id="enable_daily_summary" data-feature="daily_summary">
+                            <div class="toggle-slider"></div>
+                        </label>
+                        <div class="feature-info">
+                            <h3><i class="fas fa-sun"></i> Daily Summary</h3>
+                            <p>Generate daily summaries of activities and events</p>
+                            <span class="feature-status" id="status_daily_summary"></span>
+                        </div>
+                    </div>
+
+                    <div class="feature-card">
+                        <label class="feature-toggle">
+                            <input type="checkbox" id="enable_kg" data-feature="kg">
+                            <div class="toggle-slider"></div>
+                        </label>
+                        <div class="feature-info">
+                            <h3><i class="fas fa-project-diagram"></i> Knowledge Graph</h3>
+                            <p>Build and maintain long-term memory connections</p>
+                            <span class="feature-status" id="status_kg"></span>
+                        </div>
+                    </div>
+
+                    <div class="feature-card" style="opacity: 0.4; pointer-events: none;">
+                        <label class="feature-toggle">
+                            <input type="checkbox" id="enable_taxonomy" data-feature="taxonomy" disabled>
+                            <div class="toggle-slider"></div>
+                        </label>
+                        <div class="feature-info">
+                            <h3><i class="fas fa-sitemap"></i> Taxonomy</h3>
+                            <p>Classify and organize information automatically (coming soon)</p>
+                            <span class="feature-status" id="status_taxonomy"></span>
+                        </div>
+                    </div>
+
+                    <div class="feature-card">
+                        <label class="feature-toggle">
+                            <input type="checkbox" id="enable_entity_cards" data-feature="entity_cards">
+                            <div class="toggle-slider"></div>
+                        </label>
+                        <div class="feature-info">
+                            <h3><i class="fas fa-address-card"></i> Entity Cards</h3>
+                            <p>Maintain context cards for people and entities</p>
+                            <span class="feature-status" id="status_entity_cards"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="error-message" class="error-message" style="display: none;"></div>
+            <div id="success-message" class="success-message" style="display: none;"></div>
+        </form>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/features_settings.js') }}"></script>
+</body>
+</html>
+
+

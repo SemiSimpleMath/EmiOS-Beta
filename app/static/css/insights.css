@@ -1,0 +1,149 @@
+.insights-container { max-width: 900px; }
+
+/* Tabs */
+.insights-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 1rem;
+    border-bottom: 2px solid var(--border-color, #2d3e50);
+    padding-bottom: 0;
+}
+.insights-tab {
+    padding: 0.6rem 1.2rem;
+    background: none;
+    border: none;
+    color: #8899aa;
+    cursor: pointer;
+    font-size: 0.95rem;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    transition: color 0.2s, border-color 0.2s;
+}
+.insights-tab:hover { color: #ccc; }
+.insights-tab.active { color: #58a6ff; border-bottom-color: #58a6ff; }
+.insights-tab i { margin-right: 0.4rem; }
+
+/* Panels */
+.insights-panel { display: none; }
+.insights-panel.active { display: block; }
+
+/* Date navigation */
+.date-nav {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.8rem;
+    margin-bottom: 1rem;
+}
+.date-nav-btn {
+    background: var(--card-bg, #1e2a3a);
+    border: 1px solid var(--border-color, #2d3e50);
+    color: #58a6ff;
+    padding: 0.4rem 0.7rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.9rem;
+}
+.date-nav-btn:hover { background: #253040; }
+.date-picker {
+    background: var(--card-bg, #1e2a3a);
+    border: 1px solid var(--border-color, #2d3e50);
+    color: #e0e0e0;
+    padding: 0.4rem 0.8rem;
+    border-radius: 6px;
+    font-size: 0.9rem;
+}
+.date-label {
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: #e0e0e0;
+    min-width: 200px;
+    text-align: center;
+}
+
+/* Content area */
+.insights-content {
+    background: var(--card-bg, #1e2a3a);
+    border: 1px solid var(--border-color, #2d3e50);
+    border-radius: 10px;
+    padding: 1.2rem;
+    min-height: 200px;
+    color: #e0e0e0;
+    line-height: 1.6;
+    font-size: 0.9rem;
+}
+.insights-loading { color: #8899aa; font-style: italic; }
+.insights-empty { color: #8899aa; font-style: italic; text-align: center; padding: 2rem 0; }
+
+/* Rendered markdown inside insights */
+.insights-content h1, .insights-content h2, .insights-content h3, .insights-content h4 {
+    color: #88C0D0;
+    margin: 0.8em 0 0.3em;
+}
+.insights-content h1 { font-size: 1.2rem; }
+.insights-content h2 { font-size: 1.1rem; }
+.insights-content h3 { font-size: 1rem; }
+.insights-content ul, .insights-content ol { padding-left: 1.5em; margin: 0.4em 0; }
+.insights-content li { padding: 0.15em 0; }
+.insights-content strong { color: #88C0D0; }
+.insights-content code { background: rgba(255,255,255,0.08); padding: 0.1em 0.3em; border-radius: 3px; }
+.insights-content blockquote { border-left: 3px solid #5E81AC; padding-left: 0.8em; margin: 0.5em 0; color: #a0a0a0; }
+.insights-content hr { border: none; border-top: 1px solid #2d3e50; margin: 1em 0; }
+.insights-content a { color: #58a6ff; }
+
+/* Theme cards */
+.theme-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px;
+    padding: 0.8rem;
+    margin-bottom: 0.6rem;
+}
+.theme-card h4 { color: #88C0D0; margin: 0 0 0.3em; font-size: 0.95rem; }
+.theme-card .theme-meta { font-size: 0.8rem; color: #8899aa; margin-bottom: 0.3em; }
+.theme-card .theme-evidence { font-size: 0.82rem; color: #a0a0a0; }
+
+/* Belief cards */
+.beliefs-controls {
+    display: flex;
+    gap: 0.8rem;
+    margin-bottom: 1rem;
+}
+.beliefs-filter, .beliefs-search {
+    background: var(--card-bg, #1e2a3a);
+    border: 1px solid var(--border-color, #2d3e50);
+    color: #e0e0e0;
+    padding: 0.4rem 0.8rem;
+    border-radius: 6px;
+    font-size: 0.9rem;
+}
+.beliefs-search { flex: 1; }
+.belief-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px;
+    padding: 0.7rem 0.9rem;
+    margin-bottom: 0.5rem;
+}
+.belief-card .belief-domain {
+    display: inline-block;
+    font-size: 0.7rem;
+    color: #58a6ff;
+    background: rgba(88,166,255,0.1);
+    padding: 0.15em 0.5em;
+    border-radius: 4px;
+    margin-right: 0.5rem;
+}
+.belief-card .belief-confidence {
+    display: inline-block;
+    font-size: 0.7rem;
+    padding: 0.15em 0.5em;
+    border-radius: 4px;
+    margin-right: 0.5rem;
+}
+.belief-confidence.high { color: #4caf50; background: rgba(76,175,80,0.1); }
+.belief-confidence.medium { color: #ff9800; background: rgba(255,152,0,0.1); }
+.belief-confidence.low { color: #f44336; background: rgba(244,67,54,0.1); }
+.belief-card .belief-statement { margin-top: 0.3em; font-size: 0.88rem; }
+.belief-card .belief-meta { font-size: 0.75rem; color: #8899aa; margin-top: 0.3em; }
+.belief-count { color: #8899aa; font-size: 0.85rem; margin-bottom: 0.8rem; }

@@ -1,0 +1,48 @@
+name: doc_editor_manager
+class_name: MultiAgentManager
+description: "Manager for the doc editor room."
+max_cycles: 20
+
+role_bindings:
+  delegator: room::delegator
+
+agents:
+  - name: room::delegator
+    class: Delegator
+  - name: doc_editor::chat
+    class: Agent
+  - name: doc_editor::editor
+    class: Agent
+
+control_nodes:
+  - name: doc_writer_pre_node
+    class: DocWriterPreNode
+  - name: doc_create_final_router_node
+    class: DocCreateFinalRouterNode
+  - name: final_answer_node
+    class: FinalAnswerNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+
+tools:
+  allowed_tools: []
+  except_tools: []
+
+flow_config:
+  strict_routing: true
+  flow:
+    doc_creation_mode:
+      source_agent: "doc_editor::chat"
+  doc_creation_mode:
+    source_agent: "doc_editor::chat"
+    final_node: "final_answer_node"
+    chat_response_key: "chat_response"
+    doc_done_key: "doc_creation_done_tf"
+    doc_markdown_key: "doc_markdown"
+  state_map:
+    "room::delegator": "doc_editor::chat"
+    "doc_editor::chat": "doc_writer_pre_node"
+    "doc_writer_pre_node": "doc_editor::editor"
+    "doc_editor::editor": "doc_create_final_router_node"
+    "doc_create_final_router_node": "final_answer_node"
+    "final_answer_node": "manager_exit_node"

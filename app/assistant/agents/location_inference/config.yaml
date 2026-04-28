@@ -1,0 +1,20 @@
+name: location_inference
+class_name: Agent
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-4.1-mini"
+  model_tier: "mini"
+  temperature: 0.3
+allowed_tools: []
+except_tools: []
+allowed_nodes:
+- return_control
+system_context_items:
+- resource_user_data
+- resource_current_location
+- resource_location_inference_guidelines
+user_context_items:
+- date_time
+- days_to_predict
+- calendar_events
+type: agent

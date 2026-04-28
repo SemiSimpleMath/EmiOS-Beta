@@ -1,0 +1,49 @@
+{
+  "name": "emi_team_manager",
+  "description": "This is an all purpose team that can do both simple and complex problem solving. It has access to any API you can think of and means to use it. It can handle\nemails and calendar and todo tasks.  It is also the only agent team that can call other agent teams.  So if there is a multi step problem that requires many teams\nemi_team_manager can handle that.  That being said if your problem is simple and there is another team that is specifically meant for that problem, do not pick\nemi_team_manager.  It is a bit like trying to kill a mosquito with a bazooka.\n\n- Only team that can handler email, calendar and todo tasks.\n- Can do the jobs of all other managers by calling them.\n- If a single other manager can be called to solve the problem, it is faster to do so.",
+  "inputs": [
+    {
+      "name": "task",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "information",
+      "type": "string",
+      "required": true,
+      "description": ""
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "EmiTeam arguments are\ntask: The problem that we are trying to solve.\ninformation: Any extra information provided to us that maybe helpful.",
+  "metadata": {
+    "category": "orchestration",
+    "verbs": [
+      "orchestrate"
+    ],
+    "entities": [
+      "workflow"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "medium",
+    "latency_class": "moderate",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

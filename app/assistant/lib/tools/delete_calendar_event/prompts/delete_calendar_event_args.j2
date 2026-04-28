@@ -1,0 +1,28 @@
+## delete_calendar_event
+
+Delete a single calendar event. For recurring events, this cancels only the specific occurrence matching `event_id` — the rest of the series is untouched. To remove an entire recurring series, use `delete_repeating_calendar_event` instead.
+
+### Arguments:
+
+- **event_id** (required): The Google Calendar event ID. For a single occurrence of a recurring event, use the instance id (e.g. `abc123_20260411T030000Z`).
+- **cascade** (optional, default: false): Also delete linked children (reminders, sub-events) in the local repository.
+
+### Delete a non-recurring event:
+```json
+{
+  "tool_name": "delete_calendar_event",
+  "arguments": {
+    "event_id": "abc123xyz"
+  }
+}
+```
+
+### Cancel one occurrence of a recurring event:
+```json
+{
+  "tool_name": "delete_calendar_event",
+  "arguments": {
+    "event_id": "abc123_20260411T030000Z"
+  }
+}
+```

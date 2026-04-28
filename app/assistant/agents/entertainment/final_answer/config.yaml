@@ -1,0 +1,17 @@
+name: entertainment::final_answer
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "gemini"
+  engine: "gemini-3-flash-preview"
+  model_tier: "mini"
+
+allowed_tools: []
+except_tools: []
+allowed_nodes: [manager_exit_node]
+
+user_context_items:
+  - date_time
+  - task
+  - information
+  - recent_history

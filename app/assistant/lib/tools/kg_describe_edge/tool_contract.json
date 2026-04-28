@@ -1,0 +1,45 @@
+{
+  "name": "kg_describe_edge",
+  "description": "This tool provides a detailed description of a specific edge, including its source and target nodes, relationship type, attributes, and contextual information.\nNote: This tool does not support filtering as it describes a specific edge by ID.",
+  "inputs": [
+    {
+      "name": "edge_id",
+      "type": "string",
+      "required": true,
+      "description": ""
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "The UUID of the edge to describe in detail.",
+  "metadata": {
+    "category": "knowledge_graph",
+    "verbs": [
+      "operate"
+    ],
+    "entities": [
+      "edge",
+      "graph",
+      "node"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "medium",
+    "latency_class": "moderate",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

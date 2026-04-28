@@ -1,0 +1,29 @@
+schema_version: 1
+server_id: npm/server-google-maps
+display_name: Google Maps MCP (npm)
+source: official_registry
+
+enabled: true
+
+launch_options:
+  - id: npx
+    transport: stdio
+    command: npx
+    args:
+      - -y
+      - "@modelcontextprotocol/server-google-maps"
+    env:
+      # Required by the Google Maps MCP package.
+      # OAuth user tokens are generally not used by this server package;
+      # it expects a Maps API key.
+      GOOGLE_MAPS_API_KEY: "${GOOGLE_MAPS_API_KEY}"
+
+policy:
+  default_requires_approval: false
+  max_concurrent_calls: 2
+  call_timeout_seconds: 25
+  max_result_bytes: 300000
+
+# Optional pinning can be added later once we confirm exact tool names
+# provided by the installed package version.
+tool_allowlist: []

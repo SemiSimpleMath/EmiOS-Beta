@@ -1,0 +1,43 @@
+{
+  "name": "find_calendar_event_by_name",
+  "description": "Search for calendar events by name using semantic similarity. Returns the top matching events.",
+  "inputs": [
+    {
+      "name": "event_name",
+      "type": "string",
+      "required": true,
+      "description": "The name or description of the event to search for."
+    },
+    {
+      "name": "start_date",
+      "type": "string",
+      "required": false,
+      "description": "ISO 8601 datetime for the start of the search window. Defaults to 1 year ago."
+    },
+    {
+      "name": "end_date",
+      "type": "string",
+      "required": false,
+      "description": "ISO 8601 datetime for the end of the search window. Defaults to 1 year from now."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable list of matching events with similarity scores."
+    }
+  ],
+  "metadata": {
+    "category": "calendar",
+    "verbs": ["read"],
+    "entities": ["calendar"],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": ["google_oauth"],
+    "requires_network": true,
+    "cost_level": "low",
+    "latency_class": "medium",
+    "approval_required": false
+  }
+}

@@ -1,0 +1,13 @@
+Use this tool to read/control Nest thermostat state.
+
+Required:
+- `action`: one of `get_status`, `set_mode`, `set_target_temperature`, `set_eco_mode`, `set_fan_mode`
+
+Conditional fields:
+- `mode` for `set_mode` (`heat`, `cool`, `heat_cool`, `off`)
+- `target_temperature` for `set_target_temperature` (single numeric temperature value)
+- `enabled` for `set_eco_mode` (boolean)
+- `fan_mode` for `set_fan_mode` (`on`, `auto`, `off`)
+
+Optional:
+- `device_id` to target a specific thermostat.

@@ -1,0 +1,19 @@
+name: task_compile::phase_ii
+class_name: Agent
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.2"
+  model_tier: "strong"
+
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+
+user_context_items:
+  - task
+  - information
+  - compile_seed
+  - task_compile_manager_catalog
+  - task_compile_contract
+  - phase_i_atoms
+  - critic_feedback

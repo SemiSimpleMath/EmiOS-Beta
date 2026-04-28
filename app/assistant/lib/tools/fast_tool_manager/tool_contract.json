@@ -1,0 +1,49 @@
+{
+  "name": "fast_tool_manager",
+  "description": "A single-step manager for calendar, reminder, and todo tasks. Use this when the user request is simple and can be handled with one tool call.\nFast, single-tool manager for routine tasks (calendar, reminders, todo).\nUse when the request is a straightforward one-step action or lookup.",
+  "inputs": [
+    {
+      "name": "task",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "information",
+      "type": "string",
+      "required": true,
+      "description": ""
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "fast_tool_manager arguments:\ntask: the user request\ninformation: any extra context\nProvide the task and any additional information needed for the fast_tool_manager.",
+  "metadata": {
+    "category": "orchestration",
+    "verbs": [
+      "orchestrate"
+    ],
+    "entities": [
+      "workflow"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "medium",
+    "latency_class": "moderate",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

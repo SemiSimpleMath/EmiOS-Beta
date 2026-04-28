@@ -1,0 +1,15 @@
+{
+  "step_id": "entertainment_advisor",
+  "description": "Daily life-domain advisor for entertainment, leisure, dining, and hobby suggestions.",
+  "run_policy": {
+    "type": "always",
+    "min_interval_seconds": 3600
+  },
+  "afk_guard": {
+    "skip_when_afk": true,
+    "skip_when_potentially_afk": false
+  },
+  "daily_reset": {
+    "description": "No per-day reset needed; previous output carries forward for continuity."
+  }
+}

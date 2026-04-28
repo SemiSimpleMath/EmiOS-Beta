@@ -1,0 +1,72 @@
+{
+  "name": "create_google_doc",
+  "description": "Create a new blank Google Docs document. Optionally write initial content into it. Returns the document_id and web link. Use edit_google_doc afterwards to make further edits.",
+  "inputs": [
+    {
+      "name": "title",
+      "type": "string",
+      "required": true,
+      "description": "Title for the new Google Doc."
+    },
+    {
+      "name": "initial_content",
+      "type": "string",
+      "required": false,
+      "description": "Optional text to write into the document body immediately after creation."
+    },
+    {
+      "name": "account_id",
+      "type": "string",
+      "required": false,
+      "description": "Optional Google OAuth account id (default \"google_user_primary\")."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable confirmation with the document link."
+    },
+    {
+      "path": "data.document_id",
+      "type": "string",
+      "description": "The new document's Google Docs ID."
+    },
+    {
+      "path": "data.title",
+      "type": "string",
+      "description": "The document title as created."
+    },
+    {
+      "path": "data.web_view_link",
+      "type": "string",
+      "description": "Direct URL to open the document in a browser."
+    },
+    {
+      "path": "data.initial_content_written",
+      "type": "boolean",
+      "description": "Whether initial_content was written into the document."
+    }
+  ],
+  "metadata": {
+    "domain": "doc",
+    "actions": [
+      "create"
+    ],
+    "selectors": [
+      "title",
+      "content"
+    ],
+    "risk_level": "medium",
+    "side_effects": "write",
+    "requires_auth": [
+      "google"
+    ],
+    "requires_network": true,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": true,
+    "room_visibility_default": "show",
+    "approval_required": true
+  }
+}

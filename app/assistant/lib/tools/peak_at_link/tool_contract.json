@@ -1,0 +1,56 @@
+{
+  "name": "peak_at_link",
+  "description": "Peek at a webpage and return the first few human-readable lines.",
+  "inputs": [
+    {
+      "name": "url",
+      "type": "string",
+      "required": true,
+      "description": "Target webpage URL."
+    },
+    {
+      "name": "max_lines",
+      "type": "integer",
+      "required": false,
+      "description": "Maximum preview lines to return (default 8)."
+    },
+    {
+      "name": "max_chars_per_line",
+      "type": "integer",
+      "required": false,
+      "description": "Maximum characters per preview line (default 220)."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable preview text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured preview payload."
+    }
+  ],
+  "arguments_prompt": "{\n  \"url\": \"https://example.com\",\n  \"max_lines\": 8,\n  \"max_chars_per_line\": 220\n}",
+  "metadata": {
+    "domain": "web",
+    "actions": [
+      "peek",
+      "read"
+    ],
+    "selectors": [
+      "url"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "medium",
+    "latency_class": "moderate",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

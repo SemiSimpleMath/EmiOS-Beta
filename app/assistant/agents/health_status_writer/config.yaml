@@ -1,0 +1,19 @@
+name: health_status_writer
+class_name: Agent
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.2"
+  model_tier: "strong"
+
+allowed_tools: []
+except_tools: []
+
+user_context_items:
+  - date_time
+  - day_of_week
+  - health_beliefs_block
+  - sleep_output_block
+  - weekly_health_block
+
+system_context_items:
+  - resource_user_data

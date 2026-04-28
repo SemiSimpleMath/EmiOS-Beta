@@ -1,0 +1,164 @@
+    /* Reset default margins and paddings */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    /* Box Container */
+    .weather-box {
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(to bottom, #FFDAB9, #FFEBCD); /* Start with dawn colors */
+      position: relative;
+      overflow: hidden; /* Ensures content like the ground doesn't spill out */
+      box-shadow: 0 3px 7px rgba(0, 0, 0, 0.5);
+    }
+
+    /* Sun Styles */
+    .sun {
+      position: absolute;
+      width: 20px;
+      height: 20px;
+      background: radial-gradient(circle at 30% 30%, #FFD700, #FFA500);
+      border-radius: 50%;
+      box-shadow:
+        0 0 10px 2px rgba(255, 215, 0, 0.5),
+        0 0 20px 7px rgba(255, 215, 0, 0.3),
+        0 0 30px 13px rgba(255, 215, 0, 0.1);
+      pointer-events: none;
+      transition: transform 1s linear, opacity 1s linear;
+      opacity: 0;
+      display: none; /* Initially hidden */
+    }
+
+    /* Moon Styles */
+    .moon {
+      position: absolute;
+      width: 17px;
+      height: 17px;
+      background: radial-gradient(circle at 30% 30%, #f0e68c, #d3d3d3);
+      border-radius: 50%;
+      box-shadow: 0 0 7px 1px rgba(240, 230, 140, 0.5);
+      pointer-events: none;
+      transition: transform 1s linear, opacity 1s linear;
+      opacity: 0;
+      display: none; /* Initially hidden */
+    }
+
+    /* Stars Container */
+    .stars {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: transparent;
+      pointer-events: none;
+      overflow: hidden;
+      opacity: 0;
+      transition: opacity 1s linear;
+    }
+
+    /* Star Styles */
+    .star {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      background: white;
+      border-radius: 50%;
+      opacity: 0;
+      animation: twinkle 2s infinite;
+    }
+
+    @keyframes twinkle {
+      0%, 100% { opacity: 0; }
+      50% { opacity: 1; }
+    }
+
+    /* Ground Styles */
+    .ground1, .ground2 {
+      position: absolute;
+      border-top-left-radius: 67px;
+      border-top-right-radius: 67px;
+      z-index: 1;
+    }
+
+    .ground1 {
+      width: 181px;
+      height: 67px;
+      bottom: -20px;
+      left: -23px;
+      transform: rotate(20deg);
+      background: linear-gradient(#2f2b3c, #091B21);
+      transition: background 1s linear;
+    }
+
+    .ground2 {
+      width: 335px;
+      height: 67px;
+      bottom: -34px;
+      right: -54px;
+      transform: rotate(-10deg);
+      background: linear-gradient(#2f2b3c, #091B21);
+      transition: background 1s linear;
+    }
+
+    .text_container {
+      font-family: Arial, Helvetica, sans-serif;
+      text-align: center;
+    }
+
+    #weather_degrees-box {
+      display: flex;
+      justify-content: center;
+      align-items: baseline;
+      font-size: 3.35rem;
+      position: relative;
+      left: 13px;
+    }
+
+    #temp-number {
+      color: #4F787D;
+      font-size: 67px;
+      font-weight: bold;
+      text-indent: -3px;
+      position: relative;
+    }
+
+    #temp-degree {
+      font-size: 19px;
+      position: absolute;
+      top: 0;
+    }
+
+    .place {
+      text-transform: uppercase;
+      color: #694c6d;
+      font-size: 0.6rem;
+    }
+
+    .weather {
+      color: #FFF;
+      font-size: 0.6rem;
+    }
+
+    .high-low-corner {
+      position: absolute;
+      bottom: 13px;
+      right: 13px;
+      font-family: Arial, Helvetica, sans-serif;
+      text-align: right;
+      color: #FFFFFF;
+      font-size: 9px;
+      line-height: 1.2;
+      opacity: 0.8;
+      z-index: 99;
+    }
+
+    .high-low-corner .high,
+    .high-low-corner .low {
+      display: block;
+      font-weight: normal;
+      margin: 0;
+    }

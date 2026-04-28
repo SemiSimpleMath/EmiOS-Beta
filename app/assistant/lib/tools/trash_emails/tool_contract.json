@@ -1,0 +1,72 @@
+{
+  "name": "trash_emails",
+  "description": "Move all emails from one or more senders to Trash. Uses Gmail batchModify — fast even for large volumes. Supports an optional extra_query to narrow scope (e.g. only trash messages before a date).",
+  "inputs": [
+    {
+      "name": "senders",
+      "type": "array",
+      "required": true,
+      "description": "List of sender identifiers whose messages should be trashed — can be email addresses (e.g. \"noreply@ziprecruiter.com\"), bare domains to match all senders at that domain (e.g. \"quora.com\"), or display names (e.g. \"Cuts Clothing\"). Wildcards like *@domain are accepted and normalized to the bare domain."
+    },
+    {
+      "name": "extra_query",
+      "type": "string",
+      "required": false,
+      "description": "Optional additional Gmail query clause combined with the sender filter, e.g. \"before:2024/01/01\" to limit to older mail."
+    },
+    {
+      "name": "max_per_sender",
+      "type": "integer",
+      "required": false,
+      "description": "Messages trashed per sender per call. This tool always uses 1000 (hard cap)."
+    },
+    {
+      "name": "account_id",
+      "type": "string",
+      "required": false,
+      "description": "Google OAuth account id. Canonical value is exactly \"google_user_primary\"."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable summary: total messages trashed and per-sender breakdown."
+    },
+    {
+      "path": "data.total_trashed",
+      "type": "integer",
+      "description": "Total number of messages moved to Trash across all senders."
+    },
+    {
+      "path": "data.results",
+      "type": "array",
+      "description": "Per-sender results: [{sender, trashed}]."
+    }
+  ],
+  "metadata": {
+    "domain": "email",
+    "actions": [
+      "trash",
+      "delete"
+    ],
+    "selectors": [
+      "sender",
+      "domain",
+      "display_name",
+      "query"
+    ],
+    "risk_level": "high",
+    "side_effects": "destructive",
+    "requires_auth": [
+      "google"
+    ],
+    "requires_network": true,
+    "cost_level": "low",
+    "latency_class": "medium",
+    "front_door": true,
+    "room_visibility_default": "show",
+    "approval_required": true,
+    "planner_description": "Move emails from given sender/domain to Trash. Bulk."
+  }
+}

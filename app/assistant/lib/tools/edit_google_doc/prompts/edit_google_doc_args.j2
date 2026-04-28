@@ -1,0 +1,13 @@
+operation (required): diff | append.
+
+For diff:
+  find (required): exact text block to replace. Include 2-4 surrounding lines for uniqueness.
+  replace_with: replacement text (empty = delete). Keep existing lines you want to preserve.
+  On AMBIGUOUS error: use the match_sites context excerpts to widen find until unique, retry.
+
+For append:
+  text (required): text to add at document end.
+  ensure_newline: true/false (default true).
+
+document_id (required): Google Docs ID.
+account_id: optional; canonical value is exactly "google_user_primary" — do not abbreviate or alter this value.

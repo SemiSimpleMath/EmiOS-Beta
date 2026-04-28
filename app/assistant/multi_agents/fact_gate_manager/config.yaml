@@ -1,0 +1,31 @@
+name: fact_gate_manager
+class_name: MultiAgentManager
+description: "Deterministic typed fact/artifact producer manager for TaskIR gates."
+max_cycles: 8
+
+role_bindings:
+  delegator: fact_gate::delegator
+
+agents:
+  - name: fact_gate::delegator
+    class: Delegator
+  - name: fact_gate::final_answer
+    class: Agent
+
+control_nodes:
+  - name: manager_exit_node
+    class: ManagerExitNode
+  - name: graceful_exit_control_node
+    class: GracefulExitControlNode
+
+tools:
+  allowed_tools: []
+  except_tools: []
+
+flow_config:
+  strict_routing: true
+  state_map:
+    "fact_gate::delegator": "fact_gate::final_answer"
+    "fact_gate::final_answer": "manager_exit_node"
+    "graceful_exit": "graceful_exit_control_node"
+    "graceful_exit_control_node": "manager_exit_node"

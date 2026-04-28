@@ -1,0 +1,72 @@
+{
+  "name": "get_email",
+  "description": "Background scheduler tool that ingests inbox emails into the runtime EventRepository. Not intended for agent triage — use get_important_emails for that. Returns raw (unsummarized) email records. Range is capped at 7 days lookback.",
+  "inputs": [
+    {
+      "name": "start_date",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "end_date",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "unseen",
+      "type": "boolean",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "repo_update",
+      "type": "boolean",
+      "required": false,
+      "description": "Internal scheduler flag. When true, stores all fetched emails in EventRepository without LLM filtering. Always set to true by the background scheduler. Agents should not set this."
+    },
+    {
+      "name": "account_id",
+      "type": "string",
+      "required": false,
+      "description": "Optional Google OAuth account id for per-call mailbox selection (default \"google_user_primary\")."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable processing status."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Filtered/summarized email list. Bodies/headers are not guaranteed to be complete. Use get_email_thread for full thread/body retrieval."
+    }
+  ],
+  "arguments_prompt": "This is an internal background scheduler tool. Agents should use get_important_emails for inbox triage, or get_email_messages for query-driven search.",
+  "metadata": {
+    "domain": "email",
+    "actions": [
+      "ingest",
+      "read"
+    ],
+    "selectors": [
+      "date_range",
+      "unseen"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [
+      "google"
+    ],
+    "requires_network": true,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "show",
+    "approval_required": false,
+    "planner_description": "Internal scheduler ingest — agents should prefer get_important_emails or get_email_messages."
+  }
+}

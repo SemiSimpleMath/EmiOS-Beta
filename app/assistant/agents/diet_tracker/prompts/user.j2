@@ -1,0 +1,31 @@
+**Current local time:** {{ date_time }}
+
+########## CURRENT DIET LOG (today, as of last tick) ##########
+
+This is the full resource you are maintaining. Your output REPLACES this.
+Keep existing items unless a new source explicitly corrects them.
+
+{% if current_diet_log and current_diet_log.items %}
+{{ current_diet_log | tojson(indent=2) }}
+{% else %}
+(empty — no items logged yet today)
+{% endif %}
+
+########## NEW FOOD/DRINK PODS SINCE LAST RUN ##########
+
+{{ new_food_pods_block }}
+
+########## NEW DIET-RELATED TICKETS SINCE LAST RUN ##########
+
+{{ new_tickets_block }}
+
+########## TASK ##########
+
+1. Extract every concrete food/drink item from the new pods AND tickets.
+2. Apply cross-source common-sense merging (see system prompt — a ticket
+   and a chat pod within the per-kind time window are probably the same
+   eating event).
+3. Merge into the current log. Keep existing items; add new ones; dedupe
+   within source and across sources.
+4. Return the FULL merged list (existing + new), the updated summary,
+   open questions, and a one-sentence reasoning note.

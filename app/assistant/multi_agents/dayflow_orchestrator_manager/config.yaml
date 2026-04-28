@@ -1,0 +1,170 @@
+name: dayflow_orchestrator_manager
+class_name: MultiAgentManager
+description: "Internal dayflow orchestration manager with triage, state mover, action selector, and switchboard."
+max_cycles: 40
+
+role_bindings:
+  delegator: room::delegator
+  tool_selector: shared::tool_selector
+
+agents:
+  - name: room::delegator
+    class: Delegator
+  - name: dayflow_orchestrator::intake_triage
+    class: Agent
+  - name: dayflow_orchestrator::state_mover
+    class: Agent
+  - name: dayflow_orchestrator::action_selector
+    class: Agent
+  - name: dayflow_orchestrator::strategic_planner
+    class: Agent
+  - name: dayflow_orchestrator::relevance_cleaner
+    class: Agent
+  - name: dayflow_orchestrator::plan_mode
+    class: Agent
+  - name: dayflow_orchestrator::switchboard
+    class: Agent
+
+control_nodes:
+  - name: intake_triage_prep_node
+    class: IntakeTriagePrepNode
+  - name: strategic_planner_prep_node
+    class: StrategicPlannerPrepNode
+  - name: state_mover_prep_node
+    class: StateMoverPrepNode
+  - name: relevance_cleaner_prep_node
+    class: RelevanceCleanerPrepNode
+  - name: state_transition_guard_node
+    class: StateTransitionGuardNode
+  - name: triage_spawn_guard_node
+    class: TriageSpawnGuardNode
+  - name: view_materializer_node
+    class: ViewMaterializerNode
+  - name: wait_interrupt_promoter_node
+    class: WaitInterruptPromoterNode
+  - name: triage_persist_node
+    class: TriagePersistNode
+  - name: context_enricher_prep_node
+    class: ContextEnricherPrepNode
+  - name: context_enricher_persist_node
+    class: ContextEnricherPersistNode
+  - name: state_mover_persist_node
+    class: StateMoverPersistNode
+  - name: planner_persist_node
+    class: PlannerPersistNode
+  - name: relevance_cleaner_gate_node
+    class: RelevanceCleanerGateNode
+  - name: relevance_cleaner_persist_node
+    class: RelevanceCleanerPersistNode
+  - name: action_selector_router_node
+    class: ActionSelectorRouterNode
+  - name: plan_mode_final_router_node
+    class: PlanModeFinalRouterNode
+  - name: dayflow_switchboard_arguments_node
+    class: DayflowSwitchboardArgumentsNode
+  - name: dayflow_tool_caller
+    class: DayflowToolCaller
+  - name: action_result_normalizer_node
+    class: ActionResultNormalizerNode
+  - name: post_room_finalize_node
+    class: PostRoomFinalizeNode
+  - name: return_control
+    class: ReturnControlNode
+  - name: tool_caller
+    class: ToolCaller
+  - name: tool_result_handler
+    class: ToolResultHandler
+  - name: final_answer_node
+    class: FinalAnswerNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+  - name: graceful_exit_control_node
+    class: GracefulExitControlNode
+
+tools:
+  allowed_tools:
+    # --- Top-level managers (switchboard delegates here) ---
+    - emi_team_manager
+    - personal_admin_manager
+    - web_manager
+    - devices_manager
+
+    # --- Direct action tools the switchboard/orchestrator calls itself ---
+    - one_shot_tool_runner
+    - create_dayflow_ticket
+    - run_task
+    - find_tool
+    - ask_user
+    - notify_user
+
+    # --- Exotic system-control tools owned by dayflow orchestrator ---
+    - set_ui_mute
+    - set_screen_capture_enabled
+    - move_foreground_window
+
+    # --- KG context lookup ---
+    - ask_kg
+  except_tools: []
+
+scope_contract:
+  tools:
+    allowed_tools: ["all"]
+    blocked_tools:
+      - install_tool
+      - mcp::npm/playwright-mcp::browser_run_code
+    requires_approval_tools: []
+
+flow_config:
+  strict_routing: true
+  flow:
+    normal:
+      source_agent: "intake_triage_prep_node"
+    planning_mode:
+      source_agent: "dayflow_orchestrator::plan_mode"
+  action_selector:
+    source_agent: "dayflow_orchestrator::action_selector"
+    switchboard_agent: "dayflow_orchestrator::switchboard"
+    final_node: "final_answer_node"
+    exit_flag_key: "handoff_tf"
+    no_chat_path: true
+    switchboard_task_key: "switchboard_task"
+    switchboard_information_key: "switchboard_information"
+  planning_mode:
+    source_agent: "dayflow_orchestrator::plan_mode"
+    final_node: "final_answer_node"
+    chat_response_key: "chat_response"
+    planning_done_key: "planning_done_tf"
+    plan_summary_key: "plan_summary"
+  state_map:
+    "room::delegator": "intake_triage_prep_node"
+    "intake_triage_prep_node": "dayflow_orchestrator::intake_triage"
+    "dayflow_orchestrator::intake_triage": "triage_spawn_guard_node"
+    "triage_spawn_guard_node": "triage_persist_node"
+    "triage_persist_node": "context_enricher_prep_node"
+    "context_enricher_prep_node": "context_enricher_persist_node"
+    "context_enricher_persist_node": "strategic_planner_prep_node"
+    "strategic_planner_prep_node": "dayflow_orchestrator::strategic_planner"
+    "dayflow_orchestrator::strategic_planner": "planner_persist_node"
+    "planner_persist_node": "state_mover_prep_node"
+    "state_mover_prep_node": "dayflow_orchestrator::state_mover"
+    "dayflow_orchestrator::state_mover": "state_transition_guard_node"
+    "state_transition_guard_node": "state_mover_persist_node"
+    "state_mover_persist_node": "relevance_cleaner_gate_node"
+    "relevance_cleaner_gate_node": "view_materializer_node"
+    "relevance_cleaner_prep_node": "dayflow_orchestrator::relevance_cleaner"
+    "dayflow_orchestrator::relevance_cleaner": "relevance_cleaner_persist_node"
+    "relevance_cleaner_persist_node": "view_materializer_node"
+    "view_materializer_node": "wait_interrupt_promoter_node"
+    "wait_interrupt_promoter_node": "dayflow_orchestrator::action_selector"
+    "dayflow_orchestrator::action_selector": "action_selector_router_node"
+    "action_selector_router_node": "dayflow_orchestrator::switchboard"
+    "dayflow_orchestrator::plan_mode": "plan_mode_final_router_node"
+    "plan_mode_final_router_node": "final_answer_node"
+    "dayflow_orchestrator::switchboard": "dayflow_switchboard_arguments_node"
+    "dayflow_switchboard_arguments_node": "dayflow_tool_caller"
+    "dayflow_tool_caller": "action_result_normalizer_node"
+    "action_result_normalizer_node": "post_room_finalize_node"
+    "post_room_finalize_node": "final_answer_node"
+    "final_answer_node": "manager_exit_node"
+    "graceful_exit": "graceful_exit_control_node"
+    "graceful_exit_control_node": "final_answer_node"

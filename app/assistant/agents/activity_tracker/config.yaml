@@ -1,0 +1,16 @@
+name: activity_tracker
+class_name: Agent
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5-mini"
+  model_tier: "mini"
+
+system_context_items:
+- resource_user_data
+
+user_context_items:
+- date_time
+- resource_tracked_activities_output
+- current_activity_counts
+- recent_chat_excerpts
+- calendar_events_completed

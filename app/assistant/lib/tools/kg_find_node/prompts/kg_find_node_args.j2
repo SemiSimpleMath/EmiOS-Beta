@@ -1,0 +1,14 @@
+Arguments for kg_find_node tool:
+
+- text (required): The search text to find nodes
+- threshold (required): Similarity threshold (0.0 to 1.0)
+- k (required): Maximum number of nodes to return
+- node_id (required): UUID of a single node to restrict search to its neighborhood (use empty string "" for no restriction)
+- edges_k (required): Maximum number of edges to return per node
+- node_types (required): List of node types to search for (use empty list [] for no filter)
+- start_date (required): Start date filter (ISO format, use empty string "" for no filter)
+- end_date (required): End date filter (ISO format, use empty string "" for no filter)
+- max_hops (required): Maximum relationship hops from node_id to include (requires node_id to be set, use 0 for no limit)
+- taxonomy_paths (optional): List of taxonomy paths to filter by (e.g., 'entity > person', 'state > educational_status'). Returns union of nodes from all specified paths. Use empty list [] for no filter.
+
+Use empty strings or empty lists for parameters you don't want to filter by.

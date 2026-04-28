@@ -1,0 +1,16 @@
+{% if task %}
+Task: {{ task }}
+{% endif %}
+
+Known tags (if provided):
+{{ memory_available_tags }}
+
+Merged timeline data:
+{{ timeline_merged }}
+
+Return actionable_information items with:
+- fact_summary
+- tags
+- change_recommended
+- evidence
+- temporal_scope

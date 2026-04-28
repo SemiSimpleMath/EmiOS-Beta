@@ -1,0 +1,28 @@
+**Boundary date (local):** {{ boundary_date_local }}
+**Day:** {{ day_of_week }}
+{% if day_type_hints %}**Day type hints:** {{ day_type_hints }}{% endif %}
+
+Write a conversation starter for {{ resource_user_data.first_name }}.
+
+Context you may use:
+{% if weather_summary %}- Weather: {{ weather_summary }}{% endif %}
+{% if routine_md %}- Routine (day-specific):\n{{ routine_md }}{% endif %}
+{% if daily_context %}- Daily context:\n{{ daily_context | tojson(indent=2) }}{% endif %}
+{% if health %}- Health (latest):\n{{ health | tojson(indent=2) }}{% endif %}
+{% if calendar_next_7_days %}- Calendar (next 7 days):\n{{ calendar_next_7_days | tojson(indent=2) }}{% endif %}
+{% if recent_chat_excerpts %}- Recent chat (last few):\n{{ recent_chat_excerpts | tojson(indent=2) }}{% endif %}
+{% if timeline_head %}- Timeline head (today):\n{{ timeline_head | tojson(indent=2) }}{% endif %}
+{% if kg_random_topic %}- Random topic from knowledge graph (use for creative inspiration):
+  **{{ kg_random_topic.label }}** ({{ kg_random_topic.type }}{% if kg_random_topic.category %}, {{ kg_random_topic.category }}{% endif %})
+  {{ kg_random_topic.description }}
+  {% if kg_random_topic.connections %}Connections:
+  {% for c in kg_random_topic.connections %}  - {% if c.source %}{{ c.source }} {% endif %}{{ c.relationship }}{% if c.descriptor %} ({{ c.descriptor }}){% endif %}{% if c.target %} → {{ c.target }}{% endif %}
+  {% endfor %}{% endif %}{% endif %}
+
+Recent starters to avoid repeating:
+{{ conversation_starters_recent | tojson(indent=2) }}
+
+Constraints:
+- If you pick a question, it should be easy to answer quickly.
+- Avoid naggy wellness reminders; this is for conversation only.
+

@@ -1,0 +1,30 @@
+{
+  "policy_id": "room_policy::doc_editor::v1",
+  "manager_name": "doc_editor_manager",
+  "surface": "ui",
+  "default_visibility": "owner_only",
+  "default_context_id": "main",
+  "authority_level": 50,
+  "default_room_mode": "doc_creation_mode",
+  "history": {
+    "scope": "session"
+  },
+  "room_handler": "doc_editor_room.DocEditorRoom",
+  "retention": {
+    "write_unified_log": true,
+    "write_kg": false,
+    "allow_fact_extraction": false
+  },
+  "delivery": {
+    "auto_send": true,
+    "allow_initiation": false
+  },
+  "privacy": {
+    "owner_only_memory_visible": true,
+    "room_facts_only": false
+  },
+  "participant_identity": {
+    "display_name": "Jukka",
+    "aliases": ["Jukka", "User"]
+  }
+}

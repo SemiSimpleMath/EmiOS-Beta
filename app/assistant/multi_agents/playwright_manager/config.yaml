@@ -1,0 +1,164 @@
+name: playwright_manager
+class_name: MultiAgentManager
+description: "A manager that drives a real browser via Playwright MCP (npm/playwright-mcp)."
+max_cycles: 300
+
+execution_trace:
+  enabled: true
+  persist_json: true
+  persist_sqlite: true
+  max_traces_per_task: 50
+  artifact_dir: "data/execution_traces"
+tool_argument_normalizers:
+  - app.assistant.multi_agents.playwright_manager.argument_normalizers.normalize_playwright_tool_args
+
+role_bindings:
+  delegator: playwright::delegator
+
+agents:
+  - name: playwright::delegator
+    class: Delegator
+  - name: playwright::planner
+    class: Planner
+  - name: playwright::critic
+    class: PlaywrightCritic
+  - name: playwright::summary
+    class: SummaryAgent
+  - name: shared::final_answer
+    class: Agent
+
+control_nodes:
+  - name: spec_step_feeder
+    class: SpecStepFeederNode
+  - name: tool_return_router
+    class: ToolReturnRouter
+  - name: playwright_page_state_node
+    class: PlaywrightPageStateNode
+  - name: critic_pre_node
+    class: CriticPreNode
+  - name: critic_post_node
+    class: CriticPostNode
+  - name: summary_pre_node
+    class: SummaryPreNode
+  - name: summary_post_node
+    class: SummaryPostNode
+  - name: tool_caller
+    class: ToolCaller
+  - name: tool_result_handler
+    class: ToolResultHandler
+  - name: critic_capture_node
+    class: CriticCaptureNode
+  - name: return_control
+    class: ReturnControlNode
+  - name: graceful_exit_control_node
+    class: GracefulExitControlNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+
+tools:
+  allowed_tools:
+    # --- Playwright bundled action tools (action + ref snapshot) ---
+    - web_navigate_snapshot
+    - web_navigate_back_snapshot
+    - web_click_ref_snapshot
+    - web_click_xy_snapshot
+
+    # --- Minimal direct MCP tools ---
+    - mcp::npm/playwright-mcp::browser_take_screenshot
+    - mcp::npm/playwright-mcp::browser_wait_for
+    - mcp::npm/playwright-mcp::browser_tabs
+
+    # --- Local browser helpers ---
+    - web_page_coords
+    - web_spatial_snapshot
+    - web_visual_scout
+    - web_scroll
+    - web_modal_scan
+    - web_modal_search
+    - playwright_page_overview
+    - web_type_focused
+    - web_fill_xy
+    - web_fill_ref
+    - web_get_content
+    - ask_user
+  except_tools: []
+
+flow_config:
+  strict_routing: true
+  tool_return:
+    tool_call_result_handler_node: "tool_result_handler"
+    tool_result_processing_node: "playwright_page_state_node"
+  playwright_page_state:
+    source_agent: "tool_return_router"
+    next_agent: "summary_pre_node"
+    status_key: "playwright_status"
+    post_action_settle:
+      enabled: true
+      settle_ms: 1000
+      run_after_tools:
+        - "web_click_ref_snapshot"
+        - "web_click_xy_snapshot"
+        - "web_fill_xy"
+        - "web_fill_ref"
+        - "web_type_focused"
+        - "mcp::npm/playwright-mcp::browser_click"
+        - "mcp::npm/playwright-mcp::browser_mouse_click_xy"
+        - "mcp::npm/playwright-mcp::browser_type"
+    readiness_gate:
+      enabled: true
+      run_after_tools:
+        - "web_navigate_snapshot"
+        - "web_navigate_back_snapshot"
+        - "mcp::npm/playwright-mcp::browser_tabs"
+      max_attempts: 8
+      sleep_ms: 300
+      require_complete: true
+  critic:
+    enabled: true
+    subject_agent: "playwright::planner"
+    critic_capture_node: "critic_capture_node"
+    critic_agent: "playwright::critic"
+    continue_agent: "tool_caller"
+    cadence_every_actions: 5
+    action_count_state_key: "{planner_agent}_action_count"
+    run_on_last_tool_error: true
+    must_revise_flag_key: "must_revise_plan"
+    trigger_reason_key: "playwright_critic_trigger_reason"
+    payload_key: "critic_payload"
+    payload_recent_history_messages: 80
+    include_screenshot: true
+    next_if_no_pending: "playwright::planner"
+  summary:
+    enabled: false
+    source_agent: "tool_return_router"
+    summary_agent: "playwright::summary"
+    resume_agent: "playwright::planner"
+    resume_target_state_key: "resume_target"
+    planner_agent: "playwright::planner"
+    cadence_every_actions: 3
+    action_count_state_key: "{planner_agent}_action_count"
+    min_messages: 1
+    trigger_reason_key: "playwright_summary_trigger_reason"
+    payload_key: "summary_payload"
+    payload_recent_history_messages: 120
+    trigger_on_large_result_chars: 4000
+    allow_summarize_latest_tool_result: false
+  state_map:
+    "playwright::delegator": "spec_step_feeder"
+    "spec_step_feeder": "playwright::planner"
+    "playwright::planner": "critic_pre_node"
+    "critic_pre_node": "tool_caller"
+    "critic_capture_node": "playwright::critic"
+    "playwright::critic": "critic_post_node"
+    "critic_post_node": "tool_caller"
+    "tool_result_handler": "tool_return_router"
+    "tool_return_router": "playwright_page_state_node"
+    "playwright_page_state_node": "summary_pre_node"
+    "summary_pre_node": "spec_step_feeder"
+    "playwright::summary": "summary_post_node"
+    "summary_post_node": "spec_step_feeder"
+    "playwright::planner_return_control": "shared::final_answer"
+    "shared::final_answer": "manager_exit_node"
+    "graceful_exit": "graceful_exit_control_node"
+    "graceful_exit_control_node": "shared::final_answer"
+

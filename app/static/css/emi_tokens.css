@@ -1,0 +1,40 @@
+/* ============================================================
+   EmiOS Design Tokens — shared across all layouts
+   Colors, typography, transitions, theme overrides
+   ============================================================ */
+
+:root {
+  --font-family: 'Roboto', sans-serif;
+  --transition-speed: 0.3s;
+
+  /* Colors */
+  --background-color: #0F1624;
+  --header-footer-color: #1B2230;
+  --widget-background: #1C2533;
+  --widget-background-hover: #253040;
+  --text-color: #ECEFF4;
+  --heading-color: #88C0D0;
+  --accent-color: #5E81AC;
+  --hover-accent-color: #4C6782;
+  --border-color: #2E3440;
+  --input-background: #1C2533;
+  --button-text-color: #ECEFF4;
+  --text-muted: #a0a0a0;
+  --news-headline-color: #A8C4D8;
+  --news-date-color: #A8BBBB;
+}
+
+/* Light Theme Overrides */
+[data-theme="light"] {
+  --background-color: #F8F9FB;
+  --header-footer-color: #FFFFFF;
+  --widget-background: #FFFFFF;
+  --widget-background-hover: #F0F2F5;
+  --text-color: #2E3440;
+  --heading-color: #2E3440;
+  --accent-color: #5E81AC;
+  --hover-accent-color: #4C6782;
+  --border-color: #D8DEE9;
+  --input-background: #FFFFFF;
+  --button-text-color: #FFFFFF;
+}

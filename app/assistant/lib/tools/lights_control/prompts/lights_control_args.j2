@@ -1,0 +1,19 @@
+Use this tool for light controls exposed through your lights bridge endpoint (Kasa supported).
+
+Required:
+- `action`: MUST be exactly one of `list_lights`, `set_light_power`, `set_light_brightness`, `set_light_color`, `set_scene`
+
+Selectors (both optional):
+- `light_id` — target a specific light by its ID
+- `room` — target lights in a specific room (substring match on device alias, e.g. "Living Room", "Bedroom")
+- **OMIT both `room` and `light_id` to target ALL lights.** Do NOT pass "all" as a room name — just leave the field out.
+
+Conditional fields:
+- `state` for `set_light_power` (`on` or `off`)
+- `brightness_pct` for `set_light_brightness` (0-100)
+- `color` for `set_light_color` (e.g., "warm white", "#ff0000")
+- `scene_name` for `set_scene`
+
+Notes:
+- Kasa HS220 dimmer supports `list_lights`, `set_light_power`, and `set_light_brightness`.
+- `set_light_color` and `set_scene` may not be available for dimmer switches.

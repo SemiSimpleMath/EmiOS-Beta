@@ -1,0 +1,55 @@
+{
+  "name": "web_modal_search",
+  "description": "Search for a specific item inside an open modal by text. Scrolls the match into view and takes a snapshot with refs clustered around the target.",
+  "inputs": [
+    {
+      "name": "query",
+      "type": "string",
+      "required": true,
+      "description": "Text to search for inside the modal (e.g. 'caramel syrup')."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Search result summary plus snapshot refs near the matched element."
+    },
+    {
+      "path": "data.match_found",
+      "type": "boolean",
+      "description": "Whether a matching element was found in the modal."
+    },
+    {
+      "path": "data.match_text",
+      "type": "string",
+      "description": "The actual text of the matched element."
+    },
+    {
+      "path": "data.nearby_elements",
+      "type": "array",
+      "description": "Actionable elements visible in the snapshot after scrolling to the match."
+    }
+  ],
+  "arguments_prompt": "Return ONLY {\"query\":\"caramel syrup\"}",
+  "metadata": {
+    "domain": "browser",
+    "actions": [
+      "search",
+      "find"
+    ],
+    "selectors": [
+      "query",
+      "modal"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "medium",
+    "latency_class": "moderate",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

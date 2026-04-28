@@ -1,0 +1,65 @@
+name: fast_tool::final_answer
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5-nano"
+  model_tier: "nano"
+
+structured_output:
+  type: object
+  additionalProperties: false
+  properties:
+    final_answer_answer:
+      type: string
+    final_answer_sources:
+      type: array
+      items:
+        type: string
+    final_answer_detail_level:
+      type: string
+      enum: ["brief", "standard", "full"]
+    final_answer_task:
+      type: string
+    final_answer_what_was_done:
+      type: string
+    final_answer_interesting_info:
+      type: string
+    final_answer_data_list:
+      type: array
+      items:
+        type: object
+        additionalProperties: false
+        properties:
+          data_type:
+            type: string
+          key:
+            type: string
+          value:
+            type: string
+          url:
+            type: string
+          link:
+            type: string
+          title:
+            type: string
+          description:
+            type: string
+          source:
+            type: string
+          timestamp:
+            type: string
+  required:
+    - final_answer_answer
+    - final_answer_sources
+    - final_answer_detail_level
+    - final_answer_data_list
+
+allowed_tools: []
+except_tools: []
+
+user_context_items:
+  - date_time
+  - task
+  - information
+  - recent_history

@@ -1,0 +1,27 @@
+kg_update_node: Updates an existing node in the knowledge graph.
+
+**Purpose:** Modify properties of an existing node (label, description, dates, confidence, etc.)
+
+**Parameters:**
+- node_id (required): UUID of the node to update
+- label (optional): New label for the node
+- semantic_label (optional): New semantic label for the node (descriptive with names in parentheses)
+- description (optional): New description for the node
+- aliases (optional): List of aliases to add/update
+- category (optional): Category of the node
+- start_date (optional): Start date in YYYY-MM-DD format
+- end_date (optional): End date in YYYY-MM-DD format
+- start_date_confidence (optional): Confidence in start date ('actual', 'inferred')
+- end_date_confidence (optional): Confidence in end date ('actual', 'inferred')
+- valid_during (optional): Indicates the qualitative period of validness
+
+
+**Returns:**
+- success: Whether the operation succeeded
+- node_id: UUID of the updated node
+- label: Current label of the node
+- node_type: Type of the node
+- updated_fields: List of fields that were changed
+- message: Description of what was done
+
+**Safety:** This is a low-risk operation. You can safely update node properties without confirmation.

@@ -1,0 +1,31 @@
+{% if entity_level_0 %}
+#### ADDITIONAL KNOWN CONTEXT ####
+These are facts already recorded in the knowledge graph about entities mentioned below.
+Use them to improve pronoun and reference resolution.
+{{ entity_level_0 }}
+#### END OF ADDITIONAL KNOWN CONTEXT ####
+{% endif %}
+
+Please resolve all entity references in the following text. The text is divided into two parts:
+
+{% if previous_context %}
+**PREVIOUS CONTEXT (for reference only - do not process):**
+{{ previous_context }}
+{% endif %}
+
+**MESSAGES TO BE PROCESSED (focus on these only):**
+{{ text }}
+
+**IMPORTANT INSTRUCTIONS:**
+- You should ONLY process and resolve entities in the "MESSAGES TO BE PROCESSED" section
+- Use the "PREVIOUS CONTEXT" section only for reference to understand entity names and relationships
+- Do not include any resolved sentences from the previous context section
+- Focus exclusively on the new messages that need entity resolution
+
+Your task is to:
+1. Identify all pronouns and vague entity references in the MESSAGES TO BE PROCESSED section
+2. Resolve them to explicit entity names based on the context from both sections
+3. Ensure consistency throughout the text you're processing
+4. Provide reasoning for each resolution
+
+Focus on making the processed text completely self-contained with explicit entity names that can be used for knowledge graph extraction.

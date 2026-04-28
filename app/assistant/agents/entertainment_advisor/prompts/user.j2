@@ -1,0 +1,74 @@
+﻿########## CURRENT STATE ##########
+**Current Time:** {{ date_time }}
+**Day:** {{ day_of_week }}
+{% if location_summary and location_summary != "Currently: Unknown" %}
+**Location:** {{ location_summary }}
+{% endif %}
+{% if resource_weather and resource_weather.current %}
+**Weather:** {{ resource_weather.location.city }}: {{ resource_weather.current.temperature }} F, {{ resource_weather.current.condition }}
+{% endif %}
+
+{% if resource_afk_statistics_output %}
+**Computer Presence:**
+{% if resource_afk_statistics_output.is_afk %}
+[STATUS: AWAY FROM KEYBOARD] - Idle: {{ resource_afk_statistics_output.idle_minutes | default(0) | round | int }} min
+{% else %}
+[STATUS: AT KEYBOARD] - Session: {{ resource_afk_statistics_output.current_session_minutes | default(resource_afk_statistics_output.active_work_session_minutes) | default(0) | round(1) }} min
+{% endif %}
+{% endif %}
+
+{% if resource_sleep_output %}
+**Sleep:** User is up: {{ resource_sleep_output.user_is_up }} | Day start: {{ resource_sleep_output.day_start_time_local | default("unknown") }}
+{% endif %}
+
+########## SCHEDULE & ROUTINE ##########
+{% if resource_daily_context_generator_output %}
+{% if resource_expected_calendar and resource_expected_calendar.expected_schedule %}
+**Today's Schedule:**
+{% for item in resource_expected_calendar.expected_schedule %}
+- {{ item.title }} {{ item.start_local }}{% if item.end_local %} - {{ item.end_local }}{% endif %} ({{ item.status }})
+{% endfor %}
+{% endif %}
+{% if resource_daily_context_generator_output.day_theme %}
+**Day Theme:** {{ resource_daily_context_generator_output.day_theme }}
+{% endif %}
+{% if resource_daily_context_generator_output.current_status %}
+**Current Status:** {{ resource_daily_context_generator_output.current_status }}
+{% endif %}
+{% endif %}
+
+{% if resource_dayflow_routine %}
+**Daily Routine:**
+{{ resource_dayflow_routine }}
+{% endif %}
+
+########## HEALTH & ENERGY ##########
+{% if health_status_summary %}
+**Health:**
+{{ health_status_summary }}
+{% endif %}
+
+########## PREFERENCES & INTERESTS ##########
+{% if entertainment_bio %}
+**Entertainment & Hobbies (from bio):**
+{{ entertainment_bio }}
+{% endif %}
+
+{% if entertainment_beliefs %}
+**Known Preferences (from beliefs):**
+{% for belief in entertainment_beliefs[:15] %}
+- {{ belief }}
+{% endfor %}
+{% endif %}
+
+{% if recent_entertainment_history %}
+**Recent Entertainment Activity:**
+{% for item in recent_entertainment_history[:10] %}
+- {{ item }}
+{% endfor %}
+{% endif %}
+
+########## PREVIOUS ASSESSMENT ##########
+{% if previous_assessment %}
+{{ previous_assessment }}
+{% endif %}

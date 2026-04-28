@@ -1,0 +1,24 @@
+## Node to Classify:
+
+**Label**: {{ node_label }}
+**Type**: {{ node_type }}
+**Sentence**: {{ node_sentence }}
+
+## Taxonomy Candidates:
+{{ taxonomy_candidates }}
+
+---
+
+**Understanding the Hierarchy Paths:**
+Each candidate shows its full path in the taxonomy (e.g., "entity > person > parent > father").
+- **Longer paths = MORE SPECIFIC** (better match)
+- **Shorter paths = MORE GENERIC** (likely a root type)
+- Example: "entity > person > parent > father" (4 levels) is MUCH better than "entity > person" (2 levels)
+
+Pick the **MOST SPECIFIC** taxonomy type that matches this node.
+- Evaluate each candidate based on SEMANTIC MEANING, not list order
+- If multiple candidates fit, choose the one with the LONGEST/DEEPEST hierarchy path
+- Use the sentence for context and disambiguation
+- Return `taxonomy_id: null` if no candidate has confidence >= 0.5
+- Confidence guidelines: exact match (0.9-1.0), strong context (0.7-0.89), inference (0.5-0.69)
+

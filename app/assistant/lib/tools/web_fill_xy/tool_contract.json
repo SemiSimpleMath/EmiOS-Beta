@@ -1,0 +1,87 @@
+{
+  "name": "web_fill_xy",
+  "description": "web_fill_xy:\nAtomic \"click + type + Enter\" at screen coordinates (x,y) in one go.\n\nUse this to avoid the common failure mode:\nthe agent clicks into a textbox and then gets confused about whether it has focus.\n\nArguments:\n- x, y: coords to click\n- text: what to type\n- submit: press Enter after typing (default true)\n- clear_first: clear before typing (default true)\n- capture_snapshot: include browser snapshot after action (default true)",
+  "inputs": [
+    {
+      "name": "x",
+      "type": "number",
+      "required": true,
+      "description": "X coordinate (CSS pixels) to click before typing."
+    },
+    {
+      "name": "y",
+      "type": "number",
+      "required": true,
+      "description": "Y coordinate (CSS pixels) to click before typing."
+    },
+    {
+      "name": "text",
+      "type": "string",
+      "required": true,
+      "description": "Text to type after clicking to focus."
+    },
+    {
+      "name": "submit",
+      "type": "boolean",
+      "required": false,
+      "description": "If true, press Enter after typing."
+    },
+    {
+      "name": "clear_first",
+      "type": "boolean",
+      "required": false,
+      "description": "If true, clear the field before typing (best-effort)."
+    },
+    {
+      "name": "slowly",
+      "type": "boolean",
+      "required": false,
+      "description": "If true, type with a small delay between characters."
+    },
+    {
+      "name": "capture_snapshot",
+      "type": "boolean",
+      "required": false,
+      "description": "If true, capture browser_snapshot after action and include it in tool result data."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    },
+    {
+      "path": "data.snapshot_id",
+      "type": "string",
+      "description": "Unique id for the bundled browser_snapshot when captured."
+    }
+  ],
+  "arguments_prompt": "Fill arguments for `web_fill_xy`.\n\nReturn ONLY a JSON object with:\n- x (number, required)\n- y (number, required)\n- text (string, required)\n- submit (boolean, default true)\n- clear_first (boolean, default true)\n- slowly (boolean, default false)\n- capture_snapshot (boolean, default true)\n\nExample:\n{\"x\":512,\"y\":126,\"text\":\"cheeseburger\",\"submit\":true,\"clear_first\":true,\"capture_snapshot\":true}",
+  "metadata": {
+    "domain": "browser",
+    "actions": [
+      "fill",
+      "type",
+      "click"
+    ],
+    "selectors": [
+      "coords",
+      "text"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "high",
+    "latency_class": "slow",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

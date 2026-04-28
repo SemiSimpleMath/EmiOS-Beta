@@ -1,0 +1,73 @@
+name: orchestrator_evaluator
+class_name: Agent
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5-mini"
+  model_tier: "mini"
+
+# Structured output schema (fallback if agent_form.py fails to load).
+structured_output:
+  type: object
+  additionalProperties: false
+  properties:
+    action:
+      type: string
+      enum: ["done"]
+    is_done:
+      type: boolean
+    done_reason:
+      type: string
+    missing_requirements:
+      type: array
+      items:
+        type: string
+    halt_directives:
+      type: array
+      items:
+        type: object
+        additionalProperties: false
+        properties:
+          job_id:
+            type: string
+          kind:
+            type: string
+            enum: ["moot", "redundant", "superseded", "part_complete"]
+          reason:
+            type: string
+        required: ["job_id", "kind", "reason"]
+    replan_needed:
+      type: boolean
+    replan_reason:
+      type: string
+    notes:
+      type: string
+  required:
+    [
+      "action",
+      "is_done",
+      "done_reason",
+      "missing_requirements",
+      "halt_directives",
+      "replan_needed",
+      "replan_reason",
+      "notes",
+    ]
+
+allowed_tools: []
+except_tools: []
+
+user_context_items:
+  - date_time
+  - task
+  - information
+  - orchestrator_facts_version
+  - orchestrator_facts
+  - orchestrator_curated_progress
+  - orchestrator_results
+  - orchestrator_job_map
+  - orchestrator_running_jobs
+  - orchestrator_progress_inbox
+  - orchestrator_tick
+
+system_context_items: []
+

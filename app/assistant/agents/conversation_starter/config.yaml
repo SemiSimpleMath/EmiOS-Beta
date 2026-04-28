@@ -1,0 +1,27 @@
+name: conversation_starter
+class_name: Agent
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.1"
+  model_tier: "smart"
+
+allowed_tools: []
+except_tools: []
+
+structured_output: AgentForm
+
+user_context_items:
+  - boundary_date_local
+  - day_of_week
+  - conversation_starters_recent
+  - day_type_hints
+  - weather_summary
+  - routine_md
+  - daily_context
+  - health
+  - calendar_next_7_days
+  - recent_chat_excerpts
+  - timeline_head
+  - kg_random_topic
+  - resource_user_data
+

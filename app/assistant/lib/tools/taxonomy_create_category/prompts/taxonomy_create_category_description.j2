@@ -1,0 +1,25 @@
+Create a new category in the taxonomy hierarchy under a specified parent category.
+
+Use this tool when:
+- A new category is needed to properly organize the taxonomy
+- You need to add a missing intermediate category
+- Creating a new leaf category for classification
+
+Parameters:
+- parent_id: The ID of the parent category (must exist)
+- new_label: The label for the new category (e.g., "industrial_machine")
+- description: A clear description of what this category represents (optional but recommended)
+
+Example:
+  create_category(492, "industrial_machine", "Machines used in manufacturing and industrial processes")
+
+The tool will:
+1. Validate the parent exists
+2. Normalize the label (lowercase, underscores)
+3. Check for duplicates under the same parent
+4. Create the new category
+5. Return the new category_id
+
+Note: If a category with the same label already exists under this parent, the tool will return an error with the existing category's ID.
+
+

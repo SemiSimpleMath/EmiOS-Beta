@@ -1,0 +1,20 @@
+name: knowledge_graph_add::entity_resolver
+class_name: Agent
+llm_params:
+  engine: gpt-5.4-mini
+  model_tier: "mini"
+  llm_provider: "openai"
+allowed_tools: []
+except_tools: []
+user_context_items:
+- text
+- previous_context
+- entity_level_0
+system_context_items:
+  - resource_assistant_data
+  - resource_user_data
+type: agent
+
+entity_scan_keys: [text]
+entity_detection_keys:
+  - text

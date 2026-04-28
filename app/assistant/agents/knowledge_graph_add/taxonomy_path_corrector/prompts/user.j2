@@ -1,0 +1,24 @@
+{# User prompt for Taxonomy Path Corrector Agent #}
+
+**NODE TO CLASSIFY:**
+- Label: {{ node.label }}
+- Sentence: {{ node.original_sentence or "N/A" }}
+- Type: {{ node.node_type }}
+- Category: {{ node.category or "N/A" }}
+
+**ROOT TYPE:**
+{{ critic_base_path }}
+
+**FULL TAXONOMY STRUCTURE:**
+{{ taxonomy_structure }}
+
+**TASK:**
+Classify this node into the most appropriate taxonomy path. You have the complete taxonomy structure for the root type above. Find the best, most specific path that accurately describes what this node IS.
+
+Consider:
+1. What IS this node fundamentally?
+2. What existing categories in the taxonomy best fit this node?
+3. How specific should the classification be?
+4. What path follows proper IS-A relationships?
+
+Provide your classification path with detailed reasoning.

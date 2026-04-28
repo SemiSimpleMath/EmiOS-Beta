@@ -1,0 +1,67 @@
+{
+  "name": "capture_and_describe_monitors",
+  "description": "Capture and describe one or more monitor screenshots, then write a concise desktop activity snippet.",
+  "inputs": [
+    {
+      "name": "monitor_indices",
+      "type": "array",
+      "required": false,
+      "description": "Ordered monitor indices to capture and describe (1-based)."
+    },
+    {
+      "name": "question",
+      "type": "string",
+      "required": false,
+      "description": "Optional question passed to vision_image_describe for each screenshot."
+    },
+    {
+      "name": "output_file_path",
+      "type": "string",
+      "required": false,
+      "description": "Path for the generated snippet when write_output is true."
+    },
+    {
+      "name": "write_output",
+      "type": "boolean",
+      "required": false,
+      "description": "Whether to overwrite output_file_path with the snippet."
+    },
+    {
+      "name": "ensure_newline",
+      "type": "boolean",
+      "required": false,
+      "description": "Ensure trailing newline when writing output."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "Arguments:\n{\n  \"monitor_indices\": [2, 3],\n  \"question\": \"In 1-2 concise sentences, describe what Jukka is doing on this monitor right now.\",\n  \"output_file_path\": \"resources/dayflow_pipeline_outputs/resource_desktop_activity_recent.md\",\n  \"write_output\": true,\n  \"ensure_newline\": true\n}",
+  "metadata": {
+    "category": "vision",
+    "verbs": [
+      "operate"
+    ],
+    "entities": [
+      "vision"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "high",
+    "latency_class": "slow",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

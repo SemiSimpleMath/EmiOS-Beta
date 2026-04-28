@@ -1,0 +1,72 @@
+{
+  "name": "web_scroll",
+  "description": "web_scroll:\nScroll the page (or currently focused scroll container) using a simple direction API.\n\nUse this instead of raw browser wheel deltas.\n\nArguments:\n- direction: 'down' or 'up'\n- amount: pixels per step\n- steps: number of steps\n- settle_ms: wait after each step\n- capture_snapshot: include browser_snapshot after scroll",
+  "inputs": [
+    {
+      "name": "direction",
+      "type": "string",
+      "required": false,
+      "description": "Scroll direction: 'down' or 'up'."
+    },
+    {
+      "name": "amount",
+      "type": "integer",
+      "required": false,
+      "description": "Pixels per wheel step (positive integer)."
+    },
+    {
+      "name": "steps",
+      "type": "integer",
+      "required": false,
+      "description": "Number of scroll steps to apply."
+    },
+    {
+      "name": "settle_ms",
+      "type": "integer",
+      "required": false,
+      "description": "Wait time after each step in milliseconds."
+    },
+    {
+      "name": "capture_snapshot",
+      "type": "boolean",
+      "required": false,
+      "description": "If true, capture browser_snapshot after scrolling."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable scroll execution summary."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured result payload including direction and step data."
+    },
+    {
+      "path": "data.snapshot_id",
+      "type": "string",
+      "description": "Unique id for the bundled browser_snapshot when captured."
+    }
+  ],
+  "arguments_prompt": "Fill arguments for `web_scroll`.\n\nReturn ONLY a JSON object with:\n- direction (\"down\" | \"up\", default \"down\")\n- amount (integer > 0, default 420)\n- steps (integer > 0, default 1)\n- settle_ms (integer >= 0, default 120)\n- capture_snapshot (boolean, default true)\n\nExample:\n{\"direction\":\"down\",\"amount\":420,\"steps\":2,\"settle_ms\":120,\"capture_snapshot\":true}",
+  "metadata": {
+    "domain": "browser",
+    "actions": [
+      "scroll"
+    ],
+    "selectors": [
+      "direction"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "medium",
+    "latency_class": "moderate",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

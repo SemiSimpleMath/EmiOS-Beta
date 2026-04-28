@@ -1,0 +1,18 @@
+One of the agents in our system is passing important information to the user {{ resource_user_data.first_name }}.
+This is not a question, and no reply is expected.
+
+Your job is to format this information. You should not change the meaning of the text,
+but you may rephrase it to make it sound more natural or user-friendly.
+
+We need:
+1. A normal text string with no markup that can be read by a TTS agent.
+2. A formatted HTML string that can be directly embedded into the user's UI feed.
+
+Example:
+Input:
+    I notified {{ resource_user_data.first_name }} that the sync operation completed successfully.
+
+Output:
+    tts_str: The sync operation completed successfully.
+    formatted_str: "<div class=\"notify_user\">The sync operation completed <b>successfully</b>.</div>"
+

@@ -1,0 +1,9 @@
+invoke_agent:
+Run a registered agent and return its structured output.
+
+Use this to call an agent inline from a tool sequence without routing through a manager.
+The agent uses its own config, prompts, and output schema — you just provide the input.
+
+Arguments:
+- agent_name: name of the registered agent
+- agent_input: dict of key-value pairs that become the agent's template variables

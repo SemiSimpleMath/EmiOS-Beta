@@ -1,0 +1,38 @@
+name: dayflow_orchestrator::strategic_planner
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.4-mini"
+  model_tier: "mini"
+
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+entity_scan_keys: [admitted_artifacts, active_dayflow_items, recent_dayflow_chat_history, resource_expected_calendar]
+entity_card_level: 0
+
+user_context_items:
+  - date_time
+  - day_of_week
+  - admitted_artifacts
+  - active_dayflow_items
+  - plan_task_status
+  - resource_expected_calendar
+  - resource_daily_context_generator_output
+  - resource_afk_statistics_output
+  - recent_dayflow_chat_history
+  - resource_dayflow_routine
+  - active_tickets
+  - recent_responded_tickets
+  - location_summary
+  - resource_weather
+  - health_status_summary
+  - recent_action_selector_actions
+  - recent_changes
+  - entity_card
+
+system_context_items:
+  - resource_user_data
+  - resource_assistant_data
+  - resource_orchestrator_user_prefs

@@ -1,0 +1,73 @@
+{#
+  Shared macros for rendering dayflow items consistently across all agents.
+
+  Usage in any agent user.j2:
+    {% from "shared/macros/dayflow_items.j2" import task_line, task_block %}
+
+  task_line(meta)  — single item, one line + detail lines
+  task_block(items, title, limit) — grouped section with header
+#}
+
+
+{% macro task_line(meta) -%}
+- task: {{ meta.get("short_id", "") }}
+  {%- if meta.get("plan_id") %} | plan: {{ meta.get("plan_id") }}{% endif %}
+  {%- if meta.get("state") %} | {{ meta.get("state") }}{% endif %}
+  {%- if meta.get("source_type") %} | {{ meta.get("source_type") }}{% endif %}
+  {%- if meta.get("created_at_local") %} | created: {{ meta.get("created_at_local") }}{% endif %}
+  {%- if meta.get("dispatched_at_local") or meta.get("dispatched_at") %} | dispatched: {{ meta.get("dispatched_at_local", meta.get("dispatched_at","")) }}{% endif %}
+  {%- if meta.get("age_hours") %} | age: {{ meta.get("age_hours") }}{% endif %}
+  {{ meta.get("summary", "") }}
+  {%- if meta.get("execution_result") %}
+  result: {{ meta.get("execution_result") }}
+  {%- endif %}
+  {%- if meta.get("ticket_response") %}
+  ticket_response: {{ meta.get("ticket_response") }}
+  {%- endif %}
+  {%- if meta.get("wait_reason") %}
+  wait: {{ meta.get("wait_reason") }}
+  {%- endif %}
+  {%- if meta.get("reactivate_at_local") or meta.get("reactivate_at_utc") %}
+  reactivate: {{ meta.get("reactivate_at_local", meta.get("reactivate_at_utc","")) }}
+  {%- endif %}
+  {%- if meta.get("state_reason") %}
+  reason: {{ meta.get("state_reason") }}
+  {%- endif %}
+  {%- if meta.get("dispatch_status") %}
+  dispatch_status: {{ meta.get("dispatch_status") }}
+  {%- endif %}
+{%- endmacro %}
+
+
+{% macro task_block(items, title, limit=40) -%}
+{% if items %}
++++++ {{ title }} +++++
+{% for ex in items[:limit] %}
+{% set meta = ex.get("metadata", {}) %}
+{{ task_line(meta) }}
+{% endfor %}
+{% endif %}
+{%- endmacro %}
+
+
+{# plan_task_line: for plan_task_status flat dicts (task_id, summary, state, etc.) #}
+{% macro plan_task_line(t) -%}
+- task: {{ t.get("task_id","") }}
+  {%- if t.get("state") %} | {{ t.get("state") }}{% endif %}
+  {%- if t.get("dispatched_at") %} | dispatched: {{ t.get("dispatched_at") }}{% endif %}
+  {{ t.get("summary","") }}
+  {%- if t.get("execution_result") %}
+  result: {{ t.get("execution_result") }}
+  {%- endif %}
+  {%- if t.get("ticket_response") %}
+  ticket_response: {{ t.get("ticket_response") }}
+  {%- endif %}
+  {%- if t.get("state") == "waiting" %}
+  {%- if t.get("wait_reason") %}
+  waiting for: {{ t.get("wait_reason") }}
+  {%- endif %}
+  {%- if t.get("reactivate_at_local") or t.get("reactivate_at") %}
+  reactivate: {{ t.get("reactivate_at_local", t.get("reactivate_at","")) }}
+  {%- endif %}
+  {%- endif %}
+{%- endmacro %}

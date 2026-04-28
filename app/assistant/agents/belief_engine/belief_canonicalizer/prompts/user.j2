@@ -1,0 +1,10 @@
+Domain: {{ domain }}
+
+{% if clusters_block %}
+## Belief Clusters for Canonicalization
+
+Each cluster contains beliefs that scored above the similarity threshold against each other.
+Review each cluster and decide whether to consolidate.
+
+{{ clusters_block }}
+{% endif %}

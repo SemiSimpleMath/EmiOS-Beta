@@ -1,0 +1,49 @@
+{
+  "name": "personal_admin_manager",
+  "description": "Personal admin manager for calendar, todo tasks, reminders, and email. Use this for multi-step personal operations that may span these categories in one run.",
+  "inputs": [
+    {
+      "name": "task",
+      "type": "string",
+      "required": true,
+      "description": "Requested personal admin task."
+    },
+    {
+      "name": "information",
+      "type": "string",
+      "required": true,
+      "description": "Optional supporting context."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "Arguments to personal_admin_manager are:\n- task: required detailed instructions for calendar/todo/reminder/email operations.\n- information: optional supporting context and constraints.",
+  "metadata": {
+    "category": "orchestration",
+    "verbs": [
+      "orchestrate"
+    ],
+    "entities": [
+      "workflow"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "medium",
+    "latency_class": "moderate",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

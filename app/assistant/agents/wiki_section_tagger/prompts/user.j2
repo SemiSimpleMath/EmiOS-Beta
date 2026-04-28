@@ -1,0 +1,11 @@
+Subject: **{{ entity_name }}** ({{ entity_type }})
+
+Allowed sections (use ONLY these keys in your output):
+{{ allowed_sections }}
+
+Numbered bullets to tag:
+---
+{{ bullets_block }}
+---
+
+Return the tag list for each bullet, preserving the original numbers. Every input number must appear in `results` exactly once.

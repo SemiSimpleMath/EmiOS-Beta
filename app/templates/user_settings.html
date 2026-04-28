@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Settings</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/setup_wizard.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="setup-container">
+        <div class="setup-header">
+            <h1>User Settings</h1>
+            <p>Update your personal information</p>
+            <a href="/chat_bot" class="back-link"><i class="fas fa-arrow-left"></i> Back to Chat</a>
+        </div>
+
+        <form id="userSettingsForm">
+            <!-- About You -->
+            <div class="settings-section">
+                <h2>About You</h2>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="first_name">First Name <span class="required">*</span></label>
+                        <input type="text" id="first_name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="middle_name">Middle Name</label>
+                        <input type="text" id="middle_name">
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="last_name">Last Name <span class="required">*</span></label>
+                        <input type="text" id="last_name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="preferred_name">Preferred Name</label>
+                        <input type="text" id="preferred_name">
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="birthdate">Birthday</label>
+                        <input type="date" id="birthdate">
+                    </div>
+                    <div class="form-group">
+                        <label for="pronouns">Pronouns <span class="required">*</span></label>
+                        <select id="pronouns" required>
+                            <option value="">Select...</option>
+                            <option value="he/him">He/Him</option>
+                            <option value="she/her">She/Her</option>
+                            <option value="they/them">They/Them</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Important People -->
+            <div class="settings-section">
+                <h2>Important People</h2>
+                <p class="step-description">People you mention often in conversations.</p>
+                
+                <div id="people-list"></div>
+                
+                <button type="button" id="add-person-btn" class="btn-secondary">
+                    + Add Person
+                </button>
+            </div>
+
+            <!-- Work & Context -->
+            <div class="settings-section">
+                <h2>Work & Additional Context</h2>
+                
+                <div class="form-group">
+                    <label for="job">Your Job</label>
+                    <input type="text" id="job">
+                </div>
+
+                <div class="form-group">
+                    <label for="home_city">Home City</label>
+                    <input type="text" id="home_city" placeholder="e.g., Irvine, CA">
+                    <small>Used for weather, estimating distances, and food/delivery services (only with your permission). Stored locally only — never sent to external services.</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="additional_context">Additional Context</label>
+                    <textarea id="additional_context" rows="8" placeholder="Anything else about you..."></textarea>
+                </div>
+            </div>
+
+            <!-- Save Button -->
+            <div class="settings-actions">
+                <button type="submit" class="btn-primary">
+                    <i class="fas fa-save"></i> Save Changes
+                </button>
+            </div>
+
+            <div id="error-message" class="error-message" style="display: none;"></div>
+            <div id="success-message" class="success-message" style="display: none;"></div>
+            <div id="loading" class="loading" style="display: none;">
+                <div class="spinner"></div>
+                <p>Saving...</p>
+            </div>
+        </form>
+    </div>
+
+    <!-- Person Template -->
+    <template id="person-template">
+        <div class="person-entry">
+            <div class="person-header">
+                <h4>Person <span class="person-number"></span></h4>
+                <button type="button" class="remove-person-btn">×</button>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Name <span class="required">*</span></label>
+                    <input type="text" class="person-name" required>
+                </div>
+                <div class="form-group">
+                    <label>Relationship <span class="required">*</span></label>
+                    <input type="text" class="person-relationship" required>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Birthdate</label>
+                <input type="date" class="person-birthdate">
+            </div>
+        </div>
+    </template>
+
+    <script src="{{ url_for('static', filename='js/user_settings.js') }}"></script>
+</body>
+</html>
+
+

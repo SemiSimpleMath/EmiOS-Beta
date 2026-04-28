@@ -1,0 +1,117 @@
+# Sleep Tracking Configuration
+# Minimal parameters to detect sleep intervals and when user is actually up
+
+# Sleep Window
+# AFK during this period counts as sleep
+sleep_window:
+  start: "22:30"  # 10:30 PM
+  end: "09:00"    # 9:00 AM
+
+# Sleep/Awake Divider
+# Align to DayFlow boundary (5AM) to avoid “secondary boundary” confusion.
+# Used for (a) boundary-day keying and (b) “first active after divider” wake detection.
+sleep_awake_divider: "05:00"
+
+# Minimum AFK duration to count as sleep (minutes)
+# Sleep-like AFK must be this long AND overlap with sleep window
+min_sleep_afk_minutes: 60  # 1 hour minimum
+
+# Minimum overlap ratio with sleep window to classify as sleep
+# 0.60 = at least 60% of AFK period must overlap with sleep window
+min_sleep_overlap_ratio: 0.60
+
+# AFK Detection Thresholds
+# These control when the system considers the user "away"
+afk_thresholds:
+  is_potentially_afk_minutes: 1  # Grace period - wellness cycle pauses but user not yet considered AFK
+  confirmed_afk_minutes: 3       # User is confirmed AFK
+
+# AFK-based activity resets
+# If user was away from the computer for >= min_minutes, reset timers for activities
+# that have reset_on_afk: true in config_tracked_activities.json (e.g., stretches).
+afk_resets:
+  min_minutes: 10
+
+# Normal Sleep Hours
+# Used for cold start assumptions and calculating expected wake time
+normal_sleep:
+  start: "22:30"  # Typical bedtime
+  end: "07:30"    # Typical wake time
+  duration_hours: 8.5  # Default assumption for cold starts
+
+# Sleep Segment Adjustments
+# AFK doesn't perfectly reflect actual sleep:
+# - User doesn't fall asleep instantly when going AFK
+# - User doesn't race to computer immediately upon waking
+# These buffers trim inferred sleep segments to be more realistic.
+sleep_segment_adjustments:
+  # Only apply adjustments to segments longer than this (hours)
+  # Short AFK (e.g., lunch break) shouldn't be treated as sleep
+  min_segment_hours_for_trim: 2.0
+
+  # Minutes to trim from start of sleep segment (fall-asleep buffer)
+  # Accounts for time between going AFK and actually falling asleep
+  start_trim_minutes: 20
+
+  # Minutes to trim from end of sleep segment (wake-up buffer)
+  # Accounts for time between waking and reaching the computer
+  end_trim_minutes: 15
+
+  # Safety cap: never trim more than this percentage of a segment
+  # Prevents over-trimming short segments
+  max_trim_percent: 25
+
+# Sleep Quality Scoring
+# Point-based system for nuanced sleep quality assessment
+# Philosophy: Fragmented sleep is severely penalized. Duration matters linearly.
+sleep_quality_scoring:
+  # Ideal sleep duration (minutes) - gets full 100 points
+  ideal_min_minutes: 480   # 8 hours
+  ideal_max_minutes: 510   # 8.5 hours (slight buffer before oversleep penalty)
+
+  # Duration scoring (linear)
+  # Single aggressive linear drop: 27.5 pts/hr under ideal
+  # Results: 8h=100(Excellent), 7h=72(Very good), 6h=45(OK), 5h=17(Bad), 4h=0(Terrible)
+  duration_scoring:
+    # Below ideal: aggressive linear penalty
+    points_per_hour_under: 27.5
+    # Above ideal: gentler penalty per hour over
+    points_per_hour_over: 8
+    # Minimum duration to get any points (minutes)
+    min_duration_for_points: 60
+
+  # Fragmentation penalty
+  # First extra segment drops ~2 tiers (Excellent → Very good)
+  # Additional segments have incremental penalty
+  fragmentation_penalty:
+    # Penalty for going from 1 to 2 segments (2-tier drop)
+    first_segment_penalty: 25
+    # Penalty for each additional segment beyond 2
+    additional_segment_penalty: 10
+
+  # Score to tier mapping (score >= threshold gets that tier)
+  tier_thresholds:
+    excellent: 90
+    great: 80
+    very_good: 70
+    good: 60
+    pretty_good: 50
+    ok: 40
+    mediocre: 30
+    poor: 20
+    bad: 10
+    # Below 10 = terrible
+
+# Greeting Messages
+greetings:
+  # After confirmed awake
+  morning_greeting: "☀️ Good morning! How did you sleep last night?"
+
+  # Early wake (before ambiguous window, deprecated)
+  early_contact: "You're up very early. Are you getting up or planning to go back to sleep?"
+
+# Administrative Daily Reset
+# Fixed time for resetting daily counters (separate from behavioral wake logic)
+daily_reset:
+  hour: 5  # 5 AM - when daily counters reset
+

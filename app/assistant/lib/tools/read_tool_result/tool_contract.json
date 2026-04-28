@@ -1,0 +1,61 @@
+{
+  "name": "read_tool_result",
+  "description": "Read a previously stored full tool result by `tool_result_id`.\n\nUse this ONLY when the summary is insufficient and you need exact details from a prior tool call\n(for example: reusing a Playwright snapshot `ref`, seeing full JSON payloads, or verifying exact values).\n\nThis tool reads artifacts from `uploads/temp/tool_results/`.",
+  "inputs": [
+    {
+      "name": "tool_result_id",
+      "type": "string",
+      "required": true,
+      "description": "The tool_result_id marker from history (e.g., [tool_result_id: ...])."
+    },
+    {
+      "name": "field",
+      "type": "string",
+      "required": false,
+      "description": "Optional dotted path into the stored JSON (e.g., tool_result.data.call_response.result)."
+    },
+    {
+      "name": "max_chars",
+      "type": "integer",
+      "required": false,
+      "description": "Maximum characters to return. Use 0 for no truncation (can be very large)."
+    },
+    {
+      "name": "contains",
+      "type": "string",
+      "required": false,
+      "description": "Optional substring filter. If provided, only lines containing this substring will be returned (applied after selecting `field` and before `max_chars` truncation). Useful for huge snapshots, e.g. contains='ref=' or contains='link '."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "Provide arguments to load a stored tool result artifact.\n\nRules:\n- Prefer providing `field` to extract only what you need.\n- Keep `max_chars` reasonably small unless you have a strong reason.\n\nArguments schema:\n{{ user_context }}",
+  "metadata": {
+    "category": "tooling",
+    "verbs": [
+      "read"
+    ],
+    "entities": [
+      "tooling"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

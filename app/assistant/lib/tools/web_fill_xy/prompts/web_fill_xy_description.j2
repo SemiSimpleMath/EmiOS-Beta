@@ -1,0 +1,13 @@
+web_fill_xy:
+Atomic "click + type + Enter" at screen coordinates (x,y) in one go.
+
+Use this to avoid the common failure mode:
+the agent clicks into a textbox and then gets confused about whether it has focus.
+
+Arguments:
+- x, y: coords to click
+- text: what to type
+- submit: press Enter after typing (default true)
+- clear_first: clear before typing (default true)
+- capture_snapshot: include a `browser_snapshot` immediately after action (default true)
+

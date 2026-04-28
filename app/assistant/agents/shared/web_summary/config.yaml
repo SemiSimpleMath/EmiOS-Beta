@@ -1,0 +1,20 @@
+name: web_summary
+class_name: SummaryAgent
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5-mini"
+  model_tier: "mini"
+  openai_pydantic_mode: "direct_parse"
+
+allowed_tools: []
+except_tools: []
+
+user_context_items:
+  - date_time
+  - task
+  - information
+  - summary_payload
+  - web_summary_trigger_reason
+
+system_context_items:
+  []

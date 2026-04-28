@@ -1,0 +1,16 @@
+kg_explorer_manager: Orchestrates relationship discovery and temporal reasoning on the knowledge graph.
+
+**Purpose:** Discover implicit relationships, infer missing connections, and perform temporal reasoning to enhance the knowledge graph.
+
+**Parameters:**
+- task (required): The exploration task to perform
+- information (optional): Additional context or information
+- node_id (optional): Specific node ID to explore
+- exploration_type (optional): Type of exploration (relationship_discovery, temporal_reasoning, or general)
+- parameters (optional): Additional parameters for the exploration
+
+**Returns:**
+- success: Whether the exploration succeeded
+- discoveries: List of discovered relationships or temporal inferences
+- suggested_actions: List of suggested actions to take
+- confidence: Confidence level in the discoveries

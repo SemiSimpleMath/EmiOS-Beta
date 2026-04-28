@@ -1,0 +1,12 @@
+{
+  "step_id": "dayflow_routine",
+  "description": "Generate a compact, day-specific routine markdown reference from resource_user_routine.json.",
+  "run_policy": {
+    "type": "daily"
+  },
+  "afk_guard": {
+    "skip_when_afk": false,
+    "skip_when_potentially_afk": false
+  }
+}
+

@@ -1,0 +1,21 @@
+name: shared::ask_kg
+class_name: Agent
+llm_params:
+  llm_provider: "gemini"
+  engine: "gemini-3-flash-preview"
+  model_tier: "mini"
+
+allowed_tools: []
+except_tools: []
+
+structured_output: AgentForm
+
+system_context_items: []
+
+user_context_items:
+  - date_time
+  - task
+  - question
+  - evidence
+  - engine
+  - timeout

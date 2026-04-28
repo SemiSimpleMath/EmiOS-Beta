@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Additional Google Accounts</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/setup_wizard.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="setup-container">
+        <div class="setup-header">
+            <h1><i class="fas fa-users"></i> Additional Google Accounts</h1>
+            <p>Connect extra Google accounts (e.g., a dedicated assistant account)</p>
+            <a href="/settings/integrations" class="back-link"><i class="fas fa-arrow-left"></i> Back to Integrations</a>
+        </div>
+
+        <div class="settings-section">
+            <h2><i class="fas fa-plus-circle"></i> Connect New Account</h2>
+            <div class="feature-card">
+                <div class="feature-info">
+                    <p>Create or reconnect an additional account slot.</p>
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                        <input id="additional-oauth-account-id" type="text" placeholder="account_id (e.g. google_emi)" style="min-width:260px; padding:8px;">
+                        <button type="button" id="connect-additional-btn" class="oauth-connect-btn">
+                            <i class="fab fa-google"></i> Connect Account
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="settings-section">
+            <h2><i class="fas fa-list"></i> Connected Accounts</h2>
+            <div id="additional-accounts-list"></div>
+        </div>
+
+        <div id="error-message" class="error-message" style="display: none;"></div>
+        <div id="success-message" class="success-message" style="display: none;"></div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/integrations_shared.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/google_accounts_settings.js') }}"></script>
+</body>
+</html>

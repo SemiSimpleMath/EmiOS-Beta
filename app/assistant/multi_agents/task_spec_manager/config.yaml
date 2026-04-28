@@ -1,0 +1,61 @@
+name: task_spec_manager
+class_name: MultiAgentManager
+description: "Task spec creation manager."
+max_cycles: 20
+
+role_bindings:
+  delegator: room::delegator
+
+agents:
+  - name: room::delegator
+    class: Delegator
+  - name: task_spec::chat
+    class: Agent
+  - name: task_spec::editor
+    class: Agent
+
+control_nodes:
+  - name: task_spec_router_node
+    class: TaskSpecRouterNode
+  - name: task_spec_edit_apply_node
+    class: TaskSpecEditApplyNode
+  - name: task_create_final_router_node
+    class: TaskCreateFinalRouterNode
+  - name: final_answer_node
+    class: FinalAnswerNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+
+tools:
+  allowed_tools: []
+  except_tools: []
+
+flow_config:
+  strict_routing: true
+  flow:
+    normal:
+      source_agent: "task_spec::chat"
+    task_creation_mode:
+      source_agent: "task_spec::chat"
+  normal:
+    source_agent: "task_spec::chat"
+    final_node: "final_answer_node"
+    chat_response_key: "chat_response"
+    task_done_key: "task_creation_done_tf"
+    task_spec_key: "task_spec_markdown"
+    compiled_task_id_key: "compiled_task_id"
+  task_creation_mode:
+    source_agent: "task_spec::chat"
+    final_node: "final_answer_node"
+    chat_response_key: "chat_response"
+    task_done_key: "task_creation_done_tf"
+    task_spec_key: "task_spec_markdown"
+    compiled_task_id_key: "compiled_task_id"
+  state_map:
+    "room::delegator": "task_spec::chat"
+    "task_spec::chat": "task_spec_router_node"
+    "task_spec_router_node": "task_spec::editor"
+    "task_spec::editor": "task_spec_edit_apply_node"
+    "task_spec_edit_apply_node": "task_create_final_router_node"
+    "task_create_final_router_node": "final_answer_node"
+    "final_answer_node": "manager_exit_node"

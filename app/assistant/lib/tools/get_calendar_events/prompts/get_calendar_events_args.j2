@@ -1,0 +1,28 @@
+Arguments to this tool are the start time string and end time string
+
+start_date: str (required)
+end_date: str (required)
+calendar_names: list (optional)
+single_events: bool (optional, default False)
+
+**DEFAULT RANGE: Use 1 week (7 days) unless the user specifically asks for a different time period.**
+
+Today is {{ date }}.
+
+**Examples:**
+- For "check my calendar": Use today to 7 days from now
+- For "what's on my calendar this week": Use today to end of this week
+- For "any meetings tomorrow": Use tomorrow's start/end
+- For "calendar for next month": Use start/end of next month
+
+[WARNING] Avoid ambiguity at midnight: Times exactly at 00:00:00 can be misinterpreted as either the start or end of a day. When setting boundaries, explicitly choose 23:59:59 (end of the previous day) or 00:01:00 (start of the new day) for clarity.
+
+Time zone will be automatically set so don't worry about that we are looking for simple ISO 8601 format (YYYY-MM-DDTHH:MM:SS) dates.
+
+calendar_names is a list subset of: [primary, Birthdays, Food, Work]. Omit this to search all calendars.
+
+**single_events parameter (IMPORTANT):**
+- `single_events=True` (RECOMMENDED): Returns actual event instances with specific start/end times. Use this for queries about specific dates like "today", "tomorrow", "this week".
+- `single_events=False`: Returns recurring event "masters" (rule definitions like "Occurs weekly on Friday") without calculating specific instances. Only use this if you specifically need the recurrence rules.
+
+For most calendar queries, use `single_events=True` to get usable event times.

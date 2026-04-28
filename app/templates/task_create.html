@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <link rel="icon" href="{{ url_for('static', filename='images/logo5.png') }}" type="image/png">
+    <title>Emi - Task Builder</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/task_create.css') }}?v={{ static_v }}">
+</head>
+<body>
+<div class="tc-layout">
+
+  <!-- Header -->
+  <header class="tc-header">
+    <div class="tc-header__left">
+      <a href="/chat_bot" class="tc-header__back" title="Back to chat">&larr;</a>
+      <span class="tc-header__title">Task Builder</span>
+    </div>
+    <div class="tc-header__actions">
+      <button id="tc-reset-btn" class="tc-btn tc-btn--ghost">Reset</button>
+      <button id="tc-save-btn" class="tc-btn tc-btn--secondary">Save Draft</button>
+      <button id="tc-compile-btn" class="tc-btn tc-btn--primary">Compile</button>
+    </div>
+  </header>
+
+  <!-- Two-column body -->
+  <div class="tc-body">
+
+    <!-- Left: Chat -->
+    <div class="tc-chat">
+      <div class="tc-chat__messages" id="tc-chat-messages">
+        <div class="tc-chat__placeholder">Describe your task and I'll help you build it.</div>
+      </div>
+      <div class="tc-chat__input-area">
+        <textarea id="tc-chat-input" class="tc-chat__input"
+                  placeholder="Describe what you want to accomplish..."
+                  rows="2"></textarea>
+        <button id="tc-chat-send" class="tc-btn tc-btn--send">Send</button>
+      </div>
+    </div>
+
+    <!-- Right: Spec preview -->
+    <div class="tc-spec">
+      <div class="tc-spec__header">
+        <span class="tc-spec__label">Task Spec</span>
+        <span class="tc-spec__status" id="tc-spec-status"></span>
+      </div>
+      <div class="tc-spec__content" id="tc-spec-content">
+        <div class="tc-spec__placeholder">Your task spec will appear here as you describe it.</div>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js" crossorigin="anonymous"></script>
+<script src="{{ url_for('static', filename='js/emi/socket_heartbeat.js') }}?v={{ static_v }}"></script>
+<script src="{{ url_for('static', filename='js/emi/task_create_page.js') }}?v={{ static_v }}"></script>
+</body>
+</html>

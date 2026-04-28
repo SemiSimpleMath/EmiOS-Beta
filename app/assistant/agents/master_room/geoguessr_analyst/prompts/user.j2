@@ -1,0 +1,15 @@
+Screenshot #{{ geoguessr_screenshot_count }} just came in.
+
+[emi_image: {{ geoguessr_screenshot }}]
+
+{% if geoguessr_clue_history %}
+Clues gathered so far from previous screenshots:
+{% for clue in geoguessr_clue_history %}
+- {{ clue }}
+{% endfor %}
+{% else %}
+This is the first screenshot.
+{% endif %}
+
+Analyze the image carefully. Identify every geographic clue you can see.
+Provide your visible_clue (no answer spoiler), updated best_guess (private), confidence, and commentary.

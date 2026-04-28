@@ -1,0 +1,10 @@
+User asked: {{ task }}
+{%- if information %}
+
+Context: {{ information }}
+{%- endif %}
+
+Raw result:
+{{ tool_result_for_formatter }}
+
+Format this as a response for the user.

@@ -1,0 +1,82 @@
+{
+  "name": "update_todo_task",
+  "description": "Use this tool to update a todo task. You will need a task_id.  Most common job for this tool is to mark a task as done.",
+  "inputs": [
+    {
+      "name": "task_id",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "due_date",
+      "type": "string",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "priority",
+      "type": "string",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "days_offset",
+      "type": "integer",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "tasklist_name",
+      "type": "string",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "completed",
+      "type": "boolean",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "description",
+      "type": "string",
+      "required": false,
+      "description": ""
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "When updating a task, you must provide arguments that match the `UpdateTaskArgs` schema:\n- **task_id** (required): The unique ID of the task.\n- **due_date** (optional): The new due date in **ISO 8601 format** (e.g., \"2025-03-10T15:00:00Z\").\n- **priority** (optional): The new priority level as a **string** (e.g., \"high\", \"medium\", \"low\").\n- **days_offset** (optional): An **integer** representing the number of days to shift the due date (**positive to push forward, negative to move earlier**).\n- **tasklist_name** (optional): The name of the task list the task belongs to.\n- **completed** (optional): A **boolean** (`true` or `false`) indicating whether the task should be marked as complete.\n\nRules:\n- Ensure `task_id` is always included.\n- If `completed` is `true`, do **not** modify `due_date` or `days_offset` (a completed task does not need a due date change).\n- If both `due_date` and `days_offset` are provided, `days_offset` should be ignored in favor of `due_date`.",
+  "metadata": {
+    "domain": "todo",
+    "actions": [
+      "update",
+      "complete"
+    ],
+    "selectors": [
+      "task_id"
+    ],
+    "risk_level": "medium",
+    "side_effects": "writes_data",
+    "requires_auth": [
+      "google"
+    ],
+    "requires_network": true,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

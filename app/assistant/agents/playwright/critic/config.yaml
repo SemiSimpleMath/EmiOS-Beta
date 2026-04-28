@@ -1,0 +1,25 @@
+name: playwright::critic
+class_name: PlaywrightCritic
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-4.1"
+  model_tier: "smart"
+  temperature: 0
+
+allowed_tools: []
+except_tools: []
+
+system_context_items:
+  - resource_assistant_data
+  - resource_current_location
+
+user_context_items:
+  - date_time
+  - task
+  - critic_payload
+  - critic_intended_action_input
+  - recent_history
+  - pending_tool_name
+  - pending_tool_arguments
+  - playwright_critic_image
+

@@ -1,0 +1,18 @@
+{% if task %}
+Task: {{ task }}
+{% endif %}
+
+Daily assessment JSON bundle:
+{{ daily_assessment_json }}
+
+Return:
+- title
+- executive_summary (5-10 bullets)
+- dominant_themes (3-7)
+- health_day_shape if possible
+- sleep_summary if possible
+- work_presence_summary if possible
+- tickets_summary if possible
+- memory_updates if possible
+- open_questions only if needed
+

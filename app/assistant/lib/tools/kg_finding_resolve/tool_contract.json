@@ -1,0 +1,29 @@
+{
+  "name": "kg_finding_resolve",
+  "description": "Mark a kg_maintenance_finding as executed. Call this AFTER the corresponding KG mutation succeeded (or after deciding the finding requires no KG change). Records action + notes in execution_notes for audit. Always pass a non-empty `reason`.",
+  "inputs": [
+    {"name": "finding_id", "type": "string", "required": true,  "description": "kg_maintenance_finding.id to resolve."},
+    {"name": "action",     "type": "string", "required": false, "description": "One of: merge_nodes / rename_label / update_node_field / delete_edge / no_action / acknowledged. Goes into execution_notes."},
+    {"name": "notes",      "type": "string", "required": false, "description": "Free-form notes (revision_log_id of the mutation, etc.)."},
+    {"name": "reason",     "type": "string", "required": true,  "description": "Why the finding is now resolved."}
+  ],
+  "outputs": [
+    {"path": "content", "type": "text",   "description": "One-line summary."},
+    {"path": "data",    "type": "object", "description": "{ok, revision_log_id, new_status='executed'}"}
+  ],
+  "arguments_prompt": "Arguments for kg_finding_resolve:\n- finding_id (required)\n- action (optional): the op that was applied\n- notes (optional): any details\n- reason (required)",
+  "metadata": {
+    "category": "knowledge_graph",
+    "verbs": ["resolve"],
+    "entities": ["finding"],
+    "risk_level": "low",
+    "side_effects": "writes_kg",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

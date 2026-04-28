@@ -1,0 +1,47 @@
+.activity-card {
+    background: var(--card-bg, #1e2a3a);
+    border: 1px solid var(--border-color, #2d3e50);
+    border-radius: 10px;
+    padding: 1.2rem;
+    margin-bottom: 1rem;
+}
+.activity-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.8rem;
+}
+.activity-header h3 { margin: 0; font-size: 1.05rem; color: #ffffff; }
+.activity-toggle { display: flex; align-items: center; gap: 0.5rem; }
+.activity-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; }
+.activity-fields label { font-size: 0.85rem; color: #8899aa; display: block; margin-bottom: 0.3rem; }
+.activity-fields input, .activity-fields select {
+    width: 100%;
+    padding: 0.5rem;
+    border-radius: 6px;
+    border: 1px solid var(--border-color, #2d3e50);
+    background: var(--input-bg, #0d1b2a);
+    color: #e0e0e0;
+    font-size: 0.95rem;
+}
+.btn-row { display: flex; gap: 0.8rem; margin-top: 1.5rem; }
+.btn-save {
+    background: #4caf50; color: #fff; border: none; padding: 0.7rem 2rem;
+    border-radius: 8px; cursor: pointer; font-size: 1rem;
+}
+.btn-save:hover { background: #43a047; }
+.btn-add {
+    background: #2196f3; color: #fff; border: none; padding: 0.7rem 1.5rem;
+    border-radius: 8px; cursor: pointer; font-size: 0.95rem;
+}
+.btn-add:hover { background: #1e88e5; }
+.btn-remove {
+    background: none; border: none; color: #e74c3c; cursor: pointer;
+    font-size: 1.1rem; padding: 0.3rem;
+}
+.btn-remove:hover { color: #c0392b; }
+.status-msg {
+    padding: 0.6rem 1rem; border-radius: 6px; margin-top: 1rem; display: none;
+}
+.status-ok { background: #1b5e20; color: #c8e6c9; display: block; }
+.status-err { background: #b71c1c; color: #ffcdd2; display: block; }

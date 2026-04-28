@@ -1,0 +1,57 @@
+{
+  "name": "kg_describe_node",
+  "description": "This tool provides a comprehensive description of a specific node from the knowledge graph, including:\n\n- All node properties (label, semantic_label, category, description, node_type, etc.)\n- Temporal information (start_date, end_date, valid_during)\n- Node attributes and metadata\n- Sample of inbound and outbound connections with relationship types (default: 5 edges), if you want more edges (assuming there are specify higher number).\n- Edge details including source and target node information\n\nThis too is for simple hydration of known node.  It should not be used to search for nodes.",
+  "inputs": [
+    {
+      "name": "node_ids",
+      "type": "array",
+      "required": true,
+      "description": "List of node UUIDs to describe in detail"
+    },
+    {
+      "name": "max_edges",
+      "type": "integer",
+      "required": false,
+      "description": "Maximum number of edges to return per node (default: 5)"
+    },
+    {
+      "name": "include_raw",
+      "type": "boolean",
+      "required": false,
+      "description": "Whether to return raw JSON data instead of formatted text (default: false)"
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "Arguments for kg_describe_node tool:\n\n- node_ids (required): List of node UUIDs to describe in detail\n- max_edges (optional): Maximum number of edges to return per node (default: 5)\n- include_raw (optional): Whether to return raw JSON data instead of formatted text (default: false)\n\nThis tool provides comprehensive node information for multiple nodes at once, including all properties, attributes, and connections. Returns a sample of edges for better performance.",
+  "metadata": {
+    "category": "knowledge_graph",
+    "verbs": [
+      "operate"
+    ],
+    "entities": [
+      "edge",
+      "graph",
+      "node"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "medium",
+    "latency_class": "moderate",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

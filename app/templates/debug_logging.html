@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Logging Controls (Dev)</title>
+    <style>
+        :root {
+            --bg: #1a1a2e;
+            --card-bg: #16213e;
+            --text: #eee;
+            --muted: #8892b0;
+            --accent: #e94560;
+            --accent-green: #4ecca3;
+            --border: #30363d;
+            --mono: 'Consolas', 'Monaco', monospace;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: var(--accent);
+            margin-bottom: 14px;
+            font-size: 1.7rem;
+        }
+
+        .sub {
+            color: var(--muted);
+            margin-bottom: 18px;
+            font-size: 13px;
+            line-height: 1.4;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+
+        .row {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        label { font-size: 13px; color: var(--muted); }
+
+        select, input[type="text"] {
+            background: #0d1117;
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 8px 10px;
+            outline: none;
+        }
+
+        input[type="text"] { min-width: 260px; }
+
+        button {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 9px 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        button.secondary { background: #0f4c75; }
+        button:disabled { opacity: 0.55; cursor: not-allowed; }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        th, td {
+            text-align: left;
+            padding: 10px 8px;
+            border-bottom: 1px solid rgba(255,255,255,0.07);
+            font-size: 13px;
+            vertical-align: middle;
+        }
+        th { color: var(--muted); font-weight: 600; }
+        td.name { font-family: var(--mono); font-size: 12px; }
+        td.muted { color: var(--muted); }
+
+        .pill {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 999px;
+            border: 1px solid rgba(255,255,255,0.14);
+            font-size: 12px;
+            color: var(--muted);
+        }
+        .pill.on { color: var(--accent-green); border-color: rgba(78, 204, 163, 0.35); }
+        .pill.off { color: #ff7b72; border-color: rgba(255, 123, 114, 0.35); }
+
+        .status {
+            font-size: 12px;
+            color: var(--muted);
+            margin-top: 10px;
+        }
+        .status.error { color: #ff7b72; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧰 Logging Controls (Dev)</h1>
+        <div class="sub">
+            This page controls Python <code>logging</code> at runtime (no restart).<br/>
+            Tip: Set <strong>Console threshold</strong> to <code>WARNING</code> or <code>ERROR</code> to stop drowning, then enable DEBUG for just one subsystem.
+        </div>
+
+        <div class="card">
+            <div class="row">
+                <div>
+                    <label for="consoleLevel">Console threshold</label><br/>
+                    <select id="consoleLevel">
+                        <option>DEBUG</option>
+                        <option>INFO</option>
+                        <option>WARNING</option>
+                        <option>ERROR</option>
+                        <option>CRITICAL</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label for="defaultCustomLevel">Default custom level (when enabling)</label><br/>
+                    <select id="defaultCustomLevel">
+                        <option>DEBUG</option>
+                        <option>INFO</option>
+                        <option>WARNING</option>
+                        <option>ERROR</option>
+                        <option>CRITICAL</option>
+                        <option>OFF</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label for="prefix">List prefix (optional)</label><br/>
+                    <input id="prefix" type="text" placeholder="e.g. app.assistant" />
+                </div>
+
+                <div style="margin-top: 18px;">
+                    <button id="refreshBtn" class="secondary" onclick="refresh()">🔄 Refresh</button>
+                </div>
+
+                <div style="margin-top: 18px;">
+                    <label style="display:flex; gap:8px; align-items:center; color: var(--muted);">
+                        <input id="onlyOverridden" type="checkbox" onchange="render()"/>
+                        Show only custom-level loggers
+                    </label>
+                </div>
+            </div>
+
+            <div class="status" id="status"></div>
+        </div>
+
+        <div class="card">
+            <div class="row" style="justify-content: space-between;">
+                <div>
+                    <strong>Bulk actions (by prefix)</strong>
+                    <div class="sub" style="margin: 6px 0 0 0;">
+                        Applies overrides to all <em>runtime</em> loggers whose name starts with the prefix.
+                        Tip: use <code>app.</code> or <code>app.assistant.</code>.
+                    </div>
+                </div>
+            </div>
+
+            <div class="row" style="margin-top: 10px;">
+                <div>
+                    <label for="bulkPrefix">Prefix</label><br/>
+                    <input id="bulkPrefix" type="text" placeholder="e.g. app.assistant.dayflow_manager" />
+                </div>
+                <div>
+                    <label for="bulkLevel">Level</label><br/>
+                    <select id="bulkLevel">
+                        <option>OFF</option>
+                        <option>DEBUG</option>
+                        <option>INFO</option>
+                        <option>WARNING</option>
+                        <option>ERROR</option>
+                        <option>CRITICAL</option>
+                    </select>
+                </div>
+                <div style="margin-top: 18px;">
+                    <button onclick="bulkSet()">Apply to prefix</button>
+                    <button class="secondary" onclick="bulkClear()">Clear overrides for prefix</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="row" style="justify-content: space-between;">
+                <div>
+                    <strong>Runtime loggers</strong>
+                    <div class="sub" style="margin: 6px 0 0 0;">
+                        “Custom” applies a per-logger level that overrides the global defaults.
+                        Shift-click “Custom” to apply a range.
+                    </div>
+                </div>
+                <div>
+                    <label for="search">Search</label><br/>
+                    <input id="search" type="text" placeholder="type to filter..." oninput="render()"/>
+                </div>
+            </div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width: 70px;">Custom</th>
+                        <th>Logger</th>
+                        <th style="width: 140px;">Level</th>
+                        <th style="width: 160px;">Effective</th>
+                        <th style="width: 110px;">Disabled</th>
+                    </tr>
+                </thead>
+                <tbody id="tbody">
+                    <tr><td colspan="6" class="muted">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        let state = {
+            console_level: "WARNING",
+            overrides: {},
+            loggers: []
+        };
+        let autoTimer = null;
+        let lastCustomIdx = null;
+        let rendered = [];
+
+        function setStatus(msg, isError=false) {
+            const el = document.getElementById("status");
+            el.textContent = msg || "";
+            el.className = "status" + (isError ? " error" : "");
+        }
+
+        async function refresh() {
+            const btn = document.getElementById("refreshBtn");
+            btn.disabled = true;
+            setStatus("Loading...");
+            try {
+                const prefix = document.getElementById("prefix").value.trim();
+                const url = prefix ? `/debug/logging/data?prefix=${encodeURIComponent(prefix)}` : "/debug/logging/data";
+                const resp = await fetch(url);
+                const data = await resp.json();
+                state = data;
+
+                const consoleSel = document.getElementById("consoleLevel");
+                consoleSel.value = (state.console_level || "WARNING").toUpperCase();
+
+                render();
+                setStatus(`Loaded ${state.loggers.length} loggers.`);
+            } catch (e) {
+                setStatus("Failed to load: " + e.message, true);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        function render() {
+            const tbody = document.getElementById("tbody");
+            const q = (document.getElementById("search").value || "").toLowerCase();
+            const onlyOverridden = document.getElementById("onlyOverridden").checked;
+
+            const rows = (state.loggers || []).filter(l => {
+                if (q && !l.name.toLowerCase().includes(q)) return false;
+                const hasOverride = !!(state.overrides && state.overrides[l.name]);
+                if (onlyOverridden && !hasOverride) return false;
+                return true;
+            });
+
+            if (!rows.length) {
+                rendered = [];
+                tbody.innerHTML = `<tr><td colspan="6" class="muted">No matches.</td></tr>`;
+                return;
+            }
+
+            rendered = rows;
+            tbody.innerHTML = rows.map((l, idx) => {
+                const hasOverride = !!(state.overrides && state.overrides[l.name]);
+                const currentLevel = hasOverride ? state.overrides[l.name] : "";
+                const isPlaceholder = !!l.placeholder;
+
+                return `
+                    <tr>
+                        <td>
+                            <input type="checkbox"
+                                ${hasOverride ? "checked" : ""}
+                                onclick="toggleCustom(event, '${escapeHtml(l.name)}', ${idx})"
+                                title="Shift-click to select a range"
+                            />
+                        </td>
+                        <td class="name">${escapeHtml(l.name)}</td>
+                        <td>
+                            <select ${hasOverride ? "" : "disabled"} onchange="setOverrideLevel('${escapeHtml(l.name)}', this.value)">
+                                <option value="OFF" ${currentLevel === "OFF" ? "selected" : ""}>OFF</option>
+                                <option value="DEBUG" ${currentLevel === "DEBUG" ? "selected" : ""}>DEBUG</option>
+                                <option value="INFO" ${currentLevel === "INFO" ? "selected" : ""}>INFO</option>
+                                <option value="WARNING" ${currentLevel === "WARNING" ? "selected" : ""}>WARNING</option>
+                                <option value="ERROR" ${currentLevel === "ERROR" ? "selected" : ""}>ERROR</option>
+                                <option value="CRITICAL" ${currentLevel === "CRITICAL" ? "selected" : ""}>CRITICAL</option>
+                            </select>
+                        </td>
+                        <td>
+                            <span class="pill ${isPlaceholder ? "" : "on"}">
+                                ${escapeHtml(l.effective_level || "")}
+                            </span>
+                        </td>
+                        <td><span class="pill ${l.disabled ? "off" : "on"}">${l.disabled ? "YES" : "NO"}</span></td>
+                    </tr>
+                `;
+            }).join("");
+        }
+
+        async function updateConsoleLevel(level) {
+            try {
+                setStatus("Updating console threshold...");
+                const resp = await fetch("/debug/logging/console", {
+                    method: "PUT",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({level})
+                });
+                const data = await resp.json();
+                if (!data.success) throw new Error(data.error || "Unknown error");
+                state.console_level = data.console_level;
+                setStatus("Console threshold updated.");
+            } catch (e) {
+                setStatus("Failed: " + e.message, true);
+            }
+        }
+
+        async function toggleOverride(loggerName, enabled) {
+            // Back-compat: keep function, but route to new behavior
+            const level = enabled ? document.getElementById("defaultCustomLevel").value : null;
+            await setOverride(loggerName, level);
+            await refresh();
+        }
+
+        async function setOverrideLevel(loggerName, level) {
+            await setOverride(loggerName, level);
+            await refresh();
+        }
+
+        async function setOverride(loggerName, level) {
+            try {
+                setStatus("Updating override...");
+                const resp = await fetch("/debug/logging/override", {
+                    method: "PUT",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({logger: loggerName, level})
+                });
+                const data = await resp.json();
+                if (!data.success && data.error) throw new Error(data.error);
+                state.overrides = data.overrides || state.overrides;
+                setStatus("Override updated.");
+            } catch (e) {
+                setStatus("Failed: " + e.message, true);
+            }
+        }
+
+        async function toggleCustom(ev, loggerName, idx) {
+            const enabled = !!ev.target.checked;
+            const level = enabled ? document.getElementById("defaultCustomLevel").value : null;
+
+            if (ev.shiftKey && lastCustomIdx !== null) {
+                const start = Math.min(lastCustomIdx, idx);
+                const end = Math.max(lastCustomIdx, idx);
+                const names = [];
+                for (let i = start; i <= end; i++) {
+                    const name = (rendered[i] && rendered[i].name) ? rendered[i].name : null;
+                    if (name) names.push(name);
+                }
+                try {
+                    setStatus("Applying range...");
+                    const resp = await fetch("/debug/logging/batch", {
+                        method: "PUT",
+                        headers: {"Content-Type": "application/json"},
+                        body: JSON.stringify({loggers: names, level})
+                    });
+                    const data = await resp.json();
+                    if (!data.success) throw new Error(data.error || "Unknown error");
+                    setStatus(`Range applied: matched ${data.matched}, changed ${data.changed}.`);
+                    lastCustomIdx = idx;
+                    await refresh();
+                    return;
+                } catch (e) {
+                    setStatus("Failed: " + e.message, true);
+                    lastCustomIdx = idx;
+                    await refresh();
+                    return;
+                }
+            }
+
+            lastCustomIdx = idx;
+            await setOverride(loggerName, level);
+            await refresh();
+        }
+
+        function escapeHtml(s) {
+            return (s || "").replace(/[&<>"']/g, (c) => ({
+                "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"
+            }[c]));
+        }
+
+        async function bulkSet() {
+            const prefix = document.getElementById("bulkPrefix").value.trim();
+            const level = document.getElementById("bulkLevel").value;
+            if (!prefix) {
+                setStatus("Bulk prefix is required.", true);
+                return;
+            }
+            try {
+                setStatus("Applying bulk override...");
+                const resp = await fetch("/debug/logging/bulk", {
+                    method: "PUT",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({prefix, action: "set", level})
+                });
+                const data = await resp.json();
+                if (!data.success) throw new Error(data.error || "Unknown error");
+                setStatus(`Bulk applied: matched ${data.matched}, changed ${data.changed}.`);
+                await refresh();
+            } catch (e) {
+                setStatus("Failed: " + e.message, true);
+            }
+        }
+
+        async function bulkClear() {
+            const prefix = document.getElementById("bulkPrefix").value.trim();
+            if (!prefix) {
+                setStatus("Bulk prefix is required.", true);
+                return;
+            }
+            try {
+                setStatus("Clearing bulk overrides...");
+                const resp = await fetch("/debug/logging/bulk", {
+                    method: "PUT",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({prefix, action: "clear"})
+                });
+                const data = await resp.json();
+                if (!data.success) throw new Error(data.error || "Unknown error");
+                setStatus(`Bulk cleared: matched ${data.matched}, changed ${data.changed}.`);
+                await refresh();
+            } catch (e) {
+                setStatus("Failed: " + e.message, true);
+            }
+        }
+
+        document.getElementById("consoleLevel").addEventListener("change", (e) => {
+            updateConsoleLevel(e.target.value);
+        });
+
+        // Auto-refresh toggle (helps catch loggers created after page load)
+        const autoWrap = document.createElement("label");
+        autoWrap.style.display = "flex";
+        autoWrap.style.gap = "8px";
+        autoWrap.style.alignItems = "center";
+        autoWrap.style.color = "var(--muted)";
+        autoWrap.style.marginTop = "18px";
+        autoWrap.innerHTML = `<input id="autoRefresh" type="checkbox" /> Auto-refresh (5s)`;
+        document.querySelector(".card .row").appendChild(autoWrap);
+
+        document.getElementById("autoRefresh").addEventListener("change", (e) => {
+            if (e.target.checked) {
+                if (autoTimer) clearInterval(autoTimer);
+                autoTimer = setInterval(refresh, 5000);
+            } else {
+                if (autoTimer) clearInterval(autoTimer);
+                autoTimer = null;
+            }
+        });
+
+        refresh();
+    </script>
+</body>
+</html>
+

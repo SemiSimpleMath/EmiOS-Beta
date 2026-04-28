@@ -1,0 +1,19 @@
+name: shared::vision_prose_scout
+class_name: Agent
+llm_params:
+  llm_provider: "openai"
+  # Vision-capable model: this agent interprets screenshots.
+  engine: "gpt-4o"
+  model_tier: "powerful"
+  temperature: 0
+
+allowed_tools: []
+except_tools: []
+
+system_context_items: []
+
+user_context_items:
+  - date_time
+  - task
+  - image
+

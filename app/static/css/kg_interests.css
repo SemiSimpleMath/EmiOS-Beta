@@ -1,0 +1,151 @@
+.kg-interests-page {
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 28px 20px 80px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: #1a1a1a;
+  line-height: 1.5;
+}
+
+.kg-interests-page h1 {
+  margin: 0 0 12px;
+  font-size: 26px;
+}
+
+.kg-interests-intro {
+  background: #f6f8ff;
+  border-left: 3px solid #1f3e85;
+  padding: 10px 14px;
+  margin: 0 0 24px;
+  font-size: 14px;
+  color: #333;
+}
+
+.kg-interests-intro code {
+  background: #e4e8f5;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+
+.kg-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 22px;
+  font-size: 13px;
+  color: #444;
+}
+
+.kg-field textarea {
+  padding: 8px 10px;
+  font-size: 14px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.kg-categories-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.kg-categories-header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.kg-categories-list {
+  list-style: decimal inside;
+  padding: 0;
+  margin: 0 0 24px;
+}
+
+.kg-category-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 4px 0;
+}
+
+.kg-category-input {
+  flex: 1;
+  padding: 8px 10px;
+  font-size: 14px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.kg-category-remove {
+  background: #f0f0f0;
+  color: #666;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  cursor: pointer;
+  width: 32px;
+  height: 32px;
+  font-size: 18px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.kg-category-remove:hover {
+  background: #ffeded;
+  color: #b33;
+  border-color: #b33;
+}
+
+.kg-interests-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #eee;
+}
+
+.kg-btn {
+  padding: 8px 20px;
+  font-size: 14px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.kg-btn-primary {
+  background: #1f3e85;
+  color: white;
+}
+
+.kg-btn-primary:hover {
+  background: #2a4fa3;
+}
+
+.kg-btn-secondary {
+  background: #f0f0f0;
+  color: #333;
+  border: 1px solid #ccc;
+}
+
+.kg-btn-secondary:hover {
+  background: #e4e8f5;
+}
+
+.kg-save-status {
+  font-size: 13px;
+  color: #666;
+}
+
+.kg-save-status.ok {
+  color: #2a7a2a;
+}
+
+.kg-save-status.error {
+  color: #b33;
+}

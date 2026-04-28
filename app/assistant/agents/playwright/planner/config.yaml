@@ -1,0 +1,42 @@
+name: playwright::planner
+class_name: Planner
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.4-mini"
+  model_tier: "smart"
+  temperature: 0.3
+
+# Manager controls what tools are actually available via ToolRegistry filtering.
+allowed_tools: "all"
+except_tools: []
+
+allowed_nodes: [return_control]
+
+append_fields: []
+
+# Extra resources injected into the system prompt when the task text contains a matching keyword.
+# key = substring to match (case-insensitive), value = resource_id to inject.
+task_keyword_resources:
+  doordash: resource_doordash_guidelines
+  door dash: resource_doordash_guidelines
+  cnn.com: resource_cnn_guidelines
+  cnn: resource_cnn_guidelines
+  bbc.com: resource_bbc_guidelines
+  bbc: resource_bbc_guidelines
+
+user_context_items:
+  - date_time
+  - task
+  - information
+  - playwright_scroll_state
+  - playwright_modal_map
+  - playwright_latest_snapshot_summary
+  - playwright_latest_snapshot_id
+  - recent_history
+  - checklist
+  - action_count
+
+system_context_items:
+  - resource_current_location
+  - has_spec_steps
+

@@ -1,0 +1,30 @@
+{
+  "name": "kg_merge_nodes",
+  "description": "Merge two KG nodes of the same node_type. The `fold_id` node is folded into `keep_id`: every edge pointing at `fold_id` gets rewritten to point at `keep_id`, the fold node's label + aliases are added to keep's aliases, and the fold node is deleted. Atomic. Reversible via the kg_revision_log entry. Refuses to merge across different node_types. Use this for the duplicate / typo-variant case (e.g. 'Aleks' should be merged into 'Alex'). Always pass a non-empty `reason`. Pass `dry_run: true` to see the diff without committing.",
+  "inputs": [
+    {"name": "keep_id",   "type": "string",  "required": true,  "description": "Surviving node id (gains the alias + edges)."},
+    {"name": "fold_id",   "type": "string",  "required": true,  "description": "Node to fold and delete."},
+    {"name": "reason",    "type": "string",  "required": true,  "description": "Why this merge is correct. Goes into kg_revision_log."},
+    {"name": "dry_run",   "type": "boolean", "required": false, "description": "Preview the diff; do not commit. Default false."},
+    {"name": "finding_id","type": "string",  "required": false, "description": "Source kg_maintenance_finding.id, if any."}
+  ],
+  "outputs": [
+    {"path": "content", "type": "text",   "description": "One-line summary of what happened."},
+    {"path": "data",    "type": "object", "description": "{ok, revision_log_id, edges_rewritten, new_aliases} on commit; {ok, dry_run, before, after} on dry_run."}
+  ],
+  "arguments_prompt": "Arguments for kg_merge_nodes:\n- keep_id (required): surviving node id\n- fold_id (required): node to fold + delete\n- reason (required): why this merge is correct\n- dry_run (optional): preview only\n- finding_id (optional): source finding row id",
+  "metadata": {
+    "category": "knowledge_graph",
+    "verbs": ["mutate", "merge"],
+    "entities": ["node"],
+    "risk_level": "high",
+    "side_effects": "writes_kg",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

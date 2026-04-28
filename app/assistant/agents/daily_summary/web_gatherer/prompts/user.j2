@@ -1,0 +1,32 @@
+Current date and time: {{ date_time }}
+
+Task: {{ task }}
+Information: {{ information }}
+
+Recent history: {{ recent_history }}
+
+Web content: {{ web_content }}
+
+Available tools:
+{% for tool_name, tool_description in tool_descriptions.items() %}
+- **{{ tool_name }}**: {{ tool_description }}
+{% endfor %}
+
+Gather relevant information from the web that would be useful for today's daily summary. Focus on information that impacts the user's day, such as weather, news, traffic, or other relevant updates.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

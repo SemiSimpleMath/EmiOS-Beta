@@ -1,0 +1,24 @@
+taxonomy_move_category: Move a taxonomy category to a new parent.
+
+**Purpose:** Change the position of a category in the taxonomy hierarchy (fix misplacements).
+
+**Parameters:**
+- category_id (required): ID of the category to move
+- new_parent_id (optional): ID of the new parent category (omit or set to null for root level)
+
+**Use this when:**
+- Fixing misplaced categories (e.g., moving "dog" from under "vehicle" to under "animal")
+- Reorganizing the taxonomy structure
+- Moving categories to root level
+
+**Returns:**
+- success: Whether the operation succeeded
+- message: Description of what was done
+- category_id: ID of the moved category
+- label: Label of the moved category
+- old_parent_id: Previous parent ID
+- new_parent_id: New parent ID
+
+**Safety:** This is a safe operation. Checks for circular references are performed automatically.
+
+

@@ -1,0 +1,72 @@
+Today is {{ date_time }}.
+
+## TAXONOMY MAINTENANCE TASK
+
+{% if task %}
+**Task Summary:** {{ task }}
+{% endif %}
+
+{% if information %}
+**Detailed Context:**
+{{ information }}
+{% endif %}
+
+---
+
+{% if checklist %}
+## PROGRESS CHECKLIST
+
+{{ checklist }}
+
+**Instructions**: Update the checklist to reflect your progress. Mark items as:
+- DONE [COMPLETE] - Successfully completed
+- IN PROGRESS [WORKING] - Currently working on
+- FAILED [ERROR] - Encountered an error
+- SKIPPED [SKIP] - Intentionally skipped (explain why in summary)
+
+{% else %}
+## STARTING NEW TASK
+
+This is your first action. You have not executed anything yet.
+
+**Your next steps:**
+1. Read and understand the PROBLEM
+2. Review the AFFECTED CATEGORIES and their full context
+3. Examine the ACTIONS TO TAKE list
+4. Create a checklist with one item per action
+5. Verify the first action makes sense
+6. Execute the first action
+
+{% endif %}
+
+{% if recent_history %}
+## RECENT ACTIVITY
+
+{{ recent_history }}
+
+**CRITICAL**: Analyze the tool result above and record the key information in your summary field. Include:
+- What tool was called
+- What parameters were used
+- Success or failure
+- Any category IDs or changes
+- Any error messages
+
+{% endif %}
+
+{% if action_count %}
+---
+**Action Count:** {{ action_count }}/15 (You have {{ 15 - action_count }} actions remaining)
+{% endif %}
+
+{% if action_count and action_count >= 15 %}
+---
+**CRITICAL: You have reached the 15-action limit!**
+
+You must now wrap up and complete your task even if not fully done. 
+- No more tool calls allowed
+- Set action to `return_control`
+- Summarize what was completed and what remains
+{% endif %}
+
+
+

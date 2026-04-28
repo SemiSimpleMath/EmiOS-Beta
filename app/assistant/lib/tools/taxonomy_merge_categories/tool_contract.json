@@ -1,0 +1,51 @@
+{
+  "name": "taxonomy_merge_categories",
+  "description": "taxonomy_merge_categories: Merge one taxonomy category into another, eliminating duplicates.\n\n**Purpose:** Consolidate duplicate or redundant taxonomy categories by merging one into another.\n\n**What it does:**\n1. Moves all children from source category to destination category\n2. Moves all node classifications from source to destination\n3. Deletes the source category\n\n**Parameters:**\n- source_id (required): ID of the category to merge (this will be deleted)\n- destination_id (required): ID of the category to merge into (this will be kept)\n\n**Use this when:**\n- You find duplicate categories (e.g., \"email_address\" and \"email\")\n- You need to consolidate similar categories\n- You want to eliminate redundancy in the taxonomy\n\n**Returns:**\n- success: Whether the operation succeeded\n- message: Description of what was done\n- source_label: Label of the merged category\n- destination_label: Label of the category kept\n- children_moved: Number of child categories moved\n- classifications_moved: Number of node classifications moved\n\n**Safety:** This is a DESTRUCTIVE operation. The source category will be permanently deleted. Use with caution.",
+  "inputs": [
+    {
+      "name": "source_id",
+      "type": "integer",
+      "required": true,
+      "description": "ID of the category to merge (will be deleted)"
+    },
+    {
+      "name": "destination_id",
+      "type": "integer",
+      "required": true,
+      "description": "ID of the category to merge into (will be kept)"
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "Arguments for taxonomy_merge_categories:\n\nsource_id (required): ID of the source category to merge\ndestination_id (required): ID of the destination category to merge into\n\nExample:\n{\n    \"source_id\": 456,\n    \"destination_id\": 123\n}",
+  "metadata": {
+    "category": "knowledge_graph",
+    "verbs": [
+      "operate"
+    ],
+    "entities": [
+      "edge",
+      "graph",
+      "node"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "medium",
+    "latency_class": "moderate",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

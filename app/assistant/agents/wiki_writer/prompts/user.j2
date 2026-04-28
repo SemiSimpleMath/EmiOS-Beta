@@ -1,0 +1,53 @@
+{% if section_slug %}
+Entity: {{ entity_name }}
+
+You are writing ONE slice of this person's biography from the `{{ section_slug }}` slice of the rough knowledge-graph notes below. Do NOT write the whole article — only the prose for this slice.
+
+---
+
+{{ rough_page }}
+
+---
+
+{% if window_excerpts %}
+A few user-side conversation excerpts for voice and texture only. Do not treat these as new facts to include — they are for how the person sounds or what the user feels about them.
+
+{{ window_excerpts }}
+
+---
+{% endif %}
+
+{% if themes_already_covered %}
+Earlier slices of this biography have already produced sections under these headings: **{{ themes_already_covered }}**. Do NOT write another section with the same heading or the same overall thematic focus — that would duplicate the earlier section. But individual facts, people, places, or topics can freely appear again if they're needed to make THIS slice coherent. The rule is "don't repeat the whole section," not "avoid anything already mentioned." Pick a heading that names a biographical theme this slice reveals.
+{% endif %}
+
+Guidelines for this slice:
+- Start your output with a `## Heading` that names the biographical theme this slice covers (e.g. `## Marriage and family`, `## Career`, `## Beliefs`). Pick a heading that fits the material, not necessarily the slug.
+- EXCEPTION: if `{{ section_slug }}` is `summary`, produce a 1–3 paragraph lead with NO heading at all — this slice becomes the opening of the article.
+- You may use more than one `## Heading` if the material naturally splits, but keep it tight.
+- Preserve `{node:uuid}` markers at paragraph ends exactly as in the rough notes — they become citations.
+- Do NOT produce frontmatter, the `# {{ entity_name }}` title, or a `## See also` section. Those are added by the stitcher.
+- If a slice has nothing new to say (everything is already covered by an earlier theme), return just the single line "(nothing new to add)" — the stitcher will drop it.
+
+Write the slice now.
+{% else %}
+Entity: {{ entity_name }}
+
+These are the rough notes from a knowledge graph — your source material, not your template. Edit heavily. Omit data-layer noise.
+
+---
+
+{{ rough_page }}
+
+---
+
+{% if window_excerpts %}
+A few user-side conversation excerpts for voice and texture only. Do not treat these as new facts to include — they are for how the person sounds or what the user feels about them.
+
+{{ window_excerpts }}
+
+---
+{% endif %}
+
+Write the biography of {{ entity_name }} now, as a real wiki article would.
+{% endif %}

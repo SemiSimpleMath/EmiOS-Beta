@@ -1,0 +1,24 @@
+name: kg_team::find_nodes
+class_name: Planner
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-4.1"
+  model_tier: "smart"
+  temperature: .1
+  
+
+allowed_tools: [taxonomy_path_finder]
+allowed_nodes: [return_control]
+
+user_context_items:
+  - date_time
+  - agent_task
+  - information
+  - recent_history
+  - checklist
+  - action_count
+
+
+system_context_items:
+  - tool_descriptions
+  - allowed_nodes

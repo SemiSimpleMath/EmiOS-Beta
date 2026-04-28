@@ -1,0 +1,45 @@
+name: room::switchboard
+class_name: Agent
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5-mini"
+  model_tier: "mini"
+
+
+allowed_tools: all
+except_tools: []
+allowed_nodes: [return_control]
+entity_scan_keys: [incoming_message, task, information, recent_history]
+
+user_context_items:
+  - date_time
+  - task
+  - information
+  - recent_history
+  - checklist
+  - action_count
+  - room_allowed_global_resources
+  - room_allowed_resource_context
+  - room_allow_images
+  - room_allowed_entity_cards
+  - room_pinned_entities
+  - room_rag_scopes
+  - entity_summary
+  - entity_metadata
+
+system_context_items:
+  - resource_assistant_data
+  - tool_descriptions
+  - room_id
+  - room_contact_name
+  - room_inbound_timestamp_local
+  - room_inbound_line
+  - room_surface
+  - room_context_id
+  - room_visibility
+  - room_policy_id
+  - room_identity
+  - room_conversation
+  - room_safety
+  - room_facts
+  - room_participant_facts

@@ -1,0 +1,22 @@
+name: shared::find_node
+class_name: Planner
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5-mini"
+  model_tier: "mini"
+  
+
+allowed_tools: [kg_find_node]
+allowed_nodes: [return_control]
+
+user_context_items:
+  - date_time
+  - agent_task
+  - recent_history
+  - find_node_checklist
+  - find_node_found_information
+
+
+system_context_items:
+  - tool_descriptions
+  - allowed_nodes

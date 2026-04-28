@@ -1,0 +1,5 @@
+from app.assistant.lib.core_tools.kg_search.knowledge_graph_search import KnowledgeGraphSearch
+from app.assistant.lib.tool_utils.shared_tool_loader import create_tool_loader
+
+get_tool_class = create_tool_loader(KnowledgeGraphSearch)
+

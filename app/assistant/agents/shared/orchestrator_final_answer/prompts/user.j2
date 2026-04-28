@@ -1,0 +1,24 @@
+Today is {{ date_time }}.
+
+Task:
+{{ task }}
+
+{% if information %}
+Information:
+{{ information }}
+{% endif %}
+
+Collected orchestrator bundle (facts/results/done_reason):
+{{ final_answer_content }}
+
+Return canonical fields:
+- `final_answer_answer` (required)
+- `final_answer_sources` (array; can be empty)
+- `final_answer_detail_level` = "brief"
+- `final_answer_data_list` = []
+
+Optional fields (empty string if not useful):
+- `final_answer_task`
+- `final_answer_what_was_done`
+- `final_answer_interesting_info`
+

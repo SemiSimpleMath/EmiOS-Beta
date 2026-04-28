@@ -1,0 +1,24 @@
+taxonomy_update_description: Update the description of a taxonomy category.
+
+**Purpose:** Add or update the description text for a taxonomy category.
+
+**Parameters:**
+- category_id (required): ID of the category to update
+- new_description (required): New description text (use empty string to clear the description)
+
+**Use this when:**
+- Adding missing descriptions to important categories
+- Clarifying what a category represents
+- Improving taxonomy documentation
+
+**Returns:**
+- success: Whether the operation succeeded
+- message: Description of what was done
+- category_id: ID of the updated category
+- label: Label of the category
+- old_description: Previous description
+- new_description: New description
+
+**Safety:** This is a safe operation. Only the description text is modified.
+
+

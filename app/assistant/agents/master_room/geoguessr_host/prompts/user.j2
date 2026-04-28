@@ -1,0 +1,9 @@
+{% if geo_session_id %}
+Game session: {{ geo_session_id }}
+---
+{% endif %}
+{% if recent_history %}
+{{ recent_history }}
+---
+{% endif %}
+{{ incoming_message }}

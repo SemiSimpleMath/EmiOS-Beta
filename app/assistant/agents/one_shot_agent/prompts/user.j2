@@ -1,0 +1,159 @@
+Today is {{ date_time }}.
+
+User task:
+{{ task }}
+
+Additional info:
+{{ information }}
+
+Pick exactly one tool from the tool list below and return strict JSON:
+{
+  "tool_name": "<tool_name>",
+  "arguments_json": "{\"...\": ...}"
+}
+
+Hard rules:
+- `arguments_json` MUST be a valid JSON object string.
+- Only include arguments needed for the selected action. Keep payload minimal.
+- Optional arguments MUST be omitted unless they are explicitly required by the selected action or explicitly requested by the user.
+- If request is outside these fast patterns, return:
+  - tool_name: "__unsupported__"
+  - arguments_json: "{}"
+
+One-shot tool playbook:
+
+1) create_todo_task
+- Use for: "add todo", "remind me to do X" (task list style)
+- Arguments:
+  - task_name: str (required)
+  - due_date: str (optional ISO datetime; omit unless user gives due time/date)
+  - priority: str (optional: "high" | "normal" | "low")
+
+2) get_todo_tasks
+- Use for: "what are my todos", "show my tasks", "any open tasks", "what's on my list"
+- Arguments:
+  - {} (empty object) is valid and preferred — returns all active (non-completed) tasks
+  - start_date: str (optional ISO datetime — filter by due date range)
+  - end_date: str (optional ISO datetime)
+  - include_completed: bool (optional, default false — set true only if user asks for completed tasks)
+
+3) create_reminder (maps to `create_scheduler_event`)
+- Use for: one-time reminder at a specific time.
+- Arguments:
+  - title: str
+  - start_date: str (datetime)
+  - payload_message: str
+- Defaults applied by runtime:
+  - task_type: "reminder"
+  - importance: 3
+  - sound: "default"
+
+4) create_repeating_reminder (maps to `create_repeating_scheduler_event`)
+- Use for: repeating reminder every N minutes/hours/days.
+- Arguments:
+  - title: str
+  - start_date: str (datetime)
+  - interval: int (seconds)
+  - payload_message: str
+  - end_date: str (optional datetime)
+- Defaults applied by runtime:
+  - task_type: "reminder"
+  - importance: 3
+  - sound: "default"
+
+5) create_calendar_event
+- Use for: single calendar meeting/event.
+- Arguments:
+  - event_name: str
+  - start: str (ISO datetime)
+  - end: str (ISO datetime)
+  - description: str (optional)
+  - location: str (optional)
+  - participants: list[object] (optional; each item may include name/email)
+  - link: str (optional URL)
+
+6) create_repeating_calendar_event
+- Use for: recurring calendar events.
+- Arguments:
+  - event_name: str
+  - start: str (ISO datetime)
+  - end: str (ISO datetime)
+  - recurrence_rule: str (RRULE)
+  - calendar_name: str (optional)
+  - all_day: bool (optional)
+  - description: str (optional)
+  - location: str (optional)
+  - participants: list[object] (optional; each item may include name/email)
+  - link: str (optional URL)
+
+7) get_weather
+- Use for: weather queries.
+- Arguments:
+  - city: str
+  - forecast_type: str (use "current" unless user asks forecast/range)
+
+8) set_ui_mute
+- Use for: mute/unmute/toggle app audio.
+- Arguments:
+  - action: str ("mute" | "unmute" | "toggle")
+
+9) peak_at_link
+- Use for: quick link preview/peek.
+- Arguments:
+  - url: str (URL)
+  - max_lines: int (always 8)
+  - max_chars_per_line: int (always 220)
+
+10) summarize_link
+- Use for: summarize URL/page/article.
+- Arguments:
+  - url: str (URL)
+
+11) get_important_emails
+- Use for: "any new emails?", "check inbox", "important emails".
+- Arguments:
+  - {} (empty object) is valid and preferred for default behavior
+  - start_date: str (optional ISO datetime)
+  - end_date: str (optional ISO datetime)
+
+12) nest_home_control
+- Use for: thermostat status/mode/target temperature commands.
+- Required action:
+  - action: str MUST be one of:
+    - get_status
+    - set_mode
+    - set_target_temperature
+- Conditional fields:
+  - mode: str (required for set_mode; "heat" | "cool" | "heat_cool" | "off")
+  - target_temperature: float (required for set_target_temperature)
+
+13) lights_control
+- Use for: light power and brightness commands. Always targets ALL lights.
+- Required action:
+  - action: str MUST be exactly one of:
+    - set_light_power
+    - set_light_brightness
+- Conditional fields:
+  - state: str (required for set_light_power; "on" | "off")
+  - brightness_pct: int (required for set_light_brightness; 0-100)
+- Never include room or light_id - omit both always.
+
+14) ring_camera_control
+- Use for: Ring camera snapshot/events/siren/light.
+- Required action:
+  - action: str MUST be one of:
+    - list_cameras
+    - get_snapshot
+    - get_recent_events
+    - set_siren
+    - set_light
+- Conditional fields:
+  - camera_id: str (required for all except list_cameras)
+  - lookback_minutes: int (required for get_recent_events)
+  - enabled: bool (required for set_siren/set_light)
+
+Example output JSON:
+{
+  "tool_name": "lights_control",
+  "arguments_json": "{\"action\":\"set_light_power\",\"state\":\"on\"}"
+}

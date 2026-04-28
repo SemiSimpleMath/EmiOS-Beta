@@ -1,0 +1,16 @@
+name: knowledge_graph_add::taxonomy_integrity_validator
+class_name: Agent
+llm_params:
+  engine: gpt-5.4-mini
+  model_tier: "mini"
+  llm_provider: "openai"
+description: "Validates taxonomy structure for duplicates, misplacements, and organizational issues"
+
+user_context_items:
+  - branch_name
+  - categories_text
+  - total_categories
+allowed_tools: []
+except_tools: []
+system_context_items: []
+structured_output: true

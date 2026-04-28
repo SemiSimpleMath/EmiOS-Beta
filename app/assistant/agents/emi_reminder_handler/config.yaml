@@ -1,0 +1,20 @@
+name: emi_reminder_handler
+class_name: EmiReminderHandler
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5-mini"
+  model_tier: "mini"
+entity_scan_keys: [incoming_message, task, information, reminder_data]
+
+system_context_items:
+  - resource_assistant_personality
+  - resource_user_data
+
+user_context_items:
+  - entity_level_0
+  - date_time
+  - reminder_data
+
+events:
+  - scheduler_event_interval
+  - scheduler_event_one_time_event

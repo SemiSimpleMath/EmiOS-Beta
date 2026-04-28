@@ -1,0 +1,15 @@
+{% if entity_level_0 %}
+#### ADDITIONAL KNOWN CONTEXT ####
+These are facts already recorded in the knowledge graph about entities mentioned below.
+Use them to resolve conflicts and choose the most accurate data when merging.
+{{ entity_level_0 }}
+#### END OF ADDITIONAL KNOWN CONTEXT ####
+{% endif %}
+
+**Existing Node Data:**
+{{ existing_node_data }}
+
+**New Node Data:**
+{{ new_node_data }}
+
+Please analyze these two nodes and generate the optimal merged data by intelligently combining their information. Focus on preserving all valuable information while resolving conflicts and choosing the most specific and accurate data.

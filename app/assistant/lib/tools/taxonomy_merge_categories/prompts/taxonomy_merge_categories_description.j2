@@ -1,0 +1,29 @@
+taxonomy_merge_categories: Merge one taxonomy category into another, eliminating duplicates.
+
+**Purpose:** Consolidate duplicate or redundant taxonomy categories by merging one into another.
+
+**What it does:**
+1. Moves all children from source category to destination category
+2. Moves all node classifications from source to destination
+3. Deletes the source category
+
+**Parameters:**
+- source_id (required): ID of the category to merge (this will be deleted)
+- destination_id (required): ID of the category to merge into (this will be kept)
+
+**Use this when:**
+- You find duplicate categories (e.g., "email_address" and "email")
+- You need to consolidate similar categories
+- You want to eliminate redundancy in the taxonomy
+
+**Returns:**
+- success: Whether the operation succeeded
+- message: Description of what was done
+- source_label: Label of the merged category
+- destination_label: Label of the category kept
+- children_moved: Number of child categories moved
+- classifications_moved: Number of node classifications moved
+
+**Safety:** This is a DESTRUCTIVE operation. The source category will be permanently deleted. Use with caution.
+
+

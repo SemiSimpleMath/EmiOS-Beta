@@ -1,0 +1,156 @@
+from __future__ import annotations
+
+import json
+from typing import Any, Dict, List
+from app.assistant.utils.logging_config import get_logger
+
+logger = get_logger(__name__)
+
+
+class FinalAnswerNormalizer:
+    @staticmethod
+    def to_string(value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        if isinstance(value, (dict, list)):
+            try:
+                from app.assistant.utils.prompt_formatter import format_for_prompt
+                return format_for_prompt(value)
+            except Exception:
+                pass
+        return str(value)
+
+    @staticmethod
+    def to_source_list(value: Any) -> List[str]:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            out: List[str] = []
+            for item in value:
+                s = str(item).strip()
+                if s:
+                    out.append(s)
+            return out
+        if isinstance(value, str):
+            raw = value.replace("\r", "\n")
+            parts: List[str] = []
+            for line in raw.split("\n"):
+                line = line.strip()
+                if not line:
+                    continue
+                if "," in line and not line.startswith("http"):
+                    parts.extend([x.strip() for x in line.split(",") if x.strip()])
+                else:
+                    parts.append(line)
+            return parts
+        s = str(value).strip()
+        return [s] if s else []
+
+    @classmethod
+    def to_data_list(cls, result_dict: Dict[str, Any]) -> List[Dict[str, str]]:
+        v = result_dict.get("final_answer_data_list")
+        if isinstance(v, list):
+            return v
+
+        skip_keys = {
+            "final_answer_task",
+            "final_answer_answer",
+            "final_answer_no_op",
+            "final_answer_what_was_done",
+            "final_answer_interesting_info",
+            "final_answer_sources",
+            "final_answer_sources_used",
+            "final_answer_detail_level",
+            "final_answer_data_list",
+            "task",
+            "answer",
+            "no_op_tf",
+            "what_was_done",
+            "interesting_info",
+            "sources",
+            "sources_used",
+            "summary",
+            "narrative",
+            "status",
+            "action",
+            "action_input",
+            "result",
+            "exit",
+        }
+        lifted: List[Dict[str, str]] = []
+        for key, value in result_dict.items():
+            if key in skip_keys:
+                continue
+            lifted.append(
+                {
+                    "data_type": "detail",
+                    "key": str(key),
+                    "value": cls.to_string(value),
+                }
+            )
+        return lifted
+
+    @classmethod
+    def normalize(cls, result: Any) -> Dict[str, Any]:
+        if isinstance(result, dict):
+            result_dict = result
+        else:
+            result_dict = {"final_answer_answer": cls.to_string(result)}
+
+        # Important contract:
+        # If final_answer_answer is explicitly present (including empty string for no-op),
+        # preserve it and do not fallback to serializing the whole payload.
+        if "final_answer_answer" in result_dict:
+            answer = result_dict.get("final_answer_answer")
+        else:
+            answer = (
+                result_dict.get("answer")
+                or result_dict.get("summary")
+                or result_dict.get("narrative")
+                or cls.to_string(result)
+            )
+        task = result_dict.get("final_answer_task") or result_dict.get("task") or ""
+        no_op = bool(result_dict.get("final_answer_no_op", False) or result_dict.get("no_op_tf", False))
+        what_done = (
+            result_dict.get("final_answer_what_was_done")
+            or result_dict.get("what_was_done")
+            or result_dict.get("methods")
+            or ""
+        )
+        interesting = (
+            result_dict.get("final_answer_interesting_info")
+            or result_dict.get("interesting_info")
+            or ""
+        )
+        sources = cls.to_source_list(
+            result_dict.get("final_answer_sources", None)
+            if result_dict.get("final_answer_sources", None) is not None
+            else result_dict.get("final_answer_sources_used", None)
+            if result_dict.get("final_answer_sources_used", None) is not None
+            else result_dict.get("sources", None)
+            if result_dict.get("sources", None) is not None
+            else result_dict.get("sources_used", None)
+        )
+        data_list = cls.to_data_list(result_dict)
+
+        detail_level = result_dict.get("final_answer_detail_level")
+        if not isinstance(detail_level, str) or detail_level not in {"brief", "standard", "full"}:
+            if data_list:
+                detail_level = "full"
+            elif what_done or interesting or sources:
+                detail_level = "standard"
+            else:
+                detail_level = "brief"
+
+        return {
+            "final_answer_task": cls.to_string(task),
+            "final_answer_answer": cls.to_string(answer),
+            "final_answer_no_op": no_op,
+            "final_answer_what_was_done": cls.to_string(what_done),
+            "final_answer_interesting_info": cls.to_string(interesting),
+            "final_answer_sources": sources,
+            "final_answer_detail_level": detail_level,
+            "final_answer_data_list": data_list,
+        }

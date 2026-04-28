@@ -1,0 +1,49 @@
+{
+  "name": "playwright_manager",
+  "description": "This is a browser automation manager backed by Playwright. Use it for multi-step web navigation, form filling, and page interaction. Provide a clear, step-by-step task description and any target URLs.",
+  "inputs": [
+    {
+      "name": "task",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "information",
+      "type": "string",
+      "required": true,
+      "description": ""
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "- task: str\n- information: str",
+  "metadata": {
+    "category": "web",
+    "verbs": [
+      "orchestrate"
+    ],
+    "entities": [
+      "web"
+    ],
+    "risk_level": "critical",
+    "side_effects": "external_action",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "high",
+    "latency_class": "slow",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": true
+  }
+}

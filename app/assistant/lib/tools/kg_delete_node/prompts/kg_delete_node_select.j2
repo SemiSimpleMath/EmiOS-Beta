@@ -1,0 +1,13 @@
+Use kg_delete_node when you need to:
+- Remove a node that is genuinely incorrect or invalid
+- Delete duplicate nodes (after verifying with user)
+- Remove test or temporary nodes
+- Clean up nodes that are no longer relevant
+
+**DO NOT use kg_delete_node for:**
+- Nodes you're uncertain about
+- Highly connected nodes without user confirmation
+- Personal entity nodes (Person, Entity) without explicit user request
+- Nodes that might just need updating instead of deletion
+
+**ALWAYS ask the user first** before deleting important nodes!

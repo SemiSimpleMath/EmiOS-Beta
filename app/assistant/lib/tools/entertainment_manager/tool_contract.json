@@ -1,0 +1,45 @@
+{
+  "name": "entertainment_manager",
+  "description": "Life-domain research manager for entertainment, leisure, dining, and hobbies. Researches user preferences via the knowledge graph and web, then produces personalized suggestions tiered by comfort level (comfort / medium / push). Use when the dayflow pipeline needs entertainment research for any time horizon (today, week, month).",
+  "inputs": [
+    {
+      "name": "task",
+      "type": "string",
+      "required": true,
+      "description": "The entertainment research task, including the time horizon and any specific context."
+    },
+    {
+      "name": "information",
+      "type": "string",
+      "required": true,
+      "description": "Enriched context: preference history, domain board concerns, schedule, weather, health, previous output."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable entertainment research result."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured entertainment research payload."
+    }
+  ],
+  "arguments_prompt": "EntertainmentManager arguments are\ntask: What entertainment research to perform and for what time horizon.\ninformation: All relevant context about the user's current state, preferences, and constraints.",
+  "metadata": {
+    "category": "life_domain",
+    "verbs": ["research", "suggest", "recommend"],
+    "entities": ["entertainment", "leisure", "dining", "hobby"],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "medium",
+    "latency_class": "moderate",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

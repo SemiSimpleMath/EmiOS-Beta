@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Routines · Schedule</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/routines_admin.css') }}?v={{ static_v }}">
+</head>
+<body>
+  <div class="container">
+    <header class="topbar">
+      <div class="title-block">
+        <h1>Routines</h1>
+        <div class="subtitle">When things run · all times local</div>
+      </div>
+      <div class="now-block">
+        <div class="now-label">Now</div>
+        <div class="now-time" id="now-time">—</div>
+        <div class="manager-status" id="manager-status">—</div>
+      </div>
+    </header>
+
+    <nav class="tabs">
+      <button class="tab active" data-tab="schedule">Hour-by-hour</button>
+      <button class="tab" data-tab="interval">Interval (continuous)</button>
+      <button class="tab" data-tab="weekly">Weekly</button>
+      <button class="tab" data-tab="all">All routines</button>
+    </nav>
+
+    <section class="tab-panel" id="panel-schedule">
+      <div class="hint">Daily clock-driven routines. Click an entry to edit time / toggle / run now.</div>
+      <div class="timeline" id="timeline"></div>
+    </section>
+
+    <section class="tab-panel hidden" id="panel-interval">
+      <div class="hint">Routines that fire whenever their min-interval has elapsed since last run.</div>
+      <div class="interval-grid" id="interval-grid"></div>
+    </section>
+
+    <section class="tab-panel hidden" id="panel-weekly">
+      <div class="hint">Routines that fire once per ISO week on a specific day.</div>
+      <div class="weekly-grid" id="weekly-grid"></div>
+    </section>
+
+    <section class="tab-panel hidden" id="panel-all">
+      <div class="hint">Every configured routine, enabled or not.</div>
+      <table class="all-table" id="all-table">
+        <thead>
+          <tr>
+            <th>Enabled</th>
+            <th>Name</th>
+            <th>Runner</th>
+            <th>Schedule</th>
+            <th>Last run</th>
+            <th>Status</th>
+            <th>Runs</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+  </div>
+
+  <div class="modal hidden" id="edit-modal">
+    <div class="modal-card">
+      <header class="modal-head">
+        <div class="modal-title" id="edit-modal-title">Edit routine</div>
+        <button class="modal-close" id="edit-modal-close" aria-label="Close">×</button>
+      </header>
+      <div class="modal-body" id="edit-modal-body"></div>
+      <footer class="modal-foot">
+        <button class="btn ghost" id="edit-modal-cancel">Cancel</button>
+        <button class="btn primary" id="edit-modal-save">Save</button>
+      </footer>
+    </div>
+  </div>
+
+  <div class="toast hidden" id="toast"></div>
+
+  <script src="{{ url_for('static', filename='js/routines_admin.js') }}?v={{ static_v }}"></script>
+</body>
+</html>

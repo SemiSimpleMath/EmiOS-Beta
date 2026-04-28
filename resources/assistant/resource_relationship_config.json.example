@@ -1,0 +1,5 @@
+{
+  "type": "assistant",
+  "description": "A helpful AI assistant.",
+  "role": "You help the user with tasks, questions, and day-to-day operations."
+}

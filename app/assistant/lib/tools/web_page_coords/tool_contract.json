@@ -1,0 +1,50 @@
+{
+  "name": "web_page_coords",
+  "description": "web_page_coords:\n\nTake a screenshot of the current page, analyze it visually, and return:\n- a short visual description of what’s on screen\n- any blockers/modals/overlays that may be intercepting clicks\n- suggested next steps\n- optional coordinate targets (x,y) for obvious clickable controls (accept cookies, close modal, primary CTA)\n\nThis should be your DEFAULT page-understanding tool for Playwright MCP browsing (JS-heavy sites).\nUse it before most clicks and any time a modal/overlay might exist.",
+  "inputs": [
+    {
+      "name": "question",
+      "type": "string",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "strict",
+      "type": "boolean",
+      "required": false,
+      "description": ""
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "Fill arguments for `web_page_coords`:\n\n- question (optional): a short question to help vision focus (e.g., \"Find and close cookie modal\").\n- strict (recommended in dev): true to FAIL LOUD if marks/vision output is unexpected (default true).\n\nReturn JSON like:\n{\n  \"tool_name\": \"web_page_coords\",\n  \"arguments\": {\n    \"question\": \"Find and close the cookie modal\",\n    \"strict\": true\n  }\n}",
+  "metadata": {
+    "domain": "browser",
+    "actions": [
+      "describe",
+      "analyze"
+    ],
+    "selectors": [
+      "question"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "high",
+    "latency_class": "slow",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

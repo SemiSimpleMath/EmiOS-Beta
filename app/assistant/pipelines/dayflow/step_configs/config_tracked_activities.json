@@ -1,0 +1,46 @@
+{
+  "version": 3,
+  "description": "Wellness activities tracked today. Use field_name values exactly in outputs.",
+  "activities": {
+    "hydration": {
+      "display_name": "Hydration",
+      "field_name": "hydration",
+      "init_on_cold_start": true,
+      "show_daily_count": true,
+      "threshold": {
+        "label": "Every 2 hours",
+        "minutes": 120
+      }
+    },
+    "standing_break": {
+      "display_name": "Standing Break",
+      "field_name": "standing_break",
+      "init_on_cold_start": false,
+      "reset_on_afk": true,
+      "threshold": {
+        "label": "Every hour",
+        "minutes": 60
+      }
+    },
+    "finger_stretch": {
+      "display_name": "Finger Stretches",
+      "field_name": "finger_stretch",
+      "init_on_cold_start": false,
+      "reset_on_afk": true,
+      "show_daily_count": true,
+      "threshold": {
+        "label": "Every hour",
+        "minutes": 60
+      }
+    },
+    "meal": {
+      "calendar_keywords": ["Breakfast", "Lunch", "Dinner", "Meal"],
+      "display_name": "Meal",
+      "field_name": "meal",
+      "guidance": "Typical windows: 7 to 9am, 11am to 1pm, 5 to 7pm",
+      "init_on_cold_start": false,
+      "show_daily_count": true,
+      "reset_triggers": ["chat", "ticket", "calendar"]
+    }
+  }
+}

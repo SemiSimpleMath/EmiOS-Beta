@@ -1,0 +1,35 @@
+Today is {{ date_time }}.
+
+Task:
+{{ task }}
+
+{% if information %}
+Information:
+{{ information }}
+{% endif %}
+
+Facts (v{{ orchestrator_facts_version }}):
+{{ orchestrator_facts }}
+
+Curated progress (append-only; curated by curator):
+{{ orchestrator_curated_progress }}
+
+Job map (job_id -> contract/status; use ONLY to reference job_ids and understand scope, not to judge completion):
+{{ orchestrator_job_map }}
+
+Running jobs (explicit list; use job_id for halt_targets):
+{{ orchestrator_running_jobs }}
+
+Recent child results:
+{{ orchestrator_results }}
+
+Progress inbox (newest last):
+{{ orchestrator_progress_inbox }}
+
+Tick: {{ orchestrator_tick }}
+
+Decide:
+- is_done / missing_requirements
+- halt_directives for any running jobs that are redundant/moot/superseded OR part_complete
+- replan_needed (if architect should be asked to re-evaluate)
+

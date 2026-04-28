@@ -1,0 +1,67 @@
+{
+  "name": "get_important_emails",
+  "description": "Fetch important inbox emails for a time window. Each message is scored 0-10 by an LLM; only messages with importance >= 5 are returned. Spam, bulk, and low-priority mail is excluded automatically. Results include subject, sender, date, summary, and action_items. Results are ephemeral — nothing is written to the repository. For raw query-driven search, use get_email_messages. For full thread reconstruction, use get_email_thread.",
+  "inputs": [
+    {
+      "name": "start_date",
+      "type": "string",
+      "required": false,
+      "description": "ISO 8601 datetime for the start of the fetch window (e.g. \"2026-03-03T06:00:00+00:00\"). Defaults to 12 hours ago. Capped at 7 days ago."
+    },
+    {
+      "name": "end_date",
+      "type": "string",
+      "required": false,
+      "description": "Optional ISO 8601 datetime for the end of the fetch window. Defaults to now if omitted."
+    },
+    {
+      "name": "unseen",
+      "type": "boolean",
+      "required": false,
+      "description": "If true, only fetch unread messages. Default false (fetch all in window)."
+    },
+    {
+      "name": "account_id",
+      "type": "string",
+      "required": false,
+      "description": "Optional Google OAuth account id for per-call mailbox selection (default \"google_user_primary\")."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable count of relevant emails returned."
+    },
+    {
+      "path": "data_list",
+      "type": "array",
+      "description": "Importance-filtered, LLM-summarized email list. Each item contains: subject, sender, email_address, date_received, summary, action_items, importance, thread_id, message_id."
+    }
+  ],
+  "arguments_prompt": "Arguments are:\nstart_date: ISO 8601 datetime (e.g. \"2026-03-03T06:00:00+00:00\"). Defaults to 12 hours ago.\nend_date: Optional ISO 8601 datetime. Defaults to now.\nunseen: true/false — restrict to unread mail (default false).\naccount_id: Optional account id (default \"google_user_primary\").\n\nBehavior notes:\n- Only inbox mail is considered; bulk/sent/spam folders are excluded.\n- Each message is scored by an LLM (0-10 importance). Messages below 5 are not returned.\n- Results are ephemeral — nothing is stored in the repository.\n- The window is capped at 7 days maximum lookback.\n- For raw query-driven search, use get_email_messages instead.\n- For full thread context, use get_email_thread instead.",
+  "metadata": {
+    "domain": "email",
+    "actions": [
+      "triage",
+      "read",
+      "summarize"
+    ],
+    "selectors": [
+      "date_range",
+      "unseen"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [
+      "google"
+    ],
+    "requires_network": true,
+    "cost_level": "medium",
+    "latency_class": "slow",
+    "front_door": true,
+    "room_visibility_default": "show",
+    "approval_required": false,
+    "planner_description": "Return recent inbox emails scored as important (spam/bulk filtered out)."
+  }
+}

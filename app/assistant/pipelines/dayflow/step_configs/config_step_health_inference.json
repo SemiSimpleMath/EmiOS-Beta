@@ -1,0 +1,24 @@
+{
+  "step_id": "health_inference",
+  "description": "Runs health_status_inference agent and persists periodic snapshots.",
+  "run_policy": {
+    "type": "always",
+    "min_interval_seconds": 300
+  },
+  "afk_guard": {
+    "skip_when_afk": true,
+    "skip_when_potentially_afk": true
+  },
+  "lookback_hours": {
+    "chat_history": 2,
+    "recent_tickets": 2
+  },
+  "snapshot_policy": {
+    "min_interval_seconds": 7200,
+    "max_snapshots_per_day": 24
+  },
+  "daily_reset": {
+    "description": "Clear health inference output at boundary"
+  }
+}
+

@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "enabled": true,
+  "state_resource_file": "resource_wellness_pipeline_status.json",
+  "room_scope": {
+    "room_id": "dayflow_orchestrator",
+    "room_surface": "any",
+    "manager_name": "dayflow_orchestrator_manager",
+    "agent_name": "dayflow_orchestrator::action_selector",
+    "shared_chat_room_ids": [
+      "master_room"
+    ],
+    "shared_chat_room_surface": "any"
+  },
+  "daily_reset": {
+    "boundary_hour_local": 5
+  },
+  "steps": [
+    {
+      "id": "sleep",
+      "enabled": true,
+      "step_class": "app.assistant.pipelines.dayflow.steps.sleep_stage:SleepStep",
+      "run_policy": { "type": "always", "min_interval_seconds": 300 },
+      "afk_guard": { "skip_when_afk": true, "skip_when_potentially_afk": true }
+    },
+    {
+      "id": "afk_statistics",
+      "enabled": true,
+      "step_class": "app.assistant.pipelines.dayflow.steps.afk_statistics_stage:AFKStatisticsStep",
+      "run_policy": { "type": "always" },
+      "description": "Always runs - no cost, provides AFK data for other stages"
+    },
+    {
+      "id": "activity_tracker",
+      "enabled": true,
+      "step_class": "app.assistant.pipelines.dayflow.steps.activity_tracker_stage:ActivityTrackerStep",
+      "run_policy": { "type": "always", "min_interval_seconds": 60 },
+      "afk_guard": { "skip_when_afk": true, "skip_when_potentially_afk": true }
+    },
+    {
+      "id": "diet_tracker",
+      "enabled": true,
+      "step_class": "app.assistant.pipelines.dayflow.steps.diet_tracker_stage:DietTrackerStep",
+      "run_policy": { "type": "always", "min_interval_seconds": 60 },
+      "description": "Reactive step — only fires when a new food-tagged pod exists since last run. Merges new pods into resource_diet_log_today.json via diet_tracker agent."
+    },
+    {
+      "id": "daily_context_generator",
+      "enabled": true,
+      "step_class": "app.assistant.pipelines.dayflow.steps.daily_context_generator_stage:DailyContextGeneratorStep",
+      "run_policy": { "type": "always", "min_interval_seconds": 300 },
+      "afk_guard": { "skip_when_afk": true, "skip_when_potentially_afk": true }
+    },
+    {
+      "id": "dayflow_routine",
+      "enabled": true,
+      "step_class": "app.assistant.pipelines.dayflow.steps.dayflow_routine_stage:DayFlowRoutineStep",
+      "run_policy": { "type": "always", "min_interval_seconds": 3600 },
+      "afk_guard": { "skip_when_afk": true, "skip_when_potentially_afk": false },
+      "description": "Hourly belief-enriched routine doc. Writes resource_dayflow_routine.md (injected into all agents)."
+    },
+    {
+      "id": "health_status",
+      "enabled": true,
+      "step_class": "app.assistant.pipelines.dayflow.steps.health_status_stage:HealthStatusStep",
+      "run_policy": { "type": "daily" },
+      "description": "Daily belief-derived health status doc (chronic conditions + sleep). Writes resource_user_health_status.md."
+    },
+    {
+      "id": "conversation_starter",
+      "enabled": true,
+      "step_class": "app.assistant.pipelines.dayflow.steps.conversation_starter_stage:ConversationStarterStep",
+      "run_policy": { "type": "always", "min_interval_seconds": 60 },
+      "description": "Initiate conversation a few times per day; heavy context, light output."
+    },
+    {
+      "id": "health_inference",
+      "enabled": true,
+      "step_class": "app.assistant.pipelines.dayflow.steps.health_inference_stage:HealthInferenceStep",
+      "run_policy": { "type": "always", "min_interval_seconds": 300 },
+      "afk_guard": { "skip_when_afk": true, "skip_when_potentially_afk": true }
+    },
+    {
+      "id": "dayflow_cron_tickets",
+      "enabled": true,
+      "step_class": "app.assistant.pipelines.dayflow.steps.dayflow_cron_tickets_stage:DayFlowCronTicketsStep",
+      "run_policy": { "type": "always", "min_interval_seconds": 60 },
+      "afk_guard": { "skip_when_afk": true, "skip_when_potentially_afk": true },
+      "description": "Creates small timer-based day-flow tickets from dayflow cron candidate suggestions."
+    },
+    {
+      "id": "entertainment_advisor",
+      "enabled": false,
+      "step_class": "app.assistant.pipelines.dayflow.steps.entertainment_advisor_stage:EntertainmentAdvisorStep",
+      "run_policy": { "type": "always", "min_interval_seconds": 3600 },
+      "afk_guard": { "skip_when_afk": true, "skip_when_potentially_afk": false },
+      "description": "Hourly life-domain advisor for entertainment, leisure, dining, and hobbies."
+    }
+  ]
+}
+

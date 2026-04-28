@@ -1,0 +1,60 @@
+{
+  "name": "get_todo_tasks",
+  "description": "Use this tool to fetch all todo lists",
+  "inputs": [
+    {
+      "name": "start_date",
+      "type": "string",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "end_date",
+      "type": "string",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "include_completed",
+      "type": "boolean",
+      "required": false,
+      "description": ""
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "- **Purpose**: Fetch to-do tasks.\n- **Default behavior**: returns active (not completed) tasks across lists, including overdue items.\n- **Arguments**:\n  - `start_date` (str, optional): Start of due-date filter window (ISO 8601).\n  - `end_date` (str, optional): End of due-date filter window (ISO 8601).\n  - `include_completed` (bool, optional, default false): Set true only when explicitly asked to include completed tasks.",
+  "metadata": {
+    "domain": "todo",
+    "actions": [
+      "read",
+      "list"
+    ],
+    "selectors": [
+      "date_range",
+      "tasklist",
+      "completed"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [
+      "google"
+    ],
+    "requires_network": true,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": true,
+    "room_visibility_default": "show",
+    "approval_required": false
+  }
+}

@@ -1,0 +1,42 @@
+name: master_room_planning_manager
+class_name: MultiAgentManager
+description: "Isolated subroom manager for master-room planning mode."
+max_cycles: 12
+
+role_bindings:
+  delegator: room::delegator
+
+agents:
+  - name: room::delegator
+    class: Delegator
+  - name: master_room::plan_mode
+    class: Agent
+
+control_nodes:
+  - name: plan_mode_final_router_node
+    class: PlanModeFinalRouterNode
+  - name: final_answer_node
+    class: FinalAnswerNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+
+tools:
+  allowed_tools: []
+  except_tools: []
+
+flow_config:
+  strict_routing: true
+  flow:
+    planning_mode:
+      source_agent: "master_room::plan_mode"
+  planning_mode:
+    source_agent: "master_room::plan_mode"
+    final_node: "final_answer_node"
+    chat_response_key: "chat_response"
+    planning_done_key: "planning_done_tf"
+    plan_summary_key: "plan_summary"
+  state_map:
+    "room::delegator": "master_room::plan_mode"
+    "master_room::plan_mode": "plan_mode_final_router_node"
+    "plan_mode_final_router_node": "final_answer_node"
+    "final_answer_node": "manager_exit_node"

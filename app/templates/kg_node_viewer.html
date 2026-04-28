@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>KG Node — {{ node.label }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/kg_node_viewer.css') }}">
+</head>
+<body>
+  <div class="kg-node-page">
+    <header class="kg-node-header">
+      <h1>{{ node.label }}</h1>
+      <div class="kg-node-meta">
+        <span class="kg-pill">{{ node.node_type }}</span>
+        {% if node.category %}<span class="kg-pill">{{ node.category }}</span>{% endif %}
+        <span class="kg-node-id">{{ node.id }}</span>
+      </div>
+    </header>
+
+    <section class="kg-card kg-edit-card">
+      <details>
+        <summary><strong>Edit node</strong></summary>
+        <form id="kg-edit-form" class="kg-edit-form">
+          <label>Label
+            <input type="text" name="label" value="{{ node.label or '' }}">
+          </label>
+          <label>Description
+            <textarea name="description" rows="3">{{ node.description or '' }}</textarea>
+          </label>
+          <label>Original sentence
+            <textarea name="original_sentence" rows="2">{{ node.original_sentence or '' }}</textarea>
+          </label>
+          <label>Semantic label
+            <input type="text" name="semantic_label" value="{{ node.semantic_label or '' }}">
+          </label>
+          <label>Category
+            <input type="text" name="category" value="{{ node.category or '' }}">
+          </label>
+          <label>Aliases (comma-separated)
+            <input type="text" name="aliases" value="{{ (node.aliases or []) | join(', ') }}">
+          </label>
+          <label>Tags (comma-separated)
+            <input type="text" name="hash_tags" value="{{ (node.hash_tags or []) | join(', ') }}">
+          </label>
+          <div class="kg-edit-row">
+            <label>Confidence
+              <input type="number" step="0.01" min="0" max="1" name="confidence" value="{{ node.confidence if node.confidence is not none else '' }}">
+            </label>
+            <label>Importance
+              <input type="number" step="0.01" min="0" max="1" name="importance" value="{{ node.importance if node.importance is not none else '' }}">
+            </label>
+          </div>
+          <div class="kg-edit-actions">
+            <button type="submit">Save</button>
+            <span id="kg-edit-status" class="kg-muted"></span>
+          </div>
+        </form>
+      </details>
+    </section>
+    <script>
+      (function() {
+        const form = document.getElementById("kg-edit-form");
+        const status = document.getElementById("kg-edit-status");
+        if (!form) return;
+        form.addEventListener("submit", async function(ev) {
+          ev.preventDefault();
+          status.textContent = "saving...";
+          const data = new FormData(form);
+          const payload = {
+            label: data.get("label") || "",
+            description: data.get("description") || "",
+            original_sentence: data.get("original_sentence") || "",
+            semantic_label: data.get("semantic_label") || "",
+            category: data.get("category") || "",
+            aliases: (data.get("aliases") || "").split(",").map(s => s.trim()).filter(Boolean),
+            hash_tags: (data.get("hash_tags") || "").split(",").map(s => s.trim()).filter(Boolean),
+          };
+          const confRaw = data.get("confidence");
+          const impRaw = data.get("importance");
+          if (confRaw !== "" && confRaw != null) payload.confidence = parseFloat(confRaw);
+          if (impRaw !== "" && impRaw != null) payload.importance = parseFloat(impRaw);
+          try {
+            const resp = await fetch("/api/graph/node/{{ node.id }}", {
+              method: "PUT",
+              headers: {"Content-Type": "application/json"},
+              body: JSON.stringify(payload),
+            });
+            if (!resp.ok) {
+              const err = await resp.json().catch(() => ({}));
+              status.textContent = "error: " + (err.error || resp.statusText);
+              return;
+            }
+            status.textContent = "saved — reloading";
+            setTimeout(() => window.location.reload(), 500);
+          } catch (e) {
+            status.textContent = "error: " + e.message;
+          }
+        });
+      })();
+    </script>
+
+    <section class="kg-card">
+      <h2>Core</h2>
+      <dl class="kg-dl">
+        {% if node.original_sentence %}
+        <dt>Original sentence</dt><dd>{{ node.original_sentence }}</dd>
+        {% endif %}
+        {% if node.description %}
+        <dt>Description</dt><dd>{{ node.description }}</dd>
+        {% endif %}
+        {% if node.semantic_label %}
+        <dt>Semantic label</dt><dd>{{ node.semantic_label }}</dd>
+        {% endif %}
+        {% if node.goal_status %}
+        <dt>Goal status</dt><dd>{{ node.goal_status }}</dd>
+        {% endif %}
+        {% if node.aliases %}
+        <dt>Aliases</dt><dd>{{ node.aliases | join(", ") }}</dd>
+        {% endif %}
+        {% if node.hash_tags %}
+        <dt>Tags</dt><dd>{{ node.hash_tags | join(", ") }}</dd>
+        {% endif %}
+        {% if node.valid_during %}
+        <dt>Valid during</dt><dd>{{ node.valid_during }}</dd>
+        {% endif %}
+      </dl>
+    </section>
+
+    {% if node.start_date or node.end_date or node.start_date_prose or node.end_date_prose %}
+    <section class="kg-card">
+      <h2>Dates</h2>
+      <dl class="kg-dl">
+        {% if node.start_date %}
+        <dt>Start date</dt><dd>{{ node.start_date }} {% if node.start_date_confidence %}<span class="kg-muted">({{ node.start_date_confidence }})</span>{% endif %}</dd>
+        {% endif %}
+        {% if node.start_date_prose %}
+        <dt>Start (prose)</dt><dd>{{ node.start_date_prose }}</dd>
+        {% endif %}
+        {% if node.end_date %}
+        <dt>End date</dt><dd>{{ node.end_date }} {% if node.end_date_confidence %}<span class="kg-muted">({{ node.end_date_confidence }})</span>{% endif %}</dd>
+        {% endif %}
+        {% if node.end_date_prose %}
+        <dt>End (prose)</dt><dd>{{ node.end_date_prose }}</dd>
+        {% endif %}
+      </dl>
+    </section>
+    {% endif %}
+
+    <section class="kg-card">
+      <h2>Scoring</h2>
+      <dl class="kg-dl">
+        <dt>Confidence</dt><dd>{{ "%.2f" % node.confidence if node.confidence is not none else "—" }}</dd>
+        <dt>Importance</dt><dd>{{ "%.2f" % node.importance if node.importance is not none else "—" }}</dd>
+        <dt>Source</dt><dd>{{ node.source or "—" }}</dd>
+        <dt>Created</dt><dd>{{ node.created_at or "—" }}</dd>
+        <dt>Updated</dt><dd>{{ node.updated_at or "—" }}</dd>
+      </dl>
+    </section>
+
+    {% if node.out_edges %}
+    <section class="kg-card">
+      <h2>Out-edges ({{ node.out_edges | length }})</h2>
+      <ul class="kg-edges">
+        {% for e in node.out_edges %}
+        <li>
+          <span class="kg-rel">{{ e.relationship_type }}{% if e.relationship_descriptor %} [{{ e.relationship_descriptor }}]{% endif %}</span> &rarr;
+          <a href="{{ url_for('kg_node_viewer.kg_node_view', node_id=e.other.id) }}">{{ e.other.label }}</a>
+          <span class="kg-muted">[{{ e.other.node_type }}]</span>
+          {% if e.sentence %}<div class="kg-sent">{{ e.sentence }}</div>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+
+    {% if node.in_edges %}
+    <section class="kg-card">
+      <h2>In-edges ({{ node.in_edges | length }})</h2>
+      <ul class="kg-edges">
+        {% for e in node.in_edges %}
+        <li>
+          <a href="{{ url_for('kg_node_viewer.kg_node_view', node_id=e.other.id) }}">{{ e.other.label }}</a>
+          <span class="kg-muted">[{{ e.other.node_type }}]</span> &rarr;
+          <span class="kg-rel">{{ e.relationship_type }}{% if e.relationship_descriptor %} [{{ e.relationship_descriptor }}]{% endif %}</span>
+          {% if e.sentence %}<div class="kg-sent">{{ e.sentence }}</div>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+
+    {% if provenance %}
+    <section class="kg-card">
+      <h2>Provenance ({{ provenance | length }} window(s))</h2>
+      {% for p in provenance %}
+      <div class="kg-window">
+        <h3>Window {{ p.window_id[:8] }}</h3>
+        {% if p.evidence %}
+        <div class="kg-evidence">
+          {% for ev in p.evidence %}
+          <div class="kg-ev-line"><strong>{{ ev.action }}:</strong> {{ ev.sentence }}</div>
+          {% endfor %}
+        </div>
+        {% endif %}
+        <ol class="kg-window-items">
+          {% for it in p.window_items %}
+          <li>
+            <span class="kg-role">{{ it.role }}/{{ it.speaker or "—" }}:</span>
+            {{ it.text }}
+          </li>
+          {% endfor %}
+        </ol>
+      </div>
+      {% endfor %}
+    </section>
+    {% endif %}
+
+    {% if proposals %}
+    <section class="kg-section">
+      <h2>Referenced by {{ proposals | length }} proposal(s)</h2>
+      <ul class="kg-proposals">
+        {% for p in proposals %}
+        <li class="kg-proposal-item">
+          <a href="/kg-proposals/{{ p.id }}" target="_blank">
+            <code>{{ p.short_id }}</code>
+          </a>
+          <span class="kg-proposal-status kg-status-{{ p.status }}">{{ p.status }}</span>
+          <span class="kg-proposal-type">{{ p.claim_type }}</span>
+          <span class="kg-proposal-role">as {{ p.role_in_proposal }} ({{ p.resolution_action }})</span>
+          {% if p.representative_sentence %}
+          <div class="kg-proposal-sentence">{{ p.representative_sentence }}</div>
+          {% endif %}
+          <div class="kg-proposal-time">{{ p.created_at }}</div>
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+  </div>
+</body>
+</html>

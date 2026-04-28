@@ -1,0 +1,45 @@
+{
+  "name": "web_click_xy_snapshot",
+  "description": "Click by coordinates and bundle fresh browser_snapshot refs in the same result.",
+  "inputs": [
+    {
+      "name": "x",
+      "type": "number",
+      "required": true,
+      "description": "Viewport X coordinate."
+    },
+    {
+      "name": "y",
+      "type": "number",
+      "required": true,
+      "description": "Viewport Y coordinate."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Click execution summary plus bundled browser_snapshot text."
+    },
+    {
+      "path": "data.snapshot_text",
+      "type": "string",
+      "description": "Bundled browser_snapshot output with refs."
+    },
+    {
+      "path": "data.snapshot_id",
+      "type": "string",
+      "description": "Unique id for this bundled snapshot capture."
+    }
+  ],
+  "arguments_prompt": "Return ONLY {\"x\":123,\"y\":456}",
+  "metadata": {
+    "domain": "browser",
+    "actions": [
+      "click"
+    ],
+    "selectors": [
+      "coords"
+    ]
+  }
+}

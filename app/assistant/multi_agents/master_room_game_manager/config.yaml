@@ -1,0 +1,42 @@
+name: master_room_game_manager
+class_name: MultiAgentManager
+description: "Isolated subroom manager for master-room geoguessr game mode."
+max_cycles: 16
+
+role_bindings:
+  delegator: room::delegator
+
+agents:
+  - name: room::delegator
+    class: Delegator
+  - name: master_room::geoguessr_host
+    class: Agent
+  - name: master_room::geoguessr_analyst
+    class: Agent
+
+control_nodes:
+  - name: geoguessr_router_node
+    class: GeoguessrRouterNode
+  - name: final_answer_node
+    class: FinalAnswerNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+
+tools:
+  allowed_tools: []
+  except_tools: []
+
+flow_config:
+  strict_routing: true
+  flow:
+    game_mode:
+      source_agent: "master_room::geoguessr_host"
+  game_mode:
+    source_agent: "master_room::geoguessr_host"
+    final_node: "final_answer_node"
+    chat_response_key: "chat_response"
+  state_map:
+    "room::delegator": "master_room::geoguessr_host"
+    "master_room::geoguessr_host": "geoguessr_router_node"
+    "geoguessr_router_node": "final_answer_node"
+    "final_answer_node": "manager_exit_node"

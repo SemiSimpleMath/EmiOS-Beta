@@ -1,0 +1,20 @@
+name: knowledge_graph_add::edge_merger
+agent_class: "Agent"
+class_name: Agent
+llm_params:
+  engine: gpt-5.4-mini
+  model_tier: "mini"
+  llm_provider: "openai"
+allowed_tools: []
+except_tools: []
+user_context_items:
+  - new_edge_data
+  - existing_edge_candidates
+  - entity_level_0
+system_context_items:
+  - resource_user_data
+type: agent
+
+entity_scan_keys: [new_edge_data]
+entity_detection_keys:
+  - new_edge_data

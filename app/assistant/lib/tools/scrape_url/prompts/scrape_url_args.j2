@@ -1,0 +1,15 @@
+Provide arguments for the scrape tool. The scrape tool fetches website content and optionally extracts relevant portions.
+
+Arguments:
+- url (str, required): The webpage URL to scrape
+- query (str, optional): What to extract from the page
+  - If provided: scraper agent extracts only content relevant to this query
+  - If empty/omitted: returns the entire page content without summarization
+
+Example with query:
+{"url": "https://example.com/menu", "query": "Find restaurant hours and prices"}
+
+Example without query (full page):
+{"url": "https://example.com/menu", "query": ""}
+or
+{"url": "https://example.com/menu"}

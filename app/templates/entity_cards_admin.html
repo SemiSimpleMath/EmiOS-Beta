@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Entity Cards — Admin</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --panel-soft: #1f2937;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --ok: #10b981;
+      --warn: #f59e0b;
+      --bad: #ef4444;
+      --info: #60a5fa;
+      --line: #374151;
+      --chip: #334155;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; font-size: 14px; }
+    .container { max-width: 1440px; margin: 0 auto; padding: 20px; }
+
+    .topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
+    .topbar h1 { font-size: 22px; font-weight: 600; }
+    .topbar .note { color: var(--muted); font-size: 12px; }
+
+    .status-strip {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 12px 16px;
+      margin-bottom: 18px;
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .status-strip.idle { border-color: var(--line); }
+    .status-strip.running { border-color: var(--info); }
+    .status-strip .label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 2px; }
+    .status-strip .value { font-size: 13px; }
+    .status-pulse { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+    .status-pulse.running { background: var(--info); animation: pulse 1.2s ease-in-out infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+    .filters { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; align-items: center; }
+    .filters input, .filters select {
+      background: var(--panel-soft); color: var(--text);
+      border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px;
+    }
+    .filters input:focus, .filters select:focus { outline: 2px solid var(--info); }
+    .filters label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+
+    .btn {
+      padding: 6px 14px; border-radius: 5px; border: none; cursor: pointer;
+      font-size: 12px; font-weight: 600;
+    }
+    .btn-primary { background: #1d4ed8; color: #fff; }
+    .btn-v2 { background: #0e7490; color: #fff; font-size: 11px; padding: 6px 10px; }
+    .btn-danger  { background: #991b1b; color: #fff; }
+    .btn-ghost   { background: var(--panel-soft); color: var(--text); border: 1px solid var(--line); }
+    .btn:hover   { opacity: 0.85; }
+    .btn:disabled { opacity: 0.4; cursor: default; }
+
+    .toolbar { margin-left: auto; display: flex; gap: 8px; }
+
+    .counts { color: var(--muted); font-size: 12px; }
+
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    thead th { background: var(--panel); font-weight: 600; padding: 10px 14px; text-align: left; border-bottom: 2px solid var(--line); white-space: nowrap; }
+    tbody tr { border-bottom: 1px solid var(--line); }
+    tbody tr:hover { background: var(--panel-soft); }
+    td { padding: 9px 14px; vertical-align: top; }
+
+    .name { font-weight: 600; }
+    .node-id { font-family: monospace; font-size: 10px; color: var(--muted); }
+    .summary { color: var(--muted); font-size: 13px; max-width: 480px; }
+    .pill {
+      display: inline-block; padding: 2px 8px; border-radius: 4px;
+      font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+    }
+    .pill-suspicious { background: #450a0a; color: var(--bad); }
+    .pill-type { background: var(--chip); color: var(--text); }
+
+    .row-action { display: flex; gap: 6px; }
+    .msg { padding: 10px 14px; border-radius: 6px; margin-bottom: 12px; display: none; }
+    .msg.ok { background: #052e16; color: var(--ok); display: block; }
+    .msg.err { background: #450a0a; color: var(--bad); display: block; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="topbar">
+      <div>
+        <h1>Entity Cards — Admin</h1>
+        <div class="note">Regenerate cards from the current KG. Generation is serial: one card at a time.</div>
+      </div>
+    </div>
+
+    <div id="status-strip" class="status-strip idle">
+      <div><span id="status-pulse" class="status-pulse"></span></div>
+      <div>
+        <div class="label">Status</div>
+        <div class="value" id="status-label">Idle</div>
+      </div>
+      <div>
+        <div class="label">Mode</div>
+        <div class="value" id="status-mode">—</div>
+      </div>
+      <div>
+        <div class="label">Progress</div>
+        <div class="value" id="status-progress">—</div>
+      </div>
+      <div>
+        <div class="label">Current</div>
+        <div class="value" id="status-current">—</div>
+      </div>
+      <div>
+        <div class="label">Last finished</div>
+        <div class="value" id="status-last">—</div>
+      </div>
+    </div>
+
+    <div id="msg" class="msg"></div>
+
+    <div class="filters">
+      <input id="q" type="text" placeholder="Search name / summary…" oninput="debouncedLoad()">
+      <select id="type" onchange="loadList()">
+        <option value="">All types</option>
+      </select>
+      <label><input type="checkbox" id="suspicious_only" onchange="loadList()"> Only suspicious (placeholder text)</label>
+      <div class="toolbar">
+        <span class="counts" id="counts"></span>
+        <button class="btn btn-ghost" onclick="loadList()">Refresh</button>
+        <button class="btn btn-primary" onclick="regenerateAll(false)">Regenerate all in filter</button>
+        <button class="btn btn-danger" onclick="regenerateAll(true)">Regenerate suspicious only</button>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Type</th>
+            <th>Summary preview</th>
+            <th>Flags</th>
+            <th>Updated</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="rows">
+          <tr><td colspan="6" style="color: var(--muted); text-align: center; padding: 40px;">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const trunc = (s, n) => { s = String(s ?? ''); return s.length > n ? s.slice(0, n) + '…' : s; };
+
+    let debounceTimer = null;
+    function debouncedLoad() {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(loadList, 250);
+    }
+
+    function showMsg(text, kind) {
+      const el = document.getElementById('msg');
+      el.textContent = text;
+      el.className = 'msg ' + (kind || 'ok');
+      setTimeout(() => { el.className = 'msg'; }, 6000);
+    }
+
+    async function loadList() {
+      const q = document.getElementById('q').value;
+      const type = document.getElementById('type').value;
+      const suspicious = document.getElementById('suspicious_only').checked ? '1' : '0';
+      const params = new URLSearchParams({ q, type, suspicious_only: suspicious, limit: '500' });
+      const tbody = document.getElementById('rows');
+      try {
+        const res = await fetch('/entity-cards-admin/api/list?' + params.toString());
+        const data = await res.json();
+        if (data.error) { tbody.innerHTML = `<tr><td colspan="6" style="color:var(--bad)">${esc(data.error)}</td></tr>`; return; }
+        renderRows(data.cards);
+        const c = document.getElementById('counts');
+        c.textContent = `${data.returned} shown · ${data.suspicious_total} suspicious · ${data.total} total`;
+        populateTypesFromRows(data.cards);
+      } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="6" style="color:var(--bad)">Failed to load: ${esc(e.message)}</td></tr>`;
+      }
+    }
+
+    function populateTypesFromRows(cards) {
+      const sel = document.getElementById('type');
+      const current = sel.value;
+      const types = Array.from(new Set(cards.map(c => c.entity_type).filter(Boolean))).sort();
+      if (sel.options.length - 1 !== types.length) {
+        sel.innerHTML = '<option value="">All types</option>' + types.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
+        if (types.includes(current)) sel.value = current;
+      }
+    }
+
+    function renderRows(cards) {
+      const tbody = document.getElementById('rows');
+      if (!cards.length) {
+        tbody.innerHTML = `<tr><td colspan="6" style="color:var(--muted); text-align:center; padding:40px;">No cards match.</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = cards.map(c => `
+        <tr>
+          <td>
+            <div class="name">${esc(c.entity_name)}</div>
+            <div class="node-id">${esc((c.source_node_id || '').slice(0,12))}</div>
+          </td>
+          <td><span class="pill pill-type">${esc(c.entity_type || '—')}</span></td>
+          <td class="summary">${esc(trunc(c.summary, 220))}</td>
+          <td>${c.suspicious ? '<span class="pill pill-suspicious">suspicious</span>' : ''}</td>
+          <td style="font-size:11px; color:var(--muted);">${esc(c.updated_at || '')}</td>
+          <td class="row-action">
+            <button class="btn btn-primary" onclick="regenerateOne('${esc(c.id)}', this)">Regenerate</button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    async function regenerateOne(cardId, btn) {
+      const originalLabel = btn ? btn.textContent : '';
+      if (btn) { btn.disabled = true; btn.textContent = 'Working…'; }
+      try {
+        const res = await fetch(`/entity-cards-admin/api/regenerate_v2/${cardId}`, { method: 'POST' });
+        if (res.status === 409) {
+          showMsg('Another generation run is active. Wait for it to finish.', 'err');
+          return;
+        }
+        const data = await res.json();
+        if (data.error) { showMsg('Regen failed: ' + data.error, 'err'); return; }
+        const status = data.result?.status || 'ok';
+        showMsg(`Regenerated: status=${status}`, status === 'error' ? 'err' : 'ok');
+        loadList();
+      } catch (e) {
+        showMsg('Regen error: ' + e.message, 'err');
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = originalLabel; }
+      }
+    }
+
+    async function regenerateAll(suspiciousOnly) {
+      const type = document.getElementById('type').value;
+      const body = { type, suspicious_only: suspiciousOnly };
+      const label = suspiciousOnly ? 'suspicious only' : (type ? `type "${type}"` : 'all active cards');
+      if (!confirm(`Regenerate ${label}? This can take a while.`)) return;
+      try {
+        const res = await fetch('/entity-cards-admin/api/regenerate_all', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (res.status === 409) {
+          showMsg('Another generation run is active. Wait for it to finish.', 'err');
+          return;
+        }
+        const data = await res.json();
+        if (data.error) { showMsg('Bulk regen refused: ' + data.error, 'err'); return; }
+        showMsg(`Bulk regen started (${data.total} candidates). Progress in status strip.`, 'ok');
+      } catch (e) {
+        showMsg('Bulk regen error: ' + e.message, 'err');
+      }
+    }
+
+    async function pollStatus() {
+      try {
+        const res = await fetch('/entity-cards-admin/api/status');
+        const s = await res.json();
+        const strip = document.getElementById('status-strip');
+        const pulse = document.getElementById('status-pulse');
+        document.getElementById('status-label').textContent = s.running ? 'Running' : 'Idle';
+        document.getElementById('status-mode').textContent = s.mode || '—';
+        document.getElementById('status-progress').textContent = s.total ? `${s.current_idx}/${s.total}` : '—';
+        document.getElementById('status-current').textContent = s.current_label || '—';
+        document.getElementById('status-last').textContent = s.finished_at_utc || '—';
+        strip.className = 'status-strip ' + (s.running ? 'running' : 'idle');
+        pulse.className = 'status-pulse ' + (s.running ? 'running' : '');
+      } catch (e) { /* swallow */ }
+    }
+
+    loadList();
+    pollStatus();
+    setInterval(pollStatus, 2000);
+  </script>
+</body>
+</html>

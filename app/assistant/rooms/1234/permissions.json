@@ -1,0 +1,13 @@
+{
+  "tool_classes": {
+    "informational": true,
+    "transformational": true,
+    "external_action": false,
+    "sensitive": false
+  },
+  "delivery": {
+    "auto_send": true,
+    "allow_initiation": false
+  },
+  "allow_images": false
+}

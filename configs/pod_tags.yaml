@@ -1,0 +1,70 @@
+# Pod tag registry — the central vocabulary the pod_classifier uses when
+# tagging conversation bursts. Consumer agents subscribe to tags via their
+# pod_interest.tags list; a pod gets routed to any agent subscribing to any
+# tag on the pod.
+#
+# Guidelines for adding tags:
+#   - Keep descriptions concrete. The classifier LLM reads them verbatim.
+#   - Include 2-3 examples. They set the threshold for what counts.
+#   - Tag names are lowercase, underscore-separated, short.
+#   - Prefer broader tags that multiple agents can share. Narrow per-agent
+#     tags cause fragmentation.
+tags:
+  food:
+    description: >
+      Eating, drinking, meals, snacks, groceries, restaurants, cooking,
+      recipes, individual food mentions, dietary choices, hydration.
+    examples:
+      - "I had açai for breakfast"
+      - "picked up groceries on the way home"
+      - "AMC popcorn is way too salty"
+
+  entertainment:
+    description: >
+      Movies, TV shows, music, video games, live events, books, podcasts,
+      sports watching, leisure activities.
+    examples:
+      - "watched The Good, the Bad and the Ugly last night"
+      - "playing RDR2 this afternoon"
+      - "heading to a concert Friday"
+
+  health:
+    description: >
+      Physical or mental health signals — sleep quality, exercise, symptoms,
+      medications, energy level, pain, mood, stress. Does NOT include food
+      (use "food"); does NOT include calendar events like doctor appointments
+      (use "schedule" for those).
+    examples:
+      - "slept poorly last night, rough day"
+      - "back pain flaring up again"
+      - "did a 30 min walk this morning"
+
+  schedule:
+    description: >
+      Calendar events, meetings, travel plans, appointments, deadlines,
+      timing commitments. Anything with a when-and-where shape.
+    examples:
+      - "meeting with Dr. X tomorrow at 3pm"
+      - "flying to NYC Friday morning"
+      - "dinner with the Andersons Saturday"
+
+  work:
+    description: >
+      Substantive professional work: coding discussions, project
+      decisions, technical problem-solving, deliverables, job-related
+      issues. The user is talking ABOUT their work.
+      Does NOT include tool/admin churn — email trashing, task-runner
+      bookkeeping, 'run task X' imperatives, tool execution output,
+      or the assistant's acknowledgement-only replies. Those are
+      machine chatter, not work signal, and the burst should mint no
+      pod.
+    examples:
+      - "spent the afternoon refactoring the auth service"
+      - "need to finish the deck before Monday"
+      - "stuck on a bug in the pod classifier"
+    counter_examples:
+      - "trash all emails from: peacocktv.com"       # admin command
+      - "run task spammer_finder"                    # admin command
+      - "Moved 250 emails from X to Trash"           # tool output
+      - "Task 'spammer finder' completed"            # bookkeeping
+      - "[THIS TASK IS ALREADY IN FLIGHT - DO NOT RE-ATTEMPT]"  # bookkeeping

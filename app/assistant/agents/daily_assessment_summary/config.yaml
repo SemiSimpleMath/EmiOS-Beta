@@ -1,0 +1,16 @@
+name: daily_assessment_summary
+class_name: Agent
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.1"
+  model_tier: "smart"
+
+allowed_tools: []
+except_tools: []
+
+user_context_items:
+  - task
+  - daily_assessment_json
+
+system_context_items: []
+

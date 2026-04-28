@@ -1,0 +1,43 @@
+Review multiple taxonomy classification candidates:
+
+## Node to Classify
+**Label:** {{ node_label }}
+{% if node_category %}**Category:** {{ node_category }}{% endif %}
+**Type:** {{ node_type }}
+**Context:** {{ node_sentence }}
+
+## Candidate Paths
+
+The classification system found {{ candidates|length }} possible paths:
+
+{% for candidate in candidates %}
+**Candidate {{ candidate.rank }}**
+**Path:** {{ candidate.path }}
+**Taxonomy Structure:**
+    {{ candidate.path_descriptions }}
+
+{% endfor %}
+
+## Your Task
+
+Review all candidates and decide:
+1. **APPROVE** one candidate if any are acceptable (specify which rank: 1, 2, 3, etc.)
+2. **REJECT** all candidates if none are acceptable (path corrector will find a better path)
+
+## Evaluation Criteria
+
+For each candidate, ask:
+- Does it follow proper IS-A relationships?
+- Is it at an appropriate level of specificity?
+- Does the node clearly fit in this taxonomy branch?
+- Does the path make semantic sense?
+
+**Remember:**
+- **Entity taxonomy is flat**: `entity > person`, `entity > organization`, `entity > location` are LEAF nodes
+  - Modifiers like "professional", "student", "adult" are **states** or **roles**, NOT entity subtypes
+  - Example: A "professional person" is classified as `entity > person` (entity) + `state > role > professional` (state)
+- **Compare candidates**: One might be clearly better than others
+- **Judge semantic correctness**: Focus on IS-A relationships and fit
+
+Provide your decision:
+

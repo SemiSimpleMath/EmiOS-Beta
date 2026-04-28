@@ -1,0 +1,48 @@
+﻿**Description:**
+Description is describing what this node is based on the data we have seen about it.
+- **Comprehensive Strategy**: Use the most important information, ignore the rest.
+- **Length & Focus**: 1-5 sentences maximum (more only for very high importance entities)
+- **Content Hierarchy**: Prioritize core facts over preferences and minor details
+- **Core Facts (Keep)**: Life-defining traits, personality traits, important roles, specific names/details
+- **Non-Core Facts (Drop)**: Preferences, minor details, vague information
+- **Quality Principle**: Better to remove entirely than water down strong facts
+- **Language Style**: Use rich, descriptive language instead of dry facts
+- **Information Integration**: Merge meaningful facts from existing descriptions with new information from sentences
+- **Incremental Building**: When combining information, preserve the most important facts and drop less significant ones
+- **Specificity**: Use specific names/details (e.g., "his wife, Sam" not just "his wife")
+- **Always Provide**: Always provide a description unless no meaningful information is available from any source
+- ** When writing the description keep more significant facts that define the entity more fundamentally
+- **If a description becomes bloated, summarize it in a shorter way, dropping insignificant facts and keep core facts that describe the node.
+- **Most important facts should come first in the description. Rewrite the description to maintain strong core facts first and then less important facts
+at end.  This way the less important facts can be dropped more easily.
+- **Sometimes a new set of facts will contribute nothing useful and the old description is stronger, it is then ok to discard the new fact learned.
+     Preserve the most important facts, but discard less significant ones as more relevant information emerges.  It is ok to drop things from the
+     description to keep it from becoming too bloated as long as core facts are kept.  We aim for a concise summary of the node, not to list every
+     fact that can be found under the node.
+
+     **Example 1: Description Building (Comprehensive - All Sources)**
+     - Existing: description="Software engineer at tech startup", sentence="{{ resource_user_data.preferred_name }} works at a startup developing web applications"
+     - New: description=null, sentence="{{ resource_user_data.preferred_name }} is developing AI applications and leads the engineering team"
+     - Merged: "Software engineer at a tech startup who leads the engineering team and develops AI applications and web applications"
+     - Reasoning: "Combined existing description with information from both sentences, prioritizing leadership role and technical expertise while keeping description concise"
+
+     **Example 2: Description Building (Both Have Descriptions + Sentences)**
+     - Existing: description="Senior data scientist at Google", sentence="Sarah is a data scientist working on machine learning projects"
+     - New: description="AI researcher with published papers", sentence="Sarah specializes in natural language processing and has published research papers"
+     - Merged: "Senior data scientist at Google and AI researcher who specializes in machine learning and natural language processing with published research papers"
+     - Reasoning: "Combined both existing descriptions with information from both sentences, prioritizing role, company, and expertise while keeping description focused and concise"
+
+     **Example 3: Description Building (From Sentences Only)**
+     - Existing: description=null, sentence="Sarah is a data scientist working on machine learning projects"
+     - New: description=null, sentence="Sarah specializes in natural language processing and has published research papers"
+     - Merged: "Data scientist specializing in machine learning and natural language processing with published research papers"
+     - Reasoning: "Built focused description from both sentences, prioritizing core professional identity and expertise while keeping description concise"
+
+     **Example 4: Description Quality (Core Facts vs Preferences)**
+     - Existing: description="{{ resource_user_data.preferred_name }} is married to Sam and works as a software engineer", sentence="{{ resource_user_data.preferred_name }} likes Mexican food and enjoys hiking"
+     - New: description=null, sentence="{{ resource_user_data.preferred_name }} is developing AI applications and leads a team of engineers"
+     - Merged: "Software engineer who is married to Sam and leads a team developing AI applications"
+     - Reasoning: "Prioritized core facts (marriage, leadership role, technical expertise) over preferences (food, hobbies), keeping description focused on defining characteristics"
+
+
+- `merged_description`: Combined description (use ALL available information - existing descriptions AND sentences from both nodes, or null only if no meaningful information available)

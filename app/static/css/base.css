@@ -1,0 +1,75 @@
+@import url("https://fonts.googleapis.com/css?family=Raleway|Ubuntu&display=swap");
+@import url('https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,100;0,300;0,400;0,500;0,700;0,900;1,100;1,300;1,400;1,500;1,700;1,900&display=swap')
+body {
+    background: #343540;
+    padding: 0;
+    margin: 0;
+    font-family: Raleway;
+}
+
+
+  /* Base Button Styles */
+  button {
+      background-color: #0056b3; /* A professional shade of blue */
+      color: #ffffff;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 5px; /* Rounded corners */
+      text-transform: uppercase; /* Makes text uppercase */
+      font-weight: bold;
+      letter-spacing: 1px; /* Spacing between letters */
+      transition: background-color 0.3s, box-shadow 0.3s, transform 0.3s; /* Smooth transitions for interaction */
+      cursor: pointer; /* Cursor changes to a hand icon when hovered over */
+      outline: none; /* Removes the outline to keep the design clean */
+  }
+
+  /* Hover State */
+  . no-touch-device button:hover {
+      background-color: #003d82; /* A darker shade of blue for the hover state */
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); /* Adds a subtle shadow to lift the button */
+  }
+
+  /* Active State */
+  button:active {
+      background-color: #004080; /* Even darker for the active state */
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); /* Less shadow to give the effect of being pressed */
+  }
+
+  /* Focus State */
+  button:focus {
+
+  }
+
+  /* Disabled State */
+  button:disabled {
+      background-color: #cccccc;
+      color: #666666;
+      cursor: not-allowed; /* Shows that the button is not clickable */
+      box-shadow: none; /* No shadow for disabled state */
+  }
+
+
+main{
+font-family: Söhne, ui-sans-serif, system-ui, -apple-system, Roboto, "Segoe UI", Ubuntu, Cantarell, "Noto Sans", sans-serif, "Helvetica Neue", Arial, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+}
+
+body, hmtl
+{
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+}
+
+select {
+    color: #444;
+    background-color: #fff;
+    border: 1px solid #ddd;
+    padding: 3px 5px;
+    border-radius: 5px;
+}
+
+select:hover, select:focus {
+    border-color: #999;
+    box-shadow: 0 0 8px rgba(0, 0, 0, 0.1);
+}
+

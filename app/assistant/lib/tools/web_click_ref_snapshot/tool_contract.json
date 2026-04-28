@@ -1,0 +1,45 @@
+{
+  "name": "web_click_ref_snapshot",
+  "description": "Click by browser_snapshot ref and bundle fresh browser_snapshot refs in the same result.",
+  "inputs": [
+    {
+      "name": "ref",
+      "type": "string",
+      "required": true,
+      "description": "Target ref id from browser_snapshot."
+    },
+    {
+      "name": "element",
+      "type": "string",
+      "required": false,
+      "description": "Optional element label/context."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Click execution summary plus bundled browser_snapshot text."
+    },
+    {
+      "path": "data.snapshot_text",
+      "type": "string",
+      "description": "Bundled browser_snapshot output with refs."
+    },
+    {
+      "path": "data.snapshot_id",
+      "type": "string",
+      "description": "Unique id for this bundled snapshot capture."
+    }
+  ],
+  "arguments_prompt": "Return ONLY {\"ref\":\"e10\",\"element\":\"...optional...\"}",
+  "metadata": {
+    "domain": "browser",
+    "actions": [
+      "click"
+    ],
+    "selectors": [
+      "ref"
+    ]
+  }
+}

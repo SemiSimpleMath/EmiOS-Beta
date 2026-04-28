@@ -1,0 +1,55 @@
+{
+  "name": "append_text_file",
+  "description": "- **Purpose**: Append text to a file inside the repo.\n- **Arguments**:\n  - `file_path` (str, required): Path to the file (relative to repo root or absolute within repo).\n  - `content` (str, required): Text to append.\n  - `ensure_newline` (bool, optional): Ensure a trailing newline.",
+  "inputs": [
+    {
+      "name": "file_path",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "content",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "ensure_newline",
+      "type": "boolean",
+      "required": false,
+      "description": ""
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "- file_path: str\n- content: str\n- ensure_newline: bool",
+  "metadata": {
+    "category": "files",
+    "verbs": [
+      "write"
+    ],
+    "entities": [
+      "file"
+    ],
+    "risk_level": "medium",
+    "side_effects": "writes_data",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

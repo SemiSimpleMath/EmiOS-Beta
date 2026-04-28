@@ -1,0 +1,24 @@
+Evaluate this watch registration against this signal.
+
+{% if watch_registration %}
+## Watch Registration
+{{ watch_registration | tojson(indent=2) }}
+{% else %}
+## Watch Registration
+{}
+{% endif %}
+
+{% if signal %}
+## Signal
+{{ signal | tojson(indent=2) }}
+{% else %}
+## Signal
+{}
+{% endif %}
+
+{% if filter_decision %}
+## Deterministic Filter Decision
+{{ filter_decision | tojson(indent=2) }}
+{% endif %}
+
+Output the structured decision.

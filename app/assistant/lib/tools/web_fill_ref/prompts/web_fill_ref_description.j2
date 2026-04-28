@@ -1,0 +1,12 @@
+web_fill_ref:
+Atomic "click-ref + clear + type + Enter" using a snapshot ref.
+
+Same as web_fill_xy but clicks a snapshot ref instead of coordinates.
+Use this when the target input element is in the accessibility snapshot — no need to find coordinates first.
+
+Arguments:
+- ref: snapshot ref of the input element
+- text: what to type
+- submit: press Enter after typing (default true)
+- clear_first: clear before typing (default true)
+- capture_snapshot: include a `browser_snapshot` immediately after action (default true)

@@ -1,0 +1,164 @@
+name: personal_admin_manager
+class_name: MultiAgentManager
+description: "Personal admin manager for calendar, todo, reminders, and email workflows."
+max_cycles: 60
+role_bindings:
+  delegator: personal_admin::delegator
+  tool_selector: shared::tool_selector
+
+agents:
+  - name: personal_admin::delegator
+    class: Delegator
+  - name: personal_admin::planner
+    class: Planner
+  - name: emi_team::summary
+    class: Agent
+  - name: personal_admin::final_answer
+    class: Agent
+
+control_nodes:
+  - name: tool_return_router
+    class: ToolReturnRouter
+  - name: summary_pre_node
+    class: SummaryPreNode
+    config:
+      enabled: true
+      summary_agent: "emi_team::summary"
+      resume_agent: "personal_admin::planner"
+      planner_agent: "personal_admin::planner"
+      cadence_every_actions: 4
+      min_messages: 30
+      trigger_on_large_result_chars: 5000
+      allow_summarize_latest_tool_result: false
+      protect_last_n_results: 3
+  - name: summary_post_node
+    class: SummaryPostNode
+    config:
+      summary_agent: "emi_team::summary"
+      resume_agent: "personal_admin::planner"
+  - name: tool_caller
+    class: ToolCaller
+  - name: tool_result_handler
+    class: ToolResultHandler
+  - name: return_control
+    class: ReturnControlNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+  - name: graceful_exit_control_node
+    class: GracefulExitControlNode
+
+tool_visibility:
+  always_show:
+    - get_email_stats
+    - get_email_messages
+    - get_important_emails
+    - get_email_thread
+    - send_email
+    - trash_emails
+    - get_calendar_events
+    - get_todo_tasks
+    - ask_user
+    - notify_user
+  use_narrower: false
+
+tools:
+  allowed_tools:
+    - get_important_emails
+    - get_email_thread
+    - get_email_stats
+    - get_email_messages
+    - send_email
+    - trash_emails
+    - find_calendar_event_by_name
+    - get_calendar_events
+    - create_calendar_event
+    - create_repeating_calendar_event
+    - update_calendar_event
+    - delete_calendar_event
+    - delete_repeating_calendar_event
+    - get_todo_tasks
+    - create_todo_task
+    - update_todo_task
+    - delete_todo_task
+    - get_scheduler_events
+    - create_scheduler_event
+    - create_repeating_scheduler_event
+    - delete_scheduler_event
+    - get_google_doc
+    - edit_google_doc
+    - create_google_doc
+    - ask_user
+    - notify_user
+    - ask_kg
+    - pod_fetch
+    - pod_search
+  except_tools: []
+
+scope_contract:
+  tools:
+    allowed_tools:
+      - get_important_emails
+      - get_email_thread
+      - get_email_stats
+      - get_email_messages
+      - send_email
+      - trash_emails
+      - find_calendar_event_by_name
+      - get_calendar_events
+      - create_calendar_event
+      - create_repeating_calendar_event
+      - update_calendar_event
+      - delete_calendar_event
+      - delete_repeating_calendar_event
+      - get_todo_tasks
+      - create_todo_task
+      - update_todo_task
+      - delete_todo_task
+      - get_scheduler_events
+      - create_scheduler_event
+      - create_repeating_scheduler_event
+      - delete_scheduler_event
+      - get_google_doc
+      - edit_google_doc
+      - create_google_doc
+      - ask_user
+      - notify_user
+      - ask_kg
+      - pod_fetch
+      - pod_search
+    blocked_tools:
+      - install_tool
+      - mcp::npm/playwright-mcp::browser_run_code
+    requires_approval_tools: []
+    allow_external_side_effects: false
+
+flow_config:
+  strict_routing: true
+  tool_return:
+    tool_call_result_handler_node: "tool_result_handler"
+  summary:
+    enabled: true
+    source_agent: "tool_return_router"
+    summary_agent: "emi_team::summary"
+    resume_agent: "personal_admin::planner"
+    planner_agent: "personal_admin::planner"
+    cadence_every_actions: 4
+    action_count_state_key: "{planner_agent}_action_count"
+    min_messages: 30
+    trigger_on_large_result_chars: 5000
+    payload_key: "summary_payload"
+    payload_recent_history_messages: 120
+    allow_summarize_latest_tool_result: false
+    protect_last_n_results: 3
+  state_map:
+    "personal_admin::delegator": "personal_admin::planner"
+    "personal_admin::planner": "tool_caller"
+    "tool_result_handler": "tool_return_router"
+    "tool_return_router": "summary_pre_node"
+    "summary_pre_node": "personal_admin::planner"
+    "emi_team::summary": "summary_post_node"
+    "summary_post_node": "personal_admin::planner"
+    "personal_admin::planner_return_control": "personal_admin::final_answer"
+    "personal_admin::final_answer": "manager_exit_node"
+    "graceful_exit": "graceful_exit_control_node"
+    "graceful_exit_control_node": "personal_admin::final_answer"

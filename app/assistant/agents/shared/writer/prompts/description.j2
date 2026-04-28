@@ -1,0 +1,6 @@
+Compiles material that has been already discussed by the agents and compiles them to a form asked. eg. Report or an email.
+This agent does not do anything else besides create text from transcripts.  After this agent finishes writing you will still need to
+then use a tool to email the text or do something else with it. Writer agent should not be used to compile a final report for the user!  The final report is automatically formed when the task is declared done.
+    Action: {{ self_name }}
+    Action Input: is the all the instructions for the agent. Tell the write what to write, be as specific as you can and make sure it has all the info.
+    Note that while writer can produce an email text, you will still need to use tools to send the email. Writer starts with no context.  Whatever you do not pass it does not know.

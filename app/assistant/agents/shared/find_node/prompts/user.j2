@@ -1,0 +1,24 @@
+Today is {{ date_time }}.
+
+Your search task:
+{{ agent_task }}
+
+{% if find_node_checklist %}
+This is our previous checklist that you have to now update.  You may also add sub-goals to the checklist.  Do not get stuck thinking you must
+check off every single part.  Often main goal can be achieved by abandoning some goals or sub-goals or deciding that a check item has been closely enough satisfied.
+{{ find_node_checklist }}
+{% else %}
+  This is our first action.  We have not done anything yet. So summary will be blank.  We just need to come up with a plan and action.
+{% endif %}
+
+{% if find_node_found_information %}
+This is information found so far that might be used to build final answer.
+{{ find_node_found_information}}
+{% endif %}
+
+{% if recent_history %}
+Things that happened since last time you made a plan from oldest to latest.  Last thing is most recent tool result that you have to evaluate:
+{{ recent_history }}
+We now have tool result, take verbatim most important things and save in found_information.
+{% endif %}
+

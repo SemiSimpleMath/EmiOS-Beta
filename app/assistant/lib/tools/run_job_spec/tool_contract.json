@@ -1,0 +1,49 @@
+{
+  "name": "run_job_spec",
+  "description": "- **Purpose**: Load a job spec file and run it through an orchestrator.\n- **Arguments**:\n  - `job_file` (str, required): Path to the job spec markdown file.\n  - `orchestrator` (str, optional): Orchestrator type to use (default: orchestrator_test).",
+  "inputs": [
+    {
+      "name": "job_file",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "orchestrator",
+      "type": "string",
+      "required": false,
+      "description": ""
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "- job_file: str\n- orchestrator: str",
+  "metadata": {
+    "category": "orchestration",
+    "verbs": [
+      "run"
+    ],
+    "entities": [
+      "workflow"
+    ],
+    "risk_level": "medium",
+    "side_effects": "writes_data",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "medium",
+    "latency_class": "moderate",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

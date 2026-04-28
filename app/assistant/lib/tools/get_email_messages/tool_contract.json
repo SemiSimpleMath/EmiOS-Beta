@@ -1,0 +1,76 @@
+{
+  "name": "get_email_messages",
+  "description": "Fetch full-fidelity Gmail messages that match a Gmail query. No importance/summarizer filtering is applied.",
+  "inputs": [
+    {
+      "name": "query",
+      "type": "string",
+      "required": true,
+      "description": "Gmail query syntax (for example \"from:user@example.com after:1735689600\")."
+    },
+    {
+      "name": "account_id",
+      "type": "string",
+      "required": false,
+      "description": "Optional Google OAuth account id for per-call mailbox selection (default \"google_user_primary\")."
+    },
+    {
+      "name": "max_results",
+      "type": "integer",
+      "required": false,
+      "description": "Maximum matched messages to return (default 25, max 200)."
+    },
+    {
+      "name": "include_body",
+      "type": "boolean",
+      "required": false,
+      "description": "Whether to include parsed body text (default true)."
+    },
+    {
+      "name": "include_headers",
+      "type": "boolean",
+      "required": false,
+      "description": "Whether to include normalized RFC headers (default true)."
+    },
+    {
+      "name": "body_max_chars",
+      "type": "integer",
+      "required": false,
+      "description": "Maximum body chars per message when include_body=true (default 15000, max 200000)."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "data.messages",
+      "type": "array",
+      "description": "Matched messages with metadata and optional full body/headers."
+    }
+  ],
+  "arguments_prompt": "{\n  \"query\": \"from:user@example.com newer_than:14d\",\n  \"account_id\": \"google_user_primary\",\n  \"max_results\": 50,\n  \"include_body\": true,\n  \"include_headers\": true,\n  \"body_max_chars\": 20000\n}",
+  "metadata": {
+    "domain": "email",
+    "actions": [
+      "search",
+      "read",
+      "fetch"
+    ],
+    "selectors": [
+      "query",
+      "sender",
+      "date_range",
+      "label"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [
+      "google"
+    ],
+    "requires_network": true,
+    "cost_level": "low",
+    "latency_class": "medium",
+    "front_door": true,
+    "room_visibility_default": "show",
+    "approval_required": false,
+    "planner_description": "Fetch full Gmail messages matching a query (body + headers)."
+  }
+}

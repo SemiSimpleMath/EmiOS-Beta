@@ -1,0 +1,32 @@
+# Curated MCP server entry: mcp-github (PyPI)
+#
+# Source:
+# - https://pypi.org/project/mcp-github/
+#
+# Notes:
+# - This server requires a GitHub token via env var `GITHUB_TOKEN`.
+# - We keep a strict allowlist so agents don’t see write-capable tools.
+schema_version: 1
+server_id: pypi/mcp-github
+display_name: "GitHub MCP (mcp-github, PyPI)"
+source: third_party_registry
+
+enabled: true
+
+launch_options:
+  - id: uvx
+    transport: stdio
+    command: uvx
+    args:
+      - mcp-github
+
+policy:
+  default_requires_approval: false
+  max_concurrent_calls: 2
+  call_timeout_seconds: 30
+  max_result_bytes: 400000
+
+tool_allowlist:
+  - search_users
+  - search_repositories
+

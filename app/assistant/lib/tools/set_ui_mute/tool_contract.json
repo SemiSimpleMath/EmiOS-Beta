@@ -1,0 +1,43 @@
+{
+  "name": "set_ui_mute",
+  "description": "Mute, unmute, or toggle Emi UI audio in the active UI client.",
+  "inputs": [
+    {
+      "name": "action",
+      "type": "string",
+      "required": true,
+      "description": "One of: mute, unmute, toggle."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured result payload including action."
+    }
+  ],
+  "arguments_prompt": "set_ui_mute arguments:\naction: one of mute, unmute, toggle",
+  "metadata": {
+    "category": "user_interaction",
+    "verbs": [
+      "operate"
+    ],
+    "entities": [
+      "ui_audio"
+    ],
+    "risk_level": "low",
+    "side_effects": "external_action",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": true,
+    "room_visibility_default": "show",
+    "approval_required": false
+  }
+}

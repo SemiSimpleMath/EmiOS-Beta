@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wellness Reminders</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/setup_wizard.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/wellness_settings.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="setup-container">
+        <div class="setup-header">
+            <h1><i class="fas fa-heartbeat"></i> Wellness Reminders</h1>
+            <p>Configure the activities your assistant will remind you about during the day.</p>
+            <a href="/chat_bot" class="back-link"><i class="fas fa-arrow-left"></i> Back to Chat</a>
+        </div>
+
+        <div id="activities-list"></div>
+
+        <div class="btn-row">
+            <button type="button" class="btn-add" id="add-activity-btn">
+                <i class="fas fa-plus"></i> Add Activity
+            </button>
+            <button type="button" class="btn-save" id="save-btn">
+                <i class="fas fa-save"></i> Save
+            </button>
+        </div>
+        <div id="status-msg" class="status-msg"></div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/wellness_settings.js') }}"></script>
+</body>
+</html>

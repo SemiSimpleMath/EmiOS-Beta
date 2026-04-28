@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Day Flow Pipeline Debug</title>
+    <style>
+        :root {
+            --bg: #1a1a2e;
+            --card-bg: #16213e;
+            --text: #eee;
+            --accent: #0f3460;
+            --highlight: #e94560;
+            --success: #4ecca3;
+            --warning: #ffc107;
+        }
+        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            padding: 20px;
+            min-height: 100vh;
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+            color: var(--highlight);
+        }
+        
+        .controls {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        
+        button {
+            background: var(--highlight);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 0 5px;
+        }
+        
+        button:hover {
+            opacity: 0.9;
+        }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 20px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        .card {
+            background: var(--card-bg);
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+        
+        .card h2 {
+            color: var(--success);
+            margin-bottom: 15px;
+            font-size: 18px;
+            border-bottom: 1px solid var(--accent);
+            padding-bottom: 10px;
+        }
+        
+        .card h3 {
+            color: var(--warning);
+            margin: 15px 0 10px 0;
+            font-size: 14px;
+        }
+        
+        .raw-json {
+            white-space: pre-wrap;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 11px;
+            background: #0d1117;
+            color: #c9d1d9;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            max-height: 600px;
+            overflow-y: auto;
+            border: 1px solid #30363d;
+        }
+        
+        .raw-json .string { color: #a5d6ff; }
+        .raw-json .number { color: #79c0ff; }
+        .raw-json .boolean { color: #ff7b72; }
+        .raw-json .null { color: #8b949e; }
+        .raw-json .key { color: #7ee787; }
+        
+        .last-updated {
+            text-align: center;
+            color: #666;
+            font-size: 12px;
+            margin-top: 20px;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        
+        .error {
+            color: var(--highlight);
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎯 Day Flow Pipeline Debug</h1>
+    
+    <div class="controls">
+        <button id="refresh-btn" onclick="refreshData()">🔄 Refresh Data</button>
+        <button id="reset-btn" onclick="resetWellness()">🔁 Reset Wellness Tracking</button>
+        <button id="force-reset-btn" onclick="forceDailyReset()" style="background: #ff9800;">🌅 Force Daily Reset</button>
+        <a href="/debug/runtime/concurrency" style="display: inline-block; text-decoration: none;">
+            <button type="button" style="background: #2563eb;">📊 Runtime Monitor</button>
+        </a>
+    </div>
+    
+    <div id="content" class="loading">Loading...</div>
+    
+    <div id="last-updated" class="last-updated"></div>
+
+    <script>
+        function syntaxHighlight(json) {
+            if (typeof json !== 'string') {
+                json = JSON.stringify(json, null, 2);
+            }
+            json = json.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            return json.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, function (match) {
+                let cls = 'number';
+                if (/^"/.test(match)) {
+                    if (/:$/.test(match)) {
+                        cls = 'key';
+                    } else {
+                        cls = 'string';
+                    }
+                } else if (/true|false/.test(match)) {
+                    cls = 'boolean';
+                } else if (/null/.test(match)) {
+                    cls = 'null';
+                }
+                return '<span class="' + cls + '">' + match + '</span>';
+            });
+        }
+        
+        function renderData(data) {
+            // Always show raw resource files
+            const location = data.location_raw || {};
+            const userRoutine = data.user_routine_raw || {};
+            const userHealth = data.user_health_raw || {};
+            const trackedActivitiesOutput = data.tracked_activities_raw || {};
+            const trackedActivitiesConfig = data.tracked_activities_config_raw || {};
+            
+            // Pipeline stage outputs
+            const pipelineOutputs = data.pipeline_outputs_raw || {};
+            const sleepOutput = pipelineOutputs.sleep || {};
+            const afkStatsOutput = pipelineOutputs.afk_statistics || {};
+            const activityTrackerOutput = pipelineOutputs.activity_tracker || {};
+            const dailyContextOutput = pipelineOutputs.daily_context_generator || {};
+            const healthInferenceOutput = pipelineOutputs.health_inference || {};
+            const physicalOrchestratorOutput = pipelineOutputs.dayflow_orchestrator || {};
+            
+            // External resources (from tools/managers)
+            const externalResources = data.external_resources_raw || {};
+            const weatherResource = externalResources.weather || {};
+            
+            // Pipeline manager state
+            const pipelineState = data.pipeline_state_raw || {};
+            
+            // Database logs
+            const sleepLog = data.sleep_log || [];
+            const activeLog = data.active_log || [];
+            const wakeLog = data.wake_log || [];
+            const agentOutputs = data.agent_outputs || {};
+            
+            let html = '<div class="grid">';
+            
+            // ===== PIPELINE STATE (Meta) =====
+            
+            html += '<div class="card"><h2>⚙️ Pipeline Manager State</h2>';
+            html += '<h3>resource_wellness_pipeline_status.json</h3>';
+            html += '<p style="font-size: 12px; color: #79c0ff; margin-bottom: 10px;">';
+            html += '🔧 Pipeline cursor, last reset info, schema version';
+            html += '</p>';
+            html += `<pre class="raw-json">${syntaxHighlight(pipelineState)}</pre>`;
+            html += '</div>';
+            
+            // ===== PIPELINE STAGE OUTPUTS (Priority - NEW) =====
+            
+            html += '<div class="card" style="grid-column: 1 / -1;"><h2>🚀 Pipeline Stage Outputs (resource_&lt;stage_id&gt;_output.json)</h2>';
+            html += '<p style="font-size: 12px; color: #4ecca3; margin-bottom: 15px;">';
+            html += '✨ These are the outputs from each pipeline stage in execution order';
+            html += '</p>';
+            
+            // 1. Sleep Stage
+            html += '<h3 style="color: #7ee787; margin-top: 15px;">1. sleep → resource_sleep_output.json</h3>';
+            html += '<p style="font-size: 11px; color: #8b949e;">Computes sleep data from AFK events</p>';
+            html += `<pre class="raw-json" style="max-height: 300px;">${syntaxHighlight(sleepOutput)}</pre>`;
+            
+            // 2. AFK Statistics Stage
+            html += '<h3 style="color: #7ee787; margin-top: 15px;">2. afk_statistics → resource_afk_statistics_output.json</h3>';
+            html += '<p style="font-size: 11px; color: #8b949e;">Aggregates AFK statistics (_today, _since_wake)</p>';
+            html += `<pre class="raw-json" style="max-height: 300px;">${syntaxHighlight(afkStatsOutput)}</pre>`;
+            
+            // 3. Activity Tracker Stage
+            html += '<h3 style="color: #7ee787; margin-top: 15px;">3. activity_tracker → resource_tracked_activities_output.json</h3>';
+            html += '<p style="font-size: 11px; color: #8b949e;">Updates activity counts/timers from tickets and chat (may call LLM agent)</p>';
+            html += `<pre class="raw-json" style="max-height: 300px;">${syntaxHighlight(trackedActivitiesOutput)}</pre>`;
+            
+            // 4. Daily Context Generator Stage
+            html += '<h3 style="color: #7ee787; margin-top: 15px;">4. daily_context_generator → resource_daily_context_generator_output.json</h3>';
+            html += '<p style="font-size: 11px; color: #8b949e;">Generates daily context summary (LLM agent)</p>';
+            html += `<pre class="raw-json" style="max-height: 300px;">${syntaxHighlight(dailyContextOutput)}</pre>`;
+            
+            // 5. Health Inference Stage
+            html += '<h3 style="color: #7ee787; margin-top: 15px;">5. health_inference → resource_health_inference_output.json</h3>';
+            html += '<p style="font-size: 11px; color: #8b949e;">Infers energy/cognitive state (LLM agent)</p>';
+            html += `<pre class="raw-json" style="max-height: 300px;">${syntaxHighlight(healthInferenceOutput)}</pre>`;
+            
+            // 6. Day Flow Orchestrator Stage
+            html += '<h3 style="color: #7ee787; margin-top: 15px;">6. dayflow_orchestrator → resource_dayflow_orchestrator_output.json</h3>';
+            html += '<p style="font-size: 11px; color: #8b949e;">Decides proactive wellness suggestions (LLM agent)</p>';
+            html += `<pre class="raw-json" style="max-height: 300px;">${syntaxHighlight(physicalOrchestratorOutput)}</pre>`;
+            
+            html += '</div>';
+            
+            // ===== EXTERNAL RESOURCES (from tools/managers) =====
+            
+            html += '<div class="card"><h2>🌤️ Weather Resource</h2>';
+            html += '<h3>resource_weather.json</h3>';
+            html += '<p style="font-size: 12px; color: #79c0ff; margin-bottom: 10px;">';
+            html += '🔧 Updated by maintenance manager weather tool - agents subscribe to this';
+            html += '</p>';
+            html += `<pre class="raw-json">${syntaxHighlight(weatherResource)}</pre>`;
+            html += '</div>';
+            
+            // ===== CONFIG & STATIC RESOURCES =====
+            
+            // Tracked Activities Output (Resource)
+            html += '<div class="card"><h2>🎯 Tracked Activities (Output)</h2>';
+            html += '<h3>resource_tracked_activities_output.json</h3>';
+            html += '<p style="font-size: 12px; color: #79c0ff; margin-bottom: 10px;">';
+            html += '📌 Live activity state and timers';
+            html += '</p>';
+            html += `<pre class="raw-json">${syntaxHighlight(trackedActivitiesOutput)}</pre>`;
+            html += '</div>';
+
+            // Tracked Activities (Config)
+            html += '<div class="card"><h2>⚙️ Tracked Activities (Config)</h2>';
+            html += '<h3>config_tracked_activities.json</h3>';
+            html += '<p style="font-size: 12px; color: #7ee787; margin-bottom: 10px;">';
+            html += '⚙️ Activity definitions, thresholds';
+            html += '</p>';
+            html += `<pre class="raw-json">${syntaxHighlight(trackedActivitiesConfig)}</pre>`;
+            html += '</div>';
+            
+            // User Health (Traits)
+            html += '<div class="card"><h2>👤 User Health (Traits)</h2>';
+            html += '<h3>resource_user_health.json</h3>';
+            html += '<p style="font-size: 12px; color: #7ee787; margin-bottom: 10px;">';
+            html += '📋 Chronic conditions, preferences';
+            html += '</p>';
+            html += `<pre class="raw-json">${syntaxHighlight(userHealth)}</pre>`;
+            html += '</div>';
+            
+            // User Routine
+            html += '<div class="card"><h2>⏰ User Routine</h2>';
+            html += '<h3>resource_user_routine.json</h3>';
+            html += '<p style="font-size: 12px; color: #7ee787; margin-bottom: 10px;">';
+            html += '⏱️ Daily patterns, habits';
+            html += '</p>';
+            html += `<pre class="raw-json">${syntaxHighlight(userRoutine)}</pre>`;
+            html += '</div>';
+            
+            // Location
+            html += '<div class="card"><h2>📍 Location</h2>';
+            html += '<h3>resource_current_location.json</h3>';
+            html += '<p style="font-size: 12px; color: #7ee787; margin-bottom: 10px;">';
+            html += '🌍 Current location context';
+            html += '</p>';
+            html += `<pre class="raw-json">${syntaxHighlight(location)}</pre>`;
+            html += '</div>';
+            
+            // ===== DATABASE LOGS (Telemetry) =====
+            
+            // Sleep Segments Log (Database)
+            html += '<div class="card"><h2>💤 Sleep Segments Log (Database)</h2>';
+            html += '<h3>sleep_segments table (last 50)</h3>';
+            html += '<p style="font-size: 12px; color: #79c0ff; margin-bottom: 10px;">';
+            html += '📊 Raw sleep telemetry from database';
+            html += '</p>';
+            html += `<pre class="raw-json">${syntaxHighlight(sleepLog)}</pre>`;
+            html += '</div>';
+            
+            // Active Segments Log (Database)
+            html += '<div class="card"><h2>🖥️ Active Segments Log (Database)</h2>';
+            html += '<h3>active_segments table (last 50)</h3>';
+            html += '<p style="font-size: 12px; color: #79c0ff; margin-bottom: 10px;">';
+            html += '📊 Computer activity periods - AFK intervals are computed from gaps between these';
+            html += '</p>';
+            html += `<pre class="raw-json">${syntaxHighlight(activeLog)}</pre>`;
+            html += '</div>';
+            
+            // Wake Segments Log (Database)
+            html += '<div class="card"><h2>👁️ Wake Segments Log (Database)</h2>';
+            html += '<h3>wake_segments table (last 20)</h3>';
+            html += '<p style="font-size: 12px; color: #79c0ff; margin-bottom: 10px;">';
+            html += '📊 Night wake-ups from database';
+            html += '</p>';
+            html += `<pre class="raw-json">${syntaxHighlight(wakeLog)}</pre>`;
+            html += '</div>';
+            
+            html += '</div>';
+            
+            document.getElementById('content').innerHTML = html;
+            document.getElementById('last-updated').textContent = `Last updated: ${new Date(data.timestamp).toLocaleString()}`;
+        }
+        
+        async function refreshData() {
+            const btn = document.getElementById('refresh-btn');
+            btn.disabled = true;
+            btn.textContent = '⏳ Loading...';
+            
+            try {
+                const response = await fetch('/debug/status/data');
+                const data = await response.json();
+                renderData(data);
+            } catch (e) {
+                document.getElementById('content').innerHTML = `<p class="error">Error: ${e.message}</p>`;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '🔄 Refresh Data';
+            }
+        }
+        
+        async function resetWellness() {
+            if (!confirm('⚠️ WARNING: This will reset ALL wellness tracking data!\n\n' +
+                        '• Activity timestamps\n' +
+                        '• Daily counters\n' +
+                        '• Sleep segments\n' +
+                        '• Day tracking\n' +
+                        '• Tickets\n\n' +
+                        'Are you sure you want to continue?')) {
+                return;
+            }
+            
+            const btn = document.getElementById('reset-btn');
+            btn.disabled = true;
+            btn.textContent = '⏳ Resetting...';
+            
+            try {
+                const response = await fetch('/debug/wellness/reset', { method: 'POST' });
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert('✅ Wellness tracking reset complete!\n\n' +
+                         'Results:\n' + JSON.stringify(data.results, null, 2) +
+                         '\n\nPlease restart Flask server for cold start initialization.');
+                    await refreshData();
+                } else {
+                    alert('❌ Error: ' + (data.error || 'Unknown error'));
+                }
+            } catch (e) {
+                alert('Error: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '🔁 Reset Wellness Tracking';
+            }
+        }
+        
+        async function forceDailyReset() {
+            if (!confirm('🌅 Force Daily Reset\n\n' +
+                        'This will trigger reset_daily() on ALL pipeline stages:\n' +
+                        '• sleep\n' +
+                        '• afk_statistics\n' +
+                        '• activity_tracker\n' +
+                        '• daily_context_generator\n' +
+                        '• health_inference\n' +
+                        '• dayflow_orchestrator\n\n' +
+                        'Continue?')) {
+                return;
+            }
+            
+            const btn = document.getElementById('force-reset-btn');
+            btn.disabled = true;
+            btn.textContent = '⏳ Resetting...';
+            
+            try {
+                const response = await fetch('/debug/status/force_daily_reset', { method: 'POST' });
+                const data = await response.json();
+                
+                if (data.success) {
+                    const results = data.results;
+                    let msg = '🌅 Daily Reset Complete!\n\n';
+                    msg += 'Timestamp: ' + (results.reset?.timestamp_local || 'Unknown') + '\n\n';
+                    msg += 'Stage Results:\n';
+                    
+                    const stages = results.reset?.stages || {};
+                    for (const [stage, info] of Object.entries(stages)) {
+                        const status = info.status === 'success' ? '✓' : '✗';
+                        msg += `  ${status} ${stage}: ${info.status}`;
+                        if (info.error) msg += ` (${info.error})`;
+                        msg += '\n';
+                    }
+                    
+                    alert(msg);
+                    await refreshData();
+                } else {
+                    alert('❌ Error: ' + (data.error || 'Unknown error') + '\n\n' + (data.traceback || ''));
+                }
+            } catch (e) {
+                alert('Error: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '🌅 Force Daily Reset';
+            }
+        }
+        
+        // Initial load
+        refreshData();
+        
+        // Auto-refresh every 60 seconds
+        setInterval(refreshData, 60000);
+    </script>
+</body>
+</html>
+

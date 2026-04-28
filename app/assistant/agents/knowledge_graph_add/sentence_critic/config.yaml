@@ -1,0 +1,19 @@
+name: knowledge_graph_add::sentence_critic
+class_name: Agent
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.4-mini"
+  model_tier: "mini"
+allowed_tools: []
+except_tools: []
+user_context_items:
+  - sentences
+  - entity_card
+system_context_items:
+  - resource_user_data
+  - resource_assistant_data
+
+entity_card_level: 2
+entity_scan_keys: [sentences]
+entity_detection_keys:
+  - sentences

@@ -1,0 +1,21 @@
+name: pod_critic
+class_name: Agent
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.4-mini"
+  model_tier: "mini"
+
+allowed_tools: []
+except_tools: []
+
+# Critic only reads what Pass 1 produced plus a small pre-context. No
+# entity scanning — that's Pass 2's job.
+user_context_items:
+  - one_liner
+  - tags
+  - sections
+  - sections_text
+  - pre_context
+
+system_context_items: []
+type: agent

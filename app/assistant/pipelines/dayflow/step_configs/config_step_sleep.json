@@ -1,0 +1,50 @@
+{
+  "step_id": "sleep",
+  "description": "Sleep tracking and wake detection",
+  "sleep_window": {
+    "start": "22:30",
+    "end": "09:00"
+  },
+  "min_sleep_afk_minutes": 60,
+  "min_sleep_overlap_ratio": 0.6,
+  "normal_sleep": {
+    "start": "22:30",
+    "end": "07:00",
+    "duration_hours": 8.5
+  },
+  "greetings": {
+    "morning_greeting": "☀️ Good morning! How did you sleep last night?"
+  },
+  "daily_reset": {
+    "description": "Set reasonable sleep defaults for new day (assume good night sleep)",
+    "output_resource_defaults": {
+      "total_sleep_minutes": 510,
+      "last_night_sleep_minutes": 510,
+      "main_sleep_minutes": 510,
+      "sleep_quality": "good",
+      "fragmented": false,
+      "segment_count": 1,
+      "total_wake_minutes": 0,
+      "time_in_bed_minutes": 510,
+      "bedtime_previous": "22:30",
+      "bedtime_previous_local": "10:30 PM",
+      "wake_time_today": "07:00",
+      "wake_time_today_local": "07:00 AM",
+      "sleep_periods": [
+        {
+          "start_local": "10:30 PM",
+          "end_local": "07:00 AM",
+          "duration_minutes": 510,
+          "type": "main_sleep"
+        }
+      ]
+    }
+  },
+  "pre_sleep_snapshot": {
+    "enabled": true,
+    "window_minutes_before": 15,
+    "window_minutes_after": 1,
+    "description": "Write a stable pre-sleep snapshot into day_context/... near sleep_window.start (captures naps before bedtime roll-in)."
+  }
+}
+

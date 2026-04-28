@@ -1,0 +1,31 @@
+{
+  "name": "web_navigate_back_snapshot",
+  "description": "Navigate back and bundle browser_snapshot refs in the same result.",
+  "inputs": [],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Back-navigation status plus bundled browser_snapshot text."
+    },
+    {
+      "path": "data.snapshot_text",
+      "type": "string",
+      "description": "Bundled browser_snapshot output with refs."
+    },
+    {
+      "path": "data.snapshot_id",
+      "type": "string",
+      "description": "Unique id for this bundled snapshot capture."
+    }
+  ],
+  "arguments_prompt": "Return ONLY {}",
+  "metadata": {
+    "domain": "browser",
+    "actions": [
+      "navigate",
+      "back"
+    ],
+    "selectors": []
+  }
+}

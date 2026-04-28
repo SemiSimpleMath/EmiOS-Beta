@@ -1,0 +1,23 @@
+name: orchestrator_facts_curator
+class_name: Agent
+llm_params:
+  llm_provider: "gemini"
+  engine: "gemini-3-flash-preview"
+  model_tier: "mini"
+
+allowed_tools: []
+except_tools: []
+
+user_context_items:
+  - date_time
+  - task
+  - information
+  - orchestrator_facts_version
+  - orchestrator_facts
+  - orchestrator_results
+  - orchestrator_job_map
+  - orchestrator_progress_inbox
+  - orchestrator_tick
+
+system_context_items: []
+

@@ -1,0 +1,50 @@
+{
+  "name": "invoke_agent",
+  "description": "invoke_agent:\nRun a registered agent and return its structured output.\n\nUse this in task IR tool sequences to call an agent inline without routing through a manager.\nThe agent uses its own config, prompts, and output schema.\n\nArguments:\n- agent_name: name of the registered agent (e.g. 'headline_extractor', 'sensei::analyst')\n- agent_input: dict of key-value pairs that become the agent's blackboard state (maps to Jinja2 template variables)",
+  "inputs": [
+    {
+      "name": "agent_name",
+      "type": "string",
+      "required": true,
+      "description": "Name of the registered agent to invoke."
+    },
+    {
+      "name": "agent_input",
+      "type": "object",
+      "required": false,
+      "description": "Dict of key-value pairs unpacked onto the agent's blackboard. Keys map to Jinja2 template variables (e.g. 'task', 'information')."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Agent output as text (JSON for structured output agents)."
+    },
+    {
+      "path": "data.agent_name",
+      "type": "string",
+      "description": "Name of the agent that was invoked."
+    },
+    {
+      "path": "data.agent_output",
+      "type": "object",
+      "description": "Agent's structured output (from agent_form.py) or content wrapped in a dict."
+    }
+  ],
+  "arguments_prompt": "Fill arguments for `invoke_agent`.\n\nReturn ONLY a JSON object with:\n- agent_name (string, required)\n- agent_input (object, optional)\n\nExample:\n{\"agent_name\":\"sensei::analyst\",\"agent_input\":{\"task\":\"Analyze this trace\",\"information\":\"...\"}}",
+  "metadata": {
+    "category": "system",
+    "verbs": ["operate"],
+    "entities": ["agent"],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "high",
+    "latency_class": "slow",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

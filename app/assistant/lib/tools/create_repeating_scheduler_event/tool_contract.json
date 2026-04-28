@@ -1,0 +1,91 @@
+{
+  "name": "create_repeating_scheduler_event",
+  "description": "repeating scheduler events are reminder events that occur repeatedly after steady interval of time. You will need title, reminder message, start_time, interval (please specify units you use, sec, mins, hrs, days) You can also specify a RRULE.",
+  "inputs": [
+    {
+      "name": "title",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "start_date",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "end_date",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "interval",
+      "type": "integer",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "payload_message",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "task_type",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "importance",
+      "type": "integer",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "sound",
+      "type": "string",
+      "required": true,
+      "description": ""
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "A repeating scheduler event requires a start_time and an interval_duration. The start_time is a date-time string marking the event's initial execution, while interval_duration specifies the recurring time interval between each execution (e.g., every 2 hours, every day).\n\ntitle: a short description of the event.\nstart_time: The first instance when the event will occur. It should be in YYYY-MM-DD HH:MM:SS format.\ninterval_duration: The period in seconds between each occurrence of the event. This is a fixed duration to wait before repeating the task.\nAdditional Arguments:\n\npayload_message: A reminder message.\ntask_type: use `reminder`\nend_time: The end_time is an optional date-time string marking the final occurrence of the interval event.\n Once the event time surpasses end_time, the event stops repeating. If end_time is not specified, the event continues indefinitely at the defined interval.\n\nThere is also an importance attribute.  Scale is from 0 to 10.  If no importance is specified in instructions, then you can default to 1-3.\nOptionally there is also a sound.  This is a sound that will be played when the reminder is sent to user. Unless it is specified set it to 'default'.\n\n[WARNING] Avoid ambiguity at midnight: Times exactly at 00:00:00 can be misinterpreted as either the start or end of a day. When setting boundaries, explicitly choose 23:59:59 (end of the previous day) or 00:01:00 (start of the new day) for clarity.\n\nExample:\ntitle: Reminder to take out garbage\nstart_time: 2024-11-05 08:00:00\ninterval_duration: 86400 (24 hours)\npayload_message: Remind John to take out the garbage\ntask_type: reminder\nimportance: 3\nsound: default\n\nExample:\ntitle: Reminder to stretch\nstart_time: 2025-01-15 14:30:00\ninterval_duration: 1800 (30 mins)\npayload_message: Remind Bob to take a break and stretch\ntask_type: reminder\nimportance: 3\nsound: stretch",
+  "metadata": {
+    "domain": "reminder",
+    "actions": [
+      "create",
+      "remind",
+      "repeat"
+    ],
+    "selectors": [
+      "title",
+      "interval",
+      "payload"
+    ],
+    "risk_level": "medium",
+    "side_effects": "writes_data",
+    "requires_auth": [
+      "google"
+    ],
+    "requires_network": true,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

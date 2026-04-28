@@ -1,0 +1,78 @@
+## Current Context
+
+**Time:** {{ date_time }} ({{ day_of_week }})
+
+{% if vibe %}
+## Current Vibe Targets
+
+| Feature | Target (0-100) | Notes |
+|--------|-----------------|-------|
+| Energy | **{{ vibe.audio_targets.energy }}** | 0=calm, 50=medium, 100=intense |
+| Valence | **{{ vibe.audio_targets.valence }}** | 0=sad/dark, 50=neutral, 100=happy/uplifting |
+| Loudness | **{{ vibe.audio_targets.loudness }}** | 0=quiet, 100=loud |
+| Speechiness | **{{ vibe.audio_targets.speechiness }}** | 0=not speechy, 100=very speechy |
+| Acousticness | **{{ vibe.audio_targets.acousticness }}** | 0=electrified, 100=acoustic |
+| Instrumentalness | **{{ vibe.audio_targets.instrumentalness }}** | 0=vocals, 100=instrumental |
+| Liveness | **{{ vibe.audio_targets.liveness }}** | 0=studio, 100=live |
+| Tempo | **{{ vibe.audio_targets.tempo }}** | 0=slow, 100=fast |
+
+**Context:** {{ vibe.context_block | default('unknown') }}
+{% if vibe.phase_note %}**Phase:** {{ vibe.phase_note }}{% endif %}
+
+{% if vibe.verbal_plan %}
+**Session Plan:** {{ vibe.verbal_plan }}
+{% endif %}
+
+**User State:** {{ vibe.current_mood | default('unknown') }} mood, {{ vibe.current_energy | default('unknown') }} energy, {{ vibe.anxiety_level | default('calm') }} anxiety
+{% endif %}
+
+{% if vibe and vibe.music_filters %}
+## Requested Filters (from user chat)
+Honor these if present.
+{% if vibe.music_filters.note %}- Note: {{ vibe.music_filters.note }}{% endif %}
+{% if vibe.music_filters.include_genres and (vibe.music_filters.include_genres | length) > 0 %}- Include genres: {{ vibe.music_filters.include_genres | join(', ') }}{% endif %}
+{% if vibe.music_filters.exclude_genres and (vibe.music_filters.exclude_genres | length) > 0 %}- Exclude genres: {{ vibe.music_filters.exclude_genres | join(', ') }}{% endif %}
+{% if vibe.music_filters.include_artists and (vibe.music_filters.include_artists | length) > 0 %}- Include artists: {{ vibe.music_filters.include_artists | join(', ') }}{% endif %}
+{% if vibe.music_filters.exclude_artists and (vibe.music_filters.exclude_artists | length) > 0 %}- Exclude artists: {{ vibe.music_filters.exclude_artists | join(', ') }}{% endif %}
+{% if vibe.music_filters.include_keywords and (vibe.music_filters.include_keywords | length) > 0 %}- Keywords: {{ vibe.music_filters.include_keywords | join(', ') }}{% endif %}
+{% endif %}
+
+{% if provided_songs %}
+## Provided Songs ({{ provided_songs | length }}) - candidate pool (choose ONLY from these)
+Pick EXACTLY 10 unique songs from this list.
+Copy their title and artist exactly.
+
+{% for s in provided_songs %}
+- [{{ loop.index }}] "{{ s.title }}" - {{ s.artist }} ({{ s.genre }}) | E={{ s.sliders.energy }}, V={{ s.sliders.valence }}, Ld={{ s.sliders.loudness }}, Sp={{ s.sliders.speechiness }}, Ac={{ s.sliders.acousticness }}, In={{ s.sliders.instrumentalness }}, Lv={{ s.sliders.liveness }}, T={{ s.sliders.tempo }}
+{% endfor %}
+{% endif %}
+
+{% if recently_played %}
+## Recently Played (avoid repeating, especially recent ones)
+{% for item in recently_played %}
+{% if item.is_day_divider %}
+
+### --- {{ item.day_label }} ---
+{% else %}
+- {{ item.played_at }}: {{ item.title }} by {{ item.artist }}{% if item.play_count_today > 1 %} ({{ item.play_count_today }}x today){% endif %}{% if item.energy %} [E:{{ item.energy }}{% if item.valence is not none %}, V:{{ item.valence }}{% endif %}]{% endif %}
+
+{% endif %}
+{% endfor %}
+{% endif %}
+
+{% if last_played and last_played.title %}
+## Last Picked (avoid back-to-back same artist)
+- {{ last_played.title }} - {{ last_played.artist }}
+{% endif %}
+
+{% if resource_music_preferences %}
+## Music Preferences
+{{ resource_music_preferences }}
+{% endif %}
+
+---
+
+Return EXACTLY 10 candidates total:
+1) Candidates from the provided list above (source='provided') - exactly 10
+
+Return candidates with explicit fields: title, artist, reasoning, source.

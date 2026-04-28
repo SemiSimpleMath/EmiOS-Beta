@@ -1,0 +1,26 @@
+Today is {{ date_time }}
+
+Analyze the following window of {{ analysis_window_size }} messages and determine the conversation bounds for each message.
+
+**Message Window:**
+{% for message in messages %}
+**Message {{ message.id }}** ({{ message.role }}):
+{{ message.message }}
+{% endfor %}
+
+For each message, identify the start and end boundaries of the self-contained conversation block that contains that message. Consider:
+
+1. **Topic coherence** - messages discussing the same subject
+2. **Reference resolution** - messages that resolve pronouns and references  
+3. **Conversation flow** - natural user-agent exchanges
+4. **Context completeness** - all messages needed to understand the conversation
+5. **Topic boundaries** - when conversations shift to new subjects
+
+Provide bounds for each message in the format:
+- message_id: The message being analyzed
+- bounds.start_message_id: First message in the conversation block
+- bounds.end_message_id: Last message in the conversation block  
+- bounds.should_process: T if message should be processed, F if it should be dropped
+- bounds.reasoning: Explanation of why this message should be processed or dropped
+
+If a message needs context beyond this window, indicate that in the reasoning.

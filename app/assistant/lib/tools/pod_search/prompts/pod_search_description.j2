@@ -1,0 +1,12 @@
+Search pod_store for pod HEADERS. Use this to browse candidate pods by
+tag / room / recency, then call pod_fetch on the pod_ids you want to open.
+
+Pods are retrievable memory units about the user — tagged with food,
+entertainment, health, schedule, or work — that may contain knowledge,
+preferences, memories, or actionable signals. Skim headers first, only
+fetch the ones you need.
+
+Typical call shapes:
+- Recent food signals:       tags=['food'], since='3d'
+- Today's master_room pods:  scope='master_room', since='today'
+- A pile to choose from:     tags=['work','entertainment'], limit=20

@@ -1,0 +1,8 @@
+Fill arguments for `invoke_agent`.
+
+Return ONLY a JSON object with:
+- agent_name (string, required)
+- agent_input (object, optional — keys become template variables)
+
+Example:
+{"agent_name":"sensei::analyst","agent_input":{"task":"Analyze this trace","information":"..."}}

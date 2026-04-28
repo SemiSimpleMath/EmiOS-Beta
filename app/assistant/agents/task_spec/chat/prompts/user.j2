@@ -1,0 +1,25 @@
+Today is {{ date_time }}.
+
+{% if task_creation_session_id %}
+Task creation session: {{ task_creation_session_id }}
+{% endif %}
+
+{% if spec %}
+Current loaded task spec draft:
+{{ spec }}
+{% endif %}
+
+{% if task %}
+User message:
+{{ task }}
+{% endif %}
+
+{% if information %}
+Additional context:
+{{ information }}
+{% endif %}
+
+{% if recent_history %}
+Current run history:
+{{ recent_history }}
+{% endif %}

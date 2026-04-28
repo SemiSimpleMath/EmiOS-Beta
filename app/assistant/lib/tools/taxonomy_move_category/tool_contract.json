@@ -1,0 +1,51 @@
+{
+  "name": "taxonomy_move_category",
+  "description": "taxonomy_move_category: Move a taxonomy category to a new parent.\n\n**Purpose:** Change the position of a category in the taxonomy hierarchy (fix misplacements).\n\n**Parameters:**\n- category_id (required): ID of the category to move\n- new_parent_id (optional): ID of the new parent category (omit or set to null for root level)\n\n**Use this when:**\n- Fixing misplaced categories (e.g., moving \"dog\" from under \"vehicle\" to under \"animal\")\n- Reorganizing the taxonomy structure\n- Moving categories to root level\n\n**Returns:**\n- success: Whether the operation succeeded\n- message: Description of what was done\n- category_id: ID of the moved category\n- label: Label of the moved category\n- old_parent_id: Previous parent ID\n- new_parent_id: New parent ID\n\n**Safety:** This is a safe operation. Checks for circular references are performed automatically.",
+  "inputs": [
+    {
+      "name": "category_id",
+      "type": "integer",
+      "required": true,
+      "description": "ID of the category to move"
+    },
+    {
+      "name": "new_parent_id",
+      "type": "integer",
+      "required": false,
+      "description": "ID of the new parent category (None or empty for root level)"
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "Arguments for taxonomy_move_category:\n\ncategory_id (required): ID of the category to move\nnew_parent_id (required): ID of the new parent category\n\nExample:\n{\n    \"category_id\": 456,\n    \"new_parent_id\": 789\n}",
+  "metadata": {
+    "category": "knowledge_graph",
+    "verbs": [
+      "operate"
+    ],
+    "entities": [
+      "edge",
+      "graph",
+      "node"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "medium",
+    "latency_class": "moderate",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

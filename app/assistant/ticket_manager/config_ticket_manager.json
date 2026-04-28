@@ -1,0 +1,8 @@
+{
+  "default_stale_minutes": 120,
+  "default_resolution_strategy": "abandoned",
+  "stale_minutes_by_ticket_type": {},
+  "stale_minutes_by_suggestion_type": {},
+  "resolution_strategy_by_ticket_type": {},
+  "resolution_strategy_by_suggestion_type": {}
+}

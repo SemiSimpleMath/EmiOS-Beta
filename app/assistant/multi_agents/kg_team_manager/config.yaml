@@ -1,0 +1,67 @@
+name: kg_team_manager
+class_name: MultiAgentManager
+description: "A team manager that orchestrates agent execution for task completion."
+max_cycles: 80  # Prevent infinite loops
+role_bindings:
+  delegator: kg_team::delegator
+  tool_selector: shared::tool_selector
+
+agents:
+  - name: kg_team::delegator
+    class: Delegator
+  - name: kg_team::planner
+    class: Planner
+  - name: kg_team::final_answer
+    class: Agent
+  - name: shared::tool_arguments
+    class: Agent
+  - name: shared::writer
+    class: Agent
+  - name: shared::mathematician
+    class: Agent
+  - name: kg_team::find_nodes
+    class: Planner
+
+control_nodes:
+  - name: tool_caller
+    class: ToolCaller
+  - name: tool_result_handler
+    class: ToolResultHandler
+  - name: return_control
+    class: ReturnControlNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+  - name: graceful_exit_control_node
+    class: GracefulExitControlNode
+
+tools:
+  allowed_tools: [kg_find_node, kg_find_edge, kg_describe_node, kg_describe_edge, ask_kg, ask_user, kg_update_node, kg_create_node, kg_create_edge, kg_delete_node, kg_delete_edge, taxonomy_path_finder]
+  except_tools: []
+scope_contract:
+  tools:
+    allowed_tools:
+      - kg_find_node
+      - kg_find_edge
+      - kg_describe_node
+      - kg_describe_edge
+      - ask_kg
+      - ask_user
+      - kg_update_node
+      - kg_create_node
+      - kg_create_edge
+      - kg_delete_node
+      - kg_delete_edge
+      - taxonomy_path_finder
+    blocked_tools:
+      - install_tool
+      - find_tool
+
+flow_config:
+  state_map:
+    "kg_team::delegator": "kg_team::planner"
+    "shared::tool_arguments": "tool_caller"
+    "kg_team::planner_return_control": "kg_team::final_answer"
+    "kg_team::find_nodes_return_control": "tool_result_handler"
+    "kg_team::final_answer": "manager_exit_node"
+    "graceful_exit": "graceful_exit_control_node"
+    "graceful_exit_control_node": "kg_team::final_answer"

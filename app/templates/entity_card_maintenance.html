@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Entity Card Maintenance</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --panel-soft: #1f2937;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --ok: #10b981;
+      --warn: #f59e0b;
+      --bad: #ef4444;
+      --info: #60a5fa;
+      --line: #374151;
+      --chip: #334155;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; font-size: 14px; }
+    .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+
+    /* ── header ── */
+    .topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; flex-wrap: wrap; gap: 12px; }
+    .topbar h1 { font-size: 22px; font-weight: 600; }
+    .topbar .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    /* ── summary chips ── */
+    .summary-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 24px; }
+    .chip { background: var(--chip); border-radius: 8px; padding: 10px 16px; min-width: 140px; cursor: pointer; border: 2px solid transparent; transition: border-color 0.15s; }
+    .chip:hover, .chip.active { border-color: var(--info); }
+    .chip .chip-title { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+    .chip .chip-count { font-size: 26px; font-weight: 700; margin-top: 2px; }
+    .chip.type-broken_kg_link  .chip-count { color: var(--bad); }
+    .chip.type-junk_name       .chip-count { color: var(--bad); }
+    .chip.type-blank_content   .chip-count { color: var(--warn); }
+    .chip.type-low_confidence  .chip-count { color: var(--warn); }
+    .chip.type-stale_content   .chip-count { color: var(--info); }
+    .chip.type-no_kg_link      .chip-count { color: var(--muted); }
+
+    /* ── filters ── */
+    .filters { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; }
+    .filters select { background: var(--panel-soft); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; }
+    .filters select:focus { outline: 2px solid var(--info); }
+
+    /* ── table ── */
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    thead th { background: var(--panel); font-weight: 600; padding: 10px 14px; text-align: left; border-bottom: 2px solid var(--line); white-space: nowrap; }
+    tbody tr { border-bottom: 1px solid var(--line); }
+    tbody tr:hover { background: var(--panel-soft); }
+    td { padding: 9px 14px; vertical-align: top; }
+
+    /* ── badges ── */
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+    .badge-broken_kg_link  { background: #450a0a; color: var(--bad); }
+    .badge-junk_name       { background: #450a0a; color: var(--bad); }
+    .badge-blank_content   { background: #451a03; color: var(--warn); }
+    .badge-low_confidence  { background: #451a03; color: var(--warn); }
+    .badge-stale_content   { background: #1e3a5f; color: var(--info); }
+    .badge-no_kg_link      { background: #1e293b; color: var(--muted); }
+    .badge-high            { background: #450a0a; color: var(--bad); }
+    .badge-medium          { background: #451a03; color: var(--warn); }
+    .badge-low             { background: #1e293b; color: var(--muted); }
+    .badge-pending         { background: #1e3a5f; color: var(--info); }
+    .badge-approved        { background: #052e16; color: var(--ok); }
+    .badge-rejected        { background: #1e293b; color: var(--muted); }
+    .badge-executed        { background: #052e16; color: var(--ok); }
+    .badge-snoozed         { background: #292524; color: #a8a29e; }
+
+    /* ── reason cell ── */
+    .reason { max-width: 380px; color: var(--muted); font-size: 13px; }
+
+    /* ── action buttons ── */
+    .btn { padding: 5px 12px; border-radius: 5px; border: none; cursor: pointer; font-size: 12px; font-weight: 600; }
+    /* Per-finding-type primary action variants */
+    .btn-deactivate { background: #7f1d1d; color: #fecaca; }      /* destructive: kills card */
+    .btn-regenerate { background: #1d4ed8; color: #dbeafe; }      /* productive: refreshes card */
+    .btn-ack        { background: #334155; color: #cbd5e1; }      /* informational */
+    /* Generic */
+    .btn-approve { background: #065f46; color: #a7f3d0; }         /* legacy/bulk */
+    .btn-reject  { background: #44403c; color: #d6d3d1; }         /* dismiss */
+    .btn-snooze  { background: #292524; color: #a8a29e; }
+    .btn-primary { background: #1d4ed8; color: #fff; }
+    .btn-danger  { background: #991b1b; color: #fff; }
+    .btn:hover   { opacity: 0.85; }
+    .btn:disabled { opacity: 0.4; cursor: default; }
+
+    /* ── checkbox ── */
+    .cb-col { width: 32px; }
+    input[type=checkbox] { width: 15px; height: 15px; cursor: pointer; accent-color: var(--info); }
+
+    /* ── evidence ── */
+    .evidence-block { display: none; margin-top: 6px; font-size: 12px; color: var(--muted); background: var(--bg); padding: 8px; border-radius: 4px; white-space: pre-wrap; }
+    .toggle-evidence { background: none; border: none; color: var(--info); cursor: pointer; font-size: 11px; padding: 0; }
+
+    /* ── misc ── */
+    .empty { text-align: center; padding: 60px; color: var(--muted); font-size: 16px; }
+    #toast { position: fixed; bottom: 24px; right: 24px; background: #1f2937; border: 1px solid var(--line); border-radius: 8px; padding: 12px 18px; color: var(--text); display: none; z-index: 9999; }
+    #toast.show { display: block; }
+    .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--info); border-radius: 50%; animation: spin .6s linear infinite; vertical-align: middle; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <div class="topbar">
+    <h1>Entity Card Maintenance</h1>
+    <div class="actions">
+      <button class="btn btn-primary" id="btn-run">Run scan</button>
+    </div>
+  </div>
+
+  <div class="summary-row" id="summary-row">
+    <div class="chip" onclick="filterType('')">
+      <div class="chip-title">Total pending</div>
+      <div class="chip-count" id="chip-count-all">–</div>
+    </div>
+  </div>
+
+  <div class="filters">
+    <select id="filter-status" onchange="loadFindings()">
+      <option value="pending">Pending</option>
+      <option value="approved">Approved</option>
+      <option value="rejected">Rejected</option>
+      <option value="snoozed">Snoozed</option>
+      <option value="executed">Executed</option>
+    </select>
+    <select id="filter-type" onchange="loadFindings()">
+      <option value="">All types</option>
+      <option value="broken_kg_link">Broken KG link</option>
+      <option value="junk_name">Junk name</option>
+      <option value="blank_content">Blank content</option>
+      <option value="low_confidence">Low confidence</option>
+      <option value="stale_content">Stale content</option>
+      <option value="no_kg_link">No KG link</option>
+    </select>
+    <select id="filter-priority" onchange="loadFindings()">
+      <option value="">All priorities</option>
+      <option value="high">High</option>
+      <option value="medium">Medium</option>
+      <option value="low">Low</option>
+    </select>
+    <button class="btn btn-approve" onclick="bulkAction('approve')" style="margin-left:auto"
+            title="Run each selected finding's default action — Deactivate for broken_kg_link / junk_name; Acknowledge (no change) for everything else.">
+      Apply suggested action
+    </button>
+    <button class="btn btn-regenerate" onclick="bulkAction('regenerate')"
+            title="Force a v2 card regeneration for every selected finding regardless of type. Use for blank_content / stale_content rows.">
+      Regenerate selected
+    </button>
+    <button class="btn btn-reject" onclick="bulkAction('reject')"
+            title="Dismiss the selected findings without changing the cards.">
+      Dismiss selected
+    </button>
+    <button class="btn btn-snooze" onclick="bulkAction('snooze')"
+            title="Hide for now; the next scan can re-raise them.">
+      Snooze selected
+    </button>
+  </div>
+
+  <div class="table-wrap">
+    <table id="findings-table">
+      <thead>
+        <tr>
+          <th class="cb-col"><input type="checkbox" id="select-all" onchange="toggleSelectAll(this)"></th>
+          <th>Type</th>
+          <th>Priority</th>
+          <th>Status</th>
+          <th>Entity name</th>
+          <th>Entity type</th>
+          <th>Action</th>
+          <th>Reason / evidence</th>
+          <th>Confidence</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="findings-body">
+        <tr><td colspan="10" class="empty"><span class="spinner"></span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+<div id="toast"></div>
+
+<script>
+  let allFindings = [];
+  let selectedIds = new Set();
+
+  document.addEventListener('DOMContentLoaded', () => {
+    loadSummary();
+    loadFindings();
+  });
+
+  // ── summary ───────────────────────────────────────────────────────────────
+  async function loadSummary() {
+    try {
+      const res  = await fetch('/entity-card-maintenance/api/summary');
+      const data = await res.json();
+      document.getElementById('chip-count-all').textContent = data.total_pending ?? 0;
+
+      const row = document.getElementById('summary-row');
+      row.querySelectorAll('.chip.type-chip').forEach(c => c.remove());
+
+      for (const [type, statuses] of Object.entries(data.by_type || {})) {
+        const pending = statuses['pending'] || 0;
+        if (pending === 0) continue;
+        const chip = document.createElement('div');
+        chip.className = `chip type-chip type-${type}`;
+        chip.innerHTML = `<div class="chip-title">${type.replace(/_/g,' ')}</div><div class="chip-count">${pending}</div>`;
+        chip.addEventListener('click', () => filterType(type));
+        row.appendChild(chip);
+      }
+    } catch(e) { console.error('summary failed', e); }
+  }
+
+  function filterType(type) {
+    document.getElementById('filter-type').value = type;
+    loadFindings();
+  }
+
+  // ── findings table ────────────────────────────────────────────────────────
+  async function loadFindings() {
+    const status   = document.getElementById('filter-status').value;
+    const type     = document.getElementById('filter-type').value;
+    const priority = document.getElementById('filter-priority').value;
+
+    let url = `/entity-card-maintenance/api/findings?status=${status}`;
+    if (type)     url += `&type=${type}`;
+    if (priority) url += `&priority=${priority}`;
+
+    const tbody = document.getElementById('findings-body');
+    tbody.innerHTML = `<tr><td colspan="10" class="empty"><span class="spinner"></span></td></tr>`;
+
+    try {
+      const res = await fetch(url);
+      allFindings = await res.json();
+      renderFindings(allFindings);
+    } catch(e) {
+      tbody.innerHTML = `<tr><td colspan="10" class="empty" style="color:var(--bad)">Failed to load findings</td></tr>`;
+      console.error(e);
+    }
+  }
+
+  function renderFindings(findings) {
+    const tbody = document.getElementById('findings-body');
+    selectedIds.clear();
+    updateSelectAll();
+
+    if (!findings.length) {
+      tbody.innerHTML = `<tr><td colspan="10" class="empty">No findings — all clear!</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = findings.map(f => {
+      const ev = f.evidence_json || {};
+      const entityName = ev.entity_name || f.entity_card_id;
+      const entityType = ev.entity_type || '–';
+      const conf = f.confidence != null ? (f.confidence * 100).toFixed(0) + '%' : '–';
+      const evJson = f.evidence_json ? JSON.stringify(f.evidence_json, null, 2) : '';
+      const toggleId = `ev-${f.id}`;
+      const evidenceToggle = evJson
+        ? `<button class="toggle-evidence" onclick="toggleEvidence('${toggleId}')">show evidence</button>`
+          + `<div id="${toggleId}" class="evidence-block">${escHtml(evJson)}</div>`
+        : '';
+      const isPending = f.status === 'pending';
+
+      // Per-finding-type primary action — buttons say what they actually do.
+      const primary = primaryActionFor(f.finding_type);
+
+      return `<tr id="row-${f.id}">
+        <td class="cb-col"><input type="checkbox" class="row-cb" value="${f.id}" onchange="toggleRowCb(this)" ${isPending ? '' : 'disabled'}></td>
+        <td><span class="badge badge-${f.finding_type}">${f.finding_type.replace(/_/g,' ')}</span></td>
+        <td><span class="badge badge-${f.priority}">${f.priority}</span></td>
+        <td><span class="badge badge-${f.status}">${f.status}</span></td>
+        <td style="max-width:200px;word-break:break-word">${escHtml(entityName)}</td>
+        <td><span style="color:var(--muted);font-size:12px">${escHtml(entityType)}</span></td>
+        <td><code style="font-size:11px" title="${primary.tooltip}">${primary.label}</code></td>
+        <td class="reason">${escHtml(f.reason || '')}${evidenceToggle}</td>
+        <td>${conf}</td>
+        <td style="white-space:nowrap">
+          ${isPending ? `
+            <button class="btn ${primary.cls}" onclick="singleAction('${f.id}','${primary.verb}')" title="${primary.tooltip}">${primary.label}</button>
+            <button class="btn btn-reject"  onclick="singleAction('${f.id}','reject')"  title="Dismiss this finding (no change to the card)">Dismiss</button>
+            <button class="btn btn-snooze"  onclick="singleAction('${f.id}','snooze')"  title="Hide for now; the next scan can re-raise it">Snooze</button>
+          ` : ''}
+        </td>
+      </tr>`;
+    }).join('');
+  }
+
+  /**
+   * Per-finding-type primary action.
+   * The backend understands two API verbs: "approve" (run the finding's
+   * default suggested_action) and "regenerate" (force a v2 card refresh).
+   * Button label and color reflect what actually happens.
+   */
+  function primaryActionFor(findingType) {
+    switch (findingType) {
+      case 'broken_kg_link':
+      case 'junk_name':
+        return {
+          verb: 'approve',
+          label: 'Deactivate card',
+          cls:   'btn-deactivate',
+          tooltip: 'Sets is_active=false. The card stops being injected into agent prompts AND the nightly pipeline will not regenerate it. To bring the card back, toggle "Show inactive" in the Entity Cards editor and click the ♻️ Reactivate button.',
+        };
+      case 'blank_content':
+      case 'stale_content':
+        return {
+          verb: 'regenerate',
+          label: 'Regenerate card',
+          cls:   'btn-regenerate',
+          tooltip: 'Re-runs the v2 card writer for this entity using the current KG neighborhood. Replaces the existing card content.',
+        };
+      case 'low_confidence':
+      case 'no_kg_link':
+      default:
+        return {
+          verb: 'approve',
+          label: 'Acknowledge',
+          cls:   'btn-ack',
+          tooltip: 'Mark this finding as seen. No automated change to the card.',
+        };
+    }
+  }
+
+  function toggleEvidence(id) {
+    const el = document.getElementById(id);
+    el.style.display = el.style.display === 'block' ? 'none' : 'block';
+  }
+
+  // ── selection ─────────────────────────────────────────────────────────────
+  function toggleSelectAll(cb) {
+    document.querySelectorAll('.row-cb:not(:disabled)').forEach(el => {
+      el.checked = cb.checked;
+      cb.checked ? selectedIds.add(el.value) : selectedIds.delete(el.value);
+    });
+  }
+  function toggleRowCb(cb) {
+    cb.checked ? selectedIds.add(cb.value) : selectedIds.delete(cb.value);
+    updateSelectAll();
+  }
+  function updateSelectAll() {
+    const all     = document.querySelectorAll('.row-cb:not(:disabled)');
+    const checked = document.querySelectorAll('.row-cb:not(:disabled):checked');
+    const sa = document.getElementById('select-all');
+    if (sa) {
+      sa.indeterminate = checked.length > 0 && checked.length < all.length;
+      sa.checked = all.length > 0 && checked.length === all.length;
+    }
+  }
+
+  // ── actions ───────────────────────────────────────────────────────────────
+  async function singleAction(id, action) {
+    try {
+      const res = await fetch('/entity-card-maintenance/api/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      const detail = data.exec_detail ? ` — ${data.exec_detail}` : '';
+      showToast(`${action}${detail}`);
+      loadFindings();
+      loadSummary();
+    } catch(e) { showToast('Error: ' + e.message, true); }
+  }
+
+  async function bulkAction(action) {
+    const ids = [...selectedIds];
+    if (!ids.length) { showToast('Select at least one finding first'); return; }
+    try {
+      const res = await fetch('/entity-card-maintenance/api/bulk_action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids, action }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        showToast('Error: ' + (err.error || res.statusText), true);
+        return;
+      }
+      const data = await res.json();
+      const execMsg = data.executed ? `, ${data.executed} executed` : '';
+      showToast(`${action} — ${data.updated} finding(s) updated${execMsg}`);
+      loadFindings();
+      loadSummary();
+    } catch(e) { showToast('Error: ' + e.message, true); }
+  }
+
+  // ── scan trigger ──────────────────────────────────────────────────────────
+  document.getElementById('btn-run').addEventListener('click', async () => {
+    const btn = document.getElementById('btn-run');
+    btn.disabled = true;
+    btn.textContent = 'Running…';
+    try {
+      const res  = await fetch('/entity-card-maintenance/api/run', { method: 'POST' });
+      const data = await res.json();
+      showToast('Scan complete — run_id: ' + data.run_id);
+      loadFindings();
+      loadSummary();
+    } catch(e) {
+      showToast('Error: ' + e.message, true);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Run scan';
+    }
+  });
+
+  // ── utilities ─────────────────────────────────────────────────────────────
+  function showToast(msg, isError = false) {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.style.borderColor = isError ? 'var(--bad)' : 'var(--ok)';
+    el.classList.add('show');
+    setTimeout(() => el.classList.remove('show'), 3000);
+  }
+  function escHtml(str) {
+    return String(str)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+  }
+</script>
+</body>
+</html>

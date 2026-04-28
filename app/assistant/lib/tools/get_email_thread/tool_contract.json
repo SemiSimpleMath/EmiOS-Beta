@@ -1,0 +1,102 @@
+{
+  "name": "get_email_thread",
+  "description": "Fetch a full email conversation thread by Gmail thread id (or seed message id). Returns messages in chronological order.",
+  "inputs": [
+    {
+      "name": "thread_id",
+      "type": "string",
+      "required": false,
+      "description": "Gmail thread id for the conversation."
+    },
+    {
+      "name": "seed_message_id",
+      "type": "string",
+      "required": false,
+      "description": "A Gmail message id inside the target thread. Used to resolve thread id when thread_id is omitted."
+    },
+    {
+      "name": "participant_email",
+      "type": "string",
+      "required": false,
+      "description": "Email address to resolve a recent conversation thread when thread_id and seed_message_id are not provided."
+    },
+    {
+      "name": "account_id",
+      "type": "string",
+      "required": false,
+      "description": "Optional Google OAuth account id for per-call mailbox selection (default \"google_user_primary\")."
+    },
+    {
+      "name": "max_messages",
+      "type": "integer",
+      "required": false,
+      "description": "Maximum messages to return (default 100, max 500)."
+    },
+    {
+      "name": "include_body",
+      "type": "boolean",
+      "required": false,
+      "description": "Whether to include parsed message body text."
+    },
+    {
+      "name": "include_recent_messages",
+      "type": "boolean",
+      "required": false,
+      "description": "When participant_email is provided, also return recent participant messages across threads (default true)."
+    },
+    {
+      "name": "recent_message_limit",
+      "type": "integer",
+      "required": false,
+      "description": "Maximum recent participant messages to include (default 8, max 50)."
+    },
+    {
+      "name": "lookback_hours",
+      "type": "integer",
+      "required": false,
+      "description": "Optional lookback window in hours for participant search (for example 10)."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "data.thread_id",
+      "type": "string",
+      "description": "Resolved Gmail thread id."
+    },
+    {
+      "path": "data.messages",
+      "type": "array",
+      "description": "Ordered thread messages (oldest to newest)."
+    },
+    {
+      "path": "data.recent_messages",
+      "type": "array",
+      "description": "Recent participant messages (cross-thread context), if enabled."
+    }
+  ],
+  "arguments_prompt": "{\n  \"participant_email\": \"contact@example.com\",\n  \"account_id\": \"google_user_primary\",\n  \"lookback_hours\": 10,\n  \"max_messages\": 50,\n  \"include_body\": true,\n  \"include_recent_messages\": true,\n  \"recent_message_limit\": 8\n}",
+  "metadata": {
+    "domain": "email",
+    "actions": [
+      "read",
+      "fetch"
+    ],
+    "selectors": [
+      "thread_id",
+      "message_id",
+      "participant_email"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [
+      "google"
+    ],
+    "requires_network": true,
+    "cost_level": "low",
+    "latency_class": "medium",
+    "front_door": true,
+    "room_visibility_default": "show",
+    "approval_required": false,
+    "planner_description": "Fetch a full conversation thread by id, seed message, or participant."
+  }
+}

@@ -1,0 +1,43 @@
+Run one read-only SQL SELECT against the live emi.db. Use this to
+investigate the KG the way a developer would: count things, follow
+provenance, find duplicates, compare nodes, walk windows back to source
+messages.
+
+Connection is opened read-only at the SQLite level — writes are not
+possible regardless of the statement. Statements MUST start with SELECT
+or WITH; PRAGMA table_info()/foreign_key_list() also allowed for
+schema discovery. Anything else is rejected.
+
+Schema cheatsheet (read-only):
+- kg_node_metadata(id, label, node_type, category, aliases, description,
+  original_sentence, start_date, end_date, importance, pagerank_score,
+  window_id, source, created_at)
+- kg_edge_metadata(id, source_id, target_id, relationship_type, sentence,
+  window_id, source, created_at)
+- kg_node_evidence(id, node_id, source_table, source_id, derived_sentence,
+  message_timestamp, window_id, merge_action, created_at)
+- kg_window(id, start_unified_log_id, end_unified_log_id, start_timestamp,
+  end_timestamp, message_count, summary, standalone)
+- kg_window_message(window_id, unified_log_id, item_order)
+- kg_resolved_message(id, unified_log_id, unified_timestamp, resolved_text)
+- unified_log_2026(id, timestamp, role, speaker_name, message, room_id, source)
+- claim_proposal(id, status, claim_type, confidence, representative_sentence,
+  observation_count, first_observed_at, last_observed_at)
+- claim_proposal_node(id, proposal_id, label, node_type, category, sentence,
+  attributes_json, valid_from, valid_to, resolved_node_id, resolution_action)
+- claim_proposal_edge(id, proposal_id, source_node_id, target_node_id,
+  predicate, sentence)
+- claim_proposal_evidence(id, proposal_id, window_id, enrichment_id,
+  unified_log_id, raw_text, observed_at)
+- entity_cards(id, entity_name, source_node_id, summary, key_facts,
+  aliases, updated_at)
+- pod_store(pod_id, kind, tags_json, one_liner, body, source_refs_json,
+  created_at)
+
+Legacy historical tables (older nodes still reference these):
+  kg_chat_conversation_window, kg_chat_conversation_window_item.
+
+Returns rows as both a markdown table (in `content`) and structured
+`data.rows`. Default cap is 200 rows; pass `max_rows` up to 5000 if
+needed. Long cells truncate to 200 chars in the table; full values
+remain in `data.rows`.

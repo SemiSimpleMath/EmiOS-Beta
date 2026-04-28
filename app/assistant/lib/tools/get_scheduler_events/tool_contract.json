@@ -1,0 +1,52 @@
+{
+  "name": "get_scheduler_events",
+  "description": "Fetch time-based reminder alerts (APScheduler), not calendar events or meetings. Returns active reminders by default, or filter with optional start_date and end_date in ISO 8601; prefer a one-week window starting today, or a single day when only that date is needed.",
+  "inputs": [
+    {
+      "name": "start_date",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "end_date",
+      "type": "string",
+      "required": true,
+      "description": ""
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "- **Arguments**:\n  - `start_date` (str, optional): Fetching reminders in date range.  Use ISO 8601 format (e.g., \"2024-12-31T17:00:00\").\n  - `end_date` (str, optional): Fetching reminders in date range.  Use ISO 8601 format (e.g., \"2024-12-31T17:00:00\").\n\n  Typically use a range of one week (One week starting from today).  Larger ranges than a week are not advisable. If you have a very good reason you can try a larger range.\n  If you only need reminders for one day then one day range is best.",
+  "metadata": {
+    "domain": "reminder",
+    "actions": [
+      "read",
+      "list"
+    ],
+    "selectors": [
+      "date_range"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [
+      "google"
+    ],
+    "requires_network": true,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

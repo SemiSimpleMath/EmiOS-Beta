@@ -1,0 +1,7 @@
+web_type_focused:
+Type text into the currently-focused textbox (no `ref` required).
+
+Use this when you already clicked into an input and the cursor is there, but you do not have a valid snapshot `ref` for `browser_type`.
+It types into `document.activeElement` and can optionally press Enter (`submit: true`).
+By default it also captures a `browser_snapshot` after typing.
+

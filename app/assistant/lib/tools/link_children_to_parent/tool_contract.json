@@ -1,0 +1,55 @@
+{
+  "name": "link_children_to_parent",
+  "description": "Link related events (reminders, todos, calendar events) into a parent-child hierarchy.\n\nUse this after creating reminders or tasks for a specific calendar event or goal.\nThis enables cascade operations - when the parent is cancelled/rescheduled, children follow.\n\nSource systems:\n- google_calendar: Google Calendar events\n- google_tasks: Google Tasks items\n- scheduler: Internal reminders created with create_scheduler_event\n\nExample: After creating reminders for \"Dentist appointment\", link them:\n- parent: \"google_calendar:abc123xyz\" (the dentist calendar event ID)\n- children: [\"scheduler:reminder_001\", \"scheduler:reminder_002\"]",
+  "inputs": [
+    {
+      "name": "parent",
+      "type": "string",
+      "required": true,
+      "description": "Parent event reference in format 'source_system:source_id'. Examples: 'google_calendar:abc123', 'scheduler:reminder_001'"
+    },
+    {
+      "name": "children",
+      "type": "array",
+      "required": true,
+      "description": "List of child event references, each in format 'source_system:source_id'. Examples: ['scheduler:reminder_001', 'scheduler:reminder_002']"
+    },
+    {
+      "name": "parent_title",
+      "type": "string",
+      "required": false,
+      "description": "Title for the parent event (used if parent node needs to be created)"
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "## link_children_to_parent\n\nLink child events to a parent event to create a hierarchy.\n\n### Arguments:\n\n- **parent** (required): Parent event in format \"source_system:source_id\"\n  - Examples: \"google_calendar:abc123xyz\", \"scheduler:reminder_001\"\n  \n- **children** (required): List of child events, each in format \"source_system:source_id\"\n  - Example: [\"scheduler:reminder_001\", \"scheduler:reminder_002\"]\n  \n- **parent_title** (optional): Title for the parent if it needs to be created as a new node\n\n### Source Systems:\n- `google_calendar` - Google Calendar event IDs\n- `google_tasks` - Google Tasks item IDs  \n- `scheduler` - Internal scheduler/reminder IDs\n\n### Example Usage:\n\n1. Create calendar event for \"Dentist at 3pm\" \u2192 returns ID \"abc123xyz\"\n2. Create reminder \"Leave for dentist\" \u2192 returns ID \"reminder_001\"\n3. Create reminder \"Dentist in 5 min\" \u2192 returns ID \"reminder_002\"\n4. Link them:\n\n```json\n{\n  \"tool_name\": \"link_children_to_parent\",\n  \"arguments\": {\n    \"parent\": \"google_calendar:abc123xyz\",\n    \"children\": [\n      \"scheduler:reminder_001\",\n      \"scheduler:reminder_002\"\n    ],\n    \"parent_title\": \"Dentist Appointment\"\n  }\n}\n```\n\nAfter linking, if the dentist appointment is cancelled, the reminders can be cancelled automatically.",
+  "metadata": {
+    "category": "general",
+    "verbs": [
+      "operate"
+    ],
+    "entities": [
+      "tool"
+    ],
+    "risk_level": "medium",
+    "side_effects": "writes_data",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

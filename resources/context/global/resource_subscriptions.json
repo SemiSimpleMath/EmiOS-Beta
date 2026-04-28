@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "subscriptions": [
+    {
+      "resource_id": "resource_weather",
+      "room_eligible": true,
+      "trigger_mode": "keyword",
+      "keywords": [
+        "weather",
+        "forecast",
+        "temperature",
+        "rain",
+        "snow",
+        "wind",
+        "humid",
+        "humidity",
+        "storm",
+        "sunny",
+        "cloudy"
+      ],
+      "always_inject": false
+    }
+  ]
+}

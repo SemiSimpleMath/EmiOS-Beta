@@ -1,0 +1,31 @@
+{% if doc_creation_session_id %}
+Document creation session: {{ doc_creation_session_id }}
+{% endif %}
+
+{% if doc_type %}
+Document type: {{ doc_type }}
+{% endif %}
+
+{% if doc_markdown_last_emitted %}
+## Current document draft
+
+{{ doc_markdown_last_emitted }}
+
+---
+{% else %}
+The document is currently empty.
+{% endif %}
+
+## Exchanges since last edit
+
+{% if recent_exchanges %}
+{{ recent_exchanges }}
+{% else %}
+(No new exchanges.)
+{% endif %}
+
+---
+
+Based on the exchanges above: does the document need to change?
+- If yes: emit `doc_action` "update" with search/replace edits against the current document draft above.
+- If no: emit `doc_action` "no_op" with empty edits.

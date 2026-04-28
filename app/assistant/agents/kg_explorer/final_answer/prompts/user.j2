@@ -1,0 +1,33 @@
+Today is {{ date_time }}.
+
+## Exploration Task
+{% if task %}
+{{ task }}
+{% endif %}
+
+{% if information %}
+**Context**: {{ information }}
+{% endif %}
+
+## Exploration Results
+
+{% if recent_history %}
+The exploration planner has completed its work. Here is the complete history of what was explored and discovered:
+
+{{ recent_history }}
+{% else %}
+No exploration history available.
+{% endif %}
+
+## Your Task
+
+Review the exploration results above and extract actionable recommendations.
+
+For each discovery:
+1. Identify the **node** (include node_id and label if available)
+2. Describe the **finding** (what was discovered)
+3. Specify the **recommendation** (what concrete action should be taken)
+4. Provide the **reasoning** (why this makes sense based on the evidence)
+5. Assess **confidence** (high/medium/low based on strength of evidence)
+
+Be specific and concrete. Include all relevant IDs, labels, relationship types, dates, etc. so that another agent can implement your recommendations directly.

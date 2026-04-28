@@ -1,0 +1,27 @@
+name: vibe_check
+class_name: Agent
+llm_params:
+  llm_provider: "gemini"
+  engine: "gemini-3-flash-preview"
+  model_tier: "mini"
+  temperature: 0.3
+entity_scan_keys: [incoming_message, task, information, recent_history, recent_chat]
+
+# Context items loaded from resource files into system prompt
+system_context_items: []
+
+# Context items for user prompt (dynamic values passed via agent_input)
+user_context_items:
+- date_time
+- day_of_week
+- entity_summary
+- entity_metadata
+- resource_health_inference_output
+- resource_expected_calendar
+- resource_daily_context_generator_output
+- resource_afk_statistics_output
+- resource_dayflow_routine
+- resource_music_preferences
+- calendar_events
+- recent_chat
+- previous_state

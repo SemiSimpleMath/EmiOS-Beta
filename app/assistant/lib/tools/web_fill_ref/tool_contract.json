@@ -1,0 +1,81 @@
+{
+  "name": "web_fill_ref",
+  "description": "web_fill_ref:\nAtomic \"click-ref + clear + type + Enter\" using a snapshot ref.\n\nSame as web_fill_xy but clicks a snapshot ref instead of coordinates.\nUse this when the target input is in the accessibility snapshot.\n\nArguments:\n- ref: snapshot ref of the input element\n- text: what to type\n- submit: press Enter after typing (default true)\n- clear_first: clear before typing (default true)\n- capture_snapshot: include browser snapshot after action (default true)",
+  "inputs": [
+    {
+      "name": "ref",
+      "type": "string",
+      "required": true,
+      "description": "Snapshot ref of the input element to click and fill."
+    },
+    {
+      "name": "text",
+      "type": "string",
+      "required": true,
+      "description": "Text to type after clicking to focus."
+    },
+    {
+      "name": "submit",
+      "type": "boolean",
+      "required": false,
+      "description": "If true, press Enter after typing."
+    },
+    {
+      "name": "clear_first",
+      "type": "boolean",
+      "required": false,
+      "description": "If true, clear the field before typing (best-effort)."
+    },
+    {
+      "name": "slowly",
+      "type": "boolean",
+      "required": false,
+      "description": "If true, type with a small delay between characters."
+    },
+    {
+      "name": "capture_snapshot",
+      "type": "boolean",
+      "required": false,
+      "description": "If true, capture browser_snapshot after action and include it in tool result data."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    },
+    {
+      "path": "data.snapshot_id",
+      "type": "string",
+      "description": "Unique id for the bundled browser_snapshot when captured."
+    }
+  ],
+  "arguments_prompt": "Fill arguments for `web_fill_ref`.\n\nReturn ONLY a JSON object with:\n- ref (string, required)\n- text (string, required)\n- submit (boolean, default true)\n- clear_first (boolean, default true)\n- slowly (boolean, default false)\n- capture_snapshot (boolean, default true)\n\nExample:\n{\"ref\":\"e42\",\"text\":\"cheeseburger\",\"submit\":true,\"clear_first\":true,\"capture_snapshot\":true}",
+  "metadata": {
+    "domain": "browser",
+    "actions": [
+      "fill",
+      "type",
+      "click"
+    ],
+    "selectors": [
+      "ref",
+      "text"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "high",
+    "latency_class": "slow",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

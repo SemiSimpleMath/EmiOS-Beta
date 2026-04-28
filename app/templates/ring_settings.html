@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ring Cameras</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/setup_wizard.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="setup-container">
+        <div class="setup-header">
+            <h1><i class="fas fa-video"></i> Ring Cameras</h1>
+            <p>View snapshots and events from Ring cameras</p>
+            <a href="/settings/integrations" class="back-link"><i class="fas fa-arrow-left"></i> Back to Integrations</a>
+        </div>
+
+        <div class="settings-section">
+            <h2><i class="fas fa-cog"></i> Configuration</h2>
+            <div class="feature-card">
+                <div class="feature-info">
+                    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+                        <label class="feature-toggle">
+                            <input type="checkbox" id="ring_enabled">
+                            <div class="toggle-slider"></div>
+                        </label>
+                        <strong>Enable Ring integration</strong>
+                        <span id="ring_token_status" class="feature-status disabled">Token not set</span>
+                    </div>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px;">
+                        <div>
+                            <label for="ring_endpoint_url"><strong>Endpoint URL</strong></label>
+                            <input id="ring_endpoint_url" type="text" style="width:100%;padding:8px;" placeholder="http://127.0.0.1:8787/smart-home/ring">
+                        </div>
+                        <div>
+                            <label for="ring_token_env_var"><strong>Token env var</strong></label>
+                            <input id="ring_token_env_var" type="text" style="width:100%;padding:8px;" placeholder="EMI_SMARTHOME_RING_TOKEN">
+                        </div>
+                        <div>
+                            <label for="ring_timeout_seconds"><strong>Timeout seconds</strong></label>
+                            <input id="ring_timeout_seconds" type="number" min="1" style="width:100%;padding:8px;" placeholder="20">
+                        </div>
+                    </div>
+                    <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+                        <button type="button" id="ring_save_config_btn" class="oauth-connect-btn"><i class="fas fa-save"></i> Save</button>
+                        <button type="button" id="ring_refresh_status_btn" class="oauth-connect-btn"><i class="fas fa-sync-alt"></i> Refresh</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="settings-section">
+            <h2><i class="fas fa-gamepad"></i> Quick Actions</h2>
+            <div class="feature-card">
+                <div class="feature-info">
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+                        <button type="button" id="ring_list_btn" class="oauth-connect-btn">List Cameras</button>
+                        <button type="button" id="ring_snapshot_btn" class="oauth-connect-btn">Get Snapshot</button>
+                        <button type="button" id="ring_events_btn" class="oauth-connect-btn">Recent Events</button>
+                    </div>
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                        <input id="ring_camera_id_input" type="text" placeholder="Camera ID" style="padding:8px;max-width:220px;">
+                        <button type="button" id="ring_siren_on_btn" class="oauth-connect-btn">Siren On</button>
+                        <button type="button" id="ring_siren_off_btn" class="oauth-connect-btn">Siren Off</button>
+                    </div>
+                    <pre id="ring_action_result" style="margin-top:12px;white-space:pre-wrap;background:#0f172a;color:#e2e8f0;padding:10px;border-radius:6px;max-height:280px;overflow:auto;"></pre>
+                </div>
+            </div>
+        </div>
+
+        <div id="error-message" class="error-message" style="display: none;"></div>
+        <div id="success-message" class="success-message" style="display: none;"></div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/integrations_shared.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/ring_settings.js') }}"></script>
+</body>
+</html>

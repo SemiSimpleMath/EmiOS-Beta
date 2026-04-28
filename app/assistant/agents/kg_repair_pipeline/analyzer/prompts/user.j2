@@ -1,0 +1,27 @@
+Node Information:
+- Label: {{ node_label }}
+- Semantic Label: {{ node_semantic_label }}
+- Description: {{ node_description }}
+- Type: {{ node_type }}
+- Category: {{ node_category }}
+- Aliases: {{ node_aliases }}
+
+{% if start_date or end_date or valid_during %}
+Temporal Information:
+{% if start_date %}- Start Date: {{ start_date }}{% if start_date_confidence %} (confidence: {{ start_date_confidence }}){% endif %}{% endif %}
+{% if end_date %}- End Date: {{ end_date }}{% if end_date_confidence %} (confidence: {{ end_date_confidence }}){% endif %}{% endif %}
+{% if valid_during %}- Valid During: {{ valid_during }}{% endif %}
+{% endif %}
+
+{% if edge_count and edge_count != "0" %}
+Graph Context:
+- Edge Count: {{ edge_count }}
+{% if sample_connections %}
+- Sample Connections:
+{% for connection in sample_connections %}
+  - {{ connection.connected_node_label }} ({{ connection.connected_node_type }}) - {{ connection.edge_type }} - {{ connection.direction }}{% if connection.edge_sentence %} - "{{ connection.edge_sentence }}"{% endif %}
+{% endfor %}
+{% endif %}
+{% endif %}
+
+Please analyze this node for data quality issues and provide your assessment.

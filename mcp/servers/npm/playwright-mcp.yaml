@@ -1,0 +1,81 @@
+# Curated MCP server entry: Playwright MCP (npm)
+#
+# Source:
+# - https://www.npmjs.com/package/@playwright/mcp
+# - https://github.com/microsoft/playwright-mcp
+#
+# Notes:
+# - This MCP exposes MANY tools, including ones with side effects (click/type/run code).
+# - Start with a strict allowlist of read-only tools; expand carefully.
+schema_version: 1
+server_id: npm/playwright-mcp
+display_name: "Playwright MCP (@playwright/mcp, npm)"
+source: official_reference_server
+
+enabled: true
+
+launch_options:
+  # Windows note: Python subprocess cannot reliably execute `npx` (a .cmd shim)
+  # directly; use `cmd /c npx ...` so stdio launch works from Python.
+  - id: cmd_npx
+    transport: stdio
+    command: cmd
+    args:
+      - /c
+      - npx
+      - -y
+      - "@playwright/mcp@latest"
+      # Enable coordinate-based "vision" capabilities (mouse x/y tools).
+      - --caps=vision
+      # Persist browser profile (cookies, localStorage, site prefs) across sessions.
+      - --user-data-dir=${REPO_ROOT}/data/playwright_profile
+
+policy:
+  # IMPORTANT: This server can perform real browser interactions.
+  # Emi currently does not enforce MCP-side approval gates; keep the allowlist read-only.
+  default_requires_approval: true
+  max_concurrent_calls: 1
+  call_timeout_seconds: 60
+  max_result_bytes: 2000000
+
+# Allowlist
+# NOTE: Playwright MCP includes interactive tools (click/type/etc). We enable a
+# curated subset that is sufficient for real browsing flows, while keeping
+# `default_requires_approval: true` as a safety gate.
+tool_allowlist:
+  # Navigation lifecycle
+  - browser_navigate
+  - browser_navigate_back
+  - browser_close
+  - browser_install
+
+  # Read-only introspection
+  - browser_snapshot
+  - browser_take_screenshot
+  - browser_console_messages
+  - browser_network_requests
+
+  # Core interaction (ref-based)
+  - browser_click
+  - browser_hover
+  - browser_type
+  - browser_press_key
+  - browser_wait_for
+  - browser_select_option
+  - browser_fill_form
+  - browser_drag
+  - browser_tabs
+  - browser_resize
+  - browser_handle_dialog
+  - browser_evaluate
+  - browser_run_code
+  - browser_file_upload
+
+  # Coordinate-based interaction (requires --caps=vision)
+  - browser_mouse_move_xy
+  - browser_mouse_click_xy
+  - browser_mouse_wheel
+  - browser_mouse_drag_xy
+  - browser_mouse_down
+  - browser_mouse_up
+

@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>{% if article %}{{ article.name }} — EmiPedia{% elif is_search %}Search — EmiPedia{% else %}EmiPedia{% endif %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/wiki_viewer.css') }}">
+</head>
+<body>
+  <div class="wp-top">
+    <div class="wp-top-inner">
+      <form action="{{ url_for('wiki_viewer.wiki_search') }}" method="get" class="wp-search">
+        <input type="text" name="q" placeholder="Search EmiPedia" value="{{ search_query or '' }}">
+        <button type="submit">Search</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="wp-layout">
+    <aside class="wp-sidebar">
+      <div class="wp-logo">
+        <div class="wp-logo-letter">E</div>
+        <div class="wp-logo-text">EmiPedia<br><span class="wp-logo-sub">The Personal Encyclopedia</span></div>
+      </div>
+
+      <nav class="wp-nav">
+        <h3>Navigation</h3>
+        <ul>
+          <li><a href="{{ url_for('wiki_viewer.wiki_index') }}">Main page</a></li>
+          <li><a href="{{ url_for('wiki_viewer.wiki_random') }}">Random article</a></li>
+          <li><a href="{{ url_for('wiki_viewer.wiki_search') }}">Search</a></li>
+        </ul>
+
+        {% if toc %}
+        <h3>Contents</h3>
+        <ol class="wp-sidebar-toc">
+          {% for t in toc %}
+            <li><a href="#{{ t.slug }}">{{ t.heading }}</a></li>
+          {% endfor %}
+        </ol>
+        {% endif %}
+      </nav>
+    </aside>
+
+    <main class="wp-main">
+      {% if article %}
+        <div class="wp-tabs">
+          <span class="wp-tab wp-tab-active">Article</span>
+          <span class="wp-tab wp-tab-disabled">Talk</span>
+          <span class="wp-tab-right">
+            <button type="button" id="wp-regen-btn"
+                    class="wp-tab-btn"
+                    onclick="wpOpenRegenModal('{{ article.name | e }}')"
+                    title="Re-run rough → prose → consistency-critic for this article">
+              ↻ Regenerate
+            </button>
+          </span>
+        </div>
+        <div class="wp-article">
+          <div class="wp-article-meta">
+            {{ article.category }}
+            {% if article.generated_at %} · created {{ article.generated_at }}{% endif %}
+            {% if article.auto_generated %} · <span class="wp-auto">auto-generated</span>{% endif %}
+            {% if article.kg_node_id %} · <a href="/kg/node/{{ article.kg_node_id }}" class="wp-kg-link">KG node</a>{% endif %}
+          </div>
+          <h1 class="wp-title">{{ article.name }}</h1>
+
+          <div class="wp-body">
+            {{ article_html | safe }}
+          </div>
+        </div>
+
+      {% elif is_search %}
+        <h1 class="wp-title">Search results for "{{ search_query }}"</h1>
+        {% if search_results %}
+          <ul class="wp-search-results">
+            {% for r in search_results %}
+            <li>
+              <a href="{{ url_for('wiki_viewer.wiki_article', entity=r.name) }}" class="wp-search-title">{{ r.name }}</a>
+              <div class="wp-search-snippet">…{{ r.snippet }}…</div>
+            </li>
+            {% endfor %}
+          </ul>
+        {% elif search_query %}
+          <p>No results.</p>
+        {% endif %}
+
+      {% else %}
+        <h1 class="wp-title">EmiPedia</h1>
+        <p>The personal encyclopedia. {{ articles | length }} article{{ "" if articles|length == 1 else "s" }}.</p>
+        {% for cat, items in categories.items() %}
+        <h2>{{ cat | title }}</h2>
+        <ul class="wp-index-list">
+          {% for a in items %}
+          <li><a href="{{ url_for('wiki_viewer.wiki_article', entity=a.name) }}">{{ a.name }}</a></li>
+          {% endfor %}
+        </ul>
+        {% endfor %}
+      {% endif %}
+    </main>
+  </div>
+
+  <!-- Regenerate dialog. Hidden by default; opened by ↻ Regenerate button.
+       One DOM element handles all four states: confirm / running / success / error. -->
+  <div id="wp-modal-backdrop" class="wp-modal-backdrop" role="dialog" aria-modal="true"
+       aria-labelledby="wp-modal-title" hidden>
+    <div class="wp-modal" role="document">
+      <h2 id="wp-modal-title" class="wp-modal-title">Regenerate article</h2>
+      <div id="wp-modal-body" class="wp-modal-body"></div>
+      <div id="wp-modal-actions" class="wp-modal-actions"></div>
+    </div>
+  </div>
+
+  <script>
+  (function () {
+    const backdrop = document.getElementById('wp-modal-backdrop');
+    const titleEl  = document.getElementById('wp-modal-title');
+    const bodyEl   = document.getElementById('wp-modal-body');
+    const actionsEl = document.getElementById('wp-modal-actions');
+
+    function open() {
+      backdrop.hidden = false;
+      backdrop.classList.add('is-open');
+      document.addEventListener('keydown', onKey);
+    }
+    function close() {
+      backdrop.classList.remove('is-open');
+      backdrop.hidden = true;
+      document.removeEventListener('keydown', onKey);
+    }
+    function onKey(e) {
+      if (e.key === 'Escape') close();
+    }
+    backdrop.addEventListener('click', (e) => {
+      if (e.target === backdrop) close();
+    });
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (c) => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+      ));
+    }
+
+    function renderConfirm(name) {
+      titleEl.textContent = `Regenerate ${name}`;
+      bodyEl.innerHTML = `
+        <p>This will re-run the wiki pipeline for <code>${escapeHtml(name)}</code>:</p>
+        <ol style="margin: 8px 0 8px 20px;">
+          <li>refresh the rough page from the current KG neighborhood</li>
+          <li>rewrite prose sections + the lead</li>
+          <li>run the consistency critic and auto-investigate any new findings</li>
+        </ol>
+        <p style="color:#54595d; font-size:13px;">Existing prose for this entity will be replaced. Takes a few seconds to a minute.</p>
+      `;
+      actionsEl.innerHTML = '';
+      const cancel = document.createElement('button');
+      cancel.type = 'button';
+      cancel.className = 'wp-modal-btn';
+      cancel.textContent = 'Cancel';
+      cancel.onclick = close;
+      const go = document.createElement('button');
+      go.type = 'button';
+      go.className = 'wp-modal-btn wp-modal-btn--primary';
+      go.textContent = '↻ Regenerate';
+      go.onclick = () => runRegenerate(name);
+      actionsEl.appendChild(cancel);
+      actionsEl.appendChild(go);
+      go.focus();
+    }
+
+    function renderRunning(name) {
+      titleEl.textContent = `Regenerating ${name}`;
+      bodyEl.innerHTML = `
+        <div class="wp-modal-status wp-modal-status--running">
+          <span class="wp-modal-spinner" aria-hidden="true"></span>
+          <span>Running rough → prose → critic for <code>${escapeHtml(name)}</code>…</span>
+        </div>
+        <p style="color:#54595d; font-size:13px; margin-top:10px;">Don't close this tab. The page will reload when done.</p>
+      `;
+      actionsEl.innerHTML = '';
+      const cancel = document.createElement('button');
+      cancel.type = 'button';
+      cancel.className = 'wp-modal-btn';
+      cancel.textContent = 'Cancel';
+      cancel.disabled = true;
+      cancel.title = 'The request has been sent — wait for it to finish.';
+      actionsEl.appendChild(cancel);
+    }
+
+    function renderSuccess(name, findingsCount) {
+      titleEl.textContent = `Done — reloading`;
+      const findingsLine = findingsCount > 0
+        ? `<p style="color:#54595d; font-size:13px;">${findingsCount} consistency finding${findingsCount === 1 ? '' : 's'} produced; auto-investigation queued.</p>`
+        : '';
+      bodyEl.innerHTML = `
+        <div class="wp-modal-status wp-modal-status--success">
+          <span aria-hidden="true">✓</span>
+          <span>Regenerated <code>${escapeHtml(name)}</code>.</span>
+        </div>
+        ${findingsLine}
+      `;
+      actionsEl.innerHTML = '';
+    }
+
+    function renderError(name, errMsg) {
+      titleEl.textContent = `Regenerate failed`;
+      bodyEl.innerHTML = `
+        <div class="wp-modal-status wp-modal-status--error">
+          <span aria-hidden="true">✗</span>
+          <span>Could not regenerate <code>${escapeHtml(name)}</code>.</span>
+        </div>
+        <pre style="background:#fbf3f3; border:1px solid #f0d4d4; padding:8px; border-radius:2px; font-size:12px; color:#b32424; white-space:pre-wrap; margin-top:10px;">${escapeHtml(errMsg)}</pre>
+      `;
+      actionsEl.innerHTML = '';
+      const closeBtn = document.createElement('button');
+      closeBtn.type = 'button';
+      closeBtn.className = 'wp-modal-btn';
+      closeBtn.textContent = 'Close';
+      closeBtn.onclick = close;
+      const retry = document.createElement('button');
+      retry.type = 'button';
+      retry.className = 'wp-modal-btn wp-modal-btn--primary';
+      retry.textContent = 'Retry';
+      retry.onclick = () => runRegenerate(name);
+      actionsEl.appendChild(closeBtn);
+      actionsEl.appendChild(retry);
+      retry.focus();
+    }
+
+    async function runRegenerate(name) {
+      renderRunning(name);
+      try {
+        const res = await fetch(`/wiki/${encodeURIComponent(name)}/regenerate`, { method: 'POST' });
+        let data = null;
+        try { data = await res.json(); } catch (_) { /* fallthrough */ }
+        if (!data || !data.ok) {
+          const msg = (data && data.error) || res.statusText || `HTTP ${res.status}`;
+          renderError(name, msg);
+          return;
+        }
+        renderSuccess(name, data.findings_count || 0);
+        setTimeout(() => location.reload(), 700);
+      } catch (e) {
+        renderError(name, e.message || String(e));
+      }
+    }
+
+    window.wpOpenRegenModal = function (name) {
+      renderConfirm(name);
+      open();
+    };
+  })();
+  </script>
+</body>
+</html>

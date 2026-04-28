@@ -1,0 +1,57 @@
+{
+  "name": "pod_search",
+  "description": "Search pod_store for pod HEADERS (not full bodies). Use this to browse candidate pods, then call pod_fetch on the pod_ids you want to open.\n\nPods are retrievable memory units about the user.\n\nWHEN THE USER ASKS ABOUT A SPECIFIC TOPIC / PERSON / CONVERSATION: use `query` with 1-3 content keywords. Do NOT put people or topics in `tags`.\n\nExamples:\n- 'conversation with Justin about knowledge graphs' → `query='knowledge graph'` (stem-matched so 'graphs' finds 'graph')\n- 'what did I eat yesterday' → `tags=['food'], since='1d'`\n- 'creamer discussion' → `query='creamer'`\n\nParameters:\n- `query` (PREFERRED for topic/person/keyword search): substring match over one_liner + body; multi-word queries are tokenized AND-matched with plural stemming.\n- `tags`: fixed vocabulary ONLY — food, entertainment, health, schedule, work. NEVER invent tag names.\n- `since`: '24h', '3d', '2w', '1m', 'today', or ISO timestamp.\n\nIF A SEARCH RETURNS 0 PODS: drop filters and retry — drop tags, try a different query keyword, or expand since. Do NOT give up after one empty result.",
+  "inputs": [
+    {
+      "name": "query",
+      "type": "string",
+      "required": false,
+      "description": "Free-text substring matched against pod one_liner and body (case-insensitive). Pods with matches in one_liner rank above body-only matches. Use single meaningful words like 'knowledge graph' or 'Justin', not multi-concept queries."
+    },
+    {
+      "name": "tags",
+      "type": "array",
+      "required": false,
+      "description": "Fixed taxonomy. Valid values ONLY: food, entertainment, health, schedule, work. OR-match within the list. Example: ['food','health']. For people / topics / keywords, use `query` instead."
+    },
+    {
+      "name": "since",
+      "type": "string",
+      "required": false,
+      "description": "Time window shorthand. Accepts '24h', '3d', '2w', '1m', 'today', or an ISO timestamp."
+    },
+    {
+      "name": "limit",
+      "type": "integer",
+      "required": false,
+      "description": "Max number of headers to return. Default 20."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable list of pod headers."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured: {count, pods: [{pod_id, tags, one_liner, scope_id, created_at, created_by, content_type}]}."
+    }
+  ],
+  "arguments_prompt": "Arguments for pod_search:\n- query (optional): comma-separated search keywords for finding relevant pods\n- tags (optional): {food, entertainment, health, schedule, work}\n- since (optional): '24h' / '3d' / '1w' / 'today' / ISO\n- limit (optional): default 20",
+  "metadata": {
+    "category": "pod_store",
+    "verbs": ["read"],
+    "entities": ["pod"],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

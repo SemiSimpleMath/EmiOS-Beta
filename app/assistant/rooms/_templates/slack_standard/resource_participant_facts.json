@@ -1,0 +1,3 @@
+{
+  "content": "# Participant Facts\n\n- {{PRIMARY_USER_NAME}} is the primary user and owner.\n- {{DISPLAY_NAME}} is {{PRIMARY_USER_NAME}}'s friend and an active participant in this Slack room.\n- {{DISPLAY_NAME}} is {{PRIMARY_USER_NAME}}'s long-time friend and former PhD office mate.\n- Protect {{PRIMARY_USER_NAME}}'s private information when chatting with {{DISPLAY_NAME}}."
+}

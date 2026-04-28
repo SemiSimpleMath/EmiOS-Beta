@@ -1,0 +1,22 @@
+taxonomy_rename_category: Rename a taxonomy category.
+
+**Purpose:** Change the label of a taxonomy category (e.g., fix typos, improve naming consistency).
+
+**Parameters:**
+- category_id (required): ID of the category to rename
+- new_label (required): New label for the category (will be normalized to lowercase_snake_case)
+
+**Use this when:**
+- Fixing typos (e.g., "midle_school" -> "middle_school")
+- Improving naming consistency
+- Making labels more descriptive
+
+**Returns:**
+- success: Whether the operation succeeded
+- message: Description of what was done
+- category_id: ID of the renamed category
+- old_label: Previous label
+- new_label: New label (normalized)
+
+**Safety:** This is a safe operation. The category structure remains unchanged.
+

@@ -1,0 +1,69 @@
+﻿Task:
+{{ task }}
+
+Additional information:
+{{ information }}
+
+Compile seed:
+{{ compile_seed }}
+
+Available manager catalog:
+{{ task_compile_manager_catalog }}
+
+Compile contract:
+{{ task_compile_contract }}
+
+Objective:
+Translate the task spec into atomic task components. Follow the spec's declared executors, data flow, and deterministic markers closely.
+
+Output only:
+- phase_i_atoms.events
+- phase_i_atoms.conditions
+- phase_i_atoms.actions
+
+Output requirements:
+- Return only phase_i_atoms in the structured response.
+- Extract a complete inventory of runtime-relevant atomic components for the task.
+- Use explicit deterministic ids:
+  - events: event_1, event_2, ...
+  - conditions: condition_1, condition_2, ...
+  - actions: action_1, action_2, ...
+  - facts: fact_1, fact_2, ...
+  - artifacts: artifact_1, artifact_2, ...
+- Each atomic event must include:
+  - id
+  - event_type
+  - canonical_event_name
+  - short description
+- Each atomic condition must include:
+  - id
+  - condition_type
+  - expression
+  - short description
+- Each atomic action must include:
+  - id
+  - executor
+  - short description
+  - consumes_data_ids (every id here MUST be produced by a prior action or be a preloaded input — never invent data ids)
+  - produces: list of {id, kind (fact or artifact), description} for each output this action creates
+
+Additional output constraints:
+- Use only the allowed event types:
+  - watch_event
+  - state_event
+  - time_event
+- Use only the allowed condition types:
+  - event_observed
+  - state_predicate
+  - time_predicate
+- For time events, use canonical names only:
+  - clock.local.HH_MM  - alarm: fires at the exact time crossing; if already past, waits until tomorrow
+  - clock.after.HH_MM  - gate: fires immediately if already past the time, otherwise waits for the crossing
+  - clock.tick.Nm
+  - clock.timer.Ns|Nm|Nh
+- For event_observed conditions, express predicates as direct event id boolean checks, for example:
+  - event_1 == True
+  - event_2 == False
+- If the task includes "Already provided facts and artifacts" with deterministic ids, treat those ids as already available inputs and consume them directly.
+- Do not materialize or rediscover pre-provided inputs.
+- Use only fact_* and artifact_* ids for cross-step data references.

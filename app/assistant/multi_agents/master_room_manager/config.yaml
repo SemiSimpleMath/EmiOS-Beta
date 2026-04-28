@@ -1,0 +1,183 @@
+name: master_room_manager
+class_name: MultiAgentManager
+description: "Master room manager with dedicated gate/switchboard prompts."
+max_cycles: 30
+
+role_bindings:
+  delegator: room::delegator
+  tool_selector: shared::tool_selector
+
+agents:
+  - name: room::delegator
+    class: Delegator
+  - name: master_room::chat_gate
+    class: Agent
+  - name: master_room::plan_mode
+    class: Agent
+  - name: task_spec::chat
+    class: Agent
+  - name: master_room::task_spec_writer
+    class: Agent
+  - name: master_room::doc_create
+    class: Agent
+  - name: master_room::doc_writer
+    class: Agent
+  - name: master_room::geoguessr_host
+    class: Agent
+  - name: master_room::geoguessr_analyst
+    class: Agent
+  - name: master_room::switchboard
+    class: Agent
+  - name: master_room::response_formatter
+    class: Agent
+control_nodes:
+  - name: master_room_chat_task_router_node
+    class: MasterRoomChatTaskRouterNode
+  - name: plan_mode_final_router_node
+    class: PlanModeFinalRouterNode
+  - name: task_spec_router_node
+    class: TaskSpecRouterNode
+  - name: task_create_final_router_node
+    class: TaskCreateFinalRouterNode
+  - name: doc_create_final_router_node
+    class: DocCreateFinalRouterNode
+  - name: geoguessr_router_node
+    class: GeoguessrRouterNode
+  - name: room_switchboard_arguments_node
+    class: RoomSwitchboardArgumentsNode
+  - name: room_tool_caller
+    class: RoomToolCaller
+  - name: return_control_node
+    class: ReturnControlNode
+  - name: tool_caller
+    class: ToolCaller
+  - name: tool_result_handler
+    class: ToolResultHandler
+  - name: final_answer_node
+    class: FinalAnswerNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+  - name: graceful_exit_control_node
+    class: GracefulExitControlNode
+
+tools:
+  allowed_tools:
+    - get_important_emails
+    - send_email
+    - find_calendar_event_by_name
+    - get_calendar_events
+    - create_calendar_event
+    - create_repeating_calendar_event
+    - delete_calendar_event
+    - delete_repeating_calendar_event
+    - update_calendar_event
+    - get_todo_tasks
+    - create_todo_task
+    - delete_todo_task
+    - update_todo_task
+    - web_manager
+    - ask_user
+    - notify_user
+    - playwright_manager
+    - kg_team_manager
+    - ask_kg
+    - read_text_file
+    - append_text_file
+    - write_text_file
+    - find_tool
+    - search_web
+    - scrape_url
+    - peak_at_link
+    - summarize_link
+    - set_screen_capture_enabled
+    - capture_and_describe_monitors
+    - capture_monitor_screenshot
+    - vision_image_scout
+    - vision_image_describe
+    - one_shot_tool_runner
+    - fast_tool_manager
+    - run_task
+    - task_compile_manager
+    - get_google_doc
+    - edit_google_doc
+    - create_google_doc
+    - emi_team_manager
+    - personal_admin_manager
+    - devices_manager
+  except_tools: []
+
+scope_contract:
+  tools:
+    allowed_tools: ["all"]
+    blocked_tools:
+      - install_tool
+      - mcp::npm/playwright-mcp::browser_run_code
+    requires_approval_tools:
+      - playwright_manager
+
+flow_config:
+  strict_routing: true
+  flow:
+    normal:
+      source_agent: "master_room::chat_gate"
+    planning_mode:
+      source_agent: "master_room::plan_mode"
+    task_creation_mode:
+      source_agent: "task_spec::chat"
+    doc_creation_mode:
+      source_agent: "master_room::doc_create"
+    game_mode:
+      source_agent: "master_room::geoguessr_host"
+  chat_gate:
+    source_agent: "master_room::chat_gate"
+    switchboard_agent: "master_room::switchboard"
+    final_node: "final_answer_node"
+    exit_flag_key: "handoff_tf"
+    no_op_flag_key: "no_op_tf"
+    chat_response_key: "chat_response"
+    switchboard_task_key: "switchboard_task"
+    switchboard_information_key: "switchboard_information"
+  planning_mode:
+    source_agent: "master_room::plan_mode"
+    final_node: "final_answer_node"
+    chat_response_key: "chat_response"
+    planning_done_key: "planning_done_tf"
+    plan_summary_key: "plan_summary"
+  task_creation_mode:
+    source_agent: "task_spec::chat"
+    final_node: "final_answer_node"
+    chat_response_key: "chat_response"
+    task_done_key: "task_creation_done_tf"
+    task_spec_key: "task_spec_markdown"
+    compiled_task_id_key: "compiled_task_id"
+  doc_creation_mode:
+    source_agent: "master_room::doc_create"
+    final_node: "final_answer_node"
+    chat_response_key: "chat_response"
+    doc_done_key: "doc_creation_done_tf"
+    doc_markdown_key: "doc_markdown"
+  game_mode:
+    source_agent: "master_room::geoguessr_host"
+    final_node: "final_answer_node"
+    chat_response_key: "chat_response"
+  state_map:
+    "room::delegator": "master_room::chat_gate"
+    "master_room::chat_gate": "master_room_chat_task_router_node"
+    "master_room::plan_mode": "plan_mode_final_router_node"
+    "plan_mode_final_router_node": "final_answer_node"
+    "task_spec::chat": "task_spec_router_node"
+    "task_spec_router_node": "task_create_final_router_node"
+    "task_create_final_router_node": "final_answer_node"
+    "master_room::doc_create": "master_room::doc_writer"
+    "master_room::doc_writer": "doc_create_final_router_node"
+    "doc_create_final_router_node": "final_answer_node"
+    "master_room::geoguessr_host": "geoguessr_router_node"
+    "geoguessr_router_node": "final_answer_node"
+    "master_room_chat_task_router_node": "master_room::switchboard"
+    "master_room::switchboard": "room_switchboard_arguments_node"
+    "room_switchboard_arguments_node": "room_tool_caller"
+    "room_tool_caller": "master_room::response_formatter"
+    "master_room::response_formatter": "final_answer_node"
+    "final_answer_node": "manager_exit_node"
+    "graceful_exit": "graceful_exit_control_node"
+    "graceful_exit_control_node": "final_answer_node"

@@ -1,0 +1,15 @@
+{% if entity_level_0 %}
+#### ADDITIONAL KNOWN CONTEXT ####
+These are facts already recorded in the knowledge graph about entities mentioned below.
+Use them to make better merge-vs-insert decisions by understanding the broader entity context.
+{{ entity_level_0 }}
+#### END OF ADDITIONAL KNOWN CONTEXT ####
+{% endif %}
+
+New node's data that we are thinking about inserting:
+{{ new_node_context }}
+
+Existing nodes' data:
+
+{{ existing_node_candidates }}
+

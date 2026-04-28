@@ -1,0 +1,20 @@
+name: dayflow_routine_writer
+class_name: Agent
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.2"
+  model_tier: "strong"
+
+allowed_tools: []
+except_tools: []
+
+user_context_items:
+  - date_time
+  - day_of_week
+  - boundary_date_local
+  - daily_context
+  - beliefs_block
+  - weekly_insights_block
+
+system_context_items:
+  - resource_user_data

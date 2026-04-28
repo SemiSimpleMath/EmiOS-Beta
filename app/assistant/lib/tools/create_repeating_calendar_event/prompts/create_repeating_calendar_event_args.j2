@@ -1,0 +1,37 @@
+An interval calendar event requires the following arguments:
+
+Required Fields:
+- **event_name**: The title of the event (e.g., "Daily Standup Meeting").
+- **start**: The start date and time of the first occurrence, formatted as `YYYY-MM-DDTHH:MM:SS` (ISO 8601).
+- **end**: The end date and time of the first occurrence, formatted as `YYYY-MM-DDTHH:MM:SS`. Must be later than `start`.
+- **recurrence_rule**: Defines the recurrence pattern using [RFC 5545](https://icalendar.org/iCalendar-RFC-5545/3-8-5-3-recurrence-rule.html). Examples:
+  - `RRULE:FREQ=DAILY;COUNT=10` (Daily for 10 occurrences)
+  - `RRULE:FREQ=WEEKLY;UNTIL=2024-12-31T23:59:59` (Weekly until a specific date)
+  - `RRULE:FREQ=MONTHLY;COUNT=6` (Monthly for 6 months)
+  - `RRULE:FREQ=YEARLY;BYMONTH=12;BYMONTHDAY=30` (Every December 30th)
+
+Optional Fields:
+- **calendar_name**: The calendar to create the event in (e.g., "primary", "Birthdays", "Work", "Family"). Defaults to "primary".
+- **all_day**: Set to true for all-day events (no specific time, just a date). Defaults to false. When true, start/end should still be provided but times will be ignored.
+- **time_zone**: The time zone for the event (e.g., "America/Los_Angeles"). Defaults to PST if not specified.
+- **description**: A detailed description of the event (e.g., "A daily sync to discuss progress").
+- **location**: The physical or virtual location of the event (e.g., "Conference Room A" or "https://zoom.us/my/meeting").
+- **link**: A URL for the meeting or event materials.
+- **participants**: A list of participants, each with a name and email (e.g., `[{"name": "John Doe", "email": "john.doe@example.com"}]`).
+- **flexibility**: How moveable this event is. "fixed" (default), "flexible", "soft_block", or "aspirational".
+- **blocking**: True (default) blocks time on calendar, False shows as available.
+
+Example 1 (Timed Event):
+{ "event_name": "Daily Standup Meeting", "start": "2024-11-15T09:00:00", "end": "2024-11-15T09:15:00", "time_zone": "America/Los_Angeles", "recurrence_rule": "RRULE:FREQ=DAILY;COUNT=10", "location": "Online via Zoom", "link": "https://zoom.us/my/standup", "participants": [ {"name": "John Doe", "email": "john.doe@example.com"}, {"name": "Jane Smith", "email": "jane.smith@example.com"} ] }
+
+Example 2 (All-Day Birthday):
+{ "event_name": "Jaime's Birthday", "start": "2025-12-30T00:00:00", "end": "2025-12-31T00:00:00", "calendar_name": "Birthdays", "all_day": true, "recurrence_rule": "RRULE:FREQ=YEARLY;BYMONTH=12;BYMONTHDAY=30", "description": "Birthday celebration" }
+
+Example 3 (Yearly Event):
+{ "event_name": "Annual Planning Retreat", "start": "2025-01-15T08:00:00", "end": "2025-01-15T17:00:00", "time_zone": "America/Chicago", "recurrence_rule": "RRULE:FREQ=YEARLY;UNTIL=2028-01-15T17:00:00", "description": "An annual retreat to plan company goals and strategies.", "link": null, "participants": [ {"name": "CEO", "email": "ceo@example.com"}, {"name": "COO", "email": "coo@example.com"} ] }
+
+Important!
+Figure out what fields have been provided for you.  If a field is missing, leave it blank.  It is very rare that more than few fields are filled.
+If a location is not mentioned explicitly, do not fill it in.  Do not invent extra fields that are not there!  Do not hallucinate things that are not given.
+
+Avoid ambiguity at midnight: Times exactly at 00:00:00 can be misinterpreted as either the start or end of a day. When setting boundaries, explicitly choose 23:59:59 (end of the previous day) or 00:01:00 (start of the new day) for clarity.

@@ -1,0 +1,25 @@
+{# User prompt for Taxonomy Integrity Validator Agent #}
+
+Analyze the following taxonomy branch for integrity issues:
+
+**BRANCH**: {{ branch_name }}
+**TOTAL CATEGORIES**: {{ total_categories }}
+
+**CATEGORIES:**
+{{ categories_text }}
+
+---
+
+Find and report problems:
+1. **DUPLICATES** - Semantically similar or identical categories
+2. **MISPLACEMENTS** - Categories under wrong parents (violate IS-A rule)
+3. **MISSING_DESCRIPTIONS** - Important categories without descriptions
+4. **ORGANIZATIONAL_ISSUES** - Naming inconsistencies, hierarchy problems, structural issues
+
+For each problem:
+- Provide category IDs, labels, and paths
+- Describe the problem clearly
+- Give specific, actionable suggestion to fix it
+- Assign confidence (0.0-1.0)
+
+If no problems found, return empty issues list.

@@ -1,0 +1,73 @@
+{
+  "name": "web_type_focused",
+  "description": "web_type_focused:\nType text into the currently-focused textbox (no `ref` required).\n\nUse this when you already clicked into an input and the cursor is there, but you do not have a valid snapshot `ref` for `browser_type`.\nIt types into `document.activeElement` and can optionally press Enter (`submit: true`).\nBy default it captures a browser snapshot after typing.",
+  "inputs": [
+    {
+      "name": "text",
+      "type": "string",
+      "required": true,
+      "description": "Text to type into the currently-focused element."
+    },
+    {
+      "name": "submit",
+      "type": "boolean",
+      "required": false,
+      "description": "If true, press Enter after typing."
+    },
+    {
+      "name": "clear_first",
+      "type": "boolean",
+      "required": false,
+      "description": "If true, clear input/textarea before typing (best-effort)."
+    },
+    {
+      "name": "slowly",
+      "type": "boolean",
+      "required": false,
+      "description": "If true, type with a small delay between characters."
+    },
+    {
+      "name": "capture_snapshot",
+      "type": "boolean",
+      "required": false,
+      "description": "If true, capture browser_snapshot after action and include it in tool result data."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    },
+    {
+      "path": "data.snapshot_id",
+      "type": "string",
+      "description": "Unique id for the bundled browser_snapshot when captured."
+    }
+  ],
+  "arguments_prompt": "Fill arguments for `web_type_focused`.\n\nReturn ONLY a JSON object with:\n- text (string, required)\n- submit (boolean, default true)\n- clear_first (boolean, default true)\n- slowly (boolean, default false)\n- capture_snapshot (boolean, default true)\n\nExample:\n{\"text\":\"cheeseburger\",\"submit\":true,\"clear_first\":true,\"capture_snapshot\":true}",
+  "metadata": {
+    "domain": "browser",
+    "actions": [
+      "type",
+      "fill"
+    ],
+    "selectors": [
+      "text"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "high",
+    "latency_class": "slow",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

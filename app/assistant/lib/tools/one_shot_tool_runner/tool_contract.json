@@ -1,0 +1,49 @@
+{
+  "name": "one_shot_tool_runner",
+  "description": "Single-call tool runner for simple operations.\nUse for creating todos, reminders, calendar events, weather-at-place lookups, UI mute/unmute actions, and simple link peek/summarize actions in one step.",
+  "inputs": [
+    {
+      "name": "task",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "information",
+      "type": "string",
+      "required": true,
+      "description": ""
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "one_shot_tool_runner arguments:\ntask: the user request\ninformation: any extra context\nProvide the task and any additional information needed for the one_shot_tool_runner.",
+  "metadata": {
+    "category": "orchestration",
+    "verbs": [
+      "operate"
+    ],
+    "entities": [
+      "workflow"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "medium",
+    "latency_class": "moderate",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

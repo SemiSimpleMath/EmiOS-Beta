@@ -1,0 +1,39 @@
+name: room::chat_gate
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.4"
+  model_tier: "powerful"
+
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+entity_scan_keys: [task, information, recent_history]
+entity_card_level: 1
+
+enable_keyword_resource_injection: true
+
+user_context_items:
+  - date_time
+  - task
+  - information
+  - resource_user_data
+  - resource_weather
+  - resource_expected_calendar
+  - health_status_summary
+  - location_summary
+  - user_bio_context
+  - room_pinned_entities
+  - entity_card
+  - recent_history
+  - day_of_week
+  - chat_memory
+
+system_context_items:
+  - room_id
+  - room_identity
+  - room_conversation
+  - room_safety
+  - room_facts
+  - room_participant_facts

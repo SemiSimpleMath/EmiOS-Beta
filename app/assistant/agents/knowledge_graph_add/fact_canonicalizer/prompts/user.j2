@@ -1,0 +1,9 @@
+**Source sentence:** {{ extractor_sentence }}
+**Node label:** {{ node_label }}
+**Node type:** {{ node_type }}
+{% if participants %}**Participants:** {{ participants }}{% endif %}
+{% if start_date %}**Start date:** {{ start_date }}{% endif %}
+{% if end_date %}**End date:** {{ end_date }}{% endif %}
+{% if valid_during %}**Valid during:** {{ valid_during }}{% endif %}
+
+Produce the canonical present-tense sentence.

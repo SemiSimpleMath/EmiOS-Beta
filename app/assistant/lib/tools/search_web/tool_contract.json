@@ -1,0 +1,50 @@
+{
+  "name": "search_web",
+  "description": "search_web is a basic search engine.  It requires a query and context.  Short queries of 2-3 words are best.  Consider longer\nqueries only if there is no success.  Context is used to guide the summary of the search results.  You need to explain to the search tool what it is that we are looking for.\nWhile the search_web tool returns summaries, there is no reason to distrust that the facts reported are on these pages.  You can question the source, but not the fact that the results are as they appear.",
+  "inputs": [
+    {
+      "name": "query",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "task",
+      "type": "string",
+      "required": true,
+      "description": ""
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "The 'search_web' is a web search tool arguments have form:\nquery: str\ntask: str\n\nquery is what you would type into a search engine eg. sushi hours\nSearches with 2-3 keywords are best. Start with this. If it does not work, then try longer search queries.\ntask: is context for the agent that looks through search results to pick the most relevant ones.  You can give as much description here\nas need be.  What is the goal of the search?",
+  "metadata": {
+    "domain": "web",
+    "actions": [
+      "search",
+      "read"
+    ],
+    "selectors": [
+      "query"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "high",
+    "latency_class": "slow",
+    "front_door": true,
+    "room_visibility_default": "show",
+    "approval_required": false
+  }
+}

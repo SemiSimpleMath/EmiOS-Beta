@@ -1,0 +1,28 @@
+{
+  "step_id": "daily_context_generator",
+  "description": "Runs daily_context_tracker agent to generate ongoing daily context summary.",
+  "run_policy": {
+    "type": "always",
+    "min_interval_seconds": 300
+  },
+  "afk_guard": {
+    "skip_when_afk": false,
+    "skip_when_potentially_afk": false
+  },
+  "lookback_hours": {
+    "calendar_upcoming": 12,
+    "calendar_completed": 4,
+    "chat_excerpts": 4,
+    "recent_tickets": 2
+  },
+  "daily_reset": {
+    "description": "Clear daily context at boundary",
+    "output_resource_defaults": {
+      "expected_schedule": [],
+      "day_theme": "",
+      "milestones": [],
+      "current_status": ""
+    }
+  }
+}
+

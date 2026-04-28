@@ -1,0 +1,111 @@
+{
+  "name": "kg_create_node",
+  "description": "kg_create_node: Creates a new node in the knowledge graph.\n\n**Purpose:** Add a new entity, event, state, goal, property, or concept to the knowledge graph.\n\n**Parameters:**\n- label (required): Name of the node (e.g., \"Wedding Ceremony\", \"John Smith\")\n- node_type (required): Type of node - must be one of:\n  * Entity: People, organizations, locations, things\n  * Event: Occurrences, activities, happenings\n  * State: Conditions, situations, statuses\n  * Goal: Objectives, targets, aspirations\n  * Property: Characteristics, attributes\n  * Concept: Abstract ideas, categories\n- description (optional): Detailed description\n- aliases (optional): Alternative names (e.g., [\"Bob\", \"Robert\"] for \"Bob Smith\")\n- attributes (optional): Additional key-value pairs\n- category (optional): Subcategory (e.g., \"person\", \"wedding\", \"preference\")\n- start_date (optional): When it starts/started (YYYY-MM-DD)\n- end_date (optional): When it ends/ended (YYYY-MM-DD)\n- confidence (optional): How confident you are (0.0-1.0)\n- importance (optional): How important it is (0.0-1.0)\n\n**Returns:**\n- success: Whether the creation succeeded\n- node_id: UUID of the new node\n- label: Label of the node\n- node_type: Type of the node\n- status: \"created\"\n- message: Description of what was done\n\n**Example Usage:**\n\nCreate an event:\n```\nkg_create_node(\n    label=\"Wedding Ceremony\",\n    node_type=\"Event\",\n    description=\"Jukka's wedding ceremony at St. Mary's Church\",\n    start_date=\"2023-06-15\",\n    confidence=0.9,\n    importance=0.8\n)\n```\n\nCreate a person:\n```\nkg_create_node(\n    label=\"Jane Smith\",\n    node_type=\"Entity\",\n    category=\"person\",\n    aliases=[\"Jane\", \"J. Smith\"],\n    description=\"Jukka's colleague\"\n)\n```\n\n**Note:** This tool does NOT check for duplicates. If you're unsure whether a node already exists, use kg_find_node first to search for it.",
+  "inputs": [
+    {
+      "name": "label",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "semantic_label",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "node_type",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "description",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "aliases",
+      "type": "array",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "category",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "start_date",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "end_date",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "start_date_confidence",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "end_date_confidence",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "confidence",
+      "type": "number",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "importance",
+      "type": "number",
+      "required": true,
+      "description": ""
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "Arguments for kg_create_node:\n\nlabel (required): Name of the node\nsemantic_label (optional): Descriptive label with names in parentheses (e.g., \"Birthday Party (Jukka)\")\nnode_type (required): Type (Entity/Event/State/Goal/Property/Concept)\ndescription (optional): Description text\naliases (optional): List of alternative names\nattributes (optional): Additional key-value pairs\ncategory (optional): Category/subcategory (e.g., 'person', 'event')\nstart_date (optional): YYYY-MM-DD\nend_date (optional): YYYY-MM-DD\nstart_date_confidence (optional): 'inferred', 'actual', 'estimated'\nend_date_confidence (optional): 'inferred', 'actual', 'estimated'\nconfidence (optional): 0.0-1.0\nimportance (optional): 0.0-1.0\n\nExample:\n{\n    \"label\": \"Wedding Ceremony\",\n    \"node_type\": \"Event\",\n    \"description\": \"Jukka's wedding\",\n    \"start_date\": \"2023-06-15\",\n    \"confidence\": 0.9\n}",
+  "metadata": {
+    "category": "knowledge_graph",
+    "verbs": [
+      "operate"
+    ],
+    "entities": [
+      "edge",
+      "graph",
+      "node"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "medium",
+    "latency_class": "moderate",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

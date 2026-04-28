@@ -1,0 +1,26 @@
+name: personal_admin::planner
+class_name: Planner
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5-mini"
+  model_tier: "mini"
+
+allowed_tools: all
+except_tools: []
+allowed_nodes: [personal_admin::final_answer]
+entity_scan_keys: [incoming_message, task, information, recent_history]
+entity_card_level: 3
+
+user_context_items:
+  - date_time
+  - task
+  - information
+  - recent_history
+  - tool_descriptions
+  - resource_user_email
+  - entity_card
+  - referenced_pods_block
+
+system_context_items:
+  - tool_descriptions
+  - resource_personal_admin_user_prefs

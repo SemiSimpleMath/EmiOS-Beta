@@ -1,0 +1,85 @@
+{
+  "name": "run_task",
+  "description": "Run a pre-made task by name, or resume a paused task run.",
+  "inputs": [
+    {
+      "name": "compiled_file",
+      "type": "string",
+      "required": false,
+      "description": "Path to compiled task JSON."
+    },
+    {
+      "name": "task_name",
+      "type": "string",
+      "required": false,
+      "description": "Registered task id/name."
+    },
+    {
+      "name": "task_query",
+      "type": "string",
+      "required": false,
+      "description": "Free text task lookup query."
+    },
+    {
+      "name": "run_id",
+      "type": "string",
+      "required": false,
+      "description": "Existing run id to resume."
+    },
+    {
+      "name": "event_name",
+      "type": "string",
+      "required": false,
+      "description": "Event name used when resuming a waiting run."
+    },
+    {
+      "name": "event_payload",
+      "type": "object",
+      "required": false,
+      "description": "Event payload merged into run context on resume."
+    },
+    {
+      "name": "initial_context",
+      "type": "object",
+      "required": false,
+      "description": "Initial deterministic context for a new run."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data.run_id",
+      "type": "string",
+      "description": "Task IR run id."
+    },
+    {
+      "path": "data.status",
+      "type": "string",
+      "description": "Run status (running|waiting|completed|failed)."
+    }
+  ],
+  "arguments_prompt": "{\n  \"task_query\": \"compile ladder level 5\"\n}",
+  "metadata": {
+    "category": "orchestration",
+    "verbs": [
+      "run",
+      "resume"
+    ],
+    "entities": [
+      "workflow"
+    ],
+    "risk_level": "medium",
+    "side_effects": "writes_data",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "medium",
+    "latency_class": "moderate",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "name": "delete_calendar_event",
+  "description": "Delete a single calendar event, or cancel one occurrence of a recurring series. Never deletes a whole recurring series — use delete_repeating_calendar_event for that.",
+  "inputs": [
+    {
+      "name": "event_id",
+      "type": "string",
+      "required": true,
+      "description": "The Google Calendar event ID to delete. For a single occurrence of a recurring event, use the instance id (e.g. 'abc123_20260411T030000Z')."
+    },
+    {
+      "name": "cascade",
+      "type": "boolean",
+      "required": false,
+      "description": "If True, also delete linked children (reminders, sub-events) in the local repository."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "## delete_calendar_event\n\nDelete a single calendar event. For recurring events, this cancels only the specific occurrence matching event_id — the rest of the series is untouched. To remove an entire recurring series, use `delete_repeating_calendar_event` instead.\n\n### Arguments:\n\n- **event_id** (required): The Google Calendar event ID. For a single occurrence of a recurring event, use the instance id (e.g. `abc123_20260411T030000Z`).\n- **cascade** (optional, default: false): Also delete linked children (reminders, sub-events) in the local repository.\n\n### Delete a non-recurring event:\n```json\n{\n  \"tool_name\": \"delete_calendar_event\",\n  \"arguments\": {\n    \"event_id\": \"abc123xyz\"\n  }\n}\n```\n\n### Cancel one occurrence of a recurring event:\n```json\n{\n  \"tool_name\": \"delete_calendar_event\",\n  \"arguments\": {\n    \"event_id\": \"abc123_20260411T030000Z\"\n  }\n}\n```",
+  "metadata": {
+    "domain": "calendar",
+    "actions": [
+      "delete",
+      "cancel"
+    ],
+    "selectors": [
+      "event_id"
+    ],
+    "risk_level": "high",
+    "side_effects": "destructive",
+    "requires_auth": [
+      "google"
+    ],
+    "requires_network": true,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "hide",
+    "approval_min_authority": 95,
+    "planner_description": "Delete a single calendar event or cancel one occurrence of a recurring series. For whole-series deletion use delete_repeating_calendar_event."
+  }
+}

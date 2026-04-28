@@ -1,0 +1,133 @@
+########## CURRENT STATE ##########
+**Current Time:** {{ date_time }}
+**Day:** {{ day_of_week }}
+{% if location_summary and location_summary != "Currently: Unknown" %}
+**Location:** {{ location_summary }}
+{% endif %}
+{% if resource_weather and resource_weather.current %}
+**Weather:** {{ resource_weather.location.city }}: {{ resource_weather.current.temperature }} F, {{ resource_weather.current.condition }}
+{% endif %}
+
+{% if resource_afk_statistics_output %}
+**Computer Presence:**
+{% if resource_afk_statistics_output.is_afk %}
+[STATUS: AWAY FROM KEYBOARD]
+- Idle Time: {{ resource_afk_statistics_output.idle_minutes | default(0) | round | int }} minutes.
+- Directive: Do NOT suggest movement or stretches while user is away.
+{% else %}
+[STATUS: AT KEYBOARD]
+- Current Session: {{ resource_afk_statistics_output.current_session_minutes | default(resource_afk_statistics_output.active_work_session_minutes) | default(0) | round(1) }} minutes.
+{% endif %}
+- Total At Keyboard Since Wake: {{ resource_afk_statistics_output.total_active_time_since_wake | default("unknown") }} minutes.
+- Total Away Since Wake: {{ resource_afk_statistics_output.total_afk_time_since_wake | default("unknown") }} minutes.
+{% endif %}
+
+{% if resource_sleep_output %}
+**Sleep Status:**
+- User is up: {{ resource_sleep_output.user_is_up }}
+- Day start: {{ resource_sleep_output.day_start_time_local | default("unknown") }}
+{% endif %}
+
+{% if resource_tracked_activities_output and resource_tracked_activities_output.activities %}
+**Consumption Log (Today):**
+{% for key, activity in resource_tracked_activities_output.activities.items() %}
+{% if activity.show_daily_count %}
+{% set mins = activity.minutes_since %}
+- {{ activity.display_name | default(key) }}: {{ activity.count_today | default(0) }} ({% if mins is not none %}{{ mins | round(1) }} min since last{% else %}N/A{% endif %})
+{% endif %}
+{% endfor %}
+{% endif %}
+
+########## DAILY CONTEXT ##########
+{% if resource_daily_context_generator_output and (resource_daily_context_generator_output.day_theme or resource_daily_context_generator_output.milestones) %}
+{% if resource_expected_calendar and resource_expected_calendar.expected_schedule %}
+**Expected Schedule:**
+{% for item in resource_expected_calendar.expected_schedule %}
+- {{ item.title }} {{ item.start_local }}{% if item.end_local %} - {{ item.end_local }}{% endif %} ({{ item.status }})
+{% endfor %}
+{% endif %}
+{% if resource_daily_context_generator_output.day_theme %}
+**Day Theme:** {{ resource_daily_context_generator_output.day_theme }}
+{% endif %}
+{% if resource_daily_context_generator_output.current_status %}
+**Current Status:** {{ resource_daily_context_generator_output.current_status }}
+{% endif %}
+{% if resource_daily_context_generator_output.milestones %}
+**Milestones:**
+{% for milestone in resource_daily_context_generator_output.milestones %}
+- {% if milestone.time %}[{{ milestone.time }}]{% endif %} {{ milestone.description }}{% if milestone.ongoing %} (ongoing){% endif %}
+{% endfor %}
+{% endif %}
+{% endif %}
+
+{% if resource_dayflow_routine %}
+**Routine & Timing Preferences:**
+{{ resource_dayflow_routine }}
+{% endif %}
+
+{% if health_status_summary %}
+**Health:**
+{{ health_status_summary }}
+{% endif %}
+
+########## OPERATIONAL ITEMS ##########
+{% if incoming_items_new %}
+## Incoming Items (new)
+{% for m in incoming_items_new[:25] %}
+{% set meta = m.get("metadata", {}) %}
+- [{{ meta.get("source_type", "unknown") }} | {{ meta.get("event_type", "unknown") }}] {{ meta.get("summary", m.get("content", "")) }} (state={{ meta.get("state", "new") }}, item_id={{ meta.get("item_id", "n/a") }})
+{% endfor %}
+{% endif %}
+
+{% if active_tickets %}
+## Active Tickets (already dispatched, do not duplicate)
+{% for t in active_tickets %}
+- [{{ t.suggestion_type }}] {{ t.title }}{% if t.message %}: {{ t.message }}{% endif %}
+{% endfor %}
+{% endif %}
+
+{% if recent_responded_tickets %}
+## Ticket Responses (last 2 h)
+{% if recent_responded_tickets.accepted %}
+**Accepted:**
+{% for t in recent_responded_tickets.accepted %}
+- {{ t.title }}{% if t.responded_at_local %} (at {{ t.responded_at_local }}){% endif %}{% if t.user_comment %} - user said: "{{ t.user_comment }}"{% endif %}
+{% endfor %}
+{% endif %}
+{% if recent_responded_tickets.declined %}
+**Declined (do not re-suggest for 2+ h):**
+{% for t in recent_responded_tickets.declined %}
+- {{ t.title }}{% if t.responded_at_local %} (at {{ t.responded_at_local }}){% endif %}{% if t.user_comment %} - user said: "{{ t.user_comment }}"{% endif %}
+{% endfor %}
+{% endif %}
+{% if recent_responded_tickets.snoozed %}
+**Snoozed:**
+{% for t in recent_responded_tickets.snoozed %}
+- {{ t.title }}{% if t.snooze_until_local %} until {{ t.snooze_until_local }}{% endif %}{% if t.user_comment %} - user said: "{{ t.user_comment }}"{% endif %}
+{% endfor %}
+{% endif %}
+{% endif %}
+
+{% if email_events %}
+## Important Emails Today (importance >= 5)
+{% for email in email_events %}
+- [{{ email.time }}] **{{ email.sender }}** - {{ email.subject }} (importance: {{ email.importance }})
+{% if email.summary %}  _{{ email.summary }}_{% endif %}
+{% if email.action_items %}  Action items: {{ email.action_items | join(", ") }}{% endif %}
+{% endfor %}
+{% endif %}
+
+########## BACKGROUND CONTEXT (read-only) ##########
+{% if room_pinned_entities %}
+Pinned entities:
+{{ room_pinned_entities }}
+{% endif %}
+{% if entity_card %}
+Entity context:
+{{ entity_card }}
+{% endif %}
+
+########## CONVERSATION HISTORY ##########
+{% if recent_history %}
+{{ recent_history }}
+{% endif %}

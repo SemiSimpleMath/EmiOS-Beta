@@ -1,0 +1,42 @@
+{
+  "name": "web_modal_scan",
+  "description": "Scroll through an open modal top-to-bottom and return all actionable elements (radios, checkboxes, buttons, inputs). Call once after a modal opens to see every option without manual scrolling.",
+  "inputs": [],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Grouped list of all elements found: radios, checkboxes, buttons, etc. with refs and labels."
+    },
+    {
+      "path": "data.all_elements",
+      "type": "array",
+      "description": "Flat list of all unique actionable elements discovered across all scroll passes."
+    },
+    {
+      "path": "data.element_count",
+      "type": "integer",
+      "description": "Total number of unique elements found."
+    }
+  ],
+  "arguments_prompt": "web_modal_scan takes no arguments. Return: {}",
+  "metadata": {
+    "domain": "browser",
+    "actions": [
+      "scan",
+      "enumerate"
+    ],
+    "selectors": [
+      "modal"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "medium",
+    "latency_class": "moderate",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

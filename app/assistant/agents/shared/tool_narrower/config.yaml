@@ -1,0 +1,17 @@
+name: shared::tool_narrower
+class_name: Agent
+llm_params:
+  llm_provider: "gemini"
+  engine: "gemini-3-flash-preview"
+  model_tier: "mini"
+
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+
+user_context_items:
+  - task
+  - information
+  - candidate_tools
+
+system_context_items: []

@@ -1,0 +1,39 @@
+{
+  "name": "pod_fetch",
+  "description": "Fetch the FULL body of one or more pods by pod_id. Use this after calling pod_search and deciding which pods are worth opening.\n\nReturns each pod's header plus its body, source_refs, and metadata. Pod_ids that don't exist are reported in the 'missing' list — no error.",
+  "inputs": [
+    {
+      "name": "pod_ids",
+      "type": "array",
+      "required": true,
+      "description": "List of pod_ids to fetch, e.g. ['datapod:chat_cluster:abc123', 'datapod:chat_cluster:def456']."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable dump of the fetched pods."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured: {pods: [ {full pod incl. body, source_refs, metadata} ], missing: [pod_ids that weren't found]}."
+    }
+  ],
+  "arguments_prompt": "Arguments for pod_fetch tool:\n\n- pod_ids (required): list of pod_ids to open. Example: ['datapod:chat_cluster:abc123']",
+  "metadata": {
+    "category": "pod_store",
+    "verbs": ["read"],
+    "entities": ["pod"],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

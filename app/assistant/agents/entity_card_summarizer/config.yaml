@@ -1,0 +1,23 @@
+name: entity_card_summarizer
+class_name: Agent
+llm_params:
+  engine: gpt-5.4-mini
+  model_tier: "mini"
+  timeout: 180
+  llm_provider: "openai"
+allowed_tools: []
+except_tools: []
+
+user_context_items:
+  - entity_name
+  - entity_type
+  - entity_description
+  - entity_aliases
+  - tagged_bullets
+  - known_contacts
+  - resource_user_data   # user.j2 references {{ resource_user_data.first_name }}
+
+system_context_items:
+  - resource_user_data
+
+type: agent

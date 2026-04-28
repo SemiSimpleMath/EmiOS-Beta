@@ -1,0 +1,9 @@
+Estimate duration for this state/event:
+
+**Label:** {{ state_label }}
+**Type:** {{ state_node_type }}
+{% if description %}**Description:** {{ description }}{% endif %}
+{% if participants %}**Participants:** {{ participants }}{% endif %}
+{% if valid_from %}**Valid from:** {{ valid_from }}{% endif %}
+
+**Originating sentence:** {{ originating_sentence or "(not provided)" }}

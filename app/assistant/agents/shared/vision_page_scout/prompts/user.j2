@@ -1,0 +1,15 @@
+Today is {{ date_time }}.
+
+Task:
+{{ task }}
+
+Image (caller must pass `agent_input.image` as an absolute path to a PNG file):
+[emi_image: {{ image }}]
+
+Return:
+- a short page_overview
+- blockers (if any)
+- suggested_next_steps for the planner
+- a list of strings to search for in the next browser_snapshot
+- optional coordinate targets (x,y) for obvious controls (cookie accept/close modal), if you can see them
+

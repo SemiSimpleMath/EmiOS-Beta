@@ -1,0 +1,51 @@
+{
+  "name": "kg_team_manager",
+  "description": "This is knowledge graph search.  It is a fully fledged agent system that can take a question and search the knowledge graph for an answer.",
+  "inputs": [
+    {
+      "name": "task",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "information",
+      "type": "string",
+      "required": true,
+      "description": ""
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "Arguments are\ntask: The task we are asking of the knowledge graph search agents. This is in prose.  They will interpret your task and look up information required and give you the answer.\ninformation: Any extra information provided to us that maybe helpful.",
+  "metadata": {
+    "category": "knowledge_graph",
+    "verbs": [
+      "orchestrate"
+    ],
+    "entities": [
+      "edge",
+      "graph",
+      "node"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "medium",
+    "latency_class": "moderate",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

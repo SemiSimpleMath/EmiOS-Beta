@@ -1,0 +1,31 @@
+name: emi_team::planner
+class_name: Planner
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.1"
+  model_tier: "smart"
+  
+
+allowed_tools: all
+except_tools: [emi_team]
+allowed_nodes: [return_control]
+entity_scan_keys: [incoming_message, task, information, recent_history]
+entity_card_level: 2
+
+user_context_items:
+  - date_time
+  - task
+  - information
+  - task_includes
+  - task_resource_context
+  - recent_history
+  - checklist
+  - progress_report
+  - action_count
+  - entity_card
+  - referenced_pods_block
+
+system_context_items:
+  - tool_descriptions
+  - allowed_nodes
+  - task

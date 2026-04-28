@@ -1,0 +1,20 @@
+########## CURRENT STATE ##########
+**Current Time:** {{ date_time }} ({{ day_of_week }}, {{ boundary_date_local }})
+
+########## DAILY CONTEXT ##########
+{{ daily_context }}
+
+########## USER BELIEFS & PATTERNS ##########
+**Beliefs for {{ day_of_week }}:**
+{{ beliefs_block }}
+
+{% if weekly_insights_block %}
+**Weekly pattern flags — HISTORICAL (from LAST week, not this week):**
+The block below summarizes patterns from the previous 7 days. Bare weekday
+references inside it (e.g. "Saturday") are for LAST week's dates, NOT the
+current day. Do not assume any "Saturday GI bug" or similar historical event
+is happening today unless explicitly dated.
+
+{{ weekly_insights_block }}
+{% endif %}
+

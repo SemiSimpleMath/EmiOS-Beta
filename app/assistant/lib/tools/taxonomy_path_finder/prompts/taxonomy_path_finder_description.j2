@@ -1,0 +1,15 @@
+Find the most relevant taxonomy paths within a specific top-level category based on a description.
+
+**Input:**
+- `top_level_taxonomy`: The root taxonomy category to search within (e.g., "entity", "state", "event")
+- `description`: Description of what kind of paths to find (e.g., "paths related to robots and machines")
+
+**Output:**
+Returns a ranked list of the most relevant taxonomy paths that match the description, with relevance scores and reasoning.
+
+**Example:**
+- Input: `top_level_taxonomy="entity"`, `description="paths related to robots and machines"`, `keywords=[machine, robot, battlebots]`
+- Output: `["entity > artifact > machine > robot", "entity > artifact > product > physical_product > machine", ...]`
+
+This tool is useful for discovering relevant taxonomy paths when you know the general domain but need to find specific categories that match your use case.
+

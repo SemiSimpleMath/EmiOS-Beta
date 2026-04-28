@@ -1,0 +1,17 @@
+## Current Situation Snapshot
+
+{{ task }}
+{%- if resource_expected_calendar and resource_expected_calendar.expected_schedule %}
+
+## Today's Schedule
+{%- for entry in resource_expected_calendar.expected_schedule %}
+- {{ entry.title }} {{ entry.start_local }}{% if entry.end_local %} - {{ entry.end_local }}{% endif %} ({{ entry.status }})
+{%- endfor %}
+{%- endif %}
+{%- if information %}
+
+## Additional Context
+{{ information }}
+{%- endif %}
+
+Review this snapshot. Identify any contradictions, conflicts, stale assumptions, schedule collisions, or anomalies. If everything looks consistent, say so.

@@ -1,0 +1,20 @@
+name: dayflow_orchestrator::switchboard
+class_name: Agent
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5-mini"
+  model_tier: "mini"
+
+allowed_tools: all
+except_tools: []
+allowed_nodes: [return_control]
+entity_scan_keys: []
+
+user_context_items:
+  - date_time
+  - task
+  - information
+
+system_context_items:
+  - resource_assistant_data
+  - tool_descriptions

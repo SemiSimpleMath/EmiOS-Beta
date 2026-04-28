@@ -1,0 +1,31 @@
+{
+  "policy_id": "room_policy::dayflow_orchestrator::v1",
+  "manager_name": "dayflow_orchestrator_manager",
+  "surface": "system",
+  "default_visibility": "owner_only",
+  "default_context_id": "orchestrator",
+  "authority_level": 95,
+  "history": {
+    "exclude_data_types": ["agent_result", "agent_request"]
+  },
+  "retention": {
+    "write_unified_log": false,
+    "write_kg": false,
+    "allow_fact_extraction": false
+  },
+  "delivery": {
+    "auto_send": false,
+    "allow_initiation": true
+  },
+  "privacy": {
+    "owner_only_memory_visible": true,
+    "room_facts_only": false
+  },
+  "participant_identity": {
+    "display_name": "Dayflow Orchestrator",
+    "aliases": [
+      "dayflow_orchestrator",
+      "orchestrator"
+    ]
+  }
+}

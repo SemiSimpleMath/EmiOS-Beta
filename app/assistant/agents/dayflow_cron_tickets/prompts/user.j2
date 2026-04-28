@@ -1,0 +1,145 @@
+########## CURRENT STATE ##########
+**Current Time:** {{ date_time }}
+**Day:** {{ day_of_week }}
+{%- if location_summary and location_summary != "Currently: Unknown" %}
+**Location:** {{ location_summary }}
+{%- endif %}
+{%- if resource_weather and resource_weather.current %}
+**Weather:** {{ resource_weather.location.city }}: {{ resource_weather.current.temperature }} F, {{ resource_weather.current.condition }}
+{%- endif %}
+{%- if resource_afk_statistics_output %}
+
+**Computer Presence:**
+{%- if resource_afk_statistics_output.is_afk %}
+[STATUS: AWAY FROM KEYBOARD]
+- Idle Time: {{ resource_afk_statistics_output.idle_minutes | default(0) | round | int }} minutes.
+- Directive: Do NOT suggest movement or stretches while user is away.
+{%- else %}
+[STATUS: AT KEYBOARD]
+- Current Session: {{ resource_afk_statistics_output.current_session_minutes | default(resource_afk_statistics_output.active_work_session_minutes) | default(0) | round(1) }} minutes.
+{%- endif %}
+- Total At Keyboard Since Wake: {{ resource_afk_statistics_output.total_active_time_since_wake | default("unknown") }} minutes.
+- Total Away Since Wake: {{ resource_afk_statistics_output.total_afk_time_since_wake | default("unknown") }} minutes.
+{%- endif %}
+{%- if resource_sleep_output %}
+
+**Sleep Status:**
+- User is up: {{ resource_sleep_output.user_is_up }}
+- Day start: {{ resource_sleep_output.day_start_time_local | default("unknown") }}
+{%- endif %}
+
+########## DAILY CONTEXT ##########
+**Expected Schedule:**
+{%- for item in resource_expected_calendar.expected_schedule %}
+- {{ item.title }} {{ item.start_local }}{% if item.end_local %} - {{ item.end_local }}{% endif %} ({{ item.status }})
+{%- endfor %}
+**Day Theme:** {{ resource_daily_context_generator_output.day_theme | default("unknown") }}
+**Current Status:** {{ resource_daily_context_generator_output.current_status | default("unknown") }}
+{%- if resource_daily_context_generator_output.milestones %}
+**Milestones:**
+{%- for milestone in resource_daily_context_generator_output.milestones %}
+- {% if milestone.time %}[{{ milestone.time }}]{% endif %} {{ milestone.description }}{% if milestone.ongoing %} (ongoing){% endif %}
+{%- endfor %}
+{%- endif %}
+{%- if recent_chat_messages %}
+
+**Recent Chat:**
+{%- for msg in recent_chat_messages %}
+[{{ msg.time_local }}] {{ msg.sender }}: {{ msg.content }}
+{%- endfor %}
+{%- endif %}
+
+########## USER TYPICAL ROUTINE AND PREFERENCES FOR TODAY ##########
+{{ resource_dayflow_routine }}
+{%- if health_status_summary %}
+**Health:**
+{{ health_status_summary }}
+{%- endif %}
+
+########## ACTIVITY TIMERS ##########
+**Consumption Log (Today):**
+{%- for key, activity in resource_tracked_activities_output.activities.items() %}
+{%- if activity.show_daily_count %}
+{%- set count_val = time_since[key ~ "_count_today"] | default(0) %}
+{%- set mins_val = time_since["minutes_since_" ~ key] | default(none) %}
+- {{ activity.display_name | default(key) }}: {{ count_val }} ({% if mins_val is not none %}{{ mins_val | round(1) }} min since last{% else %}N/A{% endif %})
+{%- endif %}
+{%- endfor %}
+
+**How to interpret thresholds:**
+- **Number (e.g., 120 min)**: Suggest when "Time Since" exceeds this value.
+- **null ("As scheduled", "Max X/day", etc.)**: Use common sense - check calendar events, daily limits, or time windows, NOT the "Time Since" value.
+- Suggesting an action *before* the threshold is reached should be very rare (health override, safety issue, or strong schedule constraint only).
+
+| Activity | Time Since Last | Threshold | Minutes Until Threshold |
+| :--- | :--- | :--- | :--- |
+{%- for key, activity in resource_tracked_activities_output.activities.items() %}
+{%- set mins = time_since["minutes_since_" ~ key] | default(none) %}
+{%- set threshold_mins = activity.threshold_minutes | default(none) %}
+{%- set threshold_label = threshold_mins if threshold_mins is not none else (activity.guidance | default("N/A")) %}
+{%- if mins is not none and threshold_mins is not none %}
+{%- set delta = threshold_mins - mins %}
+{%- set mins_until = (delta | round(1) ~ " min") if delta > 0 else ("0 min (over by " ~ (delta | abs | round(1)) ~ " min)") %}
+{%- else %}
+{%- set mins_until = "N/A" %}
+{%- endif %}
+| {{ activity.display_name }} | {% if mins is not none %}{{ mins | round(1) }} min{% else %}N/A{% endif %} | {{ threshold_label }} | {{ mins_until }} |
+{%- endfor %}
+
+########## TICKET STATE ##########
+{%- if active_tickets %}
+**Active Tickets (do not duplicate):**
+{%- for ticket in active_tickets %}
+- [ACTIVE] {{ ticket.suggestion_type }}: {{ ticket.title }}{% if ticket.message %} - {{ ticket.message }}{% endif %}
+{%- endfor %}
+{%- endif %}
+{%- if recent_responded_tickets and (recent_responded_tickets.accepted or recent_responded_tickets.acknowledged or recent_responded_tickets.declined or recent_responded_tickets.snoozed) %}
+
+**Ticket Responses:**
+{%- if recent_responded_tickets.accepted %}
+*ACCEPTED (User accepted the ticket action. User comments are supplementary context, not action commitments.):*
+{%- for t in recent_responded_tickets.accepted %}
+- {{ t.message or t.title }} [Accepted at {{ t.responded_at_local }}]
+{%- if t.user_comment %}
+  User comment: {{ t.user_comment }}
+{%- endif %}
+{%- endfor %}
+{%- endif %}
+{%- if recent_responded_tickets.acknowledged %}
+*ACKNOWLEDGED (Can nudge again after reasonable time.):*
+{%- for t in recent_responded_tickets.acknowledged %}
+- {{ t.message or t.title }} [Acknowledged at {{ t.responded_at_local }}]
+{%- if t.user_comment %}
+  User comment: {{ t.user_comment }}
+{%- endif %}
+{%- endfor %}
+{%- endif %}
+{%- if recent_responded_tickets.declined %}
+*DECLINED (Do not resuggest unless urgent.):*
+{%- for t in recent_responded_tickets.declined %}
+- {{ t.message or t.title }} [Declined at {{ t.responded_at_local }}]
+{%- if t.user_comment %}
+  User comment: {{ t.user_comment }}
+{%- endif %}
+{%- endfor %}
+{%- endif %}
+{%- if recent_responded_tickets.snoozed %}
+*SNOOZED (Wait until eligible time.):*
+{%- for t in recent_responded_tickets.snoozed %}
+- {{ t.message or t.title }} [Snoozed at {{ t.responded_at_local }}{% if t.snooze_until_local %}, Eligible again at {{ t.snooze_until_local }}{% endif %}]
+{%- if t.user_comment %}
+  User comment: {{ t.user_comment }}
+{%- endif %}
+{%- endfor %}
+{%- endif %}
+{%- endif %}
+
+########## YOUR TASK ##########
+Synthesize preferences, health, timers, and ticket state to generate a prioritized list of suggestions.
+**Output constraints:**
+- Do NOT mention "pending reminders" unless you actually output suggestions OR there are active tickets.
+**Logic Checklist:**
+1. **Check Rules:** Does the routine allow this? (e.g., Check "Coffee Cutoff Time" vs Current Time).
+2. **Check Timers:** Is the "Time Since" value high enough based on the user's frequency preferences?
+3. **Check Context:** Does the health profile demand an override? (e.g., "Back Pain" = suggest stretch sooner).
+4. **Check Current time:** How close is an upcoming event? Do not say things like an event 6 hours away is close.

@@ -1,0 +1,23 @@
+name: context_engine::dossier_writer
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "gemini"
+  engine: "gemini-3-flash-preview"
+  model_tier: "mini"
+  temperature: 0.2
+
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+entity_scan_keys: []
+entity_card_level: 0
+
+user_context_items:
+  - user_message
+  - kg_briefing
+  - seeds
+  - primary_user
+  - visitor_label
+
+system_context_items: []

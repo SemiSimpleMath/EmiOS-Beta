@@ -1,0 +1,56 @@
+Today is {{ date_time }}.
+
+{% if task %}
+Task: {{ task }}
+{% endif %}
+
+{% if information %}
+Additional information: {{ information }}
+{% endif %}
+
+
+{% if room_allowed_global_resources %}
+Allowed global resources:
+{{ room_allowed_global_resources }}
+{% endif %}
+
+{% if room_allowed_resource_context %}
+Allowed resource content:
+{{ room_allowed_resource_context }}
+{% endif %}
+
+{% if room_allow_images is not none %}
+Images allowed in this room: {{ room_allow_images }}
+{% endif %}
+
+{% if room_allowed_entity_cards %}
+Allowed entity cards:
+{{ room_allowed_entity_cards }}
+{% endif %}
+
+{% if room_pinned_entities %}
+Pinned entities:
+{{ room_pinned_entities }}
+{% endif %}
+
+{% if room_rag_scopes %}
+Allowed RAG scopes:
+{{ room_rag_scopes }}
+{% endif %}
+
+Entity context:
+{{ entity_info }}
+
+{% if checklist %}
+Checklist so far:
+{{ checklist }}
+{% endif %}
+
+{% if recent_history %}
+Recent history (oldest to latest):
+{{ recent_history }}
+{% endif %}
+
+{% if action_count %}
+Action count so far: {{ action_count }}
+{% endif %}

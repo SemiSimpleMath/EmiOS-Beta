@@ -1,0 +1,23 @@
+name: entertainment_advisor
+class_name: Agent
+llm_params:
+  llm_provider: "gemini"
+  engine: "gemini-3-flash-preview"
+  model_tier: "mini"
+  temperature: 0.9
+entity_scan_keys: [incoming_message, task, information, recent_history]
+
+system_context_items:
+- resource_user_data
+
+user_context_items:
+- date_time
+- day_of_week
+- resource_weather
+- resource_afk_statistics_output
+- resource_sleep_output
+- resource_expected_calendar
+- resource_daily_context_generator_output
+- resource_dayflow_routine
+- health_status_summary
+- location_summary

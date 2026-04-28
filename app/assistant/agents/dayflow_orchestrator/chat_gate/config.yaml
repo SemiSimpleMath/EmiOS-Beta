@@ -1,0 +1,35 @@
+name: dayflow_orchestrator::chat_gate
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "gemini"
+  engine: "gemini-3-flash-preview"
+  model_tier: "mini"
+
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+entity_scan_keys: [recent_history, resource_expected_calendar, email_events]
+entity_card_level: 0
+
+user_context_items:
+  - date_time
+  - day_of_week
+  - resource_expected_calendar
+  - resource_daily_context_generator_output
+  - resource_dayflow_routine
+  - health_status_summary
+  - resource_afk_statistics_output
+  - resource_sleep_output
+  - resource_tracked_activities_output
+  - resource_weather
+  - active_tickets
+  - recent_responded_tickets
+  - location_summary
+  - email_events
+  - room_pinned_entities
+  - entity_card
+  - recent_history
+
+system_context_items:
+  - resource_user_data

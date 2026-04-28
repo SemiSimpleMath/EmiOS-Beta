@@ -1,0 +1,33 @@
+## Tag vocabulary
+
+{% for tag_name, tag_info in tag_vocabulary.items() %}
+### {{ tag_name }}
+{{ tag_info.description }}
+{%- if tag_info.examples %}
+Examples (counts as this tag):
+{%- for ex in tag_info.examples %}
+- {{ ex }}
+{%- endfor %}
+{%- endif %}
+{%- if tag_info.counter_examples %}
+Counter-examples (does NOT count — churn, drop the burst):
+{%- for ex in tag_info.counter_examples %}
+- {{ ex }}
+{%- endfor %}
+{%- endif %}
+
+{% endfor %}
+########## BURST TO EVALUATE ##########
+
+{{ burst_content }}
+
+########## TASK ##########
+
+1. Pick applicable tags from the vocabulary. Empty list if nothing fits.
+2. Write a TERSE one_liner (3–6 words, subject-line style). Empty if
+   tags is empty.
+3. Produce `sections`: a LIST of strings grouping the burst's relevant
+   messages by topic. Reproduce lines VERBATIM with their original
+   timestamped speaker prefix. Drop throwaways. No parentheticals, no
+   narration, no invented speakers.
+4. Briefly explain your choices (reasoning).

@@ -1,0 +1,52 @@
+{
+  "name": "devices_manager",
+  "description": "Smart-home manager for Nest thermostat, Alexa lights, and Ring controls.",
+  "inputs": [
+    {
+      "name": "task",
+      "type": "string",
+      "required": true,
+      "description": "Requested smart-home task."
+    },
+    {
+      "name": "information",
+      "type": "string",
+      "required": true,
+      "description": "Supporting details and constraints."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable result."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured manager output."
+    }
+  ],
+  "metadata": {
+    "category": "orchestration",
+    "verbs": [
+      "orchestrate",
+      "control"
+    ],
+    "entities": [
+      "devices",
+      "thermostat",
+      "lights",
+      "camera"
+    ],
+    "risk_level": "medium",
+    "side_effects": "external_action",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "medium",
+    "latency_class": "moderate",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

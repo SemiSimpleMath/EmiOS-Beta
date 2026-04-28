@@ -1,0 +1,14 @@
+Narrow per-field edit on a KG node. Atomic. Reversible via the
+kg_revision_log entry.
+
+Allowed scalar fields:
+  category, description, original_sentence, valid_during,
+  start_date, end_date, start_date_prose, end_date_prose,
+  start_date_confidence, end_date_confidence, importance,
+  goal_status, semantic_label.
+
+Allowed list fields (use list_op = add | remove | set):
+  aliases, hash_tags.
+
+For label changes use kg_rename_label; for merging use kg_merge_nodes.
+Always pass a non-empty `reason`. Pass `dry_run: true` to preview.

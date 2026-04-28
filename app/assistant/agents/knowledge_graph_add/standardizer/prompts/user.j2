@@ -1,0 +1,25 @@
+## Node Information:
+
+**Label**: {{ node_label }}
+**Type**: {{ node_type }}
+
+## Context:
+{{ context_text }}
+
+---
+
+**Task**: Generate a semantic_label that provides human-readable, context-specific description of this node.
+
+Follow the patterns from the system prompt:
+- For entities: Include relationship/context in parentheses
+- For states: Include subject and object
+- For events: Include key details and participants
+- For goals: Include owner and objective
+
+**Remember**: 
+- Title Case, ASCII only
+- 2-5 words typically
+- Add qualifiers to provide context
+- Make it instantly understandable to a human
+
+Generate the semantic_label now.

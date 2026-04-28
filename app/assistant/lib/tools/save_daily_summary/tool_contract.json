@@ -1,0 +1,46 @@
+{
+  "name": "save_daily_summary",
+  "description": "Save daily summary data to storage. Wraps the summary with metadata and saves to app/daily_summaries/ for the daily summary UI page to display.",
+  "inputs": [
+    {
+      "name": "summary_data",
+      "type": "object",
+      "required": true,
+      "description": "The daily summary data dict (with narrative, schedule, email_triage, news, etc.)."
+    },
+    {
+      "name": "date_str",
+      "type": "string",
+      "required": false,
+      "description": "Date in YYYY-MM-DD format. Defaults to today."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Confirmation message with file path."
+    },
+    {
+      "path": "data.filepath",
+      "type": "string",
+      "description": "Path to the saved file."
+    }
+  ],
+  "metadata": {
+    "category": "system",
+    "domain": "daily_summary",
+    "actions": ["save", "create", "update"],
+    "verbs": ["operate"],
+    "entities": ["daily_summary"],
+    "risk_level": "low",
+    "side_effects": "write",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

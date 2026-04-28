@@ -1,0 +1,20 @@
+Today is {{ date_time }}.
+
+Task:
+{{ task }}
+
+{% if information %}
+Information:
+{{ information }}
+{% endif %}
+
+Facts (v{{ orchestrator_facts_version }}):
+{{ orchestrator_facts }}
+
+Recent child results (latest first):
+{{ orchestrator_results }}
+
+Tick: {{ orchestrator_tick }}
+
+Decide if we are done. If not, list missing requirements.
+

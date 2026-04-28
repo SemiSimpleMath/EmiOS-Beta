@@ -1,0 +1,95 @@
+name: web_manager
+class_name: MultiAgentManager
+description: "A team manager that controls team of web search agents."
+max_cycles: 120
+role_bindings:
+  delegator: web::delegator
+  tool_selector: shared::tool_selector
+
+agents:
+  - name: web::delegator
+    class: Delegator
+  - name: web::planner
+    class: Planner
+  - name: web::web_critic
+    class: PlaywrightAgent
+  - name: web::web_summary
+    class: Agent
+  - name: shared::final_answer_lite
+    class: Agent
+  - name: shared::mathematician
+    class: Agent
+
+control_nodes:
+  - name: tool_return_router
+    class: ToolReturnRouter
+  - name: critic_pre_node
+    class: CriticPreNode
+    config:
+      enabled: true
+      critic_agent: "web::web_critic"
+      continue_agent: "tool_caller"
+  - name: critic_post_node
+    class: CriticPostNode
+    config:
+      critic_agent: "web::web_critic"
+  - name: summary_pre_node
+    class: SummaryPreNode
+    config:
+      enabled: true
+      summary_agent: "web::web_summary"
+      resume_agent: "web::planner"
+  - name: summary_post_node
+    class: SummaryPostNode
+    config:
+      summary_agent: "web::web_summary"
+      resume_agent: "web::planner"
+  - name: tool_caller
+    class: ToolCaller
+  - name: tool_result_handler
+    class: ToolResultHandler
+  - name: return_control
+    class: ReturnControlNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+  - name: graceful_exit_control_node
+    class: GracefulExitControlNode
+
+tools:
+  allowed_tools:
+    - ask_user
+    - find_tool
+    - install_tool
+    - search_web
+    - scrape_url
+    - mcp::npm/server-google-maps::maps_distance_matrix
+  except_tools: []
+
+scope_contract:
+  tools:
+    allowed_tools:
+      - ask_user
+      - find_tool
+      - install_tool
+      - search_web
+      - scrape_url
+      - mcp::npm/server-google-maps::maps_distance_matrix
+    blocked_tools:
+      - mcp::npm/playwright-mcp::browser_run_code
+    requires_approval_tools: []
+    allow_external_side_effects: false
+
+flow_config:
+  strict_routing: true
+  tool_return:
+    tool_call_result_handler_node: "tool_result_handler"
+  state_map:
+    "web::delegator": "web::planner"
+    "web::planner": "critic_pre_node"
+    "web::web_critic": "critic_post_node"
+    "tool_result_handler": "tool_return_router"
+    "tool_return_router": "web::planner"
+    "web::planner_return_control": "shared::final_answer_lite"
+    "shared::final_answer_lite": "manager_exit_node"
+    "graceful_exit": "graceful_exit_control_node"
+    "graceful_exit_control_node": "shared::final_answer_lite"

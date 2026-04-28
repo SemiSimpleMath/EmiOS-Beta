@@ -1,0 +1,21 @@
+name: context_engine::memo_writer
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "gemini"
+  engine: "gemini-3-flash-preview"
+  model_tier: "mini"
+  temperature: 0.3
+
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+entity_scan_keys: []
+entity_card_level: 0
+
+user_context_items:
+  - primary_user
+  - user_message
+  - reasoning_output
+
+system_context_items: []

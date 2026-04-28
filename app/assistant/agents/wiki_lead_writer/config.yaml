@@ -1,0 +1,18 @@
+name: wiki_lead_writer
+class_name: Agent
+llm_params:
+  engine: gpt-5.4
+  model_tier: "powerful"
+  timeout: 120
+  llm_provider: "openai"
+allowed_tools: []
+except_tools: []
+
+user_context_items:
+  - entity_name
+  - entity_type
+  - article_body
+
+system_context_items: []
+
+type: agent

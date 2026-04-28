@@ -1,0 +1,9 @@
+{
+  "tool_classes": {
+    "informational": true,
+    "transformational": true,
+    "external_action": true,
+    "sensitive": true
+  },
+  "allow_images": false
+}

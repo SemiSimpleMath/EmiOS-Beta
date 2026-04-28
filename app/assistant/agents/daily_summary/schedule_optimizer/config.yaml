@@ -1,0 +1,42 @@
+name: daily_summary::schedule_optimizer
+class_name: Agent
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5-mini"
+  model_tier: "mini"
+  
+
+allowed_tools:
+  - create_calendar_event
+  - update_calendar_event
+  - create_todo_task
+  - update_todo_task
+except_tools: []
+
+user_context_items:
+  - date_time
+  - task
+  - information
+  - recent_history
+  - calendar_analysis
+  - todo_analysis
+  - web_analysis
+
+system_context_items:
+  - tool_descriptions
+
+append_fields: [schedule_optimization, timing_recommendations, daily_schedule]
+
+
+
+
+
+
+
+
+
+
+
+
+
+

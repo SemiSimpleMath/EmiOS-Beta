@@ -1,0 +1,499 @@
+"""
+BeliefStore — the single access point for reading and writing beliefs.
+
+All DB operations use the project-standard SQLAlchemy get_session() pattern:
+  - Each method opens its own short-lived session.
+  - Sessions are never held open during ChromaDB or LLM calls.
+  - rollback() on exception, close() in finally.
+  - ORM objects never escape their session — callers receive plain dataclasses.
+
+Usage:
+    from belief_engine.store.belief_store import BeliefStore
+
+    store = BeliefStore()
+    belief = store.get_by_key("routine.dog_walk.morning")
+    store.upsert_belief(belief_data, evidence_items)
+    matches = store.find_similar("morning dog walk routine", k=5)
+"""
+from __future__ import annotations
+
+import json
+import logging
+import uuid
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
+
+from app.models.base import get_session
+from belief_engine.chroma.belief_chroma import get_belief_chroma
+from belief_engine.db.models import BeliefEvidence, UserBelief
+
+logger = logging.getLogger(__name__)
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+@dataclass
+class BeliefRecord:
+    id: str
+    domain: str
+    belief_key: str
+    statement: str
+    confidence: str          # high | medium | low
+    scope: str               # chronic | temporary
+    status: str              # active | contested | deprecated
+    conditions: Optional[Dict[str, Any]]
+    observation_count: int
+    first_observed: Optional[str]
+    last_confirmed: Optional[str]
+    created_at: str
+    updated_at: str
+
+
+@dataclass
+class EvidenceRecord:
+    id: str
+    belief_id: str
+    source_type: str         # daily_insights | kg_edge | ticket_rejection | manual
+    source_date: Optional[str]
+    source_ref: Optional[str]
+    signal_type: str         # confirms | qualifies | contradicts | rejects
+    summary: str
+    raw_text: Optional[str]
+    weight: float
+    created_at: str
+
+
+@dataclass
+class BeliefUpsertRequest:
+    """Input to store.upsert_belief()."""
+    domain: str
+    belief_key: str
+    statement: str
+    confidence: str
+    scope: str
+    status: str = "active"
+    conditions: Optional[Dict[str, Any]] = None
+    first_observed: Optional[str] = None
+    last_confirmed: Optional[str] = None
+
+
+@dataclass
+class EvidenceInput:
+    """One piece of evidence to attach to a belief."""
+    source_type: str
+    source_date: Optional[str]
+    signal_type: str
+    summary: str
+    source_ref: Optional[str] = None
+    raw_text: Optional[str] = None
+    weight: float = 1.0
+
+
+class BeliefStore:
+
+    def __init__(self) -> None:
+        self._chroma = get_belief_chroma()
+
+    # ------------------------------------------------------------------
+    # ORM → dataclass helpers (no session needed)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _orm_to_belief(row: UserBelief) -> BeliefRecord:
+        conditions_raw = row.conditions
+        conditions = json.loads(conditions_raw) if conditions_raw else None
+        return BeliefRecord(
+            id=row.id,
+            domain=row.domain,
+            belief_key=row.belief_key,
+            statement=row.statement,
+            confidence=row.confidence,
+            scope=row.scope,
+            status=row.status,
+            conditions=conditions,
+            observation_count=row.observation_count,
+            first_observed=row.first_observed,
+            last_confirmed=row.last_confirmed,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+    @staticmethod
+    def _orm_to_evidence(row: BeliefEvidence) -> EvidenceRecord:
+        return EvidenceRecord(
+            id=row.id,
+            belief_id=row.belief_id,
+            source_type=row.source_type,
+            source_date=row.source_date,
+            source_ref=row.source_ref,
+            signal_type=row.signal_type,
+            summary=row.summary,
+            raw_text=row.raw_text,
+            weight=row.weight,
+            created_at=row.created_at,
+        )
+
+    # ------------------------------------------------------------------
+    # Read
+    # ------------------------------------------------------------------
+
+    def get_by_id(self, belief_id: str) -> Optional[BeliefRecord]:
+        session = get_session()
+        try:
+            row = session.query(UserBelief).filter(UserBelief.id == belief_id).first()
+            return self._orm_to_belief(row) if row else None
+        finally:
+            session.close()
+
+    def get_by_key(self, belief_key: str) -> Optional[BeliefRecord]:
+        session = get_session()
+        try:
+            row = session.query(UserBelief).filter(UserBelief.belief_key == belief_key).first()
+            return self._orm_to_belief(row) if row else None
+        finally:
+            session.close()
+
+    def list_by_domain(self, domain: str, *, status: str = "active") -> List[BeliefRecord]:
+        session = get_session()
+        try:
+            rows = (
+                session.query(UserBelief)
+                .filter(UserBelief.domain == domain, UserBelief.status == status)
+                .order_by(UserBelief.belief_key)
+                .all()
+            )
+            return [self._orm_to_belief(r) for r in rows]
+        finally:
+            session.close()
+
+    def list_all(self, *, status: str = "active") -> List[BeliefRecord]:
+        session = get_session()
+        try:
+            rows = (
+                session.query(UserBelief)
+                .filter(UserBelief.status == status)
+                .order_by(UserBelief.domain, UserBelief.belief_key)
+                .all()
+            )
+            return [self._orm_to_belief(r) for r in rows]
+        finally:
+            session.close()
+
+    def get_evidence(self, belief_id: str) -> List[EvidenceRecord]:
+        session = get_session()
+        try:
+            rows = (
+                session.query(BeliefEvidence)
+                .filter(BeliefEvidence.belief_id == belief_id)
+                .order_by(BeliefEvidence.created_at.desc())
+                .all()
+            )
+            return [self._orm_to_evidence(r) for r in rows]
+        finally:
+            session.close()
+
+    def find_similar(
+        self,
+        query: str,
+        *,
+        k: int = 5,
+        domain: Optional[str] = None,
+        threshold: float = 0.55,
+    ) -> List[Tuple[BeliefRecord, float]]:
+        """
+        Semantic search — returns (BeliefRecord, similarity) pairs above threshold.
+        ChromaDB is queried first (no DB session), then each hit is fetched by ID
+        in its own short session.
+        """
+        if self._chroma.count() == 0:
+            return []
+        hits = self._chroma.search(query, k=k, domain=domain)
+        results: List[Tuple[BeliefRecord, float]] = []
+        for belief_id, score, _ in hits:
+            if score < threshold:
+                continue
+            belief = self.get_by_id(belief_id)
+            if belief and belief.status == "active":
+                results.append((belief, score))
+        return results
+
+    # ------------------------------------------------------------------
+    # Write
+    # ------------------------------------------------------------------
+
+    def upsert_belief(
+        self,
+        req: BeliefUpsertRequest,
+        evidence: Optional[List[EvidenceInput]] = None,
+    ) -> BeliefRecord:
+        """
+        Create or update a belief by belief_key.
+        If belief_key already exists, update statement + metadata and increment
+        observation_count.  Otherwise create new.
+        Attaches any provided evidence records (each in its own session).
+        """
+        now = _now_iso()
+        existing = self.get_by_key(req.belief_key)
+
+        if existing:
+            session = get_session()
+            try:
+                session.query(UserBelief).filter(
+                    UserBelief.belief_key == req.belief_key
+                ).update(
+                    {
+                        "statement":         req.statement,
+                        "confidence":        req.confidence,
+                        "scope":             req.scope,
+                        "status":            req.status,
+                        "conditions":        json.dumps(req.conditions) if req.conditions else None,
+                        "observation_count": existing.observation_count + 1,
+                        "last_confirmed":    req.last_confirmed or now,
+                        "updated_at":        now,
+                    },
+                    synchronize_session=False,
+                )
+                session.commit()
+            except Exception:
+                session.rollback()
+                logger.debug("[BeliefStore] upsert update failed key=%s", req.belief_key, exc_info=True)
+                raise
+            finally:
+                session.close()
+        else:
+            belief_id = str(uuid.uuid4())
+            session = get_session()
+            try:
+                session.add(
+                    UserBelief(
+                        id=belief_id,
+                        domain=req.domain,
+                        belief_key=req.belief_key,
+                        statement=req.statement,
+                        confidence=req.confidence,
+                        scope=req.scope,
+                        status=req.status,
+                        conditions=json.dumps(req.conditions) if req.conditions else None,
+                        observation_count=1,
+                        first_observed=req.first_observed or now,
+                        last_confirmed=req.last_confirmed or now,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+                session.commit()
+            except Exception:
+                session.rollback()
+                logger.debug("[BeliefStore] upsert insert failed key=%s", req.belief_key, exc_info=True)
+                raise
+            finally:
+                session.close()
+
+        belief = self.get_by_key(req.belief_key)
+        if belief is None:
+            raise RuntimeError(f"[BeliefStore] upsert failed for key={req.belief_key!r}")
+
+        # Sync embedding (ChromaDB, no DB session).
+        self._chroma.upsert(
+            belief_id=belief.id,
+            statement=belief.statement,
+            domain=belief.domain,
+        )
+
+        # Attach evidence — each in its own short session.
+        for ev in (evidence or []):
+            self._insert_evidence(belief.id, ev, now)
+
+        logger.info(
+            "[BeliefStore] upsert key=%s status=%s obs=%d",
+            belief.belief_key,
+            belief.status,
+            belief.observation_count,
+        )
+        return belief
+
+    def deprecate(self, belief_key: str, *, reason: str = "") -> None:
+        now = _now_iso()
+        session = get_session()
+        try:
+            session.query(UserBelief).filter(UserBelief.belief_key == belief_key).update(
+                {"status": "deprecated", "updated_at": now},
+                synchronize_session=False,
+            )
+            session.commit()
+        except Exception:
+            session.rollback()
+            logger.debug("[BeliefStore] deprecate failed key=%s", belief_key, exc_info=True)
+            raise
+        finally:
+            session.close()
+        logger.info("[BeliefStore] deprecated key=%s reason=%s", belief_key, reason)
+
+    def merge_belief(
+        self,
+        *,
+        surviving_key: str,
+        surviving_statement: str,
+        surviving_confidence: str,
+        surviving_scope: str,
+        deprecated_keys: List[str],
+        domain: str,
+        merge_reasoning: str,
+    ) -> BeliefRecord:
+        """
+        Consolidate a cluster of near-duplicate beliefs into one canonical belief.
+
+        - Rewrites the surviving belief with the canonical statement.
+        - Attaches a canonicalization evidence record to the surviving belief so its
+          history shows the merge event and the combined observation weight.
+        - Deprecates all redundant beliefs and removes their Chroma embeddings.
+        - observation_count on the surviving belief is incremented by the sum of all
+          deprecated beliefs' observation counts (their support is transferred).
+        """
+        store = self
+
+        # Sum up observation counts from deprecated beliefs before deprecating them.
+        transferred_obs = 0
+        deprecated_statements: List[str] = []
+        for dk in deprecated_keys:
+            dep = store.get_by_key(dk)
+            if dep:
+                transferred_obs += dep.observation_count
+                deprecated_statements.append(f"{dk}: {dep.statement}")
+
+        # Rewrite surviving belief.
+        surviving = store.get_by_key(surviving_key)
+        if surviving is None:
+            # Surviving key may be one we're creating fresh from a cluster.
+            req = BeliefUpsertRequest(
+                domain=domain,
+                belief_key=surviving_key,
+                statement=surviving_statement,
+                confidence=surviving_confidence,
+                scope=surviving_scope,
+                status="active",
+                last_confirmed=datetime.now(timezone.utc).date().isoformat(),
+            )
+        else:
+            req = BeliefUpsertRequest(
+                domain=domain,
+                belief_key=surviving_key,
+                statement=surviving_statement,
+                confidence=surviving_confidence,
+                scope=surviving_scope,
+                status="active",
+                last_confirmed=datetime.now(timezone.utc).date().isoformat(),
+            )
+
+        surviving_record = store.upsert_belief(req)
+
+        # Boost observation count by transferred support.
+        if transferred_obs > 0:
+            now = _now_iso()
+            session = get_session()
+            try:
+                session.query(UserBelief).filter(
+                    UserBelief.belief_key == surviving_key
+                ).update(
+                    {"observation_count": surviving_record.observation_count + transferred_obs,
+                     "updated_at": now},
+                    synchronize_session=False,
+                )
+                session.commit()
+            except Exception:
+                session.rollback()
+                logger.debug("[BeliefStore] merge obs boost failed key=%s", surviving_key, exc_info=True)
+                raise
+            finally:
+                session.close()
+
+        # Attach a canonicalization evidence record.
+        merged_summary = (
+            f"Canonicalization merge: absorbed {len(deprecated_keys)} redundant belief(s). "
+            f"Reasoning: {merge_reasoning[:300]}"
+        )
+        if deprecated_statements:
+            merged_summary += " Absorbed: " + " | ".join(deprecated_statements)[:400]
+
+        surviving_record = store.get_by_key(surviving_key)
+        if surviving_record:
+            self._insert_evidence(
+                surviving_record.id,
+                EvidenceInput(
+                    source_type="canonicalization",
+                    source_date=datetime.now(timezone.utc).date().isoformat(),
+                    signal_type="confirms",
+                    summary=merged_summary[:800],
+                    weight=2.0 * len(deprecated_keys),
+                ),
+                _now_iso(),
+            )
+
+        # Deprecate redundant beliefs and remove their Chroma embeddings.
+        for dk in deprecated_keys:
+            store.deprecate(dk, reason=f"merged into {surviving_key}: {merge_reasoning[:200]}")
+            dep = store.get_by_key(dk)
+            if dep:
+                try:
+                    self._chroma.delete(dep.id)
+                except Exception as exc:
+                    logger.debug("[BeliefStore] chroma delete failed for %s: %s", dk, exc)
+
+        surviving_final = store.get_by_key(surviving_key)
+        if surviving_final is None:
+            raise RuntimeError(f"[BeliefStore] merge failed — surviving key {surviving_key!r} not found after write")
+
+        logger.info(
+            "[BeliefStore] merge complete surviving=%s deprecated=%s transferred_obs=%d",
+            surviving_key, deprecated_keys, transferred_obs,
+        )
+        return surviving_final
+
+    def mark_contested(self, belief_key: str) -> None:
+        now = _now_iso()
+        session = get_session()
+        try:
+            session.query(UserBelief).filter(UserBelief.belief_key == belief_key).update(
+                {"status": "contested", "updated_at": now},
+                synchronize_session=False,
+            )
+            session.commit()
+        except Exception:
+            session.rollback()
+            logger.debug("[BeliefStore] mark_contested failed key=%s", belief_key, exc_info=True)
+            raise
+        finally:
+            session.close()
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _insert_evidence(self, belief_id: str, ev: EvidenceInput, now: str) -> None:
+        ev_id = str(uuid.uuid4())
+        session = get_session()
+        try:
+            session.add(
+                BeliefEvidence(
+                    id=ev_id,
+                    belief_id=belief_id,
+                    source_type=ev.source_type,
+                    source_date=ev.source_date,
+                    source_ref=ev.source_ref,
+                    signal_type=ev.signal_type,
+                    summary=ev.summary,
+                    raw_text=ev.raw_text,
+                    weight=ev.weight,
+                    created_at=now,
+                )
+            )
+            session.commit()
+        except Exception:
+            session.rollback()
+            logger.debug("[BeliefStore] insert_evidence failed belief_id=%s", belief_id, exc_info=True)
+            raise
+        finally:
+            session.close()

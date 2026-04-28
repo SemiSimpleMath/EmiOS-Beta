@@ -1,0 +1,17 @@
+name: dayflow_orchestrator::relevance_cleaner
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5-mini"
+  model_tier: "mini"
+
+allowed_tools: []
+
+user_context_items:
+  - date_time
+  - day_of_week
+  - active_dayflow_items
+  - plan_task_status
+
+system_context_items: []

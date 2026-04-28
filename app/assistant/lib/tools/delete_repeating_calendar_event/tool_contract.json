@@ -1,0 +1,55 @@
+{
+  "name": "delete_repeating_calendar_event",
+  "description": "Delete an entire recurring calendar event series (every occurrence). For a single occurrence or a non-recurring event, use delete_calendar_event instead.",
+  "inputs": [
+    {
+      "name": "event_id",
+      "type": "string",
+      "required": true,
+      "description": "The Google Calendar event ID of the recurring series. Either the base series id or any single instance id works — both resolve to the same series."
+    },
+    {
+      "name": "cascade",
+      "type": "boolean",
+      "required": false,
+      "description": "If True, also delete linked children (reminders, sub-events) in the local repository."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "## delete_repeating_calendar_event\n\nDelete an entire recurring calendar event series — every past, present, and future occurrence. Use only when the user has explicitly asked to cancel the whole recurring event. To cancel just one occurrence, use `delete_calendar_event` with the instance id instead.\n\n### Arguments:\n\n- **event_id** (required): The Google Calendar event ID of the recurring series. May be the base series id or any single instance id — both resolve to the same series.\n- **cascade** (optional, default: false): Also delete linked children (reminders, sub-events) in the local repository.\n\n### Example:\n```json\n{\n  \"tool_name\": \"delete_repeating_calendar_event\",\n  \"arguments\": {\n    \"event_id\": \"qgstjk55ji1tlbmm35hp59tcn8\"\n  }\n}\n```",
+  "metadata": {
+    "domain": "calendar",
+    "actions": [
+      "delete",
+      "cancel",
+      "repeat"
+    ],
+    "selectors": [
+      "event_id",
+      "recurrence"
+    ],
+    "risk_level": "high",
+    "side_effects": "destructive",
+    "requires_auth": [
+      "google"
+    ],
+    "requires_network": true,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "hide",
+    "approval_min_authority": 95,
+    "planner_description": "Delete an entire recurring event series. Use only when the user explicitly wants to remove every occurrence; otherwise use delete_calendar_event."
+  }
+}

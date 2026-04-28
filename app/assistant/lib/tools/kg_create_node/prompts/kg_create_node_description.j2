@@ -1,0 +1,56 @@
+kg_create_node: Creates a new node in the knowledge graph.
+
+**Purpose:** Add a new entity, event, state, goal, property, or concept to the knowledge graph.
+
+**Parameters:**
+- label (required): Name of the node (e.g., "Wedding Ceremony", "John Smith")
+- node_type (required): Type of node - must be one of:
+  * Entity: People, organizations, locations, things
+  * Event: Occurrences, activities, happenings
+  * State: Conditions, situations, statuses
+  * Goal: Objectives, targets, aspirations
+  * Property: Characteristics, attributes
+  * Concept: Abstract ideas, categories
+- description (optional): Detailed description
+- aliases (optional): Alternative names (e.g., ["Bob", "Robert"] for "Bob Smith")
+- attributes (optional): Additional key-value pairs
+- category (optional): Subcategory (e.g., "person", "wedding", "preference")
+- start_date (optional): When it starts/started (YYYY-MM-DD)
+- end_date (optional): When it ends/ended (YYYY-MM-DD)
+- confidence (optional): How confident you are (0.0-1.0)
+- importance (optional): How important it is (0.0-1.0)
+
+**Returns:**
+- success: Whether the creation succeeded
+- node_id: UUID of the new node
+- label: Label of the node
+- node_type: Type of the node
+- status: "created"
+- message: Description of what was done
+
+**Example Usage:**
+
+Create an event:
+```
+kg_create_node(
+    label="Wedding Ceremony",
+    node_type="Event",
+    description="Alex's wedding ceremony at St. Mary's Church",
+    start_date="2023-06-15",
+    confidence=0.9,
+    importance=0.8
+)
+```
+
+Create a person:
+```
+kg_create_node(
+    label="Jane Smith",
+    node_type="Entity",
+    category="person",
+    aliases=["Jane", "J. Smith"],
+    description="Alex's colleague"
+)
+```
+
+**Note:** This tool does NOT check for duplicates. If you're unsure whether a node already exists, use kg_find_node first to search for it.

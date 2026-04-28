@@ -1,0 +1,51 @@
+{
+  "name": "ask_kg",
+  "description": "KG RAG Q&A — two modes:\n\n**Global mode** (omit `node`): searches the *entire* graph by embedding similarity. Best for general questions about the user, daily life, preferences, people, or anything without a clear anchor node. Defaults to this when `node` is empty.\n\n**Node-anchored mode** (provide `node`): expands a bounded BFS neighborhood around the named node and ranks evidence by similarity. Best when you already know the relevant entity (e.g. \"Jukka\", \"Katy\", \"Orora\").\n\nHow it works:\n- Global: queries Chroma edge embeddings across the whole graph, hydrates top matches from SQLite.\n- Node-anchored: BFS up to 3 hops, rank all neighborhood edges by question embedding similarity.\n- In both modes, sends a compact evidence pack to a fast model and returns an answer with citations.\n\nNotes:\n- Only two input fields: `question` (required) and `node` (optional).\n- Retrieval depth and ranking are fixed internally for consistent behavior.",
+  "inputs": [
+    {
+      "name": "question",
+      "type": "string",
+      "required": true,
+      "description": "Question to answer using KG evidence"
+    },
+    {
+      "name": "node",
+      "type": "string",
+      "required": false,
+      "description": "Base node name/title (e.g. 'Jukka', 'Katy'). Leave empty to search the whole graph."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "Arguments for ask_kg tool:\n\n- question (required): The question to answer\n- node (optional): Base node name/title (e.g. \"Jukka\" or \"Katy\"). Omit to search the whole graph — best for general questions about the user or their life.",
+  "metadata": {
+    "category": "knowledge_graph",
+    "verbs": [
+      "operate"
+    ],
+    "entities": [
+      "edge",
+      "graph",
+      "node"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "medium",
+    "latency_class": "moderate",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

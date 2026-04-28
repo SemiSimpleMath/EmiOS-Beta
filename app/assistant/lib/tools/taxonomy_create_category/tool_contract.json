@@ -1,0 +1,57 @@
+{
+  "name": "taxonomy_create_category",
+  "description": "Create a new category in the taxonomy hierarchy under a specified parent category.\n\nUse this tool when:\n- A new category is needed to properly organize the taxonomy\n- You need to add a missing intermediate category\n- Creating a new leaf category for classification\n\nParameters:\n- parent_id: The ID of the parent category (must exist)\n- new_label: The label for the new category (e.g., \"industrial_machine\")\n- description: A clear description of what this category represents (optional but recommended)\n\nExample:\n  create_category(492, \"industrial_machine\", \"Machines used in manufacturing and industrial processes\")\n\nThe tool will:\n1. Validate the parent exists\n2. Normalize the label (lowercase, underscores)\n3. Check for duplicates under the same parent\n4. Create the new category\n5. Return the new category_id\n\nNote: If a category with the same label already exists under this parent, the tool will return an error with the existing category's ID.",
+  "inputs": [
+    {
+      "name": "parent_id",
+      "type": "integer",
+      "required": true,
+      "description": "ID of the parent category under which to create the new category"
+    },
+    {
+      "name": "new_label",
+      "type": "string",
+      "required": true,
+      "description": "Label for the new category (will be normalized to lowercase with underscores)"
+    },
+    {
+      "name": "description",
+      "type": "string",
+      "required": false,
+      "description": "Description for the new category (optional)"
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "Arguments for taxonomy_create_category:\n\nparent_id (required): ID of the parent taxonomy category\nlabel (required): Name of the new category (snake_case)\ndescription (optional): Description of the new category\n\nExample:\n{\n    \"parent_id\": 772,\n    \"label\": \"not_started\",\n    \"description\": \"The task or process has not begun.\"\n}",
+  "metadata": {
+    "category": "knowledge_graph",
+    "verbs": [
+      "operate"
+    ],
+    "entities": [
+      "edge",
+      "graph",
+      "node"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "medium",
+    "latency_class": "moderate",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

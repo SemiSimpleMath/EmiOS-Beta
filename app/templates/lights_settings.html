@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lights Control</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/setup_wizard.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="setup-container">
+        <div class="setup-header">
+            <h1>Kasa Lights</h1>
+            <p>Configure and control TP-Link Kasa dimmers directly from Emi</p>
+            <a href="/settings/integrations" class="back-link"><i class="fas fa-arrow-left"></i> Back to Integrations</a>
+        </div>
+
+        <form id="lightsSettingsForm">
+            <div class="settings-section">
+                <h2><i class="fas fa-lightbulb"></i> Integration Config</h2>
+                <p class="step-description">This page controls the Lights integration using Kasa local network control.</p>
+
+                <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+                    <label class="feature-toggle">
+                        <input type="checkbox" id="lights_enabled">
+                        <div class="toggle-slider"></div>
+                    </label>
+                    <strong>Enable lights integration</strong>
+                    <span id="lights_token_status" class="feature-status disabled">Token not set</span>
+                </div>
+
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px;">
+                    <div>
+                        <label for="lights_endpoint_url"><strong>Endpoint URL</strong></label>
+                        <input id="lights_endpoint_url" type="text" style="width:100%;padding:8px;" placeholder="http://127.0.0.1:8000/api/smart-home/lights">
+                    </div>
+                    <div>
+                        <label for="lights_token_env_var"><strong>Token env var</strong></label>
+                        <input id="lights_token_env_var" type="text" style="width:100%;padding:8px;" placeholder="EMI_SMARTHOME_LIGHTS_TOKEN">
+                    </div>
+                    <div>
+                        <label for="lights_timeout_seconds"><strong>HTTP timeout (seconds)</strong></label>
+                        <input id="lights_timeout_seconds" type="number" min="1" style="width:100%;padding:8px;" placeholder="20">
+                    </div>
+                    <div>
+                        <label for="lights_kasa_discovery_timeout_seconds"><strong>Kasa discovery timeout (seconds)</strong></label>
+                        <input id="lights_kasa_discovery_timeout_seconds" type="number" min="1" style="width:100%;padding:8px;" placeholder="4">
+                    </div>
+                </div>
+
+                <div style="margin-top:10px;">
+                    <label for="lights_kasa_hosts"><strong>Kasa device hosts (one IP per line)</strong></label>
+                    <textarea id="lights_kasa_hosts" style="width:100%;min-height:100px;padding:8px;" placeholder="192.168.1.51&#10;192.168.1.52"></textarea>
+                    <small>If empty, Emi can discover lights on LAN with the button below.</small>
+                </div>
+
+                <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+                    <button type="button" id="lights_save_config_btn" class="oauth-connect-btn"><i class="fas fa-save"></i> Save Config</button>
+                    <button type="button" id="lights_refresh_config_btn" class="oauth-connect-btn"><i class="fas fa-sync-alt"></i> Refresh</button>
+                    <button type="button" id="lights_discover_hosts_btn" class="oauth-connect-btn"><i class="fas fa-wifi"></i> Discover Hosts</button>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <h2><i class="fas fa-gamepad"></i> Quick Actions</h2>
+                <p class="step-description">HS220 supports power and brightness control.</p>
+
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+                    <button type="button" id="lights_list_btn" class="oauth-connect-btn">List Lights</button>
+                    <button type="button" id="lights_on_btn" class="oauth-connect-btn">All On</button>
+                    <button type="button" id="lights_off_btn" class="oauth-connect-btn">All Off</button>
+                </div>
+
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                    <input id="lights_room_input" type="text" placeholder="Room filter (optional)" style="padding:8px;max-width:220px;">
+                    <input id="lights_brightness_input" type="number" min="0" max="100" placeholder="Brightness 0-100" style="padding:8px;max-width:180px;">
+                    <button type="button" id="lights_brightness_btn" class="oauth-connect-btn">Set Brightness</button>
+                </div>
+
+                <pre id="lights_action_result" style="margin-top:12px;white-space:pre-wrap;background:#0f172a;color:#e2e8f0;padding:10px;border-radius:6px;max-height:320px;overflow:auto;"></pre>
+            </div>
+
+            <div id="error-message" class="error-message" style="display: none;"></div>
+            <div id="success-message" class="success-message" style="display: none;"></div>
+        </form>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/lights_settings.js') }}"></script>
+</body>
+</html>

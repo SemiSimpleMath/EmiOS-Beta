@@ -1,0 +1,19 @@
+Node that we are describing is
+
+{{ node_label }}
+
+It has type: {{ node_type }}
+
+It has aliases {{ node_aliases }}
+
+It has attributes {{ node_attributes }}
+
+Here is the data on the nodes that connect to our node:
+{{ neighborhood_data }}
+
+{% if prior_description %}
+This node has many connections, so we are analyzing its neighborhood in parts.
+
+Here is the prior description we generated from an earlier subset of this node's connections:
+{{ prior_description }}
+{% endif %}

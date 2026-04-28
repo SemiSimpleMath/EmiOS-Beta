@@ -1,0 +1,71 @@
+Task:
+{{ task }}
+
+Additional information:
+{{ information }}
+
+Compile seed (used by deterministic post-processing):
+{{ compile_seed }}
+
+Phase I atomic decomposition (authoritative input):
+{{ phase_i_atoms }}
+
+Available manager catalog:
+{{ task_compile_manager_catalog }}
+
+Compile contract:
+{{ task_compile_contract }}
+
+Objective:
+Compose an executable workflow draft from the provided Phase I atoms.
+
+Composition requirements:
+1) Use the provided Phase I atoms as the authoritative building blocks.
+2) Compose the smallest executable graph that satisfies the task intent.
+3) Preserve Phase I action boundaries unless an explicit workflow boundary requires a separate runtime step.
+4) Keep flow linear unless the task explicitly requires waits, branching, loopback, or time-based gating.
+5) Use explicit step kinds:
+   - wait_for_event: waits on exactly one canonical event_name
+   - wait_gate: waits on one or more canonical subscriptions with a release_condition
+   - action: executes one Phase I action block via a manager
+   - tool_sequence: executes a Phase I deterministic action block directly via tool calls (no manager). Use when the Phase I atom has ``deterministic: true`` and a ``tools`` list.
+   - decision: routes based on one or more Phase I condition atoms
+   - end: terminates the path
+6) Keep step dataflow explicit:
+   - consumes_data_ids = ids this step reads
+   - produces_data_ids = ids this step materializes for later steps
+7) Preserve deterministic ids from Phase I whenever possible:
+   - fact_*
+   - artifact_*
+8) If a Phase I action already declares outputs, preserve those outputs in the corresponding action step.
+9) Do not invent new facts, artifacts, or intermediate steps unless the workflow requires them.
+10) Transfer action instruction text verbatim from Phase I atoms. Do not rewrite, embellish, or add instructions that the source task did not contain.
+11) Keep expressions runtime-parseable:
+   - use True and False
+   - quote string literals
+   - do not use function or method calls
+11) Keep wait_for_event.clear_condition empty.
+12) For wait_gate, provide release_condition and keep clear_condition empty.
+13) For step-local relative timers, use canonical names in the form clock.timer.Ns, clock.timer.Nm, or clock.timer.Nh.
+14) Do not add watcher setup, watcher registration, timer setup, or other runtime wiring details to the workflow steps.
+15) Every decision must have both on_true and on_false, and they must point to different targets.
+16) Every non-terminal path must eventually reach an end step.
+
+Binding requirements:
+- Bind wait_for_event steps to exactly one Phase I event atom.
+- Bind wait_gate steps to one or more Phase I event atoms.
+- Bind decision steps to the Phase I condition atoms whose expressions are used.
+- Bind action steps to the corresponding Phase I action atoms.
+- bindings.atomic_id must reference Phase I ids exactly, for example:
+  - event_1
+  - condition_2
+  - action_2
+
+Output requirements:
+- Populate compiled_task with:
+  - entry_step_id
+  - steps
+- Populate logic_tree with:
+  - entry_step_id
+  - edges
+  - bindings

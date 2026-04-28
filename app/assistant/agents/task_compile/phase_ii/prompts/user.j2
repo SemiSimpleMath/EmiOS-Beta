@@ -1,0 +1,76 @@
+Task:
+{{ task }}
+
+Additional information:
+{{ information }}
+
+Compile seed (used by deterministic post-processing):
+{{ compile_seed }}
+
+Phase I atomic decomposition (authoritative input):
+{{ phase_i_atoms }}
+
+{% if critic_feedback %}
+CRITIC FEEDBACK (from prior attempt):
+{{ critic_feedback }}
+
+Review each item above. For each violation:
+- If valid: fix it in the re-emitted compiled_task.
+- If you believe it is a false positive: re-emit unchanged for that item and add a brief inline comment in your reasoning explaining why.
+  You are not required to change output that is already correct.
+{% endif %}
+
+Available manager catalog:
+{{ task_compile_manager_catalog }}
+
+Compile contract:
+{{ task_compile_contract }}
+
+Phase II objective:
+Compose executable workflow draft from Phase I atoms.
+
+Phase II composition expectations:
+1) Use only Phase I atoms as building blocks.
+2) Compose the minimal executable graph needed to satisfy task intent.
+3) Keep flow linear unless task intent explicitly needs branching, loops, waits, or time gates.
+4) Use one-step-one-purpose structure:
+   - `wait_for_event` wakes on one canonical `event_name`.
+   - `wait_gate` wakes on one-or-more canonical `subscriptions`.
+   - `action` performs manager work and emits declared outputs.
+   - `decision` routes on materialized facts.
+   - `end` terminates path.
+5) Keep manager boundaries clear: split action steps only when manager surface changes or control boundaries are needed.
+6) Make step dataflow explicit:
+   - `consumes_data_ids` = ids this step reads.
+   - `produces_data_ids` = ids this action materializes for later steps.
+   - Use deterministic ids from Phase I (`fact_*`, `artifact_*`).
+   - For manager action steps, prefer `artifact_*` outputs by default.
+   - Use `fact_*` outputs only when a downstream decision/gate explicitly consumes that fact.
+   - Simplicity rule: each action step may produce at most one `artifact_*` id.
+7) Write decision conditions using only deterministic ids:
+   - event booleans: `event_<n> == True/False`
+   - facts: `fact_<n>` predicates
+   - artifacts only when scalar-safe: `artifact_<n>` predicates
+8) Use runtime-parseable expressions only:
+   - booleans `True` / `False`
+   - quoted string literals
+   - no function/method calls (`len(...)`, `.find(...)`, etc.)
+9) Keep `wait_for_event.clear_condition` empty in Phase II; runtime/post owns normalization.
+10) For `wait_gate`, provide `release_condition` and leave `clear_condition` empty.
+11) For step-local relative timers, use canonical `clock.timer.Ns|Nm|Nh`.
+12) Do not include watcher registration payloads; post-processing injects those deterministically.
+13) Ensure every decision has both `on_true` and `on_false` with different targets.
+14) Ensure every non-terminal path reaches an `end`.
+15) Binding rules:
+   - `wait_for_event`: exactly one `atomic_type=event` binding per step.
+   - `wait_gate`: one or more `atomic_type=event` bindings per step.
+
+Additional output requirements:
+- Populate `compiled_task` as workflow draft only:
+  - `entry_step_id`
+  - `steps`
+- Populate `logic_tree` so phase composition is explicit:
+  - `entry_step_id`: workflow entry step id,
+  - `edges`: all directed edges used by the logic graph,
+  - `bindings`: map each relevant wait/decision/action step to a Phase I atomic id.
+- `bindings.atomic_id` must reference Phase I ids exactly (for example `event_1`, `condition_2`, `action_2`).

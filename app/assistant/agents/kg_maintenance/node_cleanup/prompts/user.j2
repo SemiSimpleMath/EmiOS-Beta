@@ -1,0 +1,27 @@
+Node that we are analyzing for potential cleanup:
+
+{{ node_label }}
+
+It has type: {{ node_type }}
+It has category: {{ node_category }}
+
+It has aliases {{ node_aliases }}
+
+It has attributes {{ node_attributes }}
+
+{% if node_type in ['Event', 'State', 'Goal'] %}
+Start date: {{ start_date }}
+End date: {{ end_date }}
+Valid during: {{ valid_during }}
+{% endif %}
+
+Total edge count: {{ edge_count }}
+
+Connection to {{ resource_user_data.first_name }}: {{ connection_to_user }}
+
+Distance from {{ resource_user_data.first_name }}: {{ user_distance }} hops
+
+Here is the data on the nodes that connect to our node:
+{{ neighborhood_data }}
+
+Please analyze this node and determine if it should be flagged as suspect for potential deletion.

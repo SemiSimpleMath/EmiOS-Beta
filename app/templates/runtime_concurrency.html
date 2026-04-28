@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Runtime Concurrency Monitor</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --panel: #111827;
+            --panel-soft: #1f2937;
+            --text: #e5e7eb;
+            --muted: #9ca3af;
+            --ok: #10b981;
+            --warn: #f59e0b;
+            --bad: #ef4444;
+            --line: #374151;
+            --chip: #334155;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--text);
+            font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .topbar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 18px;
+        }
+
+        .title {
+            font-size: 26px;
+            font-weight: 700;
+            margin-right: auto;
+        }
+
+        .muted {
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .btn {
+            border: 1px solid var(--line);
+            background: var(--panel-soft);
+            color: var(--text);
+            padding: 8px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .btn:hover {
+            background: #243244;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 12px;
+            margin-bottom: 14px;
+        }
+
+        .card {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            padding: 14px;
+        }
+
+        .metric-label {
+            color: var(--muted);
+            font-size: 12px;
+            margin-bottom: 6px;
+        }
+
+        .metric-value {
+            font-size: 22px;
+            font-weight: 700;
+        }
+
+        .chip {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 700;
+            background: var(--chip);
+            color: var(--text);
+        }
+
+        .chip.ok {
+            background: rgba(16, 185, 129, 0.2);
+            color: #6ee7b7;
+            border: 1px solid rgba(16, 185, 129, 0.35);
+        }
+
+        .chip.warn {
+            background: rgba(245, 158, 11, 0.2);
+            color: #fcd34d;
+            border: 1px solid rgba(245, 158, 11, 0.35);
+        }
+
+        .chip.bad {
+            background: rgba(239, 68, 68, 0.2);
+            color: #fca5a5;
+            border: 1px solid rgba(239, 68, 68, 0.35);
+        }
+
+        .section {
+            margin-top: 12px;
+        }
+
+        .section h2 {
+            margin: 10px 0;
+            font-size: 18px;
+        }
+
+        .table-wrap {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            overflow: auto;
+            max-height: 360px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 980px;
+        }
+
+        th, td {
+            text-align: left;
+            border-bottom: 1px solid var(--line);
+            padding: 8px 10px;
+            font-size: 12px;
+            vertical-align: top;
+        }
+
+        th {
+            position: sticky;
+            top: 0;
+            background: #0b1220;
+            z-index: 1;
+        }
+
+        .mono {
+            font-family: Consolas, Monaco, monospace;
+            font-size: 12px;
+        }
+
+        .error {
+            color: #fecaca;
+            background: rgba(127, 29, 29, 0.35);
+            border: 1px solid rgba(248, 113, 113, 0.3);
+            padding: 12px;
+            border-radius: 10px;
+            margin-bottom: 12px;
+        }
+
+        .issues {
+            margin-bottom: 12px;
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            padding: 12px;
+        }
+
+        .issues h2 {
+            margin: 0 0 8px 0;
+            font-size: 17px;
+        }
+
+        .issues ul {
+            margin: 0;
+            padding-left: 18px;
+        }
+
+        .issues li {
+            margin: 3px 0;
+            font-size: 13px;
+        }
+
+        .issues li.ok {
+            color: #86efac;
+        }
+
+        .issues li.warn {
+            color: #fcd34d;
+        }
+
+        .issues li.bad {
+            color: #fca5a5;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="topbar">
+            <div class="title">Runtime Concurrency Monitor</div>
+            <span id="health-chip" class="chip">Loading</span>
+            <button class="btn" id="refresh-btn" type="button">Refresh</button>
+            <span class="muted" id="updated-at">Waiting for first sample...</span>
+        </div>
+
+        <div id="error-box" style="display:none;" class="error"></div>
+
+        <div class="issues">
+            <h2>Problems First</h2>
+            <ul id="issues-list"></ul>
+        </div>
+
+        <div class="grid">
+            <div class="card">
+                <div class="metric-label">Routine Saturation</div>
+                <div class="metric-value" id="routine-saturation">-</div>
+                <div class="muted" id="routine-level">-</div>
+            </div>
+            <div class="card">
+                <div class="metric-label">Active Manager Invocations</div>
+                <div class="metric-value" id="active-invocations">-</div>
+                <div class="muted" id="longest-manager">-</div>
+            </div>
+            <div class="card">
+                <div class="metric-label">Registered Threads Alive</div>
+                <div class="metric-value" id="threads-alive">-</div>
+                <div class="muted" id="unregistered-threads">-</div>
+            </div>
+            <div class="card">
+                <div class="metric-label">Executor Tasks Running</div>
+                <div class="metric-value" id="executor-running">-</div>
+                <div class="muted" id="executor-saturation">-</div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Manager Invocations</h2>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Manager</th>
+                            <th>Request ID</th>
+                            <th>Thread</th>
+                            <th>Running (s)</th>
+                            <th>Started</th>
+                        </tr>
+                    </thead>
+                    <tbody id="invocations-body"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Registered Threads</h2>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Owner</th>
+                            <th>Name</th>
+                            <th>Kind</th>
+                            <th>Status</th>
+                            <th>Alive</th>
+                            <th>Running (s)</th>
+                            <th>Heartbeat Age (s)</th>
+                            <th>Last Heartbeat</th>
+                            <th>Error</th>
+                        </tr>
+                    </thead>
+                    <tbody id="threads-body"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Executors</h2>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Owner</th>
+                            <th>Executor ID</th>
+                            <th>Max Workers</th>
+                            <th>Running</th>
+                            <th>Submitted</th>
+                            <th>Completed</th>
+                            <th>Failed</th>
+                            <th>Saturation</th>
+                        </tr>
+                    </thead>
+                    <tbody id="executors-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const POLL_MS = 2500;
+        const HEARTBEAT_WARN_S = 90;
+        const HEARTBEAT_BAD_S = 300;
+        let pollTimer = null;
+
+        const KNOWN_UNREGISTERED_PATTERNS = [
+            "MainThread",
+            "APScheduler",
+            "_monitor",
+            "process_request_thread",
+            "simple_websocket",
+            "_send_ping",
+            "writer",
+            "-pool_",
+            "_service_task"
+        ];
+
+        function safeNum(value, fallback = 0) {
+            const parsed = Number(value);
+            if (Number.isNaN(parsed)) {
+                return fallback;
+            }
+            return parsed;
+        }
+
+        function fmtPct(v) {
+            return `${(safeNum(v, 0) * 100).toFixed(1)}%`;
+        }
+
+        function esc(value) {
+            return String(value ?? "")
+                .replaceAll("&", "&amp;")
+                .replaceAll("<", "&lt;")
+                .replaceAll(">", "&gt;")
+                .replaceAll('"', "&quot;")
+                .replaceAll("'", "&#39;");
+        }
+
+        function parseIsoToMs(value) {
+            const text = String(value || "").trim();
+            if (!text) {
+                return null;
+            }
+            const ms = Date.parse(text);
+            if (Number.isNaN(ms)) {
+                return null;
+            }
+            return ms;
+        }
+
+        function ageSecondsFromIso(value, nowMs) {
+            const parsed = parseIsoToMs(value);
+            if (parsed === null) {
+                return null;
+            }
+            return Math.max(0, (nowMs - parsed) / 1000);
+        }
+
+        function isKnownInfraUnregisteredThread(name) {
+            const normalized = String(name || "");
+            return KNOWN_UNREGISTERED_PATTERNS.some((fragment) => normalized.includes(fragment));
+        }
+
+        function buildThreadHealth(threads, nowMs) {
+            let staleWarn = 0;
+            let staleBad = 0;
+            let startupOnly = 0;
+            for (const row of threads) {
+                if (!row || !row.is_alive) {
+                    continue;
+                }
+                if (!row.has_runtime_heartbeat) {
+                    startupOnly += 1;
+                    continue;
+                }
+                const age = ageSecondsFromIso(row.last_heartbeat_utc, nowMs);
+                if (age === null) {
+                    continue;
+                }
+                if (age >= HEARTBEAT_BAD_S) {
+                    staleBad += 1;
+                } else if (age >= HEARTBEAT_WARN_S) {
+                    staleWarn += 1;
+                }
+            }
+            return { staleWarn, staleBad, startupOnly };
+        }
+
+        function chipClassForHealth(summary, diagnostics) {
+            const routineLevel = String(summary.routine_capacity_level || "ok").toLowerCase();
+            const maxSat = safeNum(summary.max_executor_saturation_ratio, 0);
+            if (
+                routineLevel === "critical" ||
+                maxSat >= 0.95 ||
+                safeNum(diagnostics.staleBad, 0) > 0 ||
+                safeNum(diagnostics.unregisteredUnknownCount, 0) > 0
+            ) {
+                return { cls: "bad", text: "Critical" };
+            }
+            if (
+                routineLevel === "warning" ||
+                maxSat >= 0.8 ||
+                safeNum(diagnostics.staleWarn, 0) > 0
+            ) {
+                return { cls: "warn", text: "Warning" };
+            }
+            return { cls: "ok", text: "Healthy" };
+        }
+
+        function renderRows(targetId, html) {
+            document.getElementById(targetId).innerHTML = html;
+        }
+
+        function render(payload) {
+            const summary = payload.summary || {};
+            const manager = payload.manager_invoker || {};
+            const registry = payload.runtime_registry || {};
+            const invocations = Array.isArray(manager.active_invocations) ? manager.active_invocations : [];
+            const threads = Array.isArray(registry.threads) ? registry.threads : [];
+            const executors = Array.isArray(registry.executors) ? registry.executors : [];
+            const pythonRuntimeThreads = registry.python_runtime_threads || {};
+            const unregisteredThreads = Array.isArray(pythonRuntimeThreads.unregistered_threads) ? pythonRuntimeThreads.unregistered_threads : [];
+            const knownUnregistered = unregisteredThreads.filter((row) => isKnownInfraUnregisteredThread(row.thread_name));
+            const unknownUnregistered = unregisteredThreads.filter((row) => !isKnownInfraUnregisteredThread(row.thread_name));
+            const nowMs = Date.now();
+            const threadHealth = buildThreadHealth(threads, nowMs);
+            const diagnostics = {
+                staleWarn: threadHealth.staleWarn,
+                staleBad: threadHealth.staleBad,
+                startupOnlyHeartbeats: threadHealth.startupOnly,
+                unregisteredKnownCount: knownUnregistered.length,
+                unregisteredUnknownCount: unknownUnregistered.length,
+            };
+
+            const routineSat = safeNum(summary.routine_saturation_ratio, 0);
+            document.getElementById("routine-saturation").textContent = fmtPct(routineSat);
+            document.getElementById("routine-level").textContent = `Level: ${summary.routine_capacity_level || "unknown"}`;
+            document.getElementById("active-invocations").textContent = String(safeNum(summary.active_manager_invocations, 0));
+            document.getElementById("longest-manager").textContent = `Longest active: ${safeNum(summary.longest_manager_running_s, 0).toFixed(1)}s`;
+            document.getElementById("threads-alive").textContent = String(safeNum(summary.registered_runtime_threads_alive, 0));
+            document.getElementById("unregistered-threads").textContent = `Unregistered known/unknown: ${diagnostics.unregisteredKnownCount}/${diagnostics.unregisteredUnknownCount}`;
+            document.getElementById("executor-running").textContent = String(safeNum(summary.executor_tasks_running, 0));
+            document.getElementById("executor-saturation").textContent = `Max saturation: ${fmtPct(summary.max_executor_saturation_ratio)}`;
+
+            const health = chipClassForHealth(summary, diagnostics);
+            const healthChip = document.getElementById("health-chip");
+            healthChip.className = `chip ${health.cls}`;
+            healthChip.textContent = health.text;
+
+            const issues = [];
+            const routineLevel = String(summary.routine_capacity_level || "ok").toLowerCase();
+            if (routineLevel === "critical") {
+                issues.push({ cls: "bad", text: `Routine lane is critical (${fmtPct(summary.routine_saturation_ratio)}).` });
+            } else if (routineLevel === "warning") {
+                issues.push({ cls: "warn", text: `Routine lane is warning (${fmtPct(summary.routine_saturation_ratio)}).` });
+            } else {
+                issues.push({ cls: "ok", text: `Routine lane healthy (${fmtPct(summary.routine_saturation_ratio)}).` });
+            }
+            if (diagnostics.unregisteredUnknownCount > 0) {
+                issues.push({ cls: "bad", text: `${diagnostics.unregisteredUnknownCount} unknown unregistered runtime thread(s).` });
+            } else if (diagnostics.unregisteredKnownCount > 0) {
+                issues.push({ cls: "warn", text: `${diagnostics.unregisteredKnownCount} known infra thread(s) are not registry-managed.` });
+            } else {
+                issues.push({ cls: "ok", text: "No unregistered runtime threads detected." });
+            }
+            if (diagnostics.staleBad > 0) {
+                issues.push({ cls: "bad", text: `${diagnostics.staleBad} thread(s) have stale heartbeat >= ${HEARTBEAT_BAD_S}s.` });
+            } else if (diagnostics.staleWarn > 0) {
+                issues.push({ cls: "warn", text: `${diagnostics.staleWarn} thread(s) have stale heartbeat >= ${HEARTBEAT_WARN_S}s.` });
+            } else {
+                issues.push({ cls: "ok", text: "No stale thread heartbeats detected." });
+            }
+            if (diagnostics.startupOnlyHeartbeats > 0) {
+                issues.push({ cls: "warn", text: `${diagnostics.startupOnlyHeartbeats} thread(s) only have startup heartbeat (no runtime pulse yet).` });
+            }
+            const maxSat = safeNum(summary.max_executor_saturation_ratio, 0);
+            if (maxSat >= 0.95) {
+                issues.push({ cls: "bad", text: `Executor pressure critical (${fmtPct(maxSat)}).` });
+            } else if (maxSat >= 0.8) {
+                issues.push({ cls: "warn", text: `Executor pressure elevated (${fmtPct(maxSat)}).` });
+            } else {
+                issues.push({ cls: "ok", text: `Executor pressure normal (${fmtPct(maxSat)}).` });
+            }
+            document.getElementById("issues-list").innerHTML = issues.map((x) => `<li class="${x.cls}">${esc(x.text)}</li>`).join("");
+
+            const invRows = invocations.length ? invocations.map((row) => `
+                <tr>
+                    <td class="mono">${esc(row.manager_name)}</td>
+                    <td class="mono">${esc(row.request_id || "-")}</td>
+                    <td class="mono">${esc(row.thread_name || row.thread_id || "-")}</td>
+                    <td>${safeNum(row.running_for_s, 0).toFixed(2)}</td>
+                    <td class="mono">${esc(row.started_at_utc || "-")}</td>
+                </tr>
+            `).join("") : '<tr><td colspan="5" class="muted">No active manager invocations.</td></tr>';
+            renderRows("invocations-body", invRows);
+
+            const threadRows = threads.length ? threads.map((row) => `
+                <tr>
+                    <td class="mono">${esc(row.owner)}</td>
+                    <td class="mono">${esc(row.thread_name || row.thread_id)}</td>
+                    <td>${esc(row.kind || "-")}</td>
+                    <td>${esc(row.status || "-")}</td>
+                    <td>${row.is_alive ? "yes" : "no"}</td>
+                    <td>${safeNum(row.running_for_s, 0).toFixed(2)}</td>
+                    <td>${
+                        (() => {
+                            if (!row.has_runtime_heartbeat) {
+                                return `<span class="chip">startup-only</span>`;
+                            }
+                            const age = ageSecondsFromIso(row.last_heartbeat_utc, nowMs);
+                            if (age === null) {
+                                return "-";
+                            }
+                            if (age >= HEARTBEAT_BAD_S) {
+                                return `<span class="chip bad">${age.toFixed(1)}</span>`;
+                            }
+                            if (age >= HEARTBEAT_WARN_S) {
+                                return `<span class="chip warn">${age.toFixed(1)}</span>`;
+                            }
+                            return `<span class="chip ok">${age.toFixed(1)}</span>`;
+                        })()
+                    }</td>
+                    <td class="mono">${esc(row.last_heartbeat_utc || "-")}</td>
+                    <td class="mono">${esc(row.last_error || "-")}</td>
+                </tr>
+            `).join("") : '<tr><td colspan="9" class="muted">No registered threads found.</td></tr>';
+            renderRows("threads-body", threadRows);
+
+            const execRows = executors.length ? executors.map((row) => `
+                <tr>
+                    <td class="mono">${esc(row.owner)}</td>
+                    <td class="mono">${esc(row.executor_id)}</td>
+                    <td>${safeNum(row.max_workers, 0)}</td>
+                    <td>${safeNum(row.running, 0)}</td>
+                    <td>${safeNum(row.submitted, 0)}</td>
+                    <td>${safeNum(row.completed, 0)}</td>
+                    <td>${safeNum(row.failed, 0)}</td>
+                    <td>${fmtPct(row.saturation_ratio)}</td>
+                </tr>
+            `).join("") : '<tr><td colspan="8" class="muted">No registered executors found.</td></tr>';
+            renderRows("executors-body", execRows);
+
+            const generatedAt = payload.generated_at_utc || new Date().toISOString();
+            document.getElementById("updated-at").textContent = `Updated: ${new Date(generatedAt).toLocaleString()}`;
+        }
+
+        async function refresh() {
+            const errorBox = document.getElementById("error-box");
+            try {
+                const response = await fetch("/api/runtime/concurrency", { cache: "no-store" });
+                const data = await response.json();
+                if (!response.ok || !data.success) {
+                    throw new Error(data.error || `HTTP ${response.status}`);
+                }
+                errorBox.style.display = "none";
+                errorBox.textContent = "";
+                render(data);
+            } catch (error) {
+                errorBox.style.display = "block";
+                errorBox.textContent = `Failed to load runtime status: ${String(error.message || error)}`;
+            }
+        }
+
+        function startPolling() {
+            if (pollTimer !== null) {
+                clearInterval(pollTimer);
+            }
+            pollTimer = window.setInterval(refresh, POLL_MS);
+        }
+
+        document.getElementById("refresh-btn").addEventListener("click", refresh);
+        refresh();
+        startPolling();
+    </script>
+</body>
+</html>

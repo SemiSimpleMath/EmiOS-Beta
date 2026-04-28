@@ -1,0 +1,16 @@
+########## CURRENT STATE ##########
+**Current Time:** {{ date_time }} ({{ day_of_week }})
+
+########## HEALTH BELIEFS ##########
+{{ health_beliefs_block }}
+
+{%- if sleep_output_block %}
+
+########## SLEEP DATA ##########
+{{ sleep_output_block }}
+{%- endif %}
+{%- if weekly_health_block %}
+
+########## WEEKLY HEALTH PATTERNS ##########
+{{ weekly_health_block }}
+{%- endif %}

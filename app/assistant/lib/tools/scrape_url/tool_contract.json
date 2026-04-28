@@ -1,0 +1,52 @@
+{
+  "name": "scrape_url",
+  "description": "Scrape tool fetches content from a webpage. Arguments are URL and optional \"query\" string.\n- If query is provided: extracts only content relevant to the query\n- If query is empty or omitted: returns the entire page content\nCan only scrape HTML/web pages. Cannot scrape PDF files.",
+  "inputs": [
+    {
+      "name": "query",
+      "type": "string",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "url",
+      "type": "string",
+      "required": true,
+      "description": ""
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "Provide arguments for the scrape tool. The scrape tool fetches website content and optionally extracts relevant portions.\n\nArguments:\n- url (str, required): The webpage URL to scrape\n- query (str, optional): What to extract from the page\n  - If provided: scraper agent extracts only content relevant to this query\n  - If empty/omitted: returns the entire page content without summarization\n\nExample with query:\n{\"url\": \"https://example.com/menu\", \"query\": \"Find restaurant hours and prices\"}\n\nExample without query (full page):\n{\"url\": \"https://example.com/menu\", \"query\": \"\"}\nor\n{\"url\": \"https://example.com/menu\"}",
+  "metadata": {
+    "domain": "web",
+    "actions": [
+      "fetch",
+      "read",
+      "extract"
+    ],
+    "selectors": [
+      "url",
+      "query"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "high",
+    "latency_class": "slow",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "first_name": "YourFirstName",
+  "middle_name": null,
+  "last_name": "YourLastName",
+  "preferred_name": "YourPreferredName",
+  "full_name": "YourFirstName YourLastName",
+  "pronouns": {
+    "subjective": "they",
+    "objective": "them"
+  },
+  "birthdate": null,
+  "job": null,
+  "home_city": "",
+  "home_state": "",
+  "home_country": "",
+  "important_people": [],
+  "additional_context": ""
+}

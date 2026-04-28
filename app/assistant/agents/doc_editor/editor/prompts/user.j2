@@ -1,0 +1,52 @@
+{% if doc_creation_session_id %}
+Document creation session: {{ doc_creation_session_id }}
+{% endif %}
+
+{% if doc_type %}
+Document type: {{ doc_type }}
+{% endif %}
+
+{% if doc_markdown_last_emitted %}
+## Current document draft
+
+<<<DOC_BEGIN>>>
+{{ doc_markdown_last_emitted }}
+<<<DOC_END>>>
+
+(The `<<<DOC_BEGIN>>>` / `<<<DOC_END>>>` markers are NOT part of the document — they only delimit where the draft starts and ends. Never include them in `old_text`.)
+{% else %}
+The document is currently empty.
+{% endif %}
+
+{% if edit_instruction %}
+## Edit instruction (from chat agent — this is what to do)
+
+{{ edit_instruction }}
+
+Follow this instruction exactly. The conversation below is provided for context only; the instruction above is authoritative.
+{% endif %}
+
+## Conversation since last edit
+
+{% if recent_exchanges %}
+{{ recent_exchanges }}
+{% else %}
+(No new exchanges.)
+{% endif %}
+
+{% if edit_retry_failures %}
+## RETRY — your previous edits did NOT match the document
+
+Your prior attempt emitted `old_text` values that could not be located in the current document draft above. Common causes: missing or extra blank lines, wrong quoted characters, or text that doesn't appear verbatim.
+
+Prior failures:
+{% for failure in edit_retry_failures %}
+- {{ failure }}
+{% endfor %}
+
+Look at the **Current document draft** again. Copy `old_text` VERBATIM — every character, every newline, every blank line must match exactly. Include enough surrounding context to be unique. Try again.
+
+{% endif %}
+Based on the conversation above: does the document need to change?
+- If yes: emit `doc_action` "update" with search/replace edits against the current document draft above.
+- If no: emit `doc_action` "no_op" with empty edits.

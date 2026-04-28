@@ -1,0 +1,29 @@
+Today is {{ date_time }}.
+{% if task %}
+Task you have been given: {{ task }}
+{% endif %}
+
+{% if information %}
+Additional information: {{ information }}
+{% endif %}
+
+{% if checklist %}
+This is our previous checklist that you have to now update. You may also add sub-goals to the checklist. Do not get stuck thinking you must check off every single part. Often main goal can be achieved by abandoning some goals or sub-goals or deciding that a check item has been closely enough satisfied.
+{{ checklist }}
+{% else %}
+This is our first action. We have not done anything yet. So found_information will be blank. We just need to come up with a plan and action.
+{% endif %}
+
+{% if recent_history %}
+Things that happened since last time you made a plan from oldest to latest. Last thing is most recent tool result that you have to evaluate:
+{{ recent_history }}
+We now have tool result, take verbatim most important things and save in found_information.
+{% endif %}
+
+{% if action_count %}
+**Action Count:** {{ action_count }}/10 (You have {{ 10 - action_count }} actions remaining)
+{% endif %}
+
+{% if action_count and action_count >= 10 %}
+CRITICAL: You have reached the 10-action limit! You must now wrap up and provide your final report even if you do not have a complete answer. No more tool calls - just report what you found.**
+{% endif %}

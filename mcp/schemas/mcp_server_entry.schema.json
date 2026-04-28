@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://emiai.local/schemas/mcp_server_entry.schema.json",
+  "title": "EmiAi MCP Server Entry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "server_id", "display_name", "source", "enabled", "launch_options", "policy"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Version of this local schema (not the MCP protocol version)."
+    },
+    "server_id": {
+      "type": "string",
+      "minLength": 3,
+      "pattern": "^[a-z0-9]+(\\.[a-z0-9-]+)*\\/[a-zA-Z0-9._-]+$",
+      "description": "Stable server identifier as '<namespace>/<name>' (e.g. io.modelcontextprotocol/time, pypi/mcp-github)."
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-friendly name for UIs/logging."
+    },
+    "description": {
+      "type": "string",
+      "description": "Optional long description for internal docs/UI. Do not treat as trusted for security decisions."
+    },
+    "source": {
+      "type": "string",
+      "enum": ["official_reference_server", "official_registry", "third_party_registry", "local_only"],
+      "description": "Where this server entry came from."
+    },
+    "enabled": {
+      "type": "boolean",
+      "description": "Whether EmiAi should attempt to connect to this server at runtime."
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Optional labels for grouping/filtering (e.g. safe, read_only, productivity)."
+    },
+    "transport_preferences": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["stdio", "streamable_http", "http_sse_deprecated"]
+      },
+      "description": "Optional preferred transports in order. Host may override."
+    },
+    "launch_options": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/launchOption" },
+      "description": "How to run/connect to the server. Multiple options allow different environments."
+    },
+    "policy": {
+      "$ref": "#/$defs/policy",
+      "description": "Host-enforced safety limits and defaults (do not rely on server-provided metadata)."
+    },
+    "tool_namespace": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9._:-]+$",
+      "description": "Optional explicit namespace prefix for tools (defaults to 'mcp::<server_id>::')."
+    },
+    "tool_allowlist": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "If non-empty, only these server tools are exposed to agents."
+    },
+    "tool_denylist": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Tools to hide even if the server advertises them."
+    }
+  },
+  "$defs": {
+    "launchOption": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "transport"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9._-]+$",
+          "description": "Local identifier for this launch option (e.g. uvx, docker, remote)."
+        },
+        "transport": {
+          "type": "string",
+          "enum": ["stdio", "streamable_http", "http_sse_deprecated"],
+          "description": "Transport used to communicate with the MCP server."
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Executable to run for stdio-based servers (e.g. uvx, python, docker, npx)."
+        },
+        "args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Arguments passed to the command for stdio-based servers."
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Environment variables to set for the server process (NO SECRETS in repo)."
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Base URL for HTTP-based servers (streamable HTTP preferred)."
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Optional static headers for HTTP servers. Avoid embedding secrets."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "transport": { "const": "stdio" } } },
+          "then": { "required": ["command", "args"] }
+        },
+        {
+          "if": { "properties": { "transport": { "enum": ["streamable_http", "http_sse_deprecated"] } } },
+          "then": { "required": ["url"] }
+        }
+      ]
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["default_requires_approval", "max_concurrent_calls", "call_timeout_seconds", "max_result_bytes"],
+      "properties": {
+        "default_requires_approval": {
+          "type": "boolean",
+          "description": "Default approval requirement for tool calls from this server (host-enforced)."
+        },
+        "max_concurrent_calls": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "description": "Concurrency limit for calls into this server."
+        },
+        "call_timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600,
+          "description": "Per-call timeout enforced by the host."
+        },
+        "max_result_bytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 50000000,
+          "description": "Maximum response size the host will accept before truncating/failing."
+        },
+        "rate_limit_per_minute": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optional host-side rate limit (calls per minute)."
+        },
+        "allow_network_access": {
+          "type": "boolean",
+          "description": "Host-side flag for whether tools may access the network (best-effort, depends on server)."
+        }
+      }
+    }
+  }
+}
+

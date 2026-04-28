@@ -1,0 +1,68 @@
+name: task_compile_manager
+class_name: MultiAgentManager
+description: "Compiles user prose tasks into workflow IR."
+max_cycles: 24
+
+role_bindings:
+  delegator: emi_team::delegator
+
+agents:
+  - name: emi_team::delegator
+    class: Delegator
+  - name: task_compile::phase_i
+    class: Agent
+  - name: task_compile::phase_ii
+    class: Agent
+
+control_nodes:
+  - name: task_compile_metadata_node
+    class: TaskCompileMetadataNode
+    config:
+      next_agent: "task_compile::phase_i"
+      compiler_name: "task_compile_manager"
+      compiler_version: "v1"
+  - name: task_compile_post_node
+    class: TaskCompilePostNode
+    config:
+      previous_agents:
+        - "task_compile_critic_node"
+      next_agent: "task_compile_final_output_node"
+      auto_write_compiled_task: true
+  - name: task_compile_critic_node
+    class: TaskCompileCriticNode
+    config:
+      previous_agents:
+        - "task_compile::phase_ii"
+        - "task_compile::phase_ii_return_control"
+      next_agent: "task_compile_post_node"
+      retry_agent: "task_compile::phase_ii"
+  - name: task_compile_final_output_node
+    class: TaskCompileFinalOutputNode
+    config:
+      previous_agent: "task_compile_post_node"
+      next_agent: "manager_exit_node"
+  - name: manager_exit_node
+    class: ManagerExitNode
+  - name: return_control
+    class: ReturnControlNode
+  - name: graceful_exit_control_node
+    class: GracefulExitControlNode
+
+tools:
+  allowed_tools: []
+  except_tools: []
+
+flow_config:
+  strict_routing: true
+  state_map:
+    "emi_team::delegator": "task_compile_metadata_node"
+    "task_compile_metadata_node": "task_compile::phase_i"
+    "task_compile::phase_i": "task_compile::phase_ii"
+    "task_compile::phase_i_return_control": "task_compile::phase_ii"
+    "task_compile::phase_ii": "task_compile_critic_node"
+    "task_compile::phase_ii_return_control": "task_compile_critic_node"
+    "task_compile_critic_node": "task_compile_post_node"
+    "task_compile_post_node": "task_compile_final_output_node"
+    "task_compile_final_output_node": "manager_exit_node"
+    "graceful_exit": "graceful_exit_control_node"
+    "graceful_exit_control_node": "manager_exit_node"

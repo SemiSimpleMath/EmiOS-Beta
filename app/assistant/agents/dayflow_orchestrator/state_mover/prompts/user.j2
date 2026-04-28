@@ -1,0 +1,100 @@
+{%- from "shared/macros/dayflow_items.j2" import task_line, task_block %}
+
+########## CURRENT STATE ##########
+**Current Time:** {{ date_time }}
+**Day:** {{ day_of_week }}
+{%- if resource_afk_statistics_output %}
+**Computer Presence:**
+{%- if resource_afk_statistics_output.is_afk %}
+[STATUS: AWAY FROM KEYBOARD] - Idle: {{ resource_afk_statistics_output.idle_minutes | default(0) | round | int }} min
+{%- else %}
+[STATUS: AT KEYBOARD] - Session: {{ resource_afk_statistics_output.current_session_minutes | default(resource_afk_statistics_output.active_work_session_minutes) | default(0) | round(1) }} min
+{%- endif %}
+{%- endif %}
+{%- if location_summary %}
+**Location:** {{ location_summary }}
+{%- endif %}
+{%- if resource_weather and resource_weather.current %}
+**Weather:** {{ resource_weather.location.city }}: {{ resource_weather.current.temperature }} F, {{ resource_weather.current.condition }}
+{%- endif %}
+{%- if health_status_summary %}
+**Health:** {{ health_status_summary }}
+{%- endif %}
+{%- if resource_expected_calendar and resource_expected_calendar.expected_schedule %}
+
+##### Today's Schedule
+{%- for entry in resource_expected_calendar.expected_schedule %}
+- {{ entry.title }} {{ entry.start_local }}{% if entry.end_local %} - {{ entry.end_local }}{% endif %} ({{ entry.status }})
+{%- endfor %}
+{%- endif %}
+{%- if recent_dayflow_chat_history %}
+
+##### Recent User Chat
+{%- for c in recent_dayflow_chat_history[-10:] %}
+- [{{ c.get("time_local","") }}] {{ c.get("summary","") }}
+{%- endfor %}
+{%- endif %}
+{%- if recent_responded_tickets %}
+{%- set has_responses = recent_responded_tickets.accepted or recent_responded_tickets.declined or recent_responded_tickets.snoozed %}
+{%- if has_responses %}
+
+##### Recent Ticket Responses
+{%- if recent_responded_tickets.accepted %}
+Accepted: {% for t in recent_responded_tickets.accepted[:5] %}{{ t.get("title","") }}{% if not loop.last %}, {% endif %}{% endfor %}
+{%- endif %}
+{%- if recent_responded_tickets.declined %}
+Declined: {% for t in recent_responded_tickets.declined[:5] %}{{ t.get("title","") }}{% if not loop.last %}, {% endif %}{% endfor %}
+{%- endif %}
+{%- if recent_responded_tickets.snoozed %}
+Snoozed: {% for t in recent_responded_tickets.snoozed[:5] %}{{ t.get("title","") }}{% if not loop.last %}, {% endif %}{% endfor %}
+{%- endif %}
+{%- endif %}
+{%- endif %}
+{%- if planned_tasks %}
+
+##### Planner Tasks
+{%- for t in planned_tasks %}
+- task: {{ t.get("task_id","") }}{% if t.get("plan_id") %} | plan: {{ t.get("plan_id") }}{% endif %}
+
+  {{ t.get("task","") }}{% if t.get("dependencies") %}
+  deps: {{ t.get("dependencies")|join(", ") }}{% endif %}{% if t.get("wait_reason") %}
+  wait: {{ t.get("wait_reason","") }}{% endif %}{% if t.get("reactivate_at") %}
+  reactivate_at: {{ t.get("reactivate_at","") }}{% endif %}{% if t.get("wake_signals") %}
+  wake_signals: {{ t.get("wake_signals")|join(", ") }}{% endif %}
+{%- endfor %}
+{%- endif %}
+{%- if active_plan_synopses %}
+
+##### Active Plans
+{%- for p in active_plan_synopses[:20] %}
+- plan: {{ p.get("plan_id","") }}
+  {{ p.get("objective","") }}
+  {{ p.get("synopsis","") }}
+{%- endfor %}
+{%- endif %}
+
+########## TRACKED ITEMS ##########
+{%- if active_dayflow_items %}
+{%- set needs_placement = [] %}
+{%- set actionable = [] %}
+{%- set dispatched = [] %}
+{%- set waiting = [] %}
+{%- set completed = [] %}
+{%- for ex in active_dayflow_items %}
+{%- set m = ex.get("metadata", {}) %}
+{%- if m.get("state","") == "important_open" %}{% if needs_placement.append(ex) %}{% endif %}
+{%- elif m.get("state","") == "actionable" %}{% if actionable.append(ex) %}{% endif %}
+{%- elif m.get("state","") == "dispatched" %}{% if dispatched.append(ex) %}{% endif %}
+{%- elif m.get("state","") in ["waiting", "watching"] %}{% if waiting.append(ex) %}{% endif %}
+{%- elif m.get("state","") == "closed" %}{% if completed.append(ex) %}{% endif %}
+{%- endif %}
+{%- endfor %}
+
+{{ task_block(needs_placement, "Needs Placement (decide: actionable, waiting, or watching)") }}
+{{ task_block(waiting, "Waiting Tasks (check if conditions are now met)") }}
+{%- endif %}
+{%- if entity_card %}
+
+##### Entity Context
+{{ entity_card }}
+{%- endif %}

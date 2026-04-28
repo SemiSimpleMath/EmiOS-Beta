@@ -1,0 +1,11 @@
+Today is {{ date_time }}
+Task: {{ task }}
+
+{% if information %}
+Additional info: {{ information }}
+{% endif %}
+
+{% if recent_history %}
+Recent history (oldest to latest):
+{{ recent_history }}
+{% endif %}

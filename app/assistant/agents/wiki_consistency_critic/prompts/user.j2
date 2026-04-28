@@ -1,0 +1,21 @@
+Subject: **{{ entity_name }}** ({{ entity_type }})
+
+{% if ground_truth_block %}
+## Ground truth (trusted facts)
+
+These are authoritative facts pulled from the subject's verified entity record. When the wiki prose conflicts with any of these, flag it.
+
+{{ ground_truth_block }}
+
+---
+{% endif %}
+
+Read the following wiki page and report any internal contradictions, tense mismatches, duplicate-entity signals, impossible sequences, or ground-truth conflicts you find.
+
+---
+
+{{ prose }}
+
+---
+
+Return findings as specified.

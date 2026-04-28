@@ -1,0 +1,16 @@
+name: notify_user
+class_name: NotifyUser
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5-mini"
+  model_tier: "mini"
+
+user_context_items:
+  - date_time
+  - notify_info
+
+system_context_items:
+  - resource_user_data.first_name
+
+events:
+  - notify_user_request

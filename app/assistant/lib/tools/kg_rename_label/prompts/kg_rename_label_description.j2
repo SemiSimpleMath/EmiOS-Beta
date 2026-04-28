@@ -1,0 +1,7 @@
+Rename a KG node's label. Use this for typo / spelling fixes when there
+is NO existing node with the new label (otherwise it would be a merge,
+not a rename). The old label is preserved as an alias so existing
+references still resolve. Refuses to rename if another node of the same
+node_type already has the new label — in that case use kg_merge_nodes.
+
+Always pass a non-empty `reason`. Pass `dry_run: true` to preview.

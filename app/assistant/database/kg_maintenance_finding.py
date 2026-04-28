@@ -1,0 +1,109 @@
+"""
+SQLAlchemy model for the unified KG maintenance findings table.
+
+One row per finding regardless of type.  The subject columns are:
+  primary_node_id   — always set (the "problem" node)
+  secondary_node_id — set only for merge findings (the "other" node in the pair)
+  edge_id           — set only for edge-level findings
+
+finding_type values:
+  "duplicate_node"       — two nodes that should be merged
+  "orphan_node"          — node with zero edges
+  "duplicate_edge"       — multiple edges between the same (src, tgt, type)
+  "missing_description"  — node lacks a description field
+  "type_error"           — node has a malformed or wrong node_type
+  "wiki_contradiction"   — wiki_consistency_critic flagged a page disagreeing
+                           with the KG / profile / cards
+  "state_auto_closed"    — state_decay job auto-closed a stale State/Event
+                           era; surfaced for confirmation rather than action
+
+  Historical (not produced today):
+    "suspect_node" — per-node LLM quality scan, sunsetted 2026-04-27. Existing
+                     rows of this type may still exist in DB and remain valid;
+                     no new ones are produced. Same diagnosis is now reached
+                     via wiki_contradiction (the wiki critic sees the node in
+                     context and flags issues holistically).
+
+status values:
+  "pending"        — awaiting investigation or human review
+  "investigated"   — kg_investigation_manager has produced a report (see investigation_report_json)
+  "approved"       — human approved the suggested_action; queued for execution
+  "rejected"       — human dismissed this finding
+  "executed"       — action has been carried out
+"""
+from __future__ import annotations
+
+import uuid
+
+from sqlalchemy import Column, DateTime, Float, Index, JSON, String, Text, func
+
+from app.models.base import Base
+
+
+class KGMaintenanceFinding(Base):
+    __tablename__ = "kg_maintenance_finding"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+
+    # ── Classification ────────────────────────────────────────────────────────
+    finding_type = Column(String(64), nullable=False, index=True)
+    status = Column(String(32), nullable=False, default="pending", index=True)
+    priority = Column(String(16), nullable=False, default="medium", index=True)
+
+    # ── Subject — flexible across finding types ───────────────────────────────
+    # primary_node_id is always set.
+    # secondary_node_id is set for merge/duplicate_node findings (the pair partner).
+    # edge_id is set for duplicate_edge findings.
+    primary_node_id = Column(String, nullable=False, index=True)
+    secondary_node_id = Column(String, nullable=True, index=True)
+    edge_id = Column(String, nullable=True, index=True)
+
+    # ── Agent conclusion ──────────────────────────────────────────────────────
+    suggested_action = Column(String(64), nullable=False)
+    # "merge", "delete", "retype", "add_description", "review"
+
+    reason = Column(Text, nullable=True)
+    confidence = Column(Float, nullable=True)
+
+    agent_name = Column(String(128), nullable=True)
+
+    # Raw context the agent saw — lets UI show reviewers why finding was raised
+    # without re-querying KG.
+    evidence_json = Column(JSON, nullable=True)
+
+    # ── Investigation trace (kg_investigation_manager) ────────────────────────
+    # Structured report produced by the investigator: {diagnosis, evidence,
+    # proposed_action, open_questions}. Set when status='investigated'.
+    investigation_report_json = Column(JSON, nullable=True)
+    investigated_at = Column(DateTime(timezone=True), nullable=True)
+
+    # ── Execution trace ───────────────────────────────────────────────────────
+    executed_by = Column(String(128), nullable=True)
+    executed_at = Column(DateTime(timezone=True), nullable=True)
+    execution_notes = Column(Text, nullable=True)
+
+    # ── Pipeline provenance ───────────────────────────────────────────────────
+    pipeline_run_id = Column(String, nullable=True, index=True)
+
+    # ── Audit ─────────────────────────────────────────────────────────────────
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    __table_args__ = (
+        # Fast lookup: "do we already have a pending finding for this node pair?"
+        Index(
+            "ix_kg_mf_dedup",
+            "finding_type",
+            "primary_node_id",
+            "secondary_node_id",
+            "status",
+        ),
+        Index("ix_kg_mf_primary_status", "primary_node_id", "status"),
+        Index("ix_kg_mf_type_status", "finding_type", "status"),
+        Index("ix_kg_mf_priority_status", "priority", "status"),
+    )

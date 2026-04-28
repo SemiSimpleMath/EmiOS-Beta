@@ -1,0 +1,61 @@
+{
+  "name": "run_routine",
+  "description": "Run a pre-built task (from resources/config_routines.json) by name or id.\n\nUse this when the user says \"run task X\" or wants to manually trigger a pre-built task.",
+  "inputs": [
+    {
+      "name": "routine_id",
+      "type": "string",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "routine_query",
+      "type": "string",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "routine_name",
+      "type": "string",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "target_date",
+      "type": "string",
+      "required": false,
+      "description": ""
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "{\n  \"routine_id\": \"daily_insights_pipeline\",\n  \"target_date\": \"2026-02-09\"\n}",
+  "metadata": {
+    "category": "orchestration",
+    "verbs": [
+      "run"
+    ],
+    "entities": [
+      "workflow"
+    ],
+    "risk_level": "medium",
+    "side_effects": "writes_data",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "medium",
+    "latency_class": "moderate",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

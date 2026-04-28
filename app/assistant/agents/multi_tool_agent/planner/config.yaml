@@ -1,0 +1,32 @@
+name: multi_tool_agent::planner
+class_name: MultiToolAgent
+llm_params:
+  llm_provider: "gemini"
+  engine: "gemini-3-flash-preview"
+  model_tier: "mini"
+  temperature: 1
+
+allowed_tools: all
+except_tools: []
+allowed_nodes: [return_control]
+
+user_context_items:
+  - date_time
+  - task
+  - information
+  - task_includes
+  - task_resource_context
+  - recent_history
+  - checklist
+  - progress_report
+  - action_count
+
+system_context_items:
+  - resource_user_data
+  - tool_descriptions
+  - task
+
+prompt_debug:
+  system: true
+  user: true
+  results: true

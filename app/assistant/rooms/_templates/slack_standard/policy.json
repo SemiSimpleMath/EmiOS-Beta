@@ -1,0 +1,23 @@
+{
+  "policy_id": "room_policy::{{ROOM_ID}}::v1",
+  "surface": "slack",
+  "default_visibility": "room_shared",
+  "default_context_id": "main",
+  "authority_level": 70,
+  "retention": {
+    "write_unified_log": true,
+    "write_kg": true,
+    "allow_fact_extraction": true
+  },
+  "delivery": {
+    "auto_send": true,
+    "allow_initiation": true
+  },
+  "privacy": {
+    "owner_only_memory_visible": false,
+    "room_facts_only": false
+  },
+  "participant_identity": {
+    "display_name": "{{DISPLAY_NAME}}"
+  }
+}

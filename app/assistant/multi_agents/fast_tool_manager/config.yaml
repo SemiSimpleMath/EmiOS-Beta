@@ -1,0 +1,66 @@
+name: fast_tool_manager
+class_name: MultiAgentManager
+description: "Fast-path manager for single-tool calendar, reminders, and todo tasks."
+max_cycles: 8
+
+role_bindings:
+  delegator: fast_tool::delegator
+  tool_selector: shared::tool_selector
+
+agents:
+  - name: fast_tool::delegator
+    class: Delegator
+  - name: fast_tool::planner
+    class: Planner
+  - name: fast_tool::final_answer
+    class: Agent
+
+control_nodes:
+  - name: tool_return_router
+    class: ToolReturnRouter
+  - name: tool_caller
+    class: ToolCaller
+  - name: tool_result_handler
+    class: ToolResultHandler
+  - name: return_control
+    class: ReturnControlNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+  - name: graceful_exit_control_node
+    class: GracefulExitControlNode
+
+tools:
+  allowed_tools:
+    # Calendar
+    - get_calendar_events
+    - create_calendar_event
+    - create_repeating_calendar_event
+    - update_calendar_event
+    - delete_calendar_event
+    - delete_repeating_calendar_event
+    # Reminders / scheduler
+    - get_scheduler_events
+    - create_scheduler_event
+    - create_repeating_scheduler_event
+    - delete_scheduler_event
+    # Todo
+    - get_todo_tasks
+    - create_todo_task
+    - update_todo_task
+    - delete_todo_task
+    # Email (read-only)
+    - get_important_emails
+  except_tools: []
+
+flow_config:
+  strict_routing: true
+  tool_return:
+    tool_call_result_handler_node: "tool_result_handler"
+  state_map:
+    "fast_tool::delegator": "fast_tool::planner"
+    "fast_tool::planner": "tool_caller"
+    "tool_result_handler": "tool_return_router"
+    "fast_tool::planner_return_control": "fast_tool::final_answer"
+    "fast_tool::final_answer": "manager_exit_node"
+    "graceful_exit": "graceful_exit_control_node"
+    "graceful_exit_control_node": "fast_tool::final_answer"

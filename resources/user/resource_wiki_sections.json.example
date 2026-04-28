@@ -1,0 +1,60 @@
+{
+  "description": "Biographical sections for the wiki. Each generated wiki page will render the sections below, in order, if there is tagged content for them. Edit the list (or the description of any entry) to reshape how pages are organized. Keys drive the {section_slug} value passed to wiki_writer; titles become the ## headings.",
+  "sections": [
+    {
+      "key": "early_life",
+      "title": "Early life",
+      "description": "Childhood, where the subject grew up, family background before adulthood, early schools, moves during formative years."
+    },
+    {
+      "key": "education",
+      "title": "Education",
+      "description": "Formal education: schools, universities, degrees, major academic advisors or coauthors, notable research."
+    },
+    {
+      "key": "career",
+      "title": "Career",
+      "description": "Jobs, employers, professional roles, major projects at work, career transitions, business ventures."
+    },
+    {
+      "key": "marriage_and_family",
+      "title": "Marriage and family",
+      "description": "Spouse, children, parents, siblings, in-laws, pets as family, parenting decisions, how the household is organized."
+    },
+    {
+      "key": "friendships",
+      "title": "Friendships",
+      "description": "Non-family close relationships — friends, former roommates, long-running contacts, how those relationships are maintained."
+    },
+    {
+      "key": "daily_life",
+      "title": "Daily life and routines",
+      "description": "Everyday rhythms, recurring activities, how mornings/evenings go, protected time, media/entertainment habits shared with family, weekend patterns."
+    },
+    {
+      "key": "beliefs",
+      "title": "Beliefs and values",
+      "description": "Political leanings, religious or philosophical views, opinions on society, predictions about the future, strong ethical positions."
+    },
+    {
+      "key": "interests",
+      "title": "Interests and hobbies",
+      "description": "Games, chess, sports, media consumption (books, shows, films), enthusiasms, fandom, what the subject follows closely outside work."
+    },
+    {
+      "key": "health",
+      "title": "Health",
+      "description": "Medical conditions, medications under consideration, therapy, sleep patterns, diet/exercise regimens, ongoing health concerns."
+    },
+    {
+      "key": "travel_and_events",
+      "title": "Travel and notable events",
+      "description": "Trips, vacations, rallies, cruises, reunions, one-off events worth recording — anything that happened at a specific time and place outside the ordinary routine."
+    },
+    {
+      "key": "personal_projects",
+      "title": "Personal projects",
+      "description": "Self-directed projects outside paid work — code, creative work, side businesses, long-term builds the subject is explicitly invested in."
+    }
+  ]
+}

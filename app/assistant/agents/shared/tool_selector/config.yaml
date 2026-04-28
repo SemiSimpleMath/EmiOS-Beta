@@ -1,0 +1,23 @@
+name: shared::tool_selector
+class_name: Agent
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5-mini"
+  model_tier: "mini"
+
+allowed_tools: "all"  # Tool selection depends on available tools, fetched dynamically
+except_tools: []
+
+user_context_items:
+  - date_time
+  - plan
+  - current_step
+  - action
+  - action_input
+
+
+system_context_items:
+  - tool_descriptions
+
+
+

@@ -1,0 +1,87 @@
+{
+  "name": "lights_control",
+  "description": "Read/control home lights through the lights gateway (Kasa/TP-Link supported).",
+  "inputs": [
+    {
+      "name": "action",
+      "type": "string",
+      "required": true,
+      "description": "MUST be exactly one of: list_lights, set_light_power, set_light_brightness, set_light_color, set_scene."
+    },
+    {
+      "name": "light_id",
+      "type": "string",
+      "required": false,
+      "description": "Optional specific light identifier."
+    },
+    {
+      "name": "room",
+      "type": "string",
+      "required": false,
+      "description": "Optional room selector."
+    },
+    {
+      "name": "state",
+      "type": "string",
+      "required": false,
+      "description": "Required for set_light_power. MUST be one of: on, off."
+    },
+    {
+      "name": "brightness_pct",
+      "type": "integer",
+      "required": false,
+      "description": "Required for set_light_brightness. Value 0-100."
+    },
+    {
+      "name": "color",
+      "type": "string",
+      "required": false,
+      "description": "Required for set_light_color."
+    },
+    {
+      "name": "scene_name",
+      "type": "string",
+      "required": false,
+      "description": "Required for set_scene."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable outcome."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Smart-home gateway response payload."
+    }
+  ],
+  "metadata": {
+    "domain": "smart_home",
+    "actions": [
+      "read",
+      "control",
+      "set"
+    ],
+    "selectors": [
+      "light_id",
+      "room",
+      "brightness",
+      "color",
+      "scene"
+    ],
+    "risk_level": "medium",
+    "side_effects": "external_action",
+    "requires_auth": [
+      "smart_home_gateway"
+    ],
+    "requires_network": true,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": true,
+    "approval_min_authority": 95
+  }
+}

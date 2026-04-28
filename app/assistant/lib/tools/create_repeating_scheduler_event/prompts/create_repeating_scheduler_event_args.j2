@@ -1,0 +1,34 @@
+A repeating scheduler event requires a start_time and an interval_duration. The start_time is a date-time string marking the event's initial execution, while interval_duration specifies the recurring time interval between each execution (e.g., every 2 hours, every day).
+
+title: a short description of the event.
+start_time: The first instance when the event will occur. It should be in YYYY-MM-DD HH:MM:SS format.
+interval_duration: The period in seconds between each occurrence of the event. This is a fixed duration to wait before repeating the task.
+Additional Arguments:
+
+payload_message: A reminder message.
+task_type: use `reminder`
+end_time: The end_time is an optional date-time string marking the final occurrence of the interval event.
+ Once the event time surpasses end_time, the event stops repeating. If end_time is not specified, the event continues indefinitely at the defined interval.
+
+There is also an importance attribute.  Scale is from 0 to 10.  If no importance is specified in instructions, then you can default to 1-3.
+Optionally there is also a sound.  This is a sound that will be played when the reminder is sent to user. Unless it is specified set it to 'default'.
+
+[WARNING] Avoid ambiguity at midnight: Times exactly at 00:00:00 can be misinterpreted as either the start or end of a day. When setting boundaries, explicitly choose 23:59:59 (end of the previous day) or 00:01:00 (start of the new day) for clarity.
+
+Example:
+title: Reminder to take out garbage
+start_time: 2024-11-05 08:00:00
+interval_duration: 86400 (24 hours)
+payload_message: Remind John to take out the garbage
+task_type: reminder
+importance: 3
+sound: default
+
+Example:
+title: Reminder to stretch
+start_time: 2025-01-15 14:30:00
+interval_duration: 1800 (30 mins)
+payload_message: Remind Bob to take a break and stretch
+task_type: reminder
+importance: 3
+sound: stretch

@@ -1,0 +1,12 @@
+{
+  "policy_id": "pipeline_policy::dayflow::v1",
+  "owner_id": "dayflow_pipeline",
+  "surface": "pipeline",
+  "visibility": "owner_only",
+  "resources": {
+    "allowed_global_resources": ["all"],
+    "allowed_room_resources": [],
+    "denied_resources": [],
+    "resource_groups": ["chat", "memory"]
+  }
+}

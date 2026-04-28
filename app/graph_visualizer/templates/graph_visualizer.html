@@ -1,0 +1,1230 @@
+<!-- CACHE BUST: 2025-09-02-20-00 - Added Node Editing -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="description" content="Knowledge Graph Visualizer - Interactive visualization of knowledge graph data" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <title>Knowledge Graph Visualizer</title>
+
+    <!-- Socket.IO client -->
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+
+    <!-- React and ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+
+    <!-- D3.js -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <style>
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+                'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+                sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        
+        .graph-container {
+            width: 100%;
+            height: 100%;
+            background-color: #f8f9fa;
+        }
+        
+        .node {
+            cursor: pointer;
+        }
+        
+        .node:hover {
+            stroke: #000;
+            stroke-width: 1.5px;
+        }
+        
+        .link {
+            stroke: #999;
+            stroke-opacity: 0.6;
+        }
+        
+        .link:hover {
+            stroke-opacity: 1;
+            stroke-width: 2px;
+        }
+        
+        /* Fix for node types legend positioning */
+        .legend {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(255, 255, 255, 0.9);
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            padding: 10px;
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 1000;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+        
+        .legend-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+            border: 1px solid #333;
+        }
+        
+        /* Ensure the graph container has proper positioning */
+        #graph-container {
+            position: relative;
+            overflow: hidden;
+        }
+    </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+        // VERSION: 2025-07-05-02-06 - Orphaned edge removal DISABLED
+        console.log('🔒 Loading GraphVisualizer with orphaned edge removal DISABLED');
+        
+        // Simple React-like component for graph visualization
+        class GraphVisualizer {
+            constructor(container) {
+                this.container = container;
+                this.graphData = { nodes: [], edges: [] };
+                this.selectedNode = null;
+                this.loading = true;
+                this.error = null;
+                this.searchQuery = '';
+                this.nodeTypeFilter = '';
+                this.edgeTypeFilter = '';
+                this.importanceThreshold = 0.0;
+                this.editMode = false; // New: Add edit mode flag
+                
+                this.nodeColors = {
+                    'person': '#4299e1',
+                    'organization': '#48bb78',
+                    'place': '#ed8936',
+                    'PhoneNumber': '#9f7aea',
+                    'call_event': '#f56565',
+                    'date': '#38b2ac',
+                    'default': '#718096'
+                };
+                
+                this.init();
+            }
+            
+            init() {
+                this.render();
+                this.fetchGraphData().then(() => {
+                    this.renderGraph();
+                });
+                this.setupWebSocket();
+            }
+            
+            async fetchGraphData() {
+                try {
+                    this.loading = true;
+                    this.render();
+                    
+                    // Add cache-busting parameter to force fresh load
+                    const timestamp = new Date().getTime();
+                    const response = await fetch(`/api/graph?t=${timestamp}`);
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    this.graphData = await response.json();
+                    this.error = null;
+                    console.log('Graph data loaded:', this.graphData);
+                    console.log('Nodes:', this.graphData.nodes?.length || 0);
+                    console.log('Edges:', this.graphData.edges?.length || 0);
+                    
+                    // Debug edge connections
+                    if (this.graphData.edges && this.graphData.edges.length > 0) {
+                        console.log('Sample edges:');
+                        this.graphData.edges.slice(0, 3).forEach(edge => {
+                            console.log(`  ${edge.source} -> ${edge.target} (${edge.type})`);
+                        });
+                    }
+                } catch (err) {
+                    this.error = 'Failed to load graph data';
+                    console.error('Error fetching graph data:', err);
+                } finally {
+                    this.loading = false;
+                    this.render();
+                    this.renderGraph();
+                }
+            }
+            
+            setupWebSocket() {
+                this.socket = io();
+                
+                this.socket.on('connect', () => {
+                    console.log('Connected to WebSocket');
+                    this.socket.emit('join_graph');
+                });
+                
+                this.socket.on('graph_data', (data) => {
+                    this.graphData = data;
+                    this.render();
+                });
+                
+                this.socket.on('node_added', (nodeData) => {
+                    this.graphData.nodes.push(nodeData);
+                    this.render();
+                });
+                
+                this.socket.on('edge_added', (edgeData) => {
+                    this.graphData.edges.push(edgeData);
+                    this.render();
+                });
+            }
+            
+            async searchGraph() {
+                try {
+                    this.loading = true;
+                    this.render();
+                    
+                    const params = new URLSearchParams();
+                    if (this.searchQuery) params.append('q', this.searchQuery);
+                    if (this.nodeTypeFilter) params.append('node_type', this.nodeTypeFilter);
+                    if (this.edgeTypeFilter) params.append('edge_type', this.edgeTypeFilter);
+                    
+                    console.log('Searching with params:', params.toString());
+                    
+                    const response = await fetch(`/api/graph/search?${params.toString()}`);
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    this.graphData = await response.json();
+                    this.error = null;
+                    console.log('Search results:', this.graphData);
+                } catch (err) {
+                    this.error = 'Failed to search graph';
+                    console.error('Error searching graph:', err);
+                } finally {
+                    this.loading = false;
+                    this.render();
+                    this.renderGraph();
+                }
+            }
+            
+            async fetchNodeDetails(nodeId) {
+                try {
+                    console.log('=== fetchNodeDetails called ===');
+                    console.log('Node ID:', nodeId);
+                    console.log('Node ID type:', typeof nodeId);
+                    console.log('Fetching details for node:', nodeId);
+                    
+                    const url = `/api/graph/node/${nodeId}`;
+                    console.log('Fetching from URL:', url);
+                    
+                    const response = await fetch(url);
+                    console.log('Response status:', response.status);
+                    console.log('Response ok:', response.ok);
+                    
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        console.error('Response error text:', errorText);
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    const nodeDetails = await response.json();
+                    console.log('Node details received:', nodeDetails);
+                    this.selectedNode = nodeDetails.node;
+                    this.nodeDetails = nodeDetails;
+                    console.log('Selected node set to:', this.selectedNode);
+                    this.render();
+                    this.renderGraph();
+                } catch (err) {
+                    console.error('Error fetching node details:', err);
+                    alert('Error fetching node details: ' + err.message);
+                }
+            }
+            
+            async deleteNode(nodeId) {
+                if (!confirm('Are you sure you want to delete this node? This will also delete all connected edges.')) {
+                    return;
+                }
+                
+                try {
+                    const response = await fetch(`/api/graph/node/${nodeId}`, {
+                        method: 'DELETE'
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    const result = await response.json();
+                    console.log('Node deleted:', result);
+                    
+                    // Remove from graph data
+                    this.graphData.nodes = this.graphData.nodes.filter(n => n.id !== nodeId);
+                    this.graphData.edges = this.graphData.edges.filter(e => 
+                        e.source !== nodeId && e.target !== nodeId
+                    );
+                    
+                    // Clear selection
+                    this.selectedNode = null;
+                    this.nodeDetails = null;
+                    
+                    this.render();
+                    alert(`Node deleted successfully. ${result.deleted_edges_count} connected edges were also deleted.`);
+                    
+                } catch (err) {
+                    console.error('Error deleting node:', err);
+                    alert('Error deleting node: ' + err.message);
+                }
+            }
+            
+            async deleteNodesByType(nodeType) {
+                const preserveEdges = confirm(`Delete ALL nodes of type "${nodeType}"?\n\nThis will:\n• Delete all ${nodeType} nodes\n• Delete edges between ${nodeType} nodes\n• Keep edges to other node types\n\nClick OK to proceed, Cancel to abort.`);
+                
+                if (!preserveEdges) {
+                    return;
+                }
+                
+                try {
+                    const response = await fetch('/api/graph/nodes/bulk-delete', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ 
+                            node_type: nodeType,
+                            preserve_edges: true  // Only delete edges where both ends are being deleted
+                        })
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    const result = await response.json();
+                    console.log('Nodes deleted:', result);
+                    
+                    // Refresh graph data
+                    await this.fetchGraphData();
+                    alert(`${result.deleted_nodes_count} nodes and ${result.deleted_edges_count} edges deleted successfully.`);
+                    
+                } catch (err) {
+                    console.error('Error deleting nodes:', err);
+                    alert('Error deleting nodes: ' + err.message);
+                }
+            }
+            
+            async deleteEdgesByType(edgeType) {
+                if (!confirm(`Are you sure you want to delete ALL edges of type "${edgeType}"?`)) {
+                    return;
+                }
+                
+                try {
+                    const response = await fetch('/api/graph/edges/bulk-delete', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ edge_type: edgeType })
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    const result = await response.json();
+                    console.log('Edges deleted:', result);
+                    
+                    // Refresh graph data
+                    await this.fetchGraphData();
+                    alert(`${result.deleted_edges_count} edges deleted successfully.`);
+                    
+                } catch (err) {
+                    console.error('Error deleting edges:', err);
+                    alert('Error deleting edges: ' + err.message);
+                }
+            }
+            
+            async restoreDemoData() {
+                if (!confirm('This will restore demo data with people, organizations, and relationships. Continue?')) {
+                    return;
+                }
+                
+                try {
+                    const response = await fetch('/api/graph/restore-demo', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        }
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    const result = await response.json();
+                    console.log('Demo data restored:', result);
+                    
+                    // Refresh graph data
+                    await this.fetchGraphData();
+                    alert(`${result.message}\nNodes: ${result.nodes_created || result.nodes}\nEdges: ${result.edges_created || result.edges}`);
+                    
+                } catch (err) {
+                    console.error('Error restoring demo data:', err);
+                    alert('Error restoring demo data: ' + err.message);
+                }
+            }
+            
+            getNodeColor(node) {
+                return this.nodeColors[node.type] || this.nodeColors.default;
+            }
+            
+            getNodeSize(node) {
+                // Make nodes bigger for easier clicking
+                return Math.max(8, Math.min(15, (node.confidence || 0.5) * 20));
+            }
+            
+            renderLegend(container) {
+                // Remove existing legend if any
+                d3.select(container).select('.legend').remove();
+                
+                // Create legend container
+                const legend = d3.select(container)
+                    .append('div')
+                    .attr('class', 'legend')
+                    .style('position', 'absolute')
+                    .style('bottom', '20px')
+                    .style('left', '20px')
+                    .style('background', 'rgba(255, 255, 255, 0.95)')
+                    .style('border', '1px solid #ccc')
+                    .style('border-radius', '5px')
+                    .style('padding', '10px')
+                    .style('font-size', '12px')
+                    .style('max-height', '200px')
+                    .style('overflow-y', 'auto')
+                    .style('z-index', '1000')
+                    .style('box-shadow', '0 2px 4px rgba(0, 0, 0, 0.1)');
+                
+                // Add title
+                legend.append('div')
+                    .style('font-weight', 'bold')
+                    .style('margin-bottom', '8px')
+                    .style('border-bottom', '1px solid #ccc')
+                    .style('padding-bottom', '4px')
+                    .text('Node Types');
+                
+                // Add legend items for each node type
+                const nodeTypes = Object.keys(this.nodeColors);
+                nodeTypes.forEach(type => {
+                    const item = legend.append('div')
+                        .attr('class', 'legend-item')
+                        .style('display', 'flex')
+                        .style('align-items', 'center')
+                        .style('margin-bottom', '5px');
+                    
+                    item.append('div')
+                        .attr('class', 'legend-color')
+                        .style('width', '12px')
+                        .style('height', '12px')
+                        .style('border-radius', '50%')
+                        .style('margin-right', '8px')
+                        .style('border', '1px solid #333')
+                        .style('background-color', this.nodeColors[type]);
+                    
+                    item.append('span')
+                        .text(type.charAt(0).toUpperCase() + type.slice(1));
+                });
+                
+                // Add count information
+                if (this.graphData && this.graphData.nodes) {
+                    const typeCounts = {};
+                    this.graphData.nodes.forEach(node => {
+                        const type = node.type || 'default';
+                        typeCounts[type] = (typeCounts[type] || 0) + 1;
+                    });
+                    
+                    legend.append('div')
+                        .style('margin-top', '8px')
+                        .style('padding-top', '8px')
+                        .style('border-top', '1px solid #ccc')
+                        .style('font-size', '11px')
+                        .style('color', '#666')
+                        .text(`Total: ${this.graphData.nodes.length} nodes`);
+                }
+            }
+            
+            validateGraphData() {
+                if (!this.graphData) {
+                    console.error('No graph data available');
+                    return false;
+                }
+                
+                if (!Array.isArray(this.graphData.nodes)) {
+                    console.error('Nodes is not an array:', this.graphData.nodes);
+                    return false;
+                }
+                
+                if (!Array.isArray(this.graphData.edges)) {
+                    console.error('Edges is not an array:', this.graphData.edges);
+                    return false;
+                }
+                
+                // Check for required node properties
+                const invalidNodes = this.graphData.nodes.filter(node => !node.id || !node.label);
+                if (invalidNodes.length > 0) {
+                    console.error('Invalid nodes found:', invalidNodes);
+                    return false;
+                }
+                
+                // Check for required edge properties
+                const invalidEdges = this.graphData.edges.filter(edge => !edge.source || !edge.target);
+                if (invalidEdges.length > 0) {
+                    console.error('Invalid edges found:', invalidEdges);
+                    return false;
+                }
+                
+                console.log('Graph data validation passed');
+                return true;
+            }
+            
+            render() {
+                if (this.loading) {
+                    this.container.innerHTML = `
+                        <div class="flex items-center justify-center h-screen">
+                            <div class="text-xl">Loading graph...</div>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                if (this.error) {
+                    this.container.innerHTML = `
+                        <div class="flex items-center justify-center h-screen">
+                            <div class="text-red-600 text-xl">${this.error}</div>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                if (!this.graphData || !this.graphData.nodes) {
+                    this.container.innerHTML = `
+                        <div class="flex items-center justify-center h-screen">
+                            <div class="text-xl">No graph data available</div>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                console.log('Rendering with data:', this.graphData);
+                
+                this.container.innerHTML = `
+                    <div class="h-screen flex flex-col">
+                        <!-- Header -->
+                        <div class="bg-gray-800 text-white p-4">
+                            <div class="flex justify-between items-center">
+                                <h1 class="text-2xl font-bold">Knowledge Graph Visualizer</h1>
+                                ${this.selectedNode ? `
+                                    <div class="bg-green-600 px-3 py-1 rounded text-sm">
+                                        ✓ Node Selected: ${this.selectedNode.label}
+                                    </div>
+                                ` : ''}
+                            </div>
+                            <div class="mt-2 flex gap-4 items-center">
+                                <input
+                                    type="text"
+                                    placeholder="Search nodes..."
+                                    value="${this.searchQuery}"
+                                    class="px-3 py-1 text-black rounded"
+                                    onchange="graphVisualizer.searchQuery = this.value"
+                                    onkeyup="if(event.key === 'Enter') graphVisualizer.searchGraph()"
+                                />
+                                <select
+                                    class="px-3 py-1 text-black rounded"
+                                    onchange="graphVisualizer.nodeTypeFilter = this.value; graphVisualizer.searchGraph()"
+                                >
+                                    <option value="" ${this.nodeTypeFilter === '' ? 'selected' : ''}>All Node Types</option>
+                                    <option value="person" ${this.nodeTypeFilter === 'person' ? 'selected' : ''}>Person</option>
+                                    <option value="organization" ${this.nodeTypeFilter === 'organization' ? 'selected' : ''}>Organization</option>
+                                    <option value="place" ${this.nodeTypeFilter === 'place' ? 'selected' : ''}>Place</option>
+                                    <option value="PhoneNumber" ${this.nodeTypeFilter === 'PhoneNumber' ? 'selected' : ''}>Phone Number</option>
+                                    <option value="call_event" ${this.nodeTypeFilter === 'call_event' ? 'selected' : ''}>Call Event</option>
+                                    <option value="date" ${this.nodeTypeFilter === 'date' ? 'selected' : ''}>Date</option>
+                                </select>
+                                <select
+                                    class="px-3 py-1 text-black rounded"
+                                    onchange="graphVisualizer.edgeTypeFilter = this.value; graphVisualizer.searchGraph()"
+                                >
+                                    <option value="" ${this.edgeTypeFilter === '' ? 'selected' : ''}>All Edge Types</option>
+                                    <option value="hasPhoneNumber" ${this.edgeTypeFilter === 'hasPhoneNumber' ? 'selected' : ''}>Has Phone Number</option>
+                                    <option value="works_at" ${this.edgeTypeFilter === 'works_at' ? 'selected' : ''}>Works At</option>
+                                    <option value="lives_in" ${this.edgeTypeFilter === 'lives_in' ? 'selected' : ''}>Lives In</option>
+                                    <option value="married_to" ${this.edgeTypeFilter === 'married_to' ? 'selected' : ''}>Married To</option>
+                                    <option value="initiated" ${this.edgeTypeFilter === 'initiated' ? 'selected' : ''}>Initiated</option>
+                                    <option value="received" ${this.edgeTypeFilter === 'received' ? 'selected' : ''}>Received</option>
+                                </select>
+                                <!-- Importance slider -->
+                                <div class="flex items-center gap-2">
+                                    <label for="importance-slider" class="text-sm">Importance ≥</label>
+                                    <input
+                                        id="importance-slider"
+                                        type="range"
+                                        min="0" max="1" step="0.01"
+                                        value="${this.importanceThreshold}"
+                                        oninput="graphVisualizer.importanceThreshold = parseFloat(this.value); graphVisualizer.renderGraph(); document.getElementById('importance-value').innerText = this.value;"
+                                        class="w-32"
+                                    />
+                                    <span id="importance-value" class="text-sm">${this.importanceThreshold}</span>
+                                </div>
+                                <button
+                                    onclick="graphVisualizer.searchGraph()"
+                                    class="px-4 py-1 bg-blue-600 rounded hover:bg-blue-700"
+                                >
+                                    Search
+                                </button>
+                                <button
+                                    onclick="graphVisualizer.fetchGraphData()"
+                                    class="px-4 py-1 bg-green-600 rounded hover:bg-green-700"
+                                >
+                                    Refresh
+                                </button>
+                                <button
+                                    onclick="graphVisualizer.deleteNodesByType(graphVisualizer.nodeTypeFilter)"
+                                    class="px-4 py-1 bg-red-600 rounded hover:bg-red-700"
+                                    title="Delete all nodes of selected type"
+                                >
+                                    Delete Nodes
+                                </button>
+                                <button
+                                    onclick="graphVisualizer.deleteEdgesByType(graphVisualizer.edgeTypeFilter)"
+                                    class="px-4 py-1 bg-orange-600 rounded hover:bg-orange-700"
+                                    title="Delete all edges of selected type"
+                                >
+                                    Delete Edges
+                                </button>
+                                <button
+                                    onclick="graphVisualizer.restoreDemoData()"
+                                    class="px-4 py-1 bg-purple-600 rounded hover:bg-purple-700"
+                                    title="Restore demo data"
+                                >
+                                    Restore Demo
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Main Content -->
+                        <div class="flex-1 flex">
+                            <!-- Graph Visualization -->
+                            <div class="flex-1 bg-gray-100" id="graph-container">
+                                <div class="w-full h-full flex items-center justify-center">
+                                    <div class="text-lg text-gray-600">
+                                        Graph visualization will be rendered here
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Sidebar -->
+                            ${this.selectedNode ? `
+                                <div class="w-80 bg-white border-l border-gray-300 p-4 overflow-y-auto">
+                                    <div class="flex justify-between items-center mb-4">
+                                        <h2 class="text-xl font-bold">Node Details</h2>
+                                        <button
+                                            onclick="graphVisualizer.toggleEditMode()"
+                                            class="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
+                                        >
+                                            ${this.editMode ? 'Cancel' : 'Edit'}
+                                        </button>
+                                    </div>
+                                    
+                                    ${!this.editMode ? `
+                                        <!-- View Mode -->
+                                        <div class="mb-4">
+                                            <h3 class="font-semibold">Basic Info</h3>
+                                            <p><strong>Label:</strong> ${this.selectedNode.label}</p>
+                                            <p><strong>Type:</strong> ${this.selectedNode.type}</p>
+                                            <p><strong>ID:</strong> <span class="text-xs font-mono text-gray-600">${this.selectedNode.id}</span></p>
+                                            <div class="mt-2">
+                                                <p class="font-semibold text-sm">Temporal Information:</p>
+                                                <p class="text-sm"><span class="text-gray-600">Start:</span> 
+                                                    ${this.selectedNode.start_date ? `
+                                                        <span class="ml-2 px-2 py-1 bg-green-100 text-green-800 rounded text-xs">
+                                                            ${new Date(this.selectedNode.start_date).toLocaleDateString()}
+                                                        </span>
+                                                    ` : `
+                                                        <span class="ml-2 px-2 py-1 bg-gray-100 text-gray-500 rounded text-xs">
+                                                            None
+                                                        </span>
+                                                    `}
+                                                </p>
+                                                <p class="text-sm"><span class="text-gray-600">End:</span> 
+                                                    ${this.selectedNode.end_date ? `
+                                                        <span class="ml-2 px-2 py-1 bg-red-100 text-red-800 rounded text-xs">
+                                                            ${new Date(this.selectedNode.end_date).toLocaleDateString()}
+                                                        </span>
+                                                    ` : `
+                                                        <span class="ml-2 px-2 py-1 bg-gray-100 text-gray-500 rounded text-xs">
+                                                            None
+                                                        </span>
+                                                    `}
+                                                </p>
+                                            </div>
+                                        </div>
+
+                                        ${this.selectedNode.description ? `
+                                            <div class="mb-4">
+                                                <h3 class="font-semibold">Description</h3>
+                                                <p class="text-gray-700">${this.selectedNode.description}</p>
+                                            </div>
+                                        ` : ''}
+
+                                        ${this.selectedNode.aliases && this.selectedNode.aliases.length > 0 ? `
+                                            <div class="mb-4">
+                                                <h3 class="font-semibold">Aliases</h3>
+                                                <div class="flex flex-wrap gap-1">
+                                                    ${this.selectedNode.aliases.map(alias => `
+                                                        <span class="px-2 py-1 bg-gray-200 rounded text-sm">${alias}</span>
+                                                    `).join('')}
+                                                </div>
+                                            </div>
+                                        ` : ''}
+
+                                        ${this.selectedNode.context_window ? `
+                                            <div class="mb-4">
+                                                <h3 class="font-semibold flex items-center cursor-pointer" onclick="this.nextElementSibling.classList.toggle('hidden')">
+                                                    Context Window
+                                                    <span class="ml-2 text-xs bg-gray-200 rounded px-2 py-0.5">click to expand</span>
+                                                </h3>
+                                                <div class="hidden text-sm text-gray-700 bg-gray-50 p-2 rounded">
+                                                    ${this.selectedNode.context_window}
+                                                </div>
+                                            </div>
+                                        ` : ''}
+
+                                        ${this.selectedNode.attributes && Object.keys(this.selectedNode.attributes).length > 0 ? `
+                                            <div class="mb-4">
+                                                <h3 class="font-semibold flex items-center cursor-pointer" onclick="this.nextElementSibling.classList.toggle('hidden')">
+                                                    Attributes
+                                                    <span class="ml-2 text-xs bg-gray-200 rounded px-2 py-0.5">click to expand</span>
+                                                </h3>
+                                                <div class="hidden">
+                                                    ${Object.entries(this.selectedNode.attributes).map(([key, value]) => `
+                                                        <div class="text-sm p-2 bg-gray-100 rounded mb-1">
+                                                            <strong>${key}:</strong> ${String(value)}
+                                                        </div>
+                                                    `).join('')}
+                                                </div>
+                                            </div>
+                                        ` : ''}
+                                    ` : `
+                                        <!-- Edit Mode -->
+                                        <form onsubmit="graphVisualizer.saveNodeChanges(event)">
+                                            <div class="mb-4">
+                                                <h3 class="font-semibold">Basic Info</h3>
+                                                <div class="mb-2">
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Label</label>
+                                                    <input 
+                                                        type="text" 
+                                                        id="edit-label" 
+                                                        value="${this.selectedNode.label}"
+                                                        class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                    >
+                                                </div>
+                                                <div class="mb-2">
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                                                    <textarea 
+                                                        id="edit-description" 
+                                                        rows="3"
+                                                        class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                    >${this.selectedNode.description || ''}</textarea>
+                                                </div>
+                                                <div class="mb-2">
+                                                    <label class="block text-sm font-medium text-gray-700 mb-1">Aliases (comma-separated)</label>
+                                                    <input 
+                                                        type="text" 
+                                                        id="edit-aliases" 
+                                                        value="${(this.selectedNode.aliases || []).filter(alias => alias && alias.trim()).join(', ')}"
+                                                        class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                        placeholder="alias1, alias2, alias3"
+                                                    >
+                                                </div>
+                                            </div>
+
+                                            <div class="mb-4">
+                                                <h3 class="font-semibold">Attributes (JSON)</h3>
+                                                <textarea 
+                                                    id="edit-attributes" 
+                                                    rows="6"
+                                                    class="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+                                                    placeholder='{"key": "value", "number": 42}'
+                                                >${JSON.stringify(this.selectedNode.attributes || {}, null, 2)}</textarea>
+                                                <p class="text-xs text-gray-500 mt-1">Enter valid JSON format</p>
+                                            </div>
+
+                                            <div class="flex gap-2">
+                                                <button 
+                                                    type="submit"
+                                                    class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
+                                                >
+                                                    Save Changes
+                                                </button>
+                                                <button 
+                                                    type="button"
+                                                    onclick="graphVisualizer.toggleEditMode()"
+                                                    class="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
+                                                >
+                                                    Cancel
+                                                </button>
+                                            </div>
+                                        </form>
+                                    `}
+
+                                    ${this.nodeDetails ? `
+                                        <div class="mb-4">
+                                            <h3 class="font-semibold">Incoming Edges (${this.nodeDetails.incoming_edges.length})</h3>
+                                            ${this.nodeDetails.incoming_edges.map((edge) => `
+                                                <div class="text-sm p-2 bg-gray-100 rounded mb-1">
+                                                    <p><strong>${edge.type}</strong> from ${edge.source_label}</p>
+                                                    <div class="mt-1 flex gap-2">
+                                                        ${edge.start_time ? `
+                                                            <span class="px-1 py-0.5 bg-green-100 text-green-700 rounded text-xs">
+                                                                Start: ${new Date(edge.start_time).toLocaleDateString()}
+                                                            </span>
+                                                        ` : `
+                                                            <span class="px-1 py-0.5 bg-gray-100 text-gray-500 rounded text-xs">
+                                                                Start: None
+                                                            </span>
+                                                        `}
+                                                        ${edge.end_time ? `
+                                                            <span class="px-1 py-0.5 bg-red-100 text-red-700 rounded text-xs">
+                                                                End: ${new Date(edge.end_time).toLocaleDateString()}
+                                                            </span>
+                                                        ` : `
+                                                            <span class="px-1 py-0.5 bg-gray-100 text-gray-500 rounded text-xs">
+                                                                End: None
+                                                            </span>
+                                                        `}
+                                                    </div>
+                                                </div>
+                                            `).join('')}
+                                        </div>
+
+                                        <div class="mb-4">
+                                            <h3 class="font-semibold">Outgoing Edges (${this.nodeDetails.outgoing_edges.length})</h3>
+                                            ${this.nodeDetails.outgoing_edges.map((edge) => `
+                                                <div class="text-sm p-2 bg-gray-100 rounded mb-1">
+                                                    <p><strong>${edge.type}</strong> to ${edge.target_label}</p>
+                                                    <div class="mt-1 flex gap-2">
+                                                        ${edge.start_time ? `
+                                                            <span class="px-1 py-0.5 bg-green-100 text-green-700 rounded text-xs">
+                                                                Start: ${new Date(edge.start_time).toLocaleDateString()}
+                                                            </span>
+                                                        ` : `
+                                                            <span class="px-1 py-0.5 bg-gray-100 text-gray-500 rounded text-xs">
+                                                                Start: None
+                                                            </span>
+                                                        `}
+                                                        ${edge.end_time ? `
+                                                            <span class="px-1 py-0.5 bg-red-100 text-red-700 rounded text-xs">
+                                                                End: ${new Date(edge.end_time).toLocaleDateString()}
+                                                            </span>
+                                                        ` : `
+                                                            <span class="px-1 py-0.5 bg-gray-100 text-gray-500 rounded text-xs">
+                                                                End: None
+                                                            </span>
+                                                        `}
+                                                    </div>
+                                                </div>
+                                            `).join('')}
+                                        </div>
+                                    ` : ''}
+
+                                    <div class="flex gap-2 mt-4">
+                                        <button
+                                            onclick="graphVisualizer.deleteNode(graphVisualizer.selectedNode.id)"
+                                            class="flex-1 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+                                        >
+                                            Delete Node
+                                        </button>
+                                        <button
+                                            onclick="graphVisualizer.selectedNode = null; graphVisualizer.render()"
+                                            class="flex-1 px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
+                                        >
+                                            Close
+                                        </button>
+                                    </div>
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+                
+                // Render the actual graph using D3.js
+                this.renderGraph();
+            }
+            
+            renderGraph() {
+                const container = document.getElementById('graph-container');
+                if (!container) {
+                    console.log('Graph container not found');
+                    return;
+                }
+                
+                if (!this.graphData || !this.graphData.nodes || this.graphData.nodes.length === 0) {
+                    console.log('No graph data to render');
+                    container.innerHTML = '<div class="flex items-center justify-center h-full"><div class="text-lg text-gray-600">No nodes to display</div></div>';
+                    return;
+                }
+                
+                console.log('Rendering graph with', this.graphData.nodes.length, 'nodes and', this.graphData.edges.length, 'edges');
+                
+                // Debug: Show sample nodes and edges
+                if (this.graphData.nodes.length > 0) {
+                    console.log('Sample nodes:', this.graphData.nodes.slice(0, 3));
+                }
+                if (this.graphData.edges.length > 0) {
+                    console.log('📋 Sample edges:', this.graphData.edges.slice(0, 3));
+                    console.log('🔍 First edge structure:', {
+                        id: this.graphData.edges[0].id,
+                        source: this.graphData.edges[0].source,
+                        source_type: typeof this.graphData.edges[0].source,
+                        target: this.graphData.edges[0].target,
+                        target_type: typeof this.graphData.edges[0].target,
+                        full_edge: this.graphData.edges[0]
+                    });
+                    
+                    // Debug all edges
+                    console.log('🔗 All edges structure:');
+                    this.graphData.edges.forEach((edge, index) => {
+                        console.log(`  Edge ${index}: ${edge.source} -> ${edge.target} (${edge.type})`);
+                    });
+                }
+                
+                // Validate graph data
+                if (!this.validateGraphData()) {
+                    container.innerHTML = '<div class="flex items-center justify-center h-full"><div class="text-lg text-red-600">Invalid graph data</div></div>';
+                    return;
+                }
+                
+                // NEW: Filter nodes and edges by importance threshold
+                const minImportance = this.importanceThreshold || 0.0;
+                const filteredNodes = this.graphData.nodes.filter(n => typeof n.importance === 'number' ? n.importance >= minImportance : true);
+                const nodeIds = new Set(filteredNodes.map(n => n.id));
+                const filteredEdges = this.graphData.edges.filter(e => {
+                    // Only show edges where both source and target nodes are visible and edge importance >= threshold
+                    const edgeImportance = typeof e.importance === 'number' ? e.importance : 1.0;
+                    return nodeIds.has(e.source) && nodeIds.has(e.target) && edgeImportance >= minImportance;
+                });
+                
+                // Clear previous graph
+                container.innerHTML = '';
+                console.log('🧹 Cleared container, about to create SVG');
+                
+                const width = container.clientWidth;
+                const height = container.clientHeight;
+                
+                console.log('📏 Container dimensions:', width, 'x', height);
+                
+                // Create SVG
+                const svg = d3.select(container)
+                    .append('svg')
+                    .attr('width', width)
+                    .attr('height', height);
+                
+                console.log('🎨 SVG created, about to create force simulation');
+                
+                // Create force simulation with error handling
+                let simulation;
+                let edgesForD3; // Declare in wider scope
+                try {
+                    console.log('Creating D3 force simulation...');
+                    console.log('Nodes for simulation:', filteredNodes.length);
+                    console.log('Edges for simulation:', filteredEdges.length);
+                    
+                    // Ensure edges have proper source/target structure for D3
+                    edgesForD3 = filteredEdges.map(edge => ({
+                        ...edge,
+                        source: edge.source,
+                        target: edge.target
+                    }));
+                    
+                    console.log('Edges for D3:', edgesForD3);
+                    console.log('Sample edge structure:', edgesForD3[0]);
+                    console.log('Node IDs available:', filteredNodes.map(n => n.id));
+                    
+                    simulation = d3.forceSimulation(filteredNodes)
+                        .force('link', d3.forceLink(edgesForD3).id(d => d.id))
+                        .force('charge', d3.forceManyBody().strength(-300))
+                        .force('center', d3.forceCenter(width / 2, height / 2));
+                    
+                    console.log('D3 force simulation created successfully');
+                } catch (error) {
+                    console.error('Error creating force simulation:', error);
+                    console.error('Error details:', error.message, error.stack);
+                    container.innerHTML = '<div class="flex items-center justify-center h-full"><div class="text-lg text-red-600">Error creating graph visualization</div></div>';
+                    return;
+                }
+                
+                console.log('🔗 ABOUT TO CREATE LINKS - this should appear!');
+                
+                // Create links
+                console.log('🔗 Creating D3 links with', edgesForD3.length, 'edges');
+                console.log('🔗 SVG container:', svg);
+                console.log('🔗 Edges data for D3:', edgesForD3);
+                
+                let links; // Declare links variable in wider scope
+                try {
+                    links = svg.append('g')
+                        .selectAll('line')
+                        .data(edgesForD3)  // Use the same edges data as the force simulation
+                        .enter().append('line')
+                        .attr('stroke', '#999')
+                        .attr('stroke-opacity', 0.6)
+                        .attr('stroke-width', 1);
+                    
+                    console.log('✅ Created', links.size(), 'link elements');
+                    console.log('✅ Links selection:', links);
+                } catch (error) {
+                    console.error('❌ Error creating links:', error);
+                    links = null;
+                }
+                
+                // Create clickable background circles (larger click area)
+                const clickAreas = svg.append('g')
+                    .selectAll('circle')
+                    .data(filteredNodes)
+                    .enter().append('circle')
+                    .attr('r', d => this.getNodeSize(d) + 5) // 5px larger than visible node
+                    .attr('fill', 'transparent')
+                    .style('cursor', 'pointer')
+                    .on('click', (event, d) => {
+                        console.log('Node clicked:', d);
+                        console.log('Event:', event);
+                        console.log('Node ID:', d.id);
+                        console.log('Node label:', d.label);
+                        event.preventDefault();
+                        event.stopPropagation();
+                        this.fetchNodeDetails(d.id);
+                    });
+                
+                // Create visible nodes
+                const nodes = svg.append('g')
+                    .selectAll('circle')
+                    .data(filteredNodes)
+                    .enter().append('circle')
+                    .attr('r', d => this.getNodeSize(d))
+                    .attr('fill', d => this.getNodeColor(d))
+                    .attr('stroke', d => d.id === (this.selectedNode?.id) ? '#ff0000' : '#fff')
+                    .attr('stroke-width', d => d.id === (this.selectedNode?.id) ? 3 : 1.5)
+                    .style('pointer-events', 'none') // Let clicks pass through to background
+                    .on('mouseover', function(event, d) {
+                        d3.select(this)
+                            .attr('stroke-width', 3)
+                            .attr('stroke', '#ff6b6b');
+                    })
+                    .on('mouseout', function(event, d) {
+                        if (d.id !== (this.parentNode.parentNode.selectedNode?.id)) {
+                            d3.select(this)
+                                .attr('stroke-width', 1.5)
+                                .attr('stroke', '#fff');
+                        }
+                        // Remove tooltip
+                        d3.select('.tooltip').remove();
+                    })
+                    .on('mouseover', function(event, d) {
+                        // Show tooltip
+                        const tooltip = d3.select('body').append('div')
+                            .attr('class', 'tooltip')
+                            .style('position', 'absolute')
+                            .style('background', 'rgba(0, 0, 0, 0.8)')
+                            .style('color', 'white')
+                            .style('padding', '8px')
+                            .style('border-radius', '4px')
+                            .style('font-size', '12px')
+                            .style('pointer-events', 'none')
+                            .style('z-index', '1000');
+                        
+                        tooltip.html(`
+                            <strong>${d.label}</strong><br>
+                            Type: ${d.type}<br>
+                            Confidence: ${(d.confidence * 100).toFixed(1)}%
+                        `);
+                        
+                        tooltip.style('left', (event.pageX + 10) + 'px')
+                               .style('top', (event.pageY - 10) + 'px');
+                    });
+                
+                // Add labels
+                const labels = svg.append('g')
+                    .selectAll('text')
+                    .data(filteredNodes)
+                    .enter().append('text')
+                    .text(d => d.label)
+                    .attr('text-anchor', 'middle')
+                    .attr('dy', d => this.getNodeSize(d) + 16)
+                    .attr('font-size', '14px')
+                    .attr('fill', '#333')
+                    .attr('font-weight', 'bold')
+                    .attr('paint-order', 'stroke')
+                    .attr('stroke', '#fff')
+                    .attr('stroke-width', 3);
+                
+                // Add selection indicator (glow effect for selected node)
+                if (this.selectedNode) {
+                    svg.append('circle')
+                        .attr('cx', d => this.selectedNode.x || width/2)
+                        .attr('cy', d => this.selectedNode.y || height/2)
+                        .attr('r', d => this.getNodeSize(this.selectedNode) + 8)
+                        .attr('fill', 'none')
+                        .attr('stroke', '#ff0000')
+                        .attr('stroke-width', 2)
+                        .attr('stroke-opacity', 0.6)
+                        .attr('stroke-dasharray', '5,5')
+                        .attr('class', 'selection-glow');
+                }
+                
+                // Update positions on tick
+                simulation.on('tick', () => {
+                    console.log('🔄 Tick function called');
+                    
+                    // Debug link positions
+                    if (links && links.size() > 0) {
+                        const firstLink = links.datum();
+                        console.log('🔗 First link data:', firstLink);
+                        console.log('🔗 First link source:', firstLink.source);
+                        console.log('🔗 First link target:', firstLink.target);
+                        console.log('🔗 First link position:', {
+                            x1: firstLink.source?.x,
+                            y1: firstLink.source?.y,
+                            x2: firstLink.target?.x,
+                            y2: firstLink.target?.y
+                        });
+                    } else {
+                        console.log('⚠️ No links found in tick function');
+                    }
+                    
+                    if (links) {
+                        links
+                            .attr('x1', d => d.source.x)
+                            .attr('y1', d => d.source.y)
+                            .attr('x2', d => d.target.x)
+                            .attr('y2', d => d.target.y);
+                    }
+                    
+                    clickAreas
+                        .attr('cx', d => d.x)
+                        .attr('cy', d => d.y);
+                    
+                    nodes
+                        .attr('cx', d => d.x)
+                        .attr('cy', d => d.y);
+                    
+                    labels
+                        .attr('x', d => d.x)
+                        .attr('y', d => d.y);
+                    
+                    // Update selection glow position
+                    if (this.selectedNode) {
+                        const selectedNodeData = filteredNodes.find(n => n.id === this.selectedNode.id);
+                        if (selectedNodeData) {
+                            svg.select('.selection-glow')
+                                .attr('cx', selectedNodeData.x)
+                                .attr('cy', selectedNodeData.y);
+                        }
+                    }
+                });
+                
+                // Add zoom behavior
+                const zoom = d3.zoom()
+                    .on('zoom', (event) => {
+                        svg.selectAll('g').attr('transform', event.transform);
+                    });
+                
+                svg.call(zoom);
+                
+                // Add node types legend
+                this.renderLegend(container);
+            }
+
+            toggleEditMode() {
+                console.log('🔄 Toggle edit mode called. Current editMode:', this.editMode);
+                this.editMode = !this.editMode;
+                console.log('🔄 New editMode:', this.editMode);
+                this.render();
+            }
+
+                         async saveNodeChanges(event) {
+                 event.preventDefault();
+                 const label = document.getElementById('edit-label').value;
+                 const description = document.getElementById('edit-description').value;
+                 const aliases = document.getElementById('edit-aliases').value.split(',').map(alias => alias.trim()).filter(alias => alias);
+                 
+                 let attributes;
+                 try {
+                     attributes = JSON.parse(document.getElementById('edit-attributes').value);
+                 } catch (err) {
+                     alert('Invalid JSON in attributes field. Please check the format.');
+                     return;
+                 }
+
+                try {
+                    const response = await fetch(`/api/graph/node/${this.selectedNode.id}`, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            label: label,
+                            description: description,
+                            aliases: aliases,
+                            attributes: attributes
+                        })
+                    });
+
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        console.error('Error saving node changes:', response.status, errorText);
+                        alert('Failed to save node changes: ' + response.statusText);
+                        return;
+                    }
+
+                    const result = await response.json();
+                    console.log('Node updated:', result);
+                    this.selectedNode.label = label;
+                    this.selectedNode.description = description;
+                    this.selectedNode.aliases = aliases;
+                    this.selectedNode.attributes = attributes;
+                    this.nodeDetails = { ...this.nodeDetails, node: this.selectedNode }; // Update nodeDetails
+                    this.render();
+                    alert('Node updated successfully!');
+                } catch (err) {
+                    console.error('Error saving node changes:', err);
+                    alert('Error saving node changes: ' + err.message);
+                }
+            }
+        }
+        
+        // Initialize the graph visualizer when the page loads
+        let graphVisualizer;
+        document.addEventListener('DOMContentLoaded', () => {
+            graphVisualizer = new GraphVisualizer(document.getElementById('root'));
+        });
+    </script>
+</body>
+</html> 

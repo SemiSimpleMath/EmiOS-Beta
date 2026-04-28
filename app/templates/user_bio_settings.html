@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Bio Settings</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/setup_wizard.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="setup-container">
+        <div class="setup-header">
+            <h1>Your Bio</h1>
+            <p>Facts about you that your assistant uses to personalize conversations.</p>
+            <a href="/chat_bot" class="back-link"><i class="fas fa-arrow-left"></i> Back to Chat</a>
+        </div>
+
+        <form id="bioSettingsForm">
+            <div class="settings-section">
+                <div class="bio-section" data-section="background">
+                    <h3>Background</h3>
+                    <p class="section-hint">Education, career, family, pets&hellip;</p>
+                    <div class="bio-facts-list"></div>
+                    <div class="bio-add-row">
+                        <input type="text" class="bio-new-fact" placeholder="e.g., PhD in Mathematics from UCLA">
+                        <button type="button" class="btn-secondary bio-add-btn">+ Add</button>
+                    </div>
+                </div>
+
+                <div class="bio-section" data-section="entertainment_hobbies">
+                    <h3>Entertainment &amp; Hobbies</h3>
+                    <p class="section-hint">Favorite movies, shows, games, music, hobbies&hellip;</p>
+                    <div class="bio-facts-list"></div>
+                    <div class="bio-add-row">
+                        <input type="text" class="bio-new-fact" placeholder="e.g., Pulp Fiction, Chess, Elden Ring">
+                        <button type="button" class="btn-secondary bio-add-btn">+ Add</button>
+                    </div>
+                </div>
+
+                <div class="bio-section" data-section="values">
+                    <h3>Values &amp; Beliefs</h3>
+                    <p class="section-hint">Political views, philosophy, what matters to you&hellip;</p>
+                    <div class="bio-facts-list"></div>
+                    <div class="bio-add-row">
+                        <input type="text" class="bio-new-fact" placeholder="e.g., I prioritize science and evidence">
+                        <button type="button" class="btn-secondary bio-add-btn">+ Add</button>
+                    </div>
+                </div>
+
+                <div class="bio-section" data-section="health_logistics">
+                    <h3>Health &amp; Logistics</h3>
+                    <p class="section-hint">Health conditions, travel preferences, routines&hellip;</p>
+                    <div class="bio-facts-list"></div>
+                    <div class="bio-add-row">
+                        <input type="text" class="bio-new-fact" placeholder="e.g., Chronic back pain">
+                        <button type="button" class="btn-secondary bio-add-btn">+ Add</button>
+                    </div>
+                </div>
+
+                <div class="bio-section" data-section="style_persona">
+                    <h3>Style &amp; Persona</h3>
+                    <p class="section-hint">Personality traits, communication style&hellip;</p>
+                    <div class="bio-facts-list"></div>
+                    <div class="bio-add-row">
+                        <input type="text" class="bio-new-fact" placeholder="e.g., Introvert, thoughtful">
+                        <button type="button" class="btn-secondary bio-add-btn">+ Add</button>
+                    </div>
+                </div>
+
+                <div class="bio-section" data-section="projects">
+                    <h3>Projects</h3>
+                    <p class="section-hint">Personal or professional projects you're working on&hellip;</p>
+                    <div class="bio-facts-list"></div>
+                    <div class="bio-add-row">
+                        <input type="text" class="bio-new-fact" placeholder="e.g., Building a personal AI assistant">
+                        <button type="button" class="btn-secondary bio-add-btn">+ Add</button>
+                    </div>
+                </div>
+
+                <div class="bio-section" data-section="preferences">
+                    <h3>Preferences</h3>
+                    <p class="section-hint">Scheduling preferences, food, general likes/dislikes&hellip;</p>
+                    <div class="bio-facts-list"></div>
+                    <div class="bio-add-row">
+                        <input type="text" class="bio-new-fact" placeholder="e.g., Prefer morning meetings">
+                        <button type="button" class="btn-secondary bio-add-btn">+ Add</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="setup-navigation">
+                <button type="button" id="saveBioBtn" class="btn-primary">
+                    <i class="fas fa-save"></i> Save Changes
+                </button>
+            </div>
+
+            <div id="error-message" class="error-message" style="display: none;"></div>
+            <div id="success-message" class="success-message" style="display: none;"></div>
+        </form>
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', async function() {
+        document.querySelectorAll('.bio-add-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const row = this.closest('.bio-add-row');
+                const input = row.querySelector('.bio-new-fact');
+                addBioFact(this.closest('.bio-section'), input);
+            });
+        });
+        document.querySelectorAll('.bio-new-fact').forEach(input => {
+            input.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addBioFact(this.closest('.bio-section'), this);
+                }
+            });
+        });
+        document.getElementById('saveBioBtn').addEventListener('click', saveBio);
+
+        await loadBio();
+    });
+
+    function escapeHtml(str) {
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+
+    function addBioFact(sectionEl, input) {
+        const text = input.value.trim();
+        if (!text) return;
+        const list = sectionEl.querySelector('.bio-facts-list');
+        const item = document.createElement('div');
+        item.className = 'bio-fact-item';
+        item.innerHTML = `<span class="bio-fact-text">${escapeHtml(text)}</span><button type="button" class="bio-fact-remove" title="Remove">&times;</button>`;
+        item.querySelector('.bio-fact-remove').addEventListener('click', function() { item.remove(); });
+        list.appendChild(item);
+        input.value = '';
+        input.focus();
+    }
+
+    function populateSection(sectionEl, facts) {
+        const list = sectionEl.querySelector('.bio-facts-list');
+        list.innerHTML = '';
+        (facts || []).forEach(text => {
+            const item = document.createElement('div');
+            item.className = 'bio-fact-item';
+            item.innerHTML = `<span class="bio-fact-text">${escapeHtml(text)}</span><button type="button" class="bio-fact-remove" title="Remove">&times;</button>`;
+            item.querySelector('.bio-fact-remove').addEventListener('click', function() { item.remove(); });
+            list.appendChild(item);
+        });
+    }
+
+    async function loadBio() {
+        try {
+            const resp = await fetch('/api/user-bio');
+            const data = await resp.json();
+            if (!data.success) throw new Error(data.error || 'Failed to load bio');
+            const bio = data.bio;
+            document.querySelectorAll('.bio-section').forEach(section => {
+                const key = section.dataset.section;
+                populateSection(section, bio[key]);
+            });
+        } catch (e) {
+            console.error('Load bio error:', e);
+            showError('Failed to load bio: ' + e.message);
+        }
+    }
+
+    function collectBioData() {
+        const bio = {};
+        document.querySelectorAll('.bio-section').forEach(section => {
+            const key = section.dataset.section;
+            const facts = [];
+            section.querySelectorAll('.bio-fact-text').forEach(el => {
+                const t = el.textContent.trim();
+                if (t) facts.push(t);
+            });
+            bio[key] = facts;
+        });
+        return bio;
+    }
+
+    async function saveBio() {
+        const btn = document.getElementById('saveBioBtn');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+        try {
+            const resp = await fetch('/api/user-bio', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(collectBioData()),
+            });
+            const data = await resp.json();
+            if (!resp.ok || !data.success) throw new Error(data.error || 'Save failed');
+            showSuccess('Bio saved successfully!');
+        } catch (e) {
+            console.error('Save bio error:', e);
+            showError('Failed to save bio: ' + e.message);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-save"></i> Save Changes';
+        }
+    }
+
+    function showError(msg) {
+        const el = document.getElementById('error-message');
+        el.textContent = msg;
+        el.style.display = 'block';
+        setTimeout(() => { el.style.display = 'none'; }, 5000);
+    }
+
+    function showSuccess(msg) {
+        const el = document.getElementById('success-message');
+        el.textContent = msg;
+        el.style.display = 'block';
+        setTimeout(() => { el.style.display = 'none'; }, 3000);
+    }
+    </script>
+</body>
+</html>

@@ -1,0 +1,92 @@
+{#- The actual speaker of the LATEST message. Multi-participant rooms (e.g.,
+    Slack channels with more than one human) must not conflate this with
+    room_contact_name — the latter is a per-room label, the former is the
+    identity of whoever just spoke this turn. -#}
+{%- set speaker_name = current_speaker_name or room_contact_name or "User" %}
+
+########## CONTEXT ##########
+{%- if resource_user_data %}
+**Owner:** {{ resource_user_data.full_name or resource_user_data.first_name }}
+{%- if resource_user_data.important_people %}
+**People:** {% for p in resource_user_data.important_people %}{{ p.name }} ({{ p.relationship }}){% if not loop.last %}, {% endif %}{% endfor %}
+{%- endif %}
+{%- endif %}
+{#- Don't frame the turn as "you are talking to <X>" — the room may have
+    multiple participants and any given message may not be addressed to
+    Emi at all. The speaker is identified on each message's prefix line;
+    engagement rules (when to respond vs stay silent) live in the room's
+    conversation policy. -#}
+**Current Time:** {{ date_time }}
+**Day:** {{ day_of_week }}
+{%- if location_summary and location_summary != "Currently: Unknown" %}
+**Location:** {{ location_summary }}
+{%- endif %}
+{%- if resource_weather and resource_weather.current %}
+**Weather:** {{ resource_weather.location.city }}: {{ resource_weather.current.temperature }} F, {{ resource_weather.current.condition }}
+{%- endif %}
+{%- if health_status_summary %}
+
+Health Summary:
+{{ health_status_summary }}
+{%- endif %}
+{%- if user_bio_context %}
+
+User Bio Context:
+{{ user_bio_context }}
+{%- endif %}
+{%- if room_pinned_entities %}
+
+Pinned entities:
+{{ room_pinned_entities }}
+{%- endif %}
+{%- if entity_card %}
+
+Entity context:
+{{ entity_card }}
+{%- endif %}
+{%- if _keyword_injected_resources %}
+{%- for res in _keyword_injected_resources %}
+
+## {{ res.label }}
+{%- if res.content is string %}
+{{ res.content }}
+{%- elif res.content is mapping and res.content.events is defined %}
+{%- for ev in res.content.events %}
+- {{ ev.start_local }}{% if ev.end_local %} - {{ ev.end_local }}{% endif %}: {{ ev.title }} [{{ ev.status }}]
+{%- endfor %}
+{%- elif res.content is mapping %}
+{%- for k, v in res.content.items() %}
+{%- if k != "last_updated" and k != "last_updated_utc" %}
+- **{{ k }}**: {{ v }}
+{%- endif %}
+{%- endfor %}
+{%- else %}
+{{ res.content }}
+{%- endif %}
+{%- endfor %}
+{%- endif %}
+{%- if resource_expected_calendar and resource_expected_calendar.expected_schedule %}
+
+########## SCHEDULE ##########
+{%- for entry in resource_expected_calendar.expected_schedule %}
+- {{ entry.title }} {{ entry.start_local }}{% if entry.end_local %} - {{ entry.end_local }}{% endif %} ({{ entry.status }})
+{%- endfor %}
+{%- endif %}
+{%- if chat_memory %}
+
+########## PAST CONVERSATIONS (RAG — may or may not be relevant) ##########
+*These are snippets from previous days' conversations, retrieved because they seem related to the current message. Use them ONLY if they add genuine context. Do not reference them unless they are clearly relevant.*
+{{ chat_memory }}
+{%- endif %}
+
+########## CONVERSATION HISTORY ##########
+{%- if recent_history %}
+Current run history:
+{{ recent_history }}
+{%- endif %}
+{%- if task %}
+
++++++ LATEST MESSAGE IN THIS ROOM +++++
+[{{ date_time }}] {{ speaker_name }}: {{ task }}
+++++++++++++++++++++++++++++++++++++++++
+{%- endif %}

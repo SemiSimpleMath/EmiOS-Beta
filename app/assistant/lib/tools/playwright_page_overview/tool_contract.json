@@ -1,0 +1,75 @@
+{
+  "name": "playwright_page_overview",
+  "description": "- **Purpose**: For Playwright browsing, capture a quick top/bottom visual summary after a navigation.\n- **Arguments**:\n  - `wait_seconds` (float, optional): Seconds to wait for page load settle (default 5).\n  - `wait_for_dom_ready` (bool, optional): If true, poll `document.readyState` up to wait_seconds (default true).\n  - `scroll_pause_seconds` (float, optional): Seconds to pause after scroll (default 0.8).\n  - `resize_viewport` (bool, optional): Temporarily resize viewport for capture (default false).\n  - `top_question` (str, optional): Prompt for the top-of-page visual description.\n  - `bottom_question` (str, optional): Prompt for the bottom-of-page visual description.",
+  "inputs": [
+    {
+      "name": "wait_seconds",
+      "type": "number",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "wait_for_dom_ready",
+      "type": "boolean",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "scroll_pause_seconds",
+      "type": "number",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "resize_viewport",
+      "type": "boolean",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "top_question",
+      "type": "string",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "bottom_question",
+      "type": "string",
+      "required": false,
+      "description": ""
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "- wait_seconds: float\n- wait_for_dom_ready: bool\n- scroll_pause_seconds: float\n- resize_viewport: bool\n- top_question: str\n- bottom_question: str",
+  "metadata": {
+    "domain": "browser",
+    "actions": [
+      "describe",
+      "analyze",
+      "summarize"
+    ],
+    "selectors": [
+      "question"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "high",
+    "latency_class": "slow",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

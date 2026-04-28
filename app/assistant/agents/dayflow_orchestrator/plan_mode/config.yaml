@@ -1,0 +1,37 @@
+name: dayflow_orchestrator::plan_mode
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "gemini"
+  engine: "gemini-3-flash-preview"
+  model_tier: "mini"
+
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+entity_scan_keys: [task, information, recent_history]
+entity_card_level: 0
+
+user_context_items:
+  - date_time
+  - task
+  - information
+  - room_allowed_resource_context
+  - room_allow_images
+  - room_allowed_entity_cards
+  - room_pinned_entities
+  - entity_card
+  - recent_history
+
+system_context_items:
+  - room_id
+  - room_contact_name
+  - room_surface
+  - room_context_id
+  - room_visibility
+  - room_policy_id
+  - room_identity
+  - room_conversation
+  - room_safety
+  - room_facts
+  - room_participant_facts

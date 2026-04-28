@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Insights</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/setup_wizard.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/insights.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+</head>
+<body>
+    <div class="setup-container insights-container">
+        <div class="setup-header">
+            <h1><i class="fas fa-brain"></i> Insights</h1>
+            <p>What Emi has learned about your day, your week, and you</p>
+            <a href="/chat_bot" class="back-link"><i class="fas fa-arrow-left"></i> Back to Chat</a>
+        </div>
+
+        <!-- Tab Navigation -->
+        <div class="insights-tabs">
+            <button class="insights-tab active" data-tab="daily">
+                <i class="fas fa-calendar-day"></i> Daily
+            </button>
+            <button class="insights-tab" data-tab="weekly">
+                <i class="fas fa-calendar-week"></i> Weekly
+            </button>
+            <button class="insights-tab" data-tab="beliefs">
+                <i class="fas fa-lightbulb"></i> Beliefs
+            </button>
+        </div>
+
+        <!-- Daily Tab -->
+        <div class="insights-panel active" id="panel-daily">
+            <div class="date-nav">
+                <button id="daily-prev" class="date-nav-btn"><i class="fas fa-chevron-left"></i></button>
+                <input type="date" id="daily-date-picker" class="date-picker">
+                <button id="daily-next" class="date-nav-btn"><i class="fas fa-chevron-right"></i></button>
+            </div>
+            <div id="daily-content" class="insights-content">
+                <div class="insights-loading">Loading...</div>
+            </div>
+        </div>
+
+        <!-- Weekly Tab -->
+        <div class="insights-panel" id="panel-weekly">
+            <div class="date-nav">
+                <button id="weekly-prev" class="date-nav-btn"><i class="fas fa-chevron-left"></i></button>
+                <span id="weekly-label" class="date-label">This Week</span>
+                <button id="weekly-next" class="date-nav-btn"><i class="fas fa-chevron-right"></i></button>
+            </div>
+            <div id="weekly-content" class="insights-content">
+                <div class="insights-loading">Loading...</div>
+            </div>
+        </div>
+
+        <!-- Beliefs Tab -->
+        <div class="insights-panel" id="panel-beliefs">
+            <div class="beliefs-controls">
+                <select id="beliefs-domain-filter" class="beliefs-filter">
+                    <option value="all">All Domains</option>
+                    <option value="routine">Routine</option>
+                    <option value="health">Health</option>
+                    <option value="communication">Communication</option>
+                    <option value="food">Food</option>
+                    <option value="sleep">Sleep</option>
+                    <option value="general">General</option>
+                </select>
+                <input type="text" id="beliefs-search" class="beliefs-search" placeholder="Search beliefs...">
+            </div>
+            <div id="beliefs-content" class="insights-content">
+                <div class="insights-loading">Loading...</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/insights.js') }}"></script>
+</body>
+</html>

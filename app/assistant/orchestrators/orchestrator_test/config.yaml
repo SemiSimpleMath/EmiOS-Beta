@@ -1,0 +1,29 @@
+name: orchestrator_test
+class_name: Orchestrator
+
+# Brain agents (curator + router + evaluator + architect)
+architect_agent: shared::orchestrator_architect
+facts_curator_agent: shared::orchestrator_facts_curator
+router_agent: shared::orchestrator_router
+evaluator_agent: shared::orchestrator_evaluator
+
+# Policy (keep it small for smoke runs)
+max_depth: 1
+max_children_total: 6
+max_children_concurrent: 3
+default_child_budget:
+  max_cycles: 10
+  timeout_seconds: 300
+
+# Allowlist: keep it simple to force a single manager type
+allowed_child_managers:
+  - web_manager
+  - emi_team_manager
+allowed_child_orchestrators: []
+
+# Optional global guidance passed to all child planners (append-only constraints/facts).
+global_guidance: []
+
+# Curator batching policy for orchestrator_progress events
+progress_threshold: 3
+

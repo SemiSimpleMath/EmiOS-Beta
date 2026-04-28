@@ -1,0 +1,45 @@
+name: taxonomy_team_manager
+class_name: MultiAgentManager
+description: "A team manager that orchestrates taxonomy operations for maintaining and improving the taxonomy structure."
+max_cycles: 80  # Prevent infinite loops
+role_bindings:
+  delegator: taxonomy_team::delegator
+  tool_selector: shared::tool_selector
+
+agents:
+  - name: taxonomy_team::delegator
+    class: Delegator
+  - name: taxonomy_team::planner
+    class: Planner
+  - name: taxonomy_team::final_answer
+    class: Agent
+  - name: shared::tool_arguments
+    class: Agent
+  - name: shared::writer
+    class: Agent
+
+control_nodes:
+  - name: tool_caller
+    class: ToolCaller
+  - name: tool_result_handler
+    class: ToolResultHandler
+  - name: return_control
+    class: ReturnControlNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+  - name: graceful_exit_control_node
+    class: GracefulExitControlNode
+
+tools:
+  allowed_tools: [taxonomy_merge_categories, taxonomy_rename_category, taxonomy_move_category, taxonomy_update_description, taxonomy_create_category, ask_kg]
+  except_tools: []
+
+flow_config:
+  state_map:
+    "taxonomy_team::delegator": "taxonomy_team::planner"
+    "shared::tool_arguments": "tool_caller"
+    "taxonomy_team::planner_return_control": "taxonomy_team::final_answer"
+    "taxonomy_team::find_node_return_control": "tool_result_handler"
+    "taxonomy_team::final_answer": "manager_exit_node"
+    "graceful_exit": "graceful_exit_control_node"
+    "graceful_exit_control_node": "taxonomy_team::final_answer"

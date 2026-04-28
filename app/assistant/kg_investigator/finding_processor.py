@@ -1,0 +1,215 @@
+"""Loop pending kg_maintenance_finding rows through kg_investigation_manager.
+
+For each pending finding:
+  1. Build an investigator brief (finding_brief.build_finding_brief).
+  2. Invoke kg_investigation_manager with the brief.
+  3. Pull the structured report from the final-answer agent's audit message.
+  4. Persist the report into kg_maintenance_finding.investigation_report_json
+     and bump status to 'investigated'.
+
+Idempotent: skips findings whose status is not 'pending'.
+
+Wireable to a routine: ``run_pending_findings(limit=N)`` returns a small
+result dict the routine can write to its day file.
+"""
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
+from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
+from app.assistant.kg_investigator.finding_brief import build_finding_brief
+from app.assistant.ServiceLocator.service_locator import DI
+from app.assistant.utils.logging_config import get_logger
+from app.assistant.utils.pydantic_classes import Message
+from app.models.db_manager import get_db_manager
+
+logger = get_logger(__name__)
+
+MANAGER_NAME = "kg_investigation_manager"
+
+
+def _claim_pending_finding_ids(*, limit: int, finding_types: Optional[List[str]] = None) -> List[str]:
+    """Pick up to `limit` oldest pending findings, optionally filtered to specific types."""
+    with get_db_manager().read_session() as session:
+        q = (
+            session.query(KGMaintenanceFinding.id)
+            .filter(KGMaintenanceFinding.status == "pending")
+        )
+        if finding_types:
+            q = q.filter(KGMaintenanceFinding.finding_type.in_(finding_types))
+        rows = q.order_by(KGMaintenanceFinding.created_at.asc()).limit(limit).all()
+        return [r[0] for r in rows]
+
+
+def _extract_report_from_audit(blackboard) -> Optional[Dict[str, Any]]:
+    """Pull the structured report from the kg_investigation::final_answer audit message."""
+    try:
+        msgs = blackboard.get_messages()
+    except Exception as e:
+        logger.warning("could not read blackboard messages: %s", e)
+        return None
+    for m in msgs:
+        sender = str(getattr(m, "sender", "") or "")
+        if sender.endswith("final_answer") and "kg_investigation" in sender:
+            data = getattr(m, "data", None) or {}
+            # Keep only the structured fields + the markdown rendering. Drop
+            # the standard envelope filler.
+            report = {
+                k: data.get(k)
+                for k in (
+                    "diagnosis",
+                    "evidence",
+                    "proposed_action",
+                    "open_questions",
+                    "final_answer_answer",
+                    "result_summary",
+                )
+                if data.get(k) is not None
+            }
+            return report or None
+    return None
+
+
+def _persist_report(*, finding_id: str, report: Dict[str, Any]) -> None:
+    with get_db_manager().transaction(op="finding_processor.persist_report") as session:
+        f = (
+            session.query(KGMaintenanceFinding)
+            .filter(KGMaintenanceFinding.id == finding_id)
+            .first()
+        )
+        if f is None:
+            logger.warning("persist_report: finding %s vanished", finding_id)
+            return
+        f.investigation_report_json = report
+        f.investigated_at = datetime.now(timezone.utc)
+        f.status = "investigated"
+
+
+def investigate_one(finding_id: str) -> Dict[str, Any]:
+    """Investigate a single finding by id. Returns a small result dict."""
+    brief = build_finding_brief(finding_id)
+    if brief is None:
+        return {"status": "not_found", "finding_id": finding_id}
+    task, information = brief
+
+    mgr = DI.multi_agent_manager_factory.create_manager(MANAGER_NAME)
+    msg = Message(task=task, information=information)
+    try:
+        DI.manager_invoker.invoke(mgr, msg)
+    except Exception as e:
+        logger.error("investigation failed for finding %s: %s", finding_id, e)
+        logger.debug("investigation exception details", exc_info=True)
+        return {"status": "error", "finding_id": finding_id, "error": str(e)}
+
+    report = _extract_report_from_audit(mgr.blackboard)
+    if report is None:
+        logger.warning("no structured report produced for finding %s", finding_id)
+        return {"status": "no_report", "finding_id": finding_id}
+
+    _persist_report(finding_id=finding_id, report=report)
+
+    summary = report.get("result_summary") or (report.get("diagnosis") or "")[:140]
+    proposed = report.get("proposed_action") or {}
+    op = proposed.get("op") if isinstance(proposed, dict) else None
+    return {
+        "status": "investigated",
+        "finding_id": finding_id,
+        "proposed_op": op,
+        "summary": summary,
+    }
+
+
+def investigate_findings(
+    finding_ids: List[str],
+    *,
+    max_to_investigate: int = 50,
+) -> Dict[str, Any]:
+    """Investigate an explicit list of finding ids — typically returned by a
+    producer (wiki critic, etc.) right after it wrote them.
+
+    Skips ids that aren't pending (e.g., already investigated or rejected).
+    Caps total work at ``max_to_investigate`` to keep producer routines bounded.
+    """
+    ids = list(dict.fromkeys((fid or "").strip() for fid in (finding_ids or []) if fid))
+    if not ids:
+        return {"status": "no_ids", "processed": 0, "results": []}
+
+    # Filter to ids that are still pending — others (already investigated /
+    # rejected / executed) shouldn't be redone.
+    with get_db_manager().read_session() as session:
+        rows = (
+            session.query(KGMaintenanceFinding.id)
+            .filter(KGMaintenanceFinding.id.in_(ids))
+            .filter(KGMaintenanceFinding.status == "pending")
+            .all()
+        )
+        pending_ids = [r[0] for r in rows]
+
+    if not pending_ids:
+        return {"status": "nothing_pending", "processed": 0, "results": []}
+
+    if len(pending_ids) > max_to_investigate:
+        logger.info(
+            "[finding_processor] investigate_findings capped %d → %d",
+            len(pending_ids), max_to_investigate,
+        )
+        pending_ids = pending_ids[:max_to_investigate]
+
+    results: List[Dict[str, Any]] = []
+    investigated = 0
+    errors = 0
+    for fid in pending_ids:
+        r = investigate_one(fid)
+        results.append(r)
+        if r.get("status") == "investigated":
+            investigated += 1
+        elif r.get("status") in ("error", "no_report"):
+            errors += 1
+
+    logger.info(
+        "[finding_processor] processed=%d investigated=%d errors=%d (from %d ids)",
+        len(pending_ids), investigated, errors, len(ids),
+    )
+    return {
+        "status": "ok",
+        "processed": len(pending_ids),
+        "investigated": investigated,
+        "errors": errors,
+        "results": results,
+    }
+
+
+def run_pending_findings(
+    *,
+    limit: int = 5,
+    finding_types: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Process up to `limit` pending findings sequentially. Optionally filter
+    to specific finding_types (e.g., ['wiki_contradiction'])."""
+    ids = _claim_pending_finding_ids(limit=limit, finding_types=finding_types)
+    if not ids:
+        return {"status": "no_pending_findings", "processed": 0, "results": []}
+
+    results: List[Dict[str, Any]] = []
+    investigated = 0
+    errors = 0
+    for fid in ids:
+        r = investigate_one(fid)
+        results.append(r)
+        if r.get("status") == "investigated":
+            investigated += 1
+        elif r.get("status") in ("error", "no_report"):
+            errors += 1
+
+    logger.info(
+        "[finding_processor] processed=%d investigated=%d errors=%d",
+        len(ids), investigated, errors,
+    )
+    return {
+        "status": "ok",
+        "processed": len(ids),
+        "investigated": investigated,
+        "errors": errors,
+        "results": results,
+    }

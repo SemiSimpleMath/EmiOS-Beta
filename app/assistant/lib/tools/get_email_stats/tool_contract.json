@@ -1,0 +1,126 @@
+{
+  "name": "get_email_stats",
+  "description": "Aggregate statistics for emails matching a Gmail query. Returns total count, first/last received timestamps, date span, average per day, unique sender breakdown with counts and percentages, unique thread count, and subject samples. Uses header-only fetches — no email body is downloaded. Use Gmail query syntax to filter by sender, date, label, etc.",
+  "inputs": [
+    {
+      "name": "query",
+      "type": "string",
+      "required": true,
+      "description": "Gmail query string. Examples: \"from:alice@example.com\", \"from:alice@example.com after:1735689600\", \"from:alice@example.com newer_than:90d\", \"label:inbox from:boss@work.com\"."
+    },
+    {
+      "name": "account_id",
+      "type": "string",
+      "required": false,
+      "description": "Optional Google OAuth account id (default \"google_user_primary\")."
+    },
+    {
+      "name": "max_results",
+      "type": "integer",
+      "required": false,
+      "description": "Max emails to count (default 5000, max 50000). Sender/date breakdowns are based on a sample of 500 most recent — the total count is always exact."
+    },
+    {
+      "name": "group_by_sender",
+      "type": "boolean",
+      "required": false,
+      "description": "Include per-sender breakdown in results (default true)."
+    },
+    {
+      "name": "group_by_day",
+      "type": "boolean",
+      "required": false,
+      "description": "Include daily count distribution in results (default false). Useful for visualising send frequency over time."
+    },
+    {
+      "name": "top_senders_limit",
+      "type": "integer",
+      "required": false,
+      "description": "How many top senders to return in the breakdown (default 10)."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable summary: total, date range, top sender, thread count."
+    },
+    {
+      "path": "data.total",
+      "type": "integer",
+      "description": "Total emails matched."
+    },
+    {
+      "path": "data.first_received",
+      "type": "string",
+      "description": "ISO 8601 UTC datetime of the oldest matched email."
+    },
+    {
+      "path": "data.last_received",
+      "type": "string",
+      "description": "ISO 8601 UTC datetime of the most recent matched email."
+    },
+    {
+      "path": "data.date_span_days",
+      "type": "number",
+      "description": "Days between first and last received email."
+    },
+    {
+      "path": "data.avg_per_day",
+      "type": "number",
+      "description": "Average emails per day over the span."
+    },
+    {
+      "path": "data.unique_senders",
+      "type": "integer",
+      "description": "Number of distinct sender addresses."
+    },
+    {
+      "path": "data.unique_threads",
+      "type": "integer",
+      "description": "Number of distinct Gmail thread IDs."
+    },
+    {
+      "path": "data.senders",
+      "type": "array",
+      "description": "Top sender breakdown: [{email, count, pct, subject_samples}]."
+    },
+    {
+      "path": "data.daily_counts",
+      "type": "array",
+      "description": "Daily count distribution [{date, count}] when group_by_day=true."
+    },
+    {
+      "path": "data.subject_samples",
+      "type": "array",
+      "description": "Up to 10 subject lines from matched emails."
+    }
+  ],
+  "arguments_prompt": "Arguments are:\nquery (required): Gmail query string. Examples:\n  - \"from:alice@example.com\" — all mail from Alice\n  - \"from:alice@example.com newer_than:90d\" — last 90 days from Alice\n  - \"from:alice@example.com after:1735689600\" — after unix timestamp\n  - \"label:inbox subject:invoice\" — inbox invoices\nmax_results: int, default 5000, max 50000. Controls how many IDs are counted. Sender/date breakdowns are always based on a 500-message sample; the total count is exact.\ngroup_by_sender: true/false (default true) — include sender breakdown.\ngroup_by_day: true/false (default false) — include daily count distribution.\ntop_senders_limit: int (default 10) — how many senders to return.\naccount_id: optional, default \"google_user_primary\".",
+  "metadata": {
+    "domain": "email",
+    "actions": [
+      "stats",
+      "aggregate",
+      "read"
+    ],
+    "selectors": [
+      "query",
+      "sender",
+      "date_range",
+      "label"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [
+      "google"
+    ],
+    "requires_network": true,
+    "cost_level": "low",
+    "latency_class": "medium",
+    "front_door": true,
+    "room_visibility_default": "show",
+    "approval_required": false,
+    "planner_description": "Count emails and break down by sender/date for a Gmail query. Fast, header-only."
+  }
+}

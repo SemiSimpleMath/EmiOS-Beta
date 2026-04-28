@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Shadow KG — Proposal Review</title>
+  <link rel="stylesheet" href="/static/css/kg_proposals.css">
+</head>
+<body>
+  <nav class="kp-top">
+    <h1>Shadow KG</h1>
+    <a href="/kg-proposals/">Proposals</a>
+    <a href="/kg-maintenance/" target="_blank">Findings</a>
+    <a href="/kg-visualizer" target="_blank">KG Visualizer</a>
+    <div style="margin-left:auto; display:flex; gap:10px;">
+      <button id="kp-run-pipeline" class="kp-btn kp-btn-primary">Run pipeline</button>
+      <button id="kp-run-promoter-dry" class="kp-btn">Promoter (dry-run)</button>
+      <button id="kp-run-promoter-commit" class="kp-btn kp-btn-warn">Promoter (commit)</button>
+    </div>
+  </nav>
+
+  <main class="kp-main">
+    <div class="kp-chips">
+      {% set chip_order = ['pending','enriching','pending_review','promoted','abandoned','contradicted','retracted','all'] %}
+      {% for s in chip_order %}
+        <a class="kp-chip {% if s == status_filter %}active{% endif %}" href="?status={{ s }}">
+          {{ s }}
+          <span class="kp-chip-count">{{ counts.get(s, 0) if s != 'all' else counts.values()|sum }}</span>
+        </a>
+      {% endfor %}
+    </div>
+
+    {% if proposals %}
+    <table class="kp-table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Claim</th>
+          <th>Type</th>
+          <th>Status</th>
+          <th>Nodes</th>
+          <th>Edges</th>
+          <th>Obs</th>
+          <th>Last seen</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in proposals %}
+        <tr>
+          <td><span class="kp-short-id">{{ p.short_id }}</span></td>
+          <td>
+            <a class="kp-claim" href="/kg-proposals/{{ p.id }}">
+              {{ p.representative_sentence or '(no sentence)' }}
+            </a>
+          </td>
+          <td><span class="kp-claim-type kp-ct-{{ p.claim_type }}">{{ p.claim_type }}</span></td>
+          <td>{{ p.status }}</td>
+          <td>{{ p.n_nodes }}</td>
+          <td>{{ p.n_edges }}</td>
+          <td>{{ p.observation_count }}</td>
+          <td><span class="kp-short-id">{{ p.last_observed_at or p.created_at or '—' }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+      <div class="kp-empty">
+        <p>No proposals in this view.</p>
+        <p style="color:#888;">Click <strong>Run pipeline</strong> to trigger extraction on pending chat windows. New proposals will appear here as the extractor processes them.</p>
+      </div>
+    {% endif %}
+  </main>
+
+  <script>
+    async function postJson(url) {
+      const resp = await fetch(url, { method: 'POST' });
+      return resp.json();
+    }
+
+    function formatPipelineResult(data) {
+      const parts = [];
+      parts.push(`Pipeline finished in ${data.elapsed_seconds}s`);
+      parts.push(`New proposals: ${data.proposals_added}`);
+      const before = data.before_totals || {};
+      const after = data.after_totals || {};
+      for (const k of ['resolved_messages', 'segments', 'extractions', 'enrichments']) {
+        const b = before[k] ?? 0; const a = after[k] ?? 0;
+        if (a !== b) {
+          const sign = (a - b) > 0 ? '+' : '';
+          parts.push(`  ${k}: ${b} → ${a} (${sign}${a - b})`);
+        }
+      }
+      if (data.extraction_verdict_changes && data.extraction_verdict_changes.length) {
+        parts.push('Extraction verdict changes:');
+        for (const c of data.extraction_verdict_changes) {
+          const sign = c.delta > 0 ? '+' : '';
+          parts.push(`  ${c.verdict}: ${c.before} → ${c.after} (${sign}${c.delta})`);
+        }
+      }
+      if (data.error) parts.push('ERROR: ' + data.error);
+      return parts.join('\n');
+    }
+
+    document.getElementById('kp-run-pipeline').addEventListener('click', async (e) => {
+      e.preventDefault();
+      const btn = e.currentTarget;
+      btn.disabled = true; btn.textContent = 'Running…';
+      try {
+        const data = await postJson('/kg-proposals/run-pipeline');
+        alert(formatPipelineResult(data));
+      } catch (err) {
+        alert('Request failed: ' + err);
+      } finally {
+        btn.disabled = false; btn.textContent = 'Run pipeline';
+        window.location.reload();
+      }
+    });
+
+    document.getElementById('kp-run-promoter-dry').addEventListener('click', async (e) => {
+      e.preventDefault();
+      const data = await postJson('/kg-proposals/run-promoter');
+      alert('Promoter DRY RUN:\n' + JSON.stringify(data.stats, null, 2));
+    });
+
+    document.getElementById('kp-run-promoter-commit').addEventListener('click', async (e) => {
+      e.preventDefault();
+      if (!confirm('COMMIT: this will promote eligible proposals to the KG. Continue?')) return;
+      const data = await postJson('/kg-proposals/run-promoter?commit=1');
+      alert('Promoter COMMITTED:\n' + JSON.stringify(data.stats, null, 2));
+      window.location.reload();
+    });
+  </script>
+</body>
+</html>

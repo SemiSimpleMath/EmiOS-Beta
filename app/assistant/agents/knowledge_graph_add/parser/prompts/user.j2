@@ -1,0 +1,22 @@
+Today is {{ date_time }}
+
+{% if entity_level_0 %}
+#### ENTITY CONTEXT SECTION ####
+Information in this section is just to provide context.  It is facts from the knowledge graph we already have.
+If it contains the information you are considering parsing, then do not parse the new information as it adds nothing but processing work.
+However, if there is any new information worth adding to the knowledge graph then use the entity context section to help you write clear parsed
+sentences for downstream agents.
+{{ entity_level_0 }}
+
+#### END OF ENTITY CONTEXT SECTION ####
+{% endif %}
+
+{% if original_message_timestamp %}
+The original message was recorded on: {{ original_message_timestamp }}
+{% endif %}
+
+Parse the following text into self-contained sentences that can be used to construct knowledge graph nodes. Each sentence must contain all parts needed to build a complete node.
+
+Text to parse:
+{{ text }}
+

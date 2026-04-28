@@ -1,0 +1,14 @@
+Link related events (reminders, todos, calendar events) into a parent-child hierarchy.
+
+Use this after creating reminders or tasks for a specific calendar event or goal.
+This enables cascade operations - when the parent is cancelled/rescheduled, children follow.
+
+Source systems:
+- google_calendar: Google Calendar events
+- google_tasks: Google Tasks items
+- scheduler: Internal reminders created with create_scheduler_event
+
+Example: After creating reminders for "Dentist appointment", link them:
+- parent: "google_calendar:abc123xyz" (the dentist calendar event ID)
+- children: ["scheduler:reminder_001", "scheduler:reminder_002"]
+

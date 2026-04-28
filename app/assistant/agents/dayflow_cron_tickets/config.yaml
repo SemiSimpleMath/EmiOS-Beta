@@ -1,0 +1,31 @@
+name: dayflow_cron_tickets
+class_name: Agent
+llm_params:
+  llm_provider: "gemini"
+  engine: "gemini-3-flash-preview"
+  model_tier: "mini"
+  temperature: 0.8
+entity_scan_keys: [incoming_message, task, information, recent_history, recent_chat_messages]
+
+system_context_items:
+- resource_user_data
+- resource_tracked_activities_output
+
+user_context_items:
+- date_time
+- day_of_week
+- resource_afk_statistics_output
+- time_since
+- location_summary
+- resource_weather
+- recent_chat_messages
+- calendar_events
+- active_tickets
+- recent_responded_tickets
+- resource_tracked_activities_output
+- resource_dayflow_routine
+- health_status_summary
+- resource_expected_calendar
+- resource_daily_context_generator_output
+- resource_sleep_output
+

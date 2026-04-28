@@ -1,0 +1,4652 @@
+{
+  "metadata": {
+    "exported_at": "2025-10-15T01:49:29.279004",
+    "root_count": 6,
+    "total_nodes": 638,
+    "version": "1.0"
+  },
+  "taxonomy": [
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "A human being",
+          "id": 7,
+          "label": "person",
+          "parent_id": 1
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "Furniture product",
+                      "id": 114,
+                      "label": "furniture",
+                      "parent_id": 112
+                    },
+                    {
+                      "children": [],
+                      "description": "Clothing item",
+                      "id": 115,
+                      "label": "clothing",
+                      "parent_id": 112
+                    },
+                    {
+                      "children": [],
+                      "description": "Household appliance",
+                      "id": 116,
+                      "label": "appliance",
+                      "parent_id": 112
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "description": "Created via manual review",
+                              "id": 583,
+                              "label": "ship",
+                              "parent_id": 582
+                            }
+                          ],
+                          "description": "Created via manual review",
+                          "id": 582,
+                          "label": "watercraft",
+                          "parent_id": 581
+                        }
+                      ],
+                      "description": "Created via manual review",
+                      "id": 581,
+                      "label": "vehicle",
+                      "parent_id": 112
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "description": "Created via manual review",
+                              "id": 494,
+                              "label": "competition_robot",
+                              "parent_id": 493
+                            }
+                          ],
+                          "description": "Created via manual review",
+                          "id": 493,
+                          "label": "robot",
+                          "parent_id": 492
+                        }
+                      ],
+                      "description": "Created via manual review",
+                      "id": 492,
+                      "label": "machine",
+                      "parent_id": 112
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "A mobile phone",
+                          "id": 107,
+                          "label": "phone",
+                          "parent_id": 106
+                        },
+                        {
+                          "children": [],
+                          "description": "A computing device",
+                          "id": 108,
+                          "label": "computer",
+                          "parent_id": 106
+                        },
+                        {
+                          "children": [],
+                          "description": "A tablet device",
+                          "id": 109,
+                          "label": "tablet",
+                          "parent_id": 106
+                        },
+                        {
+                          "children": [],
+                          "description": "A wearable device",
+                          "id": 110,
+                          "label": "wearable",
+                          "parent_id": 106
+                        }
+                      ],
+                      "description": "An electronic device",
+                      "id": 106,
+                      "label": "device",
+                      "parent_id": 112
+                    }
+                  ],
+                  "description": "A tangible product",
+                  "id": 112,
+                  "label": "physical_product",
+                  "parent_id": 111
+                },
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "Professional service",
+                      "id": 118,
+                      "label": "professional_service",
+                      "parent_id": 117
+                    },
+                    {
+                      "children": [],
+                      "description": "Subscription service",
+                      "id": 119,
+                      "label": "subscription",
+                      "parent_id": 117
+                    },
+                    {
+                      "children": [],
+                      "description": "Utility service",
+                      "id": 120,
+                      "label": "utility",
+                      "parent_id": 117
+                    }
+                  ],
+                  "description": "A service offering",
+                  "id": 117,
+                  "label": "service",
+                  "parent_id": 111
+                },
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "A software platform",
+                      "id": 91,
+                      "label": "platform",
+                      "parent_id": 672
+                    },
+                    {
+                      "children": [],
+                      "description": "A software tool",
+                      "id": 92,
+                      "label": "tool",
+                      "parent_id": 672
+                    },
+                    {
+                      "children": [],
+                      "description": "A web presence",
+                      "id": 90,
+                      "label": "website",
+                      "parent_id": 672
+                    },
+                    {
+                      "children": [],
+                      "description": "A data storage system",
+                      "id": 94,
+                      "label": "database",
+                      "parent_id": 672
+                    },
+                    {
+                      "children": [],
+                      "description": "An online service",
+                      "id": 93,
+                      "label": "service",
+                      "parent_id": 672
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [
+                            {
+                              "children": [],
+                              "description": "Created via manual review",
+                              "id": 531,
+                              "label": "chat_corpus",
+                              "parent_id": 530
+                            }
+                          ],
+                          "description": "Created via manual review",
+                          "id": 530,
+                          "label": "text_corpus",
+                          "parent_id": 529
+                        },
+                        {
+                          "children": [],
+                          "description": "Created via manual review",
+                          "id": 535,
+                          "label": "personal_data_collection",
+                          "parent_id": 529
+                        },
+                        {
+                          "children": [],
+                          "description": "Created via manual review",
+                          "id": 538,
+                          "label": "reference_dictionary",
+                          "parent_id": 529
+                        }
+                      ],
+                      "description": "Created via manual review",
+                      "id": 529,
+                      "label": "dataset",
+                      "parent_id": 672
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "Created via manual review",
+                          "id": 509,
+                          "label": "codebase",
+                          "parent_id": 508
+                        }
+                      ],
+                      "description": "Created via manual review",
+                      "id": 508,
+                      "label": "software",
+                      "parent_id": 672
+                    },
+                    {
+                      "children": [],
+                      "description": "An application programming interface",
+                      "id": 95,
+                      "label": "api",
+                      "parent_id": 672
+                    },
+                    {
+                      "children": [],
+                      "description": "A software application",
+                      "id": 89,
+                      "label": "application",
+                      "parent_id": 672
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "A text document",
+                          "id": 97,
+                          "label": "document",
+                          "parent_id": 96
+                        },
+                        {
+                          "children": [],
+                          "description": "A tabular document",
+                          "id": 98,
+                          "label": "spreadsheet",
+                          "parent_id": 96
+                        },
+                        {
+                          "children": [],
+                          "description": "A slide deck",
+                          "id": 99,
+                          "label": "presentation",
+                          "parent_id": 96
+                        },
+                        {
+                          "children": [],
+                          "description": "A source code file",
+                          "id": 100,
+                          "label": "code_file",
+                          "parent_id": 96
+                        }
+                      ],
+                      "description": "A digital file or document",
+                      "id": 96,
+                      "label": "digital_document",
+                      "parent_id": 672
+                    },
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "Created via manual review",
+                          "id": 620,
+                          "label": "meeting_link",
+                          "parent_id": 619
+                        }
+                      ],
+                      "description": "Created via manual review",
+                      "id": 619,
+                      "label": "digital_link",
+                      "parent_id": 672
+                    }
+                  ],
+                  "description": "Added via web interface",
+                  "id": 672,
+                  "label": "digital_product",
+                  "parent_id": 111
+                }
+              ],
+              "description": "A commercial product or offering",
+              "id": 111,
+              "label": "product",
+              "parent_id": 491
+            }
+          ],
+          "description": "Anything man made.  Can be physical object or digital object.  Any kind of product.",
+          "id": 491,
+          "label": "artifact",
+          "parent_id": 1
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "A technology company",
+                  "id": 33,
+                  "label": "tech_company",
+                  "parent_id": 32
+                },
+                {
+                  "children": [],
+                  "description": "An early-stage company",
+                  "id": 34,
+                  "label": "startup",
+                  "parent_id": 32
+                },
+                {
+                  "children": [],
+                  "description": "A large company",
+                  "id": 35,
+                  "label": "corporation",
+                  "parent_id": 32
+                }
+              ],
+              "description": "A commercial business organization",
+              "id": 32,
+              "label": "company",
+              "parent_id": 31
+            },
+            {
+              "children": [],
+              "description": "A governing body",
+              "id": 40,
+              "label": "government",
+              "parent_id": 31
+            },
+            {
+              "children": [],
+              "description": "A non-governmental organization",
+              "id": 41,
+              "label": "ngo",
+              "parent_id": 31
+            },
+            {
+              "children": [],
+              "description": "A non-profit organization",
+              "id": 42,
+              "label": "nonprofit",
+              "parent_id": 31
+            },
+            {
+              "children": [],
+              "description": "A membership organization",
+              "id": 43,
+              "label": "club",
+              "parent_id": 31
+            },
+            {
+              "children": [],
+              "description": "A group organized for a purpose",
+              "id": 44,
+              "label": "team",
+              "parent_id": 31
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Created via manual review",
+                  "id": 576,
+                  "label": "law_firm",
+                  "parent_id": 575
+                }
+              ],
+              "description": "Created via manual review",
+              "id": 575,
+              "label": "professional_services_firm",
+              "parent_id": 31
+            },
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 577,
+              "label": "political_party",
+              "parent_id": 31
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Created via manual review",
+                  "id": 625,
+                  "label": "university",
+                  "parent_id": 624
+                },
+                {
+                  "children": [],
+                  "description": "Added via web interface",
+                  "id": 670,
+                  "label": "high_school",
+                  "parent_id": 624
+                },
+                {
+                  "children": [],
+                  "description": "Added via web interface",
+                  "id": 671,
+                  "label": "midle_school",
+                  "parent_id": 624
+                }
+              ],
+              "description": "Created via manual review",
+              "id": 624,
+              "label": "educational_institution",
+              "parent_id": 31
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Created via manual review",
+                  "id": 630,
+                  "label": "band",
+                  "parent_id": 629
+                }
+              ],
+              "description": "Created via manual review",
+              "id": 629,
+              "label": "musical_group",
+              "parent_id": 31
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Created via manual review",
+                  "id": 496,
+                  "label": "open_source_community",
+                  "parent_id": 495
+                }
+              ],
+              "description": "Created via manual review",
+              "id": 495,
+              "label": "community",
+              "parent_id": 31
+            }
+          ],
+          "description": "A structured group of people with a common purpose",
+          "id": 31,
+          "label": "organization",
+          "parent_id": 1
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "A nation state",
+              "id": 46,
+              "label": "country",
+              "parent_id": 45
+            },
+            {
+              "children": [],
+              "description": "A state or province",
+              "id": 47,
+              "label": "state",
+              "parent_id": 45
+            },
+            {
+              "children": [],
+              "description": "An urban area",
+              "id": 48,
+              "label": "city",
+              "parent_id": 45
+            },
+            {
+              "children": [],
+              "description": "A small urban area",
+              "id": 49,
+              "label": "town",
+              "parent_id": 45
+            },
+            {
+              "children": [],
+              "description": "A district within a city",
+              "id": 50,
+              "label": "neighborhood",
+              "parent_id": 45
+            },
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "Created via manual review",
+                      "id": 648,
+                      "label": "home",
+                      "parent_id": 647
+                    }
+                  ],
+                  "description": "Created via manual review",
+                  "id": 647,
+                  "label": "residence",
+                  "parent_id": 51
+                },
+                {
+                  "children": [],
+                  "description": "A workplace",
+                  "id": 53,
+                  "label": "office",
+                  "parent_id": 51
+                },
+                {
+                  "children": [],
+                  "description": "An educational facility",
+                  "id": 54,
+                  "label": "school_building",
+                  "parent_id": 51
+                },
+                {
+                  "children": [],
+                  "description": "A medical facility",
+                  "id": 55,
+                  "label": "hospital",
+                  "parent_id": 51
+                },
+                {
+                  "children": [],
+                  "description": "A dining establishment",
+                  "id": 56,
+                  "label": "restaurant",
+                  "parent_id": 51
+                },
+                {
+                  "children": [],
+                  "description": "A retail establishment",
+                  "id": 57,
+                  "label": "store",
+                  "parent_id": 51
+                },
+                {
+                  "children": [],
+                  "description": "A fitness facility",
+                  "id": 58,
+                  "label": "gym",
+                  "parent_id": 51
+                }
+              ],
+              "description": "A structure with walls and a roof",
+              "id": 51,
+              "label": "building",
+              "parent_id": 45
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "A public green space",
+                  "id": 60,
+                  "label": "park",
+                  "parent_id": 59
+                },
+                {
+                  "children": [],
+                  "description": "A shore area",
+                  "id": 61,
+                  "label": "beach",
+                  "parent_id": 59
+                },
+                {
+                  "children": [],
+                  "description": "An elevated landform",
+                  "id": 62,
+                  "label": "mountain",
+                  "parent_id": 59
+                },
+                {
+                  "children": [],
+                  "description": "A wooded area",
+                  "id": 63,
+                  "label": "forest",
+                  "parent_id": 59
+                },
+                {
+                  "children": [],
+                  "description": "A path for walking or hiking",
+                  "id": 64,
+                  "label": "trail",
+                  "parent_id": 59
+                }
+              ],
+              "description": "A location in the open air",
+              "id": 59,
+              "label": "outdoor_location",
+              "parent_id": 45
+            }
+          ],
+          "description": "A place or position",
+          "id": 45,
+          "label": "location",
+          "parent_id": 1
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": null,
+              "id": 707,
+              "label": "reference_agent",
+              "parent_id": 65
+            },
+            {
+              "children": [],
+              "description": "An AI assistant",
+              "id": 66,
+              "label": "assistant",
+              "parent_id": 65
+            },
+            {
+              "children": [],
+              "description": "A conversational AI",
+              "id": 67,
+              "label": "chatbot",
+              "parent_id": 65
+            },
+            {
+              "children": [],
+              "description": "An autonomous AI system",
+              "id": 68,
+              "label": "agent",
+              "parent_id": 65
+            }
+          ],
+          "description": "An artificial intelligence agent",
+          "id": 65,
+          "label": "ai_agent",
+          "parent_id": 1
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "A domesticated canine",
+                  "id": 71,
+                  "label": "dog",
+                  "parent_id": 70
+                },
+                {
+                  "children": [],
+                  "description": "A domesticated feline",
+                  "id": 72,
+                  "label": "cat",
+                  "parent_id": 70
+                },
+                {
+                  "children": [],
+                  "description": "An avian pet",
+                  "id": 73,
+                  "label": "bird",
+                  "parent_id": 70
+                },
+                {
+                  "children": [],
+                  "description": "An aquatic pet",
+                  "id": 74,
+                  "label": "fish",
+                  "parent_id": 70
+                }
+              ],
+              "description": "A domesticated animal kept for companionship",
+              "id": 70,
+              "label": "pet",
+              "parent_id": 69
+            }
+          ],
+          "description": "A living organism",
+          "id": 69,
+          "label": "animal",
+          "parent_id": 1
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "A written or printed work",
+              "id": 76,
+              "label": "book",
+              "parent_id": 75
+            },
+            {
+              "children": [],
+              "description": "A written piece",
+              "id": 77,
+              "label": "article",
+              "parent_id": 75
+            },
+            {
+              "children": [],
+              "description": "A motion picture",
+              "id": 78,
+              "label": "movie",
+              "parent_id": 75
+            },
+            {
+              "children": [],
+              "description": "A television program",
+              "id": 79,
+              "label": "tv_show",
+              "parent_id": 75
+            },
+            {
+              "children": [],
+              "description": "A recorded visual medium",
+              "id": 80,
+              "label": "video",
+              "parent_id": 75
+            },
+            {
+              "children": [],
+              "description": "Musical composition or recording",
+              "id": 81,
+              "label": "music",
+              "parent_id": 75
+            },
+            {
+              "children": [],
+              "description": "A musical piece",
+              "id": 82,
+              "label": "song",
+              "parent_id": 75
+            },
+            {
+              "children": [],
+              "description": "An audio program",
+              "id": 83,
+              "label": "podcast",
+              "parent_id": 75
+            },
+            {
+              "children": [],
+              "description": "An interactive entertainment",
+              "id": 84,
+              "label": "game",
+              "parent_id": 75
+            },
+            {
+              "children": [],
+              "description": "A piece of visual art",
+              "id": 85,
+              "label": "artwork",
+              "parent_id": 75
+            },
+            {
+              "children": [],
+              "description": "A captured image",
+              "id": 86,
+              "label": "photograph",
+              "parent_id": 75
+            },
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "Created via manual review",
+                      "id": 558,
+                      "label": "stage_musical",
+                      "parent_id": 557
+                    }
+                  ],
+                  "description": "Created via manual review",
+                  "id": 557,
+                  "label": "musical_theatre_work",
+                  "parent_id": 556
+                }
+              ],
+              "description": "Created via manual review",
+              "id": 556,
+              "label": "theatrical_work",
+              "parent_id": 75
+            },
+            {
+              "children": [],
+              "description": "The proposed path 'entity > creative_work > game' is close, but 'game' is too general and doesn't align with the existing siblings under 'creative_work'. The context suggests 'End Game' is an interactive entertainment, which fits the category of 'video_game'. This new category would align well with existing siblings like 'movie', 'tv_show', and 'music', all of which are specific types of creative works. Therefore, a new category 'video_game' should be added under 'creative_work'.",
+              "id": 697,
+              "label": "video_game",
+              "parent_id": 75
+            }
+          ],
+          "description": "A work of creative expression",
+          "id": 75,
+          "label": "creative_work",
+          "parent_id": 1
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "A meal",
+              "id": 122,
+              "label": "meal",
+              "parent_id": 121
+            },
+            {
+              "children": [],
+              "description": "A food ingredient",
+              "id": 123,
+              "label": "ingredient",
+              "parent_id": 121
+            },
+            {
+              "children": [],
+              "description": "A drink",
+              "id": 124,
+              "label": "beverage",
+              "parent_id": 121
+            },
+            {
+              "children": [],
+              "description": "A prepared dish",
+              "id": 125,
+              "label": "dish",
+              "parent_id": 121
+            },
+            {
+              "children": [],
+              "description": "A snack food",
+              "id": 126,
+              "label": "snack",
+              "parent_id": 121
+            }
+          ],
+          "description": "Edible substance",
+          "id": 121,
+          "label": "food",
+          "parent_id": 1
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "A pharmaceutical drug",
+              "id": 128,
+              "label": "medication",
+              "parent_id": 127
+            },
+            {
+              "children": [],
+              "description": "A medical treatment",
+              "id": 129,
+              "label": "treatment",
+              "parent_id": 127
+            },
+            {
+              "children": [],
+              "description": "A health condition",
+              "id": 130,
+              "label": "medical_condition",
+              "parent_id": 127
+            },
+            {
+              "children": [],
+              "description": "A medical symptom",
+              "id": 131,
+              "label": "symptom",
+              "parent_id": 127
+            },
+            {
+              "children": [],
+              "description": "A medical procedure",
+              "id": 132,
+              "label": "medical_procedure",
+              "parent_id": 127
+            }
+          ],
+          "description": "A medical-related entity",
+          "id": 127,
+          "label": "medical_entity",
+          "parent_id": 1
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Intellectual property",
+              "id": 134,
+              "label": "intellectual_property",
+              "parent_id": 133
+            },
+            {
+              "children": [],
+              "description": "A license or permission",
+              "id": 135,
+              "label": "license",
+              "parent_id": 133
+            },
+            {
+              "children": [],
+              "description": "A right or entitlement",
+              "id": 136,
+              "label": "right",
+              "parent_id": 133
+            },
+            {
+              "children": [],
+              "description": "A warranty or guarantee",
+              "id": 137,
+              "label": "warranty",
+              "parent_id": 133
+            }
+          ],
+          "description": "An intangible entity",
+          "id": 133,
+          "label": "intangible",
+          "parent_id": 1
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "A tree plant",
+              "id": 139,
+              "label": "tree",
+              "parent_id": 138
+            },
+            {
+              "children": [],
+              "description": "A flowering plant",
+              "id": 140,
+              "label": "flower",
+              "parent_id": 138
+            },
+            {
+              "children": [],
+              "description": "A vegetable plant",
+              "id": 141,
+              "label": "vegetable_plant",
+              "parent_id": 138
+            },
+            {
+              "children": [],
+              "description": "An herb plant",
+              "id": 142,
+              "label": "herb",
+              "parent_id": 138
+            }
+          ],
+          "description": "A plant organism",
+          "id": 138,
+          "label": "plant",
+          "parent_id": 1
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 587,
+              "label": "email_address",
+              "parent_id": 586
+            }
+          ],
+          "description": "Any kind of contact information.",
+          "id": 586,
+          "label": "contact_point",
+          "parent_id": 1
+        }
+      ],
+      "description": "Physical or abstract things that exist",
+      "id": 1,
+      "label": "entity",
+      "parent_id": null
+    },
+    {
+      "children": [
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "A phone conversation",
+              "id": 148,
+              "label": "call",
+              "parent_id": 143
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "The proposed path 'event > communication > conversation' is appropriate for the node 'Question' as it fits the context of an informal exchange of ideas. However, 'question' is distinct enough from 'conversation' to warrant its own category. A question is a specific type of communication event that involves seeking information, which is not fully captured by 'conversation'. Therefore, adding 'question' as a new category under 'conversation' is justified.",
+                  "id": 696,
+                  "label": "question",
+                  "parent_id": 144
+                }
+              ],
+              "description": "An informal exchange of ideas",
+              "id": 144,
+              "label": "conversation",
+              "parent_id": 143
+            },
+            {
+              "children": [],
+              "description": "A detailed consideration of a topic",
+              "id": 145,
+              "label": "discussion",
+              "parent_id": 143
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Created via manual review",
+                  "id": 631,
+                  "label": "video_meeting",
+                  "parent_id": 146
+                }
+              ],
+              "description": "A formal gathering for discussion",
+              "id": 146,
+              "label": "meeting",
+              "parent_id": 143
+            },
+            {
+              "children": [],
+              "description": "A formal talk",
+              "id": 147,
+              "label": "presentation",
+              "parent_id": 143
+            },
+            {
+              "children": [],
+              "description": "A video conversation",
+              "id": 149,
+              "label": "video_call",
+              "parent_id": 143
+            },
+            {
+              "children": [],
+              "description": "A formal questioning session",
+              "id": 150,
+              "label": "interview",
+              "parent_id": 143
+            },
+            {
+              "children": [],
+              "description": "A discussion to reach agreement",
+              "id": 151,
+              "label": "negotiation",
+              "parent_id": 143
+            },
+            {
+              "children": [],
+              "description": "A brief communication",
+              "id": 152,
+              "label": "message",
+              "parent_id": 143
+            },
+            {
+              "children": [],
+              "description": "An electronic message",
+              "id": 153,
+              "label": "email",
+              "parent_id": 143
+            },
+            {
+              "children": [],
+              "description": "A text message",
+              "id": 154,
+              "label": "text",
+              "parent_id": 143
+            },
+            {
+              "children": [],
+              "description": "An online conversation",
+              "id": 155,
+              "label": "chat",
+              "parent_id": 143
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Created via manual review",
+                  "id": 612,
+                  "label": "question",
+                  "parent_id": 611
+                }
+              ],
+              "description": "Created via manual review",
+              "id": 611,
+              "label": "inquiry",
+              "parent_id": 143
+            }
+          ],
+          "description": "An act of information exchange",
+          "id": 143,
+          "label": "communication",
+          "parent_id": 2
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "A social celebration",
+              "id": 157,
+              "label": "party",
+              "parent_id": 156
+            },
+            {
+              "children": [],
+              "description": "A social meal",
+              "id": 158,
+              "label": "dinner",
+              "parent_id": 156
+            },
+            {
+              "children": [],
+              "description": "A midday meal gathering",
+              "id": 159,
+              "label": "lunch",
+              "parent_id": 156
+            },
+            {
+              "children": [],
+              "description": "A joyous social event",
+              "id": 160,
+              "label": "celebration",
+              "parent_id": 156
+            },
+            {
+              "children": [],
+              "description": "An informal meeting of people",
+              "id": 161,
+              "label": "gathering",
+              "parent_id": 156
+            },
+            {
+              "children": [],
+              "description": "A casual social meeting",
+              "id": 162,
+              "label": "hangout",
+              "parent_id": 156
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "A marriage ceremony",
+                  "id": 164,
+                  "label": "wedding",
+                  "parent_id": 163
+                },
+                {
+                  "children": [],
+                  "description": "A birthday celebration",
+                  "id": 165,
+                  "label": "birthday_party",
+                  "parent_id": 163
+                },
+                {
+                  "children": [],
+                  "description": "An anniversary celebration",
+                  "id": 166,
+                  "label": "anniversary",
+                  "parent_id": 163
+                },
+                {
+                  "children": [],
+                  "description": "A graduation ceremony",
+                  "id": 167,
+                  "label": "graduation",
+                  "parent_id": 163
+                }
+              ],
+              "description": "A formal social event",
+              "id": 163,
+              "label": "ceremony",
+              "parent_id": 156
+            }
+          ],
+          "description": "A social gathering",
+          "id": 156,
+          "label": "social_event",
+          "parent_id": 2
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "A large professional gathering",
+              "id": 169,
+              "label": "conference",
+              "parent_id": 168
+            },
+            {
+              "children": [],
+              "description": "A hands-on training session",
+              "id": 170,
+              "label": "workshop",
+              "parent_id": 168
+            },
+            {
+              "children": [],
+              "description": "An educational session",
+              "id": 171,
+              "label": "seminar",
+              "parent_id": 168
+            },
+            {
+              "children": [],
+              "description": "A skill development session",
+              "id": 172,
+              "label": "training",
+              "parent_id": 168
+            },
+            {
+              "children": [],
+              "description": "A team coordination meeting",
+              "id": 173,
+              "label": "team_meeting",
+              "parent_id": 168
+            },
+            {
+              "children": [],
+              "description": "A project status review",
+              "id": 174,
+              "label": "project_review",
+              "parent_id": 168
+            },
+            {
+              "children": [],
+              "description": "An employee evaluation",
+              "id": 175,
+              "label": "performance_review",
+              "parent_id": 168
+            }
+          ],
+          "description": "A work-related event",
+          "id": 168,
+          "label": "professional_event",
+          "parent_id": 2
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "A structured exercise session",
+                  "id": 178,
+                  "label": "workout",
+                  "parent_id": 177
+                },
+                {
+                  "children": [],
+                  "description": "Cardiovascular exercise",
+                  "id": 179,
+                  "label": "cardio",
+                  "parent_id": 177
+                },
+                {
+                  "children": [],
+                  "description": "Resistance exercise",
+                  "id": 180,
+                  "label": "strength_training",
+                  "parent_id": 177
+                },
+                {
+                  "children": [],
+                  "description": "Flexibility exercise",
+                  "id": 181,
+                  "label": "stretching",
+                  "parent_id": 177
+                }
+              ],
+              "description": "A physical exertion for fitness",
+              "id": 177,
+              "label": "exercise",
+              "parent_id": 176
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "A running sport",
+                  "id": 183,
+                  "label": "running",
+                  "parent_id": 182
+                },
+                {
+                  "children": [],
+                  "description": "A swimming sport",
+                  "id": 184,
+                  "label": "swimming",
+                  "parent_id": 182
+                },
+                {
+                  "children": [],
+                  "description": "A cycling sport",
+                  "id": 185,
+                  "label": "cycling",
+                  "parent_id": 182
+                },
+                {
+                  "children": [],
+                  "description": "A basketball sport",
+                  "id": 186,
+                  "label": "basketball",
+                  "parent_id": 182
+                },
+                {
+                  "children": [],
+                  "description": "A soccer sport",
+                  "id": 187,
+                  "label": "soccer",
+                  "parent_id": 182
+                },
+                {
+                  "children": [],
+                  "description": "A tennis sport",
+                  "id": 188,
+                  "label": "tennis",
+                  "parent_id": 182
+                },
+                {
+                  "children": [],
+                  "description": "A hiking activity",
+                  "id": 189,
+                  "label": "hiking",
+                  "parent_id": 182
+                }
+              ],
+              "description": "A competitive physical activity",
+              "id": 182,
+              "label": "sport",
+              "parent_id": 176
+            },
+            {
+              "children": [],
+              "description": "A mind-body practice",
+              "id": 190,
+              "label": "yoga",
+              "parent_id": 176
+            },
+            {
+              "children": [],
+              "description": "A mindfulness practice",
+              "id": 191,
+              "label": "meditation",
+              "parent_id": 176
+            },
+            {
+              "children": [],
+              "description": "A walking activity",
+              "id": 192,
+              "label": "walk",
+              "parent_id": 176
+            },
+            {
+              "children": [],
+              "description": "A dancing activity",
+              "id": 193,
+              "label": "dance",
+              "parent_id": 176
+            }
+          ],
+          "description": "A physical action or exercise",
+          "id": 176,
+          "label": "physical_activity",
+          "parent_id": 2
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "An instructional session",
+              "id": 195,
+              "label": "class",
+              "parent_id": 194
+            },
+            {
+              "children": [],
+              "description": "A formal educational talk",
+              "id": 196,
+              "label": "lecture",
+              "parent_id": 194
+            },
+            {
+              "children": [],
+              "description": "A hands-on learning session",
+              "id": 197,
+              "label": "tutorial",
+              "parent_id": 194
+            },
+            {
+              "children": [],
+              "description": "A self-study period",
+              "id": 198,
+              "label": "study_session",
+              "parent_id": 194
+            },
+            {
+              "children": [],
+              "description": "An assessment",
+              "id": 199,
+              "label": "exam",
+              "parent_id": 194
+            },
+            {
+              "children": [],
+              "description": "A short assessment",
+              "id": 200,
+              "label": "quiz",
+              "parent_id": 194
+            },
+            {
+              "children": [],
+              "description": "A laboratory session",
+              "id": 201,
+              "label": "lab",
+              "parent_id": 194
+            }
+          ],
+          "description": "A learning event",
+          "id": 194,
+          "label": "educational_event",
+          "parent_id": 2
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "A healthcare appointment",
+              "id": 203,
+              "label": "medical_appointment",
+              "parent_id": 202
+            },
+            {
+              "children": [],
+              "description": "A dental appointment",
+              "id": 204,
+              "label": "dental_appointment",
+              "parent_id": 202
+            },
+            {
+              "children": [],
+              "description": "A service appointment",
+              "id": 205,
+              "label": "service_appointment",
+              "parent_id": 202
+            }
+          ],
+          "description": "A scheduled meeting",
+          "id": 202,
+          "label": "appointment",
+          "parent_id": 2
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "A journey",
+              "id": 207,
+              "label": "trip",
+              "parent_id": 206
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Created via manual review",
+                  "id": 579,
+                  "label": "cruise",
+                  "parent_id": 208
+                }
+              ],
+              "description": "A leisure trip",
+              "id": 208,
+              "label": "vacation",
+              "parent_id": 206
+            },
+            {
+              "children": [],
+              "description": "A work-related trip",
+              "id": 209,
+              "label": "business_trip",
+              "parent_id": 206
+            },
+            {
+              "children": [],
+              "description": "Regular travel to work",
+              "id": 210,
+              "label": "commute",
+              "parent_id": 206
+            },
+            {
+              "children": [],
+              "description": "Air travel",
+              "id": 211,
+              "label": "flight",
+              "parent_id": 206
+            }
+          ],
+          "description": "Movement from one place to another",
+          "id": 206,
+          "label": "travel",
+          "parent_id": 2
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Resting activity",
+              "id": 213,
+              "label": "sleep",
+              "parent_id": 212
+            },
+            {
+              "children": [],
+              "description": "An eating occasion",
+              "id": 214,
+              "label": "meal",
+              "parent_id": 212
+            },
+            {
+              "children": [],
+              "description": "Morning meal",
+              "id": 215,
+              "label": "breakfast",
+              "parent_id": 212
+            },
+            {
+              "children": [],
+              "description": "Food preparation",
+              "id": 216,
+              "label": "cooking",
+              "parent_id": 212
+            },
+            {
+              "children": [],
+              "description": "Housekeeping",
+              "id": 217,
+              "label": "cleaning",
+              "parent_id": 212
+            },
+            {
+              "children": [],
+              "description": "Purchasing goods",
+              "id": 218,
+              "label": "shopping",
+              "parent_id": 212
+            },
+            {
+              "children": [],
+              "description": "Small tasks",
+              "id": 219,
+              "label": "errands",
+              "parent_id": 212
+            }
+          ],
+          "description": "A regular daily activity",
+          "id": 212,
+          "label": "routine_activity",
+          "parent_id": 2
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "A buying transaction",
+              "id": 221,
+              "label": "purchase",
+              "parent_id": 220
+            },
+            {
+              "children": [],
+              "description": "A selling transaction",
+              "id": 222,
+              "label": "sale",
+              "parent_id": 220
+            },
+            {
+              "children": [],
+              "description": "A payment transaction",
+              "id": 223,
+              "label": "payment",
+              "parent_id": 220
+            },
+            {
+              "children": [],
+              "description": "A refund transaction",
+              "id": 224,
+              "label": "refund",
+              "parent_id": 220
+            },
+            {
+              "children": [],
+              "description": "A donation transaction",
+              "id": 225,
+              "label": "donation",
+              "parent_id": 220
+            },
+            {
+              "children": [],
+              "description": "A rental transaction",
+              "id": 226,
+              "label": "rental",
+              "parent_id": 220
+            }
+          ],
+          "description": "A financial or commercial transaction",
+          "id": 220,
+          "label": "transaction",
+          "parent_id": 2
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Signing a contract",
+              "id": 228,
+              "label": "contract_signing",
+              "parent_id": 227
+            },
+            {
+              "children": [],
+              "description": "A legal lawsuit",
+              "id": 229,
+              "label": "lawsuit",
+              "parent_id": 227
+            },
+            {
+              "children": [],
+              "description": "A court proceeding",
+              "id": 230,
+              "label": "court_hearing",
+              "parent_id": 227
+            },
+            {
+              "children": [],
+              "description": "An arbitration proceeding",
+              "id": 231,
+              "label": "arbitration",
+              "parent_id": 227
+            }
+          ],
+          "description": "A legal proceeding or action",
+          "id": 227,
+          "label": "legal_event",
+          "parent_id": 2
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Receiving an award",
+              "id": 233,
+              "label": "award",
+              "parent_id": 232
+            },
+            {
+              "children": [],
+              "description": "Receiving recognition",
+              "id": 234,
+              "label": "recognition",
+              "parent_id": 232
+            },
+            {
+              "children": [],
+              "description": "Completing something",
+              "id": 235,
+              "label": "completion",
+              "parent_id": 232
+            },
+            {
+              "children": [],
+              "description": "Reaching a milestone",
+              "id": 236,
+              "label": "milestone",
+              "parent_id": 232
+            }
+          ],
+          "description": "An accomplishment or success",
+          "id": 232,
+          "label": "achievement",
+          "parent_id": 2
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "A birth",
+              "id": 238,
+              "label": "birth",
+              "parent_id": 237
+            },
+            {
+              "children": [],
+              "description": "A death",
+              "id": 239,
+              "label": "death",
+              "parent_id": 237
+            },
+            {
+              "children": [],
+              "description": "Coming of age",
+              "id": 240,
+              "label": "coming_of_age",
+              "parent_id": 237
+            },
+            {
+              "children": [],
+              "description": "Retirement",
+              "id": 241,
+              "label": "retirement",
+              "parent_id": 237
+            }
+          ],
+          "description": "A significant life event",
+          "id": 237,
+          "label": "life_milestone",
+          "parent_id": 2
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "An injury accident",
+              "id": 243,
+              "label": "injury",
+              "parent_id": 242
+            },
+            {
+              "children": [],
+              "description": "Property damage",
+              "id": 244,
+              "label": "damage",
+              "parent_id": 242
+            },
+            {
+              "children": [],
+              "description": "A spill accident",
+              "id": 245,
+              "label": "spill",
+              "parent_id": 242
+            }
+          ],
+          "description": "An unintended incident",
+          "id": 242,
+          "label": "accident",
+          "parent_id": 2
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Writing activity",
+              "id": 247,
+              "label": "writing",
+              "parent_id": 246
+            },
+            {
+              "children": [],
+              "description": "Drawing activity",
+              "id": 248,
+              "label": "drawing",
+              "parent_id": 246
+            },
+            {
+              "children": [],
+              "description": "Music composition",
+              "id": 249,
+              "label": "composing",
+              "parent_id": 246
+            },
+            {
+              "children": [],
+              "description": "Design activity",
+              "id": 250,
+              "label": "designing",
+              "parent_id": 246
+            }
+          ],
+          "description": "A creative activity",
+          "id": 246,
+          "label": "creative_event",
+          "parent_id": 2
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 592,
+              "label": "scheduled_task",
+              "parent_id": 591
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 591,
+          "label": "automation",
+          "parent_id": 2
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Created via manual review",
+                  "id": 503,
+                  "label": "television_watching",
+                  "parent_id": 502
+                }
+              ],
+              "description": "Created via manual review",
+              "id": 502,
+              "label": "viewing",
+              "parent_id": 501
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 501,
+          "label": "media_consumption",
+          "parent_id": 2
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Created via manual review",
+                  "id": 555,
+                  "label": "karaoke_performance",
+                  "parent_id": 554
+                }
+              ],
+              "description": "Created via manual review",
+              "id": 554,
+              "label": "musical_performance",
+              "parent_id": 553
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 553,
+          "label": "performance",
+          "parent_id": 2
+        }
+      ],
+      "description": "Actions or occurrences at a point in time",
+      "id": 2,
+      "label": "event",
+      "parent_id": null
+    },
+    {
+      "children": [
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 639,
+              "label": "therapy_participation",
+              "parent_id": 638
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 638,
+          "label": "participation_state",
+          "parent_id": 3
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 653,
+              "label": "place_of_residence",
+              "parent_id": 652
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 652,
+          "label": "residence_state",
+          "parent_id": 3
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 655,
+              "label": "email_address",
+              "parent_id": 654
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 654,
+          "label": "contact_point",
+          "parent_id": 3
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "A friend relationship",
+              "id": 252,
+              "label": "friendship",
+              "parent_id": 251
+            },
+            {
+              "children": [],
+              "description": "A married relationship",
+              "id": 253,
+              "label": "marriage",
+              "parent_id": 251
+            },
+            {
+              "children": [],
+              "description": "A partner relationship",
+              "id": 254,
+              "label": "partnership",
+              "parent_id": 251
+            },
+            {
+              "children": [],
+              "description": "A romantic relationship",
+              "id": 255,
+              "label": "dating",
+              "parent_id": 251
+            },
+            {
+              "children": [],
+              "description": "An engaged relationship",
+              "id": 256,
+              "label": "engagement",
+              "parent_id": 251
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "The proposed path 'state > relationship > family_relationship' is appropriate for classifying 'sibling relationship' as it fits the IS-A rule: a sibling relationship IS-A family relationship. The existing siblings at this level, such as 'friendship' and 'marriage', are types of relationships, but none specifically cover sibling relationships. Therefore, adding 'sibling_relationship' as a new category under 'family_relationship' fills a gap in the taxonomy and maintains semantic clarity.",
+                  "id": 693,
+                  "label": "sibling_relationship",
+                  "parent_id": 257
+                }
+              ],
+              "description": "A family connection",
+              "id": 257,
+              "label": "family_relationship",
+              "parent_id": 251
+            },
+            {
+              "children": [],
+              "description": "A work relationship",
+              "id": 258,
+              "label": "professional_relationship",
+              "parent_id": 251
+            },
+            {
+              "children": [],
+              "description": "A mentor-mentee relationship",
+              "id": 259,
+              "label": "mentorship",
+              "parent_id": 251
+            },
+            {
+              "children": [],
+              "description": "A membership relationship",
+              "id": 261,
+              "label": "membership",
+              "parent_id": 251
+            },
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 549,
+              "label": "conversational_relationship",
+              "parent_id": 251
+            },
+            {
+              "children": [],
+              "description": "The proposed path 'state > relationship > partnership' is not entirely appropriate because 'pair bond' is a specific type of relationship that is distinct from 'partnership'. The existing siblings under 'relationship' include various types of relationships, such as 'friendship' and 'marriage', which are more aligned with 'pair bond'. Therefore, it is more appropriate to add 'pair_bond' as a new category under 'state > relationship'. This ensures that the taxonomy accurately reflects the distinct nature of pair bonding as a type of relationship.",
+              "id": 695,
+              "label": "pair_bond",
+              "parent_id": 251
+            }
+          ],
+          "description": "A connection between entities",
+          "id": 251,
+          "label": "relationship",
+          "parent_id": 3
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "The proposed path 'state > employment_status > employed' is appropriate for categorizing 'Remote Work' as it fits under the broader category of being employed. However, 'Remote Work' is a distinct type of employment status that is not currently represented among the existing siblings like 'unemployed', 'self_employed', etc. Adding 'remote_work' as a new category under 'employed' would accurately reflect the nature of working remotely as a specific employment status.",
+                  "id": 694,
+                  "label": "state > relationship > employment > work_arrangement > remote",
+                  "parent_id": 263
+                }
+              ],
+              "description": "Having a job",
+              "id": 263,
+              "label": "employed",
+              "parent_id": 262
+            },
+            {
+              "children": [],
+              "description": "Not having a job",
+              "id": 264,
+              "label": "unemployed",
+              "parent_id": 262
+            },
+            {
+              "children": [],
+              "description": "Working for oneself",
+              "id": 265,
+              "label": "self_employed",
+              "parent_id": 262
+            },
+            {
+              "children": [],
+              "description": "Independent contractor",
+              "id": 266,
+              "label": "freelance",
+              "parent_id": 262
+            },
+            {
+              "children": [],
+              "description": "No longer working",
+              "id": 267,
+              "label": "retired",
+              "parent_id": 262
+            },
+            {
+              "children": [],
+              "description": "In education",
+              "id": 268,
+              "label": "student",
+              "parent_id": 262
+            },
+            {
+              "children": [],
+              "description": "In an internship",
+              "id": 269,
+              "label": "intern",
+              "parent_id": 262
+            }
+          ],
+          "description": "A work status",
+          "id": 262,
+          "label": "employment_status",
+          "parent_id": 3
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "A state of joy",
+                  "id": 272,
+                  "label": "happiness",
+                  "parent_id": 271
+                },
+                {
+                  "children": [],
+                  "description": "A state of enthusiasm",
+                  "id": 273,
+                  "label": "excitement",
+                  "parent_id": 271
+                },
+                {
+                  "children": [],
+                  "description": "A state of satisfaction",
+                  "id": 274,
+                  "label": "contentment",
+                  "parent_id": 271
+                },
+                {
+                  "children": [],
+                  "description": "A state of thankfulness",
+                  "id": 275,
+                  "label": "gratitude",
+                  "parent_id": 271
+                },
+                {
+                  "children": [],
+                  "description": "A state of affection",
+                  "id": 276,
+                  "label": "love",
+                  "parent_id": 271
+                }
+              ],
+              "description": "A positive feeling",
+              "id": 271,
+              "label": "positive_emotion",
+              "parent_id": 270
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "A state of sorrow",
+                  "id": 278,
+                  "label": "sadness",
+                  "parent_id": 277
+                },
+                {
+                  "children": [],
+                  "description": "A state of displeasure",
+                  "id": 279,
+                  "label": "anger",
+                  "parent_id": 277
+                },
+                {
+                  "children": [],
+                  "description": "A state of worry",
+                  "id": 280,
+                  "label": "anxiety",
+                  "parent_id": 277
+                },
+                {
+                  "children": [],
+                  "description": "A state of apprehension",
+                  "id": 281,
+                  "label": "fear",
+                  "parent_id": 277
+                },
+                {
+                  "children": [],
+                  "description": "A state of dissatisfaction",
+                  "id": 282,
+                  "label": "frustration",
+                  "parent_id": 277
+                },
+                {
+                  "children": [],
+                  "description": "A state of tension",
+                  "id": 283,
+                  "label": "stress",
+                  "parent_id": 277
+                }
+              ],
+              "description": "A negative feeling",
+              "id": 277,
+              "label": "negative_emotion",
+              "parent_id": 270
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "A state of tranquility",
+                  "id": 285,
+                  "label": "calm",
+                  "parent_id": 284
+                },
+                {
+                  "children": [],
+                  "description": "A state of disinterest",
+                  "id": 286,
+                  "label": "boredom",
+                  "parent_id": 284
+                },
+                {
+                  "children": [],
+                  "description": "A state of uncertainty",
+                  "id": 287,
+                  "label": "confusion",
+                  "parent_id": 284
+                }
+              ],
+              "description": "A neutral feeling",
+              "id": 284,
+              "label": "neutral_emotion",
+              "parent_id": 270
+            },
+            {
+              "children": [],
+              "description": "The proposed path 'state > emotional_state > anticipation' is close, but 'anticipation' should be more accurately labeled as 'anticipation_state' to maintain consistency with the node label and the existing sibling structure. The siblings 'positive_emotion', 'negative_emotion', and 'neutral_emotion' suggest that the taxonomy is organized by specific emotional states, so adding 'anticipation_state' under 'emotional_state' is appropriate. This ensures clarity and consistency in the taxonomy.",
+              "id": 698,
+              "label": "anticipation_state",
+              "parent_id": 270
+            },
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 498,
+              "label": "anticipation",
+              "parent_id": 270
+            }
+          ],
+          "description": "An emotional condition",
+          "id": 270,
+          "label": "emotional_state",
+          "parent_id": 3
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "In good health",
+              "id": 289,
+              "label": "healthy",
+              "parent_id": 288
+            },
+            {
+              "children": [],
+              "description": "Having an illness",
+              "id": 290,
+              "label": "sick",
+              "parent_id": 288
+            },
+            {
+              "children": [],
+              "description": "Regaining health",
+              "id": 291,
+              "label": "recovering",
+              "parent_id": 288
+            },
+            {
+              "children": [],
+              "description": "Having an injury",
+              "id": 292,
+              "label": "injured",
+              "parent_id": 288
+            },
+            {
+              "children": [],
+              "description": "Experiencing tiredness",
+              "id": 293,
+              "label": "fatigued",
+              "parent_id": 288
+            },
+            {
+              "children": [],
+              "description": "Having high energy",
+              "id": 294,
+              "label": "energetic",
+              "parent_id": 288
+            },
+            {
+              "children": [],
+              "description": "Experiencing discomfort",
+              "id": 295,
+              "label": "pain",
+              "parent_id": 288
+            }
+          ],
+          "description": "A health condition",
+          "id": 288,
+          "label": "health_status",
+          "parent_id": 3
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Renting a residence",
+              "id": 297,
+              "label": "renting",
+              "parent_id": 296
+            },
+            {
+              "children": [],
+              "description": "Owning a residence",
+              "id": 298,
+              "label": "owning",
+              "parent_id": 296
+            },
+            {
+              "children": [],
+              "description": "Residing alone",
+              "id": 299,
+              "label": "living_alone",
+              "parent_id": 296
+            },
+            {
+              "children": [],
+              "description": "Residing with roommates",
+              "id": 300,
+              "label": "living_with_roommates",
+              "parent_id": 296
+            },
+            {
+              "children": [],
+              "description": "Residing with family",
+              "id": 301,
+              "label": "living_with_family",
+              "parent_id": 296
+            },
+            {
+              "children": [],
+              "description": "Residing with partner",
+              "id": 302,
+              "label": "living_with_partner",
+              "parent_id": 296
+            }
+          ],
+          "description": "A residential status",
+          "id": 296,
+          "label": "living_situation",
+          "parent_id": 3
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Moderate skill level",
+              "id": 305,
+              "label": "intermediate",
+              "parent_id": 303
+            },
+            {
+              "children": [],
+              "description": "Novice level",
+              "id": 304,
+              "label": "beginner",
+              "parent_id": 303
+            },
+            {
+              "children": [],
+              "description": "High skill level",
+              "id": 306,
+              "label": "advanced",
+              "parent_id": 303
+            },
+            {
+              "children": [],
+              "description": "Mastery level",
+              "id": 307,
+              "label": "expert",
+              "parent_id": 303
+            },
+            {
+              "children": [],
+              "description": null,
+              "id": 703,
+              "label": "poor",
+              "parent_id": 303
+            }
+          ],
+          "description": "A proficiency level",
+          "id": 303,
+          "label": "skill_level",
+          "parent_id": 3
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 568,
+              "label": "opinion",
+              "parent_id": 567
+            },
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 571,
+              "label": "expectation",
+              "parent_id": 567
+            },
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 604,
+              "label": "belief",
+              "parent_id": 567
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 567,
+          "label": "cognitive_state",
+          "parent_id": 3
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Having financial obligations",
+              "id": 309,
+              "label": "debt",
+              "parent_id": 308
+            },
+            {
+              "children": [],
+              "description": "Having money saved",
+              "id": 310,
+              "label": "savings",
+              "parent_id": 308
+            },
+            {
+              "children": [],
+              "description": "Actively investing",
+              "id": 311,
+              "label": "investing",
+              "parent_id": 308
+            },
+            {
+              "children": [],
+              "description": "Managing finances",
+              "id": 312,
+              "label": "budgeting",
+              "parent_id": 308
+            }
+          ],
+          "description": "A financial condition",
+          "id": 308,
+          "label": "financial_status",
+          "parent_id": 3
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "A leisure interest",
+              "id": 314,
+              "label": "hobby",
+              "parent_id": 313
+            },
+            {
+              "children": [],
+              "description": "A strong interest",
+              "id": 315,
+              "label": "passion",
+              "parent_id": 313
+            },
+            {
+              "children": [],
+              "description": "An exploratory interest",
+              "id": 316,
+              "label": "curiosity",
+              "parent_id": 313
+            }
+          ],
+          "description": "A sustained curiosity or affinity",
+          "id": 313,
+          "label": "interest",
+          "parent_id": 3
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Citizenship status",
+              "id": 318,
+              "label": "citizenship",
+              "parent_id": 317
+            },
+            {
+              "children": [],
+              "description": "Legal capacity status",
+              "id": 319,
+              "label": "legal_capacity",
+              "parent_id": 317
+            },
+            {
+              "children": [],
+              "description": "Immigration status",
+              "id": 320,
+              "label": "visa_status",
+              "parent_id": 317
+            },
+            {
+              "children": [],
+              "description": "Legal liability",
+              "id": 321,
+              "label": "liability",
+              "parent_id": 317
+            }
+          ],
+          "description": "A legal standing or status",
+          "id": 317,
+          "label": "legal_status",
+          "parent_id": 3
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 573,
+              "label": "scheduled_items_active",
+              "parent_id": 572
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 572,
+          "label": "schedule_state",
+          "parent_id": 3
+        },
+        {
+          "children": [],
+          "description": "Created via manual review",
+          "id": 580,
+          "label": "age_state",
+          "parent_id": 3
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 585,
+              "label": "pessimism",
+              "parent_id": 584
+            },
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 605,
+              "label": "kindness",
+              "parent_id": 584
+            },
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 606,
+              "label": "empathy",
+              "parent_id": 584
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 584,
+          "label": "personality_trait",
+          "parent_id": 3
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Available status",
+              "id": 323,
+              "label": "available",
+              "parent_id": 322
+            },
+            {
+              "children": [],
+              "description": "Unavailable status",
+              "id": 324,
+              "label": "unavailable",
+              "parent_id": 322
+            },
+            {
+              "children": [],
+              "description": "Reserved status",
+              "id": 325,
+              "label": "reserved",
+              "parent_id": 322
+            },
+            {
+              "children": [],
+              "description": "Sold out status",
+              "id": 326,
+              "label": "sold_out",
+              "parent_id": 322
+            },
+            {
+              "children": [],
+              "description": "In stock status",
+              "id": 327,
+              "label": "in_stock",
+              "parent_id": 322
+            }
+          ],
+          "description": "An availability status",
+          "id": 322,
+          "label": "availability",
+          "parent_id": 3
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "New condition",
+              "id": 329,
+              "label": "new",
+              "parent_id": 328
+            },
+            {
+              "children": [],
+              "description": "Used condition",
+              "id": 330,
+              "label": "used",
+              "parent_id": 328
+            },
+            {
+              "children": [],
+              "description": "Broken condition",
+              "id": 331,
+              "label": "broken",
+              "parent_id": 328
+            },
+            {
+              "children": [],
+              "description": "Damaged condition",
+              "id": 332,
+              "label": "damaged",
+              "parent_id": 328
+            },
+            {
+              "children": [],
+              "description": "Refurbished condition",
+              "id": 333,
+              "label": "refurbished",
+              "parent_id": 328
+            }
+          ],
+          "description": "A physical condition",
+          "id": 328,
+          "label": "condition",
+          "parent_id": 3
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Active membership",
+              "id": 335,
+              "label": "active_member",
+              "parent_id": 334
+            },
+            {
+              "children": [],
+              "description": "Expired membership",
+              "id": 336,
+              "label": "expired_member",
+              "parent_id": 334
+            },
+            {
+              "children": [],
+              "description": "Suspended membership",
+              "id": 337,
+              "label": "suspended_member",
+              "parent_id": 334
+            },
+            {
+              "children": [],
+              "description": "Pending membership",
+              "id": 338,
+              "label": "pending_member",
+              "parent_id": 334
+            }
+          ],
+          "description": "A membership state",
+          "id": 334,
+          "label": "membership_status",
+          "parent_id": 3
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Enrolled in education",
+              "id": 340,
+              "label": "enrolled",
+              "parent_id": 339
+            },
+            {
+              "children": [],
+              "description": "Graduated status",
+              "id": 341,
+              "label": "graduated",
+              "parent_id": 339
+            },
+            {
+              "children": [],
+              "description": "Dropped out status",
+              "id": 342,
+              "label": "dropped_out",
+              "parent_id": 339
+            },
+            {
+              "children": [],
+              "description": "On leave status",
+              "id": 343,
+              "label": "on_leave",
+              "parent_id": 339
+            }
+          ],
+          "description": "An education-related status",
+          "id": 339,
+          "label": "educational_status",
+          "parent_id": 3
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 597,
+              "label": "deceased",
+              "parent_id": 596
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 596,
+          "label": "life_status",
+          "parent_id": 3
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Created via manual review",
+                  "id": 637,
+                  "label": "party_affiliation",
+                  "parent_id": 636
+                }
+              ],
+              "description": "Created via manual review",
+              "id": 636,
+              "label": "political_identity",
+              "parent_id": 608
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Created via manual review",
+                  "id": 610,
+                  "label": "humanist_identity",
+                  "parent_id": 609
+                }
+              ],
+              "description": "Created via manual review",
+              "id": 609,
+              "label": "ideological_identity",
+              "parent_id": 608
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 608,
+          "label": "identity",
+          "parent_id": 3
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 618,
+              "label": "account_hosting",
+              "parent_id": 617
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 617,
+          "label": "service_state",
+          "parent_id": 3
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 633,
+              "label": "meeting",
+              "parent_id": 632
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 632,
+          "label": "host",
+          "parent_id": 3
+        },
+        {
+          "children": [],
+          "description": "Created via manual review",
+          "id": 634,
+          "label": "skill",
+          "parent_id": 3
+        },
+        {
+          "children": [],
+          "description": "Added via web interface",
+          "id": 488,
+          "label": "ownership",
+          "parent_id": 3
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 490,
+              "label": "assistant",
+              "parent_id": 489
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 489,
+          "label": "role",
+          "parent_id": 3
+        },
+        {
+          "children": [],
+          "description": "Created via manual review",
+          "id": 504,
+          "label": "preference",
+          "parent_id": 3
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 525,
+              "label": "low_stock",
+              "parent_id": 524
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 524,
+          "label": "inventory_state",
+          "parent_id": 3
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 541,
+              "label": "near_place",
+              "parent_id": 540
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 540,
+          "label": "spatial_state",
+          "parent_id": 3
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 548,
+              "label": "busy",
+              "parent_id": 547
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 547,
+          "label": "schedule",
+          "parent_id": 3
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Created via manual review",
+                  "id": 552,
+                  "label": "chat_to_reference_processing",
+                  "parent_id": 551
+                }
+              ],
+              "description": "Created via manual review",
+              "id": 551,
+              "label": "processing_state",
+              "parent_id": 550
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 550,
+          "label": "operational_state",
+          "parent_id": 3
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Added via web interface",
+              "id": 674,
+              "label": "teacher",
+              "parent_id": 673
+            },
+            {
+              "children": [],
+              "description": "Added via web interface",
+              "id": 675,
+              "label": "professor",
+              "parent_id": 673
+            }
+          ],
+          "description": "Added via web interface",
+          "id": 673,
+          "label": "occupation",
+          "parent_id": 3
+        }
+      ],
+      "description": "Conditions or situations that persist over time",
+      "id": 3,
+      "label": "state",
+      "parent_id": null
+    },
+    {
+      "children": [
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Created via manual review",
+                  "id": 660,
+                  "label": "purchase_item",
+                  "parent_id": 659
+                }
+              ],
+              "description": "Created via manual review",
+              "id": 659,
+              "label": "acquisition_goal",
+              "parent_id": 344
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Goal to lose weight",
+                  "id": 346,
+                  "label": "weight_loss",
+                  "parent_id": 345
+                },
+                {
+                  "children": [],
+                  "description": "Goal to improve fitness",
+                  "id": 347,
+                  "label": "fitness",
+                  "parent_id": 345
+                },
+                {
+                  "children": [],
+                  "description": "Goal to improve diet",
+                  "id": 348,
+                  "label": "nutrition",
+                  "parent_id": 345
+                },
+                {
+                  "children": [],
+                  "description": "Goal to stop smoking",
+                  "id": 349,
+                  "label": "quit_smoking",
+                  "parent_id": 345
+                },
+                {
+                  "children": [],
+                  "description": "Goal to improve sleep",
+                  "id": 350,
+                  "label": "sleep_improvement",
+                  "parent_id": 345
+                }
+              ],
+              "description": "A health-related objective",
+              "id": 345,
+              "label": "health_goal",
+              "parent_id": 344
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Goal to learn a language",
+                  "id": 352,
+                  "label": "learn_language",
+                  "parent_id": 351
+                },
+                {
+                  "children": [],
+                  "description": "Goal to learn a skill",
+                  "id": 353,
+                  "label": "learn_skill",
+                  "parent_id": 351
+                },
+                {
+                  "children": [],
+                  "description": "Goal to read more",
+                  "id": 354,
+                  "label": "read_books",
+                  "parent_id": 351
+                },
+                {
+                  "children": [],
+                  "description": "Goal to complete a course",
+                  "id": 355,
+                  "label": "take_course",
+                  "parent_id": 351
+                }
+              ],
+              "description": "A learning objective",
+              "id": 351,
+              "label": "learning_goal",
+              "parent_id": 344
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Goal to meditate regularly",
+                  "id": 357,
+                  "label": "meditation_practice",
+                  "parent_id": 356
+                },
+                {
+                  "children": [],
+                  "description": "Goal to exercise regularly",
+                  "id": 358,
+                  "label": "exercise_routine",
+                  "parent_id": 356
+                },
+                {
+                  "children": [],
+                  "description": "Goal to read regularly",
+                  "id": 359,
+                  "label": "reading_habit",
+                  "parent_id": 356
+                },
+                {
+                  "children": [],
+                  "description": "Goal to write regularly",
+                  "id": 360,
+                  "label": "writing_habit",
+                  "parent_id": 356
+                }
+              ],
+              "description": "A habit-forming objective",
+              "id": 356,
+              "label": "habit_goal",
+              "parent_id": 344
+            }
+          ],
+          "description": "A personal objective",
+          "id": 344,
+          "label": "personal_goal",
+          "parent_id": 4
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Goal for promotion",
+              "id": 362,
+              "label": "career_advancement",
+              "parent_id": 361
+            },
+            {
+              "children": [],
+              "description": "Goal to switch jobs",
+              "id": 363,
+              "label": "job_change",
+              "parent_id": 361
+            },
+            {
+              "children": [],
+              "description": "Goal to develop skills",
+              "id": 364,
+              "label": "skill_development",
+              "parent_id": 361
+            },
+            {
+              "children": [],
+              "description": "Goal to get certified",
+              "id": 365,
+              "label": "certification",
+              "parent_id": 361
+            },
+            {
+              "children": [],
+              "description": "Goal to become a leader",
+              "id": 366,
+              "label": "leadership",
+              "parent_id": 361
+            },
+            {
+              "children": [],
+              "description": "Goal to start a business",
+              "id": 367,
+              "label": "entrepreneurship",
+              "parent_id": 361
+            },
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 499,
+              "label": "project_improvement",
+              "parent_id": 361
+            }
+          ],
+          "description": "A career objective",
+          "id": 361,
+          "label": "professional_goal",
+          "parent_id": 4
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Goal to save funds",
+              "id": 369,
+              "label": "save_money",
+              "parent_id": 368
+            },
+            {
+              "children": [],
+              "description": "Goal to eliminate debt",
+              "id": 370,
+              "label": "pay_off_debt",
+              "parent_id": 368
+            },
+            {
+              "children": [],
+              "description": "Goal to invest",
+              "id": 371,
+              "label": "invest",
+              "parent_id": 368
+            },
+            {
+              "children": [],
+              "description": "Goal to purchase property",
+              "id": 372,
+              "label": "buy_home",
+              "parent_id": 368
+            },
+            {
+              "children": [],
+              "description": "Goal to plan retirement",
+              "id": 373,
+              "label": "retirement_planning",
+              "parent_id": 368
+            }
+          ],
+          "description": "A financial objective",
+          "id": 368,
+          "label": "financial_goal",
+          "parent_id": 4
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Goal to finish a project",
+              "id": 375,
+              "label": "complete_project",
+              "parent_id": 374
+            },
+            {
+              "children": [],
+              "description": "Goal to launch something",
+              "id": 376,
+              "label": "launch_product",
+              "parent_id": 374
+            },
+            {
+              "children": [],
+              "description": "Goal to write a book",
+              "id": 377,
+              "label": "write_book",
+              "parent_id": 374
+            },
+            {
+              "children": [],
+              "description": "Goal to build an application",
+              "id": 378,
+              "label": "build_app",
+              "parent_id": 374
+            },
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 500,
+              "label": "improve_project",
+              "parent_id": 374
+            }
+          ],
+          "description": "A project objective",
+          "id": 374,
+          "label": "project_goal",
+          "parent_id": 4
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": null,
+              "id": 706,
+              "label": "personal_goal",
+              "parent_id": 379
+            },
+            {
+              "children": [],
+              "description": "Goal to form friendships",
+              "id": 380,
+              "label": "make_friends",
+              "parent_id": 379
+            },
+            {
+              "children": [],
+              "description": "Goal to strengthen bonds",
+              "id": 381,
+              "label": "improve_relationship",
+              "parent_id": 379
+            },
+            {
+              "children": [],
+              "description": "Goal to find a romantic partner",
+              "id": 382,
+              "label": "find_partner",
+              "parent_id": 379
+            },
+            {
+              "children": [],
+              "description": "Goal to have children",
+              "id": 383,
+              "label": "start_family",
+              "parent_id": 379
+            }
+          ],
+          "description": "A relationship objective",
+          "id": 379,
+          "label": "relationship_goal",
+          "parent_id": 4
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 514,
+              "label": "software_security_improvement",
+              "parent_id": 513
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 513,
+          "label": "quality_goal",
+          "parent_id": 4
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Created via manual review",
+                  "id": 521,
+                  "label": "proactive_assistant_notification",
+                  "parent_id": 520
+                }
+              ],
+              "description": "Created via manual review",
+              "id": 520,
+              "label": "feature_delivery",
+              "parent_id": 519
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 519,
+          "label": "product_goal",
+          "parent_id": 4
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 523,
+              "label": "autonomous_learning_enablement",
+              "parent_id": 522
+            },
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 532,
+              "label": "proactive_assistant_behavior",
+              "parent_id": 522
+            },
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 542,
+              "label": "memory_persistence",
+              "parent_id": 522
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 522,
+          "label": "capability_goal",
+          "parent_id": 4
+        }
+      ],
+      "description": "Desired outcomes or objectives",
+      "id": 4,
+      "label": "goal",
+      "parent_id": null
+    },
+    {
+      "children": [
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Created via manual review",
+                  "id": 642,
+                  "label": "therapy",
+                  "parent_id": 641
+                }
+              ],
+              "description": "Created via manual review",
+              "id": 641,
+              "label": "treatment",
+              "parent_id": 640
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 640,
+          "label": "health_care",
+          "parent_id": 5
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Created via manual review",
+                  "id": 651,
+                  "label": "ADHD",
+                  "parent_id": 650
+                }
+              ],
+              "description": "Created via manual review",
+              "id": 650,
+              "label": "neurodevelopmental_disorder",
+              "parent_id": 649
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 649,
+          "label": "diagnosis_category",
+          "parent_id": 5
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Created via manual review",
+                  "id": 561,
+                  "label": "musical",
+                  "parent_id": 560
+                }
+              ],
+              "description": "Created via manual review",
+              "id": 560,
+              "label": "theater",
+              "parent_id": 559
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 559,
+          "label": "performing_arts",
+          "parent_id": 5
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 570,
+              "label": "agreement",
+              "parent_id": 569
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Created via manual review",
+                  "id": 599,
+                  "label": "family",
+                  "parent_id": 598
+                }
+              ],
+              "description": "Created via manual review",
+              "id": 598,
+              "label": "kinship",
+              "parent_id": 569
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 569,
+          "label": "social_concept",
+          "parent_id": 5
+        },
+        {
+          "children": [],
+          "description": "Created via manual review",
+          "id": 600,
+          "label": "color",
+          "parent_id": 5
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Created via manual review",
+                  "id": 603,
+                  "label": "theoretical_physicist",
+                  "parent_id": 602
+                }
+              ],
+              "description": "Created via manual review",
+              "id": 602,
+              "label": "physicist",
+              "parent_id": 601
+            },
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 607,
+              "label": "data_scientist",
+              "parent_id": 601
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 601,
+          "label": "occupation",
+          "parent_id": 5
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "Created via manual review",
+                      "id": 616,
+                      "label": "affirmation_email",
+                      "parent_id": 615
+                    }
+                  ],
+                  "description": "Created via manual review",
+                  "id": 615,
+                  "label": "email_type",
+                  "parent_id": 614
+                }
+              ],
+              "description": "Created via manual review",
+              "id": 614,
+              "label": "email",
+              "parent_id": 613
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 613,
+          "label": "communication",
+          "parent_id": 5
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Created via manual review",
+                  "id": 623,
+                  "label": "school",
+                  "parent_id": 622
+                }
+              ],
+              "description": "Created via manual review",
+              "id": 622,
+              "label": "educational_institution_concept",
+              "parent_id": 621
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 621,
+          "label": "education",
+          "parent_id": 5
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 708,
+              "label": "online_account",
+              "parent_id": 384
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Created via manual review",
+                  "id": 566,
+                  "label": "email_service",
+                  "parent_id": 565
+                }
+              ],
+              "description": "Created via manual review",
+              "id": 565,
+              "label": "online_service",
+              "parent_id": 384
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "ML concept",
+                  "id": 386,
+                  "label": "machine_learning",
+                  "parent_id": 385
+                },
+                {
+                  "children": [],
+                  "description": "Deep learning concept",
+                  "id": 387,
+                  "label": "deep_learning",
+                  "parent_id": 385
+                },
+                {
+                  "children": [],
+                  "description": "Neural network concept",
+                  "id": 388,
+                  "label": "neural_network",
+                  "parent_id": 385
+                },
+                {
+                  "children": [],
+                  "description": "NLP concept",
+                  "id": 389,
+                  "label": "natural_language_processing",
+                  "parent_id": 385
+                },
+                {
+                  "children": [],
+                  "description": "Computer vision concept",
+                  "id": 390,
+                  "label": "computer_vision",
+                  "parent_id": 385
+                }
+              ],
+              "description": "Artificial intelligence",
+              "id": 385,
+              "label": "ai",
+              "parent_id": 384
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "The proposed path 'concept > technology > programming > software_engineering' is too general for 'multithreading'. Multithreading is a specific concept within programming, not just software engineering. The current siblings at the 'programming' level include 'programming_language' and 'web_development', which are more aligned with multithreading as a programming concept. Therefore, a new category 'multithreading' should be added under 'concept > technology > programming' to accurately reflect its role as a specific programming concept.",
+                  "id": 701,
+                  "label": "multithreading",
+                  "parent_id": 391
+                },
+                {
+                  "children": [],
+                  "description": "A programming language concept",
+                  "id": 392,
+                  "label": "programming_language",
+                  "parent_id": 391
+                },
+                {
+                  "children": [],
+                  "description": "Web dev concept",
+                  "id": 393,
+                  "label": "web_development",
+                  "parent_id": 391
+                },
+                {
+                  "children": [],
+                  "description": "Mobile dev concept",
+                  "id": 394,
+                  "label": "mobile_development",
+                  "parent_id": 391
+                },
+                {
+                  "children": [],
+                  "description": "Data science concept",
+                  "id": 395,
+                  "label": "data_science",
+                  "parent_id": 391
+                },
+                {
+                  "children": [],
+                  "description": "Software eng concept",
+                  "id": 396,
+                  "label": "software_engineering",
+                  "parent_id": 391
+                },
+                {
+                  "children": [],
+                  "description": "DevOps concept",
+                  "id": 397,
+                  "label": "devops",
+                  "parent_id": 391
+                },
+                {
+                  "children": [],
+                  "description": "Cloud concept",
+                  "id": 398,
+                  "label": "cloud_computing",
+                  "parent_id": 391
+                },
+                {
+                  "children": [],
+                  "description": "Database concept",
+                  "id": 399,
+                  "label": "database",
+                  "parent_id": 391
+                }
+              ],
+              "description": "Programming concept",
+              "id": 391,
+              "label": "programming",
+              "parent_id": 384
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Created via manual review",
+                  "id": 507,
+                  "label": "database",
+                  "parent_id": 506
+                }
+              ],
+              "description": "Created via manual review",
+              "id": 506,
+              "label": "data_management",
+              "parent_id": 384
+            }
+          ],
+          "description": "A technological concept",
+          "id": 384,
+          "label": "technology",
+          "parent_id": 5
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "The proposed path 'concept > academic_subject > information_science' is incorrect because 'security' is not a subset of 'information_science'. Security is a broader field that encompasses various aspects such as physical security, cybersecurity, and more. It fits better as a standalone academic subject under 'concept > academic_subject'. This classification aligns with the existing siblings like 'science' and 'mathematics', which are also broad fields of study.",
+              "id": 702,
+              "label": "security",
+              "parent_id": 400
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Physics concept",
+                  "id": 402,
+                  "label": "physics",
+                  "parent_id": 401
+                },
+                {
+                  "children": [],
+                  "description": "Chemistry concept",
+                  "id": 403,
+                  "label": "chemistry",
+                  "parent_id": 401
+                },
+                {
+                  "children": [],
+                  "description": "Biology concept",
+                  "id": 404,
+                  "label": "biology",
+                  "parent_id": 401
+                },
+                {
+                  "children": [],
+                  "description": "Astronomy concept",
+                  "id": 405,
+                  "label": "astronomy",
+                  "parent_id": 401
+                },
+                {
+                  "children": [],
+                  "description": "Geology concept",
+                  "id": 406,
+                  "label": "geology",
+                  "parent_id": 401
+                }
+              ],
+              "description": "Scientific field",
+              "id": 401,
+              "label": "science",
+              "parent_id": 400
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Algebra concept",
+                  "id": 408,
+                  "label": "algebra",
+                  "parent_id": 407
+                },
+                {
+                  "children": [],
+                  "description": "Calculus concept",
+                  "id": 409,
+                  "label": "calculus",
+                  "parent_id": 407
+                },
+                {
+                  "children": [],
+                  "description": "Statistics concept",
+                  "id": 410,
+                  "label": "statistics",
+                  "parent_id": 407
+                },
+                {
+                  "children": [],
+                  "description": "Geometry concept",
+                  "id": 411,
+                  "label": "geometry",
+                  "parent_id": 407
+                }
+              ],
+              "description": "Mathematical field",
+              "id": 407,
+              "label": "mathematics",
+              "parent_id": 400
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "History concept",
+                  "id": 413,
+                  "label": "history",
+                  "parent_id": 412
+                },
+                {
+                  "children": [],
+                  "description": "Philosophy concept",
+                  "id": 414,
+                  "label": "philosophy",
+                  "parent_id": 412
+                },
+                {
+                  "children": [],
+                  "description": "Literature concept",
+                  "id": 415,
+                  "label": "literature",
+                  "parent_id": 412
+                },
+                {
+                  "children": [],
+                  "description": "Language concept",
+                  "id": 416,
+                  "label": "language",
+                  "parent_id": 412
+                },
+                {
+                  "children": [],
+                  "description": "Created via manual review",
+                  "id": 505,
+                  "label": "music",
+                  "parent_id": 412
+                },
+                {
+                  "children": [
+                    {
+                      "children": [
+                        {
+                          "children": [],
+                          "description": "Created via manual review",
+                          "id": 564,
+                          "label": "song",
+                          "parent_id": 563
+                        }
+                      ],
+                      "description": "Created via manual review",
+                      "id": 563,
+                      "label": "music",
+                      "parent_id": 562
+                    }
+                  ],
+                  "description": "Created via manual review",
+                  "id": 562,
+                  "label": "art",
+                  "parent_id": 412
+                }
+              ],
+              "description": "Humanities field",
+              "id": 412,
+              "label": "humanities",
+              "parent_id": 400
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Psychology concept",
+                  "id": 419,
+                  "label": "psychology",
+                  "parent_id": 418
+                },
+                {
+                  "children": [],
+                  "description": "Sociology concept",
+                  "id": 420,
+                  "label": "sociology",
+                  "parent_id": 418
+                },
+                {
+                  "children": [],
+                  "description": "Economics concept",
+                  "id": 421,
+                  "label": "economics",
+                  "parent_id": 418
+                },
+                {
+                  "children": [],
+                  "description": "Political science concept",
+                  "id": 422,
+                  "label": "political_science",
+                  "parent_id": 418
+                }
+              ],
+              "description": "Social science field",
+              "id": 418,
+              "label": "social_science",
+              "parent_id": 400
+            },
+            {
+              "children": [],
+              "description": "Added via web interface",
+              "id": 676,
+              "label": "philosophy",
+              "parent_id": 400
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "The proposed path 'concept > academic_subject > information_science' is appropriate for the field of study 'Databases'. However, 'Databases' is a distinct area within information science and warrants its own category under this path. The existing siblings like 'science', 'mathematics', and 'cognitive_science' are broad academic subjects, and 'Databases' fits well as a specialized subject within 'information_science'. Creating a new category 'databases' under 'information_science' will provide the necessary specificity and maintain the IS-A relationship, as 'databases IS-A academic_subject'.",
+                  "id": 700,
+                  "label": "databases",
+                  "parent_id": 677
+                }
+              ],
+              "description": "Added via web interface",
+              "id": 677,
+              "label": "information_science",
+              "parent_id": 400
+            },
+            {
+              "children": [],
+              "description": "Added via web interface",
+              "id": 678,
+              "label": "cognitive_science",
+              "parent_id": 400
+            }
+          ],
+          "description": "An area of study",
+          "id": 400,
+          "label": "academic_subject",
+          "parent_id": 5
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Nutrition concept",
+              "id": 432,
+              "label": "nutrition",
+              "parent_id": 431
+            },
+            {
+              "children": [],
+              "description": "Mindfulness concept",
+              "id": 433,
+              "label": "mindfulness",
+              "parent_id": 431
+            },
+            {
+              "children": [],
+              "description": "Fitness concept",
+              "id": 434,
+              "label": "fitness",
+              "parent_id": 431
+            },
+            {
+              "children": [],
+              "description": "Sleep concept",
+              "id": 435,
+              "label": "sleep",
+              "parent_id": 431
+            },
+            {
+              "children": [],
+              "description": "Stress management concept",
+              "id": 436,
+              "label": "stress_management",
+              "parent_id": 431
+            },
+            {
+              "children": [],
+              "description": "Mental health concept",
+              "id": 437,
+              "label": "mental_health",
+              "parent_id": 431
+            }
+          ],
+          "description": "Wellness concept",
+          "id": 431,
+          "label": "wellness",
+          "parent_id": 5
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Agile methodology",
+              "id": 448,
+              "label": "agile",
+              "parent_id": 447
+            },
+            {
+              "children": [],
+              "description": "Waterfall methodology",
+              "id": 449,
+              "label": "waterfall",
+              "parent_id": 447
+            },
+            {
+              "children": [],
+              "description": "Scientific method",
+              "id": 450,
+              "label": "scientific_method",
+              "parent_id": 447
+            },
+            {
+              "children": [],
+              "description": "Design thinking",
+              "id": 451,
+              "label": "design_thinking",
+              "parent_id": 447
+            },
+            {
+              "children": [],
+              "description": "Lean methodology",
+              "id": 452,
+              "label": "lean",
+              "parent_id": 447
+            }
+          ],
+          "description": "A systematic approach or method",
+          "id": 447,
+          "label": "methodology",
+          "parent_id": 5
+        },
+        {
+          "children": [],
+          "description": "Political concepts",
+          "id": 453,
+          "label": "politics",
+          "parent_id": 5
+        },
+        {
+          "children": [],
+          "description": "Religious concepts",
+          "id": 457,
+          "label": "religion",
+          "parent_id": 5
+        },
+        {
+          "children": [],
+          "description": "Environmental concepts",
+          "id": 458,
+          "label": "environment",
+          "parent_id": 5
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Created via manual review",
+                  "id": 512,
+                  "label": "software_security",
+                  "parent_id": 511
+                }
+              ],
+              "description": "Created via manual review",
+              "id": 511,
+              "label": "software_engineering",
+              "parent_id": 510
+            },
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "Created via manual review",
+                      "id": 517,
+                      "label": "multithreading",
+                      "parent_id": 516
+                    }
+                  ],
+                  "description": "Created via manual review",
+                  "id": 516,
+                  "label": "concurrency",
+                  "parent_id": 515
+                }
+              ],
+              "description": "Created via manual review",
+              "id": 515,
+              "label": "computer_science",
+              "parent_id": 510
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 510,
+          "label": "discipline",
+          "parent_id": 5
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": null,
+              "id": 704,
+              "label": "task",
+              "parent_id": 518
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 518,
+          "label": "task_management",
+          "parent_id": 5
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Created via manual review",
+                  "id": 645,
+                  "label": "thai_cuisine",
+                  "parent_id": 644
+                }
+              ],
+              "description": "Created via manual review",
+              "id": 644,
+              "label": "cuisine",
+              "parent_id": 526
+            },
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 656,
+              "label": "vegetable",
+              "parent_id": 526
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Created via manual review",
+                  "id": 528,
+                  "label": "milk",
+                  "parent_id": 527
+                }
+              ],
+              "description": "Created via manual review",
+              "id": 527,
+              "label": "beverage",
+              "parent_id": 526
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Created via manual review",
+                  "id": 544,
+                  "label": "lunch",
+                  "parent_id": 543
+                }
+              ],
+              "description": "Created via manual review",
+              "id": 543,
+              "label": "meal",
+              "parent_id": 526
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 526,
+          "label": "food",
+          "parent_id": 5
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 537,
+              "label": "information_retrieval",
+              "parent_id": 536
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 536,
+          "label": "information_science",
+          "parent_id": 5
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 546,
+              "label": "eating",
+              "parent_id": 545
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 545,
+          "label": "activity",
+          "parent_id": 5
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Created via manual review",
+                  "id": 663,
+                  "label": "male",
+                  "parent_id": 662
+                },
+                {
+                  "children": [],
+                  "description": "Created via manual review",
+                  "id": 664,
+                  "label": "female",
+                  "parent_id": 662
+                }
+              ],
+              "description": "Created via manual review",
+              "id": 662,
+              "label": "sex_category",
+              "parent_id": 661
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 661,
+          "label": "biological_concept",
+          "parent_id": 5
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Created via manual review",
+                  "id": 667,
+                  "label": "dog",
+                  "parent_id": 666
+                }
+              ],
+              "description": "Created via manual review",
+              "id": 666,
+              "label": "canine",
+              "parent_id": 665
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 665,
+          "label": "animal",
+          "parent_id": 5
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 669,
+              "label": "friendship",
+              "parent_id": 668
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 668,
+          "label": "social_relationship",
+          "parent_id": 5
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": null,
+              "id": 705,
+              "label": "retail_store",
+              "parent_id": 423
+            },
+            {
+              "children": [],
+              "description": "Marketing concept",
+              "id": 424,
+              "label": "marketing",
+              "parent_id": 423
+            },
+            {
+              "children": [],
+              "description": "Finance concept",
+              "id": 425,
+              "label": "finance",
+              "parent_id": 423
+            },
+            {
+              "children": [],
+              "description": "Management concept",
+              "id": 426,
+              "label": "management",
+              "parent_id": 423
+            },
+            {
+              "children": [],
+              "description": "Entrepreneurship concept",
+              "id": 427,
+              "label": "entrepreneurship",
+              "parent_id": 423
+            },
+            {
+              "children": [],
+              "description": "Strategy concept",
+              "id": 428,
+              "label": "strategy",
+              "parent_id": 423
+            },
+            {
+              "children": [],
+              "description": "Operations concept",
+              "id": 429,
+              "label": "operations",
+              "parent_id": 423
+            },
+            {
+              "children": [],
+              "description": "HR concept",
+              "id": 430,
+              "label": "human_resources",
+              "parent_id": 423
+            },
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 539,
+              "label": "retail",
+              "parent_id": 423
+            }
+          ],
+          "description": "Business concept",
+          "id": 423,
+          "label": "business_and_industry",
+          "parent_id": 5
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Created via manual review",
+                  "id": 688,
+                  "label": "memory",
+                  "parent_id": 687
+                }
+              ],
+              "description": "Created via manual review",
+              "id": 687,
+              "label": "cognitive_capability",
+              "parent_id": 686
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 686,
+          "label": "cognitive_science",
+          "parent_id": 5
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 690,
+              "label": "band",
+              "parent_id": 689
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 689,
+          "label": "music",
+          "parent_id": 5
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Created via manual review",
+              "id": 692,
+              "label": "fininsh_food",
+              "parent_id": 691
+            }
+          ],
+          "description": "Created via manual review",
+          "id": 691,
+          "label": "cuisine",
+          "parent_id": 5
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Added via web interface",
+              "id": 683,
+              "label": "law",
+              "parent_id": 682
+            },
+            {
+              "children": [],
+              "description": "Added via web interface",
+              "id": 684,
+              "label": "ethics",
+              "parent_id": 682
+            }
+          ],
+          "description": "Ethics, Law",
+          "id": 682,
+          "label": "abstract_system",
+          "parent_id": 5
+        },
+        {
+          "children": [
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "Created via manual review",
+                  "id": 628,
+                  "label": "computer_game",
+                  "parent_id": 627
+                },
+                {
+                  "children": [],
+                  "description": "Created via manual review",
+                  "id": 635,
+                  "label": "board_game",
+                  "parent_id": 627
+                }
+              ],
+              "description": "Created via manual review",
+              "id": 627,
+              "label": "game",
+              "parent_id": 679
+            },
+            {
+              "children": [],
+              "description": "Added via web interface",
+              "id": 680,
+              "label": "entertainment",
+              "parent_id": 679
+            },
+            {
+              "children": [],
+              "description": "Added via web interface",
+              "id": 681,
+              "label": "sports",
+              "parent_id": 679
+            },
+            {
+              "children": [],
+              "description": "Added via web interface",
+              "id": 685,
+              "label": "religion",
+              "parent_id": 679
+            }
+          ],
+          "description": "Entertainment, sports etc.",
+          "id": 679,
+          "label": "culture_and_society",
+          "parent_id": 5
+        }
+      ],
+      "description": "Abstract ideas or categories of knowledge",
+      "id": 5,
+      "label": "concept",
+      "parent_id": null
+    },
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "Created via manual review",
+          "id": 643,
+          "label": "age_difference",
+          "parent_id": 6
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Age property",
+              "id": 463,
+              "label": "age",
+              "parent_id": 462
+            },
+            {
+              "children": [],
+              "description": "Gender property",
+              "id": 464,
+              "label": "gender",
+              "parent_id": 462
+            },
+            {
+              "children": [],
+              "description": "Nationality property",
+              "id": 465,
+              "label": "nationality",
+              "parent_id": 462
+            },
+            {
+              "children": [],
+              "description": "Ethnicity property",
+              "id": 466,
+              "label": "ethnicity",
+              "parent_id": 462
+            },
+            {
+              "children": [],
+              "description": "Language property",
+              "id": 467,
+              "label": "language_spoken",
+              "parent_id": 462
+            }
+          ],
+          "description": "A demographic attribute",
+          "id": 462,
+          "label": "demographic",
+          "parent_id": 6
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Height property",
+              "id": 469,
+              "label": "height",
+              "parent_id": 468
+            },
+            {
+              "children": [],
+              "description": "Weight property",
+              "id": 470,
+              "label": "weight",
+              "parent_id": 468
+            },
+            {
+              "children": [],
+              "description": "Color property",
+              "id": 471,
+              "label": "color",
+              "parent_id": 468
+            },
+            {
+              "children": [],
+              "description": "Size property",
+              "id": 472,
+              "label": "size",
+              "parent_id": 468
+            },
+            {
+              "children": [],
+              "description": "Shape property",
+              "id": 473,
+              "label": "shape",
+              "parent_id": 468
+            },
+            {
+              "children": [],
+              "description": "Temperature property",
+              "id": 474,
+              "label": "temperature",
+              "parent_id": 468
+            }
+          ],
+          "description": "A physical attribute",
+          "id": 468,
+          "label": "physical_property",
+          "parent_id": 6
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Amount property",
+              "id": 476,
+              "label": "quantity",
+              "parent_id": 475
+            },
+            {
+              "children": [],
+              "description": "Time duration property",
+              "id": 477,
+              "label": "duration",
+              "parent_id": 475
+            },
+            {
+              "children": [],
+              "description": "Distance property",
+              "id": 478,
+              "label": "distance",
+              "parent_id": 475
+            },
+            {
+              "children": [],
+              "description": "Speed property",
+              "id": 479,
+              "label": "speed",
+              "parent_id": 475
+            },
+            {
+              "children": [],
+              "description": "Cost property",
+              "id": 480,
+              "label": "cost",
+              "parent_id": 475
+            }
+          ],
+          "description": "A measurable quantity",
+          "id": 475,
+          "label": "quantitative_property",
+          "parent_id": 6
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "Quality property",
+              "id": 482,
+              "label": "quality",
+              "parent_id": 481
+            },
+            {
+              "children": [],
+              "description": "Difficulty level",
+              "id": 483,
+              "label": "difficulty",
+              "parent_id": 481
+            },
+            {
+              "children": [],
+              "description": "Priority level",
+              "id": 484,
+              "label": "priority",
+              "parent_id": 481
+            },
+            {
+              "children": [],
+              "description": "Urgency level",
+              "id": 485,
+              "label": "urgency",
+              "parent_id": 481
+            },
+            {
+              "children": [],
+              "description": "Importance level",
+              "id": 486,
+              "label": "importance",
+              "parent_id": 481
+            }
+          ],
+          "description": "A qualitative attribute",
+          "id": 481,
+          "label": "qualitative_property",
+          "parent_id": 6
+        }
+      ],
+      "description": "Attributes or characteristics",
+      "id": 6,
+      "label": "property",
+      "parent_id": null
+    }
+  ]
+}

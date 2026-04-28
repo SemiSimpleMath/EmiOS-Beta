@@ -1,0 +1,27 @@
+name: dayflow_orchestrator::ticket_builder
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "gemini"
+  engine: "gemini-3-flash-preview"
+  model_tier: "mini"
+
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+entity_scan_keys: [ticket_brief, reasoning, actionable_items]
+entity_card_level: 0
+
+user_context_items:
+  - date_time
+  - day_of_week
+  - ticket_brief
+  - acted_on_item_ids
+  - actionable_items
+  - active_plan_synopses
+  - recent_responded_tickets
+  - entity_card
+
+system_context_items:
+  - resource_user_data
+

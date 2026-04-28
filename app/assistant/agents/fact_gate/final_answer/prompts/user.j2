@@ -1,0 +1,31 @@
+Current time: {{ date_time }}
+
+Task instruction:
+{{ task }}
+
+Step information:
+{{ information }}
+
+{% if task_ir_output_target_data_ids %}
+Required output key(s):
+{{ task_ir_output_target_data_ids }}
+{% endif %}
+
+{% if task_ir_output_schema %}
+Required output schema:
+{{ task_ir_output_schema }}
+{% endif %}
+
+{% if task_ir_consumed_inputs %}
+Consumed inputs:
+{{ task_ir_consumed_inputs }}
+{% endif %}
+
+{% if task_ir_preloaded_inputs %}
+Preloaded inputs:
+{{ task_ir_preloaded_inputs }}
+{% endif %}
+
+Return:
+- `final_answer_answer`: one short status line.
+- `final_answer_data_list`: include required key(s) with JSON-literal string values matching schema.

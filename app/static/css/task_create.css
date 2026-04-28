@@ -1,0 +1,269 @@
+/* Task Create Page */
+
+body {
+  margin: 0;
+  padding: 0;
+  background: #0d1017;
+  color: #c8d0df;
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+}
+
+.tc-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* Header */
+.tc-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  background: #13161f;
+  border-bottom: 1px solid #1e2535;
+  flex-shrink: 0;
+}
+
+.tc-header__left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.tc-header__back {
+  color: #556070;
+  text-decoration: none;
+  font-size: 18px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: color 0.15s;
+}
+
+.tc-header__back:hover {
+  color: #8aa0b8;
+}
+
+.tc-header__title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #c8d0df;
+}
+
+.tc-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Buttons */
+.tc-btn {
+  border: none;
+  border-radius: 6px;
+  padding: 7px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  letter-spacing: 0.02em;
+}
+
+.tc-btn--ghost {
+  background: none;
+  color: #556070;
+  border: 1px solid #2a3a50;
+}
+
+.tc-btn--ghost:hover {
+  color: #8aa0b8;
+  border-color: #3a5070;
+}
+
+.tc-btn--secondary {
+  background: #1a2535;
+  color: #7a9ec0;
+  border: 1px solid #2a3a50;
+}
+
+.tc-btn--secondary:hover {
+  background: #1e2d40;
+}
+
+.tc-btn--primary {
+  background: #1a3a2a;
+  color: #5abf8a;
+  border: 1px solid #2a5040;
+}
+
+.tc-btn--primary:hover {
+  background: #1e4530;
+}
+
+.tc-btn--send {
+  background: #2a4a6a;
+  color: #c8d8e8;
+  border: 1px solid #3a5a7a;
+  flex-shrink: 0;
+}
+
+.tc-btn--send:hover {
+  background: #305580;
+}
+
+/* Two-column body */
+.tc-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* Chat column */
+.tc-chat {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #1e2535;
+  min-width: 0;
+}
+
+.tc-chat__messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tc-chat__placeholder {
+  color: #3a4a5a;
+  font-style: italic;
+  font-size: 14px;
+  margin-top: 40px;
+  text-align: center;
+}
+
+.tc-chat__input-area {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid #1e2535;
+  background: #11141c;
+}
+
+.tc-chat__input {
+  flex: 1;
+  background: #1a1e28;
+  border: 1px solid #2a3040;
+  border-radius: 8px;
+  color: #c8d0df;
+  font-size: 13px;
+  font-family: inherit;
+  padding: 10px 12px;
+  resize: none;
+  outline: none;
+  min-height: 20px;
+  max-height: 120px;
+}
+
+.tc-chat__input:focus {
+  border-color: #3a5a7a;
+}
+
+/* Chat bubbles */
+.tc-msg {
+  max-width: 85%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.tc-msg--user {
+  align-self: flex-end;
+  background: #1a2a3a;
+  color: #c8d8e8;
+  border-bottom-right-radius: 4px;
+}
+
+.tc-msg--assistant {
+  align-self: flex-start;
+  background: #1a1e28;
+  color: #9aabbb;
+  border-bottom-left-radius: 4px;
+}
+
+/* Spec column */
+.tc-spec {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.tc-spec__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 20px;
+  border-bottom: 1px solid #1e2535;
+  flex-shrink: 0;
+}
+
+.tc-spec__label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #556070;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.tc-spec__status {
+  font-size: 11px;
+  color: #4a6a8a;
+}
+
+.tc-spec__content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #9aabbb;
+}
+
+.tc-spec__placeholder {
+  color: #3a4a5a;
+  font-style: italic;
+  font-size: 14px;
+  margin-top: 40px;
+  text-align: center;
+}
+
+.tc-spec__content h1 {
+  font-size: 18px;
+  color: #c8d0df;
+  margin: 0 0 12px 0;
+  font-weight: 700;
+}
+
+.tc-spec__content h2 {
+  font-size: 13px;
+  color: #5a8ab0;
+  margin: 16px 0 6px 0;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tc-spec__content ol,
+.tc-spec__content ul {
+  padding-left: 20px;
+  margin: 4px 0;
+}
+
+.tc-spec__content li {
+  margin: 4px 0;
+}

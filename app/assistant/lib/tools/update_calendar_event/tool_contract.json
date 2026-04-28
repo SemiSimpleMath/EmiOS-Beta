@@ -1,0 +1,105 @@
+{
+  "name": "update_calendar_event",
+  "description": "Updates an existing calendar event. Use scope=\"single\" or \"all\" for recurring events.",
+  "inputs": [
+    {
+      "name": "event_id",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "summary",
+      "type": "string",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "description",
+      "type": "string",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "start",
+      "type": "string",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "end",
+      "type": "string",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "recurrence",
+      "type": "array",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "location",
+      "type": "string",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "email",
+      "type": "string",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "scope",
+      "type": "string",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "flexibility",
+      "type": "string",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "blocking",
+      "type": "boolean",
+      "required": false,
+      "description": ""
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "Arguments to this tool are the event ID and the fields you want to update. The supported fields are:\n\nsummary: The event's title.\ndescription: A description of the event.\nstart: The start time of the event\nend: The end time of the event\nrecurrence: A list specifying recurrence rules (e.g., [\"RRULE:FREQ=WEEKLY;COUNT=10\"]).\nlocation: The location of the event.\nemail: The organizer's email address.\nscope: For recurring events only. Use \"single\" to update just this one occurrence, or \"all\" to update the entire series. If not specified, defaults to \"single\" for recurring event instances and \"all\" for non-recurring events.\nflexibility: How moveable this event is. \"fixed\", \"flexible\", \"soft_block\", or \"aspirational\".\nblocking: True blocks time on calendar, False shows as available.\n\nExamples:\n- \"Move tomorrow's standup to 10am\" → scope=\"single\" (only that occurrence changes)\n- \"Change the weekly standup time to 10am\" → scope=\"all\" (all occurrences change)\n- \"Mark my gym session as flexible\" → flexibility=\"flexible\"",
+  "metadata": {
+    "domain": "calendar",
+    "actions": [
+      "update"
+    ],
+    "selectors": [
+      "event_id"
+    ],
+    "risk_level": "medium",
+    "side_effects": "writes_data",
+    "requires_auth": [
+      "google"
+    ],
+    "requires_network": true,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

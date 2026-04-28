@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>{% if not_found %}Not found{% else %}Proposal {{ proposal.short_id }}{% endif %}</title>
+  <link rel="stylesheet" href="/static/css/kg_proposals.css">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+  <nav class="kp-top">
+    <h1>Shadow KG</h1>
+    <a href="/kg-proposals/">Proposals</a>
+    <a href="/kg-maintenance/" target="_blank">Findings</a>
+  </nav>
+
+  <main class="kp-main">
+    {% if not_found %}
+      <p>Proposal not found.</p>
+      <a class="kp-back" href="/kg-proposals/">← back</a>
+    {% else %}
+
+    <a class="kp-back" href="/kg-proposals/?status={{ proposal.status }}">← back to queue</a>
+
+    <section class="kp-hero">
+      <div class="kp-claim-text">{{ proposal.representative_sentence or '(no sentence)' }}</div>
+      <div class="kp-hero-meta">
+        <span class="kp-meta-item"><strong>ID:</strong> <span class="kp-short-id">{{ proposal.short_id }}</span></span>
+        <span class="kp-meta-item"><strong>Type:</strong> <span class="kp-claim-type kp-ct-{{ proposal.claim_type }}">{{ proposal.claim_type }}</span></span>
+        <span class="kp-meta-item"><strong>Status:</strong> {{ proposal.status }}</span>
+        <span class="kp-meta-item"><strong>Nodes/Edges:</strong> {{ proposal.n_nodes }}/{{ proposal.n_edges }}</span>
+        <span class="kp-meta-item"><strong>Obs:</strong> {{ proposal.observation_count }}</span>
+        {% if proposal.first_observed_at %}
+        <span class="kp-meta-item"><strong>First:</strong> {{ proposal.first_observed_at }}</span>
+        {% endif %}
+      </div>
+      {% if proposal.retraction_reason %}
+      <div class="kp-hero-decision" style="border-left-color:#a40000;">
+        <strong>Retracted:</strong> {{ proposal.retraction_reason }}
+      </div>
+      {% endif %}
+    </section>
+
+    <section class="kp-graph-card">
+      <h2>
+        Proposed structure (dotted) + existing neighborhood
+        <button id="kp-copy-mermaid" class="kp-btn" style="float:right; font-size:11px; padding:3px 8px;">Copy Mermaid</button>
+        <a href="/kg-proposals/{{ proposal.id }}.md" target="_blank" class="kp-btn" style="float:right; font-size:11px; padding:3px 8px; margin-right:6px;">Export .md</a>
+      </h2>
+      <div class="mermaid" id="kp-mermaid-source">
+{{ mermaid }}
+      </div>
+    </section>
+
+    <section class="kp-detail-grid">
+      <div class="kp-card">
+        <h2>Nodes ({{ nodes|length }})</h2>
+        <table class="kp-inner-table">
+          <thead><tr><th>temp</th><th>label</th><th>type</th><th>resolution</th></tr></thead>
+          <tbody>
+            {% for n in nodes %}
+            <tr>
+              <td><span class="kp-short-id">{{ n.extractor_temp_id or n.short_id }}</span></td>
+              <td><strong>{{ n.label }}</strong>{% if n.valid_from %} <span class="kp-short-id">[{{ n.valid_from }}]</span>{% endif %}</td>
+              <td><span class="kp-endpoint-type">{{ n.node_type }}</span></td>
+              <td>
+                {% if n.resolved_link %}
+                  <a href="{{ n.resolved_link }}" target="_blank">{{ n.resolution_action }} → {{ n.resolved_label }}</a>
+                  {% if n.resolved_locked %}<span class="kp-endpoint-locked">LOCKED</span>{% endif %}
+                {% else %}
+                  <span class="kp-short-id">{{ n.resolution_action }}</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="kp-card">
+        <h2>Edges ({{ edges|length }})</h2>
+        <table class="kp-inner-table">
+          <thead><tr><th>source</th><th>predicate</th><th>target</th></tr></thead>
+          <tbody>
+            {% for e in edges %}
+            <tr>
+              <td>{{ e.source_label }}</td>
+              <td><span class="kp-predicate">{{ e.predicate }}</span></td>
+              <td>{{ e.target_label }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="kp-card" style="margin-top:20px;">
+      <h2>Evidence ({{ evidence|length }} observation{{ '' if evidence|length == 1 else 's' }})</h2>
+      <ul class="kp-evidence">
+        {% for ev in evidence %}
+        <li class="kp-evidence-item">
+          <div class="kp-evidence-header">
+            {% if ev.source_type %}<span class="kp-tag">{{ ev.source_type }}</span>{% endif %}
+            {% if ev.room_id %}<span class="kp-tag">{{ ev.room_id }}</span>{% endif %}
+            {% if ev.speaker_name %}<span class="kp-tag">{{ ev.speaker_name }} ({{ ev.speaker_role or '?' }})</span>{% endif %}
+            {% if ev.observed_at %}<span>{{ ev.observed_at }}</span>{% endif %}
+            {% if ev.window_short %}<span class="kp-short-id">win {{ ev.window_short }}</span>{% endif %}
+          </div>
+          {% if ev.raw_text %}<div class="kp-evidence-raw">{{ ev.raw_text }}</div>{% endif %}
+          {% if ev.extractor_model %}
+            <div class="kp-short-id">via {{ ev.extractor_model }}</div>
+          {% endif %}
+          {% if ev.window_items %}
+          <details class="kp-provenance">
+            <summary>Show source chat window ({{ ev.window_items|length }} msg{{ '' if ev.window_items|length == 1 else 's' }})</summary>
+            <ol class="kp-window-items">
+              {% for it in ev.window_items %}
+              <li class="kp-window-item kp-window-item-{{ it.role or 'unknown' }}">
+                <span class="kp-window-speaker">{{ it.speaker or it.role or '?' }}</span>
+                {% if it.ts %}<span class="kp-short-id">{{ it.ts }}</span>{% endif %}
+                <div class="kp-window-text">{{ it.text }}</div>
+              </li>
+              {% endfor %}
+            </ol>
+            {% if ev.window_resolved_text %}
+            <details class="kp-provenance kp-provenance-nested">
+              <summary>Show resolver output (entity-annotated)</summary>
+              <pre class="kp-window-resolved">{{ ev.window_resolved_text }}</pre>
+            </details>
+            {% endif %}
+          </details>
+          {% endif %}
+        </li>
+        {% else %}
+        <li style="color:#888;">No evidence.</li>
+        {% endfor %}
+      </ul>
+    </section>
+
+    {% if proposal.status in ('pending', 'pending_review', 'enriching') %}
+    <section class="kp-actions">
+      <button id="kp-reject" class="kp-btn">Reject (retract)</button>
+    </section>
+    {% endif %}
+
+    {% endif %}
+  </main>
+
+  <script>
+    if (window.mermaid) { mermaid.initialize({ startOnLoad: true, theme: 'default' }); }
+
+    // Stash raw Mermaid source BEFORE Mermaid replaces it with rendered SVG.
+    const rawMermaid = {{ mermaid | tojson }};
+    const copyBtn = document.getElementById('kp-copy-mermaid');
+    if (copyBtn) {
+      copyBtn.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText('```mermaid\n' + rawMermaid + '\n```');
+          const orig = copyBtn.textContent;
+          copyBtn.textContent = 'Copied!';
+          setTimeout(() => { copyBtn.textContent = orig; }, 1200);
+        } catch (err) {
+          alert('Copy failed: ' + err);
+        }
+      });
+    }
+
+    const rejectBtn = document.getElementById('kp-reject');
+    const proposalId = {{ (proposal.id | tojson) if not not_found else 'null' }};
+    if (rejectBtn) {
+      rejectBtn.addEventListener('click', async () => {
+        const reason = prompt('Reject (retract). Reason (optional):');
+        if (reason === null) return;
+        const resp = await fetch(`/kg-proposals/${proposalId}/reject`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason }),
+        });
+        const data = await resp.json();
+        if (data.ok) window.location.reload();
+        else alert('Error: ' + (data.error || 'unknown'));
+      });
+    }
+  </script>
+</body>
+</html>

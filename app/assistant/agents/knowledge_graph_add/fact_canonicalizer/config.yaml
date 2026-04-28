@@ -1,0 +1,19 @@
+name: knowledge_graph_add::fact_canonicalizer
+class_name: Agent
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.4-nano"
+  model_tier: "nano"
+allowed_tools: []
+except_tools: []
+user_context_items:
+  - node_label
+  - node_type
+  - extractor_sentence
+  - participants
+  - start_date
+  - end_date
+  - valid_during
+system_context_items:
+  - resource_user_data
+type: agent

@@ -1,0 +1,26 @@
+**Current Time:** {{ date_time }}
+{% if resource_afk_statistics_output %}
+{% if resource_afk_statistics_output.is_afk %}
+**Computer:** AWAY — idle {{ resource_afk_statistics_output.idle_minutes | default(0) | round | int }} min
+{% else %}
+**Computer:** AT KEYBOARD — session {{ resource_afk_statistics_output.current_session_minutes | default(resource_afk_statistics_output.active_work_session_minutes) | default(0) | round(1) }} min
+{% endif %}
+{% endif %}
+{% if resource_expected_calendar and resource_expected_calendar.expected_schedule %}
+**Upcoming schedule:**
+{% for entry in resource_expected_calendar.expected_schedule[:5] %}
+- {{ entry.title }} {{ entry.start_local }}{% if entry.end_local %} - {{ entry.end_local }}{% endif %} ({{ entry.status }})
+{% endfor %}
+{% endif %}
+
+++++++++++++++++++++++++++ ACTIONABLE ITEMS — PICK ONE +++++++++++++++++++++++++++++
+{% for item in actionable_items[:10] %}
+- task: {{ item.get("short_id", item.get("item_id","")) }}{% if item.get("plan_id") %} | plan: {{ item.get("plan_id") }}{% endif %}{% if item.get("importance","") not in ["medium", ""] %} | {{ item.get("importance") }}{% endif %}
+
+  {{ item.get("summary","") }}{% if item.get("scheduled_start_local","") %}
+  starts {{ item.get("scheduled_start_local","") }} ({{ item.get("starts_in","") }}){% endif %}{% if item.get("scheduled_end_local","") %} | ends {{ item.get("scheduled_end_local","") }} ({{ item.get("ends_in","") }}){% endif %}{% if item.get("action_description","") %}
+  action: {{ item.get("action_description","") }}{% endif %}{% if item.get("condition","") %}
+  condition: {{ item.get("condition","") }}{% endif %}
+
+{% endfor %}
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++

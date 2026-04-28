@@ -1,0 +1,30 @@
+﻿Today is {{ date_time }}.
+
+Task:
+{{ task }}
+
+{% if information %}
+Information:
+{{ information }}
+{% endif %}
+
+{% if playwright_summary_trigger_reason %}
+Summary trigger reason: {{ playwright_summary_trigger_reason }}
+{% endif %}
+
+{% if summary_payload %}
+Summary payload:
+{{ summary_payload }}
+{% endif %}
+
+{% if summary_payload.latest_tool_result_history_id %}
+PROTECTED - do NOT summarize, hide, or delete history_id {{ summary_payload.latest_tool_result_history_id }}. This is the latest tool result and must remain intact for the planner.
+{% endif %}
+
+Create action lists over history ids.
+Use summary_pairs for entries to compress (objects with "history_id" and "summary").
+Use hide/unhide/pin/delete lists for visibility/lifecycle controls.
+Prefer summarizing older ids first.
+Prefer ids in `unsummarized_ids` before touching `already_summarized_ids`.
+Do not prioritize summarizing summaries; only re-summarize when a prior summary is clearly missing key evidence.
+For Playwright loops, prioritize durable page/task state and suppress repetitive tactical steps.

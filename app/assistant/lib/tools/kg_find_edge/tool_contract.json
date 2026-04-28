@@ -1,0 +1,69 @@
+{
+  "name": "kg_find_edge",
+  "description": "This tool finds edges connected to a specific node, with optional filtering by text search and other criteria. It returns the most relevant edges based on importance, recency, and text matching.\nAvailable filters: start_date, end_date, node_types (Entity, Event, State, Goal, Property, Concept), node_ids, exclude_nodes, max_hops, text (filters connected nodes by their labels).",
+  "inputs": [
+    {
+      "name": "node_id",
+      "type": "string",
+      "required": true,
+      "description": "The UUID of the node to find edges for."
+    },
+    {
+      "name": "dir",
+      "type": "string",
+      "required": false,
+      "description": "Direction: 'in', 'out', or 'both' (default: 'both')"
+    },
+    {
+      "name": "k",
+      "type": "integer",
+      "required": false,
+      "description": "Maximum number of edges to return (default: 5)"
+    },
+    {
+      "name": "text",
+      "type": "string",
+      "required": false,
+      "description": "Optional text to filter edges by (searches in connected node labels)"
+    },
+    {
+      "name": "filters",
+      "type": "object",
+      "required": false,
+      "description": "Optional additional filters to restrict search scope"
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "The node_id to find edges for, plus optional filters like relationship type, text search, direction, and date range.",
+  "metadata": {
+    "category": "knowledge_graph",
+    "verbs": [
+      "operate"
+    ],
+    "entities": [
+      "edge",
+      "graph",
+      "node"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "medium",
+    "latency_class": "moderate",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

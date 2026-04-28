@@ -1,0 +1,50 @@
+{
+  "name": "taxonomy_rename_category",
+  "description": "taxonomy_rename_category: Rename a taxonomy category.\n\n**Purpose:** Change the label of a taxonomy category (e.g., fix typos, improve naming consistency).\n\n**Parameters:**\n- category_id (required): ID of the category to rename\n- new_label (required): New label for the category (will be normalized to lowercase_snake_case)\n\n**Use this when:**\n- Fixing typos (e.g., \"midle_school\" -> \"middle_school\")\n- Improving naming consistency\n- Making labels more descriptive\n\n**Returns:**\n- success: Whether the operation succeeded\n- message: Description of what was done\n- category_id: ID of the renamed category\n- old_label: Previous label\n- new_label: New label (normalized)\n\n**Safety:** This is a safe operation. The category structure remains unchanged.",
+  "inputs": [
+    {
+      "name": "category_id",
+      "type": "integer",
+      "required": true,
+      "description": "ID of the category to rename"
+    },
+    {
+      "name": "new_label",
+      "type": "string",
+      "required": true,
+      "description": "New label for the category"
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "metadata": {
+    "category": "knowledge_graph",
+    "verbs": [
+      "operate"
+    ],
+    "entities": [
+      "edge",
+      "graph",
+      "node"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "medium",
+    "latency_class": "moderate",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

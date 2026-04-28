@@ -1,0 +1,125 @@
+name: kg_mutation_manager
+description: "KG mutation manager — consumes a kg_investigation report's proposed_action and applies it to the KG via narrow audit-wired tools (merge / rename / update field / resolve / escalate). Refuses anything outside the proposed_action's op."
+class_name: MultiAgentManager
+max_cycles: 16
+
+role_bindings:
+  delegator: emi_team::delegator
+  tool_selector: shared::tool_selector
+
+agents:
+  - name: emi_team::delegator
+    class: Delegator
+  - name: kg_mutation::planner
+    class: Planner
+  - name: emi_team::summary
+    class: Agent
+  - name: kg_mutation::final_answer
+    class: Agent
+
+control_nodes:
+  - name: tool_return_router
+    class: ToolReturnRouter
+  - name: summary_pre_node
+    class: SummaryPreNode
+    config:
+      enabled: true
+      summary_agent: "emi_team::summary"
+      resume_agent: "kg_mutation::planner"
+      planner_agent: "kg_mutation::planner"
+      cadence_every_actions: 4
+      min_messages: 12
+      trigger_on_large_result_chars: 4000
+      allow_summarize_latest_tool_result: false
+  - name: summary_post_node
+    class: SummaryPostNode
+    config:
+      summary_agent: "emi_team::summary"
+      resume_agent: "kg_mutation::planner"
+  - name: tool_caller
+    class: ToolCaller
+  - name: tool_result_handler
+    class: ToolResultHandler
+  - name: return_control
+    class: ReturnControlNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+  - name: graceful_exit_control_node
+    class: GracefulExitControlNode
+
+tool_visibility:
+  always_show:
+    - kg_query
+    - kg_merge_nodes
+    - kg_rename_label
+    - kg_update_node_field
+    - kg_finding_resolve
+    - kg_finding_escalate
+    - ask_user
+  use_narrower: false
+
+tools:
+  allowed_tools:
+    - kg_query
+    - kg_merge_nodes
+    - kg_rename_label
+    - kg_update_node_field
+    - kg_finding_resolve
+    - kg_finding_escalate
+    - ask_user
+  except_tools: []
+
+scope_contract:
+  tools:
+    allowed_tools:
+      - kg_query
+      - kg_merge_nodes
+      - kg_rename_label
+      - kg_update_node_field
+      - kg_finding_resolve
+      - kg_finding_escalate
+      - ask_user
+    blocked_tools:
+      - install_tool
+      - mcp::npm/playwright-mcp::browser_run_code
+      - kg_create_node
+      - kg_create_edge
+      - kg_delete_node
+      - kg_delete_edge
+      - kg_update_node
+    requires_approval_tools: []
+    allow_external_side_effects: false
+  writes:
+    write_kg: true
+    allow_fact_extraction: false
+
+flow_config:
+  strict_routing: true
+  tool_return:
+    tool_call_result_handler_node: "tool_result_handler"
+  summary:
+    enabled: true
+    source_agent: "tool_return_router"
+    summary_agent: "emi_team::summary"
+    resume_agent: "kg_mutation::planner"
+    planner_agent: "kg_mutation::planner"
+    cadence_every_actions: 4
+    action_count_state_key: "{planner_agent}_action_count"
+    min_messages: 12
+    trigger_on_large_result_chars: 4000
+    payload_key: "summary_payload"
+    payload_recent_history_messages: 60
+    allow_summarize_latest_tool_result: false
+    protect_last_n_results: 3
+  state_map:
+    "emi_team::delegator": "kg_mutation::planner"
+    "kg_mutation::planner": "tool_caller"
+    "tool_result_handler": "tool_return_router"
+    "tool_return_router": "summary_pre_node"
+    "summary_pre_node": "kg_mutation::planner"
+    "emi_team::summary": "summary_post_node"
+    "summary_post_node": "kg_mutation::planner"
+    "kg_mutation::planner_return_control": "kg_mutation::final_answer"
+    "kg_mutation::final_answer": "manager_exit_node"
+    "graceful_exit": "graceful_exit_control_node"
+    "graceful_exit_control_node": "kg_mutation::final_answer"

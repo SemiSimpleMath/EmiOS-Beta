@@ -1,0 +1,2302 @@
+"""
+kg_tools.py - Utility functions for manipulating the knowledge graph nodes and edges.
+"""
+
+# NodeType is now an ENUM, no longer a separate table
+
+import uuid
+
+from app.models.base import get_session
+from app.assistant.utils.logging_config import get_logger
+
+from collections import deque
+
+logger = get_logger(__name__)
+
+from typing import Any, Dict, List, Union
+from app.assistant.kg.db.knowledge_graph_db_sqlite import Node
+from sqlalchemy.orm import Session
+from sqlalchemy import and_, or_
+
+
+# Note: create_embedding and cosine_similarity moved to knowledge_graph_utils.py
+# Use KnowledgeGraphUtils class for these functions
+
+
+def get_nodes_by_connection_count(session: Session, limit: int = 100) -> List[Node]:
+    """
+    Return nodes ordered by total number of incoming + outgoing edges.
+    """
+    from sqlalchemy import func
+    from app.assistant.kg.db.knowledge_graph_db_sqlite import Node, Edge
+
+    incoming = (
+        session.query(Edge.target_id.label("node_id"), func.count().label("incoming_count"))
+            .group_by(Edge.target_id)
+            .subquery()
+    )
+
+    outgoing = (
+        session.query(Edge.source_id.label("node_id"), func.count().label("outgoing_count"))
+            .group_by(Edge.source_id)
+            .subquery()
+    )
+
+    joined = (
+        session.query(
+            Node,
+            (func.coalesce(incoming.c.incoming_count, 0) + func.coalesce(outgoing.c.outgoing_count, 0)).label(
+                "total_degree")
+        )
+            .outerjoin(incoming, Node.id == incoming.c.node_id)
+            .outerjoin(outgoing, Node.id == outgoing.c.node_id)
+            .order_by(func.coalesce(incoming.c.incoming_count, 0) + func.coalesce(outgoing.c.outgoing_count, 0).desc())
+            .limit(limit)
+    )
+
+    return [row[0] for row in joined.all()]
+
+
+from typing import List, Tuple, Optional
+from app.assistant.kg.db.knowledge_graph_db_sqlite import Edge
+
+
+def group_edges_by_similarity(
+        edges: List[Edge],
+        cosine_similarity,
+        similarity_threshold: float = 0.8
+) -> List[List[Edge]]:
+    """
+    Group edges by semantic similarity of their relationship_type using precomputed embeddings.
+
+    Args:
+        edges: List of Edge objects to compare.
+        cosine_similarity: Callable that computes cosine similarity between two vectors.
+        similarity_threshold: Minimum similarity to consider edges as similar.
+
+    Returns:
+        List of groups of similar edges (each group is a list of Edge objects).
+    """
+    if not edges:
+        return []
+
+    # Group edges by relationship_type and store representative embedding per type
+    type_to_embedding = {}
+    type_to_edges = {}
+
+    for edge in edges:
+        tname = edge.relationship_type
+        if not tname or edge.label_embedding is None:
+            continue
+        if tname not in type_to_embedding:
+            type_to_embedding[tname] = edge.label_embedding
+            type_to_edges[tname] = []
+        type_to_edges[tname].append(edge)
+
+    type_names = list(type_to_embedding.keys())
+    used = set()
+    groups = []
+
+    for i, t1 in enumerate(type_names):
+        if t1 in used:
+            continue
+        group = [t1]
+        used.add(t1)
+        for j in range(i + 1, len(type_names)):
+            t2 = type_names[j]
+            if t2 in used:
+                continue
+            sim = cosine_similarity(type_to_embedding[t1], type_to_embedding[t2])
+            if sim >= similarity_threshold:
+                group.append(t2)
+                used.add(t2)
+
+        # Combine all edges with similar types
+        clustered_edges = []
+        for t in group:
+            clustered_edges.extend(type_to_edges[t])
+        if len(clustered_edges) > 1:
+            groups.append(clustered_edges)
+
+    return groups
+
+
+from collections import defaultdict
+from typing import List
+from uuid import UUID
+
+
+def get_similar_edges_for_node(
+        node_id: UUID,
+        session: Session,
+        similarity_threshold: float = 0.8,
+        max_groups: int = 500
+) -> List[List[Edge]]:
+    """
+    For a given node, find groups of outgoing edges that are:
+    - Directed at the same target_id
+    - Semantically similar by embedding (based on relationship_type or overall edge meaning)
+    Returns a list of edge groups (each a list of similar edges).
+    """
+    edges = session.query(Edge).filter(Edge.source_id == node_id).all()
+    target_buckets = defaultdict(list)
+
+    # Step 1: Group all outgoing edges by target_id
+    for edge in edges:
+        target_buckets[edge.target_id].append(edge)
+
+    # Step 2: For each target_id group, find internal similarity groups
+
+    similar_groups = []
+    for bucket in target_buckets.values():
+        groups = group_edges_by_similarity(
+            bucket,
+            cosine_similarity=cosine_similarity,
+            similarity_threshold=similarity_threshold
+        )
+        similar_groups.extend(groups)
+
+    # Optional: limit the number of groups returned
+    return similar_groups[:max_groups]
+
+
+def merge_nodes(n1_id, n2_id, session: Session) -> Node:
+    """
+    DEPRECATED: This function is deprecated. Use KnowledgeGraphUtils.intelligent_merge_nodes() instead.
+    This function will be removed in a future version.
+    """
+    import warnings
+    warnings.warn(
+        "merge_nodes() is deprecated. Use KnowledgeGraphUtils.intelligent_merge_nodes() instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    
+    if str(n1_id) == str(n2_id):
+        raise ValueError("Cannot merge a node with itself")
+
+    node1 = session.get(Node, n1_id)
+    node2 = session.get(Node, n2_id)
+    if not node1 or not node2:
+        raise ValueError("One or both nodes not found")
+
+    aliases1 = set(node1.aliases or [])
+    aliases2 = set(node2.aliases or [])
+
+    # If labels differ, treat node2's label as an alias for node1
+    if node2.label and node2.label != node1.label:
+        aliases2.add(node2.label)
+
+    merged_aliases = aliases1 | aliases2
+    node1.aliases = list(merged_aliases)
+    logger.debug(f"Merged aliases: {node1.aliases}")
+
+    # Stage changes
+    reassignments = []
+    deletions = []
+
+    edges = session.query(Edge).filter(
+        (Edge.source_id == node2.id) | (Edge.target_id == node2.id)
+    ).all()
+
+    for edge in edges:
+        sid = edge.source_id
+        tid = edge.target_id
+
+        if sid is None or tid is None:
+            logger.debug(f"Skipping corrupt edge {edge.id}")
+            continue
+
+        new_sid = node1.id if sid == node2.id else sid
+        new_tid = node1.id if tid == node2.id else tid
+
+        if new_sid == new_tid:
+            logger.debug(f"Self-loop created: deleting edge {edge.id}")
+            deletions.append(edge.id)
+            continue
+
+        # Check for duplicate (updated for current Edge schema)
+        existing = session.query(Edge).filter_by(
+            source_id=new_sid,
+            target_id=new_tid,
+            relationship_type=edge.relationship_type,
+            relationship_descriptor=edge.relationship_descriptor
+        ).first()
+
+        if existing:
+            logger.debug(f"Duplicate edge exists: deleting edge {edge.id}")
+            deletions.append(edge.id)
+        else:
+            logger.debug(f"Scheduling reassignment of edge {edge.id}")
+            reassignments.append((edge.id, new_sid, new_tid))
+
+    # Apply reassignments safely using query
+    for edge_id, new_sid, new_tid in reassignments:
+        session.query(Edge).filter_by(id=edge_id).update({
+            Edge.source_id: new_sid,
+            Edge.target_id: new_tid
+        })
+
+    # Delete edges
+    if deletions:
+        session.query(Edge).filter(Edge.id.in_(deletions)).delete(synchronize_session=False)
+
+    # Delete the merged-away node
+    session.delete(node2)
+
+    session.commit()  # Commit immediately - SQLite single-writer
+    session.refresh(node1)
+    return node1
+
+
+def delete_node(node_id, session: Session):
+    """
+    Delete a node and all its edges (edges are deleted via ON DELETE CASCADE).
+    NOTE: This function does NOT commit the session. The caller is responsible for committing.
+    """
+    # Convert UUID to string for SQLite compatibility
+    node_id = str(node_id)
+    node = session.query(Node).filter_by(id=node_id).first()
+    if not node:
+        raise ValueError("Node not found.")
+    session.delete(node)
+
+
+
+
+
+def describe_node(node_id, session: Session, filters: Dict[str, Any] = None, max_edges: int = 50) -> Dict[str, Any]:
+    """
+    Return a dict containing the node's core fields plus all incoming
+    and outgoing edges (with their labels and types).
+    
+    Args:
+        node_id: UUID or string of the node to describe
+        session: Database session
+        filters: Optional filters including temporal filters (start_date, end_date)
+        max_edges: Maximum number of edges to return (default: 50). If more edges exist,
+                   a random sample of max_edges will be returned with a warning.
+    """
+    from sqlalchemy import and_
+    
+    # Convert UUID to string for SQLite compatibility
+    node_id = str(node_id)
+    node = session.get(Node, node_id)
+    if not node:
+        raise ValueError(f"Node {node_id} not found")
+
+    # Check if we have any filters
+    start_date = filters.get("start_date") if filters else None
+    end_date = filters.get("end_date") if filters else None
+    node_types = filters.get("node_types") if filters else None
+    relationship_types = filters.get("relationship_types") if filters else None
+    text_filter = filters.get("text") if filters else None
+    
+    if start_date or end_date or node_types or relationship_types:
+        # Use TemporalGraphFilter for efficient filtering
+        temporal_filter = TemporalGraphFilter(session, start_date, end_date, node_types, relationship_types)
+        # Always include the base node in valid nodes, regardless of filters
+        valid_node_ids = temporal_filter._get_valid_node_ids(base_node_id=node_id)
+        valid_edge_ids = temporal_filter._get_valid_edge_ids()
+        
+        # Fetch edges with filtering
+        inbound: List[Edge] = (
+            session.query(Edge)
+                .filter(
+                    and_(
+                        Edge.target_id == node.id,
+                        Edge.id.in_(valid_edge_ids)
+                    )
+                )
+                .all()
+        )
+        outbound: List[Edge] = (
+            session.query(Edge)
+                .filter(
+                    and_(
+                        Edge.source_id == node.id,
+                        Edge.id.in_(valid_edge_ids)
+                    )
+                )
+                .all()
+        )
+    else:
+        # Original behavior - fetch all edges
+        inbound: List[Edge] = (
+            session.query(Edge)
+                .filter(Edge.target_id == node.id)
+                .all()
+        )
+        outbound: List[Edge] = (
+            session.query(Edge)
+                .filter(Edge.source_id == node.id)
+                .all()
+        )
+
+    # Apply text filtering if provided
+    if text_filter:
+        from app.assistant.kg_core.kg_utils.knowledge_graph_utils import KnowledgeGraphUtils
+        kg_utils = KnowledgeGraphUtils(session)
+        
+        # Create embedding for the text filter
+        text_embedding = kg_utils.create_embedding(text_filter)
+        k_matches = 10  # Top K matches to return
+        
+        # First, collect all edges with similarity scores
+        all_edge_scores = []
+        logger.debug(f"Text filtering: '{text_filter}' - collecting top {k_matches} matches")
+        logger.debug(f"Checking {len(inbound)} inbound edges for text matches")
+        
+        for edge in inbound:
+            if edge.sentence and edge.sentence_embedding is not None:
+                similarity = kg_utils.cosine_similarity(text_embedding, edge.sentence_embedding)
+                logger.debug(f"Edge sentence: '{edge.sentence[:50]}...' similarity: {similarity:.3f}")
+                
+                # Store edge with similarity score
+                edge._similarity_score = similarity
+                all_edge_scores.append((edge, similarity, 'inbound'))
+        
+        # Get top K matches from inbound edges
+        all_edge_scores.sort(key=lambda x: x[1], reverse=True)  # Sort by similarity
+        top_matches = all_edge_scores[:k_matches]
+        inbound_filtered = [edge for edge, score, direction in top_matches if direction == 'inbound']
+        
+        logger.debug(f"Selected top {len(inbound_filtered)} inbound edges")
+        
+        # Collect outbound edges with similarity scores
+        logger.debug(f"Checking {len(outbound)} outbound edges for text matches")
+        for edge in outbound:
+            if edge.sentence and edge.sentence_embedding is not None:
+                similarity = kg_utils.cosine_similarity(text_embedding, edge.sentence_embedding)
+                logger.debug(f"Edge sentence: '{edge.sentence[:50]}...' similarity: {similarity:.3f}")
+                
+                # Store edge with similarity score
+                edge._similarity_score = similarity
+                all_edge_scores.append((edge, similarity, 'outbound'))
+        
+        # Get top K matches from all edges (inbound + outbound)
+        all_edge_scores.sort(key=lambda x: x[1], reverse=True)  # Sort by similarity
+        top_matches = all_edge_scores[:k_matches]
+        inbound_filtered = [edge for edge, score, direction in top_matches if direction == 'inbound']
+        outbound_filtered = [edge for edge, score, direction in top_matches if direction == 'outbound']
+        
+        logger.debug(f"Selected top {len(inbound_filtered)} inbound + {len(outbound_filtered)} outbound edges")
+        
+        # Note: Node label filtering removed - using top-K edge filtering only
+        
+        # Update the edge lists with filtered results
+        inbound = inbound_filtered
+        outbound = outbound_filtered
+        logger.debug(f"Text filtering results: {len(inbound)} inbound, {len(outbound)} outbound edges")
+
+    # Check if we need to sample edges due to size limit
+    total_edges = len(inbound) + len(outbound)
+    warning_message = None
+    
+    if total_edges > max_edges:
+        import random
+        
+        # Combine all edges and sample randomly
+        all_edges = [(e, 'inbound') for e in inbound] + [(e, 'outbound') for e in outbound]
+        sampled_edges = random.sample(all_edges, max_edges)
+        
+        # Separate back into inbound and outbound
+        inbound = [e for e, direction in sampled_edges if direction == 'inbound']
+        outbound = [e for e, direction in sampled_edges if direction == 'outbound']
+        
+        warning_message = (
+            f"WARNING: Node has {total_edges} connections (exceeds limit of {max_edges}). "
+            f"Showing {max_edges} randomly selected connections. "
+            f"Consider filtering by: 1) specific node_id to focus on key nodes, 2) node_type=State for preferences/properties, 3) start_date/end_date for time frames, or 4) text for semantic filtering."
+        )
+        logger.warning(warning_message)
+    
+    # Currency annotation — a State/Event is "active" iff its era hasn't
+    # ended as of now. Non-State/Event nodes report active=True (no decay).
+    _now_for_currency = datetime.utcnow()
+    _is_active = _state_or_event_is_active(node, _now_for_currency)
+
+    # build the output
+    details: Dict[str, Any] = {
+        "id": str(node.id),
+        "label": node.label,
+        "semantic_label": node.semantic_label,
+        "node_type": node.node_type,
+        "category": node.category,
+        "description": node.description,
+        "aliases": node.aliases or [],
+        "attributes": node.attributes or {},
+        "valid_during": node.valid_during,
+        "hash_tags": node.hash_tags or [],
+        "goal_status": node.goal_status,
+        "confidence": node.confidence,
+        "importance": node.importance,
+        "source": node.source,
+        "start_date": node.start_date.isoformat() if node.start_date else None,
+        "end_date": node.end_date.isoformat() if node.end_date else None,
+        "start_date_confidence": node.start_date_confidence,
+        "end_date_confidence": node.end_date_confidence,
+        # Currency marker — False means era has elapsed; agents should
+        # treat as historical, not current. See project_kg_redesign_v2
+        # memo (era-bound decay).
+        "is_active": _is_active,
+        "created_at": node.created_at.isoformat() if node.created_at else None,
+        "updated_at": node.updated_at.isoformat() if node.updated_at else None,
+        "inbound_edges": [],
+        "outbound_edges": []
+    }
+    
+    # Add warning message if present
+    if warning_message:
+        details["warning"] = warning_message
+
+    for e in inbound:
+        # load the source node so we can show its label
+        src = session.get(Node, e.source_id)
+        edge_data = {
+            "edge_id": str(e.id),
+            "from_node_id": str(e.source_id),
+            "from_node_label": src.label if src else None,
+            "from_node_type": src.node_type if src else None,
+            "from_is_active": _state_or_event_is_active(src, _now_for_currency) if src else True,
+            "edge_type": e.relationship_type,
+            "sentence": e.sentence
+        }
+        if hasattr(e, '_similarity_score'):
+            edge_data["similarity_score"] = e._similarity_score
+        details["inbound_edges"].append(edge_data)
+
+    for e in outbound:
+        # load the target node so we can show its label
+        tgt = session.get(Node, e.target_id)
+        edge_data = {
+            "edge_id": str(e.id),
+            "to_node_id": str(e.target_id),
+            "to_node_label": tgt.label if tgt else None,
+            "to_node_type": tgt.node_type if tgt else None,
+            "to_is_active": _state_or_event_is_active(tgt, _now_for_currency) if tgt else True,
+            "edge_type": e.relationship_type,
+            "sentence": e.sentence
+        }
+        if hasattr(e, '_similarity_score'):
+            edge_data["similarity_score"] = e._similarity_score
+        details["outbound_edges"].append(edge_data)
+
+    return details
+
+
+def _state_or_event_is_active(node, now=None) -> bool:
+    """Is this node's era still in force as of ``now``?
+
+    - For State/Event nodes: True iff ``end_date`` is NULL or > now.
+      Also False when ``end_date_confidence == "auto_decay"`` AND the
+      end_date has elapsed (redundant but explicit).
+    - For all other node types: True. Entities/Concepts/etc. are timeless
+      identities, not decaying states.
+
+    Used by describe_node to annotate currency on every serialized node
+    so agent-facing tools can distinguish "currently true" from
+    "historically observed" without running their own filter queries.
+    """
+    if node is None:
+        return True
+    node_type = getattr(node, "node_type", None)
+    if node_type not in ("State", "Event"):
+        return True
+    end_date = getattr(node, "end_date", None)
+    if end_date is None:
+        return True
+    if now is None:
+        now = datetime.utcnow()
+    try:
+        return end_date > now
+    except TypeError:
+        # Tz-aware vs naive compare; fall back to string compare as a cheap guard.
+        return str(end_date) > str(now)
+
+
+def find_nodes_by_type(node_type_value: str, session: Session) -> List[Node]:
+    """
+    Return all nodes with the given node_type_value.
+    """
+    return session.query(Node).filter(Node.node_type == node_type_value).all()
+
+
+def find_nodes_by_attribute(attr_name: str, attr_value: Any, session: Session) -> List[Node]:
+    """
+    Return nodes where attributes[attr_name] == attr_value.
+    Uses SQLite json_extract for JSON field queries.
+    """
+    return session.query(Node).filter(
+        func.json_extract(Node.attributes, f'$.{attr_name}') == str(attr_value)
+    ).all()
+
+
+from sqlalchemy import func, desc
+
+
+def find_nodes_by_partial_label(substring: str, session: Session, case_insensitive: bool = True) -> List[Node]:
+    """
+    Return nodes whose labels contain the given substring.
+    """
+    if case_insensitive:
+        return session.query(Node).filter(func.lower(Node.label).like(f"%{substring.lower()}%")).all()
+    else:
+        return session.query(Node).filter(Node.label.like(f"%{substring}%")).all()
+
+
+def find_nodes_multi_filter(filters: Dict[str, Any], session: Session) -> List[Node]:
+    """
+    Flexible node filtering based on a combination of label, node_type, aliases, and attributes.
+    Supported filter keys: 'label', 'node_type', 'alias', 'attributes' (dict)
+    """
+    query = session.query(Node)
+
+    if "label" in filters:
+        query = query.filter(Node.label == filters["label"])
+
+    if "node_type" in filters:
+        query = query.filter(Node.node_type == filters["node_type"])
+    
+    # Legacy support for type_name
+    if "type_name" in filters:
+        query = query.filter(Node.node_type == filters["type_name"])
+
+    if "alias" in filters:
+        # .contains([x]) on SQLite JSON columns is broken for multi-element arrays.
+        _a = filters["alias"].replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        query = query.filter(Node.aliases.like(f'%"{_a}"%'))
+
+    if "attributes" in filters:
+        for attr_key, attr_val in filters["attributes"].items():
+            query = query.filter(Node.attributes[attr_key].astext == str(attr_val))
+
+    return query.all()
+
+
+def update_node_label(node_id: uuid.UUID, new_label: str, session: Session) -> Optional[Node]:
+    """
+    Update the label of a node.
+    NOTE: This function does NOT commit the session. The caller is responsible for committing.
+    """
+    # Convert UUID to string for SQLite compatibility
+    node_id = str(node_id)
+    node = session.get(Node, node_id)
+    if not node:
+        logger.warning(f"Node {node_id} not found")
+        return None
+
+    node.label = new_label
+    return node
+
+
+def update_node_type(node_id: uuid.UUID, new_node_type: str, session: Session) -> Optional[Node]:
+    """
+    Update the node_type of a node after validating it exists.
+    NOTE: This function does NOT commit the session. The caller is responsible for committing.
+    """
+    # Convert UUID to string for SQLite compatibility
+    node_id = str(node_id)
+    node = session.get(Node, node_id)
+    if not node:
+        logger.warning(f"Node {node_id} not found")
+        return None
+
+    # Valid node types: Entity, Event, State, Goal, Concept, Property
+    node.node_type = new_node_type
+    return node
+
+
+def replace_node_attribute(node_id: uuid.UUID, attr_name: str, new_value: Any, session: Session) -> Optional[Node]:
+    """
+    Replace a single attribute value on a node. Overwrites any existing value.
+    NOTE: This function does NOT commit the session. The caller is responsible for committing.
+    """
+    # Convert UUID to string for SQLite compatibility
+    node_id = str(node_id)
+    node = session.get(Node, node_id)
+    if not node:
+        logger.warning(f"Node {node_id} not found")
+        return None
+
+    attributes = node.attributes or {}
+    attributes[attr_name] = new_value
+    node.attributes = attributes
+
+    return node
+
+
+def remove_node_attribute(node_id: uuid.UUID, attr_name: str, session: Session) -> Optional[Node]:
+    """
+    Remove a key from the attributes JSONB dict of a node.
+    NOTE: This function does NOT commit the session. The caller is responsible for committing.
+    """
+    # Convert UUID to string for SQLite compatibility
+    node_id = str(node_id)
+    node = session.get(Node, node_id)
+    if not node:
+        logger.warning(f"Node {node_id} not found")
+        return None
+
+    attributes = node.attributes or {}
+    if attr_name in attributes:
+        del attributes[attr_name]
+        node.attributes = attributes
+    else:
+        logger.warning(f"Attribute '{attr_name}' not found in node {node_id}")
+
+    return node
+
+
+def get_edges_by_node(node_id: uuid.UUID, session: Session, direction: str = "both") -> List[Edge]:
+    """
+    Retrieve all edges connected to a node. Supports 'inbound', 'outbound', or 'both'.
+    """
+    if direction == "inbound":
+        return session.query(Edge).filter(Edge.target_id == node_id).all()
+    elif direction == "outbound":
+        return session.query(Edge).filter(Edge.source_id == node_id).all()
+    elif direction == "both":
+        return session.query(Edge).filter(
+            (Edge.source_id == node_id) | (Edge.target_id == node_id)
+        ).all()
+    else:
+        raise ValueError("Invalid direction. Use 'inbound', 'outbound', or 'both'.")
+
+
+def get_relationships_by_type(relationship_type_value: str, session: Session) -> List[Edge]:
+    """
+    Retrieve all edges with the given relationship_type_value.
+    """
+    return session.query(Edge).filter(Edge.relationship_type == relationship_type_value).all()
+
+
+def delete_edge(edge_id: uuid.UUID, session: Session) -> bool:
+    """
+    Marks an edge for deletion by its ID. Does not commit the session.
+    """
+    edge = session.get(Edge, edge_id)
+    if not edge:
+        logger.warning(f"Edge {edge_id} not found")
+        return False
+
+    session.delete(edge)
+    return True
+
+
+# Note: create_embedding moved to knowledge_graph_utils.py
+# Use KnowledgeGraphUtils.create_embedding() instead
+
+
+def safe_add_relationship_by_id(
+        db_session: Session,
+        source_id: uuid.UUID,
+        target_id: uuid.UUID,
+        relationship_type: str,
+        attributes: Optional[Dict[str, Any]] = None
+) -> Tuple[Optional[Edge], str]:
+    """
+    Creates and adds a relationship to the session using node IDs if it doesn't
+    already exist. Does not commit the transaction.
+
+    Uniqueness is determined by the combination of source ID, target ID,
+    relationship type, and start/end times extracted from the attributes.
+
+    Returns a tuple containing the Edge object and a status string:
+    "created", "found", or "error_missing_nodes".
+    """
+    attributes = attributes or {}
+
+    # 1. Helper to safely parse ISO date strings from attributes.
+    def _parse_iso(date_str: Optional[str]) -> Optional[datetime]:
+        if not date_str:
+            return None
+        try:
+            # Handle 'Z' for UTC timezone correctly
+            return datetime.fromisoformat(str(date_str).replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            # Return None if parsing fails
+            return None
+
+    start_date = _parse_iso(attributes.get("start_date") or attributes.get("start_date"))
+    end_date = _parse_iso(attributes.get("end_date") or attributes.get("end_date"))
+
+    # 2. Check for an existing edge using the full composite key.
+    from app.assistant.kg_core.kg_utils.knowledge_graph_utils import KnowledgeGraphUtils
+    kg_utils = KnowledgeGraphUtils(db_session)
+    existing_edge = kg_utils.find_exact_match_relationship(
+        source_id, target_id, relationship_type, start_date, end_date
+    )
+
+    if existing_edge:
+        # Edge already exists, return it
+        return existing_edge, "found"
+
+    # 3. Fetch nodes to create a descriptive text for the embedding.
+    source_node = db_session.get(Node, source_id)
+    target_node = db_session.get(Node, target_id)
+
+    if not source_node or not target_node:
+        missing = []
+        if not source_node: missing.append(f"source (ID: {source_id})")
+        if not target_node: missing.append(f"target (ID: {target_id})")
+        logger.warning(f"Could not create edge because nodes were not found: {', '.join(missing)}")
+        return None, "error_missing_nodes"
+
+    # Create a semantically rich sentence for the embedding
+    embedding_text = f"{source_node.label} {relationship_type} {target_node.label}"
+
+    # 4. Create the new edge object.
+    edge_id = str(uuid.uuid4())
+    new_edge = Edge(
+        id=edge_id,
+        source_id=str(source_id),
+        target_id=str(target_id),
+        relationship_type=relationship_type,
+        start_date=start_date,
+        end_date=end_date,
+        attributes=attributes,
+        # Note: embeddings are now stored in ChromaDB, not as columns
+    )
+
+    # 5. Add the new edge to the session for a future commit.
+    db_session.add(new_edge)
+    
+    # Store edge embedding in ChromaDB
+    from app.assistant.kg.chroma.chroma_embedding_manager import get_chroma_manager
+    chroma = get_chroma_manager()
+    edge_embedding = kg_utils.create_embedding(embedding_text)
+    chroma.store_edge_embedding(edge_id, embedding_text, edge_embedding)
+
+    return new_edge, "created"
+
+
+def update_edge_attributes(edge_id: uuid.UUID, updates: Dict[str, Any], session: Session) -> Optional[Edge]:
+    """
+    Update the attributes JSONB field of an edge with the given updates.
+    Performs a shallow merge (overwrites existing keys with new values).
+    NOTE: This function does NOT commit the session. The caller is responsible for committing.
+    """
+    edge = session.get(Edge, edge_id)
+    if not edge:
+        logger.warning(f"Edge {edge_id} not found")
+        return None
+
+    edge.attributes = {**(edge.attributes or {}), **updates}
+    return edge
+
+
+def semantic_find_edge_type(rel_text: str, session: Session, threshold: float = 0.75) -> Optional[str]:
+    """
+    Use semantic similarity to find the closest matching edge type to the provided text.
+    Now uses EdgeCanon instead of deprecated EdgeType.
+    """
+    from app.assistant.kg_core.kg_utils.knowledge_graph_utils import KnowledgeGraphUtils
+    from app.assistant.kg_core.kg_pipeline_old.standardization.models_standardization import EdgeCanon
+    
+    kg_utils = KnowledgeGraphUtils(session)
+
+    rel_embedding = kg_utils.create_embedding(rel_text)
+    edge_canonicals = session.query(EdgeCanon).all()
+
+    best_match = None
+    best_score = 0
+
+    for ec in edge_canonicals:
+        candidate_embedding = kg_utils.create_embedding(ec.edge_type)
+        score = kg_utils.cosine_similarity(rel_embedding, candidate_embedding)
+        if score > best_score:
+            best_match = ec.edge_type
+            best_score = score
+
+    if best_score >= threshold:
+        return best_match
+    else:
+        return None
+
+
+def short_describe_node(
+        node_or_id: Union[Node, str, UUID],
+        session: Session,
+        *,
+        k_edges: int = 5,
+        alias_max: int = 2,
+        trivial_types: Optional[set] = None,
+        importance_default: float = 0.5,
+        include_sentences: bool = False,
+) -> Dict[str, Any]:
+    """
+    Compact summary for a node, using per-edge importance if present.
+    Fallback order for importance: Edge.attributes['importance'] -> Edge.importance -> default.
+    """
+    if not isinstance(session, Session):
+        raise TypeError("session must be an SQLAlchemy Session instance")
+
+    # Resolve node
+    node = node_or_id if isinstance(node_or_id, Node) else session.get(Node, node_or_id)
+    if not node:
+        raise ValueError(f"Node not found: {node_or_id}")
+
+    # Pull a bit extra, newest first
+    inbound = (
+        session.query(Edge)
+            .filter(Edge.target_id == node.id)
+            .order_by(desc(Edge.updated_at), desc(Edge.created_at))
+            .limit(max(k_edges * 3, 10))
+            .all()
+    )
+    outbound = (
+        session.query(Edge)
+            .filter(Edge.source_id == node.id)
+            .order_by(desc(Edge.updated_at), desc(Edge.created_at))
+            .limit(max(k_edges * 3, 10))
+            .all()
+    )
+    edges = [("in", e) for e in inbound] + [("out", e) for e in outbound]
+
+    def _edge_ts(e: Edge) -> Optional[datetime]:
+        return e.updated_at or e.created_at
+
+    def _recency_score(ts: Optional[datetime]) -> float:
+        if not ts:
+            return 0.0
+        now = datetime.now(timezone.utc)
+        age_days = max(0.0, (now - ts).total_seconds() / 86400.0)
+        half_life = 90.0
+        return 0.5 ** (age_days / half_life)
+
+    scored: List[Dict[str, Any]] = []
+    for direction, e in edges:
+        other = e.source_node if direction == "in" else e.target_node
+        if not other:
+            continue
+
+        # Importance priority: Edge.attributes > Edge.importance > default
+        edge_imp = None
+        if e.attributes:
+            edge_imp = e.attributes.get("importance")
+            if isinstance(edge_imp, str):
+                try:
+                    edge_imp = float(edge_imp)
+                except ValueError:
+                    edge_imp = None
+        if edge_imp is None and e.importance is not None:
+            edge_imp = e.importance
+        imp = float(edge_imp) if edge_imp is not None else importance_default
+
+        rec = _recency_score(_edge_ts(e))
+        score = 0.6 * imp + 0.4 * rec
+
+        edge_info = {
+            "edge_id": str(e.id),
+            "direction": direction,
+            "edge_type": e.relationship_type,
+            "other_node_id": str(other.id),
+            "other_node_label": other.label,
+            "updated_at": (_edge_ts(e).isoformat() if _edge_ts(e) else None),
+            "score": round(score, 4),
+            "importance": round(float(imp), 4),
+        }
+        if include_sentences and e.sentence:
+            edge_info["sentence"] = e.sentence
+        scored.append(edge_info)
+
+    scored.sort(key=lambda x: (x["score"], x["updated_at"] or ""), reverse=True)
+
+    # Diversity caps
+    trivial_types = trivial_types or {"has_email"}
+    seen_per_type: Dict[str, int] = {}
+    top_edges: List[Dict[str, Any]] = []
+    for s in scored:
+        et = s["edge_type"]
+        cap = 1 if et in trivial_types else 2
+        if seen_per_type.get(et, 0) >= cap:
+            continue
+        top_edges.append(s)
+        seen_per_type[et] = seen_per_type.get(et, 0) + 1
+        if len(top_edges) >= k_edges:
+            break
+
+    aliases = node.aliases or []
+    aliases_preview = aliases[:alias_max]
+    aliases_more_count = max(0, len(aliases) - len(aliases_preview))
+
+    return {
+        "node_id": str(node.id),
+        "label": node.label,
+        "node_type": node.node_type,
+        "aliases_preview": aliases_preview,
+        "aliases_more_count": aliases_more_count,
+        "top_edges": top_edges,
+        "start_date": node.start_date.isoformat() if node.start_date else None,
+        "end_date": node.end_date.isoformat() if node.end_date else None,
+        "start_date_confidence": node.start_date_confidence,
+        "end_date_confidence": node.end_date_confidence,
+    }
+
+# kg_tools.py
+from typing import Any, Dict, Optional, Union
+from uuid import UUID
+from datetime import datetime, timezone
+from sqlalchemy.orm import Session
+from app.assistant.kg.db.knowledge_graph_db_sqlite import Edge, Node
+
+def _parse_iso(ts: Optional[str]) -> Optional[datetime]:
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    except Exception:
+        logger.debug("Could not parse ISO timestamp: %s", ts, exc_info=True)
+        return None
+
+def _is_active(start: Optional[datetime], end: Optional[datetime]) -> bool:
+    now = datetime.now(timezone.utc)
+    if start and now < start:
+        return False
+    if end and now >= end:
+        return False
+    return True
+
+def describe_edge(
+        edge_id: Union[str, UUID],
+        session: Session,
+        include_raw: bool = False
+) -> Dict[str, Any]:
+    """
+    Return a concise description of an edge, reading credibility, importance,
+    and qualifiers from Edge.attributes or Edge.importance column.
+    """
+    edge: Optional[Edge] = session.query(Edge).filter(Edge.id == edge_id).one_or_none()
+    if not edge:
+        raise ValueError(f"Edge not found: {edge_id}")
+
+    src: Optional[Node] = session.query(Node).filter(Node.id == edge.source_id).one_or_none()
+    tgt: Optional[Node] = session.query(Node).filter(Node.id == edge.target_id).one_or_none()
+
+    attrs: Dict[str, Any] = dict(edge.attributes or {})
+
+    # Pull primary scoring fields from attributes, then Edge columns
+    credibility = attrs.get("credibility")
+    importance = attrs.get("importance")
+    
+    # Fallback to Edge.importance column if not in attributes
+    if importance is None and edge.importance is not None:
+        importance = edge.importance
+
+    # Final defaults
+    credibility = float(credibility) if isinstance(credibility, (int, float, str)) and str(credibility).replace(".","",1).isdigit() else None
+    importance  = float(importance)  if isinstance(importance, (int, float, str))  and str(importance).replace(".","",1).isdigit()  else 0.5
+
+    decay_rate = attrs.get("decay_rate")
+    try:
+        decay_rate = float(decay_rate) if decay_rate is not None else None
+    except Exception:
+        logger.debug("Could not parse decay_rate value: %s", decay_rate, exc_info=True)
+        decay_rate = None
+
+    # Temporal fields, prefer attributes if present, else DB columns
+    start_s = attrs.get("start_date") or attrs.get("start_date")
+    end_s   = attrs.get("end_date") or attrs.get("end_date")
+    start_dt = _parse_iso(start_s) or edge.start_date
+    end_dt   = _parse_iso(end_s) or edge.end_date
+
+    # Qualifiers
+    qualifiers = {
+        "details": attrs.get("details"),
+        "location": attrs.get("location"),
+        "time_of_day": attrs.get("time_of_day"),
+        "emotion": attrs.get("emotion"),
+        "mood": attrs.get("mood"),
+        "frequency": attrs.get("frequency"),
+        "tags": attrs.get("tags"),
+        "suggested_qualifiers": attrs.get("suggested_qualifiers"),
+    }
+
+    # Provenance-like fields if you store them in attributes
+    provenance = {
+        "reference_text": attrs.get("reference_text"),
+        "provenance_timestamp": attrs.get("provenance_timestamp"),
+        "source": attrs.get("data_source"),
+        "original_message_timestamp": attrs.get("original_message_timestamp"),
+    }
+
+    # Headline synthesis, small and deterministic
+    source_label = src.label if src else None
+    target_label = tgt.label if tgt else None
+    title = attrs.get("title") or attrs.get("role")
+    if edge.relationship_type == "works_for" and source_label and target_label:
+        headline = f"{source_label} works for {target_label}"
+    elif edge.relationship_type == "works_as" and source_label and title:
+        headline = f"{source_label} works as {title}"
+    else:
+        headline = f"{source_label} {edge.relationship_type} {target_label}".strip()
+
+    data: Dict[str, Any] = {
+        "edge_id": str(edge.id),
+        "edge_type": edge.relationship_type,
+        "source": {"id": str(edge.source_id), "label": source_label},
+        "target": {"id": str(edge.target_id), "label": target_label},
+        "created_at": edge.created_at.isoformat() if edge.created_at else None,
+        "updated_at": edge.updated_at.isoformat() if edge.updated_at else None,
+        "start_date": start_dt.isoformat() if start_dt else None,
+        "end_date": end_dt.isoformat() if end_dt else None,
+        "is_active": _is_active(start_dt, end_dt),
+        "importance": importance,
+        "credibility": credibility,
+        "decay_rate": decay_rate,
+        "valid_during": attrs.get("valid_during"),
+        "qualifiers": qualifiers,
+        "provenance": provenance,
+        "attributes_preview": {k: v for k, v in attrs.items() if k in ("title", "role", "department", "email", "phone")},
+        "headline": headline,
+        "why": [
+            f"importance {importance:.2f}" if importance is not None else None,
+            "active" if _is_active(start_dt, end_dt) else "inactive",
+            "recent" if edge.updated_at and (datetime.now(timezone.utc) - edge.updated_at).days < 180 else None,
+        ],
+    }
+    data["why"] = [w for w in data["why"] if w]
+
+    if include_raw:
+        data["raw_attributes"] = attrs
+
+    return data
+
+
+def parse_filters_from_pydantic(filters) -> Dict[str, Any]:
+    """
+    Parse SearchFilters (Pydantic model or dict) into dictionary for apply_search_filters.
+    
+    Args:
+        filters: SearchFilters Pydantic model, dict, or None
+        
+    Returns:
+        Dictionary with filter values in appropriate types
+    """
+    if not filters:
+        return {}
+    
+    parsed_filters = {}
+    
+    # Handle both Pydantic models and plain dictionaries
+    if hasattr(filters, 'dict'):
+        # Pydantic model - convert to dict, excluding None values
+        filter_dict = filters.dict(exclude_none=True)
+    elif isinstance(filters, dict):
+        # Plain dictionary - filter out None values
+        filter_dict = {k: v for k, v in filters.items() if v is not None}
+    else:
+        # Unknown type, return empty dict
+        return {}
+    
+    for key, value in filter_dict.items():
+        if value is not None:
+            parsed_filters[key] = value
+    
+    # Convert singular node_id to plural node_ids for apply_search_filters
+    if "node_id" in parsed_filters and parsed_filters["node_id"]:
+        parsed_filters["node_ids"] = [parsed_filters["node_id"]]
+        del parsed_filters["node_id"]
+    
+    return parsed_filters
+
+
+def apply_search_filters(session: Session, base_query, filters: Dict[str, Any] = None) -> Any:
+    """
+    Applies search filters to any base SQLAlchemy query.
+    Returns the filtered query that can be further refined.
+    
+    Philosophy: "No filters = everything eligible" - filters are restrictive, not prescriptive.
+    
+    Args:
+        session: SQLAlchemy session
+        base_query: Base SQLAlchemy query object
+        filters: Dictionary of filter parameters
+        
+    Supported filters:
+        - node_ids: List of node UUIDs to restrict search to
+        - node_types: List of node types to filter by (Entity, Goal, State, etc.)
+        - exclude_nodes: List of node UUIDs to exclude
+        - start_date: ISO date string - only nodes valid after this date (temporal connectivity)
+        - end_date: ISO date string - only nodes valid before this date (temporal connectivity)
+        - max_hops: Integer - expand node_ids to their neighborhoods (requires node_ids, default=all connected)
+        - relationship_types: List of relationship types for connected nodes
+        
+    Returns:
+        Filtered SQLAlchemy query object
+    """
+    if not filters:
+        return base_query
+    
+    from sqlalchemy import or_, and_, func
+    from datetime import datetime
+    from app.assistant.kg.db.knowledge_graph_db_sqlite import Edge
+    
+    # Node ID restrictions with smart defaults
+    if "node_ids" in filters and filters["node_ids"]:
+        node_ids = filters["node_ids"]
+        
+        # Smart default: if max_hops not provided, look at ALL connected nodes (no hop limit)
+        max_hops = filters.get("max_hops")
+        
+        if max_hops is not None and max_hops >= 0:
+            # Get neighborhood nodes up to max_hops
+            neighborhood_nodes = set()
+            for node_id in node_ids:
+                try:
+                    if isinstance(node_id, str):
+                        node_id = uuid.UUID(node_id)
+                    neighborhood = get_neighborhood(session, node_id, depth=max_hops)
+                    neighborhood_nodes.update([node.id for node in neighborhood["nodes"]])
+                except (ValueError, TypeError):
+                    # Invalid UUID, skip
+                    continue
+            
+            if neighborhood_nodes:
+                base_query = base_query.filter(Node.id.in_(list(neighborhood_nodes)))
+        else:
+            # No max_hops provided - get ALL connected nodes (no hop limit)
+            # This is more complex - we need to get all nodes connected to the specified nodes
+            connected_nodes = set()
+            for node_id in node_ids:
+                try:
+                    if isinstance(node_id, str):
+                        node_id = uuid.UUID(node_id)
+                    # Get all connected nodes (no depth limit)
+                    connected = get_connected_nodes(node_id, session, direction="any")
+                    connected_nodes.update([node.id for node in connected])
+                    # Also include the original node
+                    connected_nodes.add(node_id)
+                except (ValueError, TypeError):
+                    # Invalid UUID, skip
+                    continue
+            
+            if connected_nodes:
+                base_query = base_query.filter(Node.id.in_(list(connected_nodes)))
+    elif "max_hops" in filters and filters["max_hops"] > 0:
+        # max_hops provided but no node_ids - ignore max_hops (can't expand from nothing)
+        pass
+    
+    # Node type restrictions (no default - if not provided, include all types)
+    if "node_types" in filters and filters["node_types"]:
+        # Convert node types to proper case (database enum expects capitalized)
+        valid_node_types = ['Entity', 'Event', 'State', 'Goal', 'Concept', 'Property']
+        normalized_types = []
+        for node_type in filters["node_types"]:
+            if isinstance(node_type, str):
+                # Try to match case-insensitively
+                for valid_type in valid_node_types:
+                    if node_type.lower() == valid_type.lower():
+                        normalized_types.append(valid_type)
+                        break
+                else:
+                    # If no match found, use the original (will cause error but that's expected)
+                    normalized_types.append(node_type)
+            else:
+                normalized_types.append(node_type)
+        
+        if normalized_types:
+            base_query = base_query.filter(Node.node_type.in_(normalized_types))
+    
+    # Taxonomy path filtering (no default - if not provided, include all taxonomies)
+    if "taxonomy_paths" in filters and filters["taxonomy_paths"]:
+        from app.assistant.kg_core.taxonomy.utils import get_taxonomy_by_path
+        
+        # Check if taxonomy tables exist before attempting the JOIN
+        try:
+            from sqlalchemy import inspect as sa_inspect
+            inspector = sa_inspect(session.get_bind())
+            if "node_taxonomy_links" not in inspector.get_table_names():
+                logger.debug("apply_search_filters: taxonomy tables not found, skipping taxonomy_paths filter")
+                filters = {k: v for k, v in filters.items() if k != "taxonomy_paths"}
+        except Exception as e:
+            logger.debug(f"apply_search_filters: could not check taxonomy tables, skipping filter: {e}")
+            filters = {k: v for k, v in filters.items() if k != "taxonomy_paths"}
+
+    if "taxonomy_paths" in filters and filters["taxonomy_paths"]:
+        from app.assistant.kg_core.taxonomy.utils import get_taxonomy_by_path
+        
+        # Get taxonomy IDs for all specified paths
+        taxonomy_ids = []
+        for path in filters["taxonomy_paths"]:
+            if isinstance(path, str):
+                try:
+                    # Get taxonomy by path (e.g., "entity > person")
+                    taxonomy = get_taxonomy_by_path(session, path)
+                    if taxonomy:
+                        taxonomy_ids.append(taxonomy.id)
+                except Exception as e:
+                    # Invalid path, skip
+                    continue
+        
+        if taxonomy_ids:
+            # Filter nodes that are classified under any of the specified taxonomy paths
+            from app.assistant.kg_core.taxonomy.models import NodeTaxonomyLink
+            base_query = base_query.join(NodeTaxonomyLink, Node.id == NodeTaxonomyLink.node_id).filter(
+                NodeTaxonomyLink.taxonomy_id.in_(taxonomy_ids)
+            ).distinct()
+    
+    # Exclude specific nodes (no default - if not provided, exclude nothing)
+    if "exclude_nodes" in filters and filters["exclude_nodes"]:
+        try:
+            exclude_uuids = []
+            for node_id in filters["exclude_nodes"]:
+                if isinstance(node_id, str):
+                    exclude_uuids.append(uuid.UUID(node_id))
+                else:
+                    exclude_uuids.append(node_id)
+            base_query = base_query.filter(~Node.id.in_(exclude_uuids))
+        except (ValueError, TypeError):
+            # Invalid UUIDs, skip this filter
+            pass
+    
+    # Temporal filtering with temporal connectivity logic
+    # Nodes without temporal bounds are always included
+    # Nodes with temporal bounds are included only if they overlap with the filter range
+    temporal_conditions = []
+    
+    if "start_date" in filters and filters["start_date"]:
+        try:
+            if isinstance(filters["start_date"], str):
+                start_date = datetime.fromisoformat(filters["start_date"].replace("Z", "+00:00"))
+            else:
+                start_date = filters["start_date"]
+            
+            # Include nodes that:
+            # 1. Have no end_date (ongoing), OR
+            # 2. Have end_date >= start_date (still valid at start_date)
+            temporal_conditions.append(
+                or_(
+                    Node.end_date.is_(None),  # No end date = always valid
+                    Node.end_date >= start_date
+                )
+            )
+        except (ValueError, TypeError):
+            # Invalid date format, skip this filter
+            pass
+    
+    if "end_date" in filters and filters["end_date"]:
+        try:
+            if isinstance(filters["end_date"], str):
+                end_date = datetime.fromisoformat(filters["end_date"].replace("Z", "+00:00"))
+            else:
+                end_date = filters["end_date"]
+            
+            # Include nodes that:
+            # 1. Have no start_date (always existed), OR  
+            # 2. Have start_date <= end_date (existed at end_date)
+            temporal_conditions.append(
+                or_(
+                    Node.start_date.is_(None),  # No start date = always existed
+                    Node.start_date <= end_date
+                )
+            )
+        except (ValueError, TypeError):
+            # Invalid date format, skip this filter
+            pass
+    
+    # Apply temporal conditions (all must be true)
+    if temporal_conditions:
+        base_query = base_query.filter(and_(*temporal_conditions))
+    
+    # Relationship type filtering (requires joining with edges)
+    # No default - if not provided, include all relationship types
+    if "relationship_types" in filters and filters["relationship_types"]:
+        # Join with edges to filter by relationship types
+        base_query = base_query.join(Edge, or_(
+            Edge.source_id == Node.id,
+            Edge.target_id == Node.id
+        )).filter(Edge.relationship_type.in_(filters["relationship_types"]))
+    
+    # Importance filtering (no default - if not provided, include all importance levels)
+    if "min_importance" in filters and filters["min_importance"] is not None:
+        try:
+            min_importance = float(filters["min_importance"])
+            # This assumes importance is stored in node attributes
+            # You might need to adjust this based on your actual schema
+            base_query = base_query.filter(
+                func.json_extract(Node.attributes, '$.importance') >= min_importance
+            )
+        except (ValueError, TypeError):
+            # Invalid importance value, skip this filter
+            pass
+    
+    return base_query
+
+
+def semantic_find_node_by_text(text: str, session: Session, threshold: float = 0.8, k: int = 5, filters = None) -> List[
+    Tuple[Node, float]]:
+    """
+    Perform semantic search against all node labels using embeddings.
+    Now supports filtering to restrict search scope using the efficient TemporalGraphFilter approach.
+    
+    Args:
+        text: Text to search for
+        session: Database session
+        threshold: Similarity threshold (0.0-1.0)
+        k: Maximum number of results
+        filters: SearchFilters Pydantic model or None
+    """
+    from app.assistant.kg_core.kg_utils.knowledge_graph_utils import KnowledgeGraphUtils
+    kg_utils = KnowledgeGraphUtils(session)
+    
+
+    # If filters are provided, use TemporalGraphFilter for efficient temporal filtering
+    if filters:
+        # Parse Pydantic SearchFilters model
+        parsed_filters = parse_filters_from_pydantic(filters)
+        
+        # Check if we have temporal filters
+        start_date = parsed_filters.get("start_date")
+        end_date = parsed_filters.get("end_date")
+        
+        if start_date or end_date:
+            # Use TemporalGraphFilter for efficient temporal filtering
+            node_types = parsed_filters.get("node_types")
+            relationship_types = parsed_filters.get("relationship_types")
+            temporal_filter = TemporalGraphFilter(session, start_date, end_date, node_types, relationship_types)
+            valid_node_ids = temporal_filter._get_valid_node_ids()
+            
+            if not valid_node_ids:
+                return []  # No nodes match the temporal filters
+            
+            # Get filtered nodes
+            filtered_nodes = session.query(Node).filter(Node.id.in_(valid_node_ids)).all()
+        else:
+            # Use the old approach for non-temporal filters
+            base_query = session.query(Node)
+            filtered_query = apply_search_filters(session, base_query, parsed_filters)
+            filtered_nodes = filtered_query.all()
+        
+        if not filtered_nodes:
+            return []  # No nodes match the filters
+        
+        # If text is empty, skip semantic matching and just return filtered nodes
+        if not text or text.strip() == "":
+            # Return filtered nodes sorted by importance (descending), then by created_at (descending for recency)
+            sorted_nodes = sorted(
+                filtered_nodes,
+                key=lambda n: (
+                    -(n.importance if n.importance is not None else 0.5),  # Higher importance first
+                    -(n.created_at.timestamp() if n.created_at else 0)  # More recent first
+                ),
+            )
+            # Return with score of 1.0 to indicate "exact match" (no semantic filtering applied)
+            candidates = [(node, 1.0) for node in sorted_nodes[:k]]
+        else:
+            # Do semantic search manually on filtered nodes
+            new_embedding = kg_utils.create_embedding(text)
+            similarities = []
+            for node in filtered_nodes:
+                if node.label_embedding is not None:
+                    sim = kg_utils.cosine_similarity(new_embedding, node.label_embedding)
+                    if sim >= threshold:
+                        similarities.append((node, sim))
+            
+            # Sort by similarity and return top k
+            similarities.sort(key=lambda x: x[1], reverse=True)
+            candidates = similarities[:k]
+    else:
+        # Original behavior - search all nodes
+        candidates = kg_utils.find_fuzzy_match_node(label=text, similarity_threshold=threshold, max_results=k)
+    
+    return candidates  # [(Node, similarity_score), ...]
+
+
+
+def validate_kg_integrity(session: Session) -> Dict[str, Any]:
+    """
+    Performs basic integrity checks on the knowledge graph.
+    Returns a summary of problems found.
+    """
+    results = {
+        "orphaned_edges": [],
+        "self_loops": [],
+        "missing_nodes": [],
+        "duplicate_nodes": []
+    }
+
+    # Orphaned edges (source or target is null)
+    orphaned = session.query(Edge).filter(
+        (Edge.source_id == None) | (Edge.target_id == None)
+    ).all()
+    results["orphaned_edges"] = [str(e.id) for e in orphaned]
+
+    # Self-loops
+    self_loops = session.query(Edge).filter(Edge.source_id == Edge.target_id).all()
+    results["self_loops"] = [str(e.id) for e in self_loops]
+
+    # Edges pointing to nonexistent nodes (optional, expensive)
+    all_node_ids = set(row[0] for row in session.query(Node.id).all())
+    broken_edges = []
+    for edge in session.query(Edge).all():
+        if edge.source_id not in all_node_ids or edge.target_id not in all_node_ids:
+            broken_edges.append(str(edge.id))
+    results["missing_nodes"] = broken_edges
+
+    # Duplicate nodes: same label + type
+    from sqlalchemy import func
+    dupes = session.query(Node.label, Node.node_type, func.count(Node.id)) \
+        .group_by(Node.label, Node.node_type) \
+        .having(func.count(Node.id) > 1).all()
+    results["duplicate_nodes"] = [{"label": d[0], "type": d[1], "count": d[2]} for d in dupes]
+
+    return results
+
+
+def count_edges_by_type(session: Session) -> Dict[str, int]:
+    """
+    Returns a dictionary of edge type → count.
+    """
+    from sqlalchemy import func
+    counts = session.query(Edge.relationship_type, func.count(Edge.id)).group_by(Edge.relationship_type).all()
+    return {type_name: count for type_name, count in counts}
+
+
+def count_nodes_by_type(session: Session) -> Dict[str, int]:
+    """
+    Returns a dictionary of node type → count.
+    """
+    from sqlalchemy import func
+    counts = session.query(Node.node_type, func.count(Node.id)).group_by(Node.node_type).all()
+    return {type_name: count for type_name, count in counts}
+
+
+def get_outgoing_edges(node_id: uuid.UUID, session: Session) -> List[Edge]:
+    """
+    Return all edges where the given node is the source.
+    """
+    return session.query(Edge).filter(Edge.source_id == node_id).all()
+
+
+def get_incoming_edges(node_id: uuid.UUID, session: Session) -> List[Edge]:
+    """
+    Return all edges where the given node is the target.
+    """
+    return session.query(Edge).filter(Edge.target_id == node_id).all()
+
+
+def get_connected_nodes(node_id: uuid.UUID, session: Session, direction: str = "any") -> List[Node]:
+    """
+    Return all nodes connected to the given node, in the specified direction.
+    direction = 'in', 'out', or 'any' (default).
+    """
+    connected_node_ids = set()
+
+    if direction in ("out", "any"):
+        outgoing = session.query(Edge.target_id).filter(Edge.source_id == node_id).all()
+        connected_node_ids.update([r[0] for r in outgoing])
+
+    if direction in ("in", "any"):
+        incoming = session.query(Edge.source_id).filter(Edge.target_id == node_id).all()
+        connected_node_ids.update([r[0] for r in incoming])
+
+    connected_node_ids.discard(node_id)  # just in case
+
+    return session.query(Node).filter(Node.id.in_(connected_node_ids)).all()
+
+
+def get_connected_nodes_with_edges(node_id: uuid.UUID, session: Session, direction: str = "any") -> List[
+    Tuple[Node, Edge]]:
+    """
+    Return all (Node, Edge) pairs connected to the given node.
+    direction = 'in', 'out', or 'any'
+    """
+    pairs = []
+
+    if direction in ("out", "any"):
+        outgoing = session.query(Edge).filter(Edge.source_id == node_id).all()
+        for edge in outgoing:
+            target = session.get(Node, edge.target_id)
+            if target:
+                pairs.append((target, edge))
+
+    if direction in ("in", "any"):
+        incoming = session.query(Edge).filter(Edge.target_id == node_id).all()
+        for edge in incoming:
+            source = session.get(Node, edge.source_id)
+            if source:
+                pairs.append((source, edge))
+
+    return pairs
+
+
+
+
+def create_node(session: Session, label: str, node_type_value: str, **kwargs) -> Node:
+    """
+    Create a new node in the knowledge graph.
+    `kwargs` can include description, aliases, attributes, start_date, end_date, 
+    start_date_confidence, end_date_confidence, etc.
+    NOTE: This function does NOT commit the session. The caller is responsible for committing.
+    """
+    # Check if the node type is valid
+    # Valid node types: Entity, Event, State, Goal, Concept, Property
+    
+    new_node = Node(
+        label=label,
+        node_type=node_type_value,
+        description=kwargs.get("description"),
+        aliases=kwargs.get("aliases", []),
+        attributes=kwargs.get("attributes", {}),
+        start_date=kwargs.get("start_date"),
+        end_date=kwargs.get("end_date"),
+        start_date_confidence=kwargs.get("start_date_confidence"),
+        end_date_confidence=kwargs.get("end_date_confidence"),
+        confidence=kwargs.get("confidence"),
+        importance=kwargs.get("importance"),
+        source=kwargs.get("source")
+    )
+    session.add(new_node)
+    return new_node
+
+
+def create_edge(session: Session, source_id: uuid.UUID, target_id: uuid.UUID, relationship_type_value: str, **kwargs) -> Edge:
+    """
+    Create a new edge between two nodes.
+    `kwargs` can include attributes, start_date, end_date, etc.
+    NOTE: This function does NOT commit the session. The caller is responsible for committing.
+    Edge type validation is handled by the edge standardization system.
+    """
+    # Check if nodes exist
+    source_node = session.get(Node, source_id)
+    target_node = session.get(Node, target_id)
+    if not source_node or not target_node:
+        raise ValueError("Source or target node not found.")
+
+    new_edge = Edge(
+        source_id=source_id,
+        target_id=target_id,
+        relationship_type=relationship_type_value,
+        attributes=kwargs.get("attributes", {}),
+        start_date=kwargs.get("start_date"),
+        end_date=kwargs.get("end_date"),
+        confidence=kwargs.get("confidence"),
+        importance=kwargs.get("importance"),
+        source=kwargs.get("source")
+    )
+    session.add(new_edge)
+
+    return new_edge
+
+
+# You will also need a delete_edges function in kg_tools.py that does NOT commit:
+def delete_edges(session: Session, edge_ids: list[str]):
+    """
+    Deletes edges from the knowledge graph by their IDs.
+    NOTE: This function does NOT commit the session. The caller is responsible for committing.
+    """
+    if not edge_ids:
+        return
+    # Ensure IDs are UUIDs if your Edge.id is UUID, or convert if needed
+    uuid_edge_ids = [uuid.UUID(eid) for eid in edge_ids]
+    session.query(Edge).filter(Edge.id.in_(uuid_edge_ids)).delete(synchronize_session='fetch')
+
+
+def get_or_create_node(session: Session, label: str, node_type: str, **kwargs) -> Node:
+    """
+    Retrieve a node by its label and type, or create it if it doesn't exist.
+    This is an atomic "upsert" pattern useful for data ingestion.
+    """
+    node = session.query(Node).filter_by(label=label, node_type=node_type).first()
+    if node:
+        return node
+    else:
+        # Pass along any other provided attributes to the create function
+        return create_node(session, label, node_type, **kwargs)
+
+
+def update_edge_type(session: Session, edge_id: uuid.UUID, new_relationship_type: str) -> Optional[Edge]:
+    """
+    Update the relationship_type of an edge.
+    NOTE: This function does NOT commit the session. The caller is responsible for committing.
+    Edge type validation is handled by the edge standardization system.
+    """
+    edge = session.get(Edge, edge_id)
+    if not edge:
+        logger.warning(f"Edge {edge_id} not found")
+        return None
+
+    edge.relationship_type = new_relationship_type
+    return edge
+
+
+def find_shortest_path(session: Session, start_node_id: uuid.UUID, end_node_id: uuid.UUID) -> Optional[List[Dict]]:
+    """
+    Finds the shortest path between two nodes using Breadth-First Search (BFS).
+    Returns a list of path segments, where each segment is a dictionary
+    containing the node and the edge that led to it.
+    """
+    if start_node_id == end_node_id:
+        return []
+
+    queue = deque([(start_node_id, [])])  # (current_node_id, path_so_far)
+    visited = {start_node_id}
+
+    while queue:
+        current_id, path = queue.popleft()
+
+        # Get all outgoing edges from the current node
+        edges = session.query(Edge).filter(Edge.source_id == current_id).all()
+        for edge in edges:
+            neighbor_id = edge.target_id
+            if neighbor_id == end_node_id:
+                # Path found!
+                final_path = path + [{"edge": edge, "node": session.get(Node, neighbor_id)}]
+                return final_path
+
+            if neighbor_id not in visited:
+                visited.add(neighbor_id)
+                new_path = path + [{"edge": edge, "node": session.get(Node, neighbor_id)}]
+                queue.append((neighbor_id, new_path))
+
+    return None  # No path found
+
+
+def get_neighborhood(session: Session, node_id: uuid.UUID, depth: int = 1) -> Dict[str, Any]:
+    """
+    Retrieves the subgraph surrounding a node up to a certain depth.
+    Returns a dictionary of all nodes and edges within the neighborhood.
+    """
+    # Convert UUID to string for SQLite compatibility
+    node_id_str = str(node_id)
+    
+    neighborhood = {"nodes": set(), "edges": set()}
+    queue = deque([(node_id_str, 0)])  # (current_node_id, current_depth)
+    visited_nodes = {node_id_str}
+
+    start_node = session.get(Node, node_id_str)
+    if not start_node:
+        return neighborhood
+
+    neighborhood["nodes"].add(start_node)
+
+    while queue:
+        current_id, current_depth = queue.popleft()
+
+        if current_depth >= depth:
+            continue
+
+        connected = get_connected_nodes_with_edges(current_id, session, direction="any")
+        for node, edge in connected:
+            neighborhood["edges"].add(edge)
+            if node.id not in visited_nodes:
+                visited_nodes.add(node.id)
+                neighborhood["nodes"].add(node)
+                queue.append((node.id, current_depth + 1))
+
+    # Convert sets to lists for JSON serialization if needed
+    neighborhood["nodes"] = list(neighborhood["nodes"])
+    neighborhood["edges"] = list(neighborhood["edges"])
+    return neighborhood
+
+
+def get_node_degree(session: Session, node_id: uuid.UUID) -> Dict[str, int]:
+    """
+    Calculates the in-degree, out-degree, and total degree for a specific node.
+    """
+    in_degree = session.query(Edge).filter(Edge.target_id == node_id).count()
+    out_degree = session.query(Edge).filter(Edge.source_id == node_id).count()
+
+    return {
+        "in_degree": in_degree,
+        "out_degree": out_degree,
+        "total_degree": in_degree + out_degree
+    }
+
+
+def find_subgraph_by_nodes(session: Session, node_ids: List[uuid.UUID]) -> Dict[str, List]:
+    """
+    Given a list of node IDs, returns all nodes and the edges that exist *between* them.
+    """
+    nodes = session.query(Node).filter(Node.id.in_(node_ids)).all()
+    edges = session.query(Edge).filter(
+        Edge.source_id.in_(node_ids),
+        Edge.target_id.in_(node_ids)
+    ).all()
+
+    return {"nodes": nodes, "edges": edges}
+
+
+def filter_kg_by_temporal_range(session: Session, start_date: str = None, end_date: str = None) -> Dict[str, List]:
+    """
+    Filter the entire knowledge graph to a specific time interval.
+    
+    This function now uses the new TemporalGraphFilter class for better performance
+    and consistency.
+    
+    Args:
+        session: Database session
+        start_date: Start of time range (ISO format string)
+        end_date: End of time range (ISO format string)
+        
+    Returns:
+        Dictionary with 'nodes' and 'edges' lists containing the temporally-filtered graph
+    """
+    temporal_filter = TemporalGraphFilter(session, start_date, end_date)
+    
+    # Get valid node and edge IDs
+    valid_node_ids = temporal_filter._get_valid_node_ids()
+    valid_edge_ids = temporal_filter._get_valid_edge_ids()
+    
+    if not valid_node_ids:
+        return {"nodes": [], "edges": []}
+    
+    # Get the actual nodes and edges
+    valid_nodes = session.query(Node).filter(Node.id.in_(valid_node_ids)).all()
+    valid_edges = session.query(Edge).filter(Edge.id.in_(valid_edge_ids)).all()
+    
+    return {"nodes": valid_nodes, "edges": valid_edges}
+
+
+def build_connected_subgraph_from_filtered_graph(filtered_graph: Dict[str, List], base_node_id: uuid.UUID, max_hops: int = None) -> Dict[str, List]:
+    """
+    Build a connected subgraph from a pre-filtered graph, starting from a base node.
+    
+    This is the second level of filtering - it takes a temporally-filtered graph
+    and builds a connected subgraph around a specific node with optional hop limits.
+    
+    Args:
+        filtered_graph: Dictionary with 'nodes' and 'edges' from filter_kg_by_temporal_range
+        base_node_id: UUID of the base node to start from
+        max_hops: Maximum number of hops from base node (None for unlimited)
+        
+    Returns:
+        Dictionary with 'nodes' and 'edges' lists containing the connected subgraph
+    """
+    from collections import defaultdict
+    
+    # Check if base node exists in filtered graph
+    base_node_exists = any(node.id == base_node_id for node in filtered_graph["nodes"])
+    if not base_node_exists:
+        return {"nodes": [], "edges": []}
+    
+    # Build edge lookup maps for O(1) access
+    edges_by_source = defaultdict(list)
+    edges_by_target = defaultdict(list)
+    
+    for edge in filtered_graph["edges"]:
+        edges_by_source[edge.source_id].append(edge)
+        edges_by_target[edge.target_id].append(edge)
+    
+    # BFS to find all connected nodes and edges
+    visited_nodes = {base_node_id}
+    queue = [(base_node_id, 0)]  # (node_id, hop_distance)
+    connected_edges = []
+    
+    while queue:
+        current_node, hop_distance = queue.pop(0)
+        
+        # Check hop limit
+        if max_hops is not None and hop_distance >= max_hops:
+            continue
+        
+        # Find all edges connected to current node
+        for edge in edges_by_source[current_node]:
+            if edge not in connected_edges:
+                connected_edges.append(edge)
+                if edge.target_id not in visited_nodes:
+                    visited_nodes.add(edge.target_id)
+                    queue.append((edge.target_id, hop_distance + 1))
+        
+        for edge in edges_by_target[current_node]:
+            if edge not in connected_edges:
+                connected_edges.append(edge)
+                if edge.source_id not in visited_nodes:
+                    visited_nodes.add(edge.source_id)
+                    queue.append((edge.source_id, hop_distance + 1))
+    
+    # Get the actual node objects from filtered graph
+    connected_nodes = [node for node in filtered_graph["nodes"] if node.id in visited_nodes]
+    
+    return {"nodes": connected_nodes, "edges": connected_edges}
+
+
+def build_temporal_subgraph(session: Session, base_node_id: uuid.UUID, filters: Dict[str, Any] = None, max_hops: int = None) -> Dict[str, List]:
+    """
+    Build a connected subgraph starting from a base node, applying temporal and other filters.
+    
+    This uses the new two-level filtering approach:
+    1. First, filter the entire KG to the specified time range
+    2. Then, build a connected subgraph from that filtered graph
+    
+    Args:
+        session: Database session
+        base_node_id: UUID of the base node to start from
+        filters: Dictionary of filter parameters (start_date, end_date, etc.)
+        max_hops: Maximum number of hops from base node (None for unlimited)
+        
+    Returns:
+        Dictionary with 'nodes' and 'edges' lists containing the connected subgraph
+    """
+    # Extract temporal filters
+    start_date = filters.get("start_date") if filters else None
+    end_date = filters.get("end_date") if filters else None
+    
+    # Step 1: Filter the entire KG by temporal range
+    filtered_graph = filter_kg_by_temporal_range(session, start_date, end_date)
+    
+    # Step 2: Build connected subgraph from the filtered graph
+    subgraph = build_connected_subgraph_from_filtered_graph(filtered_graph, base_node_id, max_hops)
+    
+    return subgraph
+
+
+def find_connected_nodes_with_temporal_filter(session: Session, base_node_id: uuid.UUID, filters: Dict[str, Any] = None, max_hops: int = None) -> List[Node]:
+    """
+    Find all nodes connected to a base node, applying temporal and other filters.
+    
+    This is a simpler version of build_temporal_subgraph that only returns connected nodes,
+    useful for functions that need to find connected nodes but don't need the full subgraph.
+    
+    Args:
+        session: Database session
+        base_node_id: UUID of the base node to start from
+        filters: Dictionary of filter parameters (start_date, end_date, etc.)
+        max_hops: Maximum number of hops from base node (None for unlimited)
+        
+    Returns:
+        List of connected Node objects
+    """
+    subgraph = build_temporal_subgraph(session, base_node_id, filters, max_hops)
+    return subgraph["nodes"]
+
+
+def find_similar_nodes_by_neighbors(session: Session, node_id: uuid.UUID, limit: int = 5) -> List[Tuple[Node, float]]:
+    """
+    Finds nodes that are structurally similar by comparing their neighbors.
+    Uses Jaccard similarity: J(A, B) = |A ∩ B| / |A ∪ B|.
+    """
+    target_neighbors = set(n.id for n in get_connected_nodes(node_id, session))
+    if not target_neighbors:
+        return []
+
+    all_nodes = session.query(Node).filter(Node.id != node_id).all()
+    scores = []
+
+    for candidate_node in all_nodes:
+        candidate_neighbors = set(n.id for n in get_connected_nodes(candidate_node.id, session))
+
+        intersection_size = len(target_neighbors.intersection(candidate_neighbors))
+        union_size = len(target_neighbors.union(candidate_neighbors))
+
+        if union_size == 0:
+            continue
+
+        jaccard_score = intersection_size / union_size
+        if jaccard_score > 0:
+            scores.append((candidate_node, jaccard_score))
+
+    scores.sort(key=lambda x: x[1], reverse=True)
+    return scores[:limit]
+
+
+
+
+def inspect_node_neighborhood(
+        node_id: uuid.UUID,
+        session: Session
+) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    """
+    Returns:
+        node_info: dict containing info about the main node.
+        edge_list: flat list of enriched edges with connected node data, suitable for chunking.
+    """
+    # Convert UUID to string for SQLite compatibility
+    node_id = str(node_id)
+    node = session.get(Node, node_id)
+    if not node:
+        raise ValueError(f"Node {node_id} not found")
+
+    node_info = {
+        "id": str(node.id),
+        "label": node.label,
+        "semantic_label": node.semantic_label,
+        "type": node.node_type,
+        "description": node.description,
+        "aliases": node.aliases or [],
+        "attributes": node.attributes or {},
+        "start_date": node.start_date.isoformat() if node.start_date else None,
+        "end_date": node.end_date.isoformat() if node.end_date else None,
+        "start_date_confidence": node.start_date_confidence,
+        "end_date_confidence": node.end_date_confidence
+    }
+
+    edges = []
+
+    incoming = session.query(Edge).filter(Edge.target_id == node_id).all()
+    outgoing = session.query(Edge).filter(Edge.source_id == node_id).all()
+
+    for edge in incoming:
+        src = session.get(Node, edge.source_id)
+        if not src:
+            continue
+        
+        # Prioritize original_message_timestamp over provenance_timestamp for temporal reasoning
+        edge_attrs = edge.attributes or {}
+        if edge_attrs.get("original_message_timestamp") and edge_attrs.get("provenance_timestamp"):
+            # Create a copy and prioritize the original timestamp
+            prioritized_attrs = edge_attrs.copy()
+            prioritized_attrs["timestamp"] = edge_attrs["original_message_timestamp"]
+            prioritized_attrs["message_timestamp"] = edge_attrs["original_message_timestamp"]
+        else:
+            prioritized_attrs = edge_attrs
+        
+        edges.append({
+            "direction": "in",
+            "edge_type": edge.relationship_type,
+            "edge_attributes": prioritized_attrs,
+            "sentence": edge.sentence,
+            "relationship_descriptor": edge.relationship_descriptor,
+            "connected_node": {
+                "id": str(src.id),
+                "label": src.label,
+                "type": src.node_type,
+                "description": src.description,
+                "aliases": src.aliases or []
+            }
+        })
+
+    for edge in outgoing:
+        tgt = session.get(Node, edge.target_id)
+        if not tgt:
+            continue
+        
+        # Prioritize original_message_timestamp over provenance_timestamp for temporal reasoning
+        edge_attrs = edge.attributes or {}
+        if edge_attrs.get("original_message_timestamp") and edge_attrs.get("provenance_timestamp"):
+            # Create a copy and prioritize the original timestamp
+            prioritized_attrs = edge_attrs.copy()
+            prioritized_attrs["timestamp"] = edge_attrs["original_message_timestamp"]
+            prioritized_attrs["message_timestamp"] = edge_attrs["original_message_timestamp"]
+        else:
+            prioritized_attrs = edge_attrs
+        
+        edges.append({
+            "direction": "out",
+            "edge_type": edge.relationship_type,
+            "edge_attributes": prioritized_attrs,
+            "sentence": edge.sentence,
+            "relationship_descriptor": edge.relationship_descriptor,
+            "connected_node": {
+                "id": str(tgt.id),
+                "label": tgt.label,
+                "type": tgt.node_type,
+                "description": tgt.description,
+                "aliases": tgt.aliases or []
+            }
+        })
+
+    return node_info, edges
+
+
+if __name__ == "__main__":
+    session = get_session()
+
+    nodes = find_nodes_by_partial_label("Sam", session)
+
+    node_id = nodes[0].id
+
+    data = inspect_node_neighborhood(node_id, session)
+
+    print(data)
+
+    # trans = session.begin()  # explicitly control the transaction
+    # find_corrupt_edges(session)
+    # main()
+    # jukka_nodes = find_nodes_by_partial_label("Emi", session)
+    #
+    # for node in jukka_nodes:
+    #     print(f"Found node: ID={node.id}, Label='{node.label}', Description={node.description}")
+    #
+    # # 🎯 Get top 5 nodes with the most outgoing edges
+    # top_outgoing_nodes = get_nodes_with_most_outgoing_edges(session, limit=5)
+    # print("--- Top 5 Nodes by Outgoing Edges ---")
+    # for node, count in top_outgoing_nodes:
+    #     print(f"Node: '{node.label}' (ID: {node.id}) has {count} outgoing edges.")
+    #
+    # print("\n" + "="*40 + "\n")
+    #
+    # # 📥 Get top 5 nodes with the most incoming edges
+    # top_incoming_nodes = get_nodes_with_most_incoming_edges(session, limit=5)
+    # print("--- Top 5 Nodes by Incoming Edges ---")
+    # for node, count in top_incoming_nodes:
+    #     print(f"Node: '{node.label}' (ID: {node.id}) has {count} incoming edges.")
+    #
+    #
+    #
+    # run_clustering_demos(session)
+
+    # # Assuming 'session' is your active SQLAlchemy session
+    # jukka_node_id = uuid.UUID('99cb4011-17a0-43d5-a0f0-70c3af3a99e7')
+    # sam_node_id = uuid.UUID('06eac21c-d65a-4ba6-841f-a0609f4ef59a')
+    #
+    # # Find the shortest path from you to Jamie
+    # path = find_shortest_path(session, primary_user_node_id, jamie_node_id)
+    #
+    # if path:
+    #     print(f"Path from primary user to 'Jamie':")
+    #     current_node_label = "primary user"
+    #     for segment in path:
+    #         edge = segment['edge']
+    #         next_node = segment['node']
+    #         print(f"  - [{current_node_label}] --({edge.relationship_type})--> [{next_node.label}]")
+    #         current_node_label = next_node.label
+    # else:
+    #     print("No direct path found between 'Jukka' and 'Sam'.")
+    #
+    # import uuid
+    # import pprint
+    #
+    # # Assuming 'session' is your active SQLAlchemy session
+    # sam_node_id = uuid.UUID('06eac21c-d65a-4ba6-841f-a0609f4ef59a')
+    #
+    # # Get the full summary for Sam's node
+    # sam_details = describe_node(sam_node_id, session)
+    #
+    # # Print the details in a readable format
+    # pprint.pprint(sam_details)
+
+
+class TemporalGraphFilter:
+    """
+    A class that provides database-level temporal filtering for knowledge graph operations.
+    Instead of loading data into memory, this creates database views/queries that can be
+    reused across multiple operations.
+    """
+    
+    def __init__(self, session: Session, start_date: Optional[str] = None, end_date: Optional[str] = None, 
+                 node_types: Optional[List[str]] = None, relationship_types: Optional[List[str]] = None):
+        self.session = session
+        self.start_date = start_date
+        self.end_date = end_date
+        self.node_types = node_types
+        self.relationship_types = relationship_types
+        self._valid_node_ids = None
+        self._valid_edge_ids = None
+    
+    def _parse_time(self, time_str: str) -> datetime:
+        """Parse time string into datetime object."""
+        try:
+            if "T" in time_str:
+                return datetime.fromisoformat(time_str.replace("Z", "+00:00"))
+            else:
+                return datetime.fromisoformat(time_str + "T00:00:00+00:00")
+        except (ValueError, TypeError):
+            raise ValueError(f"Invalid time format: {time_str}")
+    
+    def _get_valid_node_ids(self, base_node_id: Optional[uuid.UUID] = None) -> set:
+        """Get set of node IDs that are temporally valid and match node type filters.
+        
+        Args:
+            base_node_id: If provided, this node will always be included regardless of filters
+        """
+        if self._valid_node_ids is not None:
+            return self._valid_node_ids
+        
+        query = self.session.query(Node.id)
+        
+        # Apply temporal filtering
+        if self.start_date:
+            start_dt = self._parse_time(self.start_date)
+            query = query.filter(
+                or_(
+                    Node.end_date.is_(None),
+                    Node.end_date >= start_dt
+                )
+            )
+        
+        if self.end_date:
+            end_dt = self._parse_time(self.end_date)
+            query = query.filter(
+                or_(
+                    Node.start_date.is_(None),
+                    Node.start_date <= end_dt
+                )
+            )
+        
+        # Apply node type filtering
+        if self.node_types:
+            query = query.filter(Node.node_type.in_(self.node_types))
+        
+        valid_node_ids = {node_id for node_id, in query.all()}
+        
+        # Always include the base node if specified, regardless of filters
+        if base_node_id:
+            valid_node_ids.add(base_node_id)
+        
+        self._valid_node_ids = valid_node_ids
+        return self._valid_node_ids
+    
+    def _get_valid_edge_ids(self) -> set:
+        """Get set of edge IDs that are temporally valid and match relationship type filters."""
+        if self._valid_edge_ids is not None:
+            return self._valid_edge_ids
+        
+        valid_node_ids = self._get_valid_node_ids()
+        if not valid_node_ids:
+            self._valid_edge_ids = set()
+            return self._valid_edge_ids
+        
+        query = self.session.query(Edge.id).filter(
+            and_(
+                Edge.source_id.in_(valid_node_ids),
+                Edge.target_id.in_(valid_node_ids)
+            )
+        )
+        
+        # Apply relationship type filtering
+        if self.relationship_types:
+            query = query.filter(Edge.relationship_type.in_(self.relationship_types))
+        
+        self._valid_edge_ids = {edge_id for edge_id, in query.all()}
+        return self._valid_edge_ids
+    
+    def find_node_by_text(self, text: str, similarity_threshold: float = 0.7) -> Optional[Node]:
+        """Find a node by text within the temporally-filtered graph."""
+        valid_node_ids = self._get_valid_node_ids()
+        if not valid_node_ids:
+            return None
+        
+        # Use the existing semantic search but filter results by temporal validity
+        results = semantic_find_node_by_text(
+            text=text,
+            session=self.session,
+            threshold=similarity_threshold,
+            k=10
+        )
+        
+        # Filter results to only include temporally valid nodes
+        for node, score in results:
+            if node.id in valid_node_ids:
+                return node
+        
+        return None
+    
+    def describe_node(self, node_id: uuid.UUID, max_hops: int = None) -> Dict[str, Any]:
+        """Describe a node and its neighborhood within the temporally-filtered graph."""
+        # Always include the base node in valid nodes, regardless of filters
+        valid_node_ids = self._get_valid_node_ids(base_node_id=node_id)
+        valid_edge_ids = self._get_valid_edge_ids()
+        
+        # Get the node
+        node = self.session.query(Node).filter(Node.id == node_id).first()
+        if not node:
+            return {"error": "Node not found"}
+        
+        # Get connected edges (only temporally valid ones)
+        edge_query = self.session.query(Edge).filter(
+            and_(
+                Edge.id.in_(valid_edge_ids),
+                or_(
+                    Edge.source_id == node_id,
+                    Edge.target_id == node_id
+                )
+            )
+        )
+        
+        if max_hops is not None:
+            # For now, we'll get direct connections only
+            # TODO: Implement multi-hop traversal with temporal constraints
+            pass
+        
+        edges = edge_query.all()
+        
+        # Separate inbound and outbound edges
+        inbound_edges = [e for e in edges if e.target_id == node_id]
+        outbound_edges = [e for e in edges if e.source_id == node_id]
+        
+        # Get connected nodes
+        connected_node_ids = set()
+        for edge in edges:
+            if edge.source_id != node_id:
+                connected_node_ids.add(edge.source_id)
+            if edge.target_id != node_id:
+                connected_node_ids.add(edge.target_id)
+        
+        connected_nodes = self.session.query(Node).filter(
+            Node.id.in_(connected_node_ids)
+        ).all()
+        
+        return {
+            "node": node,
+            "inbound_edges": inbound_edges,
+            "outbound_edges": outbound_edges,
+            "connected_nodes": connected_nodes,
+            "temporal_filter": {
+                "start_date": self.start_date,
+                "end_date": self.end_date
+            }
+        }
+    
+    def find_connected_nodes(self, node_id: uuid.UUID, max_hops: int = 1) -> List[Node]:
+        """Find all nodes connected to a given node within the temporally-filtered graph."""
+        # Always include the base node in valid nodes, regardless of filters
+        valid_node_ids = self._get_valid_node_ids(base_node_id=node_id)
+        valid_edge_ids = self._get_valid_edge_ids()
+        
+        # Use BFS to find connected nodes
+        visited = {node_id}
+        queue = [(node_id, 0)]
+        connected_node_ids = set()
+        
+        while queue:
+            current_node_id, hop_distance = queue.pop(0)
+            
+            if max_hops is not None and hop_distance >= max_hops:
+                continue
+            
+            # Find edges connected to current node
+            edge_query = self.session.query(Edge).filter(
+                and_(
+                    Edge.id.in_(valid_edge_ids),
+                    or_(
+                        Edge.source_id == current_node_id,
+                        Edge.target_id == current_node_id
+                    )
+                )
+            )
+            
+            for edge in edge_query.all():
+                # Get the other node in the edge
+                other_node_id = edge.target_id if edge.source_id == current_node_id else edge.source_id
+                
+                if other_node_id not in visited:
+                    visited.add(other_node_id)
+                    connected_node_ids.add(other_node_id)
+                    queue.append((other_node_id, hop_distance + 1))
+        
+        # Return the connected nodes
+        if connected_node_ids:
+            return self.session.query(Node).filter(Node.id.in_(connected_node_ids)).all()
+        return []
+    
+    def get_temporal_stats(self) -> Dict[str, Any]:
+        """Get statistics about the temporally-filtered graph."""
+        valid_node_ids = self._get_valid_node_ids()
+        valid_edge_ids = self._get_valid_edge_ids()
+        
+        total_nodes = self.session.query(Node).count()
+        total_edges = self.session.query(Edge).count()
+        
+        return {
+            "filters": {
+                "start_date": self.start_date,
+                "end_date": self.end_date,
+                "node_types": self.node_types,
+                "relationship_types": self.relationship_types
+            },
+            "filtered_counts": {
+                "nodes": len(valid_node_ids),
+                "edges": len(valid_edge_ids)
+            },
+            "total_counts": {
+                "nodes": total_nodes,
+                "edges": total_edges
+            },
+            "filter_ratio": {
+                "nodes": len(valid_node_ids) / total_nodes if total_nodes > 0 else 0,
+                "edges": len(valid_edge_ids) / total_edges if total_edges > 0 else 0
+            }
+        }

@@ -1,0 +1,96 @@
+{
+  "name": "get_google_doc",
+  "description": "Read a Google Docs document and return its plain-text content, title, revision id, and Drive metadata (created/modified times, owner, web link). Supports lookup by document_id or by name search. Body text can be truncated via max_chars.",
+  "inputs": [
+    {
+      "name": "document_id",
+      "type": "string",
+      "required": false,
+      "description": "Google Docs document ID (the long alphanumeric string in the document URL). Required unless name_search is provided."
+    },
+    {
+      "name": "name_search",
+      "type": "string",
+      "required": false,
+      "description": "Substring to search for in document names. Returns the most recently modified match. Required unless document_id is provided."
+    },
+    {
+      "name": "include_body",
+      "type": "boolean",
+      "required": false,
+      "description": "Whether to include the document body text (default true). Set false to fetch metadata only."
+    },
+    {
+      "name": "max_chars",
+      "type": "integer",
+      "required": false,
+      "description": "Maximum body characters to return (default 20000, max 100000). Truncation is indicated in the response."
+    },
+    {
+      "name": "account_id",
+      "type": "string",
+      "required": false,
+      "description": "Optional Google OAuth account id (default \"google_user_primary\")."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "data.document_id",
+      "type": "string",
+      "description": "The document ID used for the fetch."
+    },
+    {
+      "path": "data.title",
+      "type": "string",
+      "description": "Document title."
+    },
+    {
+      "path": "data.body",
+      "type": "string",
+      "description": "Plain-text document body (possibly truncated)."
+    },
+    {
+      "path": "data.char_count",
+      "type": "integer",
+      "description": "Total characters in the full document body."
+    },
+    {
+      "path": "data.truncated",
+      "type": "boolean",
+      "description": "True if body was truncated to max_chars."
+    },
+    {
+      "path": "data.web_link",
+      "type": "string",
+      "description": "Direct URL to open the document in Google Docs."
+    },
+    {
+      "path": "data.modified_time",
+      "type": "string",
+      "description": "ISO 8601 last modified timestamp."
+    }
+  ],
+  "arguments_prompt": "Arguments:\ndocument_id: Google Docs document ID from the URL (e.g. \"1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms\").\nname_search: Alternatively, a name substring to find the most recently modified matching doc.\ninclude_body: true/false (default true). False returns metadata only.\nmax_chars: integer, default 20000, max 100000.\naccount_id: optional (default \"google_user_primary\").\nNote: provide document_id OR name_search, not both.",
+  "metadata": {
+    "domain": "doc",
+    "actions": [
+      "read",
+      "fetch"
+    ],
+    "selectors": [
+      "doc_id",
+      "name"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [
+      "google"
+    ],
+    "requires_network": true,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": true,
+    "room_visibility_default": "show",
+    "approval_required": false
+  }
+}

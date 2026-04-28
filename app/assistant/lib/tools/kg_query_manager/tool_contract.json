@@ -1,0 +1,51 @@
+{
+  "name": "kg_query_manager",
+  "description": "This is knowledge graph query system. It is a fully fledged agent system specialized for querying the knowledge graph and retrieving information.",
+  "inputs": [
+    {
+      "name": "task",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "information",
+      "type": "string",
+      "required": true,
+      "description": ""
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "Arguments are\ntask: The task we are asking of the knowledge graph query agents. This is in prose. They will interpret your task and look up information required and give you the answer.\ninformation: Any extra information provided to us that maybe helpful.",
+  "metadata": {
+    "category": "knowledge_graph",
+    "verbs": [
+      "orchestrate"
+    ],
+    "entities": [
+      "edge",
+      "graph",
+      "node"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "medium",
+    "latency_class": "moderate",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

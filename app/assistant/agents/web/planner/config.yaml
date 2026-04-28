@@ -1,0 +1,37 @@
+name: web::planner
+class_name: Planner
+llm_params:
+  llm_provider: "gemini"
+  engine: "gemini-3-flash-preview"
+  model_tier: "mini"
+  temperature: 1
+  
+
+allowed_nodes: [shared::writer, shared::mathematician]
+
+allowed_tools:
+  all
+
+except_tools: [emi_team]
+
+append_fields: [progress_report]
+
+user_context_items:
+  - date_time
+  - task
+  - information
+  - orchestrator_global_objective
+  - orchestrator_global_guidance
+  - orchestrator_job_id
+  - orchestrator_job_guidance
+  - progress
+  - recent_history
+  - checklist
+  - action_count
+
+system_context_items:
+  - tool_descriptions
+  - allowed_nodes
+
+
+

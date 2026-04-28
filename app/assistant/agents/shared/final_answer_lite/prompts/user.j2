@@ -1,0 +1,36 @@
+Today is {{ date_time }}.
+
+Task:
+{{ task }}
+
+{% if information %}
+Information:
+{{ information }}
+{% endif %}
+
+{% if checklist %}
+Checklist:
+{{ checklist }}
+{% endif %}
+
+{% if recent_history %}
+Recent history (high-signal):
+{{ recent_history }}
+{% endif %}
+
+{% if final_answer_content %}
+Collected final_answer_content:
+{{ final_answer_content }}
+{% endif %}
+
+Return canonical fields:
+- `final_answer_answer` (required)
+- `final_answer_sources` (array; can be empty)
+- `final_answer_detail_level` = "brief"
+- `final_answer_data_list` = []
+
+Optional fields (empty string if not useful):
+- `final_answer_task`
+- `final_answer_what_was_done`
+- `final_answer_interesting_info`
+

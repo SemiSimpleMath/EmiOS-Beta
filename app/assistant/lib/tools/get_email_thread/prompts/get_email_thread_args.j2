@@ -1,0 +1,7 @@
+Arguments are:
+thread_id: Gmail thread id (preferred)
+seed_message_id: Gmail message id used to resolve thread_id when thread_id is omitted
+participant_email: Email address used to resolve a recent thread when thread_id/seed_message_id are omitted
+account_id: Optional Google OAuth account id for per-call mailbox selection; canonical value is exactly "google_user_primary" — do not abbreviate or alter this value
+max_messages: integer, default 100, max 500
+include_body: True or False, default True

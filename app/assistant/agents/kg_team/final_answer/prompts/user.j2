@@ -1,0 +1,14 @@
+Today is {{ date_time }}
+**Task Overview:**
+Problem we tried to solve:
+{{ task }}
+
+{% if information %}
+Additional information:
+{{ information }}
+{% endif %}
+
+{% if recent_history %}
+Previous messages from oldest to latest:
+{{ recent_history }}
+{% endif %}

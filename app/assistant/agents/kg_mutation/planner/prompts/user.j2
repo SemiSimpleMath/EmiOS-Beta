@@ -1,0 +1,26 @@
+Today is {{ date_time }}.
+
+Inbound task: {{ task }}
+
+{% if information %}
+Investigation report + finding context:
+
+{{ information }}
+{% endif %}
+
+{% if checklist %}
+Current checklist:
+{{ checklist }}
+{% endif %}
+
+{% if progress_report %}
+Progress so far:
+{{ progress_report }}
+{% endif %}
+
+{% if recent_history %}
+Recent steps:
+{{ recent_history }}
+{% endif %}
+
+What's your next action?

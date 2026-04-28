@@ -1,0 +1,23 @@
+name: knowledge_graph_add::parser
+class_name: Agent
+llm_params:
+  engine: gpt-5.4-mini
+  model_tier: "mini"
+  llm_provider: "openai"
+entity_scan_keys: [incoming_message, text, task, information, recent_history]
+allowed_tools: []
+except_tools: []
+user_context_items:
+- text
+- original_message_timestamp
+- entity_level_0
+system_context_items:
+- resource_assistant_data
+- resource_user_data
+type: agent
+
+# Detect entities in the text field for entity card injection
+entity_detection_keys:
+  - text
+
+

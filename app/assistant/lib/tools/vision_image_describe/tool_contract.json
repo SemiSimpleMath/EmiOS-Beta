@@ -1,0 +1,49 @@
+{
+  "name": "vision_image_describe",
+  "description": "Describe an image with concise text.",
+  "inputs": [
+    {
+      "name": "image_path",
+      "type": "image_path",
+      "required": true,
+      "description": "Path to image file."
+    },
+    {
+      "name": "question",
+      "type": "string",
+      "required": false,
+      "description": "Optional guidance question."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Main description text."
+    },
+    {
+      "path": "data.image_path",
+      "type": "image_path",
+      "description": "Echo of input image path."
+    }
+  ],
+  "arguments_prompt": "{\"image_path\": \"...\", \"question\": \"Describe this image concisely.\"}",
+  "metadata": {
+    "category": "vision",
+    "verbs": [
+      "operate"
+    ],
+    "entities": [
+      "vision"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "high",
+    "latency_class": "slow",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

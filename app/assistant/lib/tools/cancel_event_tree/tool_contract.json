@@ -1,0 +1,45 @@
+{
+  "name": "cancel_event_tree",
+  "description": "Cancel an event and ALL its children (reminders, sub-events, etc.) in the hierarchy.\n\nUse this when a parent event is cancelled and all related items should be cancelled too.\nFor example: \"Cancel the dentist appointment\" \u2192 cancels the appointment AND all its reminders.\n\nNOTE: This marks events as cancelled in the event graph. You still need to delete/cancel \nthem in the source systems (calendar, scheduler) using the appropriate delete tools.",
+  "inputs": [
+    {
+      "name": "source",
+      "type": "string",
+      "required": true,
+      "description": "Event reference in format 'source_system:source_id'. This event and ALL its children will be marked as cancelled."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "## cancel_event_tree\n\nCancel an event and all its children in the hierarchy.\n\n### Arguments:\n\n- **source** (required): Event reference in format \"source_system:source_id\"\n  - This event and ALL its descendants will be marked as cancelled\n\n### Example:\n\nUser says: \"Cancel my dentist appointment tomorrow\"\n\n1. First find the calendar event ID\n2. Get its hierarchy to see what's linked\n3. Cancel the tree:\n\n```json\n{\n  \"tool_name\": \"cancel_event_tree\",\n  \"arguments\": {\n    \"source\": \"google_calendar:abc123xyz\"\n  }\n}\n```\n\n4. Then use delete_calendar_event, delete_scheduler_event etc. to actually remove them\n\n### Important:\nThis tool marks events as cancelled in the event graph. You still need to actually \ndelete them from Google Calendar, Scheduler, etc. using the respective delete tools.",
+  "metadata": {
+    "category": "scheduler",
+    "verbs": [
+      "delete"
+    ],
+    "entities": [
+      "scheduler"
+    ],
+    "risk_level": "high",
+    "side_effects": "destructive",
+    "requires_auth": [
+      "google"
+    ],
+    "requires_network": true,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "hide",
+    "approval_required": true
+  }
+}

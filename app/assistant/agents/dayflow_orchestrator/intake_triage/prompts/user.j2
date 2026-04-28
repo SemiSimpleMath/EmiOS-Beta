@@ -1,0 +1,82 @@
+{%- from "shared/macros/dayflow_items.j2" import task_line %}
+
+########## TODAY'S SCHEDULE ##########
+{%- if resource_expected_calendar and resource_expected_calendar.expected_schedule %}
+{%- for entry in resource_expected_calendar.expected_schedule %}
+- {{ entry.title }} {{ entry.start_local }}{% if entry.end_local %} - {{ entry.end_local }}{% endif %} ({{ entry.status }})
+{%- endfor %}
+{%- else %}
+No schedule available.
+{%- endif %}
+
+########## NEW POTENTIAL ARTIFACTS ##########
+{%- if eligible_items_now %}
+{%- for m in (eligible_items_now or [])[:80] %}
+{%- set meta = m.get("metadata", {}) %}
+{%- if meta.get("source_type","") == "email" %}
+- {% if meta.get("is_update") %}[UPDATE: {{ meta.get("update_changed_fields", [])|join(", ") }}] {% endif %}Email{% if meta.get("created_at_local") %} received {{ meta.get("created_at_local") }}{% endif %} from {{ meta.get("email_sender","Unknown") }}: "{{ meta.get("email_subject", meta.get("summary","")) }}"{% if meta.get("email_summary") %} — {{ meta.get("email_summary") }}{% endif %}{% if meta.get("importance","") not in ["medium", ""] %} — {{ meta.get("importance") }}{% endif %}
+  artifact_id: {{ meta.get("short_id", meta.get("item_id","")) }}
+{%- else %}
+- {% if meta.get("is_update") %}[UPDATE: {{ meta.get("update_changed_fields", [])|join(", ") }}] {% endif %}{{ meta.get("summary","(no summary)") }}{% if meta.get("importance","") not in ["medium", ""] %} — {{ meta.get("importance") }}{% endif %} ({{ meta.get("source_type","") }}: {{ meta.get("event_type","") }})
+  artifact_id: {{ meta.get("short_id", meta.get("item_id","")) }}
+{%- endif %}
+{%- endfor %}
+{%- else %}
+None
+{%- endif %}
+
+########## EXISTING CONTEXT (for duplicate checking) ##########
+##### Active Plans
+{%- if active_plan_synopses %}
+{%- for p in active_plan_synopses[:20] %}
+- [{{ p.get("plan_id","") }}] {{ p.get("objective","") }}
+  {{ p.get("synopsis","") }}
+{%- endfor %}
+{%- else %}
+None
+{%- endif %}
+
+##### Active Tasks
+{%- set active_tasks = [] %}
+{%- for ex in (active_dayflow_items or []) %}
+{%- set m = ex.get("metadata", {}) %}
+{%- if m.get("state","") in ["important_open", "actionable"] %}{% if active_tasks.append(ex) %}{% endif %}{%- endif %}
+{%- endfor %}
+{%- if active_tasks %}
+{%- for ex in active_tasks[:60] %}
+{%- set meta = ex.get("metadata", {}) %}
+{{ task_line(meta) }}
+{%- endfor %}
+{%- else %}
+None
+{%- endif %}
+
+##### Tracked Tasks — Waiting
+{%- set waiting = [] %}
+{%- for ex in (active_dayflow_items or []) %}
+{%- set m = ex.get("metadata", {}) %}
+{%- if m.get("state","") in ["waiting", "watching"] %}{% if waiting.append(ex) %}{% endif %}{%- endif %}
+{%- endfor %}
+{%- if waiting %}
+{%- for ex in waiting[:60] %}
+{%- set meta = ex.get("metadata", {}) %}
+{{ task_line(meta) }}
+{%- endfor %}
+{%- else %}
+None
+{%- endif %}
+
+##### Recently Completed
+{%- if recently_completed_items %}
+{%- for ex in (recently_completed_items or [])[:40] %}
+{%- set meta = ex.get("metadata", {}) %}
+{{ task_line(meta) }}
+{%- endfor %}
+{%- else %}
+None
+{%- endif %}
+{%- if entity_card %}
+
+##### Entity Context
+{{ entity_card }}
+{%- endif %}

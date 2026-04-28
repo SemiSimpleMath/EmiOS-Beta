@@ -1,0 +1,16 @@
+name: playwright_orchestrator
+class_name: Orchestrator
+
+# Brain agents (3-agent design)
+architect_agent: shared::orchestrator_architect
+facts_curator_agent: shared::orchestrator_facts_curator
+router_agent: shared::orchestrator_router
+
+# Policy
+max_depth: 2
+max_children_total: 6
+max_children_concurrent: 3
+default_child_budget:
+  max_cycles: 30
+  timeout_seconds: 180
+

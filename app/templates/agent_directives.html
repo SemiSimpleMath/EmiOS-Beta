@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent Directives</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/setup_wizard.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/agent_directives.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="setup-container">
+        <div class="setup-header">
+            <h1><i class="fas fa-scroll"></i> Agent Directives</h1>
+            <p>Standing instructions for your agents. Edit these to guide how each agent behaves.</p>
+            <a href="/chat_bot" class="back-link"><i class="fas fa-arrow-left"></i> Back to Chat</a>
+        </div>
+
+        <div class="agent-nav">
+            <button class="nav-arrow" id="prev-agent" title="Previous agent"><i class="fas fa-chevron-left"></i></button>
+            <div class="agent-info">
+                <h2 id="agent-name">Loading...</h2>
+                <p id="agent-description"></p>
+            </div>
+            <button class="nav-arrow" id="next-agent" title="Next agent"><i class="fas fa-chevron-right"></i></button>
+        </div>
+
+        <div class="editor-container">
+            <textarea id="directive-editor" placeholder="Write markdown directives for this agent..."></textarea>
+        </div>
+
+        <div class="btn-row">
+            <button type="button" class="btn-save" id="save-btn">
+                <i class="fas fa-save"></i> Save
+            </button>
+        </div>
+        <div id="status-msg" class="status-msg"></div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/agent_directives.js') }}"></script>
+</body>
+</html>

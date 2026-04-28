@@ -1,0 +1,100 @@
+name: devices_manager
+class_name: MultiAgentManager
+description: "Smart-home devices manager for Nest, lights, and Ring controls."
+max_cycles: 30
+role_bindings:
+  delegator: emi_team::delegator
+  tool_selector: shared::tool_selector
+
+agents:
+  - name: emi_team::delegator
+    class: Delegator
+  - name: emi_team::planner
+    class: Planner
+  - name: emi_team::summary
+    class: Agent
+  - name: shared::compact_final_answer
+    class: Agent
+
+control_nodes:
+  - name: tool_return_router
+    class: ToolReturnRouter
+  - name: summary_pre_node
+    class: SummaryPreNode
+    config:
+      enabled: true
+      summary_agent: "emi_team::summary"
+      resume_agent: "emi_team::planner"
+      planner_agent: "emi_team::planner"
+      cadence_every_actions: 3
+      min_messages: 15
+      trigger_on_large_result_chars: 1200
+      allow_summarize_latest_tool_result: false
+  - name: summary_post_node
+    class: SummaryPostNode
+    config:
+      summary_agent: "emi_team::summary"
+      resume_agent: "emi_team::planner"
+  - name: tool_caller
+    class: ToolCaller
+  - name: tool_result_handler
+    class: ToolResultHandler
+  - name: return_control
+    class: ReturnControlNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+  - name: graceful_exit_control_node
+    class: GracefulExitControlNode
+
+tools:
+  allowed_tools:
+    - nest_home_control
+    - lights_control
+    - ring_camera_control
+    - ask_user
+    - notify_user
+  except_tools: []
+
+scope_contract:
+  tools:
+    allowed_tools:
+      - nest_home_control
+      - lights_control
+      - ring_camera_control
+      - ask_user
+      - notify_user
+    blocked_tools:
+      - install_tool
+      - mcp::npm/playwright-mcp::browser_run_code
+    requires_approval_tools: []
+    allow_external_side_effects: true
+
+flow_config:
+  strict_routing: true
+  tool_return:
+    tool_call_result_handler_node: "tool_result_handler"
+  summary:
+    enabled: true
+    source_agent: "tool_return_router"
+    summary_agent: "emi_team::summary"
+    resume_agent: "emi_team::planner"
+    planner_agent: "emi_team::planner"
+    cadence_every_actions: 3
+    action_count_state_key: "{planner_agent}_action_count"
+    min_messages: 15
+    trigger_on_large_result_chars: 1200
+    payload_key: "summary_payload"
+    payload_recent_history_messages: 80
+    allow_summarize_latest_tool_result: false
+  state_map:
+    "emi_team::delegator": "emi_team::planner"
+    "emi_team::planner": "tool_caller"
+    "tool_result_handler": "tool_return_router"
+    "tool_return_router": "summary_pre_node"
+    "summary_pre_node": "emi_team::planner"
+    "emi_team::summary": "summary_post_node"
+    "summary_post_node": "emi_team::planner"
+    "emi_team::planner_return_control": "shared::compact_final_answer"
+    "shared::compact_final_answer": "manager_exit_node"
+    "graceful_exit": "graceful_exit_control_node"
+    "graceful_exit_control_node": "shared::compact_final_answer"
