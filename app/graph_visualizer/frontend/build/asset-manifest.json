@@ -1,0 +1,13 @@
+{
+  "files": {
+    "main.css": "/kg-visualizer/static/css/main.b9698512.css",
+    "main.js": "/kg-visualizer/static/js/main.352f8355.js",
+    "index.html": "/kg-visualizer/index.html",
+    "main.b9698512.css.map": "/kg-visualizer/static/css/main.b9698512.css.map",
+    "main.352f8355.js.map": "/kg-visualizer/static/js/main.352f8355.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.b9698512.css",
+    "static/js/main.352f8355.js"
+  ]
+}

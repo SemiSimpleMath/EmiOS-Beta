@@ -84,7 +84,8 @@ Thumbs.db
 # ── Node / frontend builds ────────────────────────────────────────────────────
 node_modules/
 app/graph_visualizer/frontend/node_modules/
-app/graph_visualizer/frontend/build/
+# Note: app/graph_visualizer/frontend/build/ IS shipped (prebuilt React bundle)
+# so users don't need Node + npm to use the KG Visualizer.
 app/agent_flow/node_modules/
 
 # ── Test & coverage artifacts ─────────────────────────────────────────────────
