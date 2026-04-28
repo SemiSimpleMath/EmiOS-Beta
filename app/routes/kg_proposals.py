@@ -521,15 +521,22 @@ def _load_window_items(session, window_id: Optional[str]) -> List[Dict[str, Any]
 def _load_window_resolved(session, window_id: Optional[str]) -> Optional[str]:
     """Return the window's resolved_text (JSON-flattened to human-readable
     prose) if available. Lets the user see the resolver's output alongside
-    the raw chat."""
+    the raw chat. Defensive — if the schema doesn't carry resolved_text on
+    the window object (post-segment->window migration), returns None and
+    the page just hides the section."""
     if not window_id:
         return None
     import json as _json
     from app.assistant.database.kg_chat_projection import KGChatConversationWindow
-    w = (
-        session.query(KGChatConversationWindow.resolved_text)
-        .filter(KGChatConversationWindow.id == window_id).first()
-    )
+    if not hasattr(KGChatConversationWindow, "resolved_text"):
+        return None
+    try:
+        w = (
+            session.query(KGChatConversationWindow.resolved_text)
+            .filter(KGChatConversationWindow.id == window_id).first()
+        )
+    except Exception:
+        return None
     if w is None or not w[0]:
         return None
     rt = w[0].strip()
