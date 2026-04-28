@@ -1,7 +1,7 @@
 """
 Wiki Viewer — Wikipedia/Farzapedia-style renderer for the personal wiki.
 
-Reads markdown from C:\\Users\\semis\\EmiWiki\\prose\\<Entity>.md (source of
+Reads markdown from <EMI_WIKI_DIR>/prose/<Entity>.md (default ~/EmiWiki/prose; source of
 truth stays as markdown — Obsidian-compatible).
 
 Routes:
@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import random
 import re
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -27,8 +28,36 @@ logger = get_logger(__name__)
 
 wiki_viewer_bp = Blueprint("wiki_viewer", __name__)
 
+
+
+def _get_assistant_name() -> str:
+    """Read the user-configured assistant name (e.g. "Floppy") from
+    resources/assistant/assistant_core.json. Falls back to "Emi" if the
+    file is missing or unreadable."""
+    try:
+        from app.assistant.utils.path_utils import get_repo_root
+        import json as _json
+        path = get_repo_root() / "resources" / "assistant" / "assistant_core.json"
+        if not path.exists():
+            return "Emi"
+        with open(path, "r", encoding="utf-8") as f:
+            data = _json.load(f)
+        if isinstance(data, dict):
+            n = str(data.get("name") or data.get("assistant_name") or "").strip()
+            if n:
+                return n
+    except Exception:
+        pass
+    return "Emi"
+
+
+@wiki_viewer_bp.context_processor
+def _inject_assistant_name():
+    return {"assistant_name": _get_assistant_name()}
+
+
 # Vault location — source of truth stays as markdown files.
-WIKI_DIR = Path(r"C:\Users\semis\EmiWiki\prose")
+WIKI_DIR = Path(os.environ.get("EMI_WIKI_DIR") or (Path.home() / "EmiWiki" / "prose"))
 
 # Optional provenance sidecar: <Entity>.provenance.json with
 # {"paragraphs": [{"index": N, "sources": [node_id, ...]}, ...]}

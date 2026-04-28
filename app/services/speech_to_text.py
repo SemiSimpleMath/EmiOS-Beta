@@ -33,7 +33,7 @@ class SpeechToTextEngineFactory:
 
 if __name__ == "__main__":
     # # Usage
-    file="C:\\Users\\semis\\IdeaProjects\\EmiAi\\app\\static\\temp_audio\\tmpy56975dr.mp3"
+    file = "<path/to/audio.mp3>"  # set when running as a script
     engine = SpeechToTextEngineFactory.create_engine("whisper")
     response = engine.transcribe(file)
     print(response.text)

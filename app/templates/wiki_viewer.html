@@ -2,14 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>{% if article %}{{ article.name }} — EmiPedia{% elif is_search %}Search — EmiPedia{% else %}EmiPedia{% endif %}</title>
+  <title>{% if article %}{{ article.name }} — {{ assistant_name }}Pedia{% elif is_search %}Search — {{ assistant_name }}Pedia{% else %}{{ assistant_name }}Pedia{% endif %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/wiki_viewer.css') }}">
 </head>
 <body>
   <div class="wp-top">
     <div class="wp-top-inner">
       <form action="{{ url_for('wiki_viewer.wiki_search') }}" method="get" class="wp-search">
-        <input type="text" name="q" placeholder="Search EmiPedia" value="{{ search_query or '' }}">
+        <input type="text" name="q" placeholder="Search {{ assistant_name }}Pedia" value="{{ search_query or '' }}">
         <button type="submit">Search</button>
       </form>
     </div>
@@ -19,7 +19,7 @@
     <aside class="wp-sidebar">
       <div class="wp-logo">
         <div class="wp-logo-letter">E</div>
-        <div class="wp-logo-text">EmiPedia<br><span class="wp-logo-sub">The Personal Encyclopedia</span></div>
+        <div class="wp-logo-text">{{ assistant_name }}Pedia<br><span class="wp-logo-sub">The Personal Encyclopedia</span></div>
       </div>
 
       <nav class="wp-nav">
@@ -85,7 +85,7 @@
         {% endif %}
 
       {% else %}
-        <h1 class="wp-title">EmiPedia</h1>
+        <h1 class="wp-title">{{ assistant_name }}Pedia</h1>
         <p>The personal encyclopedia. {{ articles | length }} article{{ "" if articles|length == 1 else "s" }}.</p>
         {% for cat, items in categories.items() %}
         <h2>{{ cat | title }}</h2>

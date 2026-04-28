@@ -12,7 +12,6 @@ from app.assistant.manager_registry.manager_registry import ManagerRegistry
 from app.assistant.multi_agent_manager_factory.MultiAgentManagerFactory import MultiAgentManagerFactory
 from app.assistant.ServiceLocator.service_locator import DI
 
-sys.path.append("C:/Users/semis/IdeaProjects/EmiAi")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MANAGER_BASE_DIR = PROJECT_ROOT / "multi_agents"

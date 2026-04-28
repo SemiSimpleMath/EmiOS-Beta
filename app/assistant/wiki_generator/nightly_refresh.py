@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timezone
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
@@ -42,7 +43,7 @@ from app.models.db_manager import get_db_manager
 
 logger = get_logger(__name__)
 
-DEFAULT_VAULT = Path(r"C:\Users\semis\EmiWiki")
+DEFAULT_VAULT = Path(os.environ.get("EMI_WIKI_DIR") or (Path.home() / "EmiWiki"))
 
 
 def _parse_iso(value: Any) -> Optional[datetime]:
