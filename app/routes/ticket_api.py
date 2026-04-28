@@ -76,7 +76,7 @@ def get_pending_tickets():
         })
 
     except Exception as e:
-        logger.error(f"Error getting pending tickets: {e}")
+        logger.error(f"Error getting pending tickets: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
 
@@ -335,4 +335,5 @@ def get_pending_count():
         return jsonify({"count": len(tickets)})
 
     except Exception as e:
-        return jsonify({"count": 0, "error": str(e)})
+        logger.error(f"Error getting pending ticket count: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
