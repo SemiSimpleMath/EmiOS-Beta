@@ -295,10 +295,32 @@ def start_oauth_redirect():
         )
 
         return redirect(authorization_url)
+    except FileNotFoundError as e:
+        # Credentials file missing — user-actionable.
+        logger.info("OAuth browser flow blocked — credentials missing: %s", e)
+        params = urlencode({
+            'oauth_error': 'credentials_missing',
+            'account_id': str(request.args.get('account_id') or '').strip(),
+            'detail': str(e),
+        })
+        return redirect(f"{url_for('preferences.features_page')}?{params}")
+    except ValueError as e:
+        # Unknown account_id (not in registry) — user-actionable.
+        logger.info("OAuth browser flow blocked — unregistered account: %s", e)
+        params = urlencode({
+            'oauth_error': 'account_not_registered',
+            'account_id': str(request.args.get('account_id') or '').strip(),
+            'detail': str(e),
+        })
+        return redirect(f"{url_for('preferences.features_page')}?{params}")
     except Exception as e:
         logger.error("Failed to start browser OAuth flow: %s", e)
         logger.debug("start_oauth_redirect exception details", exc_info=True)
-        return redirect(url_for('preferences.features_page') + '?oauth_error=start_failed')
+        params = urlencode({
+            'oauth_error': 'start_failed',
+            'detail': str(e),
+        })
+        return redirect(f"{url_for('preferences.features_page')}?{params}")
 
 @google_oauth_bp.route('/oauth/google/callback')
 def oauth_callback():
