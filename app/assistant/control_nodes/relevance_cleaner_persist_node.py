@@ -83,8 +83,17 @@ class RelevanceCleanerPersistNode(ControlNode):
                 )
                 applied += 1
             except ValueError as e:
-                # Item already in target state (e.g. already suppressed) — skip, don't crash.
-                logger.info("[%s] Skipping redundant mutation for %s: %s", self.name, mut["item_id"], e)
+                # Common case: item already in a resolved state and the cleaner
+                # is asking to move it to another resolved state. The transition
+                # map disallows self-loops and disallows moves out of suppressed,
+                # so the writer raises. We surface as ERROR so genuine state-
+                # machine violations (the over-broad part of this catch) are
+                # visible in logs.
+                logger.error(
+                    "[%s] mutation rejected for %s (state-machine violation or "
+                    "redundant target): %s",
+                    self.name, mut["item_id"], e, exc_info=True,
+                )
 
         closed = sum(1 for m in mutations if m["to_state"] == "closed")
         suppressed = sum(1 for m in mutations if m["to_state"] == "suppressed")

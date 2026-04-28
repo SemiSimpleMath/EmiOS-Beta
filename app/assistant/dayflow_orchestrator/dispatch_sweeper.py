@@ -70,7 +70,11 @@ def _active_manager_names() -> set[str]:
             if name:
                 names.add(name)
     except Exception:
-        logger.debug("dispatch_sweeper: could not read invocation status", exc_info=True)
+        logger.error(
+            "dispatch_sweeper: could not read invocation status — sweep may "
+            "incorrectly revive in-flight items",
+            exc_info=True,
+        )
     return names
 
 
@@ -81,6 +85,10 @@ def _dispatch_age(meta: Dict[str, Any], now_utc: datetime) -> Optional[timedelta
     try:
         created_at_utc = parse_iso_utc_strict(created_at_str)
     except Exception:
+        logger.error(
+            "dispatch_sweeper: failed to parse created_at=%r for dispatch %s",
+            created_at_str, meta.get("item_id", "?"), exc_info=True,
+        )
         return None
     return now_utc - created_at_utc
 

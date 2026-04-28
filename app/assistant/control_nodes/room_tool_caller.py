@@ -302,4 +302,7 @@ class RoomToolCaller(ControlNode):
             )
             logger.info("[room_tool_caller] closed dayflow dispatch item %s", item_id)
         except Exception as e:
-            logger.warning("[room_tool_caller] failed to close dayflow dispatch item %s: %s", item_id, e)
+            logger.error(
+                "[room_tool_caller] failed to close dayflow dispatch item %s: %s",
+                item_id, e, exc_info=True,
+            )

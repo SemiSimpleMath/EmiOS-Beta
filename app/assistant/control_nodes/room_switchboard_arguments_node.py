@@ -109,6 +109,9 @@ class RoomSwitchboardArgumentsNode(ControlNode):
             logger.info("[%s] created dayflow dispatch item %s for master_room action: %s", self.name, item_id, action_name)
             return item_id
         except Exception as e:
-            logger.warning("[%s] failed to create dayflow dispatch item: %s", self.name, e)
+            logger.error(
+                "[%s] failed to create dayflow dispatch item: %s",
+                self.name, e, exc_info=True,
+            )
             return None
 
