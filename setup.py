@@ -23,7 +23,7 @@ def print_step(step_num, total_steps, text):
 
 def check_python_version():
     """Check if Python version is 3.10+"""
-    print_step(1, 9, "Checking Python version...")
+    print_step(1, 8, "Checking Python version...")
     
     version = sys.version_info
     if version.major < 3 or (version.major == 3 and version.minor < 10):
@@ -35,7 +35,7 @@ def check_python_version():
 
 def create_virtual_environment():
     """Create a Python virtual environment"""
-    print_step(2, 9, "Creating virtual environment...")
+    print_step(2, 8, "Creating virtual environment...")
     
     venv_path = Path(".venv")
     if venv_path.exists():
@@ -69,7 +69,7 @@ def get_pip_command():
 
 def install_dependencies():
     """Install Python dependencies"""
-    print_step(3, 9, "Installing dependencies...")
+    print_step(3, 8, "Installing dependencies...")
     
     pip_cmd = get_pip_command()
     python_cmd = get_python_command()
@@ -95,7 +95,7 @@ def install_dependencies():
 
 def check_credentials():
     """Check if required credential files exist"""
-    print_step(4, 9, "Checking credentials...")
+    print_step(4, 8, "Checking credentials...")
     
     creds_dir = Path("app/assistant/lib/credentials")
     required_files = {
@@ -118,13 +118,13 @@ def check_credentials():
     if missing:
         print("\n⚠️  WARNING: Some credentials are missing.")
         print("   You'll need to provide these before using Calendar/Gmail features.")
-        print("   See docs/gettin_started/ for instructions.")
+        print("   See BETA.md for setup instructions.")
     
     return True  # Not critical, just warn
 
 def create_directories():
     """Create necessary directories"""
-    print_step(5, 9, "Creating directories...")
+    print_step(5, 8, "Creating directories...")
     
     directories = [
         "logs",
@@ -149,7 +149,7 @@ def get_python_command():
 
 def initialize_database():
     """Initialize the database tables"""
-    print_step(6, 9, "Initializing database...")
+    print_step(6, 8, "Initializing database...")
     
     try:
         python_cmd = get_python_command()
@@ -194,7 +194,7 @@ print("   Music tables created.")
 # KG tables
 try:
     from app.assistant.kg.db.knowledge_graph_db_sqlite import Node, Edge
-    from app.assistant.kg_core.taxonomy.models import Taxonomy, NodeTaxonomy
+    from app.assistant.kg_core.taxonomy.models import Taxonomy, NodeTaxonomyLink
     Base.metadata.create_all(engine, checkfirst=True)
     print("   Knowledge Graph tables created.")
 except Exception as e:
@@ -229,41 +229,9 @@ except Exception as e:
         traceback.print_exc()
         return False
 
-def seed_taxonomy():
-    """Seed the taxonomy from the official ontology"""
-    print_step(7, 9, "Seeding taxonomy ontology...")
-
-    python_cmd = get_python_command()
-    seed_script = """
-import sys, os
-sys.path.insert(0, '.')
-from dotenv import load_dotenv
-load_dotenv()
-
-try:
-    from app.assistant.kg_core.kg_setup.seed_taxonomy_minimal_curated import seed_taxonomy
-    seed_taxonomy()
-    print("   Taxonomy seeded successfully.")
-except Exception as e:
-    print(f"   Taxonomy seeding skipped: {e}")
-"""
-    try:
-        result = subprocess.run(
-            [python_cmd, "-c", seed_script],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-        )
-        if result.stdout:
-            print(result.stdout)
-        if result.returncode != 0 and result.stderr:
-            print(f"   Warning: {result.stderr.strip()[:200]}")
-        print("✅ Taxonomy step complete")
-    except Exception as e:
-        print(f"⚠️  Taxonomy seeding skipped: {e}")
-    return True
-
 def create_default_resources():
     """Create default resource files if they don't exist"""
-    print_step(8, 9, "Checking resource files...")
+    print_step(7, 8, "Checking resource files...")
     
     resources_dir = Path("resources")
     
@@ -358,7 +326,7 @@ def _generate_ico(ico_path):
 
 def create_desktop_shortcut():
     """Create a desktop shortcut pointing to the EmiAi launcher."""
-    print_step(9, 9, "Creating desktop shortcut...")
+    print_step(8, 8, "Creating desktop shortcut...")
 
     project_root = Path.cwd()
     ico_path = project_root / "app" / "static" / "images" / "emi.ico"
@@ -441,9 +409,8 @@ def print_next_steps():
     print("   - Naming and personalising your assistant")
     print()
     print("Documentation:")
-    print("   - Quick Start: QUICK_START.md")
-    print("   - Install Guide: INSTALL.md")
-    print("   - Full Docs: docs/")
+    print("   - First-time install + first week: BETA.md")
+    print("   - Architecture & dev docs: docs/")
     print()
 
 def main():
@@ -461,7 +428,6 @@ def main():
         ("Checking credentials", check_credentials),
         ("Creating directories", create_directories),
         ("Initializing database", initialize_database),
-        ("Seeding taxonomy", seed_taxonomy),
         ("Checking resources", create_default_resources),
         ("Creating desktop shortcut", create_desktop_shortcut)
     ]
