@@ -83,7 +83,7 @@ def dayflow_orchestrator_cadence_tick(*, target_date: str | None = None, routine
     from app.assistant.dayflow_orchestrator.dispatch_sweeper import sweep_stale_dispatches
     sweep_stale_dispatches(now_utc=now_utc)
 
-    # Build the minimal day-of-week + ticket-feedback side-effect context.
+    # Build minimal extras (day_of_week). Per-agent prep nodes own the rest.
     blackboard_extras = build_dayflow_blackboard_extras()
 
     request_id = str(uuid.uuid4())

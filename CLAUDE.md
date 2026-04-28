@@ -71,13 +71,15 @@ Global service registry: `DI` from `app/assistant/ServiceLocator/service_locator
 
 ### Dayflow Orchestrator
 
-Autonomous daily workflow engine (`app/assistant/dayflow_orchestrator/`). Event-driven via `DayflowScheduler` (debounced, mutual exclusion). Processes items through 11 sub-agents in `app/assistant/agents/dayflow_orchestrator/`.
+Autonomous daily workflow engine (`app/assistant/dayflow_orchestrator/`). Event-driven via `DayflowScheduler` (debounced, mutual exclusion). Processes items through 9 sub-agents in `app/assistant/agents/dayflow_orchestrator/`.
 
-**State machine**: `new → important_open → actionable → dispatched → acted_on → closed`. Items also: `waiting` (blocked on condition), `watching` (passive), `suppressed` (rejected), `artifact` (context-only), `needs_planning`.
+**Lifecycle**: `new → artifact / important_open / actionable → dispatched → closed`. Side states: `waiting` (blocked on time/event), `watching` (passive), `suppressed` (rejected, terminal), `needs_planning`. Canonical transitions live in `dayflow_item_writer.ALLOWED_TRANSITIONS` and are enforced by `write_dayflow_item`.
 
-**Persistent state**: All items stored in `unified_log_2026` as Messages with `source='dayflow_item'`. Upsert by `Message.id` = `metadata.item_id`. Short numeric IDs (`short_id`) in metadata for LLM prompts. `state_store.py` is the canonical access layer.
+**Persistent state**: All items stored in `unified_log_2026` as Messages with `source='dayflow_item'`. Upsert by `Message.id` = `metadata.item_id`. Short numeric IDs (`short_id`) in metadata for LLM prompts. `state_store.py` reads; `dayflow_item_writer.py` writes.
 
-**Blackboard extras**: `blackboard_builder.py` loads context (items, tickets, calendar, email, health, chat, dispatches, action history) into extras dict that becomes blackboard state for the room.
+**Tick flow**: `run_dayflow_ingestion()` pulls new chat/email/delegation rows into the items table → `sweep_stale_dispatches()` closes stuck dispatches → manager invocation runs the agent pipeline. Per-agent prep nodes load their own context off the items table; there is no monolithic blackboard builder.
+
+**Tickets are tools, not items**: `create_dayflow_ticket` is a tool the switchboard dispatches like any other. The calling room blocks on the user's response (`threading.Event`); when it returns, `post_room_finalize_node` closes the source item via `acted_on_item_ids`.
 
 ### Rooms
 
