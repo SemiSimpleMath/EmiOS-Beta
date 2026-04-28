@@ -309,10 +309,29 @@ class BeliefStore:
         return belief
 
     def deprecate(self, belief_key: str, *, reason: str = "") -> None:
+        """
+        Flip a belief to status='deprecated' and record the reason as a
+        belief_evidence row so the audit trail survives the deprecation.
+
+        Idempotent: re-calling on an already-deprecated belief is a no-op
+        (no second evidence row).
+        """
         now = _now_iso()
+
+        # Look up id first so we can attach evidence after the status flip.
+        belief = self.get_by_key(belief_key)
+        if belief is None:
+            logger.warning("[BeliefStore] deprecate: key=%s not found", belief_key)
+            return
+
+        # Flip status — guarded by status != 'deprecated' so re-deprecation
+        # affects 0 rows and we skip the evidence write.
         session = get_session()
         try:
-            session.query(UserBelief).filter(UserBelief.belief_key == belief_key).update(
+            rowcount = session.query(UserBelief).filter(
+                UserBelief.belief_key == belief_key,
+                UserBelief.status != "deprecated",
+            ).update(
                 {"status": "deprecated", "updated_at": now},
                 synchronize_session=False,
             )
@@ -323,6 +342,23 @@ class BeliefStore:
             raise
         finally:
             session.close()
+
+        if rowcount == 0:
+            logger.info("[BeliefStore] deprecate key=%s already deprecated; no-op", belief_key)
+            return
+
+        # Record the deprecation as a separate short-session evidence write.
+        self._insert_evidence(
+            belief.id,
+            EvidenceInput(
+                source_type="deprecation",
+                source_date=datetime.now(timezone.utc).date().isoformat(),
+                signal_type="rejects",
+                summary=(f"Deprecated: {reason}" if reason else "Deprecated (no reason given)")[:800],
+                weight=1.0,
+            ),
+            now,
+        )
         logger.info("[BeliefStore] deprecated key=%s reason=%s", belief_key, reason)
 
     def merge_belief(
