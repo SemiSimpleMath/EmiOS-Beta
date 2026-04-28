@@ -73,6 +73,7 @@ class TriageSpawnGuardNode(ControlNode):
             )
 
         admitted_artifacts: List[Dict[str, Any]] = []
+        rejected_artifacts: List[Dict[str, Any]] = []
         seen_ids: set[str] = set()
         for dec in artifact_decisions:
             raw_artifact_id = str(dec.get("artifact_id") or "").strip()
@@ -110,17 +111,29 @@ class TriageSpawnGuardNode(ControlNode):
                     meta["state"] = "artifact"
                     meta["state_reason"] = "triage_admit"
                 admitted_artifacts.append(eligible_by_id[artifact_id])
+            elif decision.startswith("REJECT"):
+                # Mutate in-memory; triage_persist_node persists the suppression
+                # so the item exits the eligible bucket and triage doesn't
+                # re-evaluate it next tick.
+                meta = eligible_by_id[artifact_id].get("metadata")
+                if isinstance(meta, dict):
+                    meta["state"] = "suppressed"
+                    meta["state_reason"] = f"triage_{decision.lower()}"
+                rejected_artifacts.append(eligible_by_id[artifact_id])
 
         # auto_admitted already loaded above (before early-return check).
         all_admitted = auto_admitted + admitted_artifacts
 
         self.blackboard.update_state_value("admitted_artifacts", all_admitted)
         self.blackboard.update_state_value("admitted_artifacts_count", len(all_admitted))
+        self.blackboard.update_state_value("rejected_artifacts", rejected_artifacts)
+        self.blackboard.update_state_value("rejected_artifacts_count", len(rejected_artifacts))
         logger.info(
-            "[%s] admission: eligible=%d triage_admitted=%d auto_admitted=%d total=%d",
+            "[%s] admission: eligible=%d triage_admitted=%d triage_rejected=%d auto_admitted=%d total=%d",
             self.name,
             len(eligible_by_id),
             len(admitted_artifacts),
+            len(rejected_artifacts),
             len(auto_admitted),
             len(all_admitted),
         )
