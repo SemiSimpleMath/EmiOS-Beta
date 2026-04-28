@@ -25,13 +25,13 @@ class BeliefEngineExportAdapter:
         force: bool = False,
     ) -> Dict:
         from belief_engine.export.export_beliefs import export_beliefs
-        try:
-            out_path = export_beliefs()
-            logger.info("[BeliefEngineExportAdapter] export complete → %s", out_path)
-            return {"pipeline_id": self.pipeline_id, "status": "success", "path": str(out_path)}
-        except Exception as exc:
-            logger.exception("[BeliefEngineExportAdapter] export failed: %s", exc)
-            return {"pipeline_id": self.pipeline_id, "status": "error", "error": str(exc)}
+
+        # Let exceptions bubble — routine_manager wraps the dispatch in
+        # try/except and records status=error only on a raised exception,
+        # not on a returned error dict.
+        out_path = export_beliefs()
+        logger.info("[BeliefEngineExportAdapter] export complete → %s", out_path)
+        return {"pipeline_id": self.pipeline_id, "status": "success", "path": str(out_path)}
 
 
 class BeliefEngineAdapter:
@@ -45,9 +45,10 @@ class BeliefEngineAdapter:
     disabling a domain is now a YAML edit rather than a code + routines.json
     edit.
 
-    A single domain failure is logged but does not abort the rest. The
-    overall status is 'success' if every domain succeeded, 'partial' if
-    some failed, 'error' only if every domain failed.
+    A single domain failure is logged but does not abort the rest of the
+    loop — the adapter collects per-domain results then raises once at
+    the end if any domain failed, so routine_manager records the run as
+    failed with a summary of which domains broke.
     """
 
     pipeline_id = "belief_engine"
@@ -73,7 +74,7 @@ class BeliefEngineAdapter:
 
         results: List[Dict[str, Any]] = []
         successes = 0
-        failures = 0
+        failed_domains: List[str] = []
         for cfg in domains:
             try:
                 pipeline = BeliefEnginePipeline(
@@ -84,21 +85,24 @@ class BeliefEngineAdapter:
                 successes += 1
                 logger.info("[BeliefEngineAdapter] domain=%s done", cfg.id)
             except Exception as exc:
+                # Per the class docstring, a single domain failure does not
+                # abort the rest of the loop. We record it and continue, then
+                # raise once at the end so routine_manager records the run
+                # as failed.
                 logger.exception("[BeliefEngineAdapter] domain=%s failed: %s", cfg.id, exc)
                 results.append({"domain": cfg.id, "status": "error", "error": str(exc)})
-                failures += 1
+                failed_domains.append(cfg.id)
 
-        if successes == 0 and failures > 0:
-            overall = "error"
-        elif failures > 0:
-            overall = "partial"
-        else:
-            overall = "success"
+        if failed_domains:
+            raise RuntimeError(
+                f"belief_engine: {len(failed_domains)}/{len(domains)} domains failed: "
+                f"{', '.join(failed_domains)} (successes={successes})"
+            )
 
         return {
             "pipeline_id": self.pipeline_id,
-            "status": overall,
+            "status": "success",
             "successes": successes,
-            "failures": failures,
+            "failures": 0,
             "results": results,
         }
