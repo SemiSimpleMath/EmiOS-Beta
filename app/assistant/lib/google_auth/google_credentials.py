@@ -23,6 +23,7 @@ from google.oauth2.credentials import Credentials
 from app.assistant.lib.google_auth.account_ids import DEFAULT_GOOGLE_ACCOUNT_ID
 from app.assistant.lib.google_auth import oauth_registry
 from app.assistant.lib.google_auth.oauth_account_store import get_google_oauth_account_store
+from app.assistant.lib.google_auth.principal_resolver import fetch_principal_email
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -121,6 +122,8 @@ def load_google_credentials(
                 creds.refresh(Request())
                 refreshed_json = creds.to_json()
                 principal = str(stored.get("principal_email") or "").strip() or None
+                if principal is None:
+                    principal = fetch_principal_email(creds)
                 store.upsert_credentials(
                     account_id=account_id,
                     principal_email=principal,

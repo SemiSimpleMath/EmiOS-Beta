@@ -22,6 +22,7 @@ from app.assistant.lib.google_auth.account_ids import (
 )
 from app.assistant.lib.google_auth import oauth_registry
 from app.assistant.lib.google_auth.oauth_account_store import get_google_oauth_account_store
+from app.assistant.lib.google_auth.principal_resolver import fetch_principal_email
 from app.assistant.utils.logging_config import get_logger
 
 if os.environ.get('APP_ENV', 'development') != 'production':
@@ -38,26 +39,20 @@ def _requested_account_id() -> str:
 def _resolve_for_account(account_id: str, scope_set_hint: str | None = None):
     """Return (credentials_path, scopes, scope_set) for *account_id*.
 
-    If the account is in the registry, we use its definitions.
-    *scope_set_hint* is only used as a fallback for ad-hoc accounts that are
-    NOT in the registry (the "Connect Additional Account" flow).
+    The account MUST be in the registry (configs/oauth_accounts.json). Unknown
+    account_ids are rejected — no silent fallback to default credentials.
+    *scope_set_hint* is ignored; scopes come from the registry entry.
     """
-    if oauth_registry.is_known_account(account_id):
-        cred_path = oauth_registry.get_client_credentials_path(account_id)
-        scopes = oauth_registry.get_scopes(account_id)
-        scope_set = oauth_registry.get_scope_set(account_id)
-        return cred_path, scopes, scope_set
-
-    # Ad-hoc / additional account — fall back to workspace defaults
-    scope_set = str(scope_set_hint or "workspace").strip()
-    if not oauth_registry.is_known_account(DEFAULT_GOOGLE_ACCOUNT_ID):
+    if not oauth_registry.is_known_account(account_id):
+        known = sorted(oauth_registry.list_accounts().keys())
         raise ValueError(
-            f"Account '{account_id}' is not in the OAuth registry and "
-            f"default account '{DEFAULT_GOOGLE_ACCOUNT_ID}' is also missing."
+            f"Account '{account_id}' is not in the OAuth registry. "
+            f"Add it to configs/oauth_accounts.json (with a client_credentials path "
+            f"and scopes) before connecting. Known accounts: {known}."
         )
-    cred_path = oauth_registry.get_client_credentials_path(DEFAULT_GOOGLE_ACCOUNT_ID)
-    default_acct = oauth_registry.get_account(DEFAULT_GOOGLE_ACCOUNT_ID)
-    scopes = default_acct.get("scopes", [])
+    cred_path = oauth_registry.get_client_credentials_path(account_id)
+    scopes = oauth_registry.get_scopes(account_id)
+    scope_set = oauth_registry.get_scope_set(account_id)
     return cred_path, scopes, scope_set
 
 
@@ -233,6 +228,14 @@ def start_oauth():
             'error': str(e),
             'reason': 'credentials_missing',
         }), 400
+    except ValueError as e:
+        # Unknown account_id (not in registry) — user-actionable.
+        logger.info("OAuth start blocked — unregistered account: %s", e)
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'reason': 'account_not_registered',
+        }), 400
     except Exception as e:
         logger.error("Failed to start OAuth flow: %s", e)
         logger.debug("start_oauth exception details", exc_info=True)
@@ -321,8 +324,7 @@ def oauth_callback():
         credentials = flow.credentials
 
         creds_json = credentials.to_json()
-        creds_dict = json.loads(creds_json)
-        principal_email = str(creds_dict.get("account") or "").strip() or None
+        principal_email = fetch_principal_email(credentials)
         store = get_google_oauth_account_store()
         store.upsert_credentials(
             account_id=account_id,

@@ -12,17 +12,26 @@
         <div class="setup-header">
             <h1><i class="fas fa-users"></i> Additional Google Accounts</h1>
             <p>Connect extra Google accounts (e.g., a dedicated assistant account)</p>
-            <a href="/settings/integrations" class="back-link"><i class="fas fa-arrow-left"></i> Back to Integrations</a>
+            <a href="/settings/integrations/google" class="back-link"><i class="fas fa-arrow-left"></i> Back to Google OAuth</a>
         </div>
 
-        <div class="settings-section">
+        <div class="settings-section" style="opacity:0.55;pointer-events:none;">
+            <div class="feature-card" style="border:1px dashed #888;background:#f6f6f6;">
+                <div class="feature-info">
+                    <h3><i class="fas fa-tools"></i> Not yet implemented</h3>
+                    <p>Adding additional Google accounts requires registering each account in <code>configs/oauth_accounts.json</code> with its own client credentials. A self-service flow is planned but not built yet.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="settings-section" style="opacity:0.55;pointer-events:none;">
             <h2><i class="fas fa-plus-circle"></i> Connect New Account</h2>
             <div class="feature-card">
                 <div class="feature-info">
                     <p>Create or reconnect an additional account slot.</p>
                     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-                        <input id="additional-oauth-account-id" type="text" placeholder="account_id (e.g. google_emi)" style="min-width:260px; padding:8px;">
-                        <button type="button" id="connect-additional-btn" class="oauth-connect-btn">
+                        <input id="additional-oauth-account-id" type="text" placeholder="account_id (e.g. google_emi)" style="min-width:260px; padding:8px;" disabled>
+                        <button type="button" id="connect-additional-btn" class="oauth-connect-btn" disabled>
                             <i class="fab fa-google"></i> Connect Account
                         </button>
                     </div>

@@ -8,6 +8,7 @@ from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.models.base import Base, get_session
+from app.assistant.lib.google_auth import oauth_registry
 from app.assistant.lib.google_auth.oauth_crypto import decrypt_text, encrypt_text
 from app.assistant.utils.logging_config import get_logger
 
@@ -64,6 +65,12 @@ class GoogleOAuthAccountStore:
         account_id = str(account_id or "").strip()
         if not account_id:
             raise ValueError("account_id is required.")
+        if not oauth_registry.is_known_account(account_id):
+            known = sorted(oauth_registry.list_accounts().keys())
+            raise ValueError(
+                f"Refusing to upsert credentials for unregistered account_id={account_id!r}. "
+                f"Add it to configs/oauth_accounts.json first. Known accounts: {known}."
+            )
         if not isinstance(credentials_json, str) or not credentials_json.strip():
             raise ValueError("credentials_json is required.")
         session = get_session()
@@ -117,34 +124,6 @@ class GoogleOAuthAccountStore:
                 )
                 .one_or_none()
             )
-            if row is None and "@" in account_id:
-                row = (
-                    session.query(GoogleOAuthAccount)
-                    .filter(
-                        GoogleOAuthAccount.principal_email == account_id,
-                        GoogleOAuthAccount.is_active.is_(True),
-                    )
-                    .first()
-                )
-                if row is not None:
-                    logger.info(
-                        "OAuth lookup by principal_email=%s resolved to account_id=%s",
-                        account_id,
-                        row.account_id,
-                    )
-            if row is None:
-                active_rows = (
-                    session.query(GoogleOAuthAccount)
-                    .filter(GoogleOAuthAccount.is_active.is_(True))
-                    .all()
-                )
-                if len(active_rows) == 1:
-                    row = active_rows[0]
-                    logger.info(
-                        "OAuth lookup for account_id=%s failed; single active account fallback to account_id=%s",
-                        account_id,
-                        row.account_id,
-                    )
             if row is None:
                 return None
             if not isinstance(row.credentials_encrypted, str) or not row.credentials_encrypted.strip():
