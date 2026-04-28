@@ -95,7 +95,7 @@ def make_dayflow_message(
     last_reviewed_at: Optional[datetime] = None,
     extra_meta: Optional[Dict[str, Any]] = None,
 ) -> Message:
-    """Build a dayflow Message ready for persist_dayflow_items()."""
+    """Build a dayflow Message ready for seed_items() (write_dayflow_items_batch)."""
     now_utc = datetime.now(timezone.utc)
     item_id = item_id or f"task:{uuid.uuid4().hex[:12]}"
     meta = {

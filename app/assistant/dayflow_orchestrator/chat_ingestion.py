@@ -8,7 +8,7 @@ standard dayflow item Message, and returns them for persistence.
 The caller is responsible for:
   1. Providing the watermark (``since_utc``) so only new messages are loaded.
   2. Filtering out item IDs that already exist in the dayflow state store.
-  3. Persisting the returned Messages via ``persist_dayflow_items()``.
+  3. Persisting the returned Messages via ``write_dayflow_items_batch()``.
   4. Advancing the watermark after successful persistence.
 """
 from __future__ import annotations

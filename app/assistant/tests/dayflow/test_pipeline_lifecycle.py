@@ -244,66 +244,44 @@ class TestFullItemLifecycle:
 class TestStateTransitionLifecycle:
 
     def test_important_open_to_actionable_to_dispatched_to_closed(self):
-        """Test the happy path state transitions via apply_state_mutations."""
-        from app.assistant.dayflow_orchestrator.state_store import apply_state_mutations
+        """Test the happy path state transitions via write_dayflow_item."""
+        from app.assistant.dayflow_orchestrator.dayflow_item_writer import write_dayflow_item
 
         seed_items([
             make_dayflow_message(item_id="task:lifecycle_st", short_id=1,
                                 state="important_open", summary="Lifecycle task"),
         ])
 
-        # Step 1: important_open → actionable
-        existing = load_all_items()
-        apply_state_mutations(existing, [
-            {"item_id": "task:lifecycle_st", "to_state": "actionable", "reason": "Ready"},
-        ])
-        item = load_item_by_id("task:lifecycle_st")
-        assert get_meta(item)["state"] == "actionable"
+        write_dayflow_item("task:lifecycle_st", state="actionable", reason="Ready", caller="test")
+        assert get_meta(load_item_by_id("task:lifecycle_st"))["state"] == "actionable"
 
-        # Step 2: actionable → dispatched
-        existing = load_all_items()
-        apply_state_mutations(existing, [
-            {"item_id": "task:lifecycle_st", "to_state": "dispatched", "reason": "Sent to user"},
-        ])
-        item = load_item_by_id("task:lifecycle_st")
-        assert get_meta(item)["state"] == "dispatched"
+        write_dayflow_item("task:lifecycle_st", state="dispatched", reason="Sent to user", caller="test")
+        assert get_meta(load_item_by_id("task:lifecycle_st"))["state"] == "dispatched"
 
-        # Step 3: dispatched → closed
-        existing = load_all_items()
-        apply_state_mutations(existing, [
-            {"item_id": "task:lifecycle_st", "to_state": "closed", "reason": "Done"},
-        ])
-        item = load_item_by_id("task:lifecycle_st")
-        assert get_meta(item)["state"] == "closed"
+        write_dayflow_item("task:lifecycle_st", state="closed", reason="Done", caller="test")
+        assert get_meta(load_item_by_id("task:lifecycle_st"))["state"] == "closed"
 
     def test_actionable_to_waiting_to_actionable(self):
         """Test the waiting → reactivation path."""
-        from app.assistant.dayflow_orchestrator.state_store import apply_state_mutations
+        from app.assistant.dayflow_orchestrator.dayflow_item_writer import write_dayflow_item
 
         seed_items([
             make_dayflow_message(item_id="task:wait_cycle", state="actionable"),
         ])
 
-        # To waiting
-        existing = load_all_items()
-        apply_state_mutations(existing, [{
-            "item_id": "task:wait_cycle",
-            "to_state": "waiting",
-            "reason": "Blocked",
-            "wait_reason": "Need user input",
-            "reactivate_at": "2026-04-10T10:00:00Z",
-        }])
-        item = load_item_by_id("task:wait_cycle")
-        meta = get_meta(item)
+        write_dayflow_item(
+            "task:wait_cycle",
+            state="waiting",
+            updates={
+                "wait_reason": "Need user input",
+                "reactivate_at_utc": "2026-04-10T10:00:00Z",
+            },
+            reason="Blocked",
+            caller="test",
+        )
+        meta = get_meta(load_item_by_id("task:wait_cycle"))
         assert meta["state"] == "waiting"
         assert meta.get("wait_reason") == "Need user input"
 
-        # Back to actionable (reactivation)
-        existing = load_all_items()
-        apply_state_mutations(existing, [{
-            "item_id": "task:wait_cycle",
-            "to_state": "actionable",
-            "reason": "Timer fired",
-        }])
-        item = load_item_by_id("task:wait_cycle")
-        assert get_meta(item)["state"] == "actionable"
+        write_dayflow_item("task:wait_cycle", state="actionable", reason="Timer fired", caller="test")
+        assert get_meta(load_item_by_id("task:wait_cycle"))["state"] == "actionable"

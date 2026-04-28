@@ -16,7 +16,7 @@ from app.assistant.tests.dayflow.conftest import (
 )
 
 
-# ── persist_dayflow_items ────────────────────────────────────────
+# ── seed_items / write_dayflow_items_batch ──────────────────────
 
 class TestPersistDayflowItems:
 
@@ -143,89 +143,6 @@ class TestLoadExistingDayflowItems:
         ids = [get_meta(i)["item_id"] for i in items]
         assert "task:ok" in ids
         assert "task:gone" in ids
-
-
-# ── patch_item_metadata ──────────────────────────────────────────
-
-class TestPatchItemMetadata:
-
-    def test_patch_merges_not_overwrites(self):
-        seed_items([
-            make_dayflow_message(
-                item_id="task:patch_me", state="important_open",
-                summary="Original", short_id=42,
-            ),
-        ])
-        from app.assistant.dayflow_orchestrator.state_store import patch_item_metadata
-        result = patch_item_metadata("task:patch_me", {"state": "dispatched", "dispatched_at": "2026-04-09T10:00:00Z"})
-        assert result is True
-
-        item = load_item_by_id("task:patch_me")
-        meta = get_meta(item)
-        assert meta["state"] == "dispatched"
-        assert meta["dispatched_at"] == "2026-04-09T10:00:00Z"
-        # Original fields preserved
-        assert meta["summary"] == "Original"
-        assert meta["short_id"] == 42
-
-    def test_patch_nonexistent_returns_false(self):
-        from app.assistant.dayflow_orchestrator.state_store import patch_item_metadata
-        result = patch_item_metadata("task:does_not_exist", {"state": "closed"})
-        assert result is False
-
-
-# ── apply_state_mutations ────────────────────────────────────────
-
-class TestApplyStateMutations:
-
-    def test_basic_state_transition(self):
-        seed_items([
-            make_dayflow_message(item_id="task:mut1", state="important_open", short_id=10),
-        ])
-        existing = load_all_items()
-        mutations = [{"item_id": "task:mut1", "to_state": "actionable", "reason": "test"}]
-
-        from app.assistant.dayflow_orchestrator.state_store import apply_state_mutations
-        apply_state_mutations(existing, mutations)
-
-        item = load_item_by_id("task:mut1")
-        meta = get_meta(item)
-        assert meta["state"] == "actionable"
-
-    def test_mutation_to_waiting_with_reactivate(self):
-        seed_items([
-            make_dayflow_message(item_id="task:wait1", state="actionable"),
-        ])
-        existing = load_all_items()
-        mutations = [{
-            "item_id": "task:wait1",
-            "to_state": "waiting",
-            "reason": "blocked on user",
-            "wait_reason": "Waiting for user response",
-            "reactivate_at": "2026-04-10T10:00:00Z",
-        }]
-
-        from app.assistant.dayflow_orchestrator.state_store import apply_state_mutations
-        apply_state_mutations(existing, mutations)
-
-        item = load_item_by_id("task:wait1")
-        meta = get_meta(item)
-        assert meta["state"] == "waiting"
-        assert meta.get("wait_reason") == "Waiting for user response"
-
-    def test_mutation_to_closed(self):
-        seed_items([
-            make_dayflow_message(item_id="task:close1", state="dispatched"),
-        ])
-        existing = load_all_items()
-        mutations = [{"item_id": "task:close1", "to_state": "closed", "reason": "done"}]
-
-        from app.assistant.dayflow_orchestrator.state_store import apply_state_mutations
-        apply_state_mutations(existing, mutations)
-
-        item = load_item_by_id("task:close1")
-        meta = get_meta(item)
-        assert meta["state"] == "closed"
 
 
 # ── build_plan_synopsis_messages ─────────────────────────────────
