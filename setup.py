@@ -191,14 +191,31 @@ db.Model.metadata.create_all(
 )
 print("   Music tables created.")
 
-# KG tables
+# KG tables — import every database module so all model classes register
+# with Base.metadata before create_all is called.
 try:
     from app.assistant.kg.db.knowledge_graph_db_sqlite import Node, Edge
     from app.assistant.kg_core.taxonomy.models import Taxonomy, NodeTaxonomyLink
+    from app.assistant.database import claim_proposals  # noqa: F401
+    from app.assistant.database import kg_chat_projection  # noqa: F401
+    from app.assistant.database import kg_maintenance_finding  # noqa: F401
+    from app.assistant.database import kg_merge_log  # noqa: F401
+    from app.assistant.database import kg_pipeline_models  # noqa: F401
+    from app.assistant.database import kg_revision_log  # noqa: F401
+    from app.assistant.database import entity_card_maintenance_finding  # noqa: F401
+    from app.assistant.database import processed_entity_log  # noqa: F401
     Base.metadata.create_all(engine, checkfirst=True)
     print("   Knowledge Graph tables created.")
 except Exception as e:
     print(f"   KG tables skipped: {e}")
+
+# Belief engine tables (separate schema, raw SQL bootstrap)
+try:
+    from belief_engine.db.ensure_schema import ensure_schema as _ensure_belief_schema
+    _ensure_belief_schema()
+    print("   Belief engine tables created.")
+except Exception as e:
+    print(f"   Belief engine tables skipped: {e}")
 """
         
         # Run using venv Python
