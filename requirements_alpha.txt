@@ -88,3 +88,4 @@ diff-match-patch
 
 # Markdown rendering (used by wiki_viewer + dev_wiki Flask routes)
 markdown>=3.7
+python-frontmatter>=1.1.0
