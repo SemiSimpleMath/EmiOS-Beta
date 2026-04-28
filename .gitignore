@@ -167,6 +167,8 @@ musickit/
 /app/assistant/tests/generic_agent/generic_agent.py
 /app/assistant/tests/manager_tests/context_enricher/context_enricher_test.py
 /app/assistant/test/agent_tests/test_web_planner_timing.py
+/app/assistant/tests/agent_tests/conversation_boundary/porch_house_test.py
+/app/assistant/agents/knowledge_graph_add/conversation_boundary/prompts/system_atomic.j2
 
 # ── Deprecated test files (intentionally pytest-skipped, plan called for delete) ─
 /app/assistant/test/agent_tests/test_memory_final_answer_agent.py
