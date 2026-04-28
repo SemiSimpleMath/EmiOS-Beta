@@ -43,7 +43,43 @@ from app.models.db_manager import get_db_manager
 
 logger = get_logger(__name__)
 
-DEFAULT_VAULT = Path(os.environ.get("EMI_WIKI_DIR") or (Path.home() / "EmiWiki"))
+def _get_assistant_name() -> str:
+    """Read assistant name (e.g. 'Floppy') from resources/assistant/
+    assistant_core.json. Fallback: 'Emi'."""
+    try:
+        from app.assistant.utils.path_utils import get_repo_root
+        import json as _json
+        path = get_repo_root() / "resources" / "assistant" / "assistant_core.json"
+        if not path.exists():
+            return "Emi"
+        with open(path, "r", encoding="utf-8") as f:
+            data = _json.load(f)
+        if isinstance(data, dict):
+            n = str(data.get("name") or data.get("assistant_name") or "").strip()
+            if n:
+                return n
+    except Exception:
+        pass
+    return "Emi"
+
+
+def _default_vault() -> Path:
+    """Per-assistant vault root, lazily evaluated. Override via EMI_WIKI_DIR."""
+    override = os.environ.get("EMI_WIKI_DIR")
+    if override:
+        return Path(override)
+    return Path.home() / f"{_get_assistant_name()}Wiki"
+
+
+# Back-compat — code that imported DEFAULT_VAULT still works (callable shim
+# that resolves on access). Prefer _default_vault() in new code.
+class _LazyVault:
+    def __truediv__(self, other): return _default_vault() / other
+    def __fspath__(self): return str(_default_vault())
+    def __str__(self): return str(_default_vault())
+    def __getattr__(self, name): return getattr(_default_vault(), name)
+
+DEFAULT_VAULT = _LazyVault()
 
 
 def _parse_iso(value: Any) -> Optional[datetime]:

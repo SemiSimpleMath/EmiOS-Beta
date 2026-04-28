@@ -1,7 +1,8 @@
 """
 Wiki Viewer — Wikipedia/Farzapedia-style renderer for the personal wiki.
 
-Reads markdown from <EMI_WIKI_DIR>/prose/<Entity>.md (default ~/EmiWiki/prose; source of
+Reads markdown from <vault_root>/prose/<Entity>.md where <vault_root> is
+~/<AssistantName>Wiki by default (override via EMI_WIKI_DIR env var). Source of
 truth stays as markdown — Obsidian-compatible).
 
 Routes:
@@ -57,7 +58,20 @@ def _inject_assistant_name():
 
 
 # Vault location — source of truth stays as markdown files.
-WIKI_DIR = Path(os.environ.get("EMI_WIKI_DIR") or (Path.home() / "EmiWiki" / "prose"))
+def _wiki_vault_root() -> Path:
+    """Per-assistant vault root, e.g. ~/FloppyWiki for assistant 'Floppy'.
+    Override with EMI_WIKI_DIR env var (treated as the vault root, not the
+    prose dir). Read fresh each call so a renamed assistant is picked up
+    without a restart."""
+    override = os.environ.get("EMI_WIKI_DIR")
+    if override:
+        return Path(override)
+    return Path.home() / f"{_get_assistant_name()}Wiki"
+
+
+def _wiki_prose_dir() -> Path:
+    """Per-assistant prose dir under the vault root."""
+    return _wiki_vault_root() / "prose"
 
 # Optional provenance sidecar: <Entity>.provenance.json with
 # {"paragraphs": [{"index": N, "sources": [node_id, ...]}, ...]}
@@ -71,10 +85,10 @@ def _slugify(name: str) -> str:
 
 def _find_article(entity: str) -> Optional[Path]:
     """Case-insensitive filename match."""
-    if not WIKI_DIR.exists():
+    if not _wiki_prose_dir().exists():
         return None
     target = entity.lower().strip()
-    for p in WIKI_DIR.glob("*.md"):
+    for p in _wiki_prose_dir().glob("*.md"):
         if p.stem.lower() == target:
             return p
     return None
@@ -211,9 +225,9 @@ def _render_markdown_to_html(md_text: str) -> str:
 def _list_articles() -> list[dict]:
     """Scan the wiki vault for articles + extract category for nav."""
     articles = []
-    if not WIKI_DIR.exists():
+    if not _wiki_prose_dir().exists():
         return articles
-    for p in sorted(WIKI_DIR.glob("*.md")):
+    for p in sorted(_wiki_prose_dir().glob("*.md")):
         try:
             post = frontmatter.load(p)
             meta = post.metadata or {}
@@ -266,9 +280,9 @@ def wiki_random():
 def wiki_search():
     q = (request.args.get("q") or "").strip()
     results = []
-    if q and WIKI_DIR.exists():
+    if q and _wiki_prose_dir().exists():
         ql = q.lower()
-        for p in WIKI_DIR.glob("*.md"):
+        for p in _wiki_prose_dir().glob("*.md"):
             try:
                 text = p.read_text(encoding="utf-8")
                 if ql in text.lower():
@@ -379,7 +393,7 @@ def wiki_article_regenerate(entity: str):
         return jsonify({"ok": False, "error": "Article not found"}), 404
 
     label = path.stem
-    vault_path = WIKI_DIR.parent
+    vault_path = _wiki_vault_root()
 
     try:
         from app.assistant.wiki_generator.page_writer import generate_prose_page_tagged
