@@ -230,68 +230,61 @@ class BeliefStore:
         evidence: Optional[List[EvidenceInput]] = None,
     ) -> BeliefRecord:
         """
-        Create or update a belief by belief_key.
-        If belief_key already exists, update statement + metadata and increment
-        observation_count.  Otherwise create new.
-        Attaches any provided evidence records (each in its own session).
+        Create or update a belief by belief_key in one atomic statement.
+
+        On insert: a new row with observation_count=1.
+        On conflict (belief_key already exists): updates statement, confidence,
+        scope, status, conditions, last_confirmed, updated_at, and increments
+        observation_count by 1 at the DB level — no read-modify-write race.
+
+        Attaches any provided evidence records (each in its own short session).
         """
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
         now = _now_iso()
-        existing = self.get_by_key(req.belief_key)
+        new_id = str(uuid.uuid4())  # used on insert; ignored on conflict
 
-        if existing:
-            session = get_session()
-            try:
-                session.query(UserBelief).filter(
-                    UserBelief.belief_key == req.belief_key
-                ).update(
-                    {
-                        "statement":         req.statement,
-                        "confidence":        req.confidence,
-                        "scope":             req.scope,
-                        "status":            req.status,
-                        "conditions":        json.dumps(req.conditions) if req.conditions else None,
-                        "observation_count": existing.observation_count + 1,
-                        "last_confirmed":    req.last_confirmed or now,
-                        "updated_at":        now,
-                    },
-                    synchronize_session=False,
-                )
-                session.commit()
-            except Exception:
-                session.rollback()
-                logger.debug("[BeliefStore] upsert update failed key=%s", req.belief_key, exc_info=True)
-                raise
-            finally:
-                session.close()
-        else:
-            belief_id = str(uuid.uuid4())
-            session = get_session()
-            try:
-                session.add(
-                    UserBelief(
-                        id=belief_id,
-                        domain=req.domain,
-                        belief_key=req.belief_key,
-                        statement=req.statement,
-                        confidence=req.confidence,
-                        scope=req.scope,
-                        status=req.status,
-                        conditions=json.dumps(req.conditions) if req.conditions else None,
-                        observation_count=1,
-                        first_observed=req.first_observed or now,
-                        last_confirmed=req.last_confirmed or now,
-                        created_at=now,
-                        updated_at=now,
-                    )
-                )
-                session.commit()
-            except Exception:
-                session.rollback()
-                logger.debug("[BeliefStore] upsert insert failed key=%s", req.belief_key, exc_info=True)
-                raise
-            finally:
-                session.close()
+        stmt = sqlite_insert(UserBelief).values(
+            id=new_id,
+            domain=req.domain,
+            belief_key=req.belief_key,
+            statement=req.statement,
+            confidence=req.confidence,
+            scope=req.scope,
+            status=req.status,
+            conditions=json.dumps(req.conditions) if req.conditions else None,
+            observation_count=1,
+            first_observed=req.first_observed or now,
+            last_confirmed=req.last_confirmed or now,
+            created_at=now,
+            updated_at=now,
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["belief_key"],
+            set_={
+                "statement":         stmt.excluded.statement,
+                "confidence":        stmt.excluded.confidence,
+                "scope":             stmt.excluded.scope,
+                "status":            stmt.excluded.status,
+                "conditions":        stmt.excluded.conditions,
+                "observation_count": UserBelief.observation_count + 1,
+                "last_confirmed":    stmt.excluded.last_confirmed,
+                "updated_at":        stmt.excluded.updated_at,
+            },
+        )
 
+        session = get_session()
+        try:
+            session.execute(stmt)
+            session.commit()
+        except Exception:
+            session.rollback()
+            logger.debug("[BeliefStore] upsert failed key=%s", req.belief_key, exc_info=True)
+            raise
+        finally:
+            session.close()
+
+        # Read back the canonical row in a separate short session.
         belief = self.get_by_key(req.belief_key)
         if belief is None:
             raise RuntimeError(f"[BeliefStore] upsert failed for key={req.belief_key!r}")
