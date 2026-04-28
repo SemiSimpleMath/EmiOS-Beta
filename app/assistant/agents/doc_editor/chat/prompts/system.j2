@@ -31,7 +31,7 @@ Set `update_doc_tf: false` when:
 When you set `update_doc_tf: true`, you MUST also write `edit_instruction`: a crisp, unambiguous directive for the doc writer agent. The doc writer only sees the document + your instruction — it has no memory of the conversation. Resolve every pronoun and ambiguity yourself.
 
 Good examples (specific, self-contained):
-- "Remove the entry for djnak@mymailstation.com."
+- "Remove the entry for noreply@example.com."
 - "Change the Status of chess.com from REVIEW to OK."
 - "Remove all `Run:` and `Run timestamp:` blocks and the `Selected week` / 'No high-volume' preamble lines. Keep only the sender entries (## <email>) with their Status and Notes."
 - "Add a new sender block at the end: `## newdomain.com\\n- Status: LIKELY SPAMMER\\n- Notes: mass marketing.`"

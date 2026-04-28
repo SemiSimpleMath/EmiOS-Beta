@@ -21,7 +21,7 @@ class AgentForm(BaseModel):
             "agent describing EXACTLY what to change. Resolve all pronouns, disambiguate names, and "
             "be specific about what sections/entries/fields are affected. "
             "Examples: "
-            "'Remove the entry for djnak@mymailstation.com' | "
+            "'Remove the entry for noreply@example.com' | "
             "'Change chess.com status from REVIEW to OK' | "
             "'Remove all `Run:` and `Run timestamp:` blocks, keeping only the sender entries.'"
         ),

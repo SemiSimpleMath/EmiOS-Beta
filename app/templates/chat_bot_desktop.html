@@ -43,6 +43,10 @@
       <i class="fas fa-volume-down" id="mute-icon"></i>
       <i class="fas fa-volume-mute hidden" id="unmute-icon"></i>
     </span>
+    <!-- My Life (KG + Wiki) Menu Button -->
+    <button id="life-menu-toggle-btn" class="menu-toggle-btn life-menu-toggle-btn" aria-label="Toggle My Life Menu" title="My Life">
+      <i class="fas fa-book-open"></i>
+    </button>
     {% if dev_tools_enabled %}
     <button id="dev-menu-toggle-btn" class="menu-toggle-btn dev-menu-toggle-btn" aria-label="Dev Tools">
       <i class="fas fa-wrench"></i>
@@ -194,6 +198,21 @@
     </ul>
   </div>
   {% endif %}
+
+  <!-- My Life Dropdown Menu (KG + Wiki + Entities) -->
+  <div id="life-dropdown-menu" class="dropdown-menu dropdown-menu--right hidden">
+    <ul class="menu-list">
+      <li class="menu-item"><a href="/wiki/" target="_blank" class="menu-btn"><i class="fas fa-book"></i><span>Wiki</span></a></li>
+      <li class="menu-item"><a href="/kg-visualizer" target="_blank" class="menu-btn"><i class="fas fa-project-diagram"></i><span>KG Visualizer</span></a></li>
+      <li class="menu-item"><a href="/kg-interests" target="_blank" class="menu-btn"><i class="fas fa-sliders-h"></i><span>KG Interests (what to track)</span></a></li>
+      <li class="menu-item"><a href="/kg-proposals/" target="_blank" class="menu-btn"><i class="fas fa-clipboard-list"></i><span>Shadow KG / Proposals</span></a></li>
+      <li class="menu-item"><a href="/entity_cards" target="_blank" class="menu-btn"><i class="fas fa-address-card"></i><span>Entity Cards</span></a></li>
+      <li class="menu-item"><a href="/entity-cards-admin" target="_blank" class="menu-btn"><i class="fas fa-sync-alt"></i><span>Entity Cards Admin (regen)</span></a></li>
+      <li class="menu-item"><a href="/entity-card-maintenance" target="_blank" class="menu-btn"><i class="fas fa-broom"></i><span>Entity Card Maintenance</span></a></li>
+      <li class="menu-item"><a href="/kg-maintenance" target="_blank" class="menu-btn"><i class="fas fa-stethoscope"></i><span>KG Maintenance</span></a></li>
+      <li class="menu-item"><a href="/taxonomy_webviewer" target="_blank" class="menu-btn"><i class="fas fa-sitemap"></i><span>Taxonomy Viewer</span></a></li>
+    </ul>
+  </div>
 </header>
 
 
