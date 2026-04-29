@@ -28,10 +28,18 @@
 #     run; downstream filtering picks it up immediately.
 #   - Tags can appear in multiple domains — items tagged with a shared tag
 #     fan out to every matching domain.
+#
+# decay_enabled (per domain, default false):
+#   When true, the pipeline runs DecayStaleBeliefsStep between Update and
+#   Reevaluate. Effects:
+#     - active+temporary unconfirmed for >30d -> deprecated
+#     - active+chronic   unconfirmed for >180d -> contested (handed to reevaluator)
+#   Roll out one domain at a time; flip back to false to halt.
 
 domains:
   - id: routine
     enabled: true
+    decay_enabled: false
     tags: [routine, schedule, general]
     ticket_types:
       - standing_break
@@ -45,6 +53,7 @@ domains:
 
   - id: health
     enabled: true
+    decay_enabled: false
     tags: [health, wellness, sleep, nutrition]
     ticket_types:
       - standing_break
@@ -55,6 +64,7 @@ domains:
 
   - id: food
     enabled: true
+    decay_enabled: false
     tags: [food, nutrition]
     ticket_types:
       - coffee
@@ -64,21 +74,25 @@ domains:
 
   - id: communication
     enabled: true
+    decay_enabled: false
     tags: [communication]
     ticket_types: []
 
   - id: sleep
     enabled: true
+    decay_enabled: false
     tags: [sleep]
     ticket_types:
       - sleep
 
   - id: work
     enabled: true
+    decay_enabled: false
     tags: [work]
     ticket_types: []
 
   - id: general
     enabled: true
+    decay_enabled: false
     tags: [general, family]
     ticket_types: []

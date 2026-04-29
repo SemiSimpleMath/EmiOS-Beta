@@ -31,6 +31,11 @@ class DomainConfig:
     enabled: bool
     tags: List[str] = field(default_factory=list)
     ticket_types: List[str] = field(default_factory=list)
+    # Time-based decay — opt-in per domain. When true, the pipeline runs
+    # DecayStaleBeliefsStep between UpdateBeliefsStep and ReevaluateBeliefsStep:
+    # active+temporary beliefs unconfirmed for >30d are deprecated; active+chronic
+    # beliefs unconfirmed for >180d are flagged contested for the reevaluator.
+    decay_enabled: bool = False
 
 
 def _config_path() -> Path:
@@ -58,6 +63,7 @@ def _load() -> Dict[str, DomainConfig]:
             enabled=bool(entry.get("enabled", False)),
             tags=[str(t) for t in (entry.get("tags") or [])],
             ticket_types=[str(t) for t in (entry.get("ticket_types") or [])],
+            decay_enabled=bool(entry.get("decay_enabled", False)),
         )
     return out
 

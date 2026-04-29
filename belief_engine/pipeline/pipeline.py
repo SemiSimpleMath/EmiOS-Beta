@@ -14,8 +14,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
+from belief_engine.config import get_domain_config
 from belief_engine.pipeline.steps.collect_evidence import CollectEvidenceStep
 from belief_engine.pipeline.steps.update_beliefs import UpdateBeliefsStep
+from belief_engine.pipeline.steps.decay_stale_beliefs import DecayStaleBeliefsStep
 from belief_engine.pipeline.steps.reevaluate_beliefs import ReevaluateBeliefsStep
 from belief_engine.pipeline.steps.canonicalize_belief_set import CanonicalizeBeliefSetStep
 
@@ -46,12 +48,24 @@ class BeliefEnginePipeline:
         started = datetime.now(timezone.utc).isoformat()
         step_results = []
 
+        # DecayStaleBeliefsStep is opt-in per domain via configs/belief_domains.yaml.
+        # Insert between Update (which bumps last_confirmed for touched beliefs)
+        # and Reevaluate (which handles contested keys, including the chronics
+        # flagged by the decay step).
+        domain_cfg = get_domain_config(self.domain)
+        decay_on = bool(domain_cfg and domain_cfg.decay_enabled)
+
         steps = [
             CollectEvidenceStep(self.domain, self.lookback_days),
             UpdateBeliefsStep(self.domain),
+        ]
+        if decay_on:
+            steps.append(DecayStaleBeliefsStep(self.domain))
+            logger.info("[BeliefEnginePipeline:%s] decay_enabled=true for domain=%s", run_id, self.domain)
+        steps.extend([
             ReevaluateBeliefsStep(),
             CanonicalizeBeliefSetStep(self.domain),
-        ]
+        ])
 
         overall_status = "success"
         for step in steps:
