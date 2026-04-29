@@ -18,7 +18,7 @@ If you are new, start at **[Welcome](welcome/WELCOME.md)** and read in order.
 |---|------|---------|
 | 00 | [Overview](architecture/00_OVERVIEW.md) | The layered stack from transport to service |
 | 01 | [Agents](architecture/01_AGENTS.md) | LLM decision units; config + prompts + form |
-| 02 | [Managers](architecture/02_MANAGERS.md) | MultiAgentManager / RoomManager / infrastructure managers |
+| 02 | [Managers](architecture/02_MANAGERS.md) | MultiAgentManager / RoomManager — agent-orchestrating only |
 | 03 | [Rooms](architecture/03_ROOMS.md) | Scoped conversation channels and the room contract |
 | 04 | [Control Nodes](architecture/04_CONTROL_NODES.md) | Deterministic state machines in the agent loop |
 | 05 | [Dayflow](architecture/05_DAYFLOW.md) | Autonomous daily workflow engine |
@@ -26,6 +26,7 @@ If you are new, start at **[Welcome](welcome/WELCOME.md)** and read in order.
 | 07 | [Tools](architecture/07_TOOLS.md) | Tool contract, registry, scope filtering |
 | 08 | [KG Chat Pipeline (legacy)](architecture/08_KG_CHAT_PIPELINE.md) | Historical reference; superseded by 09 |
 | 09 | [KG Pipeline (current)](architecture/09_KG_PIPELINE.md) | Bucket-per-stage chat → KG ingest |
+| 10 | [Service Managers](architecture/10_SERVICE_MANAGERS.md) | RoutineManager, BackgroundTaskManager, TicketManager, AFKMonitor, etc. — non-agent services |
 | 11 | [Wiki Generator](architecture/11_WIKI_GENERATOR.md) | KG → markdown vault, nightly refresh, critic |
 | 12 | [Entity Cards](architecture/12_ENTITY_CARDS.md) | Per-entity profile cards (model, generator, editor, admin) |
 | 13 | [KG Investigation + Mutation](architecture/13_KG_INVESTIGATION_MUTATION.md) | Self-healing loop: findings → investigator → mutator |

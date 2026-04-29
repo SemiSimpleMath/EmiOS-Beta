@@ -4,29 +4,30 @@ The word "Manager" is an overloaded suffix in this codebase. Two
 fundamentally different things wear it:
 
 1. **Agent-orchestrating managers** (`MultiAgentManager` and its
-   subclasses) — run a per-invocation agent loop with a blackboard,
-   route turns via `state_map`, are invoked through `ManagerInvoker`,
-   and produce a structured result for the caller.
+   subclasses) — the subject of this page. Run a per-invocation agent
+   loop with a blackboard, route turns via `state_map`, are invoked
+   through `ManagerInvoker`, and produce a structured result for the
+   caller.
 2. **Service managers** — long-lived services whose responsibility is
-   scheduling, lifecycle, or domain state. They never run an agent
-   loop. `RoutineManager` is the canonical example: it dispatches
-   scheduled work to functions / tasks / tools / pipelines on a clock,
-   not via LLM agent decisions.
+   scheduling, lifecycle, or domain state. `RoutineManager`,
+   `BackgroundTaskManager`, `TicketManager`, `AFKMonitor`, etc.
+   They never run an agent loop and share nothing with `MultiAgentManager`
+   except the suffix. **See
+   [10_SERVICE_MANAGERS](10_SERVICE_MANAGERS.md).**
 
-These two categories share almost nothing except the suffix. Don't
-read sections about MultiAgentManager (blackboard, state_map, agent
-loop, manager_invoker) and assume they apply to RoutineManager — they
-don't.
+Don't read sections about `MultiAgentManager` (blackboard, state_map,
+agent loop, manager_invoker) and assume they apply to service
+managers — they don't.
 
-## Agent-orchestrating managers
-
-### MultiAgentManager (`manager_classes/MultiAgentManager.py`)
+## MultiAgentManager (`manager_classes/MultiAgentManager.py`)
 
 Base class for every manager that runs LLM agents in a loop:
+
 - One `Blackboard` per invocation (shared scoped state, message log).
 - Loads agents via `AgentLoader` from each manager's YAML config.
 - Validates routing config (`state_map`, control-node refs).
-- Manages role bindings (flexible agent aliasing — e.g. `delegator: shared::delegator`).
+- Manages role bindings (flexible agent aliasing — e.g.
+  `delegator: shared::delegator`).
 - Tool scope filtering via `ToolScopeService`.
 - Event registration (configurable subscriptions).
 
@@ -34,7 +35,7 @@ Invoked through `ManagerInvoker.invoke(manager, message)`; the agent
 loop runs until an exit condition (return_control, max_cycles, error,
 explicit cancel) and returns a `ToolResult`.
 
-### RoomManager (`manager_classes/RoomManager.py`)
+## RoomManager (`manager_classes/RoomManager.py`)
 
 `MultiAgentManager` subclass with **deterministic routing** (no LLM
 delegator agent). Used for rooms (master_room, dayflow_orchestrator,
@@ -47,7 +48,7 @@ LLM-chosen next agent.
 - Enforces `max_cycles` (default 30).
 - Exit conditions: cancelled, max_cycles, exit flag, error flag.
 
-### Manager invocation chain (applies ONLY to the above)
+## Manager invocation chain
 
 ```
 RoomSessionManager.invoke_manager(envelope, request_data)
@@ -64,77 +65,29 @@ RoomSessionManager.invoke_manager(envelope, request_data)
       -> Return ToolResult
 ```
 
-`RoutineManager` etc. are NOT invoked through this chain. They have
-their own dispatch mechanisms (cron-style scheduling, BackgroundTaskManager
-threads).
+`RoutineManager` and the other service managers are NOT invoked
+through this chain. They have their own dispatch mechanisms (cron-style
+scheduling for routines, `BackgroundTaskManager`-owned threads for
+daemons).
 
-### Manager YAML configuration
+## Manager YAML configuration
 
 Agent-orchestrating managers are configured via YAML files loaded by
 `ManagerRegistry`. Each config defines:
-- `state_map` — agent routing graph
-- `role_bindings` — agent aliasing
-- `entry_agent` — starting agent
-- `max_cycles` — loop limit
-- `events` — event subscriptions
-- `scope` — tool/resource access controls
+
+- `state_map` — agent routing graph.
+- `role_bindings` — agent aliasing.
+- `entry_agent` — starting agent.
+- `max_cycles` — loop limit.
+- `events` — event subscriptions.
+- `scope` — tool/resource access controls.
 
 Service managers do NOT use these configs.
 
-## Service managers
+## Coordination primitives (used during agent-orchestration)
 
-These are long-lived services. They share the "Manager" suffix as a
-naming convention but otherwise have nothing in common with
-`MultiAgentManager`.
-
-### RoutineManager (`routine_manager/`)
-
-Schedules and dispatches routine work from `configs/routines.json`.
-- 5 runner types: `task`, `job`, `tool`, `function`, `pipeline`.
-- 5 scheduling policies: `interval`, `daily`, `weekly`, `quiet_hours`.
-- Guards: AFK guard, manual toggle, feature guard.
-- Thread-safe state persistence to `resource_routine_status.json`.
-- Fixed-capacity worker thread pool (`max_workers` config).
-
-Function-type routines are registered in
-`app/assistant/routine_manager/routine_functions.py`'s
-`ROUTINE_FUNCTION_REGISTRY`. Pipeline-type routines invoke a pipeline
-class's `.run()`. Neither runs an agent loop.
-
-See: [06_PIPELINES_AND_ROUTINES.md](06_PIPELINES_AND_ROUTINES.md) and
-[20_ROUTINES_ADMIN.md](20_ROUTINES_ADMIN.md).
-
-### BackgroundTaskManager (`background_task_manager/`)
-
-Thread-per-task daemon management. Default tasks include
-`db_cleanup`, `watchdog`, `ticket_maintenance`, and `routine_runner`
-(which is what actually wakes up `RoutineManager` periodically).
-
-### TicketManager (`ticket_manager/`)
-
-Type-agnostic CRUD with state machine.
-- States: `pending` -> `proposed` -> `accepted` / `dismissed` / `snoozed` / `expired`.
-- Terminal: `completed`, `dismissed`, `expired`, `failed`.
-- Enforces valid transitions via `_ALLOWED_TRANSITIONS`.
-
-### Feature-specific service managers
-
-| Manager | Purpose |
-|---------|---------|
-| `AFKMonitor` | Active-first idle detection; records active segments, infers AFK from gaps |
-| `DJManager` | Music selection state machine with vibe planning and candidate selection |
-| `LocationManager` | User location tracking/prediction from calendar + patterns |
-| `MaintenanceManager` | Daily summaries, db cleanup, log management, rate-limited events |
-| `PreferenceManager` | Feedback handling (thumbs up/down), delegates to LabelAgent |
-| `UserSettingsManager` | User settings and feature flags storage/retrieval |
-
-These are all plain Python services accessed via `DI` — they don't
-run agent loops, don't have manager YAML configs, and aren't invoked
-through `ManagerInvoker`.
-
-## Coordination mechanisms
-
-These primitives are used by both categories of manager.
+These primitives are owned by [17_SERVICE_LAYER](17_SERVICE_LAYER.md);
+this section is just how the agent-orchestrators interact with them.
 
 ### ServiceLocator (DI)
 
@@ -160,12 +113,14 @@ event_hub.publish(message)  # message.event_topic = 'repo_update'
 Common events: `socket_emit`, `repo_update`, `agent_progress_emit`,
 `proactive_suggestion`, `afk_state_changed`, `dayflow_ticket_responded`.
 
-### Blackboard (only for agent-orchestrating managers)
+### Blackboard (per-invocation scoped state)
 
 Each `MultiAgentManager` invocation gets its own `Blackboard` with a
 scope stack:
+
 - **Global scope** — manager-level state.
-- **Local scopes** — created for agent-to-agent calls (push/pop call context).
+- **Local scopes** — created for agent-to-agent calls (push/pop call
+  context).
 - `get_state_value(key)` — searches top-to-bottom of stack.
 - `update_state_value(key, val)` — writes to current (top) scope.
 - `add_msg(message)` — appends to message log.
@@ -177,13 +132,11 @@ Service managers don't use Blackboard.
 1. **ServiceLocator bootstrap** — register core services.
 2. **ManagerRegistry.preload_all()** — load all
    `MultiAgentManager`-derived configs.
-3. **BackgroundTaskManager.start_all()** — start daemon tasks.
-4. **RoutineManager** — lazy-initialized; the BTM `routine_runner`
-   task wakes it up on a clock.
-5. **RoomSessionManager** — instantiates `RoomManager` instances per
+3. **BackgroundTaskManager.start_all()** — start daemon tasks (this
+   step is in service-manager territory; see
+   [10_SERVICE_MANAGERS](10_SERVICE_MANAGERS.md)).
+4. **RoomSessionManager** — instantiates `RoomManager` instances per
    room request.
-6. **Shutdown**: `BackgroundTaskManager.stop_all()` ->
-   `RoutineManager.shutdown()`.
 
 ## Key files
 
@@ -191,10 +144,7 @@ Service managers don't use Blackboard.
 |------|---------|
 | `manager_classes/MultiAgentManager.py` | Base agent orchestrator |
 | `manager_classes/RoomManager.py` | Deterministic-routing subclass |
-| `manager_runtime/manager_invoker.py` | Canonical invocation entry point for agent-orchestrating managers |
+| `manager_runtime/manager_invoker.py` | Canonical invocation entry point |
 | `manager_registry/manager_registry.py` | Manager YAML config loading |
 | `multi_agent_manager_factory/` | Manager instance factory |
-| `routine_manager/routine_manager.py` | Scheduled routine dispatcher (NOT a MultiAgentManager) |
-| `background_task_manager/background_task_manager.py` | Daemon thread management |
-| `ticket_manager/ticket_manager.py` | Ticket CRUD state machine |
-| `ServiceLocator/service_locator.py` | Dependency injection registry |
+| `ServiceLocator/service_locator.py` | DI registry (see [17_SERVICE_LAYER](17_SERVICE_LAYER.md)) |
