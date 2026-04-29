@@ -36,6 +36,10 @@ The directory layout *is* the lifecycle taxonomy. Putting a resource in the wron
 resources/
   user/                              [user-authored / setup-seeded]
     resource_user_data.json          — name, pronouns, timezone, family
+    user_bio.json                    — style/background/projects/values/preferences;
+                                       seeded by setup wizard, edited via
+                                       /settings/user-bio, injected into chat_gate
+                                       prompts via UserBioContextService
     resource_kg_interests.json       — what the user wants Emi to track
     resource_wiki_sections.json      — biographical taxonomy
 
@@ -97,13 +101,6 @@ resources/
   context/                           [pipeline-derived: contextual]
     global/, user/
 
-  memory/                            [legacy; predates belief_engine]
-    resource_user_food_prefs.json
-    resource_user_general_prefs.json
-    resource_user_health.json
-    resource_user_routine.json
-    *_tmp.json                       — staging files for old memory pipeline
-
   resource_current_location.json     [flat at root: runtime snapshot]
   resource_routine_status.json       [flat at root: runtime snapshot]
 ```
@@ -111,7 +108,7 @@ resources/
 **Special cases:**
 - **`templates/`** is not a normal resource directory. Files there contain Jinja template tokens (`{{ ... }}` / `{% ... %}`) and **must be compiled to concrete values before injection** — `ResourceManager._assert_concrete_resource()` raises `ValueError` if a resource with template tokens is offered for injection. Compiled outputs land in `instructions/` or other consumer directories.
 - **`pointers/`** is an indirection layer: `resource_X_latest.json` typically contains a path or id pointing at a versioned artifact elsewhere. Useful when the latest version's filename changes but consumers want a stable pointer.
-- **`memory/`** is legacy from the pre-`belief_engine` architecture. The dead `memory::*` agent namespace was removed 2026-04-28; some of these files may still exist but should be considered cold storage.
+- **`memory/`** previously held the output of the dead `memory_apply_fact` subsystem; removed 2026-04-28. The one surviving live file (`user_bio.json`) migrated to `resources/user/`.
 
 ## 4. The metadata envelope (emerging convention, not universal)
 
@@ -221,7 +218,6 @@ The orchestrator is a consumer of the pipeline's outputs.
 | `status/`, flat `resource_*.json` at root | No | Runtime overwrite every tick. |
 | `templates/` | Yes (with care) | These are source files that get compiled. Edit the template, not the compiled output. |
 | `pointers/`, `context/` | No | Indirection / pipeline-managed. |
-| `memory/` | Don't touch | Legacy from the dead `memory::*` agent namespace. |
 
 If a pipeline-output looks wrong, the fix is upstream (in the pipeline or its prompts), not the file.
 
@@ -243,7 +239,6 @@ A few things that the resource layer enables, and that other AI architectures of
 - **Atomic writes** are not universal across writers; some still use `write_text` directly.
 - **The metadata envelope is inconsistent** (§4) — readers must know per-resource shape.
 - **Per-resource contracts are scattered.** `RESOURCE_CONTRACTS.md` exists for dayflow pipeline outputs only; other categories rely on prose docs or grepping.
-- **`memory/`** is dead-but-present (§3). Worth pruning when convenient.
 - **`templates/instructions/`** is a real subdirectory but its compilation flow isn't documented here — see ResourceManager and the agent instruction-loading paths if you need to extend it.
 
 ## 12. Cross-references

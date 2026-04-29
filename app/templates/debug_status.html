@@ -170,8 +170,6 @@
         function renderData(data) {
             // Always show raw resource files
             const location = data.location_raw || {};
-            const userRoutine = data.user_routine_raw || {};
-            const userHealth = data.user_health_raw || {};
             const trackedActivitiesOutput = data.tracked_activities_raw || {};
             const trackedActivitiesConfig = data.tracked_activities_config_raw || {};
             
@@ -276,24 +274,6 @@
             html += '⚙️ Activity definitions, thresholds';
             html += '</p>';
             html += `<pre class="raw-json">${syntaxHighlight(trackedActivitiesConfig)}</pre>`;
-            html += '</div>';
-            
-            // User Health (Traits)
-            html += '<div class="card"><h2>👤 User Health (Traits)</h2>';
-            html += '<h3>resource_user_health.json</h3>';
-            html += '<p style="font-size: 12px; color: #7ee787; margin-bottom: 10px;">';
-            html += '📋 Chronic conditions, preferences';
-            html += '</p>';
-            html += `<pre class="raw-json">${syntaxHighlight(userHealth)}</pre>`;
-            html += '</div>';
-            
-            // User Routine
-            html += '<div class="card"><h2>⏰ User Routine</h2>';
-            html += '<h3>resource_user_routine.json</h3>';
-            html += '<p style="font-size: 12px; color: #7ee787; margin-bottom: 10px;">';
-            html += '⏱️ Daily patterns, habits';
-            html += '</p>';
-            html += `<pre class="raw-json">${syntaxHighlight(userRoutine)}</pre>`;
             html += '</div>';
             
             // Location

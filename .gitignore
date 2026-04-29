@@ -208,6 +208,9 @@ data/kg_projection/
 resources/user/resource_user_data.json
 resources/user/user_bio.json
 resources/user/.setup_draft.json
+# resources/memory/ — entire directory removed 2026-04-28 (was the storage
+# layer for the dead memory_apply_fact subsystem). user_bio migrated to
+# resources/user/; the rest of memory/ was dead.
 
 # Assistant core & personality (contains your personal identity setup)
 resources/assistant/assistant_core.json
@@ -223,7 +226,6 @@ app/assistant/user_settings_manager/user_settings_data/user_settings.json
 # Runtime-generated resource outputs (personal health, sleep, activity, routines)
 resources/dayflow_pipeline_outputs/
 resources/daily_insights_pipeline_outputs/
-resources/memory/
 resources/kg_derived/
 resources/status/
 resources/day_context/

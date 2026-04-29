@@ -163,7 +163,6 @@ def status_data():
         resources_root = get_resources_dir()
         dayflow_dir = resources_root / "dayflow_pipeline_outputs"
         daily_insights_dir = resources_root / "daily_insights_pipeline_outputs"
-        memory_dir = resources_root / "memory"
         status_dir = resources_root / "status"
         context_user_dir = resources_root / "context" / "user"
         context_global_dir = resources_root / "context" / "global"
@@ -198,8 +197,6 @@ def status_data():
         
         # Load all resource files
         location_raw = load_resource(resources_root, "resource_current_location.json")
-        user_routine_raw = load_resource(memory_dir, "resource_user_routine.json")
-        user_health_raw = load_resource(memory_dir, "resource_user_health.json")
         tracked_activities_raw = load_resource(dayflow_dir, "resource_tracked_activities_output.json")
         tracked_activities_config_raw = load_config("config_tracked_activities.json")
         
@@ -234,8 +231,6 @@ def status_data():
             
             # Raw (exact file contents, unmodified)
             "location_raw": location_raw,
-            "user_routine_raw": user_routine_raw,
-            "user_health_raw": user_health_raw,
             "tracked_activities_raw": tracked_activities_raw,
             "tracked_activities_config_raw": tracked_activities_config_raw,
             
