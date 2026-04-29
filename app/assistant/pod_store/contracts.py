@@ -15,12 +15,14 @@ PodSourceKind = Literal[
     "unified_log",
     "event_repository:email",
     "resource",
+    "image_file",
 ]
 
 
 PodKind = Literal[
     "chat_cluster",
     "email",
+    "image",
     "tool_result",
     "summary",
     "resource_snapshot",
