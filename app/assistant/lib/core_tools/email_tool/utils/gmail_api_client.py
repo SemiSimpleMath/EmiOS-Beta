@@ -3,8 +3,17 @@
 Gmail API client using OAuth2 credentials
 """
 import base64
+import mimetypes
+import os
 import time
+from email import encoders
+from email.mime.audio import MIMEAudio
+from email.mime.base import MIMEBase
+from email.mime.image import MIMEImage
+from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from typing import List, Optional, Sequence
+
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from app.assistant.utils.logging_config import get_logger
@@ -448,31 +457,70 @@ class GmailAPIClient:
             logger.debug("search_emails_metadata exception details", exc_info=True)
             raise
 
-    def send_email(self, to, subject, body):
+    def send_email(self, to, subject, body, attachment_paths: Optional[Sequence[str]] = None):
         """
-        Send an email via Gmail API
-        
+        Send an email via Gmail API. Supports optional file attachments.
+
         Args:
             to: Recipient email address
             subject: Email subject
             body: Email body (plain text)
-            
+            attachment_paths: Optional list of absolute paths to files to
+                attach. Each path must exist; missing/unreadable files
+                cause the whole send to fail (callers should resolve
+                pod_ids → paths upstream and pre-validate). MIME type is
+                inferred from extension.
+
         Returns:
             Dict with message ID if successful, None otherwise
         """
         try:
-            message = MIMEText(body)
+            paths: List[str] = [p for p in (attachment_paths or []) if p]
+            if not paths:
+                # Plain text path — single MIMEText, smaller wire size.
+                message = MIMEText(body)
+            else:
+                # Multipart with attachments.
+                message = MIMEMultipart()
+                message.attach(MIMEText(body, "plain"))
+                for path in paths:
+                    if not os.path.isfile(path):
+                        raise FileNotFoundError(f"attachment not found: {path}")
+                    ctype, encoding = mimetypes.guess_type(path)
+                    if ctype is None or encoding is not None:
+                        ctype = "application/octet-stream"
+                    maintype, subtype = ctype.split("/", 1)
+                    with open(path, "rb") as fh:
+                        data = fh.read()
+                    if maintype == "image":
+                        part = MIMEImage(data, _subtype=subtype)
+                    elif maintype == "audio":
+                        part = MIMEAudio(data, _subtype=subtype)
+                    elif maintype == "text":
+                        part = MIMEText(data.decode("utf-8", errors="replace"), _subtype=subtype)
+                    else:
+                        part = MIMEBase(maintype, subtype)
+                        part.set_payload(data)
+                        encoders.encode_base64(part)
+                    filename = os.path.basename(path)
+                    part.add_header("Content-Disposition", f'attachment; filename="{filename}"')
+                    message.attach(part)
+
             message['to'] = to
             message['subject'] = subject
-            
+
             raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
-            
+
             sent_message = self.service.users().messages().send(
                 userId='me',
                 body={'raw': raw_message}
             ).execute()
-            
-            logger.info(f"Email sent successfully to {to}. Message ID: {sent_message['id']}")
+
+            n_atts = len(paths)
+            logger.info(
+                "Email sent successfully to %s (attachments=%d). Message ID: %s",
+                to, n_atts, sent_message['id'],
+            )
             return {'id': sent_message['id']}
             
         except HttpError as e:

@@ -96,6 +96,10 @@ class PodStoreTool(BaseTool):
         since = arguments.get("since") or None
         query = (arguments.get("query") or "").strip() or None
         kind = (arguments.get("kind") or "").strip() or None
+        linked_to_entity = (arguments.get("linked_to_entity") or "").strip() or None
+        linked_via = arguments.get("linked_via") or None
+        if linked_via is not None and not isinstance(linked_via, list):
+            raise ValueError("`linked_via` must be a list of edge relationship_type strings")
         raw_limit = arguments.get("limit")
         limit = int(raw_limit) if raw_limit is not None else 20
 
@@ -109,6 +113,8 @@ class PodStoreTool(BaseTool):
             tags=tags,
             scope=scope,
             kind=kind,
+            linked_to_entity=linked_to_entity,
+            linked_via=linked_via,
             since=since,
             query=query,
             limit=limit,
@@ -117,6 +123,8 @@ class PodStoreTool(BaseTool):
         summary_line = (
             f"Found {len(headers)} pod(s)"
             + (f" of kind={kind!r}" if kind else "")
+            + (f" linked to {linked_to_entity!r}" if linked_to_entity else "")
+            + (f" via {linked_via}" if linked_via else "")
             + (f" matching '{query}'" if query else "")
             + (f" tagged {tags}" if tags else "")
             + (f" since {since}" if since else "")

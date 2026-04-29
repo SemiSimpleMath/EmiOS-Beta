@@ -10,7 +10,15 @@ class pod_search_args(BaseModel):
     )
     kind: Optional[str] = Field(
         default=None,
-        description="Restrict to one pod kind. Currently 'chat_cluster' or 'email'.",
+        description="Restrict to one pod kind. Currently 'chat_cluster', 'email', or 'image'.",
+    )
+    linked_to_entity: Optional[str] = Field(
+        default=None,
+        description="Only pods that an Entity with this label has KG edges to. E.g. 'Jukka' → pods Jukka is depicted_in / has_profile_image-of / has_video-of / etc.",
+    )
+    linked_via: Optional[List[str]] = Field(
+        default=None,
+        description="When filtering by linked_to_entity, restrict to these edge relationship_types. E.g. ['depicted_in','has_profile_image']. Omit for any edge.",
     )
     tags: Optional[List[str]] = Field(
         default=None,

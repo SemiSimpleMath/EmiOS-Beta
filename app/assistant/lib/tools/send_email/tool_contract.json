@@ -1,6 +1,6 @@
 {
   "name": "send_email",
-  "description": "Sends an email.  Needs a To email address and body, subject is optional but nice to have. Can be used to send text message using SMS.\nDo not use email to communicate with the user directly unless instructed to do so.",
+  "description": "Sends an email. Needs a To email address and body; subject is optional. Can be used to send a text message via the SMS-via-email gateway.\nSupports file attachments via pod_ids — each pod_id is resolved to its backing file (image / video / etc.) and attached. Use when the user asks to email a photo / receipt / video / etc. Use pod_search first to find the right pod_id(s).\nDo not use email to communicate with the user directly unless instructed to do so.",
   "inputs": [
     {
       "name": "to",
@@ -25,6 +25,12 @@
       "type": "string",
       "required": false,
       "description": "Optional Google OAuth account id for per-call sender selection (default \"google_user_primary\")."
+    },
+    {
+      "name": "pod_ids",
+      "type": "array",
+      "required": false,
+      "description": "Optional list of pod URIs (e.g. ['datapod:image:abc...']) to attach to the email. Each pod must have a backing file via metadata.stored_path; image/video/audio/document pods all work. The file is read from disk and attached with its original filename and inferred MIME type. If any pod is missing or unbacked the whole send fails — resolve pod_ids upstream via pod_search before calling."
     }
   ],
   "outputs": [
@@ -39,7 +45,7 @@
       "description": "Structured tool result payload."
     }
   ],
-  "arguments_prompt": "Arguments for sending an email:\nto: str\nsubject: Optional[str]\nbody: Optional[str]\naccount_id: Optional[str]  # Use to choose sender account per call",
+  "arguments_prompt": "Arguments for sending an email:\nto: str\nsubject: Optional[str]\nbody: Optional[str]\naccount_id: Optional[str]  # Use to choose sender account per call\npod_ids: Optional[List[str]]  # Pod URIs to attach as files (e.g. ['datapod:image:abc...']). Find pod_ids first via pod_search (kind='image', linked_to_entity=...).",
   "metadata": {
     "domain": "email",
     "actions": [

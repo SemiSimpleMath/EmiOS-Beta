@@ -134,6 +134,8 @@ class PodStore:
         tags: Optional[Sequence[str]] = None,
         scope: Optional[str] = None,
         kind: Optional[str] = None,
+        linked_to_entity: Optional[str] = None,
+        linked_via: Optional[Sequence[str]] = None,
         since: Optional[Union[datetime, str]] = None,
         since_utc: Optional[datetime] = None,
         query: Optional[str] = None,
@@ -149,6 +151,15 @@ class PodStore:
         - ``kind``: only pods of this kind (e.g. ``"email"``,
           ``"chat_cluster"``). Useful to narrow a free-text query to one
           source.
+        - ``linked_to_entity``: only pods that are the target of a KG edge
+          from an Entity node with this label (case-sensitive match).
+          E.g., ``linked_to_entity="Jukka"`` returns pods Jukka has any
+          outgoing edge to (depicted_in, has_profile_image, has_video, …).
+          Combine with ``linked_via`` to narrow by edge type.
+        - ``linked_via``: only meaningful with ``linked_to_entity``. List of
+          edge relationship_types to accept (e.g.
+          ``["depicted_in", "has_profile_image"]``). When None, any edge
+          from the entity counts.
         - ``since``: only pods created after this. Accepts a datetime OR a
           shorthand string: ``"24h"``, ``"3d"``, ``"2w"``, ``"today"``, or
           an ISO timestamp. ``since_utc`` kept for backward compatibility.
@@ -175,6 +186,23 @@ class PodStore:
                     q = q.filter(PodRow.scope_id == scope)
                 if kind:
                     q = q.filter(PodRow.kind == kind)
+                if linked_to_entity:
+                    # Sub-select pod_ids that are the target of a KG edge
+                    # from an Entity node matching the label. Both pod_store
+                    # and kg_*_metadata live in emi.db so a cross-table
+                    # subquery on the same engine is fine.
+                    from app.assistant.kg.db.knowledge_graph_db import Edge, Node
+                    pod_id_subq = (
+                        session.query(Edge.target_id)
+                        .join(Node, Node.id == Edge.source_id)
+                        .filter(Node.label == linked_to_entity)
+                        .filter(Node.node_type == "Entity")
+                    )
+                    if linked_via:
+                        pod_id_subq = pod_id_subq.filter(
+                            Edge.relationship_type.in_(list(linked_via))
+                        )
+                    q = q.filter(PodRow.pod_id.in_(pod_id_subq))
                 if for_agent:
                     # LIKE on the JSON-serialized list. SQLite stores JSON
                     # arrays as text like `["meal_planner","health_watcher"]`.

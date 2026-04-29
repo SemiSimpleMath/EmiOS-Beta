@@ -1,6 +1,9 @@
 {
   "name": "pod_search",
-  "description": "Search pod_store for pod HEADERS (not full bodies). Use this to browse candidate pods, then call pod_fetch on the pod_ids you want to open.\n\nPods are retrievable memory units about the user.\n\nWHEN THE USER ASKS ABOUT A SPECIFIC TOPIC / PERSON / CONVERSATION: use `query` with 1-3 content keywords. Do NOT put people or topics in `tags`.\n\nExamples:\n- 'conversation with Justin about knowledge graphs' → `query='knowledge graph'` (stem-matched so 'graphs' finds 'graph')\n- 'what did I eat yesterday' → `tags=['food'], since='1d'`\n- 'creamer discussion' → `query='creamer'`\n- 'emails from Acme this week' → `kind='email', query='Acme', since='7d'`\n- 'recent invoice emails' → `kind='email', query='invoice', since='2w'`\n\nParameters:\n- `query` (PREFERRED for topic/person/keyword search): substring match over one_liner + body; multi-word queries are tokenized AND-matched with plural stemming.\n- `kind`: restrict to one pod kind. Valid: 'chat_cluster', 'email'. Use 'email' to search the user's email pods specifically.\n- `tags`: fixed vocabulary ONLY — food, entertainment, health, schedule, work. NEVER invent tag names. (Tags are populated for chat pods only; emails currently have no tags.)\n- `since`: '24h', '3d', '2w', '1m', 'today', or ISO timestamp.\n\nIF A SEARCH RETURNS 0 PODS: drop filters and retry — drop tags, try a different query keyword, or expand since. Do NOT give up after one empty result.",
+  "description": "Search pod_store for pod HEADERS (not full bodies). Use this to browse candidate pods, then call pod_fetch on the pod_ids you want to open.\n\nPods are retrievable memory units about the user.\n\nWHEN THE USER ASKS ABOUT A SPECIFIC TOPIC / PERSON / CONVERSATION: use `query` with 1-3 content keywords. Do NOT put people or topics in `tags`.\n\nExamples:\n- 'conversation with Justin about knowledge graphs' → `query='knowledge graph'` (stem-matched so 'graphs' finds 'graph')\n- 'what did I eat yesterday' → `tags=['food'], since='1d'`\n- 'creamer discussion' → `query='creamer'`\n- 'emails from Acme this week' → `kind='email', query='Acme', since='7d'`\n- 'recent invoice emails' → `kind='email', query='invoice', since='2w'`
+- 'pictures of me from today' → `kind='image', linked_to_entity='<primary_user>', linked_via=['depicted_in','has_profile_image'], since='today'`
+- 'my profile picture' → `kind='image', linked_to_entity='<primary_user>', linked_via=['has_profile_image']`
+- 'video of Peter's birthday' → `kind='video', linked_to_entity='Peter', query='birthday'`\n\nParameters:\n- `query` (PREFERRED for topic/person/keyword search): substring match over one_liner + body; multi-word queries are tokenized AND-matched with plural stemming.\n- `kind`: restrict to one pod kind. Valid: 'chat_cluster', 'email'. Use 'email' to search the user's email pods specifically.\n- `tags`: fixed vocabulary ONLY — food, entertainment, health, schedule, work. NEVER invent tag names. (Tags are populated for chat pods only; emails currently have no tags.)\n- `since`: '24h', '3d', '2w', '1m', 'today', or ISO timestamp.\n\nIF A SEARCH RETURNS 0 PODS: drop filters and retry — drop tags, try a different query keyword, or expand since. Do NOT give up after one empty result.",
   "inputs": [
     {
       "name": "query",
@@ -12,7 +15,19 @@
       "name": "kind",
       "type": "string",
       "required": false,
-      "description": "Restrict to one pod kind. Currently 'chat_cluster' or 'email'. When searching the user's mailbox, set kind='email' to skip chat pods."
+      "description": "Restrict to one pod kind. Currently 'chat_cluster', 'email', or 'image'. When searching the user's mailbox set kind='email'; for photos set kind='image'."
+    },
+    {
+      "name": "linked_to_entity",
+      "type": "string",
+      "required": false,
+      "description": "Only pods that are the target of a KG edge from an Entity node with this label. Example: linked_to_entity='Jukka' returns pods that Jukka has any outgoing edge to (depicted_in / has_profile_image / has_video / etc.). Match is case-sensitive — pass the canonical entity label."
+    },
+    {
+      "name": "linked_via",
+      "type": "array",
+      "required": false,
+      "description": "Only meaningful with linked_to_entity. List of edge relationship_types to accept. Example: linked_via=['depicted_in','has_profile_image']. Omit to accept any edge type from that entity."
     },
     {
       "name": "tags",
@@ -45,7 +60,7 @@
       "description": "Structured: {count, pods: [{pod_id, tags, one_liner, scope_id, created_at, created_by, content_type}]}."
     }
   ],
-  "arguments_prompt": "Arguments for pod_search:\n- query (optional): comma-separated search keywords for finding relevant pods\n- kind (optional): 'chat_cluster' | 'email' — narrow to one source\n- tags (optional): {food, entertainment, health, schedule, work} (chat_cluster pods only)\n- since (optional): '24h' / '3d' / '1w' / 'today' / ISO\n- limit (optional): default 20",
+  "arguments_prompt": "Arguments for pod_search:\n- query (optional): comma-separated search keywords for finding relevant pods\n- kind (optional): 'chat_cluster' | 'email' | 'image' — narrow to one source\n- linked_to_entity (optional): canonical entity label, e.g. 'Jukka', 'Peter'. Returns pods that entity has KG edges to (photos depicting them, etc.).\n- linked_via (optional): list of edge relationship_types when filtering by entity. e.g. ['depicted_in','has_profile_image']. Omit for any edge.\n- tags (optional): {food, entertainment, health, schedule, work} (chat_cluster pods only)\n- since (optional): '24h' / '3d' / '1w' / 'today' / ISO\n- limit (optional): default 20",
   "metadata": {
     "category": "pod_store",
     "verbs": ["read"],

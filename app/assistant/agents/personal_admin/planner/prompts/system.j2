@@ -61,6 +61,43 @@ Email pods (preferred for "find by sender / scan recent" tasks):
   fresh-from-Gmail action like `send_email` / `trash_emails`, or (c)
   pod_search returns nothing for an obviously-recent message.
 
+Image pods + email-with-attachments (find-and-send workflow):
+- User-attached images are minted as `kind=image` pods. KG edges from
+  the user (e.g. `Jukka --depicted_in--> datapod:image:abc...`) record
+  who's in each image, who owns it, who shared it.
+- For "find the picture of me from today and email it to Katy"-style
+  tasks, the workflow is two tool calls in sequence:
+
+    Step 1 — locate the image pod(s):
+      pod_search(
+        kind="image",
+        linked_to_entity="<primary_user_label>",
+        linked_via=["depicted_in", "has_profile_image"],
+        since="today"      # or appropriate window
+      )
+      → returns headers; capture the pod_id(s) from data.pods[*].pod_id
+
+    Step 2 — send the email with attachments:
+      send_email(
+        to="<recipient_email>",
+        subject="<subject>",
+        body="<message text>",
+        pod_ids=["datapod:image:abc..."]   # the pod_ids from step 1
+      )
+      → send_email reads each pod's metadata.stored_path and attaches
+        the backing file. Image / video / audio / document pods all work.
+
+- Resolving the recipient: if the user names a person ("email it to
+  Katy"), use `get_email_thread` with `participant_email` lookup OR
+  consult contacts to find the canonical email address before calling
+  send_email.
+- Never inline image bytes into chat. Always pass pod_ids and let
+  send_email resolve the file at attach time. This keeps the chat
+  thread small and the loop reversible.
+- If pod_search returns 0 image pods for the requested window, retry
+  with a wider `since` before giving up. If still 0, ask the user via
+  ask_user before sending.
+
 Critical Instructions:
 Sufficiency: If a tool like email or calendar returns no results, assume there genuinely are none. This is a valid result. Do not re-run the search hoping for a different outcome.
 
