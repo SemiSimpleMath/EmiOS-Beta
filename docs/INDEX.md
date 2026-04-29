@@ -29,7 +29,8 @@ If you are new, start at **[Welcome](welcome/WELCOME.md)** and read in order.
 | 11 | [Wiki Generator](architecture/11_WIKI_GENERATOR.md) | KG → markdown vault, nightly refresh, critic |
 | 12 | [Entity Cards](architecture/12_ENTITY_CARDS.md) | Per-entity profile cards (model, generator, editor, admin) |
 | 13 | [KG Investigation + Mutation](architecture/13_KG_INVESTIGATION_MUTATION.md) | Self-healing loop: findings → investigator → mutator |
-| 14 | [Pods (datapod) System](architecture/14_PODS.md) | URI-addressable content units, the gut, classifier |
+| 14 | [Pods (datapod) System](architecture/14_PODS.md) | URI-addressable content units, the gut, classifier, search/fetch, body-vs-artifact, kg_mirror |
+| 14b | [Pods: media lifecycle](architecture/14b_PODS_MEDIA_LIFECYCLE.md) | End-to-end trace: chat image upload → pod → KG edge → "find and email" workflow |
 | 15 | [emi_team + Scope](architecture/15_EMI_TEAM_AND_SCOPE.md) | The general-worker manager pattern + permission model |
 | 20 | [Routines Admin UI](architecture/20_ROUTINES_ADMIN.md) | The /routines page that manages the schedule |
 

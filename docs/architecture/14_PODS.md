@@ -1,14 +1,16 @@
 # Pods (Datapods)
 
-A pod is a URI-addressable content unit. Agents pass `datapod:kind:id` strings around instead of full chat transcripts, email bodies, or tool output. The recipient hydrates a header on demand and only fetches the full body when it actually needs to read.
+A pod is a URI-addressable content unit. Agents pass `datapod:kind:id` strings around instead of full chat transcripts, email bodies, image bytes, or tool output. The recipient hydrates a header on demand and only fetches the full body when it actually needs to read.
 
-The milestone "chat became addressable memory" landed 2026-04-19. Before pods, every consumer that wanted to know "what did Alex say about creamer?" had to scan raw `unified_log_2026`. Now there is a curated semantic layer in front of the log, and the unit of currency between agents is a 6+ char id.
+The milestone "chat became addressable memory" landed 2026-04-19. Email pods, image pods, and the pod-as-KG-citizen unification landed 2026-04-29. Before pods, every consumer that wanted to know "what did Alex say about creamer?" had to scan raw `unified_log_2026`. Now there is a curated semantic layer in front of the log, and the unit of currency between agents is a 6+ char id.
+
+> **For the concrete end-to-end trace** of what happens when a user pastes an image into chat, through to "find that picture and email it to Katy" being a working two-tool-call workflow, see [14b_PODS_MEDIA_LIFECYCLE.md](14b_PODS_MEDIA_LIFECYCLE.md).
 
 ## Naming
 
 - **In prose**: "pod."
 - **In code**: `datapod` everywhere — the table is `pod_store`, the URI scheme is `datapod:`, the runtime model is `Pod`, the contract is `PodRow`. The `pod_*` short form survives only in directory names (`pod_store/`, `pod_classifier_service.py`, `pod_search/`, `pod_fetch/`).
-- **URI shape**: `datapod:<kind>:<id>` — `<kind>` is snake_case (`chat_cluster`, `email`); `<id>` is lowercase alphanumeric, 6+ chars. Old ids are 24-hex sha256 prefixes; new ids are 6 base36 (both match the same regex).
+- **URI shape**: `datapod:<kind>:<id>` — `<kind>` is snake_case (`chat_cluster`, `email`, `image`, future: `video`, `audio`, `pdf`, ...); `<id>` is lowercase alphanumeric, 6+ chars. Old ids are 24-hex sha256 prefixes; new ids are 6 base36 (both match the same regex).
 
 The canonical regex lives in `app/assistant/pod_store/pod_uri.py:23`:
 
@@ -25,7 +27,7 @@ The canonical regex lives in `app/assistant/pod_store/pod_uri.py:23`:
 | column | type | notes |
 | --- | --- | --- |
 | `pod_id` | str PK | full URI including scheme, e.g. `datapod:chat_cluster:abc…`. Deterministic when 1:1 to a source; uuid otherwise. |
-| `kind` | str, indexed | `chat_cluster`, `email`, `tool_result`, `summary`, `resource_snapshot` |
+| `kind` | str, indexed | `chat_cluster`, `email`, `image`, `tool_result`, `summary`, `resource_snapshot` (future: `video`, `audio`, `pdf`, ...) |
 | `tags_json` | JSON list | tag names from `configs/pod_tags.yaml` |
 | `one_liner` | text | terse 3–6 word subject line; load-bearing — shown to agents without hydration |
 | `body` | text, nullable | full content if small enough to inline; null when better resolved from `source_refs` |
@@ -37,6 +39,53 @@ The canonical regex lives in `app/assistant/pod_store/pod_uri.py:23`:
 | `metadata_json` | JSON, nullable | kind-specific fields (sender, subject, tool name, classifier reasoning, critic verdict). Not indexed — for post-hoc inspection. |
 
 The Pydantic counterpart is `Pod` in `app/assistant/pod_store/contracts.py:36`. `PodHeader` (same file) is the lightweight payload `PodInjector` attaches to a `Message` after scanning its text for pod URIs — `pod_id + kind + tags + one_liner + scope_id + created_by + created_at + content_type`, no body. Agents pass the bare `pod_id` string between each other; the injector hydrates the header on receipt.
+
+## body vs. artifact principle
+
+`pod.body` is the **searchable text representation** of the pod's content — chat transcript, email text, vision caption, OCR, transcript, etc. The actual underlying artifact (bytes, URL, external row) lives wherever artifacts of that type naturally live, and `pod.metadata` carries the pointer:
+
+| Pod kind | `body` contains | Artifact lives |
+|---|---|---|
+| `chat_cluster` | the transcript itself | n/a — transcript is the content |
+| `email` | the email body text | optional `.eml` on disk; for now the body is the artifact |
+| `image` | vision caption + OCR text (filled by extraction pass) | `data/images/<hash[:2]>/<hash>.<ext>` (content-addressed) |
+| `video` (future) | transcript + frame captions | `data/videos/<hash>/...` |
+| `audio` (future) | transcript | `data/audio/<hash>/...` |
+| `web_page` (future) | extracted readable text | `metadata.url` (HTTP, fetch on demand) |
+
+`pod_search` (substring match over `one_liner` + `body`) finds pods via the searchable text; consumers fetch the artifact via `metadata.stored_path` (or `metadata.url`, etc.) only when they need to act on it (`send_email` attachments, vision recompute, etc.).
+
+Why: putting bytes in `body` defeats `pod_search`. Putting bytes in a separate column inflates the DB. Re-extraction (better vision prompts) over the original artifact is cheap when the body is just a cache.
+
+The full principle plus per-kind metadata conventions live in the `project_pod_body_vs_artifact_principle` memory note.
+
+## Pods as KG citizens (kg_mirror)
+
+Every pod is also a row in `kg_node_metadata` with `node_type="Pod"`, automatically. `PodStore.put` calls `kg_mirror.ensure_pod_node` after every write (`app/assistant/pod_store/kg_mirror.py`); the mirror node carries:
+
+- `id` = the pod's URI (e.g. `datapod:image:abc...`)
+- `node_type` = `"Pod"`
+- `category` = the pod kind (`image`, `email`, `chat_cluster`, ...)
+- `label` = `pod.one_liner`
+- `original_sentence` = `pod.body[:400]`
+- `source` = `"pod_mirror"`
+
+This means **KG edges can target pods** without any schema change — `kg_edge_metadata.target_id` accepts pod URIs the same way it accepts UUID-shaped node ids:
+
+```
+Jukka --depicted_in--> datapod:image:abc...        (the user is in this photo)
+Jukka --has_profile_image--> datapod:image:abc...  (canonical profile photo)
+Peter's Birthday --has_video--> datapod:video:def...
+Acme Plumbing --invoiced_via--> datapod:email:ghi...
+```
+
+**Edge direction convention: KG-node → Pod.** The KG node "owns" or "documents-via" the pod. Reads naturally as "Jukka is depicted in this pod" / "Peter's Birthday has this video." Multiple anchors share a pod — Peter's Birthday + Peter + Katy + the date can all edge into one video pod via different roles.
+
+Consequences:
+- Existing tools work unchanged. `kg_query`, graph viz, wiki neighborhood walks, `kg_investigator` all already speak "kg_node_metadata id." Pods slot in without any of those caring.
+- The fact_extractor learns one extra rule (treat `datapod:` URIs in resolved sentences as already-resolved node ids) and writes pod-targeting edges using a small kind-keyed vocabulary (see [14b](14b_PODS_MEDIA_LIFECYCLE.md)).
+- The proposal layer (`proposal_writer`, `proposal_promoter`) accepts pod URIs as already-resolved edge endpoints, bypassing the proposal-node lookup that's used for newly-extracted entities.
+- A backfill at adoption time mirrored every existing chat / email pod into KG (78 nodes the first time it ran).
 
 ## End-to-end pipeline
 
@@ -152,9 +201,16 @@ Both tools are thin facades over `PodStoreTool` (`app/assistant/lib/core_tools/p
 
 ### `pod_search` — header browse
 
-Inputs: `query?`, `tags?`, `since?`, `limit=20`. Returns headers only (no body): `{pod_id, kind, tags, one_liner, scope_id, created_by, created_at, content_type}`. Use to scan candidates and decide which are worth opening.
+Inputs: `query?`, `kind?`, `linked_to_entity?`, `linked_via?`, `tags?`, `since?`, `limit=20`. Returns headers only (no body): `{pod_id, kind, tags, one_liner, scope_id, created_by, created_at, content_type}`. Use to scan candidates and decide which are worth opening.
 
 The tool contract (`app/assistant/lib/tools/pod_search/tool_contract.json`) is opinionated: `query` is preferred for topic/person/keyword search; `tags` is restricted to the fixed vocabulary `{food, entertainment, health, schedule, work}` — no inventing tag names. If a search returns zero, the contract instructs the caller to drop filters and retry rather than give up.
+
+Filter compositions worth knowing:
+
+- `kind="email", query="<sender>", since="7d"` — recent emails matching a sender or subject substring.
+- `kind="image", linked_to_entity="<entity>", linked_via=["depicted_in","has_profile_image"], since="today"` — pods of that entity from today (powered by the kg_mirror — every pod is also a kg_node, so a subquery joins through `kg_edge_metadata`).
+- `kind="image", linked_to_entity="<entity>", linked_via=["has_profile_image"]` — the canonical profile photo (one expected).
+- `kind="video", linked_to_entity="<entity>", query="birthday"` — video pods of an entity matching a topic.
 
 `scope` is intentionally not an agent-facing argument (`:104`): pods are user memory, not room-private, so cross-room retrieval is the default. A future scope policy would derive room from `tool_message.scope_context` rather than asking the agent.
 
@@ -202,9 +258,47 @@ The new id format is 6 base36 characters; the pre-existing format is 24 hex (sha
 
 ## Email pods
 
-> Status: partial. Email envelopes flow through the gut today (`EmailRepoSource`), but `PodClassifierService._is_chat_envelope` filters them out (`:303`); only `unified_log` envelopes are buffered and minted. The module docstring (`:13`) explicitly notes "Non-chat envelopes (email, etc.) are ignored for now — the first PodClassifier iteration is chat-only. Email/tool-result pods will be minted by dedicated paths later."
+`PodClassifierService.handle_envelope` dispatches on `signal_type`:
 
-The design intent (per the `emails_as_pods` memory): mint each ingested email as a pod so agents pass `pod_id` references around instead of full email bodies. The pod schema is already email-aware — `PodKind` includes `"email"` and `PodSourceKind` includes `"event_repository:email"` — but the minter that produces those rows is not yet wired.
+- `unified_log` → chat-burst path (existing — buffered per room, three-pass classifier).
+- `email` → single-shot path (`_process_email`, no buffering): every email envelope from `EmailRepoSource` mints exactly one `kind="email"` pod immediately.
+
+The email path is deliberately simpler than the chat path. Each email is already an atomic unit with structured metadata (subject, sender, body) — there's no "burst" to buffer, no entity-resolution problem (sender/recipient are explicit headers), and no need for the chat critic's spam/churn filter (Gmail labels did that upstream). For v1 there is no LLM tagging pass — `tags=[]` for email pods; consumers filter by `kind="email"` + `query` (sender/subject substring) + `since` instead.
+
+Pod shape:
+- `kind="email"`, `one_liner = "<sender>: <subject>"`, `body = full email text`.
+- `source_refs = [{kind: "event_repository:email", id: "<signal_id>"}]`.
+- `scope_id = account_id` so multi-account works.
+- `metadata` carries `subject`, `sender_display`, `sender_email`, `account_id`, `uid`, `occurred_at_utc` for cheap consumer-side filtering without `pod_fetch`.
+
+Idempotency: `pod_id = sha256(signal_id)[:24]` (mirrors the chat-cluster shape). Re-receiving the same email envelope no-ops via `PodStore.get`-then-skip rather than overwriting.
+
+The first email-pod consumer is the `personal_admin` planner — its prompt teaches it to prefer `pod_search(kind="email", query=<sender>, since=...)` over Gmail-hitting tools for find-by-sender / scan-recent tasks. Workflow: pass `pod_id` strings forward, never inline bodies; downstream agents `pod_fetch` only when they need to act.
+
+## Image pods
+
+User-attached images flow through the chat upload path (`POST /process_request`) into `image_ingest.ingest_image_file`, which:
+
+1. Hashes the bytes (sha256) and copies into `data/images/<hash[:2]>/<hash>.<ext>` (content-addressed, dedup-by-content).
+2. Mints a `kind="image"` pod via `PodStore.put` — which immediately mirrors it as a kg_node (above).
+3. Writes a sidecar JSON stamp (`<file>.emipod.json`) next to the stored copy with `{pod_id, sha256, stamped_at_utc}` so the reconciler can identify the file later regardless of filename.
+4. The pod's `metadata` carries `sha256`, `stored_path` (repo-relative), `width`, `height`, `format`, `file_size_bytes`, `source_kind` (`chat_attachment` / `email_attachment` / `manual_upload`).
+5. The `body` starts empty; a vision-extraction pass (planned) will populate it with `caption + OCR`. `one_liner` defaults to a structural placeholder (`[image: jpeg, 320kb, 1920x1080]`) until vision lands.
+
+After ingest, `ui_inbound_service` emits the **naked pod URI** as the chat marker:
+
+```
+"Hey Emi here is a picture of me datapod:image:abc12345..."
+```
+
+The URI then flows through unified_log → entity_resolver (which preserves `datapod:` tokens verbatim, per a prompt rule) → fact_extractor (which has a kind-keyed edge vocabulary table — see [14b](14b_PODS_MEDIA_LIFECYCLE.md)) → proposal_writer → proposal_promoter, which writes `kg_edge_metadata` rows with `target_id = datapod:image:...`.
+
+There are also **two image surfaces** with asymmetric needs:
+
+- **Curated identity** — `resources/identity/<entity>.<ext>` (`jukka.jpg`, `peter.jpg`). Filename IS semantic. Replacing a photo keeps the same name. Profile/avatar use case. Personal photos gitignored except `README`.
+- **Content-addressed flow** — `data/images/<hash>` (above). Hashed by content. Auto-populated by ingest paths.
+
+Both surfaces produce the same kind of pod. KG edges express role: `has_profile_image` (one canonical, from `resources/identity/`) vs `depicted_in` (many, from any flow image). The `image_reconcile.reconcile_directory` routine walks either surface and uses sidecar stamps + content-hash lookup to handle file moves without breaking pod-store ↔ filesystem links — sidecar JSON over xattr/EXIF for v1 because portable. See `project_image_storage_and_stamping` memo.
 
 ## Errors as pods
 
@@ -215,14 +309,20 @@ The design intent (per the `emails_as_pods` memory): mint each ingested email as
 What reads pods today:
 
 - **`DietTrackerStep`** (`app/assistant/pipelines/dayflow/steps/diet_tracker_stage.py`) — the canonical consumer. On every dayflow tick it probes `PodStore.query(tags=["food"], since=last_run)`. If new food pods exist (or new diet-relevant tickets), it pulls them, renders them into a prompt block for the `diet_tracker` agent, and merges the agent's output into `resource_diet_log_today.json`. Demonstrates the pod_interest pattern in production: incremental, reactive, cheap.
+- **`personal_admin` planner** — first email-pod and image-pod consumer. Its prompt teaches it two workflows:
+  - "find by sender / scan recent" → `pod_search(kind="email", query=<sender>, since=...)`. Pass `pod_id` strings forward; never inline bodies.
+  - "find media + email it" → `pod_search(kind="image", linked_to_entity=<user>, linked_via=[...], since=...)` followed by `send_email(pod_ids=[...])`. The send_email tool resolves each `pod_id` to its `metadata.stored_path` and attaches the file via Gmail's API (MIMEMultipart).
 - **`PodInjector`** — auto-hydrates pod headers for any agent whose context contains URI strings. No agent has to opt in.
+- **`fact_extractor`** — emits KG edges that target pod URIs (e.g., `Jukka --depicted_in--> datapod:image:...`). The extractor's prompt has a kind-keyed edge vocabulary; the proposal layer threads pod URIs through as already-resolved endpoints.
 
 What is planned but not built:
 
-- A general **retrieval agent** that takes a user question, drives `pod_search` with appropriate query/tags/since, picks the most relevant headers, calls `pod_fetch`, and feeds the bodies to the answering agent. Today every consumer rolls its own retrieval against `PodStore.query`.
-- Email pods, error pods (above).
-- `pod_search` excerpt return.
-- Cross-task pod consumers beyond `diet_tracker` (e.g., a meal-calendar consumer for `food`-tagged pods, an entertainment recap consumer for `entertainment`-tagged pods).
+- A general **retrieval agent** that takes a user question, drives `pod_search` with appropriate query/tags/since/linked_to_entity, picks the most relevant headers, calls `pod_fetch`, and feeds the bodies to the answering agent. Today every consumer rolls its own retrieval against `PodStore.query`.
+- **Image vision-extraction pass** to fill `pod.body` with caption + OCR. Pods are minted with empty bodies today; `pod_search?kind=image&query=...` only matches the structural one_liner placeholder until vision lands.
+- **Video / audio / document pod paths** — schema accommodates them (`PodKind` is freeform-checked downstream); image_ingest needs to be generalized into kind-aware media_ingest, and the corresponding `data/<kind>/` storage dirs created.
+- **Error pods** (above).
+- **`pod_search` excerpt return.**
+- **Cross-task pod consumers** beyond `diet_tracker` (e.g., meal-calendar for `food`-tagged pods, entertainment recap for `entertainment`-tagged pods, sleep / exercise / expense trackers shaped like diet_tracker).
 
 ## Key files
 
@@ -231,9 +331,13 @@ What is planned but not built:
 | `app/assistant/pod_store/__init__.py` | Public API surface for the pod store package |
 | `app/assistant/pod_store/models.py` | `PodRow` SQLAlchemy table |
 | `app/assistant/pod_store/contracts.py` | `Pod`, `PodHeader`, `PodSourceRef` |
-| `app/assistant/pod_store/pod_store.py` | `PodStore` (`put`, `get`, `query`) |
+| `app/assistant/pod_store/pod_store.py` | `PodStore` (`put`, `get`, `query` — including `kind` / `linked_to_entity` / `linked_via` filters) |
 | `app/assistant/pod_store/pod_uri.py` | URI regex + `hydrate_headers_from_text` |
-| `app/assistant/pod_store/pod_classifier_service.py` | The minter — buffer, flush, 3-pass classify+critique+resolve |
+| `app/assistant/pod_store/pod_classifier_service.py` | The minter — chat burst path + email single-shot path |
+| `app/assistant/pod_store/kg_mirror.py` | Pod → kg_node_metadata projection (every pod is a KG citizen) |
+| `app/assistant/pod_store/image_ingest.py` | Image bytes → content-addressed storage + `kind=image` pod |
+| `app/assistant/pod_store/file_stamp.py` | Sidecar JSON stamp for content-addressed files |
+| `app/assistant/pod_store/image_reconcile.py` | Walk a directory, sync pods with disk, handle moves |
 | `app/assistant/agents/pod_classifier/` | Pass 1 agent (gpt-5.4-mini) |
 | `app/assistant/agents/pod_critic/` | Pass 1.5 rejection gate (gpt-5.4-mini) |
 | `app/assistant/agents/pod_entity_resolver/` | Pass 2 entity parentheticals (gpt-5.4-mini) |
