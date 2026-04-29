@@ -424,16 +424,40 @@ def write_one_proposal_group(
     # Pod URIs (e.g., datapod:image:abc...) are already valid kg_node ids —
     # see app/assistant/pod_store/kg_mirror.py. The fact_extractor emits
     # them verbatim as edge endpoints when an attached image / video / email
-    # is the subject. Treat them as pre-resolved temp_id → uuid mappings so
-    # the edge writer doesn't drop them as "endpoint missing temp_id mapping".
+    # is the subject. Insert a placeholder claim_proposal_node row whose id
+    # IS the URI so the FK on claim_proposal_edge.target_node_id is
+    # satisfied; mark it resolution_action="matched_pod_mirror" so the
+    # promoter knows it's already a real kg_node and skips re-resolution.
     from app.assistant.pod_store.pod_uri import POD_URI_RE
+    from app.assistant.pod_store.pod_store import PodStore
+    pod_store_for_labels = None
+    pod_uris_seen: set[str] = set()
     for e in edges:
-        src_tid = str(e.get("source") or e.get("source_temp_id") or "")
-        tgt_tid = str(e.get("target") or e.get("target_temp_id") or "")
-        if src_tid and POD_URI_RE.fullmatch(src_tid):
-            temp_to_uuid.setdefault(src_tid, src_tid)
-        if tgt_tid and POD_URI_RE.fullmatch(tgt_tid):
-            temp_to_uuid.setdefault(tgt_tid, tgt_tid)
+        for tid in (
+            str(e.get("source") or e.get("source_temp_id") or ""),
+            str(e.get("target") or e.get("target_temp_id") or ""),
+        ):
+            if not tid or not POD_URI_RE.fullmatch(tid) or tid in pod_uris_seen:
+                continue
+            pod_uris_seen.add(tid)
+            if pod_store_for_labels is None:
+                pod_store_for_labels = PodStore()
+            pod = pod_store_for_labels.get(tid)
+            label = (pod.one_liner if pod else tid)[:512] or tid
+            category = (pod.kind if pod else None)
+            session.add(ClaimProposalNode(
+                id=tid,
+                proposal_id=proposal.id,
+                extractor_temp_id=tid,
+                label=label,
+                node_type="Pod",
+                category=category,
+                resolved_node_id=tid,
+                resolution_action="matched_pod_mirror",
+            ))
+            session.flush()
+            temp_to_uuid[tid] = tid
+            stats["nodes_written"] = stats.get("nodes_written", 0) + 1
 
     for e in edges:
         src_tid = str(e.get("source") or e.get("source_temp_id") or "")
