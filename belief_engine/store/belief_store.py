@@ -21,7 +21,7 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.models.base import get_session
@@ -499,6 +499,148 @@ class BeliefStore:
             raise
         finally:
             session.close()
+
+    # ------------------------------------------------------------------
+    # Decay (time-based)
+    # ------------------------------------------------------------------
+
+    def decay_temporary_beliefs(
+        self,
+        domain: str,
+        *,
+        now_utc: datetime,
+        threshold_days: int = 30,
+    ) -> List[str]:
+        """
+        Auto-deprecate active+temporary beliefs in this domain whose last_confirmed
+        is older than threshold_days. The agent already tagged these as ephemeral
+        ("will decay" per the updater prompt) — this honors that tag.
+
+        Each deprecation goes through the canonical deprecate() path so an audit
+        evidence row is written. Returns the list of deprecated belief_keys.
+
+        NULL last_confirmed values are skipped defensively (no current rows have
+        them, but a defensive predicate avoids tablescan surprises later).
+        """
+        cutoff_iso = (now_utc - timedelta(days=threshold_days)).isoformat()
+        stale_keys: List[str] = []
+
+        session = get_session()
+        try:
+            rows = (
+                session.query(UserBelief.belief_key)
+                .filter(
+                    UserBelief.domain == domain,
+                    UserBelief.status == "active",
+                    UserBelief.scope == "temporary",
+                    UserBelief.last_confirmed.isnot(None),
+                    UserBelief.last_confirmed < cutoff_iso,
+                )
+                .all()
+            )
+            stale_keys = [r[0] for r in rows]
+        finally:
+            session.close()
+
+        for key in stale_keys:
+            self.deprecate(
+                key,
+                reason=f"temporary belief unconfirmed for >{threshold_days}d (last_confirmed cutoff {cutoff_iso[:10]})",
+            )
+
+        if stale_keys:
+            logger.info(
+                "[BeliefStore] decay_temporary domain=%s deprecated=%d (cutoff=%s)",
+                domain, len(stale_keys), cutoff_iso[:10],
+            )
+        return stale_keys
+
+    def flag_stale_chronic_beliefs(
+        self,
+        domain: str,
+        *,
+        now_utc: datetime,
+        threshold_days: int = 180,
+    ) -> List[str]:
+        """
+        Flag active+chronic beliefs unconfirmed for >threshold_days as 'contested'
+        so the existing ReevaluateBeliefsStep picks them up for an LLM review
+        (refresh / qualify / split / deprecate / confirm).
+
+        Each transition writes a belief_evidence row recording the staleness
+        reason. Returns the list of newly-contested belief_keys.
+
+        NULL last_confirmed values are skipped defensively.
+        """
+        cutoff_iso = (now_utc - timedelta(days=threshold_days)).isoformat()
+        now = _now_iso()
+
+        session = get_session()
+        try:
+            rows = (
+                session.query(UserBelief.id, UserBelief.belief_key)
+                .filter(
+                    UserBelief.domain == domain,
+                    UserBelief.status == "active",
+                    UserBelief.scope == "chronic",
+                    UserBelief.last_confirmed.isnot(None),
+                    UserBelief.last_confirmed < cutoff_iso,
+                )
+                .all()
+            )
+            stale = [(rid, rkey) for rid, rkey in rows]
+        finally:
+            session.close()
+
+        if not stale:
+            return []
+
+        # Flip status active -> contested in one short session.
+        flipped: List[Tuple[str, str]] = []
+        session = get_session()
+        try:
+            for belief_id, belief_key in stale:
+                rowcount = session.query(UserBelief).filter(
+                    UserBelief.id == belief_id,
+                    UserBelief.status == "active",
+                ).update(
+                    {"status": "contested", "updated_at": now},
+                    synchronize_session=False,
+                )
+                if rowcount:
+                    flipped.append((belief_id, belief_key))
+            session.commit()
+        except Exception:
+            session.rollback()
+            logger.debug("[BeliefStore] flag_stale_chronic failed domain=%s", domain, exc_info=True)
+            raise
+        finally:
+            session.close()
+
+        # Audit row per flipped belief — separate short sessions via _insert_evidence.
+        for belief_id, belief_key in flipped:
+            self._insert_evidence(
+                belief_id,
+                EvidenceInput(
+                    source_type="decay_review",
+                    source_date=datetime.now(timezone.utc).date().isoformat(),
+                    signal_type="qualifies",
+                    summary=(
+                        f"Chronic belief flagged for review: unconfirmed for "
+                        f">{threshold_days}d (last_confirmed cutoff {cutoff_iso[:10]})."
+                    )[:800],
+                    weight=1.0,
+                ),
+                now,
+            )
+
+        flipped_keys = [k for _, k in flipped]
+        if flipped_keys:
+            logger.info(
+                "[BeliefStore] flag_stale_chronic domain=%s contested=%d (cutoff=%s)",
+                domain, len(flipped_keys), cutoff_iso[:10],
+            )
+        return flipped_keys
 
     # ------------------------------------------------------------------
     # Internal helpers
