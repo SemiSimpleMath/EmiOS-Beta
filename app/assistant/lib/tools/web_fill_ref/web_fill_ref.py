@@ -97,7 +97,9 @@ class WebFillRef(BaseTool):
         timeout_s = float(server_entry.get("policy", {}).get("call_timeout_seconds", 20))
 
         # Step 1: Click the ref to focus the element.
-        mcp_args = {"ref": ref}
+        # npm/playwright-mcp renamed `ref` to `target` (the field accepts a
+        # snapshot ref OR a CSS selector). Cached MCP schema is the source.
+        mcp_args = {"target": ref}
         if element:
             mcp_args["element"] = element
         click_resp = mcp_stdio_call_tool(

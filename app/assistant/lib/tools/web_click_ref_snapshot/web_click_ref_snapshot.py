@@ -55,7 +55,10 @@ class WebClickRefSnapshot(BaseTool):
             except Exception:
                 pass
 
-        mcp_args = {"ref": ref}
+        # npm/playwright-mcp renamed `ref` to `target` (the field is "exact
+        # target element reference from the page snapshot, or a unique element
+        # selector"). The cached MCP schema reflects the current server.
+        mcp_args = {"target": ref}
         if element:
             mcp_args["element"] = element
 
