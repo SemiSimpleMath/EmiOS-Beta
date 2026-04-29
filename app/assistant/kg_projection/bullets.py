@@ -73,6 +73,7 @@ def render_bullets(neighborhood: EntityNeighborhood) -> List[Bullet]:
     """
     entity = neighborhood.entity
     entity_id = str(entity.id) if getattr(entity, "id", None) else None
+    entity_label = getattr(entity, "label", "") or ""
     out: List[Bullet] = []
 
     # ---- relationships (State connections, outbound) ----
@@ -83,9 +84,9 @@ def render_bullets(neighborhood: EntityNeighborhood) -> List[Bullet]:
     )
     undated_rel = [r for r in neighborhood.relationships if r.state.start_date is None]
     for r in dated_rel:
-        out.append(_state_connection_bullet(r, subkind="dated"))
+        out.append(_state_connection_bullet(r, subkind="dated", entity_label=entity_label))
     for r in undated_rel:
-        out.append(_state_connection_bullet(r, subkind="undated"))
+        out.append(_state_connection_bullet(r, subkind="undated", entity_label=entity_label))
 
     # ---- inbound relationships (this entity is the target of a State hub) ----
     in_dated_rel = sorted(
@@ -95,9 +96,9 @@ def render_bullets(neighborhood: EntityNeighborhood) -> List[Bullet]:
     )
     in_undated_rel = [r for r in neighborhood.inbound_relationships if r.state.start_date is None]
     for r in in_dated_rel:
-        out.append(_state_connection_bullet(r, subkind="dated"))
+        out.append(_state_connection_bullet(r, subkind="dated", entity_label=entity_label))
     for r in in_undated_rel:
-        out.append(_state_connection_bullet(r, subkind="undated"))
+        out.append(_state_connection_bullet(r, subkind="undated", entity_label=entity_label))
 
     # ---- events (outbound) ----
     dated_evt = sorted(
@@ -107,9 +108,9 @@ def render_bullets(neighborhood: EntityNeighborhood) -> List[Bullet]:
     )
     undated_evt = [e for e in neighborhood.events if e.event.start_date is None]
     for e in dated_evt:
-        out.append(_event_connection_bullet(e, subkind="dated"))
+        out.append(_event_connection_bullet(e, subkind="dated", entity_label=entity_label))
     for e in undated_evt:
-        out.append(_event_connection_bullet(e, subkind="undated"))
+        out.append(_event_connection_bullet(e, subkind="undated", entity_label=entity_label))
 
     # ---- inbound events (this entity is the location/recipient of an Event hub) ----
     in_dated_evt = sorted(
@@ -119,9 +120,9 @@ def render_bullets(neighborhood: EntityNeighborhood) -> List[Bullet]:
     )
     in_undated_evt = [e for e in neighborhood.inbound_events if e.event.start_date is None]
     for e in in_dated_evt:
-        out.append(_event_connection_bullet(e, subkind="dated"))
+        out.append(_event_connection_bullet(e, subkind="dated", entity_label=entity_label))
     for e in in_undated_evt:
-        out.append(_event_connection_bullet(e, subkind="undated"))
+        out.append(_event_connection_bullet(e, subkind="undated", entity_label=entity_label))
 
     # ---- beliefs ----
     for b in neighborhood.beliefs_about:
@@ -167,36 +168,46 @@ def _collect_window_ids(*sources) -> List[str]:
     return out
 
 
-def _state_connection_bullet(r: StateConnection, *, subkind: str) -> Bullet:
+def _role_line(node_label: str, edge) -> str:
+    """Render one participant's role in a State/Event hub.
+
+    Each participant has its OWN edge with its OWN relationship_type and
+    sentence, so the bullet must show that per-edge breakdown rather than
+    flattening counterparts under the rendering entity's predicate.
+    """
+    rel = (getattr(edge, "relationship_type", "") or "").replace("_", " ").lower()
+    sentence = (getattr(edge, "sentence", "") or "").strip()
+    sentence_str = f' — "{sentence}"' if sentence else ""
+    return f"    - [[{_slugify(node_label)}]] — {rel}{sentence_str}"
+
+
+def _state_connection_bullet(r: StateConnection, *, subkind: str, entity_label: str) -> Bullet:
     state = r.state
     edge = r.edge
     date = _fmt_date(state.start_date)
     date_str = f" since {date}" if date else ""
-
-    counterpart_names = [c.label for c, _ in r.counterparts]
-    if counterpart_names:
-        counterpart_str = ", ".join(f"[[{_slugify(lbl)}]]" for lbl in counterpart_names)
-    else:
-        counterpart_str = "(no counterpart in KG)"
-
-    rel_type = (edge.relationship_type or "").replace("_", " ").lower()
     node_tag = f" {{node:{state.id}}}" if getattr(state, "id", None) else ""
-    # Inbound bullets read "site of <relationship>" so the reader knows the
-    # subject of the page is the TARGET, not the source. The counterparts are
-    # the entities the State actually connects (e.g., Sam / Riley).
-    if r.is_inbound:
-        lines = [f"- site of **{rel_type}** for {counterpart_str}{date_str} — *{state.label}*{node_tag}"]
-    else:
-        lines = [f"- **{rel_type}** {counterpart_str}{date_str} — *{state.label}*{node_tag}"]
+
+    # Header: state label + dates + node tag. The role list below carries the
+    # per-edge predicate info — flattening it into the header (the old shape)
+    # falsely attributed every counterpart's role to the rendering entity.
+    lines = [f"- *{state.label}*{date_str}{node_tag}"]
 
     fact_sentence = (state.original_sentence or "").strip() or (edge.sentence or "").strip()
     if fact_sentence:
         lines.append(f"  > {fact_sentence}")
 
+    role_lines: List[str] = [_role_line(entity_label, edge)]
+    for c_node, c_edge in r.counterparts:
+        role_lines.append(_role_line(getattr(c_node, "label", "") or "", c_edge))
+    lines.append("  Roles in this state:")
+    lines.extend(role_lines)
+
     meta_bits = _read_metadata_bits(state, edge)
     if meta_bits:
         lines.append(f"  [{meta_bits}]")
 
+    counterpart_names = [c.label for c, _ in r.counterparts]
     if len(r.counterparts) > 1:
         for a, b in _detect_likely_duplicates(counterpart_names):
             lines.append(f"  <!-- KG GAP: state {state.label!r} likely duplicate counterparts: {a!r} and {b!r} -->")
@@ -204,9 +215,6 @@ def _state_connection_bullet(r: StateConnection, *, subkind: str) -> Bullet:
         lines.append(f"  <!-- KG GAP: state {state.label!r} has no start_date or end_date -->")
 
     source_node_ids = [str(state.id)] if getattr(state, "id", None) else []
-    # Counterparts are not "source" of the bullet's fact — only the hub State
-    # node is. But if we ever want to catch counterpart-entity changes for
-    # incremental refresh, we'd add them here. For now: state only.
     source_edge_ids = [str(edge.id)] if getattr(edge, "id", None) else []
 
     return Bullet(
@@ -220,27 +228,24 @@ def _state_connection_bullet(r: StateConnection, *, subkind: str) -> Bullet:
     )
 
 
-def _event_connection_bullet(e: EventConnection, *, subkind: str) -> Bullet:
+def _event_connection_bullet(e: EventConnection, *, subkind: str, entity_label: str) -> Bullet:
     event = e.event
     edge = e.edge
     date = _fmt_date(event.start_date)
     date_str = f" ({date})" if date else ""
-    coparts = [c.label for c, _ in e.co_participants]
-    coparts_str = ""
-    if coparts:
-        coparts_str = " with " + ", ".join(f"[[{_slugify(lbl)}]]" for lbl in coparts)
     node_tag = f" {{node:{event.id}}}" if getattr(event, "id", None) else ""
-    # Inbound: the entity is the location/recipient of the event, not a participant.
-    if e.is_inbound:
-        rel_type = (edge.relationship_type or "").replace("_", " ").lower()
-        prep = f"site of" if rel_type in ("location", "at_institution", "destination", "location_from") else f"{rel_type} of"
-        lines = [f"- {prep} **{event.label}**{date_str}{coparts_str}{node_tag}"]
-    else:
-        lines = [f"- **{event.label}**{date_str}{coparts_str}{node_tag}"]
+
+    lines = [f"- **{event.label}**{date_str}{node_tag}"]
 
     fact = (event.original_sentence or "").strip() or (edge.sentence or "").strip()
     if fact:
         lines.append(f"  > {fact}")
+
+    role_lines: List[str] = [_role_line(entity_label, edge)]
+    for c_node, c_edge in e.co_participants:
+        role_lines.append(_role_line(getattr(c_node, "label", "") or "", c_edge))
+    lines.append("  Roles in this event:")
+    lines.extend(role_lines)
 
     meta_bits = _read_metadata_bits(event, edge)
     if meta_bits:
