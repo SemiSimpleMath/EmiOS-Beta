@@ -207,6 +207,7 @@ data/kg_projection/
 # User profile (contains real name, birthdate, family, address, job)
 resources/user/resource_user_data.json
 resources/user/user_bio.json
+resources/user/resource_wiki_sections.json
 resources/user/.setup_draft.json
 # resources/memory/ — entire directory removed 2026-04-28 (was the storage
 # layer for the dead memory_apply_fact subsystem). user_bio migrated to

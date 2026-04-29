@@ -40,6 +40,7 @@ def _seed_personal_resources() -> None:
     resources_dir = get_resources_dir()
     example_pairs = [
         resources_dir / "user" / "resource_user_data.json",
+        resources_dir / "user" / "resource_wiki_sections.json",
         resources_dir / "assistant" / "resource_assistant_data.json",
         resources_dir / "assistant" / "resource_assistant_personality_data.json",
         resources_dir / "assistant" / "resource_chat_guidelines_data.json",
