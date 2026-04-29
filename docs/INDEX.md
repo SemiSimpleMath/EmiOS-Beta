@@ -24,8 +24,7 @@ If you are new, start at **[Welcome](welcome/WELCOME.md)** and read in order.
 | 05 | [Dayflow](architecture/05_DAYFLOW.md) | Autonomous daily workflow engine |
 | 06 | [Pipelines & Routines](architecture/06_PIPELINES_AND_ROUTINES.md) | Step-based pipelines + scheduled routine system |
 | 07 | [Tools](architecture/07_TOOLS.md) | Tool contract, registry, scope filtering |
-| 08 | [KG Chat Pipeline (legacy)](architecture/08_KG_CHAT_PIPELINE.md) | Historical reference; superseded by 09 |
-| 09 | [KG Pipeline (current)](architecture/09_KG_PIPELINE.md) | Bucket-per-stage chat → KG ingest |
+| 09 | [KG Pipeline](architecture/09_KG_PIPELINE.md) | Bucket-per-stage chat → KG ingest |
 | 10 | [Service Managers](architecture/10_SERVICE_MANAGERS.md) | RoutineManager, BackgroundTaskManager, TicketManager, AFKMonitor, etc. — non-agent services |
 | 11 | [Wiki Generator](architecture/11_WIKI_GENERATOR.md) | KG → markdown vault, nightly refresh, critic |
 | 12 | [Entity Cards](architecture/12_ENTITY_CARDS.md) | Per-entity profile cards (model, generator, editor, admin) |

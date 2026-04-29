@@ -1,17 +1,13 @@
-# KG Pipeline — Architecture (Refactor target, 2026-04-25)
+# KG Pipeline — Architecture
 
-This is the design for the rebuilt KG ingest pipeline. Replaces `08_KG_CHAT_PIPELINE.md` (the prior architecture, retained as historical reference).
+This is the architecture for the live KG ingest pipeline that turns chat in `unified_log_2026` into rows in the live knowledge graph (`kg_node_metadata`, `kg_edge_metadata`) via the proposal layer (`claim_proposal*`).
 
-## Why a refactor
+## Design principles
 
-The prior pipeline (`kg_chat_pipeline_parallel`) accumulated structural problems:
-
-- Coordination via a `status` enum on a shared `kg_chat_conversation_window` table — implicit queues, hard to inspect, easy to lose state.
-- Time-based windowing produced fragmented or topic-mixed windows. Several built-but-unwired pieces (per-message resolver, conversation_boundary segmenter) addressed parts of this but were never connected.
-- Stages bundled responsibilities (extract step did critique + extract + proposal-write inline).
-- Several cycles of "looks done but isn't actually wired" eroded confidence that running the pipeline did what it claimed to do.
-
-This refactor replaces the entire intermediate plumbing with **explicit table-per-stage queues** and **simple worker functions**. The live KG (`kg_node_metadata`, `kg_edge_metadata`) and the proposal layer (`claim_proposal*`) are not touched — only the chat-ingest plumbing in front of them.
+- **Explicit table-per-stage queues.** Each stage has its own queue table; rows move forward one stage at a time. No status enums on shared tables, no implicit coordination.
+- **Simple worker functions.** Each stage is a stateless function that reads from its input queue, processes, writes to its output queue. No bundled responsibilities.
+- **Bucket-per-stage windowing.** Conversation windows are formed by an explicit segmenter, not by time-based heuristics, so windows are topic-coherent.
+- **Stages don't touch the live KG directly.** The pipeline ends at the proposal layer (`claim_proposal*`); the proposal promoter is the sole writer to `kg_node_metadata` / `kg_edge_metadata`.
 
 ## Architectural principle
 
