@@ -422,11 +422,16 @@ def generate_prose_page_tagged(
         article_body=article_body,
     )
 
+    from app.assistant.wiki_generator.profile_image import materialize_profile_image_for_vault
+    profile_image_rel = materialize_profile_image_for_vault(entity_label, vault_path)
+
     stitched_parts: list[str] = []
     if frontmatter:
         stitched_parts.append(frontmatter.rstrip() + "\n")
     if title:
         stitched_parts.append(title)
+    if profile_image_rel:
+        stitched_parts.append(f"![{entity_label}]({profile_image_rel})\n")
     if lead:
         stitched_parts.append(lead.strip() + "\n")
     if article_body:
@@ -617,11 +622,16 @@ def regenerate_affected_sections(
         article_body=article_body,
     )
 
+    from app.assistant.wiki_generator.profile_image import materialize_profile_image_for_vault
+    profile_image_rel = materialize_profile_image_for_vault(entity_label, vault_path)
+
     stitched_parts: list[str] = []
     if frontmatter:
         stitched_parts.append(frontmatter.rstrip() + "\n")
     if title:
         stitched_parts.append(title)
+    if profile_image_rel:
+        stitched_parts.append(f"![{entity_label}]({profile_image_rel})\n")
     if lead:
         stitched_parts.append(lead.strip() + "\n")
     if article_body:
