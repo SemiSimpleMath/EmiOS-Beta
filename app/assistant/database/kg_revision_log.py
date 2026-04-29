@@ -10,6 +10,12 @@ op vocabulary (current):
   - "rename_label"         change a node's label (typo fix; never collides)
   - "update_node_field"    narrow per-field edit (alias add, date fix, etc.)
   - "delete_edge"          remove a single edge
+  - "split_state"          undo a wrong-merge: replace one State/Event hub
+                           with N new nodes, rerouting each edge to the
+                           right new node. before_json captures the old
+                           node + all its edges; after_json captures the
+                           new node ids + their full snapshots so the
+                           reverse op can rebuild the original hub.
   - "finding_resolve"      mark a kg_maintenance_finding as executed
   - "finding_escalate"     route a finding to user review
 
