@@ -61,6 +61,23 @@ def _lazy_proposal_promoter(*, target_date=None, routine=None):
 proposal_promoter = _lazy_proposal_promoter
 
 
+def _lazy_kg_finding_backlog_drain(*, target_date=None, routine=None):
+    """Daily: investigate the oldest N pending kg_maintenance findings (FIFO).
+
+    The weekly kg_maintenance_pipeline only investigates findings produced by
+    its own run, leaving older pending findings to accumulate. This drain
+    routine picks from the global pending queue so the backlog doesn't grow.
+    """
+    from app.assistant.kg_investigator.finding_processor import drain_pending_findings
+    spec = (routine.spec if routine and hasattr(routine, "spec") else {}) or {}
+    limit = int(spec.get("limit", 5))
+    finding_types = spec.get("finding_types") or None
+    return drain_pending_findings(limit=limit, finding_types=finding_types)
+
+
+kg_finding_backlog_drain = _lazy_kg_finding_backlog_drain
+
+
 def _lazy_wiki_nightly_refresh(*, target_date=None, routine=None):
     """Nightly: incrementally regenerate wiki pages whose KG neighborhood
     changed since the page was last generated. Optionally runs the

@@ -268,6 +268,26 @@
       "notes": "Weekly KG maintenance scan: orphan nodes, missing descriptions, suspect nodes (LLM), duplicate pairs (LLM random sampling). All findings are written to kg_maintenance_finding table for review at /kg-maintenance."
     },
     {
+      "id": "kg_finding_backlog_drain",
+      "enabled": true,
+      "name": "KG finding backlog drain",
+      "aliases": [
+        "drain findings",
+        "kg backlog",
+        "investigate findings"
+      ],
+      "runner": "function",
+      "spec": {
+        "function_name": "kg_finding_backlog_drain",
+        "limit": 5
+      },
+      "run_policy": {
+        "type": "daily",
+        "time_local": "03:00"
+      },
+      "notes": "Daily: investigate up to 5 oldest pending kg_maintenance_findings (FIFO drain). Picks from the global pending queue, complementing the weekly kg_maintenance_pipeline which only investigates findings produced by its own run."
+    },
+    {
       "id": "entity_card_maintenance_pipeline",
       "enabled": true,
       "name": "Entity card maintenance pipeline",

@@ -142,6 +142,24 @@ def api_action():
         raise
 
 
+@kg_maintenance_bp.route("/api/finding/<finding_id>/investigate", methods=["POST"])
+def api_investigate_finding(finding_id):
+    """
+    Investigate a single pending finding on demand. Synchronous: invokes the
+    kg_investigation_manager and waits for the structured report. Returns
+    the small result dict {status, finding_id, proposed_op, summary}.
+
+    Status transitions: pending -> investigated (on success).
+    """
+    try:
+        from app.assistant.kg_investigator.finding_processor import investigate_one
+        result = investigate_one(finding_id)
+        return jsonify(result)
+    except Exception as e:
+        logger.error("[kg_maintenance] investigate failed id=%s: %s", finding_id, e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
 @kg_maintenance_bp.route("/api/bulk_action", methods=["POST"])
 def api_bulk_action():
     """Body: { "ids": ["<id>", ...], "action": "approve"|"reject" }"""

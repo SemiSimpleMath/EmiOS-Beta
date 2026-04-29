@@ -120,6 +120,30 @@ def investigate_one(finding_id: str) -> Dict[str, Any]:
     }
 
 
+def drain_pending_findings(
+    *,
+    limit: int = 5,
+    finding_types: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """
+    Drain the oldest `limit` pending findings from the backlog (FIFO).
+
+    Routine entry-point — different from the pipeline's
+    ``_investigate_findings_for_run`` which only sees that run's own findings.
+    This function picks from the global pending queue regardless of which
+    pipeline run produced them, so old findings don't sit forever.
+
+    Optional ``finding_types`` filter restricts to specific types
+    (e.g. ['duplicate_node', 'orphan_node']).
+    """
+    ids = _claim_pending_finding_ids(limit=limit, finding_types=finding_types)
+    if not ids:
+        logger.info("[finding_processor] drain: no pending findings")
+        return {"status": "empty_queue", "processed": 0, "results": []}
+    logger.info("[finding_processor] drain: investigating %d oldest pending findings", len(ids))
+    return investigate_findings(ids, max_to_investigate=limit)
+
+
 def investigate_findings(
     finding_ids: List[str],
     *,

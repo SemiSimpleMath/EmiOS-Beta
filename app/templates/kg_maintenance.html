@@ -101,6 +101,7 @@
     .btn-execute  { background: #1d4ed8; color: #fff; }
     .btn-approve  { background: #065f46; color: #a7f3d0; }
     .btn-reject   { background: #7f1d1d; color: #fca5a5; }
+    .btn-investigate { background: #4c1d95; color: #ddd6fe; }
     .btn-primary  { background: #1d4ed8; color: #fff; }
     .btn-danger   { background: #991b1b; color: #fff; }
     .btn:hover    { opacity: 0.85; }
@@ -354,6 +355,7 @@
       <td>
         <div class="action-btns">
           ${canExec && labels.exec ? `<button class="btn btn-execute" onclick="confirmExecute('${f.id}')">${labels.exec}</button>` : ''}
+          ${f.status === 'pending' ? `<button class="btn btn-investigate" onclick="investigateNow('${f.id}', this)" title="Run the LLM investigator on this finding now (replaces the next nightly drain slot for this id)">Investigate now</button>` : ''}
           ${f.status === 'pending' ? `<button class="btn btn-approve" onclick="singleAction('${f.id}','approve')">${labels.approve}</button>` : ''}
           ${canAct ? `
             <button class="btn btn-reject" onclick="singleAction('${f.id}','reject')">${labels.reject}</button>
@@ -505,6 +507,47 @@
       loadSummary();
     } catch(e) {
       showToast('Error: ' + e.message, true);
+    }
+  }
+
+  // -- On-demand investigate (single finding, synchronous LLM call) --
+  async function investigateNow(findingId, btn) {
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Investigating...';
+    }
+    try {
+      const res = await fetch(`/kg-maintenance/api/finding/${encodeURIComponent(findingId)}/investigate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.error || res.statusText);
+      }
+      const data = await res.json();
+      const status = data.status || 'unknown';
+      if (status === 'investigated') {
+        const op = data.proposed_op || '?';
+        const summary = data.summary ? ` — ${data.summary.slice(0, 80)}` : '';
+        showToast(`Investigated (proposed: ${op})${summary}`);
+      } else if (status === 'not_found') {
+        showToast('Finding not found', true);
+      } else if (status === 'no_report') {
+        showToast('Investigator returned no structured report', true);
+      } else if (status === 'error') {
+        showToast('Investigation error: ' + (data.error || 'unknown'), true);
+      } else {
+        showToast(`Status: ${status}`);
+      }
+      loadFindings();
+      loadSummary();
+    } catch (e) {
+      showToast('Error: ' + e.message, true);
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Investigate now';
+      }
     }
   }
 
