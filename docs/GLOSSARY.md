@@ -114,7 +114,7 @@ Pub-sub messaging service exposed via `DI.event_hub`. Topics like `socket_emit`,
 
 ### evidence
 
-(KG) Rows in `kg_node_evidence` / `kg_edge_evidence` that link a KG record back to its source window in `kg_window` (or legacy `kg_chat_conversation_window`).
+(KG) Rows in `kg_node_evidence` / `kg_edge_evidence` that link a KG record back to its source window in `kg_window` (or `kg_chat_conversation_window`, the read-only provenance archive — see [09_KG_PIPELINE.md](architecture/09_KG_PIPELINE.md)).
 
 (Investigator) The `evidence` array in an investigation report — list of `(query, finding)` pairs grounding the diagnosis.
 
@@ -166,7 +166,7 @@ Stable UUID identifying a node in `kg_node_metadata`. Foreign key from many plac
 
 ### kg_pipeline
 
-The current chat → KG ingest pipeline. Bucket-per-stage architecture: `unified_log_2026` → `kg_resolved_message` → `kg_window` → `kg_window_extraction` → `kg_window_enrichment` → `claim_proposal*` → live KG. Replaced legacy `kg_chat_pipeline_parallel` on 2026-04-22. See [09_KG_PIPELINE.md](architecture/09_KG_PIPELINE.md).
+The chat → KG ingest pipeline. Bucket-per-stage architecture: `unified_log_2026` → `kg_resolved_message` → `kg_window` → `kg_window_extraction` → `kg_window_enrichment` → `claim_proposal*` → live KG. See [09_KG_PIPELINE.md](architecture/09_KG_PIPELINE.md).
 
 ### kg_revision_log
 
@@ -304,7 +304,7 @@ When code or prose says "wiki" without a qualifier, it means **EmiPedia** — th
 
 ### window
 
-(KG) A row in `kg_window`. A coherent conversation unit (one topic) — the atomic unit of work for the KG pipeline. Replaces legacy time-based `kg_chat_conversation_window`.
+(KG) A row in `kg_window`. A coherent conversation unit (one topic) — the atomic unit of work for the KG pipeline.
 
 ### wiki_contradiction
 

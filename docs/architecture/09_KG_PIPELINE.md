@@ -44,7 +44,7 @@ claim_proposal (+ claim_proposal_node/edge/evidence)   ← bucket: ready to prom
    │   - assigns TTL to State/Event nodes via state_ttl_estimator
    │   - decay job (separate maintenance routine) auto-closes stale eras
    ▼
-kg_node_metadata + kg_edge_metadata        ← live KG (untouched by this refactor)
+kg_node_metadata + kg_edge_metadata        ← live KG (written by the promoter, stage 5)
 ```
 
 5 stages run inside `KGPipeline`. Stage 5 (`proposal_promoter`) is a separate scheduled routine, unchanged from today.
@@ -108,7 +108,7 @@ kg_resolved_message
 
 **Behavior:** Reads up to one day's worth of new resolved messages. Calls the segmenter agent with the full span. Agent returns windows — coherent conversation units, each spanning one or more messages. Each window is written as one `kg_window` row plus N `kg_window_message` rows.
 
-**Cadence:** Same gating principle as the prior Build step. Only segment when (a) there are at least N resolved messages contiguously available since the watermark, OR (b) the resolver has caught up to the most recent resolved message for that day. Prevents premature 1-msg windows on live conversations.
+**Cadence:** Only segment when (a) there are at least N resolved messages contiguously available since the watermark, OR (b) the resolver has caught up to the most recent resolved message for that day. Prevents premature 1-msg windows on live conversations.
 
 **Cross-window links:** When a new window continues a topic from an older window (the A B A pattern), the agent emits `related_previous_window_ids` so downstream consumers can rejoin them on demand. The worker never goes back and modifies older windows.
 
@@ -210,7 +210,7 @@ No LLM calls — component-splitting and enrichment have already happened in Sta
 
 **Queue query:** `kg_window_enrichment ke LEFT JOIN claim_proposal_evidence cpe ON cpe.enrichment_id = ke.id WHERE cpe.id IS NULL`.
 
-**Schema for `claim_proposal_evidence`:** the existing `window_id` column is reused — it now holds either a `kg_chat_conversation_window.id` (legacy nodes) or a `kg_window.id` (current pipeline). The two UUID spaces are disjoint, so consumers (e.g. the node viewer) try the legacy lookup first and fall through to the new tables. `enrichment_id` is added as a denormalized convenience FK to `kg_window_enrichment.id`.
+**Schema for `claim_proposal_evidence`:** the `window_id` column accepts ids from either `kg_window` (current pipeline) or `kg_chat_conversation_window` (older provenance archive — the ~3,612 nodes promoted before this pipeline existed point at it). The two UUID spaces are disjoint, so consumers (e.g. the node viewer) check the archive first and fall through to the current tables. `enrichment_id` is a denormalized convenience FK to `kg_window_enrichment.id`.
 
 ### Stage 5: Promote (existing routine, untouched)
 
@@ -257,45 +257,22 @@ Each step exports a class with two methods:
 
 The runner coordinates: spawns one daemon thread per step, each thread loops `claim_next → process → commit` on its bucket.
 
-## Migration plan
+## Provenance archive
 
-**Drop** (10 plumbing tables — intermediate working state of the legacy pipeline; their important downstream output is already in `kg_node_metadata` / `claim_proposal*`):
-- `kg_chat_projection_state`, `kg_chat_conversation_window_state` — watermark singletons
-- `kg_chat_extracted_node`, `kg_chat_extracted_edge` — extractor scratchpad
-- `kg_chat_parsed_sentence` — legacy parser output
-- `kg_chat_enriched_node`, `kg_chat_standardized_node`, `kg_chat_standardized_edge` — legacy chain working state
-- `kg_chat_merged_node_ref`, `kg_chat_merged_edge_ref` — refs into `kg_node_metadata`, redundant with `created_from_proposal_id`
+Three older tables are still on disk in read-only mode because
+`kg_node_evidence.window_id` and `claim_proposal_evidence.window_id`
+on ~3,612 KG nodes promoted before this pipeline existed point at
+them:
 
-**Keep as historical archive** (3 provenance tables — referenced by `kg_node_evidence.window_id` and `claim_proposal_evidence.window_id` for the ~3,612 already-promoted KG nodes that came from the legacy chain):
-- `kg_chat_projection` — canonical chat-only message log (legacy)
-- `kg_chat_conversation_window` — conversation grouping (legacy)
-- `kg_chat_conversation_window_item` — message ↔ window membership (legacy)
+- `kg_chat_projection` — canonical chat-only message log
+- `kg_chat_conversation_window` — conversation grouping
+- `kg_chat_conversation_window_item` — message ↔ window membership
 
-These three become read-only historical archives. Drill-down from any pre-2026-04-25 KG node to its source conversation continues to work.
-
-**Other:**
-- Code: `app/assistant/pipelines/kg_chat_pipeline_parallel/` → archive to `.archive`
-- Routine entry `kg_chat_pipeline_parallel` removed from `routines.json`, replaced by `kg_pipeline`
-- Subsystem flag `kg_chat_pipeline` stays for now (touches UI; rename later)
-
-**Build:**
-- Tables per the schemas above
-- Code in `app/assistant/pipelines/kg_pipeline/`
-- New routine entry `kg_pipeline` in `routines.json`
-
-**Live KG untouched:**
-- `kg_node_metadata`, `kg_edge_metadata`, `kg_node_evidence`, `kg_edge_evidence` — every existing row preserved
-- `claim_proposal*` tables preserved (pending proposals from old pipeline still get promoted; new `window_id`/`enrichment_id` columns added to `claim_proposal_evidence`)
-- Wiki / entity_card / visualizer all read from `kg_node_metadata` — unaffected
-
-**Cutover sequence:**
-1. Backup: full DB file copy + per-table JSON snapshots (`scratch_backup_kg_chat_tables.py`).
-2. Run `proposal_promoter` (commit) once via UI — drains the 7 pending proposals into the live KG.
-3. Run `scratch_migrate_to_kg_pipeline.py --commit` — adds `window_id`/`enrichment_id` columns, creates 5 new tables, drops 10 plumbing tables, archives old pipeline directory.
-4. Restart the app so the new routine config + cleared imports take effect.
-5. Trigger a manual `kg_pipeline` run via UI; confirm new tables get populated stage-by-stage.
-
-The first run will process from today onward (no historical backfill — preserved by the `START_LOCAL_DATE = "2026-04-25"` cutoff on the resolver). Set to `None` later to backfill the full history.
+Drill-down from any of those KG nodes to source conversation reads
+through these tables. The live pipeline writes to `kg_resolved_message`
+/ `kg_window` / `kg_window_message` instead; consumers (e.g. the node
+viewer) check the archive first and fall through to the current tables
+because the two UUID spaces are disjoint.
 
 ## Properties this gives us
 
@@ -305,12 +282,12 @@ The first run will process from today onward (no historical backfill — preserv
 - **Decoupled.** Stage 4 doesn't know or care that stage 2 is still working. Each stage runs at its own pace.
 - **Easy to add new sources later.** Email, docs, etc. enter at Stage 1 by extending the eligibility filter. Everything downstream is source-agnostic.
 
-## Open questions / future work (not in scope for the build)
+## Open questions / future work
 
 - **Multi-worker-per-stage** when extractor becomes the throughput bottleneck.
 - **Cross-window link consumption** — proposal_writer or wiki layer could use `related_previous_window_ids` to merge re-joined topics into one wiki paragraph.
 - **Triager** — per-sentence salience tagger (sentence-level filter inside a window). Defer until needed.
-- **Resolver `(unknown)` hallucination** — root cause prompt fix for the case observed today (`Uni (university highschool) (unknown)`).
+- **Resolver `(unknown)` hallucination** — root cause prompt fix for cases like `Uni (university highschool) (unknown)`.
 - **`enable_keyword_resource_injection` audit** — verify no other KG-adjacent agent has this flag bloated on.
 - **Subsystem flag rename** (`kg_chat_pipeline` → `kg_pipeline`) — UI surface, deferred.
 
@@ -318,7 +295,7 @@ The first run will process from today onward (no historical backfill — preserv
 
 - **Message** — one row in `unified_log_2026`. The immutable source-of-truth log (also carries non-chat events; the resolver filters to chat-eligible ones).
 - **Resolved message** — one row in `kg_resolved_message`. The entity-substituted version of one chat-eligible `unified_log_2026` row, keyed by `unified_log_id`.
-- **Window** — one row in `kg_window`. A coherent conversation unit (one topic). The atomic unit of work for stages 2 onward. Replaces the legacy time-based "conversation window"; both are conceptually the same — chunks of conversation — just produced by different chunking algorithms.
+- **Window** — one row in `kg_window`. A coherent conversation unit (one topic). The atomic unit of work for stages 2 onward.
 - **Extraction** — one row in `kg_window_extraction`. The result of running critic+extractor on one window. Holds raw nodes/edges before component-split and enrichment.
 - **Enrichment** — one row in `kg_window_enrichment`. One connected component from an extraction, with metadata enrichment (dates, aliases, importance, etc.) applied. Maps 1:1 to a future proposal.
 - **Proposal** — one row in `claim_proposal`. One connected subgraph ready to be evaluated for KG promotion.

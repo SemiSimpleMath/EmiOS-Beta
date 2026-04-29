@@ -57,7 +57,6 @@ resources/
 
   kg_derived/                        [pipeline-derived: belief engine, KG]
     resource_user_beliefs.json       — exported by belief_engine_export
-    resource_user_beliefs_communication_canonicalized.json (legacy)
 
   daily_insights_pipeline_outputs/   [pipeline-derived: daily_insights]
     resource_daily_insights.json     — per-day actionable info
@@ -142,7 +141,7 @@ The convention isn't enforced — readers are expected to know the shape of each
 - Auto-reload on read when the file mtime advances — pipelines write, consumers see updates without explicit invalidation.
 - Per-file locks (`_file_locks`) for concurrent-write safety.
 - Refuse to inject resources containing template tokens — those must be compiled first (`_assert_concrete_resource`).
-- Mirror values to `DI.global_blackboard` for legacy callers (best-effort; ResourceManager cache is the source of truth).
+- Mirror values to `DI.global_blackboard` so callers reading directly from the blackboard still see fresh values (best-effort; the ResourceManager cache is the source of truth).
 
 **Read API:** `get_resource(resource_id)` — returns the cached value, auto-refreshing if the backing file is newer.
 

@@ -212,8 +212,6 @@ The `secret_token` here is what Telegram echoes back in the `X-Telegram-Bot-Api-
 
 EmiOS does not bundle a tunnel. To expose the local Flask app to Twilio / Slack / Telegram webhooks during development, run whatever tunnel you prefer (ngrok, cloudflared, tailscale funnel, …) externally and paste the resulting URL into each surface's webhook config. Tunnel URLs from free-tier services are ephemeral; expect to redo all three on every restart unless your plan reserves a domain.
 
-> Historical: a `/ngrok/start` / `/ngrok/stop` / `/ngrok/status` Flask blueprint shipped briefly to spawn an `ngrok http` subprocess from a "Start Ngrok" button in the dev menu. Removed 2026-04-27 — the endpoints were unauthenticated, the state was a module-level global outside DI, and the workflow turned out to be redundant with running `ngrok` from a separate terminal.
-
 ## RoomSessionManager — the central hub
 
 `app/assistant/room_session_manager/room_session_manager.py` is a 1032-line class that every transport flows through. Public entry points:

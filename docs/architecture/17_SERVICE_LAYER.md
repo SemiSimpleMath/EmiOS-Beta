@@ -240,7 +240,7 @@ The log is capped at `_MAX_MESSAGES = 20000`; on overflow it trims to `_TRIM_TAR
 - `control_nodes/chat_task_router_node.py:170` — outbound chat messages.
 - `context_engine/context_memo.py:110` — context memo writes.
 - `lib/tools/one_shot_tool_runner/one_shot_tool_runner.py:441` — synthesized one-shot user messages.
-- `ResourceManager._publish_to_global_blackboard` (`resource_manager.py:68`) — every resource value is mirrored into `global_blackboard.state_dict` under its `resource_id` so legacy readers can still find it.
+- `ResourceManager._publish_to_global_blackboard` (`resource_manager.py:68`) — every resource value is mirrored into `global_blackboard.state_dict` under its `resource_id` so callers that read straight from the blackboard (rather than going through `ResourceManager`) still see fresh values.
 
 ### What reads from it
 

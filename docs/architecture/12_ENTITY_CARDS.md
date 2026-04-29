@@ -18,14 +18,14 @@ Entity cards are structured Markdown-like profiles for the people, places, and t
 | `original_aliases` | JSON list | Aliases pulled directly from the Node |
 | `summary` | TEXT (required) | One-to-two-sentence card body, LLM-generated |
 | `key_facts` | JSON list | 3–10 short bullet facts, ordered by importance |
-| `relationships` | JSON list | Legacy field — v2 writer leaves empty (facts embed relationship info) |
+| `relationships` | JSON list | Unused — the writer leaves it empty; relationship info is embedded in `key_facts` |
 | `user_relevance_reason` | TEXT | One-liner for the L0 view (why this entity matters to the user) |
 | `aliases` | JSON list | Processed aliases (may be edited by the user) |
 | `confidence` | FLOAT | Generator confidence; powers `low_confidence` maintenance scan |
 | `card_metadata` | JSON dict | Schema v2 envelope: `views.{level0,level1,level2}`, `gating`, `signals`, `provenance` (see `kg_entity_card_pipeline.py:935-1015`) |
 | `is_active` | BOOL | Soft-delete flag — inactive cards are hidden from injection and editor by default |
 | `usage_count` / `last_used` | INT / DATETIME | Atomic increment + timestamp on each prompt injection |
-| `batch_number` / `total_batches` | INT | Provenance from legacy v1 batched generator (v2 leaves NULL) |
+| `batch_number` / `total_batches` | INT | Unused — left NULL by the writer |
 
 Two satellite tables back the model:
 - `entity_card_usage` — one row per injection event (agent_name, session_id, query_text). `entity_cards.py:124-156`.
@@ -121,7 +121,7 @@ There are three production entry points; all of them call the same v2 writer (`g
 3. **Single-card regen — editor button**
    The `/entity_cards` editor renders a per-card `↻` button (`entity_cards_editor.js:163`) that calls `POST /entity-cards-admin/api/regenerate_v2/<card_id>`. Synchronous: blocks the request until the LLM returns (5–15 s typical), then returns the refreshed card row. Same lock, same 409 behavior.
 
-The legacy `POST /entity-cards-admin/api/regenerate/<card_id>` URL (line 167) forwards to the v2 endpoint — the v1 writer (`_process_node_worker`) is no longer wired into any production path.
+There is also an alias URL `POST /entity-cards-admin/api/regenerate/<card_id>` (line 167) that forwards to the same `regenerate_v2` endpoint above. An older `_process_node_worker` writer exists in the codebase but is not wired into any production path.
 
 ## Generator agents
 
@@ -130,7 +130,7 @@ The legacy `POST /entity-cards-admin/api/regenerate/<card_id>` URL (line 167) fo
 | `entity_card_critic` | Pre-filter — given a list of candidate node labels, decides which are worth generating cards for. Rejects junk (possessive compounds, generic items, system meta-references, ammo calibers, etc.). Called from `_run_critic_gate` in `kg_entity_card_pipeline.py:349`. | gpt-5.1 (standard) | `app/assistant/agents/entity_card_critic/` |
 | `entity_card_summarizer` | The single LLM call that produces the card body. Reads `entity_name`, `entity_type`, `entity_description`, `entity_aliases`, `tagged_bullets` (sectioned markdown), `known_contacts` (deterministic). Returns structured `summary`, `key_facts: List[str]`, `contact_info: List[ContactInfo]`, `relevance_reason`. Pydantic schema: `agent_form.py`. | gpt-5.4-mini | `app/assistant/agents/entity_card_summarizer/` |
 | `wiki_section_tagger` | Shared with the wiki: assigns each bullet to 0..N taxonomy section keys so the summarizer sees grouped slices. Per-bullet content-hash cache under `data/kg_projection/`. | (configured in agent dir) | `app/assistant/agents/wiki_section_tagger/` |
-| `entity_card_generator` | Legacy v1 batched writer. Still has a config but is no longer invoked from production paths. | gpt-5.4-mini | `app/assistant/agents/entity_card_generator/` |
+| `entity_card_generator` | An older batched writer — agent directory still exists but is not invoked from any production path. | gpt-5.4-mini | `app/assistant/agents/entity_card_generator/` |
 
 > Note: `pod_entity_resolver` in the agents directory is unrelated to entity cards — it belongs to the pod system.
 
