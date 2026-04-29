@@ -12,6 +12,9 @@ from app.assistant.dayflow_orchestrator.orchestrator_status import (  # noqa: F4
     DAYFLOW_ORCHESTRATOR_STATUS_RESOURCE_ID,
     MASTER_ROOM_BLOCK_SECONDS,
 )
+from app.assistant.utils.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 def _lazy_cadence_tick(*, target_date=None, routine=None):
@@ -78,6 +81,89 @@ def _lazy_kg_finding_backlog_drain(*, target_date=None, routine=None):
 kg_finding_backlog_drain = _lazy_kg_finding_backlog_drain
 
 
+def _lazy_kg_date_gap_drain(*, target_date=None, routine=None):
+    """Daily: pick 1-3 highest-priority state_missing_dates findings to ask
+    the user about, marking them as queued so they aren't re-picked
+    immediately.
+
+    v1 stops at marking — the actual push-question-to-chat wiring (via
+    questioner_manager or a proactive_suggestion ticket) is a follow-up.
+    Until that lands, the user-facing surface is /kg-maintenance/date-gaps,
+    where the queued items show up first by priority.
+
+    Routine spec:
+      limit          — max findings to queue this run (default 3)
+      cooldown_days  — re-ask interval; findings asked within this many days
+                       are skipped (default 7)
+    """
+    from datetime import datetime, timezone, timedelta
+    from sqlalchemy import case
+    from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
+    from app.models.db_manager import get_db_manager
+
+    spec = (routine.spec if routine and hasattr(routine, "spec") else {}) or {}
+    limit = max(1, int(spec.get("limit", 3)))
+    cooldown_days = max(0, int(spec.get("cooldown_days", 7)))
+    cutoff = datetime.now(timezone.utc) - timedelta(days=cooldown_days)
+
+    queued_ids: list[str] = []
+    skipped_in_cooldown = 0
+    with get_db_manager().transaction(op="kg_date_gap_drain") as session:
+        rows = (
+            session.query(KGMaintenanceFinding)
+            .filter(KGMaintenanceFinding.finding_type == "state_missing_dates")
+            .filter(KGMaintenanceFinding.status == "pending")
+            .order_by(
+                # high → medium → low
+                case(
+                    {"high": 1, "medium": 2, "low": 3},
+                    value=KGMaintenanceFinding.priority,
+                    else_=4,
+                ),
+                KGMaintenanceFinding.created_at.asc(),
+            )
+            .limit(limit * 5)  # pull a buffer so cooldown filter has room
+            .all()
+        )
+        for f in rows:
+            if len(queued_ids) >= limit:
+                break
+            ev = dict(f.evidence_json or {})
+            last_asked_raw = ev.get("last_asked_at")
+            if last_asked_raw:
+                try:
+                    last_asked = datetime.fromisoformat(last_asked_raw.replace("Z", "+00:00"))
+                    if last_asked.tzinfo is None:
+                        last_asked = last_asked.replace(tzinfo=timezone.utc)
+                    if last_asked > cutoff:
+                        skipped_in_cooldown += 1
+                        continue
+                except ValueError:
+                    pass
+            ev["last_asked_at"] = datetime.now(timezone.utc).isoformat()
+            ev["asked_count"] = int(ev.get("asked_count", 0)) + 1
+            f.evidence_json = ev
+            queued_ids.append(f.id)
+
+    logger.info(
+        "[kg_date_gap_drain] queued=%d skipped_in_cooldown=%d (limit=%d, cooldown_days=%d)",
+        len(queued_ids), skipped_in_cooldown, limit, cooldown_days,
+    )
+    return {
+        "queued": len(queued_ids),
+        "skipped_in_cooldown": skipped_in_cooldown,
+        "queued_finding_ids": queued_ids,
+        # TODO: actually push these as questions to the user's chat. Today
+        # this routine only marks them as queued so the cooldown works and
+        # the /kg-maintenance/date-gaps page sorts queued items first. Real
+        # chat delivery via questioner_manager or a proactive_suggestion
+        # ticket is the next piece.
+    }
+
+
+kg_date_gap_drain = _lazy_kg_date_gap_drain
+
+
 def _lazy_wiki_nightly_refresh(*, target_date=None, routine=None):
     """Nightly: incrementally regenerate wiki pages whose KG neighborhood
     changed since the page was last generated. Optionally runs the
@@ -101,4 +187,5 @@ ROUTINE_FUNCTION_REGISTRY = {
     "chat_memory_index": chat_memory_index,
     "proposal_promoter": proposal_promoter,
     "wiki_nightly_refresh": wiki_nightly_refresh,
+    "kg_date_gap_drain": kg_date_gap_drain,
 }
