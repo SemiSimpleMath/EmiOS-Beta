@@ -81,13 +81,16 @@ One scheduled routine, one disabled-by-default routine kept for manual re-export
 
 ## 3. Pipeline structure (per domain)
 
-Each domain pipeline is a fixed four-step sequence defined in `belief_engine/pipeline/pipeline.py:49-54`. Steps share a `_RunContext` dataclass and run sequentially; if any step raises, the pipeline aborts (`pipeline.py:65-75`).
+Each domain pipeline is a four- or five-step sequence defined in `belief_engine/pipeline/pipeline.py`. Steps share a `_RunContext` dataclass and run sequentially; if any step raises, the pipeline aborts.
 
 ```
-CollectEvidenceStep  ──>  UpdateBeliefsStep  ──>  ReevaluateBeliefsStep  ──>  CanonicalizeBeliefSetStep
-   (no LLM)                (LLM: belief_updater)    (LLM: belief_reevaluator,    (LLM: belief_canonicalizer,
-                                                     conditional)                  multi-pass)
+CollectEvidenceStep  ──>  UpdateBeliefsStep  ──> [DecayStaleBeliefsStep] ──>  ReevaluateBeliefsStep  ──>  CanonicalizeBeliefSetStep
+   (no LLM)                (LLM: belief_updater)   (no LLM, opt-in per       (LLM: belief_reevaluator,    (LLM: belief_canonicalizer,
+                                                     domain via decay_enabled  conditional)                  multi-pass)
+                                                     flag in YAML)
 ```
+
+The decay step is optional: it runs only when the domain's `decay_enabled` flag is true in `configs/belief_domains.yaml` (default false). When it runs, it sits between Update and Reevaluate so freshly-confirmed beliefs (whose `last_confirmed` was bumped by Update) are correctly excluded from staleness, and any chronics it flags as `contested` flow into Reevaluate's existing handler.
 
 ### Step 1 — `CollectEvidenceStep`
 
@@ -112,6 +115,19 @@ Per-belief decisions from the agent (`agent_form.py`): `create | update | deprec
 ### Step 3 — `ReevaluateBeliefsStep` (conditional)
 
 `belief_engine/pipeline/steps/reevaluate_beliefs.py`. Only runs if Step 2 produced contested keys. For each contested belief, fetches the **complete** evidence trail from `belief_evidence` (capped at 50 items, `reevaluate_beliefs.py:26`) and asks `belief_engine::belief_reevaluator` for an authoritative rewrite. Allowed actions: `rewrite | qualify | split | deprecate | confirm` (`belief_reevaluator/agent_form.py:39-46`). A `confirm` restores `status=active`; `split` produces two beliefs (one inheriting the original key, one with a dot-suffix).
+
+### Step 3.5 — `DecayStaleBeliefsStep` (optional, per-domain)
+
+`belief_engine/pipeline/steps/decay_stale_beliefs.py`. No LLM. Runs only when the domain has `decay_enabled: true` in `configs/belief_domains.yaml` — all 7 domains default false; opt in per domain.
+
+Honors the `scope` field that the `belief_updater` agent already sets on every belief:
+
+- **active+temporary** unconfirmed for >30 days → **deprecated** via `BeliefStore.decay_temporary_beliefs()` (auto-prune; the agent's "will decay" tag, finally enforced). Each deprecation flows through the canonical `BeliefStore.deprecate()` path so an audit `belief_evidence` row is written.
+- **active+chronic** unconfirmed for >180 days → **contested** via `BeliefStore.flag_stale_chronic_beliefs()`. The contested keys are appended onto `ctx.belief_update_result["contested_keys"]` so the existing `ReevaluateBeliefsStep` (Step 4) picks them up for an LLM review pass — same machinery used for confidence-driven contestation.
+
+Thresholds are constructor parameters on `DecayStaleBeliefsStep` with defaults of 30 and 180 days; `now_utc` is also injectable so the sandbox harness in `belief_engine/sandbox/` can simulate time passage without monkey-patching `datetime.now()`.
+
+To roll out: flip `decay_enabled: true` on one domain (recommended: `routine`, smallest blast radius), run the routine, watch logs and exports.
 
 ### Step 4 — `CanonicalizeBeliefSetStep`
 
@@ -192,18 +208,22 @@ Synchronisation: the export is called inline at the end of `BeliefEngineAdapter.
 
 There is no live database query path from agent prompts. All consumers go through the exported JSON. This is intentional: the resource boundary makes belief reads cheap, deterministic, and version-able.
 
-## 7. Decay mechanism — planned, not built
+## 7. Decay mechanism — shipped, gated off per-domain
 
-A belief decay mechanism (deterministic scan + LLM review to retire stale beliefs) is **planned but not implemented**. Searching `belief_engine/` for `decay`, `stale`, or `retire` returns no hits. The intent is recorded in user memory (`feedback/project memo: "Belief decay design"` — deterministic scan + LLM review for stale beliefs), but no code, no scheduled routine, and no candidate-finder exists today.
+Time-based decay is implemented (2026-04-28) and lives as `DecayStaleBeliefsStep` in the pipeline (see §3, Step 3.5). All 7 domains default `decay_enabled: false`; roll out by flipping the flag in `configs/belief_domains.yaml`.
 
-What code-grounded hooks already exist that a decay job could lean on:
+**Mechanism (deterministic, no LLM):**
+- `BeliefStore.decay_temporary_beliefs(domain, now_utc, threshold_days=30)` deprecates active+temporary beliefs unconfirmed past the threshold. Goes through `BeliefStore.deprecate()` so each deprecation writes an audit `belief_evidence` row with `source_type='deprecation'`.
+- `BeliefStore.flag_stale_chronic_beliefs(domain, now_utc, threshold_days=180)` flips active+chronic beliefs to `contested` and writes an audit row with `source_type='decay_review'`. The contested keys hand off to `ReevaluateBeliefsStep` for LLM review.
 
-- `last_confirmed` is maintained on every upsert and `no_change` (`update_beliefs.py:170-178`); a decay scan would read this column.
-- `observation_count` and `confidence` give a coarse staleness vs. strength signal.
-- `BeliefStore.deprecate()` + the existing `status='deprecated'` enum value already exist; a decay job would be a fourth pipeline step or a separate routine that flips `active → deprecated` after a review.
-- The export is content-guarded, so retiring beliefs would propagate cleanly (one fewer entry in the JSON, mtime updates, downstream agents pick up on next dayflow run).
+**Why scope-honoring:** the `belief_updater` agent's prompt already says `temporary` beliefs "will decay" — this just enforces the agent's existing tag. No new judgment, no new LLM calls.
 
-> Note: until decay ships, `last_confirmed` is the only signal that anything has gone stale. There is currently no path that closes a belief without either an explicit user contradiction (caught by the updater/re-evaluator) or a manual deprecate.
+**Sandbox:** `belief_engine/sandbox/` provides a `BeliefSandbox` context manager that runs against a temp-file SQLite (never touches `emi.db`), with seed/run/inspect helpers and synthetic-time injection. 11 scripted scenarios in `belief_engine/sandbox/scenarios.py` cover boundary conditions, idempotency, domain isolation, mixed cohorts, and time advance. Run via `PYTHONPATH=. python -m belief_engine.sandbox.scenarios`.
+
+**What's still missing (planned, not built):**
+- **Bitemporal validity windows** (`valid_from`, `valid_until` columns) for sharp temporal claims like "next week I'll be in SF" — different mechanism from freshness decay (date-bounded vs unconfirmed-for-N-days). 5-commit plan logged in user memory; not started.
+- **Salience separate from frequency** — trash night is rarely mentioned but high-stakes; `confidence` currently conflates both. Logged but on hold pending bitemporal.
+- **Confidence aging** between LLM touches (deterministic drift `high → medium → low` based on `last_confirmed`) — was Phase 2 of the original lifecycle plan; deferred since scope-based decay covers most of the structural need.
 
 ## 8. Why the beliefs DB is "fragile / handle with extreme care"
 
@@ -212,7 +232,7 @@ The user-memory note flagging the belief DB as fragile reflects several structur
 1. **Tables live in `emi.db`, not a separate file.** `ensure_schema.py:20` writes the schema directly into the main DB. A schema migration mistake (or a `DELETE FROM user_beliefs` from the wrong shell) hits the same file as the unified log, KG, and pod store.
 2. **`belief_evidence.belief_id` is `ON DELETE CASCADE`** (`schema.py:37`). Removing a single belief takes its entire evidence trail with it — there is no soft-delete safety net at the FK layer; only application-level `deprecate()` (which sets `status='deprecated'`) is safe. A direct `DELETE` cascades silently.
 3. **Two-store consistency.** A belief lives in both SQLite (`user_beliefs`) and Chroma (`belief_engine_beliefs` collection). The store keeps them in sync on writes (`belief_store.py:299-304`, `:441-443`), but a direct DB edit will leave Chroma orphaned. Conversely, deprecated beliefs that were never merged keep their embeddings, and `find_similar` only filters them out post-hoc.
-4. **No backups beyond what the user creates manually.** A `data/beliefs_backup_20260318_224637.db` exists in the tree, suggesting hand-made snapshots, not automated rotation.
+4. **No backups beyond what the user creates manually.** No automated rotation; no scheduled `sqlite3 .backup` job. (A `data/beliefs_backup_20260318_224637.db` and a `data/beliefs.db` were both 0-byte vestigials from an earlier "isolated DB" attempt — removed 2026-04-28.)
 5. **No `dry-run` on the canonicalizer's merge step in production.** `CanonicalizeBeliefSetStep.run` accepts a `dry_run=False` kwarg (`canonicalize_belief_set.py:229`) but the routine adapter never passes it. A bad LLM merge cluster gets persisted; the only audit is the `merge_reasoning` written into the `canonicalization` evidence row.
 
 Practical implication: any script that wants to prune, rebalance, or re-seed beliefs should go through `BeliefStore` (`belief_engine/store/belief_store.py`) and never touch the tables directly. Per the user's standing rule on belief-store work: ask before running heavy DB scripts while Emi is running.
@@ -221,11 +241,14 @@ Practical implication: any script that wants to prune, rebalance, or re-seed bel
 
 | File | Purpose |
 | --- | --- |
-| `belief_engine/__init__.py` | Module-level docstring with quickstart |
-| `belief_engine/pipeline/pipeline.py` | `BeliefEnginePipeline` — 4-step orchestrator, one domain per call |
-| `belief_engine/pipeline/routine_adapter.py` | `BeliefEngineRoutineAdapter` (per-domain), `BeliefEngineExportAdapter` |
+| `belief_engine/__init__.py` | Module-level overview + cross-ref to this doc |
+| `belief_engine/sandbox/sandbox.py` | `BeliefSandbox` — temp-file SQLite harness, seed/run/inspect helpers, synthetic time injection |
+| `belief_engine/sandbox/scenarios.py` | 11 scripted decay scenarios. Run: `PYTHONPATH=. python -m belief_engine.sandbox.scenarios` |
+| `belief_engine/pipeline/pipeline.py` | `BeliefEnginePipeline` — 4–5 step orchestrator (decay step opt-in per domain), one domain per call |
+| `belief_engine/pipeline/routine_adapter.py` | `BeliefEngineAdapter` (loops domains, exports inline), `BeliefEngineExportAdapter` (manual re-export) |
 | `belief_engine/pipeline/steps/collect_evidence.py` | Domain-tag-filtered scan of last 14 days of insights + tickets |
 | `belief_engine/pipeline/steps/update_beliefs.py` | LLM `belief_updater` — create/update/deprecate/no_change |
+| `belief_engine/pipeline/steps/decay_stale_beliefs.py` | Deterministic decay; honors `scope` field. Opt-in via `decay_enabled` per domain. |
 | `belief_engine/pipeline/steps/reevaluate_beliefs.py` | LLM `belief_reevaluator` — full evidence trail rewrite for contested |
 | `belief_engine/pipeline/steps/canonicalize_belief_set.py` | LLM `belief_canonicalizer` — multi-pass merge/split until convergence |
 | `belief_engine/store/belief_store.py` | Sole DB+Chroma access layer (short sessions, no LLM under lock) |
