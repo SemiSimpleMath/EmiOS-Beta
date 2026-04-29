@@ -635,6 +635,23 @@ async (page) => {
         logger.debug("playwright_page_state_node failed to parse JSONish payload")
         return None
 
+    def _run_js(self, *, server_entry: dict[str, Any], js: str) -> str:
+        """Call browser_run_code with the given JS snippet. Returns raw response text.
+
+        Raises on MCP-level failure so the caller's broad except logs once.
+        """
+        timeout_s = float(server_entry.get("policy", {}).get("call_timeout_seconds", 20))
+        resp = mcp_stdio_call_tool(
+            server_entry=server_entry,
+            tool_name=self.MCP_RUN_CODE,
+            arguments={"code": js},
+            timeout_s=timeout_s,
+        )
+        text, is_error, _ = format_mcp_tool_result_content(resp)
+        if is_error:
+            raise RuntimeError(f"browser_run_code failed: {text}")
+        return text or ""
+
     def _get_page_scroll_state(self, server_entry: dict[str, Any]) -> dict[str, Any]:
         """Lightweight page scroll state — no modal detection overhead."""
         js = """

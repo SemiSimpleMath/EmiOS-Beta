@@ -187,5 +187,6 @@ ROUTINE_FUNCTION_REGISTRY = {
     "chat_memory_index": chat_memory_index,
     "proposal_promoter": proposal_promoter,
     "wiki_nightly_refresh": wiki_nightly_refresh,
+    "kg_finding_backlog_drain": kg_finding_backlog_drain,
     "kg_date_gap_drain": kg_date_gap_drain,
 }
