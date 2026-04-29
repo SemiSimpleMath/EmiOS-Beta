@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>KG Maintenance</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/kg_maintenance.css') }}">
   <style>
     :root {
       --bg: #0f172a;
@@ -339,10 +340,9 @@
       ? `<button class="toggle-evidence" onclick="toggleEvidence('${toggleId}')">details</button><div id="${toggleId}" class="evidence-block">${esc(evJson)}</div>`
       : '';
 
-    const reportJson = f.investigation_report_json ? JSON.stringify(f.investigation_report_json, null, 2) : '';
     const reportToggleId = `rep-${f.id}`;
-    const reportBtn = reportJson
-      ? `<button class="toggle-evidence" onclick="toggleEvidence('${reportToggleId}')" title="Investigated ${f.investigated_at || ''}">report</button><div id="${reportToggleId}" class="evidence-block">${esc(reportJson)}</div>`
+    const reportBtn = f.investigation_report_json
+      ? `<button class="toggle-evidence" onclick="toggleReport('${reportToggleId}')" title="Investigated ${f.investigated_at || ''}">report</button><div id="${reportToggleId}" class="report-block">${renderReport(f.investigation_report_json)}</div>`
       : '';
 
     const execNotes = f.execution_notes
@@ -403,6 +403,118 @@
   function toggleEvidence(id) {
     const el = document.getElementById(id);
     el.style.display = el.style.display === 'block' ? 'none' : 'block';
+  }
+
+  function toggleReport(id) {
+    const el = document.getElementById(id);
+    el.style.display = el.style.display === 'block' ? 'none' : 'block';
+  }
+
+  function toggleReportRaw(btn) {
+    const root = btn.closest('.report-block');
+    if (!root) return;
+    root.classList.toggle('expanded');
+    btn.textContent = root.classList.contains('expanded') ? 'hide raw JSON' : 'show raw JSON';
+  }
+
+  function renderReport(report) {
+    if (!report || typeof report !== 'object') return '';
+    const sections = [];
+
+    // 1. Result summary — short headline if present
+    if (report.result_summary) {
+      sections.push(`<div class="report-section"><div class="report-summary">${esc(report.result_summary)}</div></div>`);
+    } else if (report.final_answer_answer) {
+      sections.push(`<div class="report-section"><div class="report-summary">${esc(report.final_answer_answer)}</div></div>`);
+    }
+
+    // 2. Diagnosis — long prose
+    if (report.diagnosis) {
+      sections.push(`<div class="report-section">
+        <div class="report-heading">Diagnosis</div>
+        <div class="report-prose">${esc(report.diagnosis)}</div>
+      </div>`);
+    }
+
+    // 3. Proposed action — key/value summary
+    if (report.proposed_action && typeof report.proposed_action === 'object') {
+      const pa = report.proposed_action;
+      const rows = Object.entries(pa)
+        .filter(([k, _]) => k !== 'affected_records' && k !== 'edge_ids' && k !== 'buckets')
+        .map(([k, v]) => {
+          const display = (v === null || v === undefined) ? '<em style="color:var(--muted)">null</em>'
+            : typeof v === 'object' ? `<code>${esc(JSON.stringify(v))}</code>`
+            : `<code>${esc(String(v))}</code>`;
+          return `<div class="k">${esc(k)}</div><div class="v">${display}</div>`;
+        }).join('');
+      if (rows) {
+        sections.push(`<div class="report-section">
+          <div class="report-heading">Proposed action</div>
+          <div class="report-kv">${rows}</div>
+        </div>`);
+      }
+    }
+
+    // 4. Affected records — table (future shape, gracefully renders empty)
+    const affected = report.affected_records ||
+                     (report.proposed_action && report.proposed_action.affected_records);
+    if (Array.isArray(affected) && affected.length > 0) {
+      const rows = affected.map(r => {
+        const op = (r.recommendation && r.recommendation.op) || 'review';
+        const opClass = `rec-${op.replace(/[^a-z0-9_]/gi, '_')}`;
+        const recText = r.recommendation
+          ? (r.recommendation.new
+              ? `${esc(op)} → "${esc(String(r.recommendation.new).slice(0, 80))}"`
+              : esc(op))
+          : 'review';
+        return `<tr>
+          <td class="tbl-cell">${esc(r.table || '')}</td>
+          <td class="id-cell" title="${esc(r.id || '')}">${esc((r.id || '').slice(0, 12))}</td>
+          <td class="field-cell">${esc(r.field || '')}</td>
+          <td class="recommend-cell ${opClass}">${recText}</td>
+        </tr>`;
+      }).join('');
+      sections.push(`<div class="report-section">
+        <div class="report-heading">Affected records (${affected.length})</div>
+        <table class="affected-table">
+          <thead><tr><th>Table</th><th>ID</th><th>Field</th><th>Recommendation</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`);
+    }
+
+    // 5. Open questions
+    if (Array.isArray(report.open_questions) && report.open_questions.length > 0) {
+      const items = report.open_questions.map(q => `<li>${esc(String(q))}</li>`).join('');
+      sections.push(`<div class="report-section">
+        <div class="report-heading">Open questions</div>
+        <ul class="report-list">${items}</ul>
+      </div>`);
+    }
+
+    // 6. Evidence
+    if (report.evidence) {
+      let evHtml = '';
+      if (Array.isArray(report.evidence)) {
+        evHtml = `<ul class="report-list">${report.evidence.map(e =>
+          `<li>${typeof e === 'string' ? esc(e) : `<code>${esc(JSON.stringify(e))}</code>`}</li>`
+        ).join('')}</ul>`;
+      } else if (typeof report.evidence === 'string') {
+        evHtml = `<div class="report-prose">${esc(report.evidence)}</div>`;
+      } else {
+        evHtml = `<code>${esc(JSON.stringify(report.evidence))}</code>`;
+      }
+      sections.push(`<div class="report-section">
+        <div class="report-heading">Evidence</div>
+        ${evHtml}
+      </div>`);
+    }
+
+    // 7. Raw JSON escape hatch
+    sections.push(`<button class="raw-toggle" onclick="toggleReportRaw(this)">show raw JSON</button>
+      <pre class="report-raw">${esc(JSON.stringify(report, null, 2))}</pre>`);
+
+    return sections.join('');
   }
 
   // -- Selection --

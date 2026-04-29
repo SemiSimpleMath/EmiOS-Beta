@@ -1,0 +1,168 @@
+/* Investigation report viewer — styled rendering of investigation_report_json
+   in the /kg-maintenance dashboard. Inline raw-JSON view is gone; this file
+   replaces .evidence-block-style scrollers with a sectioned layout for the
+   structured report fields (diagnosis, result_summary, proposed_action,
+   open_questions, evidence, affected_records).
+
+   Reuses the dashboard's color palette via the existing CSS custom
+   properties declared inline in kg_maintenance.html. */
+
+.report-block {
+    display: none;
+    margin-top: 8px;
+    background: var(--panel-soft);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 12px 14px;
+    font-size: 13px;
+    color: var(--text);
+    max-width: 720px;
+    line-height: 1.5;
+}
+
+.report-block .report-section {
+    margin-bottom: 12px;
+}
+
+.report-block .report-section:last-child {
+    margin-bottom: 0;
+}
+
+.report-block .report-heading {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    margin-bottom: 4px;
+}
+
+.report-block .report-prose {
+    color: var(--text);
+    white-space: pre-wrap;
+    font-size: 13px;
+}
+
+.report-block .report-summary {
+    color: var(--info);
+    font-style: italic;
+    font-size: 13px;
+}
+
+.report-block .report-kv {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    column-gap: 12px;
+    row-gap: 4px;
+    font-size: 12px;
+}
+
+.report-block .report-kv .k {
+    color: var(--muted);
+    font-weight: 600;
+}
+
+.report-block .report-kv .v {
+    color: var(--text);
+    word-break: break-word;
+}
+
+.report-block .report-kv .v code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px;
+    background: var(--bg);
+    padding: 1px 5px;
+    border-radius: 3px;
+}
+
+.report-block ul.report-list {
+    margin: 0;
+    padding-left: 18px;
+    color: var(--text);
+    font-size: 12px;
+}
+
+.report-block ul.report-list li {
+    margin-bottom: 3px;
+}
+
+.report-block .affected-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+    margin-top: 4px;
+}
+
+.report-block .affected-table th,
+.report-block .affected-table td {
+    border-bottom: 1px solid var(--line);
+    padding: 5px 7px;
+    vertical-align: top;
+    text-align: left;
+}
+
+.report-block .affected-table th {
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.report-block .affected-table td.tbl-cell {
+    color: var(--muted);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 10px;
+}
+
+.report-block .affected-table td.id-cell {
+    color: var(--info);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 10px;
+}
+
+.report-block .affected-table td.field-cell {
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.report-block .affected-table td.recommend-cell {
+    font-size: 11px;
+}
+
+.report-block .affected-table .rec-no_change { color: var(--muted); }
+.report-block .affected-table .rec-update_text,
+.report-block .affected-table .rec-update_field { color: var(--warn); }
+.report-block .affected-table .rec-delete_edge,
+.report-block .affected-table .rec-delete_node { color: var(--bad); }
+.report-block .affected-table .rec-split_state,
+.report-block .affected-table .rec-merge_nodes { color: var(--info); }
+
+.report-block .raw-toggle {
+    display: inline-block;
+    margin-top: 8px;
+    background: none;
+    border: none;
+    color: var(--info);
+    cursor: pointer;
+    font-size: 11px;
+    padding: 0;
+}
+
+.report-block .report-raw {
+    display: none;
+    margin-top: 6px;
+    font-size: 11px;
+    color: var(--muted);
+    background: var(--bg);
+    padding: 8px;
+    border-radius: 4px;
+    white-space: pre-wrap;
+    max-height: 300px;
+    overflow-y: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.report-block.expanded .report-raw {
+    display: block;
+}
