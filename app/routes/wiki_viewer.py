@@ -405,8 +405,21 @@ def wiki_article_regenerate(entity: str):
     try:
         # Step 1: refresh the rough page from the current KG neighborhood.
         regenerate_entity_page(label=label, vault_path=vault_path)
-        # Step 2: stitch the prose page (sections + lead).
-        generate_prose_page_tagged(entity_label=label, vault_path=vault_path)
+        # Step 2: stitch the prose page (sections + lead). Returns None on
+        # any silent precondition failure (missing taxonomy, no bullets, all
+        # sections empty). Surface that to the UI instead of letting the
+        # caller think the regen succeeded.
+        prose_path = generate_prose_page_tagged(entity_label=label, vault_path=vault_path)
+        if prose_path is None:
+            return jsonify({
+                "ok": False,
+                "error": (
+                    "Prose generation produced no output. "
+                    "Common causes: missing resource_wiki_sections.json taxonomy, "
+                    "no biographical bullets in the KG neighborhood, or every "
+                    "section call returned empty. Check the server log for details."
+                ),
+            }), 500
         # Step 3: run the consistency critic; auto-investigate any new findings.
         crit = run_consistency_critic(entity_label=label, vault_path=vault_path)
     except Exception as exc:
