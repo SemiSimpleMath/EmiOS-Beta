@@ -51,6 +51,19 @@ _AUTO_EXECUTABLE_TYPES: frozenset[str] = frozenset({"duplicate_node", "orphan_no
 _DASHBOARD_HIDDEN_TYPES: frozenset[str] = frozenset({"state_missing_dates"})
 
 
+@kg_maintenance_bp.route("/date-gaps", methods=["GET"])
+def date_gaps():
+    """Dedicated page for state_missing_dates findings — the user-facing
+    queue of bounded-category States/Events with no start_date. Hidden from
+    the main triage dashboard so the question backlog doesn't drown the
+    actionable findings."""
+    try:
+        return render_template("kg_maintenance_date_gaps.html")
+    except Exception:
+        logger.debug("[kg_maintenance] date_gaps failed", exc_info=True)
+        raise
+
+
 @kg_maintenance_bp.route("/queue", methods=["GET"])
 def action_queue():
     """Dedicated view of approved findings (user-flagged work queue).

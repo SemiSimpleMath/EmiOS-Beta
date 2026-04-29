@@ -1,11 +1,24 @@
-/* Investigation report viewer — styled rendering of investigation_report_json
-   in the /kg-maintenance dashboard. Inline raw-JSON view is gone; this file
-   replaces .evidence-block-style scrollers with a sectioned layout for the
-   structured report fields (diagnosis, result_summary, proposed_action,
-   open_questions, evidence, affected_records).
+/* Shared styles for the /kg-maintenance dashboard and its sub-pages.
+   Includes:
+     - CSS custom properties (theme palette) so any page that links this
+       file inherits the dark theme without re-declaring vars
+     - Investigation report viewer (sectioned report_block)
+     - Date-gaps page styles (.date-gaps-*)
+*/
 
-   Reuses the dashboard's color palette via the existing CSS custom
-   properties declared inline in kg_maintenance.html. */
+:root {
+    --bg: #0f172a;
+    --panel: #111827;
+    --panel-soft: #1f2937;
+    --text: #e5e7eb;
+    --muted: #9ca3af;
+    --ok: #10b981;
+    --warn: #f59e0b;
+    --bad: #ef4444;
+    --info: #60a5fa;
+    --line: #374151;
+    --chip: #334155;
+}
 
 .report-block {
     display: none;
@@ -166,3 +179,254 @@
 .report-block.expanded .report-raw {
     display: block;
 }
+
+/* -----------------------------------------------------------------------
+   Date-gaps page (/kg-maintenance/date-gaps)
+----------------------------------------------------------------------- */
+
+body.dg-body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+    font-size: 14px;
+    margin: 0;
+    padding: 0;
+}
+
+body.dg-body * {
+    box-sizing: border-box;
+}
+
+.dg-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.dg-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.dg-topbar h1 {
+    font-size: 22px;
+    font-weight: 600;
+    margin: 0;
+}
+
+.dg-topbar .dg-back {
+    color: var(--info);
+    text-decoration: none;
+    font-size: 13px;
+}
+
+.dg-topbar .dg-back:hover {
+    text-decoration: underline;
+}
+
+.dg-summary {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+.dg-chip {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 12px 18px;
+    min-width: 110px;
+}
+
+.dg-chip .dg-chip-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin-bottom: 4px;
+}
+
+.dg-chip .dg-chip-count {
+    font-size: 22px;
+    font-weight: 700;
+}
+
+.dg-chip-high   .dg-chip-count { color: var(--bad); }
+.dg-chip-medium .dg-chip-count { color: var(--warn); }
+.dg-chip-low    .dg-chip-count { color: var(--muted); }
+.dg-chip-asked  .dg-chip-count { color: var(--info); }
+
+.dg-explainer {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 12px 16px;
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.5;
+    margin-bottom: 18px;
+}
+
+.dg-explainer strong {
+    color: var(--text);
+}
+
+.dg-explainer code {
+    background: var(--bg);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 12px;
+}
+
+.dg-category-block {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    margin-bottom: 18px;
+    overflow: hidden;
+}
+
+.dg-category-header {
+    background: var(--panel-soft);
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--line);
+}
+
+.dg-category-header h2 {
+    font-size: 14px;
+    font-weight: 600;
+    margin: 0;
+    text-transform: capitalize;
+}
+
+.dg-category-header .dg-cat-count {
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.dg-row {
+    display: grid;
+    grid-template-columns: 1fr 220px 100px 120px;
+    gap: 12px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--line);
+    align-items: center;
+}
+
+.dg-row:last-child {
+    border-bottom: none;
+}
+
+.dg-row .dg-label {
+    font-weight: 600;
+    color: var(--text);
+}
+
+.dg-row .dg-priority-badge {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 1px 7px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.dg-priority-high   { background: rgba(239, 68, 68, 0.18); color: #fca5a5; }
+.dg-priority-medium { background: rgba(245, 158, 11, 0.18); color: #fcd34d; }
+.dg-priority-low    { background: rgba(148, 163, 184, 0.15); color: var(--muted); }
+
+.dg-row .dg-description {
+    color: var(--muted);
+    font-size: 12px;
+    margin-top: 3px;
+    line-height: 1.4;
+}
+
+.dg-row .dg-entities {
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.dg-row .dg-entities-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 2px;
+}
+
+.dg-row .dg-entity-tag {
+    background: var(--bg);
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    color: var(--text);
+}
+
+.dg-row .dg-entity-tag.dg-entity-primary {
+    color: var(--info);
+    font-weight: 600;
+}
+
+.dg-row .dg-score {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.dg-row .dg-actions {
+    display: flex;
+    gap: 6px;
+    justify-content: flex-end;
+}
+
+.dg-btn {
+    padding: 4px 10px;
+    border-radius: 4px;
+    border: none;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.dg-btn-ask  { background: #1d4ed8; color: #fff; }
+.dg-btn-skip { background: #7f1d1d; color: #fca5a5; }
+
+.dg-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.dg-empty {
+    padding: 30px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 14px;
+}
+
+#dg-toast {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 10px 16px;
+    color: var(--text);
+    font-size: 13px;
+    display: none;
+    z-index: 9999;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+
+#dg-toast.show { display: block; }
+#dg-toast.error { color: var(--bad); border-color: var(--bad); }

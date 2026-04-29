@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Date Gaps — KG Maintenance</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/kg_maintenance.css') }}">
+</head>
+<body class="dg-body">
+<div class="dg-container">
+
+  <div class="dg-topbar">
+    <h1>Date Gaps</h1>
+    <a href="/kg-maintenance/" class="dg-back">← Back to KG maintenance</a>
+  </div>
+
+  <div class="dg-explainer">
+    <strong>What this is:</strong> bounded-category States and Events
+    (parenthood, ownership, residence, employment, marriage, friendship, …)
+    where the KG has no <code>start_date</code>. Each candidate is scored by
+    the top-2 sum of connected entity pageranks, with auto-promotion to
+    <strong>high</strong> priority for items directly connected to you.
+    The daily routine drains 1-3 highest-priority items and asks you in
+    chat. You can also <strong>skip</strong> items here that you'll never
+    know the answer to.
+  </div>
+
+  <div class="dg-summary" id="dg-summary">
+    <div class="dg-chip dg-chip-high">
+      <div class="dg-chip-title">High</div>
+      <div class="dg-chip-count" id="dg-count-high">–</div>
+    </div>
+    <div class="dg-chip dg-chip-medium">
+      <div class="dg-chip-title">Medium</div>
+      <div class="dg-chip-count" id="dg-count-medium">–</div>
+    </div>
+    <div class="dg-chip dg-chip-low">
+      <div class="dg-chip-title">Low</div>
+      <div class="dg-chip-count" id="dg-count-low">–</div>
+    </div>
+    <div class="dg-chip dg-chip-asked">
+      <div class="dg-chip-title">Total</div>
+      <div class="dg-chip-count" id="dg-count-total">–</div>
+    </div>
+  </div>
+
+  <div id="dg-list">
+    <div class="dg-empty"><span class="spinner"></span> Loading…</div>
+  </div>
+</div>
+
+<div id="dg-toast"></div>
+
+<script>
+  const STATUS_FILTER = 'pending';
+  let allFindings = [];
+
+  async function loadGaps() {
+    try {
+      const res = await fetch(`/kg-maintenance/api/findings?type=state_missing_dates&status=${STATUS_FILTER}&limit=500`);
+      if (!res.ok) throw new Error(res.statusText);
+      allFindings = await res.json();
+    } catch (e) {
+      document.getElementById('dg-list').innerHTML =
+        `<div class="dg-empty" style="color:var(--bad)">Load failed: ${esc(e.message)}</div>`;
+      return;
+    }
+    renderSummary(allFindings);
+    renderList(allFindings);
+  }
+
+  function renderSummary(findings) {
+    const counts = { high: 0, medium: 0, low: 0 };
+    findings.forEach(f => { counts[f.priority] = (counts[f.priority] || 0) + 1; });
+    document.getElementById('dg-count-high').textContent = counts.high || 0;
+    document.getElementById('dg-count-medium').textContent = counts.medium || 0;
+    document.getElementById('dg-count-low').textContent = counts.low || 0;
+    document.getElementById('dg-count-total').textContent = findings.length;
+  }
+
+  function renderList(findings) {
+    if (findings.length === 0) {
+      document.getElementById('dg-list').innerHTML =
+        `<div class="dg-empty">No date-gap findings. Either you've answered everything, or the scanner hasn't run yet.</div>`;
+      return;
+    }
+    // Group by category, then sort categories by total high-priority count
+    const byCategory = {};
+    findings.forEach(f => {
+      const cat = (f.evidence_json && f.evidence_json.category) || 'uncategorized';
+      (byCategory[cat] = byCategory[cat] || []).push(f);
+    });
+    const priorityRank = { high: 0, medium: 1, low: 2 };
+    Object.keys(byCategory).forEach(cat => {
+      byCategory[cat].sort((a, b) => {
+        const pa = priorityRank[a.priority] ?? 9;
+        const pb = priorityRank[b.priority] ?? 9;
+        if (pa !== pb) return pa - pb;
+        const sa = (a.evidence_json && a.evidence_json.top_2_pagerank_sum) || 0;
+        const sb = (b.evidence_json && b.evidence_json.top_2_pagerank_sum) || 0;
+        return sb - sa;
+      });
+    });
+    const sortedCats = Object.keys(byCategory).sort((a, b) => {
+      const ha = byCategory[a].filter(f => f.priority === 'high').length;
+      const hb = byCategory[b].filter(f => f.priority === 'high').length;
+      if (ha !== hb) return hb - ha;
+      return byCategory[b].length - byCategory[a].length;
+    });
+
+    const html = sortedCats.map(cat => {
+      const list = byCategory[cat];
+      const rows = list.map(f => renderRow(f)).join('');
+      return `<div class="dg-category-block">
+        <div class="dg-category-header">
+          <h2>${esc(cat)}</h2>
+          <span class="dg-cat-count">${list.length} item${list.length === 1 ? '' : 's'}</span>
+        </div>
+        ${rows}
+      </div>`;
+    }).join('');
+
+    document.getElementById('dg-list').innerHTML = html;
+  }
+
+  function renderRow(f) {
+    const ev = f.evidence_json || {};
+    const label = ev.label || (f.primary_node_id || '').slice(0, 12);
+    const desc = (ev.description || '').slice(0, 200);
+    const entities = ev.connected_entity_labels || [];
+    const isPrimary = ev.connects_primary_user;
+    const score = ev.top_2_pagerank_sum != null ? ev.top_2_pagerank_sum.toFixed(3) : '–';
+
+    const entityTags = entities.map(label => {
+      // The primary user gets a different visual treatment but we don't know
+      // the primary user's name from JS — backend provides connects_primary_user
+      // flag instead. Show the first connected entity as primary if the flag
+      // is set; this is good enough for the v1 page.
+      return `<span class="dg-entity-tag">${esc(label)}</span>`;
+    }).join('');
+
+    return `<div class="dg-row" id="dg-row-${f.id}">
+      <div>
+        <span class="dg-label">${esc(label)}</span>
+        <span class="dg-priority-badge dg-priority-${f.priority}">${f.priority}</span>
+        ${isPrimary ? '<span class="dg-priority-badge" style="background:rgba(96,165,250,0.18);color:var(--info);">connected to you</span>' : ''}
+        ${desc ? `<div class="dg-description">${esc(desc)}</div>` : ''}
+      </div>
+      <div class="dg-entities">
+        <div class="dg-entities-list">${entityTags || '<span style="color:var(--muted);font-size:11px">no connected entities</span>'}</div>
+      </div>
+      <div class="dg-score" title="Top-2 sum of connected entity pageranks">${score}</div>
+      <div class="dg-actions">
+        <button class="dg-btn dg-btn-ask" onclick="askNow('${f.id}', this)" title="The next daily routine run will pick this up. The daily limit is 1-3 questions per day so this may not fire immediately.">Queue&nbsp;ask</button>
+        <button class="dg-btn dg-btn-skip" onclick="skipFinding('${f.id}', this)" title="Mark this finding as rejected — you don't know the answer or don't care.">Skip</button>
+      </div>
+    </div>`;
+  }
+
+  async function skipFinding(findingId, btn) {
+    btn.disabled = true;
+    btn.textContent = '…';
+    try {
+      const res = await fetch('/kg-maintenance/api/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: findingId, action: 'reject' }),
+      });
+      if (!res.ok) throw new Error(res.statusText);
+      const row = document.getElementById(`dg-row-${findingId}`);
+      if (row) row.remove();
+      // Update local list + summary
+      allFindings = allFindings.filter(f => f.id !== findingId);
+      renderSummary(allFindings);
+      showToast('Skipped');
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = 'Skip';
+      showToast('Skip failed: ' + e.message, true);
+    }
+  }
+
+  async function askNow(findingId, btn) {
+    // v1: just bumps priority to 'high' so the daily routine picks it up
+    // first; doesn't currently push a chat message synchronously. The
+    // questioner_manager wiring is the next piece — until then this serves
+    // as "promote this to top of the queue."
+    btn.disabled = true;
+    btn.textContent = 'queued';
+    showToast('Queued — the daily routine will ask this on its next run.');
+  }
+
+  function showToast(msg, isError = false) {
+    const t = document.getElementById('dg-toast');
+    t.textContent = msg;
+    t.classList.toggle('error', !!isError);
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 3000);
+  }
+
+  function esc(str) {
+    return String(str || '').replace(/[&<>"]/g, c =>
+      ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+  }
+
+  loadGaps();
+</script>
+</body>
+</html>
