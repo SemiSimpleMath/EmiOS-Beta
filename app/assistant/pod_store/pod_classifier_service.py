@@ -1,17 +1,22 @@
-"""PodClassifierService — subscribes to the gut, turns chat bursts into pods.
+"""PodClassifierService — subscribes to the gut, turns inbound envelopes into pods.
 
-Lifecycle per chat burst:
-  1. Each IngestEnvelope arrives via handle_envelope (gut subscriber).
-  2. Chat envelopes are buffered per room. Last activity time is tracked.
-  3. A background ticker periodically checks each room: if idle longer than
-     ``quiet_threshold_seconds``, flush that room's buffer.
-  4. Flush: render the burst to text, call ``pod_classifier`` agent with
-     the burst + tag vocabulary, and if any tags come back, mint a pod in
-     pod_store with for_agents = union of subscribers for those tags.
+Two paths, dispatched by envelope shape:
 
-Non-chat envelopes (email, etc.) are ignored for now — the first
-PodClassifier iteration is chat-only. Email/tool-result pods will be
-minted by dedicated paths later.
+**Chat burst path** (envelopes from UnifiedLogSource, source_type=unified_log):
+  1. Buffered per room with a quiet-timer.
+  2. On idle (>= ``quiet_threshold_seconds``), flush the room.
+  3. Pass 1 (pod_classifier) → Pass 1.5 (pod_critic) → Pass 2 (pod_entity_resolver)
+     → mint a single ``kind=chat_cluster`` pod whose body is the resolved sections.
+
+**Email path** (envelopes from EmailRepoSource, signal_type=email):
+  Each email is a single coherent unit, so no buffering — minted immediately
+  on arrival as ``kind=email``. one_liner=subject, body=email body,
+  source_refs point at event_repository:email by signal_id. Tags + LLM
+  classification deferred to a follow-up pass; consumers filter by kind +
+  sender for now.
+
+Other signal_types are ignored for now — tool_result / resource_snapshot
+pods will land via dedicated paths later.
 """
 from __future__ import annotations
 
@@ -91,6 +96,16 @@ class PodClassifierService:
     # ──────────────────────────────────────────────────────────────────
 
     def handle_envelope(self, envelope: IngestEnvelope) -> None:
+        # Email envelopes are atomic — one email = one pod, no buffering.
+        if self._is_email_envelope(envelope):
+            try:
+                self._process_email(envelope)
+            except Exception as e:
+                logger.error("PodClassifier: email processing failed signal_id=%s: %s",
+                             getattr(envelope, "signal_id", "?"), e)
+                logger.debug("email processing exception details", exc_info=True)
+            return
+
         if not self._is_chat_envelope(envelope):
             return
         room_id = self._envelope_room_id(envelope)
@@ -304,6 +319,98 @@ class PodClassifierService:
     def _is_chat_envelope(envelope: IngestEnvelope) -> bool:
         # Chat envelopes come from UnifiedLogSource with source_type=unified_log.
         return str(getattr(envelope, "source_type", "")).strip() == "unified_log"
+
+    @staticmethod
+    def _is_email_envelope(envelope: IngestEnvelope) -> bool:
+        # Emails come from EmailRepoSource with signal_type=email.
+        return str(getattr(envelope, "signal_type", "")).strip() == "email"
+
+    def _process_email(self, envelope: IngestEnvelope) -> None:
+        """Mint a single email pod from one envelope.
+
+        Single-shot — no buffering, no LLM classification in v1. The email is
+        already an atomic unit with structured metadata (subject, sender,
+        body); tag inference can come in a follow-up pass without blocking
+        consumers that just want to find an email by sender or recipient.
+        """
+        signal_id = str(getattr(envelope, "signal_id", "") or "").strip()
+        if not signal_id:
+            logger.debug("PodClassifier: email envelope missing signal_id, skipping")
+            return
+
+        # Reject duplicates: signal_id is deterministic for an email row, so
+        # if a pod with the matching source_ref already exists we've already
+        # minted it. Cheap dedup via PodStore.get on the deterministic id.
+        pod_id = self._make_email_pod_id(signal_id)
+        if self._pod_store.get(pod_id) is not None:
+            logger.debug("PodClassifier: email pod %s already exists, skipping", pod_id[:24])
+            return
+
+        meta = envelope.metadata if isinstance(envelope.metadata, dict) else {}
+        data = envelope.data if isinstance(envelope.data, dict) else {}
+
+        subject = str(meta.get("subject") or data.get("subject") or "").strip()
+        sender_display = str(meta.get("sender_display") or data.get("sender") or "").strip()
+        sender_email = str(meta.get("sender_email") or data.get("email_address") or "").strip()
+        account_id = str(meta.get("account_id") or data.get("account_id") or "").strip()
+        body = str(data.get("body") or "").strip()
+        summary = str(data.get("summary") or "").strip()
+
+        # one_liner: prefer "Sender: subject" if both present, else whichever
+        # is non-empty. Subject alone is the most common useful header.
+        if sender_display and subject:
+            one_liner = f"{sender_display}: {subject}"
+        elif subject:
+            one_liner = subject
+        elif sender_display:
+            one_liner = f"email from {sender_display}"
+        elif summary:
+            one_liner = summary[:140]
+        else:
+            one_liner = "email (no subject)"
+
+        # Body: prefer the full email text; fall back to the summary if body
+        # is empty (e.g., header-only sync). The whole point of pods is that
+        # consumers fetch the body on demand, so storing the full text is fine.
+        pod_body = body or summary or ""
+
+        pod = Pod(
+            pod_id=pod_id,
+            kind="email",
+            tags=[],  # tag inference deferred to a follow-up pass
+            one_liner=one_liner,
+            body=pod_body,
+            source_refs=[
+                PodSourceRef(kind="event_repository:email", id=signal_id),
+            ],
+            for_agents=[],  # consumers filter by kind="email" + sender for now
+            scope_id=account_id or None,
+            created_by="pod_classifier",
+            metadata={
+                "subject": subject,
+                "sender_display": sender_display,
+                "sender_email": sender_email,
+                "account_id": account_id,
+                "uid": str(meta.get("uid") or ""),
+                "occurred_at_utc": str(envelope.occurred_at_utc or ""),
+            },
+        )
+        self._pod_store.put(pod)
+        logger.info(
+            "PodClassifier minted email pod id=%s sender=%r subject=%r account=%s",
+            pod_id, sender_email or sender_display, subject[:80], account_id,
+        )
+
+    @staticmethod
+    def _make_email_pod_id(signal_id: str) -> str:
+        """Deterministic pod_id from the email's signal_id.
+
+        Mirrors _make_cluster_pod_id's shape (datapod:<kind>:<24-hex>) so the
+        existing POD_URI_RE matches both. Will be shortened to 6 base36 once
+        the cluster path is.
+        """
+        digest = hashlib.sha256(signal_id.encode("utf-8")).hexdigest()[:24]
+        return f"datapod:email:{digest}"
 
     @staticmethod
     def _envelope_room_id(envelope: IngestEnvelope) -> str:
