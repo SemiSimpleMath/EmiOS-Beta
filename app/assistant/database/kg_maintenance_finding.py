@@ -16,6 +16,13 @@ finding_type values:
                            with the KG / profile / cards
   "state_auto_closed"    — state_decay job auto-closed a stale State/Event
                            era; surfaced for confirmation rather than action
+  "state_missing_dates"  — bounded-category State/Event with NULL start_date.
+                           Hidden from the main triage dashboard; surfaced on
+                           /kg-maintenance/date-gaps and drained 1-3/day by
+                           the kg_date_gap_drain routine into the
+                           questioner_manager. Priority bin = top-2 sum of
+                           connected entity pageranks; auto-promoted to high
+                           if directly connected to the primary user.
 
   Historical (not produced today):
     "suspect_node" — per-node LLM quality scan, sunsetted 2026-04-27. Existing

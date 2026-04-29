@@ -44,6 +44,12 @@ def dashboard():
 # review" in the action queue.
 _AUTO_EXECUTABLE_TYPES: frozenset[str] = frozenset({"duplicate_node", "orphan_node"})
 
+# Finding types that have their own dedicated UI page and should be hidden
+# from the default main-dashboard list. Each of these is a long-running
+# background queue (date-gap questions accumulate in the hundreds) and would
+# drown out the actionable triage findings if mixed in.
+_DASHBOARD_HIDDEN_TYPES: frozenset[str] = frozenset({"state_missing_dates"})
+
 
 @kg_maintenance_bp.route("/queue", methods=["GET"])
 def action_queue():
@@ -76,11 +82,19 @@ def api_findings():
         offset = int(request.args.get("offset", 0))
     except (TypeError, ValueError):
         return jsonify({"error": "limit and offset must be integers"}), 400
+    # Hide background-queue types from the main dashboard unless the caller
+    # explicitly asks for one of them via ?type=.
+    exclude_types = (
+        list(_DASHBOARD_HIDDEN_TYPES)
+        if not finding_type
+        else None
+    )
     try:
         findings = get_findings(
             status=status,
             finding_type=finding_type,
             priority=priority,
+            exclude_types=exclude_types,
             limit=limit,
             offset=offset,
         )

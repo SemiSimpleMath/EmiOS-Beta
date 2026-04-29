@@ -7,6 +7,9 @@ Steps (run in order, each self-manages its own sessions):
   3. duplicate_scan             — three-tier candidates + LLM confirm (most expensive)
   4. pagerank                   — weighted PageRank, writes scores   (cheap, no LLM)
   5. description_fill           — LLM descriptions for top-N nodes   (LLM, batched)
+  6. missing_dates_scan         — bounded-category States/Events with NULL start_date,
+                                  scored by top-2 sum of connected entity pageranks
+                                  (cheap, structural; feeds the date-gap question queue)
 
 Execution of findings is NOT automatic — findings land in kg_maintenance_finding
 for human review in the /kg-maintenance UI.  The user approves or rejects, then
@@ -88,6 +91,12 @@ class KGMaintenancePipeline:
         ))
         _run_step("state_decay", lambda: (
             __import__("app.assistant.pipelines.kg_maintenance_pipeline.step_state_decay", fromlist=["run"]).run(ctx)
+        ))
+        # Pagerank must run before this so connected-entity scores reflect
+        # the most recent graph state. pagerank is step 4 above; this is
+        # step 6, so ordering is correct as long as 'pagerank' isn't skipped.
+        _run_step("missing_dates_scan", lambda: (
+            __import__("app.assistant.pipelines.kg_maintenance_pipeline.step_missing_dates_scan", fromlist=["run"]).run(ctx)
         ))
 
         # Final pass: hand any findings produced by this run (orphan_scan,

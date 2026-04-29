@@ -200,12 +200,17 @@ def get_findings(
     status: Optional[str] = "pending",
     finding_type: Optional[str] = None,
     priority: Optional[str] = None,
+    exclude_types: Optional[list[str]] = None,
     limit: int = 200,
     offset: int = 0,
 ) -> list[dict]:
     """
     Return findings as plain dicts sorted high → medium → low, then newest first.
     Enriches each finding with resolved node labels and edge counts.
+
+    ``exclude_types`` removes findings of the listed finding_types from the
+    result. Used by the main dashboard to hide background queues (date-gap
+    questions, etc.) that have their own dedicated page.
     """
     session = get_session()
     try:
@@ -216,6 +221,8 @@ def get_findings(
             q = q.filter(KGMaintenanceFinding.finding_type == finding_type)
         if priority:
             q = q.filter(KGMaintenanceFinding.priority == priority)
+        if exclude_types:
+            q = q.filter(~KGMaintenanceFinding.finding_type.in_(exclude_types))
         q = q.order_by(_priority_order_expr(), KGMaintenanceFinding.created_at.desc())
         rows = q.limit(limit).offset(offset).all()
         findings = [_to_dict(r) for r in rows]
