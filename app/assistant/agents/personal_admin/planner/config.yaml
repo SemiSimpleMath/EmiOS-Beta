@@ -24,3 +24,24 @@ user_context_items:
 system_context_items:
   - tool_descriptions
   - resource_personal_admin_user_prefs
+
+# Skill resources injected into the system prompt only when the task or
+# inbound message contains a matching keyword. Saves prompt budget on
+# tasks where the skill is not relevant. Same mechanism as playwright/
+# planner's site-specific guidance (doordash/cnn/bbc).
+#
+# Pod skill: triggered by media-related vocabulary or the literal pod
+# URI scheme. If none of these appear, the find-and-email + email-pod
+# workflows are not loaded.
+task_keyword_resources:
+  pod: resource_pod_skill_guidelines
+  datapod: resource_pod_skill_guidelines
+  picture: resource_pod_skill_guidelines
+  pic: resource_pod_skill_guidelines
+  photo: resource_pod_skill_guidelines
+  image: resource_pod_skill_guidelines
+  video: resource_pod_skill_guidelines
+  recording: resource_pod_skill_guidelines
+  attachment: resource_pod_skill_guidelines
+  attached: resource_pod_skill_guidelines
+  receipt: resource_pod_skill_guidelines
