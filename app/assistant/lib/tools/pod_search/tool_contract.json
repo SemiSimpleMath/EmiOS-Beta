@@ -1,6 +1,6 @@
 {
   "name": "pod_search",
-  "description": "Search pod_store for pod HEADERS (not full bodies). Use this to browse candidate pods, then call pod_fetch on the pod_ids you want to open.\n\nPods are retrievable memory units about the user.\n\nWHEN THE USER ASKS ABOUT A SPECIFIC TOPIC / PERSON / CONVERSATION: use `query` with 1-3 content keywords. Do NOT put people or topics in `tags`.\n\nExamples:\n- 'conversation with Justin about knowledge graphs' → `query='knowledge graph'` (stem-matched so 'graphs' finds 'graph')\n- 'what did I eat yesterday' → `tags=['food'], since='1d'`\n- 'creamer discussion' → `query='creamer'`\n\nParameters:\n- `query` (PREFERRED for topic/person/keyword search): substring match over one_liner + body; multi-word queries are tokenized AND-matched with plural stemming.\n- `tags`: fixed vocabulary ONLY — food, entertainment, health, schedule, work. NEVER invent tag names.\n- `since`: '24h', '3d', '2w', '1m', 'today', or ISO timestamp.\n\nIF A SEARCH RETURNS 0 PODS: drop filters and retry — drop tags, try a different query keyword, or expand since. Do NOT give up after one empty result.",
+  "description": "Search pod_store for pod HEADERS (not full bodies). Use this to browse candidate pods, then call pod_fetch on the pod_ids you want to open.\n\nPods are retrievable memory units about the user.\n\nWHEN THE USER ASKS ABOUT A SPECIFIC TOPIC / PERSON / CONVERSATION: use `query` with 1-3 content keywords. Do NOT put people or topics in `tags`.\n\nExamples:\n- 'conversation with Justin about knowledge graphs' → `query='knowledge graph'` (stem-matched so 'graphs' finds 'graph')\n- 'what did I eat yesterday' → `tags=['food'], since='1d'`\n- 'creamer discussion' → `query='creamer'`\n- 'emails from Acme this week' → `kind='email', query='Acme', since='7d'`\n- 'recent invoice emails' → `kind='email', query='invoice', since='2w'`\n\nParameters:\n- `query` (PREFERRED for topic/person/keyword search): substring match over one_liner + body; multi-word queries are tokenized AND-matched with plural stemming.\n- `kind`: restrict to one pod kind. Valid: 'chat_cluster', 'email'. Use 'email' to search the user's email pods specifically.\n- `tags`: fixed vocabulary ONLY — food, entertainment, health, schedule, work. NEVER invent tag names. (Tags are populated for chat pods only; emails currently have no tags.)\n- `since`: '24h', '3d', '2w', '1m', 'today', or ISO timestamp.\n\nIF A SEARCH RETURNS 0 PODS: drop filters and retry — drop tags, try a different query keyword, or expand since. Do NOT give up after one empty result.",
   "inputs": [
     {
       "name": "query",
@@ -9,10 +9,16 @@
       "description": "Free-text substring matched against pod one_liner and body (case-insensitive). Pods with matches in one_liner rank above body-only matches. Use single meaningful words like 'knowledge graph' or 'Justin', not multi-concept queries."
     },
     {
+      "name": "kind",
+      "type": "string",
+      "required": false,
+      "description": "Restrict to one pod kind. Currently 'chat_cluster' or 'email'. When searching the user's mailbox, set kind='email' to skip chat pods."
+    },
+    {
       "name": "tags",
       "type": "array",
       "required": false,
-      "description": "Fixed taxonomy. Valid values ONLY: food, entertainment, health, schedule, work. OR-match within the list. Example: ['food','health']. For people / topics / keywords, use `query` instead."
+      "description": "Fixed taxonomy. Valid values ONLY: food, entertainment, health, schedule, work. OR-match within the list. Example: ['food','health']. For people / topics / keywords, use `query` instead. Tags are populated for chat_cluster pods only — email pods have no tags."
     },
     {
       "name": "since",
@@ -39,7 +45,7 @@
       "description": "Structured: {count, pods: [{pod_id, tags, one_liner, scope_id, created_at, created_by, content_type}]}."
     }
   ],
-  "arguments_prompt": "Arguments for pod_search:\n- query (optional): comma-separated search keywords for finding relevant pods\n- tags (optional): {food, entertainment, health, schedule, work}\n- since (optional): '24h' / '3d' / '1w' / 'today' / ISO\n- limit (optional): default 20",
+  "arguments_prompt": "Arguments for pod_search:\n- query (optional): comma-separated search keywords for finding relevant pods\n- kind (optional): 'chat_cluster' | 'email' — narrow to one source\n- tags (optional): {food, entertainment, health, schedule, work} (chat_cluster pods only)\n- since (optional): '24h' / '3d' / '1w' / 'today' / ISO\n- limit (optional): default 20",
   "metadata": {
     "category": "pod_store",
     "verbs": ["read"],

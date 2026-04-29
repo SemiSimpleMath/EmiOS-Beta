@@ -95,6 +95,7 @@ class PodStoreTool(BaseTool):
             raise ValueError("`tags` must be a list of strings")
         since = arguments.get("since") or None
         query = (arguments.get("query") or "").strip() or None
+        kind = (arguments.get("kind") or "").strip() or None
         raw_limit = arguments.get("limit")
         limit = int(raw_limit) if raw_limit is not None else 20
 
@@ -107,6 +108,7 @@ class PodStoreTool(BaseTool):
         pods = self._ensure_store().query(
             tags=tags,
             scope=scope,
+            kind=kind,
             since=since,
             query=query,
             limit=limit,
@@ -114,6 +116,7 @@ class PodStoreTool(BaseTool):
         headers = [_pod_to_header(p) for p in pods]
         summary_line = (
             f"Found {len(headers)} pod(s)"
+            + (f" of kind={kind!r}" if kind else "")
             + (f" matching '{query}'" if query else "")
             + (f" tagged {tags}" if tags else "")
             + (f" since {since}" if since else "")

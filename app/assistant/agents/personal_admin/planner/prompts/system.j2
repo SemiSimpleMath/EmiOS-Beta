@@ -43,6 +43,24 @@ Domain-Specific Rules:
 - For email thread continuity tasks, prefer `get_email_thread` over broad `get_important_emails` date-range scans when a thread id/seed message can be identified.
 - For conversation lookup by contact email, call `get_email_thread` with `participant_email` first; use `get_important_emails` for a recent inbox triage window or `get_email_messages` for a query-driven search.
 
+Email pods (preferred for "find by sender / scan recent" tasks):
+- Every inbound email is auto-minted as a `kind=email` pod in pod_store.
+  Subject + sender + account + uid live in pod metadata; the body lives
+  in the pod and is read via `pod_fetch` only when needed.
+- For tasks like "did I get an email from X today?", "what was that
+  invoice email about?", "show me recent emails from <sender>", the
+  preferred path is `pod_search` with `kind=email` + sender / scope /
+  since filters. This is faster and cheaper than `get_important_emails`
+  / `get_email_messages` because it doesn't hit Gmail.
+- Workflow: `pod_search` returns headers (one_liner = "Sender: Subject")
+  + pod_ids. **Pass the pod_ids forward in your output text, do NOT
+  inline the bodies.** A downstream agent or the user-facing renderer
+  will redeem the body via `pod_fetch` when it actually needs the text.
+- Fall back to `get_email_*` tools only when (a) the email predates the
+  pod system (older emails were never minted), (b) you need a
+  fresh-from-Gmail action like `send_email` / `trash_emails`, or (c)
+  pod_search returns nothing for an obviously-recent message.
+
 Critical Instructions:
 Sufficiency: If a tool like email or calendar returns no results, assume there genuinely are none. This is a valid result. Do not re-run the search hoping for a different outcome.
 

@@ -113,6 +113,7 @@ class PodStore:
         for_agent: Optional[str] = None,
         tags: Optional[Sequence[str]] = None,
         scope: Optional[str] = None,
+        kind: Optional[str] = None,
         since: Optional[Union[datetime, str]] = None,
         since_utc: Optional[datetime] = None,
         query: Optional[str] = None,
@@ -125,6 +126,9 @@ class PodStore:
           JSON (good enough at small scale; revisit for >10k pods).
         - ``tags``: restrict to pods whose tags include any of these.
         - ``scope``: only pods whose ``scope_id`` exactly matches (room_id).
+        - ``kind``: only pods of this kind (e.g. ``"email"``,
+          ``"chat_cluster"``). Useful to narrow a free-text query to one
+          source.
         - ``since``: only pods created after this. Accepts a datetime OR a
           shorthand string: ``"24h"``, ``"3d"``, ``"2w"``, ``"today"``, or
           an ISO timestamp. ``since_utc`` kept for backward compatibility.
@@ -149,6 +153,8 @@ class PodStore:
                     q = q.filter(PodRow.created_at >= resolved_since)
                 if scope:
                     q = q.filter(PodRow.scope_id == scope)
+                if kind:
+                    q = q.filter(PodRow.kind == kind)
                 if for_agent:
                     # LIKE on the JSON-serialized list. SQLite stores JSON
                     # arrays as text like `["meal_planner","health_watcher"]`.
