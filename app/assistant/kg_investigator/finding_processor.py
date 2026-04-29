@@ -21,12 +21,45 @@ from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
 from app.assistant.kg_investigator.finding_brief import build_finding_brief
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.pydantic_classes import Message
+from app.assistant.utils.pydantic_classes import (
+    Message,
+    ScopeApprovalPolicy,
+    ScopeContext,
+    ScopeResourcePolicy,
+    ScopeWritePolicy,
+)
 from app.models.db_manager import get_db_manager
 
 logger = get_logger(__name__)
 
 MANAGER_NAME = "kg_investigation_manager"
+
+
+def _investigation_scope() -> ScopeContext:
+    """Scope context for the kg_investigation_manager.
+
+    The investigator reads the KG / wiki / evidence and writes a structured
+    report onto the kg_maintenance_finding row (status: pending -> investigated).
+    It does NOT mutate KG nodes/edges — that's the executor's job after the
+    user approves the finding. So write_kg stays False here.
+
+    Strict scope mode requires every Message at manager ingress to carry a
+    scope_context; without this the manager refuses ingress with
+    "Missing scope_context at manager ingress while strict scope mode is
+    enabled". Both entry points (the pipeline-internal _investigate_findings_for_run
+    and the on-demand /kg-maintenance/api/finding/<id>/investigate route)
+    pass through investigate_one(), so building the scope here covers both.
+    """
+    return ScopeContext(
+        scope_id="scope::kg_investigator::finding_processor",
+        owner_id="jukka",
+        actor_id="kg_finding_investigator",
+        surface="system",
+        room_id=None,
+        approval=ScopeApprovalPolicy(authority_level=100),
+        resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
+        writes=ScopeWritePolicy(write_kg=False, write_unified_log=False),
+    )
 
 
 def _claim_pending_finding_ids(*, limit: int, finding_types: Optional[List[str]] = None) -> List[str]:
@@ -94,7 +127,7 @@ def investigate_one(finding_id: str) -> Dict[str, Any]:
     task, information = brief
 
     mgr = DI.multi_agent_manager_factory.create_manager(MANAGER_NAME)
-    msg = Message(task=task, information=information)
+    msg = Message(task=task, information=information, scope_context=_investigation_scope())
     try:
         DI.manager_invoker.invoke(mgr, msg)
     except Exception as e:
