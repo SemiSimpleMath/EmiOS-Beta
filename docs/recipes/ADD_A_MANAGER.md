@@ -110,7 +110,6 @@ The planner picks the next action. Most derived managers' planners are `Agent` (
 # app/assistant/agents/my_domain/planner/config.yaml
 name: my_domain::planner
 class_name: Agent
-color: "purple"
 
 llm_params:
   llm_provider: openai

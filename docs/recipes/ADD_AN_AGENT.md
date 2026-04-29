@@ -31,7 +31,6 @@ Sometimes you also want:
 ```yaml
 name: my_agent                       # canonical name; matches directory path
 class_name: Agent                    # one of Agent, Planner, MultiToolAgent
-color: "blue"                        # UI hint
 
 llm_params:
   llm_provider: openai               # openai | gemini | anthropic

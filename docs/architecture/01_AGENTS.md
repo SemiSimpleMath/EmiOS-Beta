@@ -43,7 +43,6 @@ agents/
 ```yaml
 name: agent_name                    # Canonical name (may include ::)
 class_name: Agent                   # Base class: Agent | Planner | MultiToolAgent
-color: "green"                      # UI color hint
 
 llm_params:
   llm_provider: openai              # Provider: openai | gemini | anthropic
