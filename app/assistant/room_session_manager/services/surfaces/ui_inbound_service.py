@@ -92,6 +92,16 @@ class UiInboundService:
             for att in atts:
                 if not isinstance(att, dict) or att.get("type") != "image":
                     continue
+                # Prefer the pod URI when an image pod was minted at upload
+                # time. The naked datapod:image:... URI lets the entity
+                # resolver, fact_extractor, and PodInjector pick it up
+                # uniformly — no marker syntax to teach each agent. Fall
+                # back to the legacy path marker only when ingest_image_file
+                # failed (process_request.py logs a warning in that case).
+                pod_id = str(att.get("pod_id") or "").strip()
+                if pod_id:
+                    image_markers.append(pod_id)
+                    continue
                 path = str(att.get("path") or "").strip()
                 if not path:
                     continue

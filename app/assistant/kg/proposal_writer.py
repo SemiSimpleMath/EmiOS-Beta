@@ -421,6 +421,20 @@ def write_one_proposal_group(
             temp_to_uuid[extractor_tid] = row.id
         stats["nodes_written"] = stats.get("nodes_written", 0) + 1
 
+    # Pod URIs (e.g., datapod:image:abc...) are already valid kg_node ids —
+    # see app/assistant/pod_store/kg_mirror.py. The fact_extractor emits
+    # them verbatim as edge endpoints when an attached image / video / email
+    # is the subject. Treat them as pre-resolved temp_id → uuid mappings so
+    # the edge writer doesn't drop them as "endpoint missing temp_id mapping".
+    from app.assistant.pod_store.pod_uri import POD_URI_RE
+    for e in edges:
+        src_tid = str(e.get("source") or e.get("source_temp_id") or "")
+        tgt_tid = str(e.get("target") or e.get("target_temp_id") or "")
+        if src_tid and POD_URI_RE.fullmatch(src_tid):
+            temp_to_uuid.setdefault(src_tid, src_tid)
+        if tgt_tid and POD_URI_RE.fullmatch(tgt_tid):
+            temp_to_uuid.setdefault(tgt_tid, tgt_tid)
+
     for e in edges:
         src_tid = str(e.get("source") or e.get("source_temp_id") or "")
         tgt_tid = str(e.get("target") or e.get("target_temp_id") or "")

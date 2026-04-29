@@ -154,17 +154,44 @@ def handle_normal_processing(text, socket_id, speaking_mode, timer_id, request_i
             except Exception:
                 logger.debug("Could not remove original upload at %s", original_path, exc_info=True)
 
-            metadata["attachments"] = [
-                {
-                    "type": "image",
-                    "path": processed_path,
-                    "original_filename": original_filename,
-                    "content_type": image_file.mimetype,
-                    "size_bytes": int(size_bytes or 0),
-                    "processed_width": processed.output_width,
-                    "processed_height": processed.output_height,
-                }
-            ]
+            attachment_record: dict = {
+                "type": "image",
+                "path": processed_path,
+                "original_filename": original_filename,
+                "content_type": image_file.mimetype,
+                "size_bytes": int(size_bytes or 0),
+                "processed_width": processed.output_width,
+                "processed_height": processed.output_height,
+            }
+
+            # Mint an image pod from the uploaded file. This copies the
+            # bytes into data/images/<hash>/, writes a kg_node mirror
+            # (so KG edges can target the pod), and stamps a sidecar
+            # next to the stored copy. The pod_id is what flows through
+            # the chat pipeline as a marker the fact_extractor can act
+            # on; the temp upload path is for UI rendering only.
+            try:
+                from app.assistant.pod_store.image_ingest import ingest_image_file
+                from pathlib import Path as _Path
+                pod = ingest_image_file(
+                    src_path=_Path(processed_path),
+                    source_kind="chat_attachment",
+                    metadata_extra={
+                        "chat_request_id": request_id,
+                        "original_filename": original_filename,
+                        "content_type": image_file.mimetype,
+                    },
+                )
+                attachment_record["pod_id"] = pod.pod_id
+                logger.info("[process_request] minted image pod %s for request_id=%s",
+                            pod.pod_id, request_id)
+            except Exception as e:
+                logger.warning("[process_request] image_ingest failed: %s — chat will use legacy path marker", e)
+                logger.debug("image_ingest failure details", exc_info=True)
+                # attachment_record["pod_id"] stays absent; downstream falls
+                # back to the path-based marker so chat still works.
+
+            metadata["attachments"] = [attachment_record]
 
         reply_to = {"type": "socketio", "room_id": target_room, "tts_requested": bool(speaking_requested)}
         metadata["reply_to"] = reply_to

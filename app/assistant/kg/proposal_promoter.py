@@ -965,9 +965,24 @@ def _evaluate_and_apply(
     # Build quick lookup of resolved_node_id by proposal_node.id
     resolved_lookup: Dict[str, Optional[str]] = {pn.id: pn.resolved_node_id for pn in pnodes}
 
+    # Pod URIs (datapod:<kind>:<id>) bypass proposal-node resolution because
+    # they are already valid kg_node_metadata ids via kg_mirror — the pod
+    # node is minted at PodStore.put() time. The fact_extractor + proposal
+    # writer thread these URIs through verbatim; here the promoter accepts
+    # them as already-resolved endpoints.
+    from app.assistant.pod_store.pod_uri import POD_URI_RE
+
+    def _resolve_endpoint(pn_id: str) -> Optional[str]:
+        v = resolved_lookup.get(pn_id)
+        if v is not None:
+            return v
+        if pn_id and POD_URI_RE.fullmatch(pn_id):
+            return pn_id  # pod URI is its own kg_node_metadata id
+        return None
+
     for pe in pedges:
-        src_kg = resolved_lookup.get(pe.source_node_id)
-        tgt_kg = resolved_lookup.get(pe.target_node_id)
+        src_kg = _resolve_endpoint(pe.source_node_id)
+        tgt_kg = _resolve_endpoint(pe.target_node_id)
         if src_kg is None or tgt_kg is None:
             # dry-run may leave new nodes without resolved_node_id — mark skipped
             dec.edge_outcomes.append(

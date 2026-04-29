@@ -195,3 +195,65 @@ Examples:
 CRITICAL:
 ASSISTANT TEXT IS ONLY PROVIDED FOR CONTEXT. DO NOT GENERATE ENTITIES EDGES OR ATTRIBUTE ANYTHING ASSISTANT SAYS AS EVIDENCE USER HAS DONE THE THINGS ASSISTANT SAYS OR BELIEVES THINGS ASSISTANT SAYS.
 YOU ARE ONLY TO USE ASSISTANT TEXT AS CONTEXT. NODES AND EDGES ONLY COME FROM USER STATEMENTES!
+
+## POD URI HANDLING — attached media / artifacts as edge targets
+
+A sentence may contain a token of the shape `datapod:<kind>:<id>`
+(e.g., `datapod:image:abc12345...`, `datapod:video:def67890...`,
+`datapod:email:ghi...`). These are ALREADY-EXISTING node ids — the
+attached image / video / email / etc. has been minted as a "Pod" node
+in the KG via a separate ingest path. You are NOT a separate `entity`
+node for the pod; you are referencing an existing node by id.
+
+**Treat the URI as a target_id (or source_id) verbatim:**
+- Do NOT mint a new node for the pod. Do NOT use it as a "label".
+- Do NOT split or paraphrase the URI. Pass it through exactly as it appears.
+- The URI substitutes for a temp_id when constructing edges.
+
+**Edge-type vocabulary for pod targets, by kind:**
+
+| Pod kind | Default-safe edge | Intent-flavored upgrades |
+|---|---|---|
+| image | `depicted_in` | `has_profile_image` (when user calls it their/Katy's/etc. profile or canonical photo), `has_screenshot`, `has_receipt` (transaction docs) |
+| video | `depicted_in` | `has_video`, `has_recording` |
+| audio | `mentioned_in` | `has_recording`, `has_voicemail` |
+| email | `mentioned_in` | `invoiced_via`, `replied_to` |
+| chat_cluster | `discussed_in` | (rare; mostly historical reference) |
+
+**Direction: KG-node → Pod**, always. Edge runs FROM the entity / event / state node TO the pod URI. Reads as "Jukka is depicted in this pod" / "Peter's Birth has this video."
+
+**Default-safe rule:** when the user's framing is ambiguous, emit the kind's default edge. When the framing is clearly possessive/canonical ("here is my profile picture", "use this as my photo"), ALSO emit the intent-flavored edge alongside the default. One canonical (`has_profile_image`) edge per entity is the convention; many `depicted_in` edges from anywhere is fine.
+
+### Pod URI examples
+
+**"Here is a picture of me datapod:image:abc12345xyz9000123def"**
+- Speaker is the user; "of me" → speaker is depicted; "here is a picture of me" framing is ambiguous between casual and canonical.
+- Nodes:
+    * temp_id: "entity_1", label: "{{ resource_user_data.preferred_name }}", node_type: "Entity", sentence: "Here is a picture of {{ resource_user_data.preferred_name }} datapod:image:abc12345xyz9000123def"
+- Edges:
+    * source: "entity_1", target: "datapod:image:abc12345xyz9000123def", label: "depicted_in", sentence: "{{ resource_user_data.preferred_name }} is depicted in this image."
+
+**"Here is my profile picture datapod:image:def67890..."**
+- "my profile picture" is the canonical framing — emit BOTH default and intent-flavored.
+- Edges:
+    * source: "entity_1", target: "datapod:image:def67890...", label: "depicted_in", sentence: "{{ resource_user_data.preferred_name }} is depicted in this image."
+    * source: "entity_1", target: "datapod:image:def67890...", label: "has_profile_image", sentence: "{{ resource_user_data.preferred_name }}'s profile image is this image."
+
+**"Video of Peter's birthday party datapod:video:abc..."**
+- An event-anchored video; the event itself is the natural source of the `has_video` edge.
+- Nodes:
+    * temp_id: "entity_1", label: "Peter", node_type: "Entity"
+    * temp_id: "event_1", label: "Birthday Party", node_type: "Event", sentence: "Peter's birthday party."
+- Edges:
+    * source: "entity_1", target: "event_1", label: "honoree", sentence: "Peter is the honoree of the birthday party."
+    * source: "event_1", target: "datapod:video:abc...", label: "has_video", sentence: "The birthday party has a video."
+    * source: "entity_1", target: "datapod:video:abc...", label: "depicted_in", sentence: "Peter is depicted in this video."
+
+**"Receipt from Chipotle datapod:image:ghi..."**
+- Receipt → `has_receipt` is the intent-flavored upgrade; the underlying transaction is the anchor.
+- Nodes:
+    * temp_id: "entity_1", label: "Chipotle", node_type: "Entity"
+    * temp_id: "event_1", label: "Purchase", node_type: "Event", sentence: "A purchase was made at Chipotle."
+- Edges:
+    * source: "event_1", target: "entity_1", label: "vendor", sentence: "The purchase was at Chipotle."
+    * source: "event_1", target: "datapod:image:ghi...", label: "has_receipt", sentence: "The Chipotle purchase has a receipt."
