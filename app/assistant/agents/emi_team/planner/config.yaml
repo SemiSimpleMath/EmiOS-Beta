@@ -29,3 +29,24 @@ system_context_items:
   - tool_descriptions
   - allowed_nodes
   - task
+
+# emi_team's role with pods is FINDING — search pod_store / KG for
+# pods matching what the user asked for, return pod_ids forward.
+# Acting on a found pod (attaching it to an email, etc.) belongs to
+# personal_admin, which gets a separate _admin skill triggered by
+# attach/forward vocabulary.
+#
+# Trigger keywords: search vocabulary + media kinds + the pod scheme.
+task_keyword_resources:
+  pod: resource_pod_skill_finder
+  datapod: resource_pod_skill_finder
+  picture: resource_pod_skill_finder
+  pic: resource_pod_skill_finder
+  photo: resource_pod_skill_finder
+  image: resource_pod_skill_finder
+  video: resource_pod_skill_finder
+  recording: resource_pod_skill_finder
+  audio: resource_pod_skill_finder
+  receipt: resource_pod_skill_finder
+  invoice: resource_pod_skill_finder
+  conversation: resource_pod_skill_finder

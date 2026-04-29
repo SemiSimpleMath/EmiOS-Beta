@@ -264,7 +264,8 @@ resources/instructions/*
 !resources/instructions/resource_bbc_guidelines.md
 !resources/instructions/resource_cnn_guidelines.md
 !resources/instructions/resource_doordash_guidelines.md
-!resources/instructions/resource_pod_skill_guidelines.md
+!resources/instructions/resource_pod_skill_finder.md
+!resources/instructions/resource_pod_skill_admin.md
 
 # Personal soul/identity doc
 SOUL.md

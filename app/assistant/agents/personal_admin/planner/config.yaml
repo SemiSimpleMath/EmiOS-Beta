@@ -27,21 +27,22 @@ system_context_items:
 
 # Skill resources injected into the system prompt only when the task or
 # inbound message contains a matching keyword. Saves prompt budget on
-# tasks where the skill is not relevant. Same mechanism as playwright/
-# planner's site-specific guidance (doordash/cnn/bbc).
+# tasks where the skill is not relevant.
 #
-# Pod skill: triggered by media-related vocabulary or the literal pod
-# URI scheme. If none of these appear, the find-and-email + email-pod
-# workflows are not loaded.
+# personal_admin's responsibility is acting on pods (attaching to
+# email, fetching to read) — NOT searching for them. Finding pods is
+# emi_team's job (see emi_team/planner/config.yaml). When a task
+# arrives here with pod_ids already in it (or in referenced_pods), the
+# admin skill teaches the right tool composition.
+#
+# Trigger keywords are narrow: explicit pod URI scheme, "attach"-
+# shaped vocabulary, and "email" in combination with media kinds (which
+# is what implies "act on a pod" rather than "find a pod").
 task_keyword_resources:
-  pod: resource_pod_skill_guidelines
-  datapod: resource_pod_skill_guidelines
-  picture: resource_pod_skill_guidelines
-  pic: resource_pod_skill_guidelines
-  photo: resource_pod_skill_guidelines
-  image: resource_pod_skill_guidelines
-  video: resource_pod_skill_guidelines
-  recording: resource_pod_skill_guidelines
-  attachment: resource_pod_skill_guidelines
-  attached: resource_pod_skill_guidelines
-  receipt: resource_pod_skill_guidelines
+  datapod: resource_pod_skill_admin
+  attach: resource_pod_skill_admin
+  attached: resource_pod_skill_admin
+  attachment: resource_pod_skill_admin
+  forward: resource_pod_skill_admin
+  unfurl: resource_pod_skill_admin
+  pod_id: resource_pod_skill_admin
