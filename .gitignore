@@ -209,6 +209,18 @@ resources/user/resource_user_data.json
 resources/user/user_bio.json
 resources/user/resource_wiki_sections.json
 resources/user/.setup_draft.json
+
+# Identity images (profile photos of user / family / pets / places)
+# README.md is tracked; everything else is personal.
+resources/identity/*.jpg
+resources/identity/*.jpeg
+resources/identity/*.png
+resources/identity/*.heic
+resources/identity/*.heif
+resources/identity/*.webp
+resources/identity/*.gif
+resources/identity/*.bmp
+resources/identity/*.emipod.json
 # resources/memory/ — entire directory removed 2026-04-28 (was the storage
 # layer for the dead memory_apply_fact subsystem). user_bio migrated to
 # resources/user/; the rest of memory/ was dead.

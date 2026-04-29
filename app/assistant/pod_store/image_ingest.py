@@ -220,6 +220,18 @@ def ingest_image_file(
         metadata=metadata,
     )
     store.put(pod)
+
+    # Stamp the destination file with its pod_id so a reconciler can
+    # find it later regardless of how it gets renamed/moved. See
+    # file_stamp.py for the sidecar format. Best-effort: stamp failure
+    # logs a warning but doesn't fail ingestion (the content-addressed
+    # storage path is enough on its own to recover the pod).
+    try:
+        from app.assistant.pod_store.file_stamp import write_stamp
+        write_stamp(dest, pod_id=pod_id, sha256=sha256, extra={"source_kind": source_kind})
+    except Exception as e:
+        logger.warning("[image_ingest] could not stamp %s: %s", dest, e)
+
     logger.info("[image_ingest] minted image pod %s sha256=%s... %s %skb",
                 pod_id, sha256[:12], dims_str, file_size // 1024)
     return pod
