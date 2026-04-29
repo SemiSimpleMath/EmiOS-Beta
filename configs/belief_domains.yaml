@@ -39,7 +39,7 @@
 domains:
   - id: routine
     enabled: true
-    decay_enabled: false
+    decay_enabled: true
     tags: [routine, schedule, general]
     ticket_types:
       - standing_break
