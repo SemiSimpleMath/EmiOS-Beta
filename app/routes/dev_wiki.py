@@ -31,7 +31,7 @@ dev_wiki_bp = Blueprint("dev_wiki", __name__)
 DOCS_ROOT = Path(__file__).resolve().parent.parent.parent / "docs"
 INDEX_DOC = "INDEX.md"
 EXCLUDED_SUBDIRS = {"audits", "drafts", "archived"}
-GITHUB_DOCS_BASE = "https://github.com/SemiSimpleMath/EmiOS-Alpha/blob/master/docs/"
+GITHUB_DOCS_BASE = "https://github.com/SemiSimpleMath/EmiOS-Beta/blob/release-v0.1/docs/"
 
 
 # ---------------------------------------------------------------------------
