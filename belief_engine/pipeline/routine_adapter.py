@@ -49,6 +49,11 @@ class BeliefEngineAdapter:
     loop — the adapter collects per-domain results then raises once at
     the end if any domain failed, so routine_manager records the run as
     failed with a summary of which domains broke.
+
+    On success, the adapter calls export_beliefs() at the end so the
+    exported JSON stays in lock-step with the DB. This replaces the
+    previously-separate fixed-time belief_engine_export routine, which
+    raced if belief_engine ran long.
     """
 
     pipeline_id = "belief_engine"
@@ -99,10 +104,18 @@ class BeliefEngineAdapter:
                 f"{', '.join(failed_domains)} (successes={successes})"
             )
 
+        # Export inline so the JSON cannot diverge from the DB. If export
+        # raises, the routine fails loudly — better than scheduling export
+        # at a fixed time and risking a race against a slow upstream run.
+        from belief_engine.export.export_beliefs import export_beliefs
+        out_path = export_beliefs()
+        logger.info("[BeliefEngineAdapter] export complete → %s", out_path)
+
         return {
             "pipeline_id": self.pipeline_id,
             "status": "success",
             "successes": successes,
             "failures": 0,
             "results": results,
+            "export_path": str(out_path),
         }

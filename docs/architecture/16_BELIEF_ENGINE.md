@@ -68,14 +68,14 @@ The `id` becomes the `domain` column on belief rows, so renaming a domain breaks
 
 ## 3. Scheduling
 
-Two routine entries:
+One scheduled routine, one disabled-by-default routine kept for manual re-export:
 
 | Routine | Time | What it does |
 | --- | --- | --- |
-| `belief_engine` | 00:30 daily | Calls `BeliefEngineAdapter.run()` — loops every enabled domain in YAML order, running the four-step pipeline for each. |
-| `belief_engine_export` | 01:00 daily | Calls `export_beliefs()` — merges all active beliefs from every domain into `resources/kg_derived/resource_user_beliefs.json`. Content-guarded: file is only rewritten when something changed. |
+| `belief_engine` | 00:30 daily | Calls `BeliefEngineAdapter.run()` — loops every enabled domain in YAML order, running the four-step pipeline for each. On success, calls `export_beliefs()` inline as the final step so the exported JSON cannot diverge from the DB. |
+| `belief_engine_export` | (disabled) | Pipeline registration kept; routine `enabled: false`. Use `/run-routine belief_engine_export` for a manual re-export. Content-guarded: file is only rewritten when something changed. |
 
-The 30-minute gap between the two is generous; in practice the unified pipeline takes a few minutes (one LLM pass per domain × 4 steps × 7 domains, with the conditional re-evaluator skipping when beliefs haven't drifted).
+> Historical: prior to 2026-04-28, the export was a separate scheduled routine at 01:00 daily. Two-routine scheduling assumed the upstream `belief_engine` finished within 30 minutes; if it ran long, the export read partial DB state. Inlining the export into the same routine guarantees they're atomic — if the domain loop fails, export does not run and the previous good JSON stays in place.
 
 > Historical: prior to 2026-04-27, each domain had its own `belief_engine_<domain>` pipeline registration plus its own routine entry, scheduled five minutes apart (00:30, 00:35, …, 00:55). The split into seven routines was over-engineered — the pipeline class was already domain-parametric, so the seven registrations all wrapped the same class with a different argument. They have been collapsed to one routine that loops over the YAML.
 
@@ -166,9 +166,9 @@ One row per signal that touched a belief. `belief_id` is `ON DELETE CASCADE` aga
 
 Embeddings are upserted on every `BeliefStore.upsert_belief` (`belief_store.py:299-304`) and deleted on merge (`belief_store.py:441-443`). Plain `deprecate()` does **not** delete the embedding — only `merge_belief()` does. This is a real consequence: deprecated-but-not-merged beliefs can still surface in `find_similar` searches; `BeliefStore.find_similar` filters them out by re-checking `status == "active"` after the Chroma hit (`belief_store.py:218-220`).
 
-## 5. The export step (`belief_engine_export`)
+## 5. The export step (`export_beliefs`)
 
-`belief_engine/export/export_beliefs.py`. Adapted to the pipeline runner via `BeliefEngineExportAdapter` in `belief_engine/pipeline/routine_adapter.py:6-33`.
+`belief_engine/export/export_beliefs.py`. Called inline from `BeliefEngineAdapter.run()` after a successful domain loop. Also adapted to the pipeline runner via `BeliefEngineExportAdapter` for manual re-export.
 
 What it does:
 
@@ -176,9 +176,9 @@ What it does:
 2. Serializes each row to a flat dict (`belief_key`, `domain`, `statement`, `confidence`, `scope`, `status`, `observation_count`, `first_observed`, `last_confirmed`, optional `conditions`).
 3. Wraps in a `_metadata` envelope (`resource_id`, `schema_version=1.0`, `generated_at`, `entry_count`, plus a description that calls out the user by primary name).
 4. **Content-guard**: serializes just the `beliefs` list (sorted, ignoring metadata) and compares it byte-for-byte against the same projection of the existing file. If unchanged, **the file is not rewritten** (`export_beliefs.py:73-83`). Only the timestamp would have changed otherwise — skipping the write avoids polluting downstream change detection (file-mtime watchers, dayflow stages keyed off the resource).
-5. Writes to `resources/kg_derived/resource_user_beliefs.json`.
+5. Writes atomically to `resources/kg_derived/resource_user_beliefs.json` — the JSON is written to a sibling `.tmp` and renamed, so a crash mid-write leaves the previous good file in place.
 
-The export runs at `01:00` local — five minutes after the last domain pipeline (`communication` at `00:55`). There is no explicit "wait for upstream" gate; the schedule is the synchronisation contract.
+Synchronisation: the export is called inline at the end of `BeliefEngineAdapter.run()` rather than scheduled separately. This is the synchronisation contract — there is no fixed-time gap between the two for a slow upstream run to outrun.
 
 ## 6. Where beliefs surface
 

@@ -225,12 +225,12 @@
         "type": "daily",
         "time_local": "00:30"
       },
-      "notes": "Loops over every domain marked enabled in configs/belief_domains.yaml and updates that domain's beliefs from the last 14 days of daily insights + ticket signals. Adding / disabling a domain is a YAML edit, not a code change. Domain failures are logged but don't abort the rest. The export step (belief_engine_export, 01:00) merges all active beliefs into resource_user_beliefs.json afterward."
+      "notes": "Loops over every domain marked enabled in configs/belief_domains.yaml and updates that domain's beliefs from the last 14 days of daily insights + ticket signals. Adding / disabling a domain is a YAML edit, not a code change. Domain failures are logged but don't abort the rest. After all domains succeed, the adapter exports active beliefs to resource_user_beliefs.json inline — atomic with the run, no fixed-time race against a slow upstream."
     },
     {
       "id": "belief_engine_export",
-      "enabled": true,
-      "name": "Belief engine — export all beliefs",
+      "enabled": false,
+      "name": "Belief engine — manual re-export",
       "aliases": [
         "belief export",
         "beliefs export",
@@ -244,7 +244,7 @@
         "type": "daily",
         "time_local": "01:00"
       },
-      "notes": "Runs once daily after all domain pipelines complete. Exports all active beliefs to resource_user_beliefs.json. Content-guarded — file is only rewritten if beliefs changed."
+      "notes": "DISABLED for scheduled execution — belief_engine now exports inline at the end of its run. Pipeline registration kept so an operator can /run-routine belief_engine_export for a manual re-export. Content-guarded — file only rewrites if beliefs changed."
     },
     {
       "id": "kg_maintenance_pipeline",
