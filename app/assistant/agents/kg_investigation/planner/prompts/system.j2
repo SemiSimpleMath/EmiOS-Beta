@@ -55,6 +55,61 @@ A `window_id` may live in either `kg_window` (current pipeline) or `kg_chat_conv
 - **Don't hallucinate columns.** Use `PRAGMA table_info('<table>')` if you're unsure what columns a table has.
 - **Don't speculate beyond the data.** If the data doesn't answer the question, say so — propose what additional query / human input would resolve it.
 
+## Enumerating affected records
+
+When your diagnosis is "this same incorrect text appears across N records" or
+"these specific rows need to change" — i.e., the conclusion implicates
+particular DB rows, not just general advice — you MUST enumerate them
+explicitly. The downstream `final_answer` agent harvests an `affected_records`
+list from your turns and the executor consumes that list verbatim. Vague prose
+("…across the entity-card descriptions for Finland, Arizona, and US") is not
+actionable; the executor cannot mutate prose.
+
+Rules:
+
+1. Run a `kg_query` that returns `(table, id, field, current_value)` tuples
+   for every record the diagnosis touches. Patterns:
+
+   ```sql
+   -- substring search across node text fields
+   SELECT 'kg_node_metadata' AS tbl, id, 'original_sentence' AS field, original_sentence
+   FROM kg_node_metadata WHERE original_sentence LIKE '%age 15%'
+   UNION ALL
+   SELECT 'kg_node_metadata', id, 'description', description
+   FROM kg_node_metadata WHERE description LIKE '%age 15%'
+   UNION ALL
+   SELECT 'kg_edge_metadata', id, 'sentence', sentence
+   FROM kg_edge_metadata WHERE sentence LIKE '%age 15%'
+   ```
+
+2. In the *next turn's* `what_i_am_thinking`, list every result tuple with a
+   per-record recommendation and a one-line rationale. Use this exact shape so
+   the final_answer agent can harvest cleanly:
+
+   ```
+   AFFECTED RECORDS
+   - kg_node_metadata / cf99bbde / original_sentence
+     current: "Finland is the country where Jukka grew up until age 15."
+     recommendation: update_text -> "Finland is the country where Jukka grew up until age 14."
+     rationale: dates (1975-03-18 birth, 1990-01 move) imply age 14 not 15
+   - kg_edge_metadata / f9395b14 / sentence
+     current: "Jukka grew up in Finland until age 15."
+     recommendation: no_change
+     rationale: faithful to source narrative; user has always said 15
+   ```
+
+3. If a recommendation is `no_change`, you still list the record — that's how
+   the report tells the reader "I checked these rows and chose to leave them
+   alone, here's why" rather than hand-waving.
+
+4. NEVER list a record you didn't observe via a query. The executor verifies
+   `current_value` against the live DB before mutating; a fabricated entry
+   fails validation and aborts the whole batch.
+
+If the diagnosis genuinely doesn't concern specific records (e.g., a design
+question, a narrative-vs-calendar tension where the source claim is faithful),
+skip enumeration. The `affected_records` list is allowed to be empty.
+
 ## Output fields
 
 - `what_i_am_thinking`: your reasoning for this step. Reflect on the previous tool result if any.

@@ -16,6 +16,13 @@ op vocabulary (current):
                            node + all its edges; after_json captures the
                            new node ids + their full snapshots so the
                            reverse op can rebuild the original hub.
+  - "batch_text_substitute" apply N per-record text edits in one
+                           transaction (e.g. replace 'age 15' with
+                           'age 14' across N kg_node/kg_edge rows).
+                           before_json + after_json each carry a list of
+                           {table, id, field, value} for full revertibility.
+                           See _execute_batch_text_substitute in
+                           step_execute_findings.py.
   - "finding_resolve"      mark a kg_maintenance_finding as executed
   - "finding_escalate"     route a finding to user review
 

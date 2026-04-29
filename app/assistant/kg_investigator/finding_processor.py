@@ -94,6 +94,7 @@ def _extract_report_from_audit(blackboard) -> Optional[Dict[str, Any]]:
                     "diagnosis",
                     "evidence",
                     "proposed_action",
+                    "affected_records",
                     "open_questions",
                     "final_answer_answer",
                     "result_summary",

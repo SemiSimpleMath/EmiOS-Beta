@@ -16,6 +16,13 @@ pipeline never runs them autopilot — only the UI's "execute" button does):
     node, and deleting the old hub. Reversible via kg_revision_log
     op="split_state".
 
+  - wiki_contradiction with investigation_report_json.proposed_action.op
+    == "batch_text_substitute" → apply per-record text edits listed in
+    investigation_report_json.affected_records (e.g. replace 'age 15' with
+    'age 14' across N rows). Each record is verified against the live DB
+    before mutating; drift aborts the whole batch. Reversible via
+    kg_revision_log op="batch_text_substitute".
+
 Suspect-node findings are NOT auto-executed — they require human review
 or a redesigned evaluation pipeline.
 
@@ -572,6 +579,173 @@ def _execute_split_state(finding: dict) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Batch text-substitute execution (act on investigation_report_json.affected_records)
+# ---------------------------------------------------------------------------
+
+# Allowlist of text columns the executor may touch. Keeping this tight makes
+# the surface auditable and prevents an investigator from suggesting an op
+# that lands on a column we haven't reasoned about.
+_ALLOWED_NODE_FIELDS = frozenset({"original_sentence", "description", "label"})
+_ALLOWED_EDGE_FIELDS = frozenset({"sentence"})
+
+
+def _execute_batch_text_substitute(finding: dict) -> dict:
+    """Apply a per-record text-substitute plan from `affected_records`.
+
+    Reads ``finding['investigation_report_json']['affected_records']`` (the
+    structured per-row inventory the planner enumerated and the final-answer
+    agent harvested) and applies each entry's recommendation. Validates every
+    record against the live DB before mutating anything — if the
+    `current_value` an investigator observed has drifted (someone else edited
+    the row meanwhile), the entire batch refuses rather than overwriting an
+    unfamiliar value.
+
+    Per-record op handling:
+      - ``update_text``: SET <field> = <new>. Requires current_value match.
+      - ``no_change``:   skip (informational only — counted, not applied).
+      - ``delete_edge`` / ``delete_node``: rejected here; those need their own
+                         dedicated executor primitives (different audit
+                         shapes, irreversibility profile differs).
+
+    All updates run in one transaction. Logs a single ``batch_text_substitute``
+    row to ``kg_revision_log`` with full before/after snapshots so the whole
+    batch can be reverted in one operation.
+    """
+    from app.assistant.kg.db.knowledge_graph_db import Edge, Node
+
+    report = finding.get("investigation_report_json") or {}
+    proposed = report.get("proposed_action") or {}
+    if not isinstance(proposed, dict) or proposed.get("op") != "batch_text_substitute":
+        return {"executed": False, "detail": "proposed_action.op is not 'batch_text_substitute'."}
+
+    affected = report.get("affected_records") or []
+    if not isinstance(affected, list) or not affected:
+        return {"executed": False, "detail": "affected_records is missing or empty — nothing to apply."}
+
+    # Pre-validate every record before touching anything.
+    plan: list[dict] = []
+    skipped_no_change = 0
+    for i, rec in enumerate(affected):
+        if not isinstance(rec, dict):
+            return {"executed": False, "detail": f"affected_records[{i}] is not a dict."}
+        rec_rec = rec.get("recommendation") or {}
+        op = rec_rec.get("op") if isinstance(rec_rec, dict) else None
+        if op == "no_change":
+            skipped_no_change += 1
+            continue
+        if op in ("delete_edge", "delete_node"):
+            return {"executed": False, "detail": (
+                f"affected_records[{i}].recommendation.op={op!r} requires a dedicated "
+                "deletion executor; not handled by batch_text_substitute."
+            )}
+        if op != "update_text":
+            return {"executed": False, "detail": f"affected_records[{i}].recommendation.op={op!r} is not supported (expected update_text|no_change)."}
+
+        table = rec.get("table") or ""
+        record_id = rec.get("id") or ""
+        field = rec.get("field") or ""
+        observed_current = rec.get("current_value")
+        new_value = rec_rec.get("new")
+
+        if not record_id:
+            return {"executed": False, "detail": f"affected_records[{i}].id is missing."}
+        if new_value is None:
+            return {"executed": False, "detail": f"affected_records[{i}] op=update_text requires recommendation.new."}
+        if observed_current == new_value:
+            return {"executed": False, "detail": f"affected_records[{i}] new equals current_value — no-op disguised as update_text."}
+
+        if table == "kg_node_metadata":
+            if field not in _ALLOWED_NODE_FIELDS:
+                return {"executed": False, "detail": f"affected_records[{i}].field={field!r} not in node allowlist {sorted(_ALLOWED_NODE_FIELDS)}."}
+        elif table == "kg_edge_metadata":
+            if field not in _ALLOWED_EDGE_FIELDS:
+                return {"executed": False, "detail": f"affected_records[{i}].field={field!r} not in edge allowlist {sorted(_ALLOWED_EDGE_FIELDS)}."}
+        else:
+            return {"executed": False, "detail": f"affected_records[{i}].table={table!r} not supported (expected kg_node_metadata|kg_edge_metadata)."}
+
+        plan.append({
+            "table": table,
+            "id": str(record_id),
+            "field": field,
+            "observed_current": observed_current,
+            "new": new_value,
+            "rationale": rec.get("rationale") or "",
+        })
+
+    if not plan:
+        return {"executed": True, "detail": f"No records to mutate (all {skipped_no_change} were no_change)."}
+
+    # Verify-and-apply in one transaction. On any drift we abort the whole batch.
+    before_snapshot: list[dict] = []
+    after_snapshot: list[dict] = []
+    session = get_session()
+    try:
+        for entry in plan:
+            cls = Node if entry["table"] == "kg_node_metadata" else Edge
+            row = session.query(cls).filter_by(id=entry["id"]).first()
+            if row is None:
+                return {"executed": False, "detail": f"Row {entry['table']}/{entry['id'][:12]} not found."}
+            live_current = getattr(row, entry["field"], None)
+            if live_current != entry["observed_current"]:
+                return {"executed": False, "detail": (
+                    f"Drift detected on {entry['table']}/{entry['id'][:12]}.{entry['field']}: "
+                    f"investigator observed {entry['observed_current']!r} but live value is "
+                    f"{(live_current or '')[:80]!r}. Refusing to overwrite — re-run the investigator."
+                )}
+
+        # No drift; apply.
+        for entry in plan:
+            cls = Node if entry["table"] == "kg_node_metadata" else Edge
+            row = session.query(cls).filter_by(id=entry["id"]).first()
+            old_value = getattr(row, entry["field"])
+            setattr(row, entry["field"], entry["new"])
+            before_snapshot.append({
+                "table": entry["table"],
+                "id": entry["id"],
+                "field": entry["field"],
+                "value": old_value,
+            })
+            after_snapshot.append({
+                "table": entry["table"],
+                "id": entry["id"],
+                "field": entry["field"],
+                "value": entry["new"],
+            })
+        session.flush()
+
+        rev = KGRevisionLog(
+            id=str(uuid.uuid4()),
+            op="batch_text_substitute",
+            args_json={
+                "n_updated": len(plan),
+                "n_skipped_no_change": skipped_no_change,
+                "tables_touched": sorted(set(e["table"] for e in plan)),
+            },
+            before_json=before_snapshot,
+            after_json=after_snapshot,
+            reason=f"batch_text_substitute via finding {finding.get('id', '?')[:8]}",
+            finding_id=finding.get("id"),
+            agent_id="kg_maintenance::_execute_batch_text_substitute",
+            succeeded=1,
+        )
+        session.add(rev)
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+    return {
+        "executed": True,
+        "detail": (
+            f"Updated {len(plan)} record(s); {skipped_no_change} marked no_change. "
+            f"Logged as batch_text_substitute revision (reversible)."
+        ),
+    }
+
+
 def execute_single_finding(finding: dict) -> dict:
     """
     Execute a single finding.  Returns a result dict with at least
@@ -583,13 +757,15 @@ def execute_single_finding(finding: dict) -> dict:
 
     # Structured-action path: a wiki_contradiction whose investigator wrote
     # an executable plan into investigation_report_json.proposed_action can
-    # be acted on directly. Currently the only supported op is split_state.
+    # be acted on directly. Supported ops: split_state, batch_text_substitute.
     if ftype == "wiki_contradiction":
         report = finding.get("investigation_report_json") or {}
         proposed = report.get("proposed_action") or {}
         op = proposed.get("op") if isinstance(proposed, dict) else None
         if op == "split_state":
             return _execute_split_state(finding)
+        if op == "batch_text_substitute":
+            return _execute_batch_text_substitute(finding)
         return {"executed": False, "detail": f"No executor for proposed_action op {op!r}; needs human review."}
 
     executor = _EXECUTORS.get(ftype)

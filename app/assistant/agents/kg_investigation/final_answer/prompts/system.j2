@@ -10,11 +10,21 @@ Populate BOTH of these in one go:
 - `diagnosis`: one paragraph, plain language. Lead with the conclusion. Cite the key numbers inline so a reader can sanity-check (e.g., "47 incoming edges across 14 disjoint participant clusters").
 - `evidence`: ordered list of `{query, finding}` items. The query is the SQL or tool call the planner actually ran; the finding is the result that mattered. Keep findings short — a count, a sample row, a date comparison. At least one item unless the investigation genuinely returned nothing.
 - `proposed_action`: structured suggestion for the eventual mutation step.
-  - `op` ∈ {merge_nodes, split_node, delete_edge, update_node_field, no_action, escalate_user}
+  - `op` ∈ {merge_nodes, split_state, delete_edge, update_node_field, batch_text_substitute, no_action, escalate_user}
   - `args`: free-form description of args for the op
   - `reversibility` ∈ {reversible, partially_reversible, irreversible}
   - `confidence`: 0.0 to 1.0
-  Use `op: no_action` when the investigation found no problem. Use `op: escalate_user` when the diagnosis is clear but the right action requires a human judgment call.
+  Use `op: no_action` when the investigation found no problem. Use `op: escalate_user` when the diagnosis is clear but the right action requires a human judgment call. Use `op: batch_text_substitute` when the fix is "edit text in N specific records" — and in that case `affected_records` is the executor's actual input, NOT `args`.
+- `affected_records`: per-record inventory. **Harvest this from the planner's enumeration turns, not from prose summaries.** Look in the planner's `what_i_am_thinking` for a section labeled `AFFECTED RECORDS` (or tuples of the shape `<table> / <id> / <field>` with `current:` / `recommendation:` / `rationale:` blocks). Copy each entry into one `AffectedRecord` item:
+  - `table` — `kg_node_metadata` or `kg_edge_metadata`
+  - `id` — the row's primary key as listed by the planner
+  - `field` — column name (`original_sentence`, `description`, `sentence`, `label`)
+  - `current_value` — verbatim from the planner's `current:` line (the executor verifies this against the live DB and refuses on drift, so accuracy matters)
+  - `recommendation.op` — `update_text`, `no_change`, `delete_edge`, or `delete_node`
+  - `recommendation.new` — required when `op=update_text`; the replacement value
+  - `recommendation.reason` — required when `op=no_change`; short why-not
+  - `rationale` — one-line per-record reason
+  Leave the list empty if the planner didn't enumerate (which is correct for design-question / narrative-tension diagnoses). NEVER fabricate entries the planner didn't list — you cannot verify them against the DB.
 - `open_questions`: things the data could not answer. Specific questions, not vague concerns.
 
 **2. The markdown rendering** (in `final_answer_answer`):
@@ -32,6 +42,11 @@ Populate BOTH of these in one go:
 - args: <args>
 - reversibility: <reversibility>
 - confidence: <confidence>
+
+## Affected records
+<omit this section entirely when affected_records is empty>
+- `<table>` / `<id>` / `<field>` — <recommendation op>: <rationale>
+- `<table>` / `<id>` / `<field>` — <recommendation op>: <rationale>
 
 ## Open questions
 <omit this section entirely when open_questions is empty>
