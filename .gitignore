@@ -170,22 +170,6 @@ musickit/
 /app/assistant/tests/agent_tests/conversation_boundary/porch_house_test.py
 /app/assistant/agents/knowledge_graph_add/conversation_boundary/prompts/system_atomic.j2
 
-# ── Deprecated test files (intentionally pytest-skipped, plan called for delete) ─
-/app/assistant/test/agent_tests/test_memory_final_answer_agent.py
-/app/assistant/test/agent_tests/test_memory_decider_agent.py
-/app/assistant/test/agent_tests/test_memory_json_finder_agent.py
-/app/assistant/test/agent_tests/test_memory_json_editor_agent.py
-
-# ── Dead memory pipeline (every subdir has empty .ignore marker) ─────────────
-/app/assistant/agents/memory/
-/app/assistant/tests/agent_tests/memory_apply_fact/
-/app/assistant/tests/agent_tests/memory_belief_arbiter/
-/app/assistant/tests/agent_tests/memory_decider/
-/app/assistant/tests/agent_tests/memory_final_answer/
-/app/assistant/tests/agent_tests/memory_json_editor/
-/app/assistant/tests/agent_tests/memory_json_finder/
-/app/assistant/tests/manager_tests/memory_manager/
-
 # ── Personal data dumps and orphan test artifacts ────────────────────────────
 /app/assistant/maintenance_manager/daily_summaries/
 /app/assistant/tests/kg_query_analysis_report.json
