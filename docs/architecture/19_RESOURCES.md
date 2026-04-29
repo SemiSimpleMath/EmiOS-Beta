@@ -57,6 +57,7 @@ resources/
 
   kg_derived/                        [pipeline-derived: belief engine, KG]
     resource_user_beliefs.json       — exported by belief_engine_export
+    resource_user_beliefs_communication_canonicalized.json — on disk, no current reader
 
   daily_insights_pipeline_outputs/   [pipeline-derived: daily_insights]
     resource_daily_insights.json     — per-day actionable info

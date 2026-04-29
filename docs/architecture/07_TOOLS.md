@@ -1,6 +1,6 @@
 # Tools
 
-Tools are executable capabilities that agents can invoke. They handle external integrations (Google Calendar, Gmail, weather APIs), device control, and internal operations.
+Tools are executable capabilities that agents can invoke. They handle external integrations (Google Calendar, Gmail, weather APIs), device control, internal operations, **and entire sub-agent flows** — see [Managers as tools](#managers-as-tools-wrapper-pattern) below.
 
 ## Tool Structure
 
@@ -21,6 +21,51 @@ lib/tools/get_weather/
 lib/core_tools/weather_tool/
   weather_tool.py             # Actual implementation with execute()
 ```
+
+## Managers as tools (wrapper pattern)
+
+A first-class pattern in this codebase: a `MultiAgentManager` (see [02_MANAGERS](02_MANAGERS.md)) can be exposed as a tool by writing a thin `BaseTool` wrapper that delegates to `ManagerInterface`. From the calling agent's perspective, the manager is just another tool — same `tool_contract.json`, same compact card on the planner's tool list, same `ToolArguments` argument-filling, same `ToolCaller` dispatch. The whole sub-agent flow (delegator → planner → tools → loop → final answer) runs inside the wrapper's `execute()` and returns one `ToolResult`.
+
+The wrapper itself is ~12 lines of boilerplate:
+
+```python
+# app/assistant/lib/tools/emi_team_manager/emi_team_manager.py
+from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
+from app.assistant.lib.core_tools.manager_interface.manager_interface import ManagerInterface
+
+class emi_team_manager(BaseTool):
+    def __init__(self):
+        super().__init__('emi_team')
+        self.manager_interface = ManagerInterface('emi_team_manager')
+
+    def execute(self, tool_message):
+        return self.manager_interface.execute(tool_message)
+
+
+def get_tool_class():
+    return emi_team_manager
+```
+
+`ManagerInterface` looks up the named manager via `multi_agent_manager_factory`, builds a `Message` from the tool arguments, calls `manager_invoker.invoke(...)`, and adapts the manager's `ToolResult` back into the calling tool flow. Scope context, blackboard, agent loop, max-cycles enforcement — all of that happens inside the manager invocation, transparent to the caller.
+
+Examples currently shipped under `lib/tools/`:
+
+| Wrapper tool | Manager invoked | Use |
+|---|---|---|
+| `emi_team_manager` | `emi_team_manager` | General-purpose worker — see [15_EMI_TEAM_AND_SCOPE](15_EMI_TEAM_AND_SCOPE.md) |
+| `kg_query_manager` | `kg_query_manager` | Read-only KG question answering |
+| `kg_explorer_manager` | `kg_explorer_manager` | Multi-step KG exploration |
+| `kg_team_manager` | `kg_team_manager` | KG team coordination |
+| `devices_manager` | `devices_manager` | Smart-home device coordination |
+| `entertainment_manager` | `entertainment_manager` | Music / video / chess |
+| `event_manager` | `event_manager` | Calendar + reminder coordination |
+| `fast_tool_manager` | `fast_tool_manager` | Single-step tool dispatch w/o full agent loop |
+| `personal_admin_manager` | `personal_admin_manager` | Email / contacts / personal-data ops |
+| `playwright_manager` | `playwright_manager` | Browser automation |
+
+The wrapper directory needs the same `tool_contract.json`, `tool_forms/`, and `prompts/` as any other tool — argument schema is what the *outer* caller fills in; everything inside is the manager's business.
+
+This is how a reasonably small agent gets the leverage of an entire sub-team without owning their config or loop. It also means tool-visibility tuning at the outer layer (`hidden_tools`, `tool_narrower`) controls which managers a given agent can invoke.
 
 ## Tool Contract
 
