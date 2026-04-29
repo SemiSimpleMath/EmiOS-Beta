@@ -342,6 +342,8 @@ def _to_dict(finding: KGMaintenanceFinding) -> dict:
         "confidence": finding.confidence,
         "agent_name": finding.agent_name,
         "evidence_json": finding.evidence_json,
+        "investigation_report_json": finding.investigation_report_json,
+        "investigated_at": finding.investigated_at.isoformat() if finding.investigated_at else None,
         "executed_by": finding.executed_by,
         "executed_at": finding.executed_at.isoformat() if finding.executed_at else None,
         "execution_notes": finding.execution_notes,

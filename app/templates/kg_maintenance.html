@@ -339,6 +339,12 @@
       ? `<button class="toggle-evidence" onclick="toggleEvidence('${toggleId}')">details</button><div id="${toggleId}" class="evidence-block">${esc(evJson)}</div>`
       : '';
 
+    const reportJson = f.investigation_report_json ? JSON.stringify(f.investigation_report_json, null, 2) : '';
+    const reportToggleId = `rep-${f.id}`;
+    const reportBtn = reportJson
+      ? `<button class="toggle-evidence" onclick="toggleEvidence('${reportToggleId}')" title="Investigated ${f.investigated_at || ''}">report</button><div id="${reportToggleId}" class="evidence-block">${esc(reportJson)}</div>`
+      : '';
+
     const execNotes = f.execution_notes
       ? `<div class="exec-notes ${f.status === 'execute_error' ? 'error' : ''}">${esc(f.execution_notes)}</div>`
       : '';
@@ -350,7 +356,7 @@
       <td><span class="badge badge-${f.status}">${f.status}</span></td>
       <td>${renderNodes(f)}</td>
       <td><code style="font-size:11px">${f.suggested_action}</code></td>
-      <td class="reason">${esc(f.reason || '')}${evidenceBtn}${execNotes}</td>
+      <td class="reason">${esc(f.reason || '')}${evidenceBtn} ${reportBtn}${execNotes}</td>
       <td>${conf}</td>
       <td>
         <div class="action-btns">
