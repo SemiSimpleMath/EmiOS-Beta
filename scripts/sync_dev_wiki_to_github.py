@@ -55,10 +55,24 @@ EXCLUDED_SUBDIRS = frozenset({"audits", "drafts", "archived"})
 
 
 def transform_path(rel_path: str) -> str:
-    """docs/<rel_path> → wiki path. INDEX.md at the root becomes Home.md."""
+    """docs/<rel_path> -> flat wiki filename.
+
+    GitHub wiki has a flat structure: files committed in subdirectories of
+    the .wiki.git repo do NOT render as wiki pages. We have to flatten the
+    path. Convention: subdir-prefixed with a dash separator.
+
+      docs/INDEX.md                           -> Home.md
+      docs/GLOSSARY.md                        -> GLOSSARY.md
+      docs/architecture/01_AGENTS.md          -> architecture-01_AGENTS.md
+      docs/welcome/WELCOME.md                 -> welcome-WELCOME.md
+      docs/recipes/ADD_AN_AGENT.md            -> recipes-ADD_AN_AGENT.md
+    """
     if rel_path == "INDEX.md":
         return "Home.md"
-    return rel_path
+    parts = Path(rel_path).parts
+    if len(parts) == 1:
+        return rel_path
+    return "-".join(parts)
 
 
 # Match markdown links: [text](target.md) or [text](target.md#anchor).
