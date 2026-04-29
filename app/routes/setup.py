@@ -425,9 +425,10 @@ def complete_setup():
         with open(assistant_resources_dir / "resource_chat_guidelines_data.json", "w") as f:
             json.dump(chat_guidelines, f, indent=2)
         
-        # 6. Create user_bio.json from setup bio step
-        memory_dir = resources_root / "memory"
-        memory_dir.mkdir(parents=True, exist_ok=True)
+        # 6. Create user_bio.json from setup bio step. Lives under resources/user/
+        # alongside other user-identity files (resource_user_data.json, etc.).
+        user_resources_dir = resources_root / "user"
+        user_resources_dir.mkdir(parents=True, exist_ok=True)
         raw_bio = data.get("user_bio") or {}
         user_bio = {
             "metadata": {
@@ -445,8 +446,8 @@ def complete_setup():
                 user_bio[section] = [str(f).strip() for f in facts if str(f).strip()]
             else:
                 user_bio[section] = []
-        
-        with open(memory_dir / "user_bio.json", "w") as f:
+
+        with open(user_resources_dir / "user_bio.json", "w") as f:
             json.dump(user_bio, f, indent=2, ensure_ascii=False)
 
         # 7. Generate room resource files from setup data
@@ -591,7 +592,7 @@ def reset_setup():
             resources_dir / "assistant" / "resource_assistant_personality_data.json",
             resources_dir / "assistant" / "resource_relationship_config.json",
             resources_dir / "assistant" / "resource_chat_guidelines_data.json",
-            resources_dir / "memory" / "user_bio.json",
+            resources_dir / "user" / "user_bio.json",
         ]
 
         deleted = []

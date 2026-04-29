@@ -857,7 +857,21 @@ _BIO_SECTIONS = [
 ]
 
 def _get_bio_path() -> Path:
-    return get_resources_dir() / "memory" / "user_bio.json"
+    """
+    Canonical location: resources/user/user_bio.json.
+
+    One-shot migration from the old resources/memory/user_bio.json: if the
+    new path doesn't exist but the old one does, move it. The old location
+    was misnamed (the "memory" subsystem is gone); user identity belongs
+    alongside other resources/user/* files.
+    """
+    new_path = get_resources_dir() / "user" / "user_bio.json"
+    old_path = get_resources_dir() / "memory" / "user_bio.json"
+    if not new_path.exists() and old_path.exists():
+        new_path.parent.mkdir(parents=True, exist_ok=True)
+        old_path.rename(new_path)
+        logger.info("Migrated user_bio.json from %s to %s", old_path, new_path)
+    return new_path
 
 
 def _read_bio() -> dict:
