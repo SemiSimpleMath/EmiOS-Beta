@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
 from app.assistant.utils.logging_config import get_logger
@@ -247,10 +247,18 @@ def get_finding(finding_id: str) -> Optional[dict]:
         session.close()
 
 
-def get_summary_counts() -> dict[str, Any]:
-    """Returns counts grouped by (finding_type, status) for the dashboard header."""
+def get_summary_counts(exclude_types: Optional[Sequence[str]] = None) -> dict[str, Any]:
+    """Returns counts grouped by (finding_type, status) for the dashboard header.
+
+    ``exclude_types`` removes the listed finding_types from ``total_pending``
+    so the headline number matches the visible row count when the dashboard
+    hides certain queues (e.g. ``state_missing_dates``, which lives on its
+    own /date-gaps page). The full ``by_type`` breakdown is always returned
+    so callers can render per-type badges (e.g. the "Date gaps (N) →" link).
+    """
     from sqlalchemy import func as sqlfunc
 
+    excluded = set(exclude_types or ())
     session = get_session()
     try:
         rows = (
@@ -265,7 +273,7 @@ def get_summary_counts() -> dict[str, Any]:
         result: dict[str, Any] = {"by_type": {}, "total_pending": 0}
         for ftype, fstatus, cnt in rows:
             result["by_type"].setdefault(ftype, {})[fstatus] = cnt
-            if fstatus == "pending":
+            if fstatus == "pending" and ftype not in excluded:
                 result["total_pending"] += cnt
         return result
     except Exception:

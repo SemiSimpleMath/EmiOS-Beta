@@ -32,7 +32,7 @@ kg_maintenance_bp = Blueprint("kg_maintenance", __name__, url_prefix="/kg-mainte
 @kg_maintenance_bp.route("/", methods=["GET"])
 def dashboard():
     try:
-        summary = get_summary_counts()
+        summary = get_summary_counts(exclude_types=_DASHBOARD_HIDDEN_TYPES)
         return render_template("kg_maintenance.html", summary=summary)
     except Exception:
         logger.debug("[kg_maintenance] dashboard failed", exc_info=True)
@@ -74,7 +74,7 @@ def action_queue():
     live after the user has flagged them for action.
     """
     try:
-        summary = get_summary_counts()
+        summary = get_summary_counts(exclude_types=_DASHBOARD_HIDDEN_TYPES)
         return render_template(
             "kg_maintenance_queue.html",
             summary=summary,
