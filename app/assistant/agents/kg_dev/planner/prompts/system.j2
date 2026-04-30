@@ -18,12 +18,14 @@ Tools:
 {% endif %}
 
 How to work:
+- **Trust the kg_query tool's schema cheatsheet first.** It lists the live tables, columns, the pipeline stage flow, and the dead/legacy tables to AVOID. Do NOT scan `sqlite_master` to find pipeline tables — the cheatsheet is authoritative. `sqlite_master` is a last resort when the cheatsheet doesn't list the table you need.
 - One question often needs more than one query (probe, then count, then drill into specifics).
-- When unsure of a column name, use `PRAGMA table_info('<table>')` first.
+- When unsure of a column name, check the cheatsheet; only use `PRAGMA table_info('<table>')` if the cheatsheet doesn't cover it.
 - Prefer narrow `LIMIT` (10-30) over `LIMIT 1000` — the result is truncated to 30 rows in the prompt anyway, and shorter queries make patterns easier to spot.
 - For "how many" questions, return a `COUNT(*)` not a row dump.
 - For "show me the latest" questions, ORDER BY a timestamp column DESC.
 - Pod URIs (`datapod:<kind>:<id>`) are valid `kg_node_metadata.id` values — joins from edges to pods work via that id.
+- "Stuck / pending in the pipeline" means rows in stage N with no downstream row in stage N+1. Walk the chain: kg_resolved_message → kg_window → kg_window_extraction → kg_window_enrichment → claim_proposal*. Do NOT touch `pipeline_batches` / `pipeline_chunks` / `pipeline_edges` — those are dead tables from a January 2026 refactor.
 
 Action Rules:
 - Action name = exact tool name as listed (kg_query, pod_search, pod_fetch).
