@@ -29,49 +29,58 @@ class PromptBuilder:
         if not user_prompt:
             logger.error("[%s] Error forming the user prompt.", agent.name)
 
-        emi_image_refs: list[str] = []
+        # Strip legacy attachment markers (their text position is just
+        # an annotation; image blocks for them go at the end).
+        legacy_image_paths: list[str] = []
+        seen_paths: set[str] = set()
         try:
-            seen_paths: set[str] = set()
             pat = re.compile(r"\[emi_image:\s*([^\]]+?)\s*\]")
             for m in pat.finditer(user_prompt or ""):
                 p = (m.group(1) or "").strip()
                 if p and p not in seen_paths:
-                    emi_image_refs.append(p)
+                    legacy_image_paths.append(p)
                     seen_paths.add(p)
             pat_legacy = re.compile(r"\[mcp_image_path:\s*([^\]]+?)\s*\]")
             for m in pat_legacy.finditer(user_prompt or ""):
                 p = (m.group(1) or "").strip()
                 if p and p not in seen_paths:
-                    emi_image_refs.append(p)
+                    legacy_image_paths.append(p)
                     seen_paths.add(p)
             user_prompt = pat.sub("", user_prompt or "")
             user_prompt = pat_legacy.sub("", user_prompt or "")
+        except Exception as e:
+            logger.error("[%s] Error parsing legacy image markers: %s", agent.name, e)
+            legacy_image_paths = []
 
-            # New image-pod path: when the prompt mentions
-            # ``datapod:image:<sha>``, resolve to the on-disk file via
-            # PodStore so the multimodal call sees the actual pixels.
-            # The URI itself is left in the text — the agent uses it as a
-            # handle for tool calls (send_email pod_ids, etc.).
-            #
-            # Recent_history can carry many image URIs from old turns; we
-            # bound to the last ``IMAGE_POD_RECENT_LIMIT`` *unique* URIs
-            # by position (i.e. the most recent ones in the rendered
-            # prompt) so token cost stays predictable.
+        provider = (agent.llm_params or {}).get("llm_provider", "")
+        if provider != "gemini":
+            system_prompt = normalize_to_ascii(system_prompt)
+            user_prompt = normalize_to_ascii(user_prompt)
+
+        # Pod-URI images are interleaved RIGHT AFTER each URI mention so
+        # the LLM has unambiguous text↔image binding ("Katy in this pic
+        # [image]" instead of bunched-at-end blocks where pairing is
+        # order-only). Bound to last IMAGE_POD_RECENT_LIMIT URIs so a
+        # long history doesn't blow token cost.
+        #
+        # Scan the POST-normalized prompt so positions are valid offsets
+        # into the same string we'll slice for the content array.
+        pod_image_inserts: list[tuple[int, str]] = []
+        try:
             from app.assistant.pod_store.pod_uri import POD_URI_RE
             from app.assistant.pod_store.pod_store import PodStore
             from app.assistant.utils.path_utils import get_repo_root
             IMAGE_POD_RECENT_LIMIT = 4
             seen_uris: set[str] = set()
-            uri_hits: list[str] = []
+            hits: list[tuple[int, str]] = []
             for m in POD_URI_RE.finditer(user_prompt or ""):
                 uri = m.group(0)
                 if not uri.startswith("datapod:image:") or uri in seen_uris:
                     continue
                 seen_uris.add(uri)
-                uri_hits.append(uri)
-            recent_uris = uri_hits[-IMAGE_POD_RECENT_LIMIT:]
+                hits.append((m.end(), uri))
             pod_store = None
-            for uri in recent_uris:
+            for end_pos, uri in hits[-IMAGE_POD_RECENT_LIMIT:]:
                 if pod_store is None:
                     pod_store = PodStore()
                 pod = pod_store.get(uri)
@@ -83,26 +92,31 @@ class PromptBuilder:
                 abs_path = str(Path(get_repo_root()) / rel)
                 if abs_path in seen_paths:
                     continue
-                emi_image_refs.append(abs_path)
                 seen_paths.add(abs_path)
+                pod_image_inserts.append((end_pos, abs_path))
         except Exception as e:
-            logger.error("[%s] Error parsing image markers in prompt: %s", agent.name, e)
-            logger.debug("[%s] image marker parse exception details", agent.name, exc_info=True)
-            emi_image_refs = []
-
-        provider = (agent.llm_params or {}).get("llm_provider", "")
-        if provider != "gemini":
-            system_prompt = normalize_to_ascii(system_prompt)
-            user_prompt = normalize_to_ascii(user_prompt)
+            logger.error("[%s] Error resolving pod image URIs: %s", agent.name, e)
+            pod_image_inserts = []
 
         msg = [
             {"role": "system", "content": system_prompt or f"[{agent.name}] Error forming system prompt."},
             {"role": "user", "content": user_prompt or f"[{agent.name}] Error forming user prompt."},
         ]
 
-        if emi_image_refs:
-            blocks = [{"type": "input_text", "text": msg[1]["content"]}]
-            for p in emi_image_refs:
+        if pod_image_inserts or legacy_image_paths:
+            user_text = msg[1]["content"]
+            blocks: list[dict] = []
+            cursor = 0
+            for end_pos, abs_path in sorted(pod_image_inserts):
+                seg = user_text[cursor:end_pos]
+                if seg:
+                    blocks.append({"type": "input_text", "text": seg})
+                blocks.append({"type": "image_path", "path": abs_path})
+                cursor = end_pos
+            tail = user_text[cursor:]
+            if tail:
+                blocks.append({"type": "input_text", "text": tail})
+            for p in legacy_image_paths:
                 blocks.append({"type": "image_path", "path": p})
             msg[1]["content"] = blocks
         return msg
