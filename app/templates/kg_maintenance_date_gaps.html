@@ -139,9 +139,14 @@
       return `<span class="dg-entity-tag">${esc(label)}</span>`;
     }).join('');
 
-    return `<div class="dg-row" id="dg-row-${f.id}">
+    const nodeId = f.primary_node_id || '';
+    const labelHtml = nodeId
+      ? `<a href="/kg/node/${encodeURIComponent(nodeId)}" target="_blank" class="dg-label dg-label-link">${esc(label)}</a>`
+      : `<span class="dg-label">${esc(label)}</span>`;
+
+    return `<div class="dg-row" id="dg-row-${f.id}" data-node-id="${esc(nodeId)}">
       <div>
-        <span class="dg-label">${esc(label)}</span>
+        ${labelHtml}
         <span class="dg-priority-badge dg-priority-${f.priority}">${f.priority}</span>
         ${isPrimary ? '<span class="dg-priority-badge" style="background:rgba(96,165,250,0.18);color:var(--info);">connected to you</span>' : ''}
         ${desc ? `<div class="dg-description">${esc(desc)}</div>` : ''}
@@ -151,10 +156,92 @@
       </div>
       <div class="dg-score" title="Top-2 sum of connected entity pageranks">${score}</div>
       <div class="dg-actions">
+        <button class="dg-btn dg-btn-fill" onclick="toggleEditor('${f.id}', this)" title="Manually set start/end dates + prose for this node.">Fill&nbsp;dates</button>
         <button class="dg-btn dg-btn-ask" onclick="askNow('${f.id}', this)" title="The next daily routine run will pick this up. The daily limit is 1-3 questions per day so this may not fire immediately.">Queue&nbsp;ask</button>
         <button class="dg-btn dg-btn-skip" onclick="skipFinding('${f.id}', this)" title="Mark this finding as rejected — you don't know the answer or don't care.">Skip</button>
       </div>
+      <div class="dg-editor" id="dg-editor-${f.id}" style="display:none;">
+        ${renderEditor(f.id)}
+      </div>
     </div>`;
+  }
+
+  function renderEditor(findingId) {
+    return `
+      <div class="dg-editor-grid">
+        <label>start_date<input type="text" id="ed-${findingId}-start_date" placeholder="YYYY-MM-DD"></label>
+        <label>start_date_prose<input type="text" id="ed-${findingId}-start_date_prose" placeholder="around 2010 / early 2020s"></label>
+        <label>start_date_confidence
+          <select id="ed-${findingId}-start_date_confidence">
+            <option value="">—</option>
+            <option value="high">high</option>
+            <option value="medium">medium</option>
+            <option value="low">low</option>
+          </select>
+        </label>
+        <label>end_date<input type="text" id="ed-${findingId}-end_date" placeholder="YYYY-MM-DD or blank if ongoing"></label>
+        <label>end_date_prose<input type="text" id="ed-${findingId}-end_date_prose" placeholder="ongoing / sometime in 2024"></label>
+        <label>end_date_confidence
+          <select id="ed-${findingId}-end_date_confidence">
+            <option value="">—</option>
+            <option value="high">high</option>
+            <option value="medium">medium</option>
+            <option value="low">low</option>
+          </select>
+        </label>
+      </div>
+      <div class="dg-editor-actions">
+        <button class="dg-btn dg-btn-save" onclick="saveDates('${findingId}', this)">Save</button>
+        <button class="dg-btn" onclick="toggleEditor('${findingId}', null)">Cancel</button>
+      </div>
+    `;
+  }
+
+  function toggleEditor(findingId, openBtn) {
+    const ed = document.getElementById(`dg-editor-${findingId}`);
+    if (!ed) return;
+    const visible = ed.style.display !== 'none';
+    ed.style.display = visible ? 'none' : 'block';
+    if (openBtn) openBtn.textContent = visible ? 'Fill dates' : 'Hide';
+  }
+
+  async function saveDates(findingId, btn) {
+    const fields = ['start_date','start_date_prose','start_date_confidence',
+                    'end_date','end_date_prose','end_date_confidence'];
+    const body = {};
+    for (const f of fields) {
+      const el = document.getElementById(`ed-${findingId}-${f}`);
+      if (!el) continue;
+      const v = (el.value || '').trim();
+      // Only send fields the user actually touched (non-empty value).
+      if (v !== '') body[f] = v;
+    }
+    if (Object.keys(body).length === 0) {
+      showToast('Nothing to save — fill at least one field.', true);
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    try {
+      const res = await fetch(`/kg-maintenance/api/finding/${findingId}/fill_dates`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || res.statusText);
+      }
+      const row = document.getElementById(`dg-row-${findingId}`);
+      if (row) row.remove();
+      allFindings = allFindings.filter(f => f.id !== findingId);
+      renderSummary(allFindings);
+      showToast('Dates saved');
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = 'Save';
+      showToast('Save failed: ' + e.message, true);
+    }
   }
 
   async function skipFinding(findingId, btn) {

@@ -400,10 +400,70 @@ body.dg-body * {
 
 .dg-btn-ask  { background: #1d4ed8; color: #fff; }
 .dg-btn-skip { background: #7f1d1d; color: #fca5a5; }
+.dg-btn-fill { background: #047857; color: #d1fae5; }
+.dg-btn-save { background: #047857; color: #fff; }
 
 .dg-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+}
+
+.dg-row .dg-label-link {
+    color: var(--info);
+    text-decoration: none;
+}
+.dg-row .dg-label-link:hover {
+    text-decoration: underline;
+}
+
+.dg-editor {
+    grid-column: 1 / -1;
+    margin-top: 10px;
+    padding: 12px;
+    border-radius: 6px;
+    background: var(--panel-soft);
+    border: 1px solid var(--line);
+}
+
+.dg-editor-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px 14px;
+}
+
+.dg-editor-grid label {
+    display: flex;
+    flex-direction: column;
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    gap: 4px;
+}
+
+.dg-editor-grid input,
+.dg-editor-grid select {
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-size: 13px;
+    text-transform: none;
+    letter-spacing: normal;
+}
+
+.dg-editor-grid input:focus,
+.dg-editor-grid select:focus {
+    outline: 2px solid var(--info);
+    outline-offset: -1px;
+}
+
+.dg-editor-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 12px;
 }
 
 .dg-empty {

@@ -13,6 +13,10 @@ Store functions manage their own sessions; this route has no direct DB access.
 """
 from __future__ import annotations
 
+import json
+import uuid
+from datetime import datetime
+
 from flask import Blueprint, jsonify, render_template, request
 
 from app.assistant.kg_maintenance.store import (
@@ -167,6 +171,133 @@ def api_action():
     except Exception:
         logger.debug("[kg_maintenance] api_action failed id=%s", finding_id, exc_info=True)
         raise
+
+
+@kg_maintenance_bp.route("/api/finding/<finding_id>/fill_dates", methods=["POST"])
+def api_fill_dates(finding_id):
+    """Manual resolver for a state_missing_dates finding.
+
+    Body fields (all optional, but at least one date or prose must be set):
+      start_date           : YYYY-MM-DD or ISO datetime, or "" to clear
+      end_date             : same shape
+      start_date_prose     : free-text approximation ("around 2010", "early 2020s")
+      end_date_prose       : same
+      start_date_confidence: 'high' | 'medium' | 'low' (optional)
+      end_date_confidence  : same
+
+    Writes the updates onto kg_node_metadata for the finding's
+    primary_node_id, then marks the finding executed (status='executed')
+    so it falls off the date-gaps queue. Logs a kg_revision_log row
+    for audit.
+    """
+    from sqlalchemy import text as sql_text
+    from app.assistant.kg_maintenance.store import get_finding, set_status
+    from app.models.base import get_session as _get_session
+
+    data = request.get_json(force=True) or {}
+    finding = get_finding(finding_id)
+    if finding is None:
+        return jsonify({"error": "Finding not found"}), 404
+    if finding.get("finding_type") != "state_missing_dates":
+        return jsonify({"error": "fill_dates only valid for state_missing_dates findings"}), 400
+
+    node_id = finding.get("primary_node_id")
+    if not node_id:
+        return jsonify({"error": "Finding has no primary_node_id"}), 400
+
+    # Collect updateable fields. None means "leave alone"; empty string means
+    # "clear the column to NULL".
+    fields = {}
+    for k in ("start_date", "end_date", "start_date_prose", "end_date_prose",
+              "start_date_confidence", "end_date_confidence"):
+        if k in data:
+            v = data.get(k)
+            if v is None or (isinstance(v, str) and v.strip() == ""):
+                fields[k] = None
+            else:
+                fields[k] = str(v).strip()
+
+    if not fields:
+        return jsonify({"error": "no fields to update"}), 400
+
+    session = _get_session()
+    try:
+        # Capture before-state of date columns for the audit log
+        before_row = session.execute(
+            sql_text(
+                "SELECT start_date, end_date, start_date_prose, end_date_prose, "
+                "       start_date_confidence, end_date_confidence "
+                "FROM kg_node_metadata WHERE id = :nid"
+            ),
+            {"nid": node_id},
+        ).first()
+        if before_row is None:
+            session.rollback()
+            return jsonify({"error": f"node {node_id} not found"}), 404
+        before_state = {
+            "start_date": before_row[0], "end_date": before_row[1],
+            "start_date_prose": before_row[2], "end_date_prose": before_row[3],
+            "start_date_confidence": before_row[4], "end_date_confidence": before_row[5],
+        }
+
+        # Apply node updates
+        sets = ", ".join(f"{k} = :{k}" for k in fields)
+        params = dict(fields)
+        params["nid"] = node_id
+        params["now"] = datetime.utcnow().isoformat()
+        session.execute(
+            sql_text(f"UPDATE kg_node_metadata SET {sets}, updated_at = :now WHERE id = :nid"),
+            params,
+        )
+
+        # Audit row in kg_revision_log (schema: op, args_json, before_json,
+        # after_json, reason, finding_id, agent_id, succeeded, ...)
+        after_state = dict(before_state)
+        after_state.update(fields)
+        try:
+            session.execute(
+                sql_text(
+                    "INSERT INTO kg_revision_log "
+                    "(id, op, args_json, before_json, after_json, reason, "
+                    " finding_id, agent_id, succeeded, created_at) "
+                    "VALUES (:id, :op, :args, :before, :after, :reason, "
+                    "        :fid, :agent, 1, :now)"
+                ),
+                {
+                    "id": str(uuid.uuid4()),
+                    "op": "fill_dates_manual",
+                    "args": json.dumps({"node_id": node_id, "patch": fields}),
+                    "before": json.dumps(before_state, default=str),
+                    "after": json.dumps(after_state, default=str),
+                    "reason": "manual fill via /kg-maintenance/date-gaps",
+                    "fid": finding_id,
+                    "agent": "ui:fill_dates",
+                    "now": datetime.utcnow().isoformat(),
+                },
+            )
+        except Exception:
+            logger.debug("[fill_dates] revision-log insert skipped", exc_info=True)
+
+        session.commit()
+    finally:
+        session.close()
+
+    # Mark finding executed
+    try:
+        set_status(
+            finding_id,
+            "executed",
+            executed_by="ui:fill_dates",
+            execution_notes=f"manual fill: {sorted(fields.keys())}",
+        )
+    except Exception:
+        # Older signatures of set_status don't accept execution_notes.
+        try:
+            set_status(finding_id, "executed", executed_by="ui:fill_dates")
+        except Exception:
+            logger.debug("[fill_dates] set_status failed", exc_info=True)
+
+    return jsonify({"ok": True, "node_id": node_id, "applied": fields})
 
 
 @kg_maintenance_bp.route("/api/finding/<finding_id>/investigate", methods=["POST"])
