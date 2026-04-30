@@ -57,20 +57,6 @@ class KGChatProjection(Base):
     resolved_at = Column(DateTime(timezone=True), nullable=True)
 
 
-class KGChatProjectionState(Base):
-    __tablename__ = "kg_chat_projection_state"
-
-    # Singleton row with id=1 tracks high-watermark scan progress in unified_log.
-    id = Column(Integer, primary_key=True, default=1)
-    last_scanned_timestamp = Column(DateTime(timezone=True), nullable=True, index=True)
-    last_scanned_unified_id = Column(String, nullable=True)
-    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
-
-    __table_args__ = (
-        Index("ix_kg_chat_projection_state_ts_id", "last_scanned_timestamp", "last_scanned_unified_id"),
-    )
-
-
 class KGChatConversationWindow(Base):
     __tablename__ = "kg_chat_conversation_window"
 
@@ -103,23 +89,6 @@ class KGChatConversationWindowItem(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
-class KGChatConversationWindowState(Base):
-    __tablename__ = "kg_chat_conversation_window_state"
-
-    id = Column(Integer, primary_key=True, default=1)
-    last_windowed_timestamp = Column(DateTime(timezone=True), nullable=True, index=True)
-    last_windowed_projection_id = Column(String, nullable=True)
-    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
-
-    __table_args__ = (
-        Index(
-            "ix_kg_chat_conversation_window_state_ts_id",
-            "last_windowed_timestamp",
-            "last_windowed_projection_id",
-        ),
-    )
-
-
 class KGChatParsedSentence(Base):
     __tablename__ = "kg_chat_parsed_sentence"
 
@@ -134,160 +103,6 @@ class KGChatParsedSentence(Base):
 
     __table_args__ = (
         Index("ix_kg_chat_parsed_sentence_window_order", "window_id", "sentence_order"),
-    )
-
-
-class KGChatExtractedNode(Base):
-    __tablename__ = "kg_chat_extracted_node"
-
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    window_id = Column(String, nullable=False, index=True)
-    chunk_index = Column(Integer, nullable=False, default=0)
-    temp_id = Column(String, nullable=True, index=True)
-    node_type = Column(String, nullable=True)
-    label = Column(String, nullable=True, index=True)
-    core = Column(String, nullable=True)
-    category = Column(String, nullable=True)
-    sentence = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-
-    __table_args__ = (
-        Index("ix_kg_chat_extracted_node_window_chunk_temp", "window_id", "chunk_index", "temp_id"),
-    )
-
-
-class KGChatExtractedEdge(Base):
-    __tablename__ = "kg_chat_extracted_edge"
-
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    window_id = Column(String, nullable=False, index=True)
-    chunk_index = Column(Integer, nullable=False, default=0)
-    temp_id = Column(String, nullable=True, index=True)
-    relationship_type = Column(String, nullable=True)
-    label = Column(String, nullable=True)
-    source_temp_id = Column(String, nullable=True, index=True)
-    target_temp_id = Column(String, nullable=True, index=True)
-    bidirectional = Column(Boolean, nullable=False, default=False)
-    sentence = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-
-    __table_args__ = (
-        Index("ix_kg_chat_extracted_edge_window_chunk_temp", "window_id", "chunk_index", "temp_id"),
-    )
-
-
-class KGChatEnrichedNode(Base):
-    __tablename__ = "kg_chat_enriched_node"
-
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    window_id = Column(String, nullable=False, index=True)
-    temp_id = Column(String, nullable=True, index=True)
-    chunk_index = Column(Integer, nullable=False, default=0)
-    node_type = Column(String, nullable=True)
-    label = Column(String, nullable=True, index=True)
-    category = Column(String, nullable=True)
-    sentence = Column(Text, nullable=True)
-    source = Column(String, nullable=True)
-
-    aliases = Column(JSON, nullable=True)
-    hash_tags = Column(JSON, nullable=True)
-    start_date = Column(String, nullable=True)
-    start_date_confidence = Column(String, nullable=True)
-    start_date_prose = Column(String, nullable=True)
-    end_date = Column(String, nullable=True)
-    end_date_confidence = Column(String, nullable=True)
-    end_date_prose = Column(String, nullable=True)
-    valid_during = Column(String, nullable=True)
-    semantic_label = Column(String, nullable=True)
-    goal_status = Column(String, nullable=True)
-    confidence = Column(Float, nullable=True)
-    importance = Column(Float, nullable=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-
-    __table_args__ = (
-        Index("ix_kg_chat_enriched_node_window_temp", "window_id", "temp_id"),
-    )
-
-
-class KGChatStandardizedNode(Base):
-    __tablename__ = "kg_chat_standardized_node"
-
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    window_id = Column(String, nullable=False, index=True)
-    temp_id = Column(String, nullable=True, index=True)
-    chunk_index = Column(Integer, nullable=False, default=0)
-    node_type = Column(String, nullable=True)
-    label = Column(String, nullable=True)
-    category = Column(String, nullable=True)
-    sentence = Column(Text, nullable=True)
-    source = Column(String, nullable=True)
-    aliases = Column(JSON, nullable=True)
-    hash_tags = Column(JSON, nullable=True)
-    start_date = Column(String, nullable=True)
-    start_date_confidence = Column(String, nullable=True)
-    start_date_prose = Column(String, nullable=True)
-    end_date = Column(String, nullable=True)
-    end_date_confidence = Column(String, nullable=True)
-    end_date_prose = Column(String, nullable=True)
-    valid_during = Column(String, nullable=True)
-    semantic_label = Column(String, nullable=True)
-    goal_status = Column(String, nullable=True)
-    confidence = Column(Float, nullable=True)
-    importance = Column(Float, nullable=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-
-    __table_args__ = (
-        Index("ix_kg_chat_standardized_node_window_temp", "window_id", "temp_id"),
-    )
-
-
-class KGChatStandardizedEdge(Base):
-    __tablename__ = "kg_chat_standardized_edge"
-
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    window_id = Column(String, nullable=False, index=True)
-    chunk_index = Column(Integer, nullable=False, default=0)
-    temp_id = Column(String, nullable=True, index=True)
-    relationship_type = Column(String, nullable=True)
-    label = Column(String, nullable=True)
-    source_temp_id = Column(String, nullable=True, index=True)
-    target_temp_id = Column(String, nullable=True, index=True)
-    bidirectional = Column(Boolean, nullable=False, default=False)
-    sentence = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-
-    __table_args__ = (
-        Index("ix_kg_chat_standardized_edge_window_temp", "window_id", "temp_id"),
-    )
-
-
-class KGChatMergedNodeRef(Base):
-    __tablename__ = "kg_chat_merged_node_ref"
-
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    window_id = Column(String, nullable=False, index=True)
-    temp_id = Column(String, nullable=False, index=True)
-    node_id = Column(String, nullable=False, index=True)
-    merge_status = Column(String(32), nullable=False, default="created")
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-
-    __table_args__ = (
-        Index("ix_kg_chat_merged_node_ref_window_temp", "window_id", "temp_id"),
-    )
-
-
-class KGChatMergedEdgeRef(Base):
-    __tablename__ = "kg_chat_merged_edge_ref"
-
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    window_id = Column(String, nullable=False, index=True)
-    edge_temp_id = Column(String, nullable=True, index=True)
-    edge_id = Column(String, nullable=False, index=True)
-    merge_status = Column(String(32), nullable=False, default="created")
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-
-    __table_args__ = (
-        Index("ix_kg_chat_merged_edge_ref_window_temp", "window_id", "edge_temp_id"),
     )
 
 

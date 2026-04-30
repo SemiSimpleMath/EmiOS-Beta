@@ -244,25 +244,28 @@ def initialize_kg_tables():
 
 def initialize_kg_pipeline_tables():
     """
-    Create KG Chat Pipeline tables used by the context-engine KG ingestion path.
+    Create KG Pipeline tables used by the live ingestion path + provenance.
 
-    Tables:
-    - kg_chat_projection, kg_chat_projection_state, kg_chat_conversation_window
-    - kg_chat_conversation_window_item, kg_chat_conversation_window_state
-    - kg_chat_parsed_sentence, kg_chat_extracted_node, kg_chat_extracted_edge
-    - kg_chat_enriched_node, kg_chat_standardized_node, kg_chat_standardized_edge
-    - kg_chat_merged_node_ref, kg_chat_merged_edge_ref
-    - kg_node_evidence, kg_edge_evidence
+    The legacy pre-2026-04-22 chain (extracted/standardized/enriched/merged
+    stage tables, plus the projection_state and conversation_window_state
+    watermark singletons) was sunsetted; those models are gone and the
+    tables they used to create are no longer recreated on startup.
+
+    What stays:
+    - kg_chat_projection — derived chat projection (still queried for old
+      window provenance via merge_utils.WindowProvenance and the wiki
+      generator's window-text fallback)
+    - kg_chat_conversation_window, kg_chat_conversation_window_item —
+      same: legacy provenance lookup fallback for old kg_window_ids
+    - kg_chat_parsed_sentence — same: legacy provenance context-text source
+    - kg_node_evidence, kg_edge_evidence — live evidence trail tables
     """
     logger.info("Initializing KG Pipeline tables...")
 
     from app.assistant.database.kg_chat_projection import (  # noqa: F401
-        KGChatProjection, KGChatProjectionState,
+        KGChatProjection,
         KGChatConversationWindow, KGChatConversationWindowItem,
-        KGChatConversationWindowState,
-        KGChatParsedSentence, KGChatExtractedNode, KGChatExtractedEdge,
-        KGChatEnrichedNode, KGChatStandardizedNode, KGChatStandardizedEdge,
-        KGChatMergedNodeRef, KGChatMergedEdgeRef,
+        KGChatParsedSentence,
         KGNodeEvidence, KGEdgeEvidence,
     )
 
