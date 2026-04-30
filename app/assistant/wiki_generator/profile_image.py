@@ -3,7 +3,9 @@
 Looks up an outgoing image-pod edge from the entity (preferring
 ``has_profile_image`` over ``depicted_in``), copies the underlying file
 into the wiki vault under ``images/`` so Obsidian/markdown viewers can
-render it inline, and returns a relative path suitable for embedding.
+render it inline, and returns a path suitable for embedding from the
+prose page (which lives at ``<vault>/prose/<entity>.md``, so the
+returned reference is ``../images/<file>``).
 
 The destination filename is content-addressed (the same sha256-named
 file the pod store wrote), so re-runs are idempotent: if the file is
@@ -88,4 +90,6 @@ def materialize_profile_image_for_vault(
             src.name, dest, entity_label,
         )
 
-    return f"images/{dest.name}"
+    # Prose pages live at <vault>/prose/<entity>.md, so the path needs to
+    # climb one directory to reach <vault>/images/.
+    return f"../images/{dest.name}"
