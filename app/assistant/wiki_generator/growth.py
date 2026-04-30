@@ -14,13 +14,23 @@ filter to entities with at least ``min_degree`` total incident edges
 (default 4) so we don't waste LLM calls on hapax nodes the extractor
 mentioned once.
 
+When an entity's prose generation returns empty (the writer LLM produced
+no content for any section — typical for tools, generic nouns, abstract
+concepts), we drop a sidecar marker at ``<vault>/empty/<stem>.json``
+recording the entity's edge count at the time. Subsequent ticks skip the
+entity unless its edge count has grown since the marker was written, so
+we don't re-pay LLM cost on the same dead-ends every night, but new KG
+content for an entity does automatically retry.
+
 Each page is independent — interruptions don't corrupt anything; the next
 run picks up wherever the last one stopped (existing pages get skipped).
 """
 from __future__ import annotations
 
+import json
 import time
 import traceback
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -52,6 +62,55 @@ def _existing_prose_stems(vault_path: Path) -> set[str]:
     }
 
 
+def _empty_dir(vault_path: Path) -> Path:
+    return vault_path / "empty"
+
+
+def _existing_empty_stems_with_degree(vault_path: Path) -> Dict[str, int]:
+    """Map sanitized stem → edge_count_at_marker for every empty marker.
+
+    The marker file ``<vault>/empty/<stem>.json`` records the entity's
+    edge count at the moment we gave up. ``pick_growth_targets`` uses it
+    to retry an entity only if its edge count has grown — so genuinely
+    stuck entities don't burn LLM tokens nightly, but new KG content
+    automatically promotes them back into the queue.
+    """
+    out: Dict[str, int] = {}
+    edir = _empty_dir(vault_path)
+    if not edir.exists():
+        return out
+    for p in edir.glob("*.json"):
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            deg = data.get("edge_count_at_marker")
+            if isinstance(deg, int):
+                out[p.stem] = deg
+        except Exception:
+            # Corrupt marker — be conservative and treat as "skip forever."
+            out[p.stem] = 1 << 30
+    return out
+
+
+def mark_entity_empty(vault_path: Path, entity_label: str, edge_count: int) -> None:
+    """Drop a sidecar marker so future ticks skip this entity until its
+    KG edge count grows past ``edge_count``."""
+    from app.assistant.wiki_generator.wiki_writer import _safe_filename
+    edir = _empty_dir(vault_path)
+    edir.mkdir(parents=True, exist_ok=True)
+    target = edir / f"{_safe_filename(entity_label)}.json"
+    target.write_text(
+        json.dumps(
+            {
+                "entity_label": entity_label,
+                "edge_count_at_marker": int(edge_count),
+                "marked_at_utc": datetime.now(timezone.utc).isoformat(),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
 def pick_growth_targets(
     *,
     vault_path: Path,
@@ -60,18 +119,16 @@ def pick_growth_targets(
 ) -> List[str]:
     """Top-degree Entity nodes (by total incident edges) without a prose page.
 
-    Returns labels in degree-descending order, capped at ``limit``. Entities
-    with fewer than ``min_degree`` edges are skipped — too thin to write
-    anything biographical about.
-
-    "Has a prose page" is checked via the sanitized filename stem
-    (matching wiki_writer._safe_filename) so labels with special chars
-    like "AT&T" or "Irvine, California" correctly map to AT_T.md /
-    Irvine_ California.md and don't get re-picked every tick.
+    Returns labels in degree-descending order, capped at ``limit``. Skips:
+      - entities below ``min_degree`` (too thin to write about);
+      - entities whose sanitized stem already has a prose file;
+      - entities marked empty whose edge count hasn't grown past the
+        marker's recorded count (so new KG content auto-retries).
     """
     from app.assistant.wiki_generator.wiki_writer import _safe_filename
 
-    skip = _existing_prose_stems(vault_path)
+    skip_prose = _existing_prose_stems(vault_path)
+    skip_empty = _existing_empty_stems_with_degree(vault_path)
     session = get_session()
     try:
         rows = session.execute(sql_text(
@@ -92,13 +149,37 @@ def pick_growth_targets(
         session.close()
 
     targets: List[str] = []
-    for label, _deg in rows:
-        if _safe_filename(label) in skip:
+    for label, deg in rows:
+        stem = _safe_filename(label)
+        if stem in skip_prose:
+            continue
+        prior_deg = skip_empty.get(stem)
+        if prior_deg is not None and int(deg) <= prior_deg:
+            # Marked empty before, no new KG content since — don't retry.
             continue
         targets.append(label)
         if len(targets) >= limit:
             break
     return targets
+
+
+def _entity_edge_count(label: str) -> int:
+    """Lookup the entity's current incident-edge count in the KG."""
+    session = get_session()
+    try:
+        row = session.execute(sql_text(
+            """
+            SELECT COUNT(e.id) AS deg
+            FROM kg_node_metadata n
+            JOIN kg_edge_metadata e
+              ON e.source_id = n.id OR e.target_id = n.id
+            WHERE n.node_type = 'Entity'
+              AND n.label = :label
+            """
+        ), {"label": label}).fetchone()
+        return int(row[0]) if row and row[0] is not None else 0
+    finally:
+        session.close()
 
 
 def build_one_page(label: str, vault_path: Path, run_critic: bool = True) -> Dict[str, Any]:
@@ -123,6 +204,11 @@ def build_one_page(label: str, vault_path: Path, run_critic: bool = True) -> Dic
         rough_path = regenerate_entity_page(label=label, vault_path=vault_path)
         prose_path = generate_prose_page_tagged(entity_label=label, vault_path=vault_path)
         if prose_path is None:
+            try:
+                deg = _entity_edge_count(label)
+                mark_entity_empty(vault_path, label, deg)
+            except Exception as e:
+                logger.warning("mark_entity_empty failed for %s: %s", label, e)
             return {
                 "label": label,
                 "status": "empty",
