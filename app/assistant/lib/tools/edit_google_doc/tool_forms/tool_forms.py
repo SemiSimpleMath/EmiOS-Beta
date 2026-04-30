@@ -9,9 +9,6 @@ class edit_google_doc_args(BaseModel):
     replace_with: Optional[str] = None
     text: Optional[str] = None
     ensure_newline: Optional[bool] = True
-    account_id: Optional[str] = None
-
-
 class edit_google_doc_arguments(BaseModel):
     tool_name: str
     arguments: edit_google_doc_args

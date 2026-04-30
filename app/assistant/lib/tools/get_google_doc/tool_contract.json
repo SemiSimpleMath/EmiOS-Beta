@@ -25,12 +25,6 @@
       "type": "integer",
       "required": false,
       "description": "Maximum body characters to return (default 20000, max 100000). Truncation is indicated in the response."
-    },
-    {
-      "name": "account_id",
-      "type": "string",
-      "required": false,
-      "description": "Optional Google OAuth account id (default \"google_user_primary\")."
     }
   ],
   "outputs": [
@@ -70,7 +64,7 @@
       "description": "ISO 8601 last modified timestamp."
     }
   ],
-  "arguments_prompt": "Arguments:\ndocument_id: Google Docs document ID from the URL (e.g. \"1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms\").\nname_search: Alternatively, a name substring to find the most recently modified matching doc.\ninclude_body: true/false (default true). False returns metadata only.\nmax_chars: integer, default 20000, max 100000.\naccount_id: optional (default \"google_user_primary\").\nNote: provide document_id OR name_search, not both.",
+  "arguments_prompt": "Arguments:\ndocument_id: Google Docs document ID from the URL (e.g. \"1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms\").\nname_search: Alternatively, a name substring to find the most recently modified matching doc.\ninclude_body: true/false (default true). False returns metadata only.\nmax_chars: integer, default 20000, max 100000.\nNote: provide document_id OR name_search, not both.",
   "metadata": {
     "domain": "doc",
     "actions": [

@@ -85,8 +85,7 @@ class EditGoogleDocTool(BaseTool):
                     f"Unknown operation '{operation}'. Must be one of: {sorted(_OPERATIONS)}."
                 )
 
-            account_id = str(args.get("account_id") or "").strip() or None
-            client = GoogleDocsClient(account_id=account_id, readonly=False)
+            client = GoogleDocsClient(readonly=False)
 
             # ------------------------------------------------------------------
             # APPEND

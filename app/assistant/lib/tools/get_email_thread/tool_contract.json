@@ -21,12 +21,6 @@
       "description": "Email address to resolve a recent conversation thread when thread_id and seed_message_id are not provided."
     },
     {
-      "name": "account_id",
-      "type": "string",
-      "required": false,
-      "description": "Optional Google OAuth account id for per-call mailbox selection (default \"google_user_primary\")."
-    },
-    {
       "name": "max_messages",
       "type": "integer",
       "required": false,

@@ -104,14 +104,13 @@ class GetEmailMessagesTool(BaseTool):
             args = tool_data.get("arguments") if isinstance(tool_data.get("arguments"), dict) else {}
 
             query = self._parse_query(args.get("query"))
-            account_id = str(args.get("account_id") or "").strip() or None
             max_results = self._parse_max_results(args.get("max_results"))
             include_body = bool(args.get("include_body", True))
             include_headers = bool(args.get("include_headers", True))
             body_max_chars = self._parse_body_max_chars(args.get("body_max_chars")) if include_body else 0
 
             utils = self._utils()
-            gmail_client = utils.get_gmail_client(account_id)
+            gmail_client = utils.get_gmail_client(None)
             hits = gmail_client.search_emails(query, max_results=max_results)
 
             rows: list[dict[str, Any]] = []
@@ -190,7 +189,6 @@ class GetEmailMessagesTool(BaseTool):
                 content=summary,
                 data={
                     "query": query,
-                    "account_id": account_id,
                     "max_results": max_results,
                     "message_count": len(rows),
                     "messages": rows,

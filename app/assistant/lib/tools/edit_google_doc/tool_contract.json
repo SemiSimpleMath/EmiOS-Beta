@@ -1,6 +1,6 @@
 {
   "name": "edit_google_doc",
-  "description": "Edit a Google Docs document using a diff-style approach. The primary operation is 'diff': provide a find block (exact text to locate) and a replace_with block (what to put in its place). The tool finds all occurrences of the search block in the document — if exactly one match is found it applies the edit; if zero matches are found it returns an error telling you to re-read the document; if two or more matches are found it returns an AMBIGUOUS error with expanded context around each match site so you can widen the find block to make it unique, then retry. Also supports 'append' to add text to the document end.",
+  "description": "Edit a Google Docs document using a diff-style approach. The primary operation is 'diff': provide a find block (exact text to locate) and a replace_with block (what to put in its place). The tool finds all occurrences of the search block in the document \u2014 if exactly one match is found it applies the edit; if zero matches are found it returns an error telling you to re-read the document; if two or more matches are found it returns an AMBIGUOUS error with expanded context around each match site so you can widen the find block to make it unique, then retry. Also supports 'append' to add text to the document end.",
   "inputs": [
     {
       "name": "document_id",
@@ -18,7 +18,7 @@
       "name": "find",
       "type": "string",
       "required": false,
-      "description": "For diff: the exact text block to locate and replace. Must match the document character-for-character including whitespace and newlines. Include enough surrounding lines to uniquely identify the location — if the block appears more than once, the tool returns an AMBIGUOUS error with context around each site so you can extend the block and retry."
+      "description": "For diff: the exact text block to locate and replace. Must match the document character-for-character including whitespace and newlines. Include enough surrounding lines to uniquely identify the location \u2014 if the block appears more than once, the tool returns an AMBIGUOUS error with context around each site so you can extend the block and retry."
     },
     {
       "name": "replace_with",
@@ -37,12 +37,6 @@
       "type": "boolean",
       "required": false,
       "description": "For append: prepend a newline before the appended text if the document does not already end with one (default true)."
-    },
-    {
-      "name": "account_id",
-      "type": "string",
-      "required": false,
-      "description": "Optional Google OAuth account id (default \"google_user_primary\")."
     }
   ],
   "outputs": [
@@ -74,10 +68,10 @@
     {
       "path": "data.match_sites",
       "type": "array",
-      "description": "For AMBIGUOUS error: [{offset, context}] — character offset and surrounding text for each match site. Use these to extend the find block until it is unique."
+      "description": "For AMBIGUOUS error: [{offset, context}] \u2014 character offset and surrounding text for each match site. Use these to extend the find block until it is unique."
     }
   ],
-  "arguments_prompt": "DIFF WORKFLOW:\n1. Call get_google_doc to read the current document text.\n2. Identify the exact block of text to replace (find). Include enough surrounding lines\n   (typically 2-4 lines before and after the change point) so the block is unique.\n3. Build replace_with: the full replacement — keep any existing lines you want plus add new content.\n4. Call edit_google_doc with operation=diff.\n\nError handling:\n- NO_MATCH: your find block doesn't match. Re-read the document and correct it.\n- AMBIGUOUS: find matched multiple locations. The error includes context excerpts around\n  each site. Extend the find block using those excerpts until it is unique, then retry.\n\nArguments:\n  document_id (required): Google Docs ID.\n  operation (required): diff | append.\n\n  For diff:\n    find (required): exact text to locate (include surrounding context lines for uniqueness).\n    replace_with: replacement text (empty string = delete the found block).\n\n  For append:\n    text (required): text to add at the end.\n    ensure_newline: true/false (default true).\n\n  account_id: optional (e.g. \"google_user_primary\").\n\nEXAMPLE — adding items to a Ralphs section:\n  find: \"- milk\\n- eggs\"\n  replace_with: \"- milk\\n- eggs\\n- butter\\n- bread\"\n  (The find block anchors to the existing end of the list; replace_with keeps existing items and appends new ones.)",
+  "arguments_prompt": "DIFF WORKFLOW:\n1. Call get_google_doc to read the current document text.\n2. Identify the exact block of text to replace (find). Include enough surrounding lines\n   (typically 2-4 lines before and after the change point) so the block is unique.\n3. Build replace_with: the full replacement \u2014 keep any existing lines you want plus add new content.\n4. Call edit_google_doc with operation=diff.\n\nError handling:\n- NO_MATCH: your find block doesn't match. Re-read the document and correct it.\n- AMBIGUOUS: find matched multiple locations. The error includes context excerpts around\n  each site. Extend the find block using those excerpts until it is unique, then retry.\n\nArguments:\n  document_id (required): Google Docs ID.\n  operation (required): diff | append.\n\n  For diff:\n    find (required): exact text to locate (include surrounding context lines for uniqueness).\n    replace_with: replacement text (empty string = delete the found block).\n\n  For append:\n    text (required): text to add at the end.\n    ensure_newline: true/false (default true).\n\n  account_id: optional (e.g. \"google_user_primary\").\n\nEXAMPLE \u2014 adding items to a Ralphs section:\n  find: \"- milk\\n- eggs\"\n  replace_with: \"- milk\\n- eggs\\n- butter\\n- bread\"\n  (The find block anchors to the existing end of the list; replace_with keeps existing items and appends new ones.)",
   "metadata": {
     "domain": "doc",
     "actions": [

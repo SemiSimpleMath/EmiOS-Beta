@@ -13,12 +13,6 @@
       "type": "string",
       "required": false,
       "description": "Optional text to write into the document body immediately after creation."
-    },
-    {
-      "name": "account_id",
-      "type": "string",
-      "required": false,
-      "description": "Optional Google OAuth account id (default \"google_user_primary\")."
     }
   ],
   "outputs": [
@@ -68,5 +62,6 @@
     "front_door": true,
     "room_visibility_default": "show",
     "approval_required": true
-  }
+  },
+  "arguments_prompt": ""
 }

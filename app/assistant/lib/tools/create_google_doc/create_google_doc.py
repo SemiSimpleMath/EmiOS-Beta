@@ -29,10 +29,9 @@ class CreateGoogleDocTool(BaseTool):
             if not title:
                 raise ValueError("title is required.")
 
-            account_id = str(args.get("account_id") or "").strip() or None
             initial_content = str(args.get("initial_content") or "").strip()
 
-            client = GoogleDocsClient(account_id=account_id, readonly=False)
+            client = GoogleDocsClient(readonly=False)
             result = client.create_document(title)
 
             document_id = result["document_id"]

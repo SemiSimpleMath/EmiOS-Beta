@@ -81,14 +81,13 @@ class GetEmailStatsTool(BaseTool):
             query = str(args.get("query") or "").strip()
             if not query:
                 raise ValueError("query is required.")
-            account_id = str(args.get("account_id") or "").strip() or None
             max_results = self._parse_max_results(args.get("max_results"))
             group_by_sender = bool(args.get("group_by_sender", True))
             group_by_day = bool(args.get("group_by_day", False))
             top_senders_limit = int(args.get("top_senders_limit") or 10)
 
             utils = self._utils()
-            gmail_client = utils.get_gmail_client(account_id)
+            gmail_client = utils.get_gmail_client(None)
             result = gmail_client.search_emails_metadata(
                 query,
                 max_results=max_results,

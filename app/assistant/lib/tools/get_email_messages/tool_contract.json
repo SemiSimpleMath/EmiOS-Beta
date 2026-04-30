@@ -9,12 +9,6 @@
       "description": "Gmail query syntax (for example \"from:user@example.com after:1735689600\")."
     },
     {
-      "name": "account_id",
-      "type": "string",
-      "required": false,
-      "description": "Optional Google OAuth account id for per-call mailbox selection (default \"google_user_primary\")."
-    },
-    {
       "name": "max_results",
       "type": "integer",
       "required": false,

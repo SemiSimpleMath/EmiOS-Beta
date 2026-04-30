@@ -62,7 +62,6 @@ class GetImportantEmailsTool(BaseTool):
             raw_start = args.get("start_date")
             raw_end = args.get("end_date")
             unseen = bool(args.get("unseen", False))
-            account_id = str(args.get("account_id") or "").strip() or None
 
             now_utc = datetime.now(timezone.utc)
 
@@ -92,18 +91,16 @@ class GetImportantEmailsTool(BaseTool):
                 end_dt = self._parse_datetime(raw_end, "end_date")
 
             logger.info(
-                "[GetImportantEmailsTool] window start=%s end=%s unseen=%s account_id=%s",
+                "[GetImportantEmailsTool] window start=%s end=%s unseen=%s",
                 start_dt.isoformat(),
                 end_dt.isoformat() if end_dt else "now",
                 unseen,
-                account_id,
             )
 
             emails = self._utils().fetch_and_filter_emails(
                 start_timestamp=start_dt,
                 end_timestamp=end_dt,
                 unseen=unseen,
-                account_id=account_id,
             )
 
             return ToolResult(

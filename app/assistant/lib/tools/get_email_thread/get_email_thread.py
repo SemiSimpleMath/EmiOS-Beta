@@ -114,7 +114,6 @@ class GetEmailThreadTool(BaseTool):
             thread_id = str(args.get("thread_id") or "").strip()
             seed_message_id = str(args.get("seed_message_id") or "").strip()
             participant_email = str(args.get("participant_email") or "").strip()
-            account_id = str(args.get("account_id") or "").strip() or None
             include_body = bool(args.get("include_body", True))
             max_messages = self._parse_max_messages(args.get("max_messages"))
             include_recent_messages = bool(args.get("include_recent_messages", True))
@@ -122,7 +121,7 @@ class GetEmailThreadTool(BaseTool):
             lookback_hours = self._parse_lookback_hours(args.get("lookback_hours"))
 
             utils = self._utils()
-            gmail_client = utils.get_gmail_client(account_id)
+            gmail_client = utils.get_gmail_client(None)
             inbound_hits: list[dict[str, Any]] = []
             bilateral_hits: list[dict[str, Any]] = []
             if not thread_id and seed_message_id:
@@ -167,7 +166,6 @@ class GetEmailThreadTool(BaseTool):
                             "thread_id": thread_id,
                             "seed_message_id": seed_message_id,
                             "participant_email": participant_email,
-                            "account_id": account_id,
                         },
                         "recent_messages": [],
                         "recent_message_count": 0,
@@ -179,7 +177,6 @@ class GetEmailThreadTool(BaseTool):
                 thread_id=thread_id,
                 max_messages=max_messages,
                 include_body=include_body,
-                account_id=account_id,
             )
             recent_messages: list[dict[str, Any]] = []
             recent_thread_ids: list[str] = []

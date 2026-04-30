@@ -46,14 +46,13 @@ class GetGoogleDocTool(BaseTool):
 
             document_id = str(args.get("document_id") or "").strip()
             name_search = str(args.get("name_search") or "").strip()
-            account_id = str(args.get("account_id") or "").strip() or None
             include_body = bool(args.get("include_body", True))
             max_chars = self._parse_max_chars(args.get("max_chars"))
 
             if not document_id and not name_search:
                 raise ValueError("Either document_id or name_search is required.")
 
-            client = GoogleDocsClient(account_id=account_id, readonly=True)
+            client = GoogleDocsClient(readonly=True)
 
             # If no direct ID, search by name first
             if not document_id:

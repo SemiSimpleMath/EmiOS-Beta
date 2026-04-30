@@ -7,7 +7,6 @@ class get_email_thread_args(BaseModel):
     thread_id: Optional[str] = None
     seed_message_id: Optional[str] = None
     participant_email: Optional[str] = None
-    account_id: Optional[str] = None
     max_messages: Optional[int] = 100
     include_body: Optional[bool] = True
     include_recent_messages: Optional[bool] = True

@@ -1,12 +1,12 @@
 {
   "name": "trash_emails",
-  "description": "Move all emails from one or more senders to Trash. Uses Gmail batchModify — fast even for large volumes. Supports an optional extra_query to narrow scope (e.g. only trash messages before a date).",
+  "description": "Move all emails from one or more senders to Trash. Uses Gmail batchModify \u2014 fast even for large volumes. Supports an optional extra_query to narrow scope (e.g. only trash messages before a date).",
   "inputs": [
     {
       "name": "senders",
       "type": "array",
       "required": true,
-      "description": "List of sender identifiers whose messages should be trashed — can be email addresses (e.g. \"noreply@ziprecruiter.com\"), bare domains to match all senders at that domain (e.g. \"quora.com\"), or display names (e.g. \"Cuts Clothing\"). Wildcards like *@domain are accepted and normalized to the bare domain."
+      "description": "List of sender identifiers whose messages should be trashed \u2014 can be email addresses (e.g. \"noreply@ziprecruiter.com\"), bare domains to match all senders at that domain (e.g. \"quora.com\"), or display names (e.g. \"Cuts Clothing\"). Wildcards like *@domain are accepted and normalized to the bare domain."
     },
     {
       "name": "extra_query",
@@ -19,12 +19,6 @@
       "type": "integer",
       "required": false,
       "description": "Messages trashed per sender per call. This tool always uses 1000 (hard cap)."
-    },
-    {
-      "name": "account_id",
-      "type": "string",
-      "required": false,
-      "description": "Google OAuth account id. Canonical value is exactly \"google_user_primary\"."
     }
   ],
   "outputs": [
@@ -68,5 +62,6 @@
     "room_visibility_default": "show",
     "approval_required": true,
     "planner_description": "Move emails from given sender/domain to Trash. Bulk."
-  }
+  },
+  "arguments_prompt": ""
 }
