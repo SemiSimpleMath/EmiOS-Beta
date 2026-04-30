@@ -19,8 +19,9 @@ from app.assistant.database.claim_proposals import (
     ClaimProposal, ClaimProposalNode, ClaimProposalEdge,
     ClaimProposalEvidence,
 )
-from app.assistant.database.kg_chat_projection import (
-    KGChatProjection, KGChatConversationWindowItem,
+from app.assistant.database.db_handler import UnifiedLog2026
+from app.assistant.database.kg_pipeline_models import (
+    KGResolvedMessage, KGWindowMessage,
 )
 from app.assistant.kg.claim_classifier import classify_claim_type
 from app.assistant.kg.predicate_vocabulary import normalize_predicate
@@ -164,37 +165,34 @@ def _fetch_window_anchor(session, window_id: str) -> Dict[str, Any]:
     """Pull the chat-context envelope for the first user-role message
     in this window. Used as the provenance anchor for every proposal
     derived from the window.
+
+    Walks the unified pipeline schema:
+      kg_window_message -> unified_log_2026 (verbatim text + speaker)
+                        -> kg_resolved_message (resolved text, optional)
     """
     if not window_id:
         return {}
-    items = (
-        session.query(KGChatConversationWindowItem)
-        .filter(KGChatConversationWindowItem.window_id == window_id)
-        .order_by(KGChatConversationWindowItem.item_order.asc())
+    rows = (
+        session.query(KGWindowMessage, UnifiedLog2026)
+        .join(UnifiedLog2026, UnifiedLog2026.id == KGWindowMessage.unified_log_id)
+        .filter(KGWindowMessage.window_id == window_id)
+        .order_by(KGWindowMessage.item_order.asc())
         .all()
     )
-    if not items:
+    if not rows:
         return {}
-    anchor_item = next((i for i in items if (i.role or "").lower() == "user"), items[0])
-    projection = (
-        session.query(KGChatProjection)
-        .filter(KGChatProjection.id == anchor_item.projection_id)
-        .first()
+    anchor_row = next(
+        ((wm, ul) for wm, ul in rows if (ul.role or "").lower() == "user"),
+        rows[0],
     )
-    if projection is None:
-        return {
-            "projection_id": anchor_item.projection_id,
-            "speaker_name": anchor_item.speaker_name,
-            "observed_at": anchor_item.unified_timestamp,
-        }
+    _wm, ul = anchor_row
     return {
-        "projection_id": projection.id,
-        "unified_log_id": projection.unified_log_id,
-        "room_id": projection.room_id,
-        "speaker_name": projection.speaker_name,
-        "speaker_role": projection.role,
-        "source_value": projection.source,
-        "observed_at": projection.unified_timestamp,
+        "unified_log_id": ul.id,
+        "room_id": ul.room_id,
+        "speaker_name": ul.speaker_name,
+        "speaker_role": ul.role,
+        "source_value": ul.source,
+        "observed_at": ul.timestamp,
     }
 
 

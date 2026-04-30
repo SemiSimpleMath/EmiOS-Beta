@@ -109,10 +109,9 @@ def _load_node(session, node_id: str) -> dict | None:
 def _load_provenance(session, node_id: str) -> list[dict]:
     """For each window that contributed evidence for this node, return window items.
 
-    A ``window_id`` may live in either ``kg_chat_conversation_window`` (legacy
-    time-windowed pipeline) or ``kg_window`` (current LLM-segmented pipeline).
-    The two UUID spaces are disjoint, so we try the legacy join first and
-    fall through to the new pipeline tables when nothing comes back.
+    Walks the unified pipeline tables: ``kg_window_message`` for membership,
+    ``unified_log_2026`` for verbatim text + speaker, ``kg_resolved_message``
+    for entity-resolved text when available.
     """
     from sqlalchemy import text
 
@@ -132,35 +131,22 @@ def _load_provenance(session, node_id: str) -> list[dict]:
         wid = r[0]
         if not wid:
             continue
-        # Try legacy storage first (the bulk of historical evidence).
         items = session.execute(
             text("""
-                SELECT item_order, role, speaker_name, text, unified_timestamp
-                FROM kg_chat_conversation_window_item
-                WHERE window_id = :wid ORDER BY item_order
+                SELECT
+                    sm.item_order,
+                    ul.role,
+                    ul.speaker_name,
+                    COALESCE(rm.resolved_text, ul.message) AS text,
+                    ul.timestamp                          AS unified_timestamp
+                FROM kg_window_message sm
+                JOIN unified_log_2026 ul        ON ul.id = sm.unified_log_id
+                LEFT JOIN kg_resolved_message rm ON rm.unified_log_id = sm.unified_log_id
+                WHERE sm.window_id = :wid
+                ORDER BY sm.item_order
             """),
             {"wid": wid},
         ).fetchall()
-        if not items:
-            # Fall through to current-pipeline storage. Members live in
-            # kg_window_message; message body comes from unified_log_2026,
-            # entity-resolved version from kg_resolved_message when available.
-            items = session.execute(
-                text("""
-                    SELECT
-                        sm.item_order,
-                        ul.role,
-                        ul.speaker_name,
-                        COALESCE(rm.resolved_text, ul.message) AS text,
-                        ul.timestamp                          AS unified_timestamp
-                    FROM kg_window_message sm
-                    JOIN unified_log_2026 ul        ON ul.id = sm.unified_log_id
-                    LEFT JOIN kg_resolved_message rm ON rm.unified_log_id = sm.unified_log_id
-                    WHERE sm.window_id = :wid
-                    ORDER BY sm.item_order
-                """),
-                {"wid": wid},
-            ).fetchall()
         evidence_sentences = session.execute(
             text("""
                 SELECT derived_sentence, merge_action, created_at

@@ -133,10 +133,9 @@ def collect_entity_window_ids(entity_label: str, limit: int = MAX_WINDOWS_FOR_EX
 def build_window_excerpts(window_ids: List[str], max_per_msg: int = MAX_CHARS_PER_MESSAGE) -> str:
     """Assemble a compact excerpt block from user-role messages across these windows.
 
-    A window_id may live in the legacy ``kg_chat_conversation_window_item``
-    table (historical archive) or in the current ``kg_window_message`` table
-    (LLM-segmented pipeline). The two UUID spaces are disjoint, so we try the
-    legacy lookup first and fall through to the current pipeline tables.
+    Walks the unified pipeline tables: ``kg_window_message`` for membership,
+    ``unified_log_2026`` for verbatim text + speaker, ``kg_resolved_message``
+    for the entity-resolved version when present.
     """
     if not window_ids:
         return ""
@@ -146,27 +145,16 @@ def build_window_excerpts(window_ids: List[str], max_per_msg: int = MAX_CHARS_PE
         for wid in window_ids:
             items = session.execute(
                 text(
-                    "SELECT item_order, speaker_name, text FROM kg_chat_conversation_window_item "
-                    "WHERE window_id = :w AND role = 'user' ORDER BY item_order"
+                    "SELECT wm.item_order, ul.speaker_name, "
+                    "       COALESCE(rm.resolved_text, ul.message) AS text "
+                    "FROM kg_window_message wm "
+                    "JOIN unified_log_2026 ul        ON ul.id = wm.unified_log_id "
+                    "LEFT JOIN kg_resolved_message rm ON rm.unified_log_id = wm.unified_log_id "
+                    "WHERE wm.window_id = :w AND ul.role = 'user' "
+                    "ORDER BY wm.item_order"
                 ),
                 {"w": wid},
             ).fetchall()
-            if not items:
-                # Fall through to current-pipeline storage. Members live in
-                # kg_window_message; message body comes from unified_log_2026,
-                # entity-resolved version from kg_resolved_message when present.
-                items = session.execute(
-                    text(
-                        "SELECT wm.item_order, ul.speaker_name, "
-                        "       COALESCE(rm.resolved_text, ul.message) AS text "
-                        "FROM kg_window_message wm "
-                        "JOIN unified_log_2026 ul        ON ul.id = wm.unified_log_id "
-                        "LEFT JOIN kg_resolved_message rm ON rm.unified_log_id = wm.unified_log_id "
-                        "WHERE wm.window_id = :w AND ul.role = 'user' "
-                        "ORDER BY wm.item_order"
-                    ),
-                    {"w": wid},
-                ).fetchall()
             if not items:
                 continue
             lines.append(f"[window {wid[:8]}]")

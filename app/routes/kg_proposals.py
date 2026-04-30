@@ -496,61 +496,65 @@ def _fmt_ts(ts) -> Optional[str]:
 
 def _load_window_items(session, window_id: Optional[str]) -> List[Dict[str, Any]]:
     """Return every chat message in the window, in order. Used by the
-    provenance expander on the proposal detail page."""
+    provenance expander on the proposal detail page.
+
+    Walks the unified pipeline schema: kg_window_message -> unified_log_2026
+    (+ optional kg_resolved_message for the entity-resolved text).
+    """
     if not window_id:
         return []
-    from app.assistant.database.kg_chat_projection import KGChatConversationWindowItem
-    rows = (
-        session.query(KGChatConversationWindowItem)
-        .filter(KGChatConversationWindowItem.window_id == window_id)
-        .order_by(KGChatConversationWindowItem.item_order.asc())
-        .all()
-    )
+    from sqlalchemy import text as sql_text
+    rows = session.execute(
+        sql_text(
+            "SELECT wm.item_order, ul.role, ul.speaker_name, "
+            "       COALESCE(rm.resolved_text, ul.message) AS text, "
+            "       ul.timestamp "
+            "FROM kg_window_message wm "
+            "JOIN unified_log_2026 ul        ON ul.id = wm.unified_log_id "
+            "LEFT JOIN kg_resolved_message rm ON rm.unified_log_id = wm.unified_log_id "
+            "WHERE wm.window_id = :w "
+            "ORDER BY wm.item_order"
+        ),
+        {"w": window_id},
+    ).fetchall()
     return [
         {
-            "order": it.item_order,
-            "role": it.role,
-            "speaker": it.speaker_name,
-            "text": it.text,
-            "ts": _fmt_ts(it.unified_timestamp),
+            "order": r[0],
+            "role": r[1],
+            "speaker": r[2],
+            "text": r[3],
+            "ts": _fmt_ts(r[4]),
         }
-        for it in rows
+        for r in rows
     ]
 
 
 def _load_window_resolved(session, window_id: Optional[str]) -> Optional[str]:
-    """Return the window's resolved_text (JSON-flattened to human-readable
-    prose) if available. Lets the user see the resolver's output alongside
-    the raw chat. Defensive — if the schema doesn't carry resolved_text on
-    the window object (post-segment->window migration), returns None and
-    the page just hides the section."""
+    """Aggregate per-message resolved_text rows into a human-readable block.
+
+    Replaces the legacy single resolved_text-per-window column. The new
+    pipeline stores resolved text per message in kg_resolved_message; this
+    helper joins across the window's messages and stitches them together.
+    """
     if not window_id:
         return None
-    import json as _json
-    from app.assistant.database.kg_chat_projection import KGChatConversationWindow
-    if not hasattr(KGChatConversationWindow, "resolved_text"):
+    from sqlalchemy import text as sql_text
+    rows = session.execute(
+        sql_text(
+            "SELECT wm.item_order, ul.role, rm.resolved_text "
+            "FROM kg_window_message wm "
+            "JOIN unified_log_2026 ul       ON ul.id = wm.unified_log_id "
+            "JOIN kg_resolved_message rm    ON rm.unified_log_id = wm.unified_log_id "
+            "WHERE wm.window_id = :w AND rm.resolved_text IS NOT NULL "
+            "ORDER BY wm.item_order"
+        ),
+        {"w": window_id},
+    ).fetchall()
+    if not rows:
         return None
-    try:
-        w = (
-            session.query(KGChatConversationWindow.resolved_text)
-            .filter(KGChatConversationWindow.id == window_id).first()
-        )
-    except Exception:
-        return None
-    if w is None or not w[0]:
-        return None
-    rt = w[0].strip()
-    if not rt.startswith("{"):
-        return rt
-    try:
-        d = _json.loads(rt)
-        lines = []
-        for entry in d.values():
-            if isinstance(entry, dict):
-                role = entry.get("role", "?")
-                text = (entry.get("resolved_text") or "").strip()
-                if text:
-                    lines.append(f"[{role}] {text}")
-        return "\n".join(lines) or None
-    except Exception:
-        return rt[:2000]
+    lines = []
+    for _order, role, text in rows:
+        t = (text or "").strip()
+        if t:
+            lines.append(f"[{role or '?'}] {t}")
+    return "\n".join(lines) or None

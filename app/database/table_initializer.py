@@ -244,28 +244,18 @@ def initialize_kg_tables():
 
 def initialize_kg_pipeline_tables():
     """
-    Create KG Pipeline tables used by the live ingestion path + provenance.
+    Create KG Pipeline evidence-trail tables used by the live ingestion path.
 
-    The legacy pre-2026-04-22 chain (extracted/standardized/enriched/merged
-    stage tables, plus the projection_state and conversation_window_state
-    watermark singletons) was sunsetted; those models are gone and the
-    tables they used to create are no longer recreated on startup.
-
-    What stays:
-    - kg_chat_projection — derived chat projection (still queried for old
-      window provenance via merge_utils.WindowProvenance and the wiki
-      generator's window-text fallback)
-    - kg_chat_conversation_window, kg_chat_conversation_window_item —
-      same: legacy provenance lookup fallback for old kg_window_ids
-    - kg_chat_parsed_sentence — same: legacy provenance context-text source
-    - kg_node_evidence, kg_edge_evidence — live evidence trail tables
+    The legacy kg_chat_* staging tables (projection / conversation_window /
+    conversation_window_item / parsed_sentence) were retired and migrated
+    into the unified kg_window / kg_window_message / kg_resolved_message
+    schema. Only the append-only evidence trail tables remain registered
+    here — kg_node_evidence and kg_edge_evidence are still actively
+    written and queried.
     """
     logger.info("Initializing KG Pipeline tables...")
 
     from app.assistant.database.kg_chat_projection import (  # noqa: F401
-        KGChatProjection,
-        KGChatConversationWindow, KGChatConversationWindowItem,
-        KGChatParsedSentence,
         KGNodeEvidence, KGEdgeEvidence,
     )
 

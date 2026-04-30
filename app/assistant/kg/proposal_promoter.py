@@ -309,7 +309,7 @@ def _window_end_ts(session, window_id: Optional[str]) -> Optional[str]:
     try:
         from sqlalchemy import text as sql_text
         row = session.execute(
-            sql_text("SELECT end_unified_timestamp FROM kg_chat_conversation_window WHERE id = :w"),
+            sql_text("SELECT end_timestamp FROM kg_window WHERE id = :w"),
             {"w": window_id},
         ).fetchone()
         if row and row[0]:
@@ -724,7 +724,7 @@ def _write_edge_evidence_for_reinforcement(
     re-observed it — evidence only lives on the shadow layer.
     """
     try:
-        from app.assistant.database.kg_chat_projection import KGEdgeEvidence, KGChatConversationWindow
+        from app.assistant.database.kg_chat_projection import KGEdgeEvidence
         from app.assistant.database.claim_proposals import ClaimProposalEvidence
     except Exception as exc:
         logger.warning("[promoter] evidence cascade unavailable: %s", exc)

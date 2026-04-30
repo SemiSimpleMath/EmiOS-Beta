@@ -9,9 +9,6 @@ from .merge_utils import (
     find_merge_candidates_semantic,
     find_node_candidates_exact,
     merge_node_fields_into_existing,
-    resolve_window_provenance,
-    write_edge_evidence,
-    write_node_evidence,
 )
 
 __all__ = [
@@ -26,8 +23,5 @@ __all__ = [
     "find_edge_candidates",
     "build_edge_candidate_payload",
     "create_edge_if_missing",
-    "resolve_window_provenance",
-    "write_node_evidence",
-    "write_edge_evidence",
 ]
 
