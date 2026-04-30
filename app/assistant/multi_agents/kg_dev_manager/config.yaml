@@ -12,8 +12,6 @@ agents:
     class: Delegator
   - name: kg_dev::planner
     class: Planner
-  - name: shared::tool_arguments
-    class: Agent
   - name: shared::final_answer_lite
     class: Agent
 
@@ -33,11 +31,14 @@ tools:
   allowed_tools: [kg_query, pod_search, pod_fetch]
   except_tools: []
 
+# The Planner class runs shared::tool_arguments internally in its
+# action_handler, so the tool_arguments payload (target_name +
+# arguments) is already on the blackboard when the planner finishes.
+# Route straight from planner to tool_caller — no extra agent step.
 flow_config:
   state_map:
     "shared::delegator": "kg_dev::planner"
-    "kg_dev::planner": "shared::tool_arguments"
-    "shared::tool_arguments": "tool_caller"
+    "kg_dev::planner": "tool_caller"
     "tool_caller": "tool_result_handler"
     "tool_result_handler": "kg_dev::planner"
     "kg_dev::planner_return_control": "shared::final_answer_lite"
