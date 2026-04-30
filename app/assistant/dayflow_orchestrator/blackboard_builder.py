@@ -4,10 +4,8 @@ Dayflow blackboard context builder (minimal).
 Per-agent pre-LLM nodes now call ``get_dayflow_items()`` directly for
 context, and wait_interrupt_promoter_node reads active dispatches via
 ``dispatch_sweeper.list_active_dispatches()`` at the point of use. This
-module only emits ``day_of_week``.
-
-The ``enrich_items_with_local_times`` helper is kept for backward
-compatibility with callers that import it from here.
+module emits ``day_of_week`` and provides ``enrich_items_with_local_times``
+for callers that need to decorate item metadata with local-time strings.
 """
 from __future__ import annotations
 
@@ -23,8 +21,7 @@ logger = get_logger(__name__)
 def enrich_items_with_local_times(items: List[Dict[str, Any]], now_utc: datetime) -> None:
     """Add local time strings and relative durations to each item's metadata.
 
-    Mutates in place. Kept for backward compatibility — new code should
-    use the per-agent prep nodes which compute presentation values.
+    Mutates in place.
     """
     local_tz = get_local_timezone()
     for item in items:

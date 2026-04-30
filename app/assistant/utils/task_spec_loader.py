@@ -161,17 +161,6 @@ def _get_boundary_hour_local(repo_root: Path) -> int:
         return 5
 
 
-def _boundary_date_local_str(now_local: datetime, boundary_hour: int) -> str:
-    """
-    Deprecated helper (kept for backwards compatibility in older tasks).
-    Prefer computing boundary_date_local directly where needed.
-    """
-    from datetime import timedelta
-
-    effective = now_local if now_local.hour >= int(boundary_hour) else now_local - timedelta(days=1)
-    return effective.strftime("%Y-%m-%d")
-
-
 def _parse_hhmm(hhmm: str) -> tuple[int, int]:
     text = (hhmm or "").strip()
     parts = text.split(":")

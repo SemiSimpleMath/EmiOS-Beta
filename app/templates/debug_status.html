@@ -134,7 +134,6 @@
     <div class="controls">
         <button id="refresh-btn" onclick="refreshData()">🔄 Refresh Data</button>
         <button id="reset-btn" onclick="resetWellness()">🔁 Reset Wellness Tracking</button>
-        <button id="force-reset-btn" onclick="forceDailyReset()" style="background: #ff9800;">🌅 Force Daily Reset</button>
         <a href="/debug/runtime/concurrency" style="display: inline-block; text-decoration: none;">
             <button type="button" style="background: #2563eb;">📊 Runtime Monitor</button>
         </a>
@@ -369,54 +368,6 @@
             } finally {
                 btn.disabled = false;
                 btn.textContent = '🔁 Reset Wellness Tracking';
-            }
-        }
-        
-        async function forceDailyReset() {
-            if (!confirm('🌅 Force Daily Reset\n\n' +
-                        'This will trigger reset_daily() on ALL pipeline stages:\n' +
-                        '• sleep\n' +
-                        '• afk_statistics\n' +
-                        '• activity_tracker\n' +
-                        '• daily_context_generator\n' +
-                        '• health_inference\n' +
-                        '• dayflow_orchestrator\n\n' +
-                        'Continue?')) {
-                return;
-            }
-            
-            const btn = document.getElementById('force-reset-btn');
-            btn.disabled = true;
-            btn.textContent = '⏳ Resetting...';
-            
-            try {
-                const response = await fetch('/debug/status/force_daily_reset', { method: 'POST' });
-                const data = await response.json();
-                
-                if (data.success) {
-                    const results = data.results;
-                    let msg = '🌅 Daily Reset Complete!\n\n';
-                    msg += 'Timestamp: ' + (results.reset?.timestamp_local || 'Unknown') + '\n\n';
-                    msg += 'Stage Results:\n';
-                    
-                    const stages = results.reset?.stages || {};
-                    for (const [stage, info] of Object.entries(stages)) {
-                        const status = info.status === 'success' ? '✓' : '✗';
-                        msg += `  ${status} ${stage}: ${info.status}`;
-                        if (info.error) msg += ` (${info.error})`;
-                        msg += '\n';
-                    }
-                    
-                    alert(msg);
-                    await refreshData();
-                } else {
-                    alert('❌ Error: ' + (data.error || 'Unknown error') + '\n\n' + (data.traceback || ''));
-                }
-            } catch (e) {
-                alert('Error: ' + e.message);
-            } finally {
-                btn.disabled = false;
-                btn.textContent = '🌅 Force Daily Reset';
             }
         }
         

@@ -14,7 +14,6 @@ from typing import Any, Dict
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.dayflow_orchestrator.blackboard_builder import (
     build_dayflow_blackboard_extras,
-    enrich_items_with_local_times,
 )
 from app.assistant.dayflow_orchestrator.orchestrator_status import (
     DAYFLOW_ORCHESTRATOR_ROOM_ID,
@@ -32,21 +31,6 @@ from app.assistant.utils.pydantic_classes import Message, ScopeResourcePolicy
 from app.assistant.utils.time_utils import parse_iso_utc_strict
 
 logger = get_logger(__name__)
-
-# Re-export for backward compatibility — these are imported by other modules
-# from app.assistant.dayflow_orchestrator.dayflow_tick
-__all__ = [
-    "DAYFLOW_ORCHESTRATOR_ROOM_ID",
-    "MASTER_ROOM_BLOCK_SECONDS",
-    "block_dayflow_orchestrator_for_master_chat",
-    "dayflow_orchestrator_cadence_tick",
-    "enrich_items_with_local_times",
-    "_enrich_items_with_local_times",
-]
-
-# Keep the underscore alias so existing `from dayflow_tick import _enrich_items_with_local_times`
-# in control nodes continues to work.
-_enrich_items_with_local_times = enrich_items_with_local_times
 
 
 def dayflow_orchestrator_cadence_tick(*, target_date: str | None = None, routine=None) -> None:

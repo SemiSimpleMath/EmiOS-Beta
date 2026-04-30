@@ -253,8 +253,3 @@ def status_data():
         return jsonify({"error": str(e)}), 500
 
 
-@debug_status_bp.route('/debug/status/force_daily_reset', methods=['POST'])
-def force_daily_reset():
-    """Force a daily reset — no longer supported (legacy pipeline removed)."""
-    return jsonify({"error": "force_daily_reset is no longer supported — dayflow_orchestrator_stage has been removed."}), 410
-

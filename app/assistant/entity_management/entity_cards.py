@@ -431,10 +431,7 @@ def update_entity_card_usage(session, entity_card_id, agent_name=None, session_i
 
 
 def _format_entity_card_full(entity_card: "EntityCard") -> str:
-    """
-    Pure formatter for the "full" entity card (legacy / backward compatible).
-    No DB writes, no session commits.
-    """
+    """Pure formatter for the full entity card. No DB writes."""
     parts = []
     parts.append(f"ENTITY CARD: {entity_card.entity_name}")
     parts.append(f"Type: {entity_card.entity_type}")

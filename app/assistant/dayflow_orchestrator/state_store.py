@@ -419,14 +419,14 @@ def reload_active_items_onto_blackboard(blackboard, *, now_utc: datetime, caller
     Returns count of active items loaded.
     """
     from app.assistant.dayflow_orchestrator.contracts import get_meta
-    from app.assistant.dayflow_orchestrator.dayflow_tick import _enrich_items_with_local_times
+    from app.assistant.dayflow_orchestrator.blackboard_builder import enrich_items_with_local_times
 
     active_items = load_existing_dayflow_items(include_terminal=True)
     active_items = [
         item for item in active_items
         if str(get_meta(item).get("source_type") or "").strip().lower() != "chat"
     ]
-    _enrich_items_with_local_times(active_items, now_utc)
+    enrich_items_with_local_times(active_items, now_utc)
 
     blackboard.update_state_value("active_dayflow_items", active_items)
     blackboard.update_state_value("existing_dayflow_items", load_existing_dayflow_items(include_terminal=True))
