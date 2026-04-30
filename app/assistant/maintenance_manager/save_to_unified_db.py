@@ -305,24 +305,17 @@ def save_to_unified_db(messages, source: str, db_session=None, force_test_db=Fal
 
         stmt = insert(UnifiedLog2026).values(records_2026)
 
+        # On conflict, only mutate fields that legitimately change after a
+        # row's original write (per-room metadata flags written by the
+        # compactor, derived data state, processed flag, attached media
+        # snapshots). Identity-defining fields — source, role, message,
+        # timestamp, room_id, direction, speaker_*, transport_* — are
+        # IMMUTABLE once the row is created. Clobbering them silently
+        # rewrites history: e.g. the room_chat_summary compactor used to
+        # rewrite original `room_ui` rows to `room_summary::<room_id>`,
+        # which made them invisible to the KG resolver's source filter.
         update_columns = {
-            "timestamp": stmt.excluded.timestamp,
-            "role": stmt.excluded.role,
-            "message": stmt.excluded.message,
-            "source": stmt.excluded.source,
             "processed": stmt.excluded.processed,
-            "request_id": stmt.excluded.request_id,
-            "room_id": stmt.excluded.room_id,
-            "room_surface": stmt.excluded.room_surface,
-            "room_context_id": stmt.excluded.room_context_id,
-            "direction": stmt.excluded.direction,
-            "speaker_id": stmt.excluded.speaker_id,
-            "speaker_name": stmt.excluded.speaker_name,
-            "speaker_role": stmt.excluded.speaker_role,
-            "speaker_external_id": stmt.excluded.speaker_external_id,
-            "transport_message_id": stmt.excluded.transport_message_id,
-            "transport_from": stmt.excluded.transport_from,
-            "transport_to": stmt.excluded.transport_to,
             "content_type": stmt.excluded.content_type,
             "media_items_json": stmt.excluded.media_items_json,
             "link_items_json": stmt.excluded.link_items_json,
