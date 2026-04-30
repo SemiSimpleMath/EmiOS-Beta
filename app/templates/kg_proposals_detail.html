@@ -138,6 +138,7 @@
 
     {% if proposal.status in ('pending', 'pending_review', 'enriching') %}
     <section class="kp-actions">
+      <button id="kp-approve" class="kp-btn">Approve (force-promote)</button>
       <button id="kp-reject" class="kp-btn">Reject (retract)</button>
     </section>
     {% endif %}
@@ -165,6 +166,7 @@
     }
 
     const rejectBtn = document.getElementById('kp-reject');
+    const approveBtn = document.getElementById('kp-approve');
     const proposalId = {{ (proposal.id | tojson) if not not_found else 'null' }};
     if (rejectBtn) {
       rejectBtn.addEventListener('click', async () => {
@@ -178,6 +180,22 @@
         const data = await resp.json();
         if (data.ok) window.location.reload();
         else alert('Error: ' + (data.error || 'unknown'));
+      });
+    }
+    if (approveBtn) {
+      approveBtn.addEventListener('click', async () => {
+        if (!confirm('Force-promote this proposal? The same evaluator the auto-promoter uses will run; conflicts will mark it contradicted instead.')) return;
+        approveBtn.disabled = true;
+        approveBtn.textContent = 'Promoting…';
+        const resp = await fetch(`/kg-proposals/${proposalId}/approve`, { method: 'POST' });
+        const data = await resp.json();
+        if (data.ok) {
+          window.location.reload();
+        } else {
+          alert('Approve result: ' + (data.status || 'error') + ' — ' + (data.error || 'unknown'));
+          approveBtn.disabled = false;
+          approveBtn.textContent = 'Approve (force-promote)';
+        }
       });
     }
   </script>

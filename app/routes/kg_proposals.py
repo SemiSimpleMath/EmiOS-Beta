@@ -3,9 +3,9 @@
 
 GET  /kg-proposals/                  — list view with status filters + trigger buttons
 GET  /kg-proposals/<id>              — detail view with graph viz + evidence
-POST /kg-proposals/run-pipeline      — trigger kg_chat_pipeline_parallel routine
+POST /kg-proposals/run-pipeline      — trigger the kg_pipeline routine (full ingest cycle)
 POST /kg-proposals/run-promoter      — run the promoter (dry-run default; ?commit=1 to apply)
-POST /kg-proposals/<id>/approve      — promote a single proposal manually (TODO)
+POST /kg-proposals/<id>/approve      — manually force-promote one pending proposal
 POST /kg-proposals/<id>/reject       — retract a proposal
 """
 from __future__ import annotations
@@ -300,6 +300,66 @@ def reject(proposal_id: str):
         p.retraction_reason = reason or "rejected via UI"
         session.commit()
         return jsonify({"ok": True})
+    finally:
+        session.close()
+
+
+@kg_proposals_bp.route("/<proposal_id>/approve", methods=["POST"])
+def approve(proposal_id: str):
+    """Manually force-promote one pending proposal.
+
+    Use case: the auto-promoter left a proposal in ``pending`` (e.g. it
+    couldn't confidently match against existing nodes). After eyeballing
+    the proposal in the UI, the user clicks Approve to push it through.
+    The same evaluator the auto-promoter uses runs against this single
+    proposal in a savepoint, then status is updated to ``promoted`` or
+    ``contradicted`` based on the decision.
+    """
+    from app.assistant.kg.proposal_promoter import _evaluate_and_apply
+
+    session = get_session()
+    try:
+        p = session.query(ClaimProposal).filter(ClaimProposal.id == proposal_id).first()
+        if p is None:
+            return jsonify({"ok": False, "error": "not found"}), 404
+        if (p.status or "").strip() != "pending":
+            return jsonify({
+                "ok": False,
+                "error": f"proposal status is {p.status!r}; only pending proposals can be approved",
+            }), 409
+
+        try:
+            session.begin_nested()
+            try:
+                dec = _evaluate_and_apply(session, p, commit=True)
+            except Exception as exc:
+                session.rollback()
+                logger.exception("[approve] proposal %s threw: %s", p.id, exc)
+                return jsonify({"ok": False, "error": str(exc)}), 500
+
+            if dec.final_status == "contradicted":
+                session.rollback()
+                p.status = "contradicted"
+                p.retraction_reason = dec.error or "conflict during manual approve"
+                session.commit()
+                return jsonify({
+                    "ok": False,
+                    "status": "contradicted",
+                    "error": dec.error or "conflict",
+                    "decision": dec.summary(),
+                }), 409
+
+            p.status = "promoted"
+            session.commit()
+            return jsonify({
+                "ok": True,
+                "status": "promoted",
+                "decision": dec.summary(),
+            })
+        except Exception as outer:
+            session.rollback()
+            logger.exception("[approve] outer handler on proposal %s", p.id)
+            return jsonify({"ok": False, "error": str(outer)}), 500
     finally:
         session.close()
 
