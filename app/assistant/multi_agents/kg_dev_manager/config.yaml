@@ -1,0 +1,46 @@
+name: kg_dev_manager
+class_name: MultiAgentManager
+description: "Read-only KG investigation console — single planner in a tool-call loop over kg_query / pod_search / pod_fetch."
+max_cycles: 30
+
+role_bindings:
+  delegator: shared::delegator
+  tool_selector: shared::tool_selector
+
+agents:
+  - name: shared::delegator
+    class: Delegator
+  - name: kg_dev::planner
+    class: Planner
+  - name: shared::tool_arguments
+    class: Agent
+  - name: shared::final_answer_lite
+    class: Agent
+
+control_nodes:
+  - name: tool_caller
+    class: ToolCaller
+  - name: tool_result_handler
+    class: ToolResultHandler
+  - name: return_control
+    class: ReturnControlNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+  - name: graceful_exit_control_node
+    class: GracefulExitControlNode
+
+tools:
+  allowed_tools: [kg_query, pod_search, pod_fetch]
+  except_tools: []
+
+flow_config:
+  state_map:
+    "shared::delegator": "kg_dev::planner"
+    "kg_dev::planner": "shared::tool_arguments"
+    "shared::tool_arguments": "tool_caller"
+    "tool_caller": "tool_result_handler"
+    "tool_result_handler": "kg_dev::planner"
+    "kg_dev::planner_return_control": "shared::final_answer_lite"
+    "shared::final_answer_lite": "manager_exit_node"
+    "graceful_exit": "graceful_exit_control_node"
+    "graceful_exit_control_node": "shared::final_answer_lite"

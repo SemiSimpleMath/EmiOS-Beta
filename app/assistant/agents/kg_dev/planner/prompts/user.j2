@@ -1,0 +1,34 @@
+Today is {{ date_time }}.
+{% if task %}
+User question: {{ task }}
+{% endif %}
+
+{% if information %}
+Additional information: {{ information }}
+{% endif %}
+
+{% if checklist %}
+Checklist so far (update DONE/PENDING/ABANDONED):
+{{ checklist }}
+{% else %}
+First action — no prior queries yet.
+{% endif %}
+
+{% if progress_report %}
+Findings so far (append-only):
+{{ progress_report }}
+{% endif %}
+
+{% if recent_history %}
+Tool calls and results so far (oldest → newest):
+{{ recent_history }}
+Use the latest tool result to decide your next query, or return_control if you have enough to answer.
+{% endif %}
+
+{% if action_count %}
+**Action Count:** {{ action_count }}/20 (You have {{ 20 - action_count }} actions remaining)
+{% endif %}
+
+{% if action_count and action_count >= 20 %}
+CRITICAL: You have reached the 20-action limit. Set action to return_control immediately.
+{% endif %}

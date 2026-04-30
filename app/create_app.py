@@ -182,6 +182,8 @@ def create_app(config_class="config.DevelopmentConfig"):
     app.register_blueprint(kg_maintenance_bp)
     from app.routes.kg_proposals import kg_proposals_bp
     app.register_blueprint(kg_proposals_bp)
+    from app.routes.kg_dev import kg_dev_bp
+    app.register_blueprint(kg_dev_bp)
     from app.routes.kg_node_viewer import kg_node_viewer_bp
     app.register_blueprint(kg_node_viewer_bp)
     from app.routes.kg_interests import kg_interests_bp

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KG Dev Console — {{ assistant_name }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/kg_dev.css') }}">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="{{ url_for('static', filename='js/emi/socket_heartbeat.js') }}"></script>
+</head>
+<body>
+  <div class="kg-dev-shell">
+    <header class="kg-dev-header">
+      <h1>KG Dev Console</h1>
+      <span class="kg-dev-sub">read-only · kg_query · pod_search · pod_fetch</span>
+      <span id="kg-dev-status" class="kg-dev-status">connecting…</span>
+    </header>
+
+    <main class="kg-dev-log" id="kg-dev-log"></main>
+
+    <form class="kg-dev-composer" id="kg-dev-composer" autocomplete="off">
+      <textarea
+        id="kg-dev-input"
+        rows="2"
+        placeholder="Ask about the KG — e.g. 'how many proposals are pending', 'show last 10 windows', 'is Justin in the KG'"
+        spellcheck="false"></textarea>
+      <button type="submit" id="kg-dev-send">Send</button>
+    </form>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/kg_dev.js') }}"></script>
+</body>
+</html>
