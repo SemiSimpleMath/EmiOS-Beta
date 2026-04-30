@@ -95,8 +95,7 @@ class CardInputs:
     bullet_count: int = 0
     tagged_section_count: int = 0
 
-    # Full neighborhood handle for advanced consumers (card writer LLM reads
-    # the entity_card_v1, if present, as a prior — future step).
+    # Full neighborhood handle for advanced consumers.
     neighborhood: Optional[EntityNeighborhood] = None
 
 
@@ -114,11 +113,10 @@ def _resolve_tag_cache_root(override: Optional[Path]) -> Path:
 def _make_window_loader():
     """Return a function that resolves window_id → resolved_text.
 
-    A window_id may live in either ``kg_chat_conversation_window_item``
-    (legacy time-based windows) or ``kg_window_message`` (current
-    LLM-segmented windows). The two UUID spaces are disjoint, so try the
-    legacy lookup first and fall through to the current pipeline tables.
-    The text is reconstructed by joining message rows in window order.
+    Walks the unified pipeline tables: ``kg_window_message`` for
+    membership, ``unified_log_2026`` for verbatim text + speaker,
+    ``kg_resolved_message`` for the entity-resolved version when
+    present.
 
     Per-call short DB session — never holds a session across LLM calls. Use a
     small per-call cache so repeated lookups in the same tagging run don't
@@ -150,33 +148,19 @@ def _make_window_loader():
             return cache[window_id]
         session = get_session()
         try:
-            # Legacy storage — message body lives directly on the item row.
             rows = session.execute(
                 sql_text(
-                    "SELECT role, speaker_name, text AS body "
-                    "FROM kg_chat_conversation_window_item "
-                    "WHERE window_id = :w ORDER BY item_order"
+                    "SELECT ul.role, ul.speaker_name, "
+                    "       COALESCE(rm.resolved_text, ul.message) AS body "
+                    "FROM kg_window_message wm "
+                    "JOIN unified_log_2026 ul        ON ul.id = wm.unified_log_id "
+                    "LEFT JOIN kg_resolved_message rm ON rm.unified_log_id = wm.unified_log_id "
+                    "WHERE wm.window_id = :w "
+                    "ORDER BY wm.item_order"
                 ),
                 {"w": window_id},
             ).fetchall()
             text = _format(rows)
-            if not text:
-                # Current-pipeline storage — message body comes from
-                # unified_log_2026, with kg_resolved_message preferred when
-                # present (entity-substituted version).
-                rows = session.execute(
-                    sql_text(
-                        "SELECT ul.role, ul.speaker_name, "
-                        "       COALESCE(rm.resolved_text, ul.message) AS body "
-                        "FROM kg_window_message wm "
-                        "JOIN unified_log_2026 ul        ON ul.id = wm.unified_log_id "
-                        "LEFT JOIN kg_resolved_message rm ON rm.unified_log_id = wm.unified_log_id "
-                        "WHERE wm.window_id = :w "
-                        "ORDER BY wm.item_order"
-                    ),
-                    {"w": window_id},
-                ).fetchall()
-                text = _format(rows)
         finally:
             session.close()
         cache[window_id] = text

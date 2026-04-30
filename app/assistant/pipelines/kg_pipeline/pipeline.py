@@ -58,10 +58,9 @@ class KGPipeline:
         only_steps: Optional[list] = None,
         force: bool = False,
     ) -> Dict[str, Any]:
-        # Subsystem flag check (kept under existing name for UI continuity).
         from app.assistant.utils.subsystem_flags import is_subsystem_enabled
-        if not is_subsystem_enabled("kg_chat_pipeline"):
-            logger.info("[kg_pipeline] skipped — subsystem flag kg_chat_pipeline is disabled")
+        if not is_subsystem_enabled("kg_pipeline"):
+            logger.info("[kg_pipeline] skipped — subsystem flag kg_pipeline is disabled")
             return {
                 "status": "skipped",
                 "reason": "subsystem_disabled",

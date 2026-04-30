@@ -11,7 +11,7 @@ _SUBSYSTEM_LABELS = {
     "signal_router": "Signal Router",
     "dj_manager": "DJ Manager",
     "context_engine": "Context Engine",
-    "kg_chat_pipeline": "KG Chat Pipeline (nightly ingest)",
+    "kg_pipeline": "KG Pipeline (nightly ingest)",
     "kg_proposal_promoter": "KG Proposal Promoter (nightly promote)",
 }
 
