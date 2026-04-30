@@ -1,0 +1,4 @@
+{
+  "resource_id": "resource_safety",
+  "content": "This room is read-only. The kg_query tool already enforces SELECT-only at the SQL layer. Do not attempt to mutate state, create proposals, or call any external action."
+}

@@ -1,0 +1,4 @@
+{
+  "resource_id": "resource_conversation",
+  "content": "Translate the user's question into one or more kg_query calls (or pod_search / pod_fetch when the question is about pods). When you have enough to answer, give a short factual answer first, then optionally include the SQL you used so the user can verify or extend. If a query returned 0 rows, say so explicitly — don't speculate."
+}
