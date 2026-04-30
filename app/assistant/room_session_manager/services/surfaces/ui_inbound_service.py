@@ -112,6 +112,20 @@ class UiInboundService:
         if not content:
             raise ValueError("UI inbound body cannot be empty.")
 
+        # User-initiated chat is a signal worth poking the dayflow
+        # orchestrator with — otherwise it sits on its 30-min ceiling
+        # while the user is actively talking and any fresh items go
+        # untriaged. Debounced inside the scheduler (DEBOUNCE_SECONDS=60),
+        # so a flurry of messages collapses to one tick. Best-effort:
+        # missing scheduler (subsystem disabled) is fine.
+        try:
+            from app.assistant.ServiceLocator.service_locator import DI
+            scheduler = getattr(DI, "dayflow_scheduler", None)
+            if scheduler is not None:
+                scheduler.poke(reason=f"user_chat:{room_id}")
+        except Exception as e:
+            logger.debug("[ui_inbound] dayflow poke skipped: %s", e, exc_info=True)
+
         inbound_ts_local = manager._local_timestamp_str()
         inbound_line = f"[{inbound_ts_local}] {resolved_sender_name}: {content}"
         request_id = resolved_request_id
