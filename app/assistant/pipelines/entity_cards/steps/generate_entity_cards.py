@@ -29,10 +29,10 @@ class GenerateEntityCardsStep:
 
     def run(self, ctx: PipelineContext) -> None:
         # Import inside run so pipeline module loads even if optional deps are missing in some environments.
-        from app.assistant.pipelines.entity_cards_v2.bulk_runner import run_entity_cards_v2
+        from app.assistant.pipelines.entity_cards.bulk_runner import run_bulk_entity_cards
 
         # Catch-up mode: scan all nodes but only create missing cards (default behavior).
-        result = run_entity_cards_v2(incremental=False)
+        result = run_bulk_entity_cards(incremental=False)
 
         out_path = ctx.day_dir / "entity_cards_generation_results.json"
         write_json_file(

@@ -23,11 +23,11 @@ from typing import Any, Dict, List, Optional
 
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.kg_projection import Bullet
-from app.assistant.pipelines.entity_cards_v2.card_inputs import (
+from app.assistant.pipelines.entity_cards.card_inputs import (
     CardInputs,
     build_card_inputs,
 )
-from app.assistant.pipelines.entity_cards_v2.contact_extractor import ContactEntry
+from app.assistant.pipelines.entity_cards.contact_extractor import ContactEntry
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import (
     Message,
@@ -41,7 +41,7 @@ logger = get_logger(__name__)
 SUMMARIZER_AGENT = "entity_card_summarizer"
 
 _SCOPE_SUMMARIZER = ScopeContext(
-    scope_id="scope::entity_cards_v2::card_writer",
+    scope_id="scope::entity_cards::card_writer",
     owner_id="jukka",
     actor_id="entity_card_summarizer",
     surface="ui",
@@ -294,7 +294,7 @@ def generate_and_persist_card(
     Returns the card dict (without the ``_inputs`` debug field stripped).
     Raises if the entity has no KG node (nothing to source from).
     """
-    from app.assistant.pipelines.entity_cards_v2.card_gen_lock import card_gen_slot
+    from app.assistant.pipelines.entity_cards.card_gen_lock import card_gen_slot
 
     with card_gen_slot(blocking=blocking):
         return _generate_and_persist_card_unlocked(

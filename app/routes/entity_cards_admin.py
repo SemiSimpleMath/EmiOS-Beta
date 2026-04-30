@@ -11,7 +11,7 @@ Generation is single-slot system-wide: at most one card is being generated at
 a time across every writer path (admin UI, /entity-card-maintenance regen,
 nightly bulk runner). Serialization is enforced inside generate_and_persist_card
 itself via the shared `card_gen_slot` context manager — see
-`app/assistant/pipelines/entity_cards_v2/card_gen_lock.py`. This module's
+`app/assistant/pipelines/entity_cards/card_gen_lock.py`. This module's
 job is the UX: surface a 409 when the user clicks "regenerate" while a bulk
 run is still in flight, instead of silently queuing requests.
 """
@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional
 from flask import Blueprint, jsonify, render_template, request
 
 from app.assistant.entity_management.entity_cards import EntityCard
-from app.assistant.pipelines.entity_cards_v2.card_gen_lock import CardGenSlotBusy
+from app.assistant.pipelines.entity_cards.card_gen_lock import CardGenSlotBusy
 from app.assistant.utils.logging_config import get_logger
 from app.models.base import get_session
 
@@ -176,20 +176,7 @@ def api_status() -> Any:
     "/entity-cards-admin/api/regenerate/<card_id>", methods=["POST"]
 )
 def api_regenerate_single(card_id: str) -> Any:
-    """Legacy URL — kept for backward compatibility with any external caller.
-
-    Production now uses v2 only. This endpoint forwards to ``api_regenerate_v2_single``
-    so the v1 writer (``_process_node_worker``) is no longer invoked from any
-    production code path.
-    """
-    return api_regenerate_v2_single(card_id)
-
-
-@entity_cards_admin_bp.route(
-    "/entity-cards-admin/api/regenerate_v2/<card_id>", methods=["POST"]
-)
-def api_regenerate_v2_single(card_id: str) -> Any:
-    """Regenerate one card via the v2 pipeline (kg_projection + summarizer).
+    """Regenerate one card (kg_projection + summarizer).
 
     Single-slot enforced system-wide inside generate_and_persist_card. We
     pass ``blocking=False`` so the user sees a 409 immediately instead of
@@ -210,7 +197,7 @@ def api_regenerate_v2_single(card_id: str) -> Any:
 
     _state_update(
         running=True,
-        mode="single_v2",
+        mode="single",
         current_label=label,
         current_node_id=node_id,
         current_idx=1,
@@ -221,7 +208,7 @@ def api_regenerate_v2_single(card_id: str) -> Any:
         errors=[],
     )
 
-    from app.assistant.pipelines.entity_cards_v2.card_writer import (
+    from app.assistant.pipelines.entity_cards.card_writer import (
         generate_and_persist_card,
     )
 
@@ -230,7 +217,7 @@ def api_regenerate_v2_single(card_id: str) -> Any:
             card_dict = generate_and_persist_card(label, force=True, blocking=False)
         except CardGenSlotBusy:
             _state_reset_running(last_result={
-                "mode": "single_v2", "label": label, "status": "busy",
+                "mode": "single", "label": label, "status": "busy",
             })
             return jsonify({
                 "error": "generation_busy",
@@ -243,8 +230,8 @@ def api_regenerate_v2_single(card_id: str) -> Any:
         status = "created"
         result_payload = {"status": status, "label": label, "card_preview": card_dict_clean}
     except Exception as e:
-        logger.error("[entity_cards_admin] v2 regen failed for %s: %s", label, e)
-        logger.debug("[entity_cards_admin] v2 regen exception", exc_info=True)
+        logger.error("[entity_cards_admin] regen failed for %s: %s", label, e)
+        logger.debug("[entity_cards_admin] regen exception", exc_info=True)
         result_payload = {"status": "error", "label": label, "error": str(e)}
         status = "error"
 
@@ -258,7 +245,7 @@ def api_regenerate_v2_single(card_id: str) -> Any:
         session.close()
 
     _state_reset_running(last_result={
-        "mode": "single_v2",
+        "mode": "single",
         "label": label,
         "status": status,
     })
@@ -277,7 +264,7 @@ def _bulk_worker(card_ids: List[str]) -> None:
     The ``_GEN_STATE['running']`` flag drives the bulk-in-progress UX 409;
     the worker clears it in ``_state_reset_running`` when done.
     """
-    from app.assistant.pipelines.entity_cards_v2.card_writer import generate_and_persist_card
+    from app.assistant.pipelines.entity_cards.card_writer import generate_and_persist_card
 
     processed = 0
     errors: List[Dict[str, str]] = []

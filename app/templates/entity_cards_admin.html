@@ -232,7 +232,7 @@
       const originalLabel = btn ? btn.textContent : '';
       if (btn) { btn.disabled = true; btn.textContent = 'Working…'; }
       try {
-        const res = await fetch(`/entity-cards-admin/api/regenerate_v2/${cardId}`, { method: 'POST' });
+        const res = await fetch(`/entity-cards-admin/api/regenerate/${cardId}`, { method: 'POST' });
         if (res.status === 409) {
           showMsg('Another generation run is active. Wait for it to finish.', 'err');
           return;

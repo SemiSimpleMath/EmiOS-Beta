@@ -158,8 +158,8 @@ def execute_approved_finding(finding_id: str, *, override_action: Optional[str] 
             session.close()
         if not entity_name:
             raise ValueError(f"Finding {finding_id!r} target card {card_id} has no entity_name.")
-        # v2 regenerate. Owns its own DB session; does its own LLM calls.
-        from app.assistant.pipelines.entity_cards_v2.card_writer import generate_and_persist_card
+        # Regenerate. Owns its own DB session; does its own LLM calls.
+        from app.assistant.pipelines.entity_cards.card_writer import generate_and_persist_card
         try:
             generate_and_persist_card(entity_name, force=True)
         except Exception as exc:
@@ -171,7 +171,7 @@ def execute_approved_finding(finding_id: str, *, override_action: Optional[str] 
                 execution_notes=f"Regenerate failed: {exc!s}"[:500],
             )
             return {"action": action, "executed": False, "detail": f"Regenerate failed: {exc!s}"}
-        set_status(finding_id, "executed", executed_by="auto", execution_notes=f"Regenerated card for '{entity_name}' via v2.")
+        set_status(finding_id, "executed", executed_by="auto", execution_notes=f"Regenerated card for '{entity_name}'.")
         return {"action": action, "executed": True, "detail": f"Regenerated entity card '{entity_name}'."}
 
     if action == "deactivate":

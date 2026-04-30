@@ -87,7 +87,7 @@ Two satellite tables back the model:
                surfaces it in /entity_cards editor
 ```
 
-The deterministic stages (`build_card_inputs`) and the single LLM summarizer call are decoupled into separate modules so intermediate state is inspectable. `app/assistant/pipelines/entity_cards_v2/card_inputs.py:188-303` (deterministic), `card_writer.py:54-160` (LLM call), `card_writer.py:273-354` (persist).
+The deterministic stages (`build_card_inputs`) and the single LLM summarizer call are decoupled into separate modules so intermediate state is inspectable. `app/assistant/pipelines/entity_cards/card_inputs.py:188-303` (deterministic), `card_writer.py:54-160` (LLM call), `card_writer.py:273-354` (persist).
 
 ## The single-slot generation rule
 
@@ -97,9 +97,9 @@ Why: the entity-card DB write path (`store_entity_card_in_db` → `rebuild_entit
 
 Where the lock lives:
 - `app/routes/entity_cards_admin.py:31` — `_GEN_LOCK = threading.Lock()`.
-- Acquired non-blocking by both single-card regen (`api_regenerate_v2_single`, line 188) and bulk regen (`api_regenerate_all`, line 311). Both return HTTP 409 `generation_busy` if the lock is already held.
+- Acquired non-blocking by both single-card regen (`api_regenerate_single`) and bulk regen (`api_regenerate_all`). Both return HTTP 409 `generation_busy` if the lock is already held.
 - Bulk runs spawn a background daemon thread (`_bulk_worker`, line 257) that holds the lock for its entire serial walk and releases in a `try/finally`.
-- The nightly pipeline (`run_entity_cards_v2`, `bulk_runner.py:127`) walks candidates sequentially in the foreground inside the routine runner — the routine_manager itself serializes pipeline runs, so it doesn't need to grab `_GEN_LOCK`.
+- The nightly pipeline (`run_bulk_entity_cards`, `bulk_runner.py:39`) walks candidates sequentially in the foreground inside the routine runner — the routine_manager itself serializes pipeline runs, so it doesn't need to grab `_GEN_LOCK`.
 
 The frontend per-card Regenerate button (`app/static/js/entity_cards_editor.js:198-227`) handles 409 by alerting the user; it does not retry.
 
@@ -107,21 +107,21 @@ The frontend per-card Regenerate button (`app/static/js/entity_cards_editor.js:1
 
 ## Generation paths
 
-There are three production entry points; all of them call the same v2 writer (`generate_and_persist_card`):
+There are three production entry points; all of them call the same writer (`generate_and_persist_card`):
 
 1. **Nightly pipeline — `entity_cards_pipeline`**
    `configs/routines.json:118-134`. Daily at 00:20 local. Runs `EntityCardsPipeline` (`app/assistant/pipelines/entity_cards/pipeline.py`) with three steps:
    - `PageRankStep` — recompute node PageRank (selection signal).
-   - `GenerateEntityCardsStep` — calls `run_entity_cards_v2(incremental=False)`, **catch-up mode**: walks all candidates but only creates **missing** cards. Existing cards are not overwritten unless their KG description changed (`store_entity_card_in_db` short-circuit at `kg_entity_card_pipeline.py:1022-1029`). Writes audit JSON to `day_dir/entity_cards_generation_results.json` and a `resource_entity_cards_generation_results_latest.json` pointer.
+   - `GenerateEntityCardsStep` — calls `run_bulk_entity_cards(incremental=False)`, **catch-up mode**: walks all candidates but only creates **missing** cards. Existing cards are not overwritten unless their KG description changed (`store_entity_card_in_db` short-circuit at `kg_entity_card_pipeline.py:1022-1029`). Writes audit JSON to `day_dir/entity_cards_generation_results.json` and a `resource_entity_cards_generation_results_latest.json` pointer.
    - `PruneEntityCardsDryRunStep` — produces `entity_cards_prune_dry_run.json`. **Never** deactivates; the apply path is a manual script (`prune_entity_cards.py --apply`).
 
 2. **Bulk regen — `/entity-cards-admin`**
    `POST /entity-cards-admin/api/regenerate_all` (`entity_cards_admin.py:304-371`). Body accepts `card_ids`, `suspicious_only`, or `type` filter. Picks targets, queues serial worker thread, `force=True` so descriptions are rewritten regardless of KG-description equality. Status is poll-able at `/entity-cards-admin/api/status`.
 
 3. **Single-card regen — editor button**
-   The `/entity_cards` editor renders a per-card `↻` button (`entity_cards_editor.js:163`) that calls `POST /entity-cards-admin/api/regenerate_v2/<card_id>`. Synchronous: blocks the request until the LLM returns (5–15 s typical), then returns the refreshed card row. Same lock, same 409 behavior.
+   The `/entity_cards` editor renders a per-card `↻` button (`entity_cards_editor.js:163`) that calls `POST /entity-cards-admin/api/regenerate/<card_id>`. Synchronous: blocks the request until the LLM returns (5–15 s typical), then returns the refreshed card row. Same lock, same 409 behavior.
 
-There is also an alias URL `POST /entity-cards-admin/api/regenerate/<card_id>` (line 167) that forwards to the same `regenerate_v2` endpoint above. An older `_process_node_worker` writer exists in the codebase but is not wired into any production path.
+An older `_process_node_worker` writer exists in the codebase but is not wired into any production path.
 
 ## Generator agents
 
@@ -159,15 +159,15 @@ REST API (under `EntityCardManager`):
 - `GET  /api/entity_cards/stats` — totals + per-type counts.
 - `GET  /api/entity_cards/types` — distinct active entity types for filter dropdown.
 
-The editor JS adds a per-card Regenerate (`↻`) button that POSTs to the admin route's v2 endpoint — handled by the single-slot lock.
+The editor JS adds a per-card Regenerate (`↻`) button that POSTs to the admin route's regenerate endpoint — handled by the single-slot lock.
 
 ## Admin UI — `/entity-cards-admin`
 
 `app/routes/entity_cards_admin.py`. Template `app/templates/entity_cards_admin.html`. Designed for bulk operations:
 
 - `GET  /entity-cards-admin/api/list` — paginated list with `q`, `type`, `suspicious_only` filter. Suspicion is a heuristic placeholder match (`_PLACEHOLDER_PATTERNS` at line 47: `"No relationship evidence"`, `"No contact information"`, etc.) on `summary` + `key_facts`. Returns `total`, `suspicious_total`, and per-card `suspicious: bool`.
-- `GET  /entity-cards-admin/api/status` — current `_GEN_STATE` snapshot: `running`, `mode` (`single_v2`|`bulk`), `current_label`, `current_idx/total`, `started_at_utc`, `last_result`, `errors`.
-- `POST /entity-cards-admin/api/regenerate_v2/<id>` — synchronous single regen.
+- `GET  /entity-cards-admin/api/status` — current `_GEN_STATE` snapshot: `running`, `mode` (`single`|`bulk`), `current_label`, `current_idx/total`, `started_at_utc`, `last_result`, `errors`.
+- `POST /entity-cards-admin/api/regenerate/<id>` — synchronous single regen.
 - `POST /entity-cards-admin/api/regenerate_all` — async bulk regen, returns immediately with `status: "started"`. Frontend polls the status endpoint to update progress.
 
 UI flow: filter for suspicious cards, queue a regen run, poll status, refresh list when done.
@@ -198,7 +198,7 @@ Each finding records human-readable `evidence_json` (entity name/type, the speci
 Endpoints:
 - `GET  /api/findings` — filter by `status`, `type`, `priority`. Sorted high→medium→low priority, then newest first. Default returns `pending`.
 - `GET  /api/summary` — counts grouped by `(finding_type, status)` for the dashboard header.
-- `POST /api/action` — single finding. Body `{id, action}` where action is `approve` | `reject` | `snooze` | `regenerate`. `approve` runs the default `suggested_action` (deactivate or review). `regenerate` overrides to a v2 card regen regardless of the original suggestion (so a `blank_content` card whose default was "review" can be re-built without leaving the queue).
+- `POST /api/action` — single finding. Body `{id, action}` where action is `approve` | `reject` | `snooze` | `regenerate`. `approve` runs the default `suggested_action` (deactivate or review). `regenerate` overrides to a card regen regardless of the original suggestion (so a `blank_content` card whose default was "review" can be re-built without leaving the queue).
 - `POST /api/bulk_action` — same actions over `ids: [...]`. Only acts on findings still in `pending` state.
 - `POST /api/run` — on-demand pipeline trigger (does not wait for the weekly schedule).
 
@@ -229,12 +229,12 @@ The shared-primitives plan in memory `project_kg_projection_shared_primitives` f
 | `app/assistant/entity_management/entity_card_injector.py` | Lexical-match injector that rewrites prompts with cards |
 | `app/assistant/entity_management/entity_catalog.py` | In-memory alias→card index for fast injection-side lookup |
 | `app/assistant/pipelines/entity_cards/pipeline.py` | Nightly `EntityCardsPipeline` — three steps (PageRank, generate, prune dry run) |
-| `app/assistant/pipelines/entity_cards/steps/generate_entity_cards.py` | Nightly entry into v2 writer |
-| `app/assistant/pipelines/entity_cards_v2/bulk_runner.py` | `run_entity_cards_v2` — selection + serial walk |
-| `app/assistant/pipelines/entity_cards_v2/card_inputs.py` | Deterministic neighborhood→bullets→tags assembly (`CardInputs`) |
-| `app/assistant/pipelines/entity_cards_v2/card_writer.py` | Single-LLM-call summarizer + persist |
-| `app/assistant/pipelines/entity_cards_v2/contact_extractor.py` | Deterministic structured-contact extraction |
-| `app/assistant/pipelines/entity_cards/kg_entity_card_pipeline/kg_entity_card_pipeline.py` | Selection helpers + `store_entity_card_in_db` (shared by v1 + v2) |
+| `app/assistant/pipelines/entity_cards/steps/generate_entity_cards.py` | Nightly entry into bulk writer |
+| `app/assistant/pipelines/entity_cards/bulk_runner.py` | `run_bulk_entity_cards` — selection + serial walk |
+| `app/assistant/pipelines/entity_cards/card_inputs.py` | Deterministic neighborhood→bullets→tags assembly (`CardInputs`) |
+| `app/assistant/pipelines/entity_cards/card_writer.py` | Single-LLM-call summarizer + persist |
+| `app/assistant/pipelines/entity_cards/contact_extractor.py` | Deterministic structured-contact extraction |
+| `app/assistant/pipelines/entity_cards/kg_entity_card_pipeline/kg_entity_card_pipeline.py` | Selection helpers + `store_entity_card_in_db` |
 | `app/assistant/pipelines/entity_card_maintenance_pipeline/` | Weekly maintenance pipeline (6 SQL scan steps) |
 | `app/assistant/database/entity_card_maintenance_finding.py` | Findings table model |
 | `app/assistant/entity_card_maintenance/store.py` | Findings CRUD + `execute_approved_finding` |
@@ -255,7 +255,7 @@ The shared-primitives plan in memory `project_kg_projection_shared_primitives` f
 
 **Regenerate one card** — Editor row's `↻` button (5–15 s, blocks). Or:
 ```bash
-.venv\Scripts\python.exe -c "from app.assistant.pipelines.entity_cards_v2.card_writer import generate_and_persist_card; generate_and_persist_card('Jamie', force=True)"
+.venv\Scripts\python.exe -c "from app.assistant.pipelines.entity_cards.card_writer import generate_and_persist_card; generate_and_persist_card('Jamie', force=True)"
 ```
 Bootstrap DI first (`import app.assistant.tests.test_setup`) for standalone scripts.
 

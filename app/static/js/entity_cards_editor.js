@@ -202,7 +202,7 @@ async function regenerateCard(cardId, label, btn) {
     const original = btn ? btn.textContent : '';
     if (btn) { btn.disabled = true; btn.textContent = '⏳'; btn.title = 'Regenerating…'; }
     try {
-        const response = await fetch(`/entity-cards-admin/api/regenerate_v2/${cardId}`, { method: 'POST' });
+        const response = await fetch(`/entity-cards-admin/api/regenerate/${cardId}`, { method: 'POST' });
         if (response.status === 409) {
             alert('Another card-generation run is already in flight. Wait for it to finish and retry.');
             return;

@@ -29,14 +29,14 @@ from app.assistant.pipelines.entity_cards.kg_entity_card_pipeline.kg_entity_card
     log_maintenance_run,
     get_last_maintenance_run_time,
 )
-from app.assistant.pipelines.entity_cards_v2.card_writer import generate_and_persist_card
+from app.assistant.pipelines.entity_cards.card_writer import generate_and_persist_card
 from app.assistant.utils.logging_config import get_logger
 from app.models.base import get_session
 
 logger = get_logger(__name__)
 
 
-def run_entity_cards_v2(
+def run_bulk_entity_cards(
     *,
     incremental: bool = False,
     min_outgoing_edges: int = 1,
@@ -44,10 +44,8 @@ def run_entity_cards_v2(
     allowed_node_types: Optional[Set[str]] = None,
     force: bool = False,
 ) -> Dict[str, Any]:
-    """v2 equivalent of v1's ``run_entity_card_pipeline``.
-
-    Same selection logic; v2 writer for each card. Returns the same shape so
-    the routine step can drop in unchanged.
+    """Bulk runner: select candidates, then call ``generate_and_persist_card``
+    for each. Returns the audit shape consumed by ``GenerateEntityCardsStep``.
     """
     session = get_session()
     if allowed_node_types is None:

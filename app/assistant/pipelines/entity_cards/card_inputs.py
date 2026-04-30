@@ -38,7 +38,7 @@ from app.assistant.kg_projection import (
     sections_as_prompt_list,
     tag_bullets,
 )
-from app.assistant.pipelines.entity_cards_v2.contact_extractor import (
+from app.assistant.pipelines.entity_cards.contact_extractor import (
     ContactEntry,
     extract_contact_info,
 )
@@ -62,9 +62,9 @@ DEFAULT_TAG_CACHE_ROOT_RELATIVE = "data/kg_projection"
 # Scope for card-side tagger calls — separate from wiki so authorization
 # decisions can diverge if needed.
 _SCOPE_CARDS = ScopeContext(
-    scope_id="scope::entity_cards_v2::card_inputs",
+    scope_id="scope::entity_cards::card_inputs",
     owner_id="jukka",
-    actor_id="entity_cards_v2_card_inputs",
+    actor_id="entity_cards_card_inputs",
     surface="ui",
     room_id="master_room",
     approval=ScopeApprovalPolicy(authority_level=100),
