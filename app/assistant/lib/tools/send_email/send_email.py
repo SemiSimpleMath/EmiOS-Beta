@@ -49,7 +49,6 @@ class SendEmail(BaseTool):
             subject = arguments.get('subject') or ""
             body = arguments.get('body') or ""
             to = arguments.get('to')
-            account_id = str(arguments.get('account_id') or "").strip() or None
             raw_pod_ids = arguments.get('pod_ids') or []
             if isinstance(raw_pod_ids, str):
                 raw_pod_ids = [raw_pod_ids]
@@ -99,7 +98,7 @@ class SendEmail(BaseTool):
                     )
                     return self.publish_msg(error_result)
 
-            gmail_client = GmailAPIClient(account_id=account_id)
+            gmail_client = GmailAPIClient()
             sent = gmail_client.send_email(
                 to=to,
                 subject=subject,
@@ -110,8 +109,8 @@ class SendEmail(BaseTool):
                 error_result = ToolResult(result_type="error", content="failed to send email.")
                 return self.publish_msg(error_result)
             else:
-                logger.info("Email sent successfully to %s via account_id=%s (attachments=%d)",
-                            to, account_id or "default", len(attachment_paths))
+                logger.info("Email sent successfully to %s (attachments=%d)",
+                            to, len(attachment_paths))
 
                 summary = f"Email successfully sent to {to}"
                 if attachment_paths:
@@ -122,7 +121,6 @@ class SendEmail(BaseTool):
                     content=summary,
                     data={
                         "message_id": str(sent.get("id") or ""),
-                        "account_id": (account_id or "default"),
                         "attachments_sent": len(attachment_paths),
                         "attachment_pod_ids": pod_ids,
                     },

@@ -7,7 +7,6 @@ class send_email_args(BaseModel):
     to: str
     subject: Optional[str]
     body: Optional[str]
-    account_id: Optional[str] = None
     pod_ids: Optional[List[str]] = Field(
         default=None,
         description="Optional pod URIs (e.g. ['datapod:image:abc...']) to attach as files. Each pod's backing file is read from metadata.stored_path and attached. Use pod_search to find pod_ids first.",
