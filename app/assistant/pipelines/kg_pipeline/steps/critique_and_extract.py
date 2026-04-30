@@ -52,6 +52,16 @@ class CritiqueAndExtractStep:
             )
             return [rid for (rid,) in rows]
 
+    def pending_count(self) -> int:
+        from sqlalchemy import func as sqlfunc
+        with get_db_manager().read_session() as session:
+            extracted_ids = session.query(KGWindowExtraction.window_id).subquery().select()
+            return int(
+                session.query(sqlfunc.count(KGWindow.id))
+                .filter(~KGWindow.id.in_(extracted_ids))
+                .scalar() or 0
+            )
+
     def _load_window_lines(self, window_id: str) -> Optional[Dict[str, Any]]:
         """Return {user_lines, context_lines, user_text, full_conversation,
         message_timestamp} or None if no usable content."""

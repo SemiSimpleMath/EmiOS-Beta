@@ -62,6 +62,22 @@ class WriteProposalsStep:
             )
             return [rid for (rid,) in rows]
 
+    def pending_count(self) -> int:
+        from sqlalchemy import func as sqlfunc
+        with get_db_manager().read_session() as session:
+            written_ids = (
+                session.query(ClaimProposalEvidence.enrichment_id)
+                .filter(ClaimProposalEvidence.enrichment_id.isnot(None))
+                .distinct()
+                .subquery()
+                .select()
+            )
+            return int(
+                session.query(sqlfunc.count(KGWindowEnrichment.id))
+                .filter(~KGWindowEnrichment.id.in_(written_ids))
+                .scalar() or 0
+            )
+
     def _load_enrichment_with_anchor(self, enrichment_id: str) -> Optional[Dict[str, Any]]:
         with get_db_manager().read_session() as session:
             enr = (

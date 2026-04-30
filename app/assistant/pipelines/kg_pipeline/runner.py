@@ -28,6 +28,13 @@ logger = get_logger(__name__)
 class PipelineStep(Protocol):
     name: str
     def run_one_cycle(self, ctx: Any) -> int: ...
+    # Optional: number of source rows still waiting to be processed by this
+    # step. The runner's monitor uses this to keep workers alive while ANY
+    # stage's input bucket is non-empty — even if no items have been
+    # processed in the last interval (e.g. the segmenter sitting on its
+    # quiet-period gate). Steps that don't implement this fall back to the
+    # processed-delta heuristic.
+    def pending_count(self) -> int: ...
 
 
 @dataclass
@@ -191,6 +198,24 @@ class KGPipelineRunner:
     # ------------------------------------------------------------------
     # Monitor loop (runs in main thread)
     # ------------------------------------------------------------------
+    def _sum_pending(self) -> int:
+        """Sum pending-input counts across all steps that expose pending_count.
+        Steps without the method contribute 0; the monitor will then fall
+        back to the processed-delta signal for those stages."""
+        total = 0
+        for step in self._steps:
+            fn = getattr(step, "pending_count", None)
+            if not callable(fn):
+                continue
+            try:
+                total += int(fn() or 0)
+            except Exception as exc:
+                logger.warning(
+                    "[kg_pipeline] pending_count failed for step=%s: %s",
+                    getattr(step, "name", "?"), exc,
+                )
+        return total
+
     def _monitor_loop(
         self,
         *,
@@ -206,19 +231,29 @@ class KGPipelineRunner:
                 error_count = sum(s.errors for s in self._worker_stats.values())
             delta = processed_now - last_processed_total
             last_processed_total = processed_now
-            if delta == 0:
+            pending = self._sum_pending()
+            if delta == 0 and pending == 0:
                 idle_rounds += 1
                 logger.info(
-                    "[kg_pipeline] monitor: idle round %d/%d (processed_total=%d errors=%d)",
+                    "[kg_pipeline] monitor: idle round %d/%d (processed_total=%d pending=0 errors=%d)",
                     idle_rounds, max_idle_rounds, processed_now, error_count,
                 )
                 if idle_rounds >= max_idle_rounds:
                     logger.info("[kg_pipeline] monitor: max idle rounds reached, stopping")
                     return "completed_idle"
+            elif delta == 0:
+                # Pending work exists somewhere upstream — keep workers alive,
+                # do NOT advance the idle counter. Reset so a transient drain
+                # from a slow stage doesn't trigger premature shutdown.
+                idle_rounds = 0
+                logger.info(
+                    "[kg_pipeline] monitor: waiting on gated input (processed_total=%d pending=%d errors=%d)",
+                    processed_now, pending, error_count,
+                )
             else:
                 idle_rounds = 0
                 logger.info(
-                    "[kg_pipeline] monitor: processed +%d (total=%d errors=%d)",
-                    delta, processed_now, error_count,
+                    "[kg_pipeline] monitor: processed +%d (total=%d pending=%d errors=%d)",
+                    delta, processed_now, pending, error_count,
                 )
         return "stopped"

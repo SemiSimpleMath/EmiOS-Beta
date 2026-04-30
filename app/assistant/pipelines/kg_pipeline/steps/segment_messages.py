@@ -86,6 +86,16 @@ class SegmentMessagesStep:
                 return None
             return self._local_date(row[0])
 
+    def pending_count(self) -> int:
+        from sqlalchemy import func as sqlfunc
+        with get_db_manager().read_session() as session:
+            segmented_ids = session.query(KGWindowMessage.unified_log_id).subquery().select()
+            return int(
+                session.query(sqlfunc.count(KGResolvedMessage.id))
+                .filter(~KGResolvedMessage.unified_log_id.in_(segmented_ids))
+                .scalar() or 0
+            )
+
     def _load_day_to_segment(self, local_day: date) -> Dict:
         """Load resolved-unsegmented messages on local_day + count of unresolved
         chat-eligible messages on that day.

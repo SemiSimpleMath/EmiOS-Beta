@@ -78,6 +78,26 @@ class ResolveMessagesStep:
             ),
         )
 
+    def pending_count(self) -> int:
+        from sqlalchemy import func as sqlfunc
+        with get_db_manager().read_session() as session:
+            resolved_ids = session.query(KGResolvedMessage.unified_log_id).subquery().select()
+            q = self._eligible_filter(
+                session.query(sqlfunc.count(UnifiedLog2026.id))
+                .filter(~UnifiedLog2026.id.in_(resolved_ids))
+            )
+            if self.START_LOCAL_DATE:
+                from datetime import timezone as _tz
+                tz = get_local_timezone()
+                start_local = datetime.combine(
+                    date.fromisoformat(self.START_LOCAL_DATE),
+                    datetime.min.time(),
+                    tzinfo=tz,
+                )
+                start_utc = start_local.astimezone(_tz.utc)
+                q = q.filter(UnifiedLog2026.timestamp >= start_utc)
+            return int(q.scalar() or 0)
+
     def _find_next_unresolved_day(self) -> Optional[date]:
         with get_db_manager().read_session() as session:
             resolved_ids = session.query(KGResolvedMessage.unified_log_id).subquery().select()

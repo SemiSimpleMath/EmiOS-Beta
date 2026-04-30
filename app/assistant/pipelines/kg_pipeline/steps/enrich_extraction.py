@@ -55,6 +55,17 @@ class EnrichExtractionStep:
             )
             return [rid for (rid,) in rows]
 
+    def pending_count(self) -> int:
+        from sqlalchemy import func as sqlfunc
+        with get_db_manager().read_session() as session:
+            enriched_ids = session.query(KGWindowEnrichment.window_extraction_id).distinct().subquery().select()
+            return int(
+                session.query(sqlfunc.count(KGWindowExtraction.id))
+                .filter(KGWindowExtraction.verdict == "extracted")
+                .filter(~KGWindowExtraction.id.in_(enriched_ids))
+                .scalar() or 0
+            )
+
     def _load_extraction(self, extraction_id: str) -> Optional[Dict[str, Any]]:
         """Return {extraction, window, resolved_window_text} or None."""
         with get_db_manager().read_session() as session:
