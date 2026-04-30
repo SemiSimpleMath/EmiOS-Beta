@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from app.assistant.agent_runtime.exceptions import QuotaExhaustedError
@@ -359,10 +360,27 @@ class LLMClient:
             self.check_for_quota_error(agent_name=agent.name, response_text=str(e))
             raise
         finally:
+            # Auto-clean ephemeral image paths (legacy chat-upload temps,
+            # MCP playwright screenshots) but never touch persistent files
+            # under data/ — that directory holds the canonical pod store
+            # and the wiki vault is its own location entirely. Deleting a
+            # pod's PNG breaks every subsequent reference to that pod.
+            try:
+                from app.assistant.utils.path_utils import get_repo_root
+                persistent_root = (get_repo_root() / "data").resolve()
+            except Exception:
+                persistent_root = None
             for path in image_paths:
                 try:
-                    if path and os.path.exists(path):
-                        os.remove(path)
+                    if not path or not os.path.exists(path):
+                        continue
+                    if persistent_root is not None:
+                        try:
+                            if Path(path).resolve().is_relative_to(persistent_root):
+                                continue
+                        except Exception:
+                            pass
+                    os.remove(path)
                 except Exception as e:
                     logger.error("[%s] Failed to cleanup image path '%s': %s", agent.name, path, e)
                     logger.debug("[%s] image cleanup exception details", agent.name, exc_info=True)
