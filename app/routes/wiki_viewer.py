@@ -398,13 +398,37 @@ def wiki_article_regenerate(entity: str):
 
     Mirrors what the nightly refresh does for a single page; useful when an
     article has visibly drifted from the KG and you want it rewritten now.
-    """
-    path = _find_article(_slugify(entity))
-    if path is None:
-        return jsonify({"ok": False, "error": "Article not found"}), 404
 
-    label = path.stem
+    Stub pages (no prose file yet) are bootstrapped: as long as a KG entity
+    node with a matching label exists, the rough → prose pipeline creates
+    the page from scratch. Only an entity with no KG presence at all is
+    rejected — there's nothing to write about.
+    """
+    label = _slugify(entity)
     vault_path = _wiki_vault_root()
+    path = _find_article(label)
+    if path is None:
+        # Stub case: confirm a KG entity exists by this label before invoking
+        # the generator. Without this check, the rough renderer would raise
+        # "No Entity node with label=..." which surfaces as a generic 500.
+        from app.assistant.kg.db.knowledge_graph_db import Node
+        from app.models.base import get_session as _gs
+        _session = _gs()
+        try:
+            entity_node = (
+                _session.query(Node)
+                .filter(Node.label == label, Node.node_type == "Entity")
+                .first()
+            )
+        finally:
+            _session.close()
+        if entity_node is None:
+            return jsonify({
+                "ok": False,
+                "error": f"No KG entity named {label!r}. Nothing to regenerate.",
+            }), 404
+    else:
+        label = path.stem
 
     try:
         from app.assistant.wiki_generator.page_writer import generate_prose_page_tagged
