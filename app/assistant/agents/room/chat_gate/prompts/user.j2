@@ -6,9 +6,9 @@
 
 ########## CONTEXT ##########
 {%- if resource_user_data %}
-**Owner:** {{ resource_user_data.full_name or resource_user_data.first_name }}
+**Owner:** {{ resource_user_data.full_name or resource_user_data.first_name }}{% if resource_user_data.birthdate %}, b. {{ resource_user_data.birthdate }}{% endif %}
 {%- if resource_user_data.important_people %}
-**People:** {% for p in resource_user_data.important_people %}{{ p.name }} ({{ p.relationship }}){% if not loop.last %}, {% endif %}{% endfor %}
+**People:** {% for p in resource_user_data.important_people %}{{ p.name }} ({{ p.relationship }}{% if p.birthdate %}, b. {{ p.birthdate }}{% endif %}){% if not loop.last %}, {% endif %}{% endfor %}
 {%- endif %}
 {%- endif %}
 {#- Don't frame the turn as "you are talking to <X>" — the room may have

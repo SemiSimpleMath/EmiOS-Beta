@@ -4,7 +4,7 @@
     matches multi-participant rooms (room::chat_gate) for consistency. -#}
 {%- set speaker_name = current_speaker_name or room_contact_name or (resource_user_data.first_name if resource_user_data else "") or "User" %}
 ########## CONTEXT ##########
-**User:** {{ resource_user_data.full_name or resource_user_data.first_name }}{% if resource_user_data.preferred_name and resource_user_data.preferred_name != resource_user_data.first_name %} (goes by {{ resource_user_data.preferred_name }}){% endif %}{% if resource_user_data.pronouns %} ({{ resource_user_data.pronouns.subjective }}/{{ resource_user_data.pronouns.objective }}){% endif %}
+**User:** {{ resource_user_data.full_name or resource_user_data.first_name }}{% if resource_user_data.preferred_name and resource_user_data.preferred_name != resource_user_data.first_name %} (goes by {{ resource_user_data.preferred_name }}){% endif %}{% if resource_user_data.pronouns %} ({{ resource_user_data.pronouns.subjective }}/{{ resource_user_data.pronouns.objective }}){% endif %}{% if resource_user_data.birthdate %}, b. {{ resource_user_data.birthdate }}{% endif %}
 {#- Speaker is identified on each message's prefix line. No "You are
     talking to" framing — engagement rules live in the room's
     conversation policy where applicable. -#}
@@ -12,7 +12,7 @@
 **Job:** {{ resource_user_data.job }}
 {%- endif %}
 {%- if resource_user_data.important_people %}
-**People:** {% for p in resource_user_data.important_people %}{{ p.name }} ({{ p.relationship }}){% if not loop.last %}, {% endif %}{% endfor %}
+**People:** {% for p in resource_user_data.important_people %}{{ p.name }} ({{ p.relationship }}{% if p.birthdate %}, b. {{ p.birthdate }}{% endif %}){% if not loop.last %}, {% endif %}{% endfor %}
 {%- endif %}
 {%- if resource_user_data.additional_context %}
 **About:** {{ resource_user_data.additional_context }}
