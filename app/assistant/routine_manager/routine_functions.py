@@ -180,6 +180,29 @@ def _lazy_wiki_nightly_refresh(*, target_date=None, routine=None):
 wiki_nightly_refresh = _lazy_wiki_nightly_refresh
 
 
+def _lazy_wiki_growth(*, target_date=None, routine=None):
+    """Nightly: build up to N new wiki pages for the highest-degree Entity
+    nodes that don't yet have one. Pairs with wiki_nightly_refresh —
+    refresh maintains existing pages, growth adds new ones over time."""
+    from pathlib import Path
+    from app.assistant.wiki_generator.growth import run_wiki_growth
+    spec = (routine.spec if routine and hasattr(routine, "spec") else {}) or {}
+    vault_raw = spec.get("vault_path") or ""
+    vault_path = Path(vault_raw) if vault_raw else None
+    max_new_pages = int(spec.get("max_new_pages", 5))
+    min_degree = int(spec.get("min_degree", 4))
+    run_critic = bool(spec.get("run_critic", True))
+    return run_wiki_growth(
+        vault_path=vault_path,
+        max_new_pages=max_new_pages,
+        min_degree=min_degree,
+        run_critic=run_critic,
+    )
+
+
+wiki_growth = _lazy_wiki_growth
+
+
 ROUTINE_FUNCTION_REGISTRY = {
     "dayflow_orchestrator_cadence_tick": dayflow_orchestrator_cadence_tick,
     "situation_audit": situation_audit,
@@ -187,6 +210,7 @@ ROUTINE_FUNCTION_REGISTRY = {
     "chat_memory_index": chat_memory_index,
     "proposal_promoter": proposal_promoter,
     "wiki_nightly_refresh": wiki_nightly_refresh,
+    "wiki_growth": wiki_growth,
     "kg_finding_backlog_drain": kg_finding_backlog_drain,
     "kg_date_gap_drain": kg_date_gap_drain,
 }
