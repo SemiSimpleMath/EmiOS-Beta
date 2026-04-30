@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Investigated findings — KG Maintenance</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/kg_maintenance.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/kg_maintenance_investigated.css') }}">
+</head>
+<body>
+  <header class="kgm-header">
+    <h1>Investigated findings</h1>
+    <p class="kgm-sub">
+      Findings the investigator has diagnosed. Read the report, leave notes,
+      then accept (close as resolved) or dismiss (won't apply).
+      <a href="/kg-maintenance/">← back to dashboard</a>
+    </p>
+  </header>
+
+  <main class="kgm-main">
+    <div class="inv-toolbar">
+      <select id="filter-type" onchange="loadFindings()">
+        <option value="">All finding types</option>
+        <option value="wiki_contradiction">wiki_contradiction</option>
+        <option value="wiki_inferred_edge">wiki_inferred_edge</option>
+        <option value="wiki_question">wiki_question</option>
+        <option value="duplicate_node">duplicate_node</option>
+        <option value="state_missing_dates">state_missing_dates</option>
+      </select>
+      <span id="inv-count" class="inv-count"></span>
+    </div>
+
+    <div id="inv-list" class="inv-list">
+      <p class="inv-loading">Loading…</p>
+    </div>
+  </main>
+
+  <script>
+  (function () {
+    const list = document.getElementById('inv-list');
+    const countEl = document.getElementById('inv-count');
+
+    function esc(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+      ));
+    }
+    function fmtDate(iso) {
+      if (!iso) return '';
+      try { return new Date(iso).toLocaleString(); } catch (_) { return iso; }
+    }
+
+    window.loadFindings = async function loadFindings() {
+      const type = document.getElementById('filter-type').value;
+      let url = '/kg-maintenance/api/investigated?limit=300';
+      if (type) url += '&type=' + encodeURIComponent(type);
+      list.innerHTML = '<p class="inv-loading">Loading…</p>';
+      try {
+        const res = await fetch(url);
+        const data = await res.json();
+        countEl.textContent = `${data.length} finding${data.length === 1 ? '' : 's'}`;
+        if (!data.length) {
+          list.innerHTML = '<p class="inv-empty">No investigated findings right now.</p>';
+          return;
+        }
+        list.innerHTML = data.map(renderCard).join('');
+      } catch (e) {
+        list.innerHTML = `<p class="inv-error">Failed to load: ${esc(e.message)}</p>`;
+      }
+    };
+
+    function renderCard(f) {
+      const r = f.investigation_report_json || {};
+      const proposed = r.proposed_action || {};
+      const op = proposed.op || '(unspecified)';
+      const args = proposed.args || '';
+      const reversibility = proposed.reversibility || '';
+      const confidence = proposed.confidence != null ? (proposed.confidence * 100).toFixed(0) + '%' : '';
+      const operatorNotes = r.operator_notes || '';
+      const evidenceList = Array.isArray(r.evidence) ? r.evidence : [];
+      const affected = Array.isArray(r.affected_records) ? r.affected_records : [];
+      const openQuestions = Array.isArray(r.open_questions) ? r.open_questions : [];
+      const primaryLabel = (f.primary_node && f.primary_node.label) || f.primary_node_id || '(no node)';
+      const primaryNodeId = (f.primary_node && f.primary_node.id) || f.primary_node_id || '';
+      const nodeLink = primaryNodeId ? `<a href="/kg/node/${esc(primaryNodeId)}" target="_blank">${esc(primaryLabel)}</a>` : esc(primaryLabel);
+
+      // Render evidence as a compact JSON list (it's typically already small).
+      const evidenceHtml = evidenceList.length
+        ? `<details class="inv-collapsible"><summary>Evidence (${evidenceList.length})</summary><pre class="inv-json">${esc(JSON.stringify(evidenceList, null, 2))}</pre></details>`
+        : '';
+
+      const affectedHtml = affected.length
+        ? `<details class="inv-collapsible"><summary>Affected records (${affected.length})</summary><pre class="inv-json">${esc(JSON.stringify(affected, null, 2))}</pre></details>`
+        : '';
+
+      const questionsHtml = openQuestions.length
+        ? `<div class="inv-questions"><h4>Open questions</h4><ul>${openQuestions.map(q => `<li>${esc(q)}</li>`).join('')}</ul></div>`
+        : '';
+
+      const opLabel = op === 'no_action'
+        ? '<span class="inv-op inv-op-noop">no_action</span>'
+        : `<span class="inv-op">${esc(op)}</span>`;
+
+      return `
+        <article class="inv-card" id="card-${esc(f.id)}">
+          <header class="inv-card-head">
+            <div class="inv-card-head-left">
+              <span class="inv-type-badge inv-type-${esc(f.finding_type)}">${esc(f.finding_type.replace(/_/g, ' '))}</span>
+              <span class="inv-priority inv-priority-${esc(f.priority)}">${esc(f.priority)}</span>
+              ${opLabel}
+              ${confidence ? `<span class="inv-confidence">conf ${confidence}</span>` : ''}
+              ${reversibility ? `<span class="inv-rev inv-rev-${esc(reversibility)}">${esc(reversibility)}</span>` : ''}
+            </div>
+            <div class="inv-card-head-right">
+              <span class="inv-meta">${nodeLink}</span>
+              <span class="inv-meta-time">${esc(fmtDate(f.investigated_at))}</span>
+            </div>
+          </header>
+
+          ${r.result_summary ? `<p class="inv-summary">${esc(r.result_summary)}</p>` : ''}
+
+          ${r.diagnosis ? `<details class="inv-collapsible" open><summary>Diagnosis</summary><div class="inv-prose">${esc(r.diagnosis)}</div></details>` : ''}
+
+          <div class="inv-proposed">
+            <h4>Proposed action: <code>${esc(op)}</code></h4>
+            ${args ? `<div class="inv-prose">${esc(args)}</div>` : '<p class="inv-empty-inline">(no args)</p>'}
+          </div>
+
+          ${affectedHtml}
+          ${evidenceHtml}
+          ${questionsHtml}
+
+          ${r.final_answer_answer ? `<details class="inv-collapsible"><summary>Full final answer</summary><div class="inv-prose">${esc(r.final_answer_answer)}</div></details>` : ''}
+
+          <div class="inv-original">
+            <h4>Original critic finding</h4>
+            <p class="inv-prose">${esc(f.reason || '(no reason recorded)')}</p>
+          </div>
+
+          <div class="inv-notes-block">
+            <label for="notes-${esc(f.id)}">Operator notes</label>
+            <textarea id="notes-${esc(f.id)}" rows="3" placeholder="Your thoughts before accepting / dismissing…">${esc(operatorNotes)}</textarea>
+            <button type="button" class="inv-btn inv-btn-save-notes" onclick="saveNotes('${esc(f.id)}')">Save notes</button>
+            <span class="inv-save-status" id="save-status-${esc(f.id)}"></span>
+          </div>
+
+          <div class="inv-actions">
+            <button type="button" class="inv-btn inv-btn-accept" onclick="acceptFinding('${esc(f.id)}')">
+              Accept (close as executed)
+            </button>
+            <button type="button" class="inv-btn inv-btn-dismiss" onclick="dismissFinding('${esc(f.id)}')">
+              Dismiss (close as rejected)
+            </button>
+          </div>
+        </article>
+      `;
+    }
+
+    function notesValue(id) {
+      const ta = document.getElementById('notes-' + id);
+      return ta ? ta.value.trim() : '';
+    }
+    function flashStatus(id, msg, isError) {
+      const el = document.getElementById('save-status-' + id);
+      if (!el) return;
+      el.textContent = msg;
+      el.classList.toggle('is-error', !!isError);
+      setTimeout(() => { el.textContent = ''; el.classList.remove('is-error'); }, 3500);
+    }
+
+    window.saveNotes = async function saveNotes(id) {
+      const notes = notesValue(id);
+      try {
+        const res = await fetch(`/kg-maintenance/api/finding/${id}/operator_notes`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ notes }),
+        });
+        if (!res.ok) throw new Error((await res.json()).error || res.statusText);
+        flashStatus(id, 'Saved.', false);
+      } catch (e) {
+        flashStatus(id, 'Save failed: ' + e.message, true);
+      }
+    };
+
+    async function closeFinding(id, action, label) {
+      const notes = notesValue(id);
+      const confirmMsg = `${label} this finding?\n\n` + (notes ? `Notes: ${notes}\n\n` : '') + 'This is reversible only by editing the row in the DB.';
+      if (!confirm(confirmMsg)) return;
+      try {
+        const res = await fetch(`/kg-maintenance/api/finding/${id}/${action}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ notes }),
+        });
+        if (!res.ok) throw new Error((await res.json()).error || res.statusText);
+        const card = document.getElementById('card-' + id);
+        if (card) {
+          card.classList.add('is-closed');
+          card.querySelector('.inv-actions').innerHTML = `<span class="inv-closed-badge">${label}d</span>`;
+        }
+      } catch (e) {
+        alert(`${label} failed: ` + e.message);
+      }
+    }
+
+    window.acceptFinding = (id) => closeFinding(id, 'accept', 'Accept');
+    window.dismissFinding = (id) => closeFinding(id, 'dismiss', 'Dismiss');
+
+    document.addEventListener('DOMContentLoaded', loadFindings);
+  })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,288 @@
+/* Investigated-findings review page. Layered on top of kg_maintenance.css
+   for the dark theme variables; this file only adds card / proposed-action
+   / notes / action styles specific to the post-investigation workflow. */
+
+.kgm-header {
+  padding: 22px 28px 8px;
+  border-bottom: 1px solid var(--line);
+}
+.kgm-header h1 {
+  margin: 0 0 4px;
+  font-size: 22px;
+  color: var(--text);
+}
+.kgm-sub {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted, #999);
+}
+.kgm-sub a { color: var(--info, #4a9eff); text-decoration: none; margin-left: 8px; }
+.kgm-sub a:hover { text-decoration: underline; }
+
+.kgm-main {
+  padding: 16px 28px 60px;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.inv-toolbar {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 18px;
+}
+.inv-toolbar select {
+  background: var(--panel-soft, #1a1a1a);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+.inv-count {
+  color: var(--muted, #888);
+  font-size: 13px;
+}
+
+.inv-list { display: flex; flex-direction: column; gap: 16px; }
+.inv-loading, .inv-empty, .inv-error { color: var(--muted, #888); padding: 20px 0; }
+.inv-error { color: var(--danger, #f33); }
+
+.inv-card {
+  background: var(--panel, #131313);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: opacity 0.2s;
+}
+.inv-card.is-closed {
+  opacity: 0.45;
+  border-style: dashed;
+}
+
+.inv-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.inv-card-head-left { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.inv-card-head-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; font-size: 12px; }
+.inv-meta { color: var(--text); font-size: 13px; }
+.inv-meta a { color: var(--info, #4a9eff); text-decoration: none; }
+.inv-meta a:hover { text-decoration: underline; }
+.inv-meta-time { color: var(--muted, #888); }
+
+.inv-type-badge {
+  background: #2a4060;
+  color: #cce0ff;
+  padding: 2px 8px;
+  border-radius: 11px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+}
+.inv-type-wiki_contradiction { background: #5a3030; color: #ffcfcf; }
+.inv-type-wiki_inferred_edge { background: #354d35; color: #d4f5d4; }
+.inv-type-wiki_question { background: #524430; color: #ffe4b3; }
+.inv-type-state_missing_dates { background: #444466; color: #cfd0ff; }
+
+.inv-priority {
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 11px;
+  text-transform: uppercase;
+}
+.inv-priority-high { background: #5e2424; color: #ffcfcf; }
+.inv-priority-medium { background: #434343; color: #ddd; }
+.inv-priority-low { background: #303030; color: #999; }
+
+.inv-op {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, monospace;
+  background: #2a2a2a;
+  color: #ddd;
+  padding: 2px 7px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+.inv-op-noop { background: #2a4040; color: #aef; }
+
+.inv-confidence {
+  font-size: 11px;
+  color: var(--muted, #888);
+  background: #1f1f1f;
+  padding: 2px 7px;
+  border-radius: 3px;
+  font-family: ui-monospace, monospace;
+}
+.inv-rev {
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 11px;
+}
+.inv-rev-reversible { background: #1f3f1f; color: #b0e0b0; }
+.inv-rev-partially_reversible { background: #4a3a1f; color: #ffd58a; }
+.inv-rev-irreversible { background: #4a1f1f; color: #ff9090; }
+
+.inv-summary {
+  margin: 4px 0;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.inv-prose {
+  white-space: pre-wrap;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 4px 0;
+}
+
+.inv-proposed {
+  background: #181818;
+  border-left: 3px solid var(--info, #4a9eff);
+  padding: 8px 12px;
+  border-radius: 0 4px 4px 0;
+}
+.inv-proposed h4 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: var(--muted, #aaa);
+  font-weight: 500;
+}
+.inv-proposed h4 code {
+  background: #2a2a2a;
+  color: #ddd;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+
+.inv-original h4 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: var(--muted, #777);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 500;
+}
+.inv-original .inv-prose {
+  color: var(--muted, #aaa);
+  font-size: 12px;
+  font-style: italic;
+}
+
+.inv-collapsible {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0;
+  font-size: 12px;
+}
+.inv-collapsible > summary {
+  cursor: pointer;
+  padding: 6px 10px;
+  user-select: none;
+  color: var(--muted, #aaa);
+  list-style-position: outside;
+}
+.inv-collapsible[open] > summary { border-bottom: 1px solid var(--line); color: var(--text); }
+.inv-collapsible > .inv-prose,
+.inv-collapsible > .inv-json {
+  margin: 0;
+  padding: 8px 10px;
+}
+.inv-json {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, monospace;
+  font-size: 11px;
+  color: #c0c0c0;
+  background: #0e0e0e;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.inv-questions h4 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: var(--muted, #aaa);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.inv-questions ul { margin: 0; padding-left: 22px; color: var(--text); font-size: 13px; }
+
+.inv-empty-inline { color: var(--muted, #777); font-style: italic; font-size: 12px; margin: 0; }
+
+.inv-notes-block {
+  background: #181818;
+  padding: 10px 12px;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.inv-notes-block label {
+  font-size: 12px;
+  color: var(--muted, #aaa);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.inv-notes-block textarea {
+  background: #0e0e0e;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 7px 9px;
+  font: inherit;
+  font-size: 13px;
+  resize: vertical;
+  min-height: 60px;
+}
+.inv-btn-save-notes {
+  align-self: flex-start;
+  background: #2a3a4a;
+  color: #ddd;
+  border: 1px solid #3a4a5a;
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.inv-btn-save-notes:hover { background: #3a4a5a; }
+.inv-save-status { font-size: 12px; color: var(--muted, #888); }
+.inv-save-status.is-error { color: var(--danger, #f55); }
+
+.inv-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 4px;
+}
+.inv-btn {
+  background: #2a2a2a;
+  color: var(--text);
+  border: 1px solid var(--line);
+  padding: 6px 14px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.inv-btn:hover { background: #353535; }
+.inv-btn-accept { background: #1f4a1f; border-color: #2a6a2a; color: #d0f5d0; }
+.inv-btn-accept:hover { background: #2a6a2a; }
+.inv-btn-dismiss { background: #4a2a2a; border-color: #6a3535; color: #f5d0d0; }
+.inv-btn-dismiss:hover { background: #6a3535; }
+
+.inv-closed-badge {
+  background: #2a2a2a;
+  color: var(--muted, #888);
+  padding: 6px 14px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-style: italic;
+}

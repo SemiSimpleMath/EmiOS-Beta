@@ -182,6 +182,7 @@
     </select>
     <div style="margin-left:auto; display:flex; gap:6px;">
       <a href="/kg-maintenance/date-gaps" class="btn btn-primary" style="text-decoration:none">Date gaps{% set _dg_pending = (summary.by_type.state_missing_dates or {}).get('pending', 0) %}{% if _dg_pending %} ({{ _dg_pending }}){% endif %} →</a>
+      <a href="/kg-maintenance/investigated" class="btn btn-primary" style="text-decoration:none" title="Review findings the investigator has already diagnosed — add notes, accept, or dismiss">Investigated →</a>
       <a href="/kg-maintenance/queue" class="btn btn-primary" style="text-decoration:none">View action queue →</a>
       <button class="btn btn-approve" onclick="bulkAction('approve')">Flag selected for action</button>
       <button class="btn btn-reject" onclick="bulkAction('reject')">Reject selected</button>

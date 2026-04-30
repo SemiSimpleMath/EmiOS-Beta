@@ -318,6 +318,154 @@ def api_investigate_finding(finding_id):
         return jsonify({"error": str(e)}), 500
 
 
+# ── Investigated-findings review surface ─────────────────────────────────────
+#
+# After kg_investigation_manager runs, the finding row goes status='investigated'
+# with a structured report in investigation_report_json. The default
+# /kg-maintenance dashboard hides these (it shows pending). The page below
+# surfaces them so a human can:
+#   - read the diagnosis + proposed_action
+#   - leave operator notes (saved into the JSON report alongside the agent's)
+#   - accept (close as 'executed' — for ops that don't need a mutation, e.g.
+#     no_action where the diagnosis is "no contradiction, just a naming variant")
+#   - dismiss (close as 'rejected' — proposed action shouldn't be applied)
+#
+# Note: this page does NOT execute KG mutations. The proposed_action.args
+# field is currently free-form prose, so applying a rename or merge requires
+# the user to go through kg_mutation_manager / the kg_mutator tool surface
+# with structured args. That apply path is left to a follow-up.
+
+
+def _persist_report_field(finding_id: str, field: str, value) -> None:
+    """Update one top-level key inside investigation_report_json (e.g.
+    'operator_notes', 'closed_by_user_at'). Read-modify-write because
+    SQLite JSON support varies by version."""
+    from app.models.base import get_session as _get_session
+    from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
+    session = _get_session()
+    try:
+        finding = session.query(KGMaintenanceFinding).filter_by(id=finding_id).first()
+        if finding is None:
+            raise ValueError(f"Finding {finding_id!r} not found")
+        report = finding.investigation_report_json or {}
+        if not isinstance(report, dict):
+            try:
+                report = json.loads(report) if isinstance(report, str) else {}
+            except Exception:
+                report = {}
+        report[field] = value
+        finding.investigation_report_json = report
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+@kg_maintenance_bp.route("/investigated", methods=["GET"])
+def investigated_review():
+    """Page listing all status='investigated' findings with their reports."""
+    return render_template("kg_maintenance_investigated.html")
+
+
+@kg_maintenance_bp.route("/api/investigated", methods=["GET"])
+def api_investigated():
+    """Findings with status='investigated', sorted by priority desc then newest."""
+    try:
+        finding_type = request.args.get("type") or None
+        limit = min(int(request.args.get("limit", 200)), 500)
+        offset = int(request.args.get("offset", 0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "limit and offset must be integers"}), 400
+    try:
+        findings = get_findings(
+            status="investigated",
+            finding_type=finding_type,
+            limit=limit,
+            offset=offset,
+        )
+        return jsonify(findings)
+    except Exception:
+        logger.debug("[kg_maintenance] api_investigated failed", exc_info=True)
+        raise
+
+
+@kg_maintenance_bp.route("/api/finding/<finding_id>/operator_notes", methods=["POST"])
+def api_finding_operator_notes(finding_id):
+    """Save operator notes onto an investigated finding without changing status.
+    Body: { "notes": str }
+    Notes land at investigation_report_json.operator_notes."""
+    data = request.get_json(force=True) or {}
+    notes = str(data.get("notes") or "").strip()
+    try:
+        _persist_report_field(finding_id, "operator_notes", notes)
+        _persist_report_field(finding_id, "operator_notes_updated_at", datetime.utcnow().isoformat() + "Z")
+        return jsonify({"ok": True, "notes": notes})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        logger.error("[kg_maintenance] operator_notes failed id=%s: %s", finding_id, e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@kg_maintenance_bp.route("/api/finding/<finding_id>/accept", methods=["POST"])
+def api_finding_accept(finding_id):
+    """Close an investigated finding as 'executed' without performing a KG
+    mutation — appropriate for proposed_action.op == 'no_action' where the
+    diagnosis itself resolves the question.
+
+    Body (optional): { "notes": str }
+    """
+    data = request.get_json(silent=True) or {}
+    notes = str(data.get("notes") or "").strip()
+    try:
+        finding = get_finding(finding_id)
+        if finding is None:
+            return jsonify({"error": "Finding not found"}), 404
+        if finding["status"] != "investigated":
+            return jsonify({"error": f"Cannot accept finding in status {finding['status']!r}"}), 409
+        if notes:
+            _persist_report_field(finding_id, "operator_notes", notes)
+        set_status(
+            finding_id, "executed",
+            executed_by="ui:investigated_review",
+            execution_notes=(notes or "Accepted from investigated-review page"),
+        )
+        return jsonify({"ok": True, "id": finding_id, "new_status": "executed"})
+    except Exception as e:
+        logger.error("[kg_maintenance] accept failed id=%s: %s", finding_id, e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@kg_maintenance_bp.route("/api/finding/<finding_id>/dismiss", methods=["POST"])
+def api_finding_dismiss(finding_id):
+    """Close an investigated finding as 'rejected' — proposed action shouldn't
+    be applied (false positive, low priority, won't-fix, etc.).
+
+    Body (optional): { "notes": str }
+    """
+    data = request.get_json(silent=True) or {}
+    notes = str(data.get("notes") or "").strip()
+    try:
+        finding = get_finding(finding_id)
+        if finding is None:
+            return jsonify({"error": "Finding not found"}), 404
+        if finding["status"] != "investigated":
+            return jsonify({"error": f"Cannot dismiss finding in status {finding['status']!r}"}), 409
+        if notes:
+            _persist_report_field(finding_id, "operator_notes", notes)
+        set_status(
+            finding_id, "rejected",
+            executed_by="ui:investigated_review",
+            execution_notes=(notes or "Dismissed from investigated-review page"),
+        )
+        return jsonify({"ok": True, "id": finding_id, "new_status": "rejected"})
+    except Exception as e:
+        logger.error("[kg_maintenance] dismiss failed id=%s: %s", finding_id, e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
 @kg_maintenance_bp.route("/api/bulk_action", methods=["POST"])
 def api_bulk_action():
     """Body: { "ids": ["<id>", ...], "action": "approve"|"reject" }"""
