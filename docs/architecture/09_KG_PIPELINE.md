@@ -1,6 +1,6 @@
 # KG Pipeline — Architecture
 
-This is the architecture for the live KG ingest pipeline that turns chat in `unified_log_2026` into rows in the live knowledge graph (`kg_node_metadata`, `kg_edge_metadata`) via the proposal layer (`claim_proposal*`).
+This is the architecture for the live KG ingest pipeline that turns chat in `unified_log_2026` into rows in the live knowledge graph (`kg_node_metadata`, `kg_edge_metadata`) via the **shadow KG** — the staging layer made up of `claim_proposal` + `claim_proposal_node` + `claim_proposal_edge` + `claim_proposal_evidence`. "Shadow KG" and "proposal layer" are used interchangeably in the codebase + admin UI. Rows live there until the proposal promoter (Stage 5) pushes them into the canonical KG, and the `/kg-proposals/` admin UI lets you review them in flight.
 
 ## Design principles
 
@@ -210,7 +210,7 @@ No LLM calls — component-splitting and enrichment have already happened in Sta
 
 **Queue query:** `kg_window_enrichment ke LEFT JOIN claim_proposal_evidence cpe ON cpe.enrichment_id = ke.id WHERE cpe.id IS NULL`.
 
-**Schema for `claim_proposal_evidence`:** the `window_id` column accepts ids from either `kg_window` (current pipeline) or `kg_chat_conversation_window` (older provenance archive — the ~3,612 nodes promoted before this pipeline existed point at it). The two UUID spaces are disjoint, so consumers (e.g. the node viewer) check the archive first and fall through to the current tables. `enrichment_id` is a denormalized convenience FK to `kg_window_enrichment.id`.
+**Schema for `claim_proposal_evidence`:** `window_id` references `kg_window.id` (single namespace; the legacy `kg_chat_conversation_window` provenance archive was migrated into `kg_window` + `kg_window_message` + `kg_resolved_message` and dropped — see "Schema migration history" below). `enrichment_id` is a denormalized convenience FK to `kg_window_enrichment.id`.
 
 ### Stage 5: Promote (existing routine, untouched)
 
@@ -257,22 +257,38 @@ Each step exports a class with two methods:
 
 The runner coordinates: spawns one daemon thread per step, each thread loops `claim_next → process → commit` on its bucket.
 
-## Provenance archive
+## Stage 5b: Manual review (the `/kg-proposals/` admin UI)
 
-Three older tables are still on disk in read-only mode because
-`kg_node_evidence.window_id` and `claim_proposal_evidence.window_id`
-on ~3,612 KG nodes promoted before this pipeline existed point at
-them:
+Most proposals get promoted (or marked contradicted) automatically by Stage 5's promoter routine. A few don't — typically when the promoter can't decide whether a proposed node should match an existing KG node (low-confidence semantic match, missing participants on a State/Event, etc.). Those stay `status='pending'` and accumulate. The admin UI is how you triage them.
 
-- `kg_chat_projection` — canonical chat-only message log
-- `kg_chat_conversation_window` — conversation grouping
-- `kg_chat_conversation_window_item` — message ↔ window membership
+**Routes** (`app/routes/kg_proposals.py`):
 
-Drill-down from any of those KG nodes to source conversation reads
-through these tables. The live pipeline writes to `kg_resolved_message`
-/ `kg_window` / `kg_window_message` instead; consumers (e.g. the node
-viewer) check the archive first and fall through to the current tables
-because the two UUID spaces are disjoint.
+| Method + path | What it does |
+|---|---|
+| `GET  /kg-proposals/` | List view, filterable by status. Trigger buttons for run-pipeline and run-promoter. |
+| `GET  /kg-proposals/<id>` | Detail page: graph viz of the proposed group, evidence trail, action buttons. |
+| `POST /kg-proposals/run-pipeline` | Synchronous trigger of the `kg_pipeline` routine (see Stage 1-4 above). Capped per cycle so this never runs unbounded. |
+| `POST /kg-proposals/run-promoter` | Run the promoter (see Stage 5). Dry-run by default; `?commit=1` applies. |
+| `POST /kg-proposals/<id>/approve` | **Manual force-promote.** Runs the same `_evaluate_and_apply` evaluator the auto-promoter uses on this single proposal in a savepoint. Status becomes `promoted` if successful, `contradicted` if the evaluator hits a conflict. Only works while `status='pending'`. |
+| `POST /kg-proposals/<id>/reject` | Retract a proposal — sets `status='retracted'`. Use when you can see a proposal is wrong (bad extraction, hallucinated relationship, etc.) and don't want it ever promoted. |
+| `GET  /kg-proposals/<id>.md` | Markdown export of the proposal — useful for sharing or archiving. |
+
+**Lifecycle of a proposal status:**
+
+```
+        ┌─→ promoted     (auto-promoter success, OR manual approve)
+pending ┼─→ contradicted (evaluator found conflict — durable single-target dup, locked node, etc.)
+        ├─→ retracted    (user clicked Reject)
+        └─→ abandoned    (writer stage hit a placeholder label that auto-rejects the group)
+```
+
+Only `pending` proposals can be approved or retracted via the UI; the other three are terminal.
+
+The shadow KG metaphor: the canonical `kg_node_metadata` / `kg_edge_metadata` tables are the live graph; `claim_proposal*` is a parallel staging area where every proposed change waits for evaluation. The promoter is the bridge.
+
+## Schema migration history
+
+The pre-2026-04-22 chain stored chat windows under `kg_chat_projection` + `kg_chat_conversation_window` + `kg_chat_conversation_window_item` + `kg_chat_parsed_sentence`. Those four tables were retired and migrated into the unified `kg_window` + `kg_window_message` + `kg_resolved_message` schema (see the migration scripts at `scratch_legacy_window_migration_*.py` for the conversion rules — pure SQL, no LLM cost). After the migration, all `kg_edge_metadata.window_id` and `kg_node_evidence.window_id` references resolve through the current schema; the legacy tables and their fallback lookup paths in `page_writer`, `kg_node_viewer`, `kg_proposals`, `proposal_writer`, and `proposal_promoter` were all removed in commit `80a8b0d2`. There is no longer a "provenance archive" — there's just one schema.
 
 ## Properties this gives us
 

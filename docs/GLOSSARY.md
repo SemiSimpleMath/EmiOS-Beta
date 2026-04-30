@@ -46,7 +46,7 @@ The first agent in a room manager's loop. Decides per turn: reply directly, hand
 
 ### claim_proposal
 
-A row in `claim_proposal` plus its sibling tables (`claim_proposal_node`, `claim_proposal_edge`, `claim_proposal_evidence`). Represents a connected subgraph of nodes/edges produced by the **KG Pipeline** that is *pending* promotion into the live KG. The promoter routine consumes these.
+A row in `claim_proposal` plus its sibling tables (`claim_proposal_node`, `claim_proposal_edge`, `claim_proposal_evidence`). Represents a connected subgraph of nodes/edges produced by the **KG Pipeline** that is *pending* promotion into the live KG. The promoter routine consumes these. See also: **Shadow KG**, **proposal_promoter**.
 
 ### compiled task
 
@@ -269,6 +269,10 @@ The new name for the analyst + spec_refiner pair (renamed 2026-04-26). Reviews t
 ### ServiceLocator
 
 The DI container. Lives in `app/assistant/ServiceLocator/service_locator.py`. Bootstrap happens in `app/bootstrap.py`. Access via `from app.assistant.ServiceLocator.service_locator import DI`.
+
+### Shadow KG
+
+The `claim_proposal*` staging layer where every proposed change waits before being promoted into the canonical KG (`kg_node_metadata` + `kg_edge_metadata`). Used interchangeably with "proposal layer". Reviewable through the `/kg-proposals/` admin UI: list, detail with graph viz, manual `approve` / `reject` per proposal. The auto-promoter routine drains pending proposals nightly. See `docs/architecture/09_KG_PIPELINE.md` for the full lifecycle.
 
 ### SignalRouter
 
