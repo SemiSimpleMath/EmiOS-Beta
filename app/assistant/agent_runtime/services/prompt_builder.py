@@ -46,6 +46,33 @@ class PromptBuilder:
                     seen_paths.add(p)
             user_prompt = pat.sub("", user_prompt or "")
             user_prompt = pat_legacy.sub("", user_prompt or "")
+
+            # New image-pod path: when the prompt mentions
+            # ``datapod:image:<sha>``, resolve to the on-disk file via
+            # PodStore so the multimodal call sees the actual pixels.
+            # The URI itself is left in the text — the agent uses it as a
+            # handle for tool calls (send_email pod_ids, etc.).
+            from app.assistant.pod_store.pod_uri import POD_URI_RE
+            from app.assistant.pod_store.pod_store import PodStore
+            from app.assistant.utils.path_utils import get_repo_root
+            pod_store = None
+            for m in POD_URI_RE.finditer(user_prompt or ""):
+                uri = m.group(0)
+                if not uri.startswith("datapod:image:"):
+                    continue
+                if pod_store is None:
+                    pod_store = PodStore()
+                pod = pod_store.get(uri)
+                if pod is None:
+                    continue
+                rel = (pod.metadata or {}).get("stored_path")
+                if not rel:
+                    continue
+                abs_path = str(Path(get_repo_root()) / rel)
+                if abs_path in seen_paths:
+                    continue
+                emi_image_refs.append(abs_path)
+                seen_paths.add(abs_path)
         except Exception as e:
             logger.error("[%s] Error parsing image markers in prompt: %s", agent.name, e)
             logger.debug("[%s] image marker parse exception details", agent.name, exc_info=True)
