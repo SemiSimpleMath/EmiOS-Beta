@@ -110,6 +110,7 @@ class CreateDayflowTicketTool(BaseTool):
                     timestamp=datetime.now(timezone.utc),
                     role="assistant",
                     user_message_data=UserMessageData(feed=None, tts=True, tts_text=tts_text),
+                    metadata={"reply_to": {"type": "socketio", "room_id": "master_room"}},
                 )
                 tts_message.event_topic = "socket_emit"
                 DI.event_hub.publish(tts_message)
