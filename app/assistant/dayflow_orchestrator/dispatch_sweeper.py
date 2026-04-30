@@ -184,14 +184,14 @@ def sweep_stale_dispatches(now_utc: Optional[datetime] = None) -> int:
 
 
 def sweep_orphaned_dispatched_tasks(now_utc: Optional[datetime] = None) -> int:
-    """Backstop sweep: revive tasks stuck in ``state='dispatched'`` with no
+    """Backstop sweep: close tasks stuck in ``state='dispatched'`` with no
     live dispatch row pointing at them.
 
     Closes the gap where the dispatch sweeper closed a dispatch cleanly
     but the source-task revive step crashed, OR a task was set to
     ``dispatched`` without a paired dispatch row at all. Without this,
-    such tasks sit in ``dispatched`` forever — they never appear in
-    ``actionable`` again, and the orchestrator never reconsiders them.
+    such tasks sit in ``dispatched`` forever — never reconsidered, never
+    surfaced.
 
     A task is considered orphaned when:
       - state == 'dispatched'
@@ -199,7 +199,12 @@ def sweep_orphaned_dispatched_tasks(now_utc: Optional[datetime] = None) -> int:
       - no in-flight ``action_dispatch`` row has ``acted_on_item_id``
         equal to this task's id (otherwise the regular sweeper owns it)
 
-    Returns the number of tasks revived.
+    Such tasks are moved to ``closed`` (NOT ``actionable``) — re-promoting
+    them would just have the orchestrator re-dispatch and re-stick. If
+    the underlying need is still alive, the planner will create a fresh
+    task next tick from current context.
+
+    Returns the number of tasks closed.
     """
     now = now_utc or datetime.now(timezone.utc)
     all_items = load_existing_dayflow_items(include_terminal=True)
@@ -239,18 +244,18 @@ def sweep_orphaned_dispatched_tasks(now_utc: Optional[datetime] = None) -> int:
 
         write_dayflow_item(
             item_id,
-            state="actionable",
+            state="closed",
             reason=f"orphan_dispatched: stuck >{_TASK_DISPATCHED_TIMEOUT_HOURS}h with no live dispatch",
             caller="dispatch_sweeper::sweep_orphaned_dispatched_tasks",
         )
         revived += 1
         logger.info(
-            "dispatch_sweeper: revived orphan-dispatched task %s (age=%s, summary=%r)",
+            "dispatch_sweeper: closed orphan-dispatched task %s (age=%s, summary=%r)",
             item_id, now - dispatched_at_utc, str(meta.get("summary") or "")[:80],
         )
 
     if revived:
-        logger.info("dispatch_sweeper: revived %d orphan-dispatched task(s).", revived)
+        logger.info("dispatch_sweeper: closed %d orphan-dispatched task(s).", revived)
     return revived
 
 
