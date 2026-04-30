@@ -1,6 +1,6 @@
 name: kg_dev_manager
 class_name: MultiAgentManager
-description: "Read-only KG investigation console — single planner in a tool-call loop over kg_query / pod_search / pod_fetch."
+description: "Read-only KG investigation console. Single planner in a tool-call loop over kg_query / pod_search / pod_fetch. Mirrors the emi_team_manager flow with critic and summary disabled — no LLM cost for those — but keeps the control-node scaffolding (tool_return_router, critic_pre_node, summary_pre_node) intact for proper resume_target routing and free planner-output validation."
 max_cycles: 30
 
 role_bindings:
@@ -16,6 +16,28 @@ agents:
     class: Agent
 
 control_nodes:
+  - name: tool_return_router
+    class: ToolReturnRouter
+  - name: critic_pre_node
+    class: CriticPreNode
+    config:
+      # Disabled: dev console queries are user-verifiable directly from
+      # the result; no need for cadence-based critique. Node still runs
+      # as a deterministic pass-through to continue_agent and validates
+      # that the planner populated tool_arguments.target_name correctly.
+      enabled: false
+      critic_agent: "kg_dev::planner"
+      continue_agent: "tool_caller"
+  - name: summary_pre_node
+    class: SummaryPreNode
+    config:
+      # Disabled: dev console interactions are short (single question
+      # → 1-3 tool calls → answer) so context never grows large enough
+      # to warrant condensation. Node still runs as a pass-through to
+      # the resume_agent.
+      enabled: false
+      summary_agent: "kg_dev::planner"
+      resume_agent: "kg_dev::planner"
   - name: tool_caller
     class: ToolCaller
   - name: tool_result_handler
@@ -31,16 +53,20 @@ tools:
   allowed_tools: [kg_query, pod_search, pod_fetch]
   except_tools: []
 
-# The Planner class runs shared::tool_arguments internally in its
-# action_handler, so the tool_arguments payload (target_name +
-# arguments) is already on the blackboard when the planner finishes.
-# Route straight from planner to tool_caller — no extra agent step.
+# State map mirrors emi_team_manager. The Planner class runs
+# shared::tool_arguments internally inside its action_handler, so by
+# the time we hit critic_pre_node the blackboard already has
+# tool_arguments={target_name, arguments}. critic_pre_node validates
+# that and routes through to tool_caller (since enabled=false).
 flow_config:
+  tool_return:
+    tool_call_result_handler_node: "tool_result_handler"
   state_map:
     "shared::delegator": "kg_dev::planner"
-    "kg_dev::planner": "tool_caller"
-    "tool_caller": "tool_result_handler"
-    "tool_result_handler": "kg_dev::planner"
+    "kg_dev::planner": "critic_pre_node"
+    "tool_result_handler": "tool_return_router"
+    "tool_return_router": "summary_pre_node"
+    "summary_pre_node": "kg_dev::planner"
     "kg_dev::planner_return_control": "shared::final_answer_lite"
     "shared::final_answer_lite": "manager_exit_node"
     "graceful_exit": "graceful_exit_control_node"
