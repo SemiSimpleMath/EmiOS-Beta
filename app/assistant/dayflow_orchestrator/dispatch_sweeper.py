@@ -33,8 +33,15 @@ logger = get_logger(__name__)
 
 
 _DISPATCH_SOFT_TIMEOUT_MINUTES: int = 10
-_DISPATCH_HARD_TIMEOUT_HOURS: int = 4
+_DISPATCH_HARD_TIMEOUT_HOURS: int = 2
 _DISPATCH_LIST_CAP: int = 40
+
+# Backstop sweep: any source-task stuck in state='dispatched' beyond
+# this window with no live dispatch row pointing at it gets revived
+# to 'actionable'. Catches state-machine gaps where the dispatch row
+# closed cleanly but the source-task revive step crashed (or where a
+# task was set to dispatched without a paired dispatch row at all).
+_TASK_DISPATCHED_TIMEOUT_HOURS: int = 2
 
 
 def _find_item_by_id(items: List[Dict[str, Any]], item_id: str) -> Optional[Dict[str, Any]]:
@@ -174,6 +181,77 @@ def sweep_stale_dispatches(now_utc: Optional[datetime] = None) -> int:
     if closed:
         logger.info("dispatch_sweeper: auto-closed %d stale dispatch(es).", closed)
     return closed
+
+
+def sweep_orphaned_dispatched_tasks(now_utc: Optional[datetime] = None) -> int:
+    """Backstop sweep: revive tasks stuck in ``state='dispatched'`` with no
+    live dispatch row pointing at them.
+
+    Closes the gap where the dispatch sweeper closed a dispatch cleanly
+    but the source-task revive step crashed, OR a task was set to
+    ``dispatched`` without a paired dispatch row at all. Without this,
+    such tasks sit in ``dispatched`` forever — they never appear in
+    ``actionable`` again, and the orchestrator never reconsiders them.
+
+    A task is considered orphaned when:
+      - state == 'dispatched'
+      - dispatched_at is older than ``_TASK_DISPATCHED_TIMEOUT_HOURS``
+      - no in-flight ``action_dispatch`` row has ``acted_on_item_id``
+        equal to this task's id (otherwise the regular sweeper owns it)
+
+    Returns the number of tasks revived.
+    """
+    now = now_utc or datetime.now(timezone.utc)
+    all_items = load_existing_dayflow_items(include_terminal=True)
+    in_flight = _iter_in_flight_dispatches(all_items)
+    covered_task_ids = {
+        str(get_meta(d).get("acted_on_item_id") or "").strip()
+        for d in in_flight
+    }
+    covered_task_ids.discard("")
+
+    cutoff = timedelta(hours=_TASK_DISPATCHED_TIMEOUT_HOURS)
+    revived = 0
+
+    for item in all_items:
+        if not isinstance(item, dict):
+            continue
+        meta = get_meta(item)
+        if str(meta.get("state") or "").strip().lower() != "dispatched":
+            continue
+        item_id = str(meta.get("item_id") or item.get("id") or "").strip()
+        if not item_id or item_id in covered_task_ids:
+            continue
+        dispatched_at_str = str(meta.get("dispatched_at") or "").strip()
+        if not dispatched_at_str:
+            # No dispatched_at to age against — skip rather than guess.
+            continue
+        try:
+            dispatched_at_utc = parse_iso_utc_strict(dispatched_at_str)
+        except Exception:
+            logger.error(
+                "dispatch_sweeper: failed to parse dispatched_at=%r for task %s",
+                dispatched_at_str, item_id, exc_info=True,
+            )
+            continue
+        if (now - dispatched_at_utc) <= cutoff:
+            continue
+
+        write_dayflow_item(
+            item_id,
+            state="actionable",
+            reason=f"orphan_dispatched: stuck >{_TASK_DISPATCHED_TIMEOUT_HOURS}h with no live dispatch",
+            caller="dispatch_sweeper::sweep_orphaned_dispatched_tasks",
+        )
+        revived += 1
+        logger.info(
+            "dispatch_sweeper: revived orphan-dispatched task %s (age=%s, summary=%r)",
+            item_id, now - dispatched_at_utc, str(meta.get("summary") or "")[:80],
+        )
+
+    if revived:
+        logger.info("dispatch_sweeper: revived %d orphan-dispatched task(s).", revived)
+    return revived
 
 
 def list_active_dispatches() -> List[Dict[str, Any]]:

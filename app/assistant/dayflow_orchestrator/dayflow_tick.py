@@ -79,9 +79,17 @@ def dayflow_orchestrator_cadence_tick(*, target_date: str | None = None, routine
     )
 
     # Close dispatches whose manager never reported back, so their source
-    # items can be re-promoted to actionable on this tick.
-    from app.assistant.dayflow_orchestrator.dispatch_sweeper import sweep_stale_dispatches
+    # items can be re-promoted to actionable on this tick. The orphan
+    # sweep is the backstop that catches tasks stuck in 'dispatched'
+    # without a live dispatch row pointing at them — closes the gap
+    # where the dispatch row closed cleanly but the source-task revive
+    # step crashed.
+    from app.assistant.dayflow_orchestrator.dispatch_sweeper import (
+        sweep_stale_dispatches,
+        sweep_orphaned_dispatched_tasks,
+    )
     sweep_stale_dispatches(now_utc=now_utc)
+    sweep_orphaned_dispatched_tasks(now_utc=now_utc)
 
     # Build minimal extras (day_of_week). Per-agent prep nodes own the rest.
     blackboard_extras = build_dayflow_blackboard_extras()
