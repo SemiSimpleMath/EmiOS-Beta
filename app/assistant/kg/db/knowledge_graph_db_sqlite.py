@@ -224,7 +224,7 @@ class Edge(Base):
 
 
 # Node type constants for compatibility
-NODE_TYPES = ['Entity', 'Event', 'State', 'Goal', 'Concept', 'Property']
+NODE_TYPES = ['Entity', 'Event', 'State', 'Goal', 'Concept', 'Property', 'Pod']
 
 
 # --- Database Management Functions ---

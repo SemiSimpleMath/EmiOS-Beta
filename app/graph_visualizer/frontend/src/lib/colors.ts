@@ -19,7 +19,8 @@ export const nodeColors: { [key: string]: string } = {
   'StateNode': '#48bb78',        // Bright green for states
   'Goal': '#ed8936',             // Orange for goals
   'GoalNode': '#ed8936',         // Orange for goals
-  
+  'Pod': '#06b6d4',              // Cyan for pods (multimodal data containers)
+
   // Common entity types
   'person': '#4299e1',
   'organization': '#48bb78',

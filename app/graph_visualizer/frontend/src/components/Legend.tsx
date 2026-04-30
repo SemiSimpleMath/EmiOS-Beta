@@ -7,7 +7,7 @@ interface LegendProps {
 
 const Legend: React.FC<LegendProps> = ({ nodeTypes }) => {
   const [open, setOpen] = useState(true);
-  const essentialTypes = ['Entity', 'Event', 'State', 'Goal', 'Property', 'Concept'];
+  const essentialTypes = ['Entity', 'Event', 'State', 'Goal', 'Property', 'Concept', 'Pod'];
 
   if (!open) {
     return (
