@@ -52,14 +52,26 @@ class PromptBuilder:
             # PodStore so the multimodal call sees the actual pixels.
             # The URI itself is left in the text — the agent uses it as a
             # handle for tool calls (send_email pod_ids, etc.).
+            #
+            # Recent_history can carry many image URIs from old turns; we
+            # bound to the last ``IMAGE_POD_RECENT_LIMIT`` *unique* URIs
+            # by position (i.e. the most recent ones in the rendered
+            # prompt) so token cost stays predictable.
             from app.assistant.pod_store.pod_uri import POD_URI_RE
             from app.assistant.pod_store.pod_store import PodStore
             from app.assistant.utils.path_utils import get_repo_root
-            pod_store = None
+            IMAGE_POD_RECENT_LIMIT = 4
+            seen_uris: set[str] = set()
+            uri_hits: list[str] = []
             for m in POD_URI_RE.finditer(user_prompt or ""):
                 uri = m.group(0)
-                if not uri.startswith("datapod:image:"):
+                if not uri.startswith("datapod:image:") or uri in seen_uris:
                     continue
+                seen_uris.add(uri)
+                uri_hits.append(uri)
+            recent_uris = uri_hits[-IMAGE_POD_RECENT_LIMIT:]
+            pod_store = None
+            for uri in recent_uris:
                 if pod_store is None:
                     pod_store = PodStore()
                 pod = pod_store.get(uri)
