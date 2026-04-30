@@ -2,6 +2,18 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Git remotes — read this before any push
+
+- `origin` → **EmiOS-Beta** (public Beta release line). This is where `release-v0.1` and any future release-vX.Y branches belong. Plain `git push` from those branches goes here.
+- `alpha-legacy` → **EmiOS-Alpha** (legacy private Alpha repo). Do not push release branches here.
+
+A `pre-push` hook at `scripts/git-hooks/pre-push` hard-blocks pushes of `release-v0.1` to anything that isn't EmiOS-Beta. If you see it fire, you targeted the wrong remote — read the message, do not edit the hook to bypass it.
+
+To enable the hook on a fresh clone (it's not active by default — `core.hooksPath` is local config):
+```bash
+git config core.hooksPath scripts/git-hooks
+```
+
 ## Development Environment
 
 - **Python**: 3.10+ via `.venv` at repo root
