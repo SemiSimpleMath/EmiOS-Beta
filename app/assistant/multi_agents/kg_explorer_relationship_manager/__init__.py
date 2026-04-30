@@ -1,1 +1,0 @@
-# KG Explorer Manager package
