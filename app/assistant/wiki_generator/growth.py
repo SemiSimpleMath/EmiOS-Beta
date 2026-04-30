@@ -35,7 +35,14 @@ logger = get_logger(__name__)
 DEFAULT_VAULT = Path.home() / "EmiWiki"
 
 
-def _existing_prose_labels(vault_path: Path) -> set[str]:
+def _existing_prose_stems(vault_path: Path) -> set[str]:
+    """Set of sanitized filename stems already present in the prose dir.
+
+    Use sanitized stems (matching ``wiki_writer._safe_filename``) because
+    that's how files are named on disk — entities like "AT&T" land at
+    ``prose/AT_T.md`` so the raw label "AT&T" wouldn't match a stem-based
+    set. ``pick_growth_targets`` sanitizes each candidate before lookup.
+    """
     prose_dir = vault_path / "prose"
     if not prose_dir.exists():
         return set()
@@ -56,8 +63,15 @@ def pick_growth_targets(
     Returns labels in degree-descending order, capped at ``limit``. Entities
     with fewer than ``min_degree`` edges are skipped — too thin to write
     anything biographical about.
+
+    "Has a prose page" is checked via the sanitized filename stem
+    (matching wiki_writer._safe_filename) so labels with special chars
+    like "AT&T" or "Irvine, California" correctly map to AT_T.md /
+    Irvine_ California.md and don't get re-picked every tick.
     """
-    skip = _existing_prose_labels(vault_path)
+    from app.assistant.wiki_generator.wiki_writer import _safe_filename
+
+    skip = _existing_prose_stems(vault_path)
     session = get_session()
     try:
         rows = session.execute(sql_text(
@@ -79,7 +93,7 @@ def pick_growth_targets(
 
     targets: List[str] = []
     for label, _deg in rows:
-        if label in skip:
+        if _safe_filename(label) in skip:
             continue
         targets.append(label)
         if len(targets) >= limit:
