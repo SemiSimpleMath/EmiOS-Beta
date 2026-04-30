@@ -449,3 +449,159 @@ body {
 }
 .wp-tab-btn:hover { background: #eaecf0; }
 .wp-tab-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* ───────── Front page (index) — Option A: hero + cards + collapsed browse ───────── */
+
+.wp-hero {
+  background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
+  border: 1px solid #c8ccd1;
+  border-radius: 6px;
+  padding: 28px 32px;
+  margin: 0 0 22px;
+}
+.wp-hero-title {
+  font-family: "Linux Libertine", Georgia, Times, serif;
+  font-size: 38px;
+  font-weight: normal;
+  margin: 0 0 4px;
+  border-bottom: none;
+  padding-bottom: 0;
+  color: #202122;
+}
+.wp-hero-tagline {
+  font-style: italic;
+  color: #54595d;
+  margin: 0 0 14px;
+  font-size: 15px;
+}
+.wp-hero-stats {
+  margin: 0;
+  font-size: 14px;
+  color: #54595d;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  align-items: center;
+}
+.wp-hero-stats strong {
+  color: #202122;
+  font-size: 16px;
+}
+.wp-hero-stats-sep {
+  color: #a2a9b1;
+  margin: 0 2px;
+}
+.wp-hero-stat-pill {
+  display: inline-block;
+  background: #eaf3ff;
+  border: 1px solid #c8d8ee;
+  color: #36c;
+  padding: 1px 8px;
+  border-radius: 11px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.wp-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+  margin: 0 0 28px;
+}
+.wp-card {
+  background: #ffffff;
+  border: 1px solid #c8ccd1;
+  border-radius: 6px;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+}
+.wp-card-title {
+  font-family: "Linux Libertine", Georgia, Times, serif;
+  font-size: 18px;
+  font-weight: normal;
+  margin: 0 0 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #eaecf0;
+  color: #202122;
+}
+.wp-card-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.wp-card-list li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.wp-card-list a {
+  color: #36c;
+  text-decoration: none;
+  font-size: 14px;
+}
+.wp-card-list a:hover { text-decoration: underline; }
+.wp-card-meta {
+  color: #72777d;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.wp-card-empty {
+  color: #72777d;
+  font-style: italic;
+  margin: 0;
+  font-size: 13px;
+}
+
+.wp-card--cta {
+  background: linear-gradient(180deg, #fffaf0 0%, #fff 100%);
+  border-color: #d4b886;
+  align-items: flex-start;
+}
+.wp-card-cta-blurb {
+  color: #54595d;
+  font-size: 13px;
+  margin: 0 0 12px;
+  line-height: 1.4;
+}
+.wp-card-cta-btn {
+  display: inline-block;
+  background: #36c;
+  color: #fff;
+  padding: 7px 14px;
+  border-radius: 4px;
+  text-decoration: none;
+  font-size: 14px;
+  border: 1px solid #2a4b8d;
+  transition: background 0.15s;
+}
+.wp-card-cta-btn:hover { background: #2a4b8d; text-decoration: none; }
+
+.wp-browse-all {
+  border-top: 1px solid #eaecf0;
+  margin-top: 20px;
+  padding-top: 16px;
+}
+.wp-browse-all > summary {
+  cursor: pointer;
+  font-size: 14px;
+  color: #54595d;
+  padding: 6px 0;
+  list-style-position: outside;
+  user-select: none;
+}
+.wp-browse-all > summary:hover { color: #36c; }
+.wp-browse-all[open] > summary { color: #202122; margin-bottom: 8px; }
+.wp-browse-cat {
+  font-family: "Linux Libertine", Georgia, Times, serif;
+  font-size: 18px;
+  font-weight: normal;
+  border-bottom: 1px solid #eaecf0;
+  padding-bottom: 4px;
+  margin: 18px 0 8px;
+  color: #202122;
+}

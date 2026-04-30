@@ -85,16 +85,66 @@
         {% endif %}
 
       {% else %}
-        <h1 class="wp-title">{{ assistant_name }}Pedia</h1>
-        <p>The personal encyclopedia. {{ articles | length }} article{{ "" if articles|length == 1 else "s" }}.</p>
-        {% for cat, items in categories.items() %}
-        <h2>{{ cat | title }}</h2>
-        <ul class="wp-index-list">
-          {% for a in items %}
-          <li><a href="{{ url_for('wiki_viewer.wiki_article', entity=a.name) }}">{{ a.name }}</a></li>
+        <section class="wp-hero">
+          <h1 class="wp-hero-title">{{ assistant_name }}Pedia</h1>
+          <p class="wp-hero-tagline">Your personal encyclopedia.</p>
+          <p class="wp-hero-stats">
+            <strong>{{ index_total }}</strong> article{{ "" if index_total == 1 else "s" }}
+            {% if index_category_counts %}
+              <span class="wp-hero-stats-sep">·</span>
+              {% for label, n in index_category_counts %}<span class="wp-hero-stat-pill">{{ n }} {{ label }}</span>{% if not loop.last %} {% endif %}{% endfor %}
+            {% endif %}
+          </p>
+        </section>
+
+        <section class="wp-cards">
+          <div class="wp-card">
+            <h3 class="wp-card-title">Recently updated</h3>
+            {% if index_recent %}
+              <ul class="wp-card-list">
+                {% for a in index_recent %}
+                  <li><a href="{{ url_for('wiki_viewer.wiki_article', entity=a.name) }}">{{ a.name }}</a></li>
+                {% endfor %}
+              </ul>
+            {% else %}
+              <p class="wp-card-empty">No articles yet.</p>
+            {% endif %}
+          </div>
+
+          <div class="wp-card">
+            <h3 class="wp-card-title">Most connected</h3>
+            {% if index_top_connected %}
+              <ul class="wp-card-list">
+                {% for a in index_top_connected %}
+                  <li>
+                    <a href="{{ url_for('wiki_viewer.wiki_article', entity=a.name) }}">{{ a.name }}</a>
+                    <span class="wp-card-meta">{{ a.relationship_count }} link{{ "" if a.relationship_count == 1 else "s" }}</span>
+                  </li>
+                {% endfor %}
+              </ul>
+            {% else %}
+              <p class="wp-card-empty">No connection data yet.</p>
+            {% endif %}
+          </div>
+
+          <div class="wp-card wp-card--cta">
+            <h3 class="wp-card-title">Roll the dice</h3>
+            <p class="wp-card-cta-blurb">Stumble onto something you'd forgotten about.</p>
+            <a class="wp-card-cta-btn" href="{{ url_for('wiki_viewer.wiki_random') }}">🎲 Random article</a>
+          </div>
+        </section>
+
+        <details class="wp-browse-all">
+          <summary>Browse all {{ index_total }} articles by category</summary>
+          {% for cat, items in categories.items() %}
+          <h2 class="wp-browse-cat">{{ cat | title }}</h2>
+          <ul class="wp-index-list">
+            {% for a in items %}
+            <li><a href="{{ url_for('wiki_viewer.wiki_article', entity=a.name) }}">{{ a.name }}</a></li>
+            {% endfor %}
+          </ul>
           {% endfor %}
-        </ul>
-        {% endfor %}
+        </details>
       {% endif %}
     </main>
   </div>

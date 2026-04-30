@@ -231,16 +231,100 @@ def _list_articles() -> list[dict]:
         try:
             post = frontmatter.load(p)
             meta = post.metadata or {}
+            mtime = p.stat().st_mtime
             articles.append({
                 "name": p.stem,
                 "category": meta.get("category") or "Other",
                 "auto_generated": bool(meta.get("auto_generated")),
                 "relationship_count": meta.get("relationship_count"),
                 "event_count": meta.get("event_count"),
+                "mtime": mtime,
             })
         except Exception:
-            articles.append({"name": p.stem, "category": "Other"})
+            try:
+                mtime = p.stat().st_mtime
+            except Exception:
+                mtime = 0.0
+            articles.append({"name": p.stem, "category": "Other", "mtime": mtime})
     return articles
+
+
+def _humanize_category(slug: str) -> str:
+    """Turn DB-style entity_type slugs into readable labels.
+
+    Examples:
+        Group_of_pet_dogs → Pet dogs
+        Calendar_event_series → Events
+        Personal_ai_assistant → AI assistants
+        Person → People
+    """
+    if not slug:
+        return "Other"
+    aliases = {
+        "person": "People",
+        "dog": "Dogs",
+        "house": "Houses",
+        "household": "Households",
+        "family_group": "Families",
+        "group_of_pet_dogs": "Pet dogs",
+        "group_of_children": "Children",
+        "calendar_event_series": "Events",
+        "social_event_series": "Social events",
+        "personal_ai_assistant": "AI assistants",
+        "ai_agent_team": "Agent teams",
+        "art_studio": "Art studios",
+        "video_game": "Video games",
+        "software_feature": "Software features",
+    }
+    # Normalize separators so 'group of children' and 'group_of_children'
+    # both hit the same alias entry.
+    key = slug.lower().strip().replace(" ", "_")
+    if key in aliases:
+        return aliases[key]
+    return key.replace("_", " ").capitalize()
+
+
+def _build_index_context(articles: list[dict]) -> dict:
+    """Compute hero stats + Recently-updated + Most-connected lists.
+
+    Returns a dict with:
+      - total: int — total article count
+      - category_counts: list[(label, count)] — humanized, sorted by count desc
+      - recent: list[dict] — top 5 by file mtime
+      - top_connected: list[dict] — top 5 by relationship_count desc (>0 only)
+    """
+    total = len(articles)
+
+    counts: dict[str, int] = {}
+    for a in articles:
+        label = _humanize_category(a.get("category") or "Other")
+        counts[label] = counts.get(label, 0) + 1
+    category_counts = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0].lower()))
+
+    recent = sorted(
+        articles,
+        key=lambda a: a.get("mtime") or 0.0,
+        reverse=True,
+    )[:5]
+
+    def _rel_count(a: dict) -> int:
+        v = a.get("relationship_count")
+        try:
+            return int(v) if v is not None else 0
+        except (TypeError, ValueError):
+            return 0
+
+    top_connected = sorted(
+        [a for a in articles if _rel_count(a) > 0],
+        key=lambda a: (-_rel_count(a), a["name"].lower()),
+    )[:5]
+
+    return {
+        "total": total,
+        "category_counts": category_counts,
+        "recent": recent,
+        "top_connected": top_connected,
+    }
 
 
 def _group_by_category(articles: list[dict]) -> dict[str, list[dict]]:
@@ -266,6 +350,7 @@ def wiki_image(filename: str):
 @wiki_viewer_bp.route("/wiki/")
 def wiki_index():
     articles = _list_articles()
+    index_ctx = _build_index_context(articles)
     return render_template(
         "wiki_viewer.html",
         is_index=True,
@@ -274,6 +359,10 @@ def wiki_index():
         toc=[],
         categories=_group_by_category(articles),
         articles=articles,
+        index_total=index_ctx["total"],
+        index_category_counts=index_ctx["category_counts"],
+        index_recent=index_ctx["recent"],
+        index_top_connected=index_ctx["top_connected"],
         current_name=None,
     )
 
