@@ -136,12 +136,6 @@ def _get_wake_segments_log(limit=20):
         return [{"error": str(e)}]
 
 
-def _get_last_agent_outputs():
-    """Get last LLM agent outputs for debugging - DEPRECATED."""
-    # Legacy function - agent outputs are now in pipeline stage outputs
-    return {"_deprecated": "Agent outputs are now in pipeline_outputs section"}
-
-
 
 @debug_status_bp.route('/debug/status')
 def status_page():
@@ -219,9 +213,6 @@ def status_data():
         active_log = _get_active_segments_log(limit=50)
         wake_log = _get_wake_segments_log(limit=20)
         
-        # Get last agent outputs
-        agent_outputs = _get_last_agent_outputs()
-        
         local_tz = get_local_timezone()
         now_local = datetime.now(local_tz)
         
@@ -256,9 +247,6 @@ def status_data():
             "sleep_log": sleep_log,
             "active_log": active_log,
             "wake_log": wake_log,
-            
-            # Agent debug outputs
-            "agent_outputs": agent_outputs
         })
         
     except Exception as e:

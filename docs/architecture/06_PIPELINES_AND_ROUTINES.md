@@ -32,7 +32,7 @@ class PipelineStep:
 |----------|----|----------|---------|
 | Daily Insights | `daily_insights` | daily 00:05 | Archive assessments, tickets, timelines; apply insights |
 | DayFlow | `dayflow` | interval 60s | Activity tracking, sleep analysis, routine scheduling |
-| KG Chat (parallel) | `kg_chat_pipeline_parallel` | quiet hours | Ingest chat messages into knowledge graph |
+| KG Pipeline | `kg_pipeline` | quiet hours | Ingest chat windows into knowledge graph |
 | Entity Cards | `entity_cards` | daily 00:20 | Generate missing entity cards |
 | Weekly Insights | `weekly_insights` | weekly Mon 00:10 | Cross-day pattern synthesis |
 | Belief Engine (x6) | `belief_engine_*` | daily 00:30-01:00 | Domain-specific belief updates + export |

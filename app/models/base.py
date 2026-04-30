@@ -125,8 +125,6 @@ def get_session(force_test_db=False):
     # Each thread gets its own session instance
     return session_maker()
 
-# Legacy functions for backward compatibility (deprecated)
-# These now use the singleton engine pattern
 def get_current_engine():
     """Get the current engine based on environment configuration"""
     global _pragma_listener_registered
@@ -156,28 +154,9 @@ def get_current_engine():
             _sessionmakers[database_uri] = sessionmaker(bind=_engines[database_uri])
         return _engines[database_uri]
 
-def get_current_session():
-    """Get a new session with the current database configuration"""
-    return get_session()  # Use the unified function
-
 # Base declarative base (this is safe to create at import time)
 Base = declarative_base()
 
-# Legacy functions for backward compatibility (deprecated)
-# These now use the singleton engine pattern
 def get_default_engine():
     """Get the default engine based on current environment configuration"""
     return get_current_engine()  # Reuse the singleton pattern
-
-def get_default_session():
-    """Get the default session based on current environment configuration"""
-    return get_session()
-
-# For backward compatibility, create these on demand
-def get_legacy_engine():
-    """Legacy function - use get_default_engine() instead"""
-    return get_default_engine()
-
-def get_legacy_session():
-    """Legacy function - use get_default_session() instead"""
-    return get_default_session()

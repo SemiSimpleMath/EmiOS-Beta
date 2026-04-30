@@ -195,24 +195,17 @@ class TaxonomyManager:
         description: Optional[str] = None,
         parent_id: Optional[int] = None
     ) -> Taxonomy:
+        """Create a new taxonomy entry without duplicate-checking.
+
+        Wraps ``create_taxonomy_safe`` for callers that want a placeholder row
+        right now and will reconcile duplicates later. Returns the Taxonomy
+        directly (not the success-dict envelope).
         """
-        Create a new taxonomy entry (placeholder for later refinement).
-        DEPRECATED: Use create_taxonomy_safe() instead for better safety.
-        
-        Args:
-            label: Normalized label for the type
-            description: Optional description
-            parent_id: Optional parent (None means to-be-determined)
-            
-        Returns:
-            Created Taxonomy object
-        """
-        # Use the safe method
         result = self.create_taxonomy_safe(
             label=label,
             parent_id=parent_id,
             description=description,
-            check_duplicates=False  # Legacy behavior
+            check_duplicates=False,
         )
         
         if result["success"]:

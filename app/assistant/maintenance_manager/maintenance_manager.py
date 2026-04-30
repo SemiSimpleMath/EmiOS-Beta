@@ -4,7 +4,6 @@ from app.assistant.log_ingestion import LogIngestionPolicy
 from app.assistant.maintenance_manager.daily_summary_scheduler import DailySummaryScheduler
 from app.assistant.manager_runtime.services.scope_adapter import build_system_scope_context
 from app.assistant.ServiceLocator.service_locator import DI
-# from app.assistant.rag_pipeline.rag_processor import RAGProcessor  # DEPRECATED
 from app.assistant.utils.logging_config import get_maintenance_logger
 from app.assistant.utils.pydantic_classes import Message
 from app.assistant.user_settings_manager.user_settings import can_run_feature
@@ -236,14 +235,6 @@ class MaintenanceManager:
         finally:
             self.daily_summary_running = False
             logger.info("📋 Daily summary background worker finished")
-
-    def run_rag_processing(self):
-        # DEPRECATED: RAG processing has been replaced by the knowledge graph pipeline
-        logger.info("🚫 RAG processing is deprecated and disabled")
-        return {
-            'message': 'RAG processing is deprecated and disabled',
-            'timestamp': datetime.now(timezone.utc).isoformat()
-        }
 
     def run_kg_processing(self):
         """

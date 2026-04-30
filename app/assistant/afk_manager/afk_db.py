@@ -83,57 +83,8 @@ def _init_table(session) -> None:
 
 
 # =============================================================================
-# Active Segment Functions (NEW - source of truth)
+# Active Segment Functions
 # =============================================================================
-
-def record_active_segment(
-        start_time_utc: datetime,
-        end_time_utc: datetime,
-) -> bool:
-    """DEPRECATED — the monitor now uses create_provisional_segment + update_segment.
-
-    Record a completed active session.
-    Called when user goes AFK (closing their active session).
-    
-    Args:
-        start_time_utc: When user became active (UTC)
-        end_time_utc: When user went AFK (UTC)
-    
-    Returns:
-        True if successful, False otherwise
-    """
-    session = get_session()
-    try:
-        _init_table(session)
-        
-        if end_time_utc <= start_time_utc:
-            logger.warning("Active segment end_time <= start_time; skipping record")
-            return False
-
-        duration_minutes = (end_time_utc - start_time_utc).total_seconds() / 60.0
-        
-        active_segment = ActiveSegment(
-            start_time=start_time_utc,
-            end_time=end_time_utc,
-            duration_minutes=duration_minutes,
-        )
-        session.add(active_segment)
-        _commit_with_retry(session, op="afk_db.record_active_segment")
-        
-        logger.info(f"Recorded active segment: {duration_minutes:.1f} min")
-        return True
-
-    except SQLAlchemyError as e:
-        session.rollback()
-        log_critical_error(
-            message="Failed to record active segment",
-            exception=e,
-            context="afk_db.record_active_segment",
-        )
-        return False
-    finally:
-        session.close()
-
 
 def create_provisional_segment(start_time_utc: datetime) -> Optional[int]:
     """
