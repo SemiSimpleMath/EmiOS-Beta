@@ -89,7 +89,17 @@ def pick_growth_targets(
 
 def build_one_page(label: str, vault_path: Path, run_critic: bool = True) -> Dict[str, Any]:
     """Render one entity's prose page end-to-end. Independent — failures
-    don't affect other pages."""
+    don't affect other pages.
+
+    Status values:
+      - ``ok``: prose page was written
+      - ``empty``: not enough biographical content to write a page
+        (render_bullets returned nothing, or the writer LLM produced
+        empty output for every section). Not an error — this entity
+        just isn't biographical enough; happens for tools, generic
+        nouns, abstract concepts.
+      - ``error``: an unhandled exception was raised
+    """
     from app.assistant.wiki_generator.consistency_critic import run_consistency_critic
     from app.assistant.wiki_generator.page_writer import generate_prose_page_tagged
     from app.assistant.wiki_generator.wiki_writer import regenerate_entity_page
@@ -98,6 +108,15 @@ def build_one_page(label: str, vault_path: Path, run_critic: bool = True) -> Dic
     try:
         rough_path = regenerate_entity_page(label=label, vault_path=vault_path)
         prose_path = generate_prose_page_tagged(entity_label=label, vault_path=vault_path)
+        if prose_path is None:
+            return {
+                "label": label,
+                "status": "empty",
+                "rough": str(rough_path) if rough_path else None,
+                "prose": None,
+                "critic_findings": None,
+                "elapsed_sec": round(time.time() - started, 1),
+            }
         crit_summary: Optional[Dict[str, Any]] = None
         if run_critic:
             crit_summary = run_consistency_critic(entity_label=label, vault_path=vault_path)
@@ -106,7 +125,7 @@ def build_one_page(label: str, vault_path: Path, run_critic: bool = True) -> Dic
             "label": label,
             "status": "ok",
             "rough": str(rough_path) if rough_path else None,
-            "prose": str(prose_path) if prose_path else None,
+            "prose": str(prose_path),
             "critic_findings": (crit_summary or {}).get("findings_count"),
             "elapsed_sec": round(elapsed, 1),
         }
@@ -140,10 +159,16 @@ def run_wiki_growth(
         logger.info("Wiki growth: START (%d/%d) label=%r", i, len(targets), label)
         r = build_one_page(label, vault_path=vault, run_critic=run_critic)
         summaries.append(r)
-        if r["status"] == "ok":
+        status = r["status"]
+        if status == "ok":
             logger.info(
                 "Wiki growth: DONE  (%d/%d) label=%r elapsed=%.1fs critic_findings=%s",
                 i, len(targets), label, r["elapsed_sec"], r.get("critic_findings"),
+            )
+        elif status == "empty":
+            logger.info(
+                "Wiki growth: SKIP  (%d/%d) label=%r — not biographical enough",
+                i, len(targets), label,
             )
         else:
             logger.error("Wiki growth: ERROR (%d/%d) label=%r %s", i, len(targets), label, r.get("error"))
@@ -152,6 +177,7 @@ def run_wiki_growth(
         "targets_picked": len(targets),
         "max_new_pages": max_new_pages,
         "ok": sum(1 for s in summaries if s.get("status") == "ok"),
+        "empty": sum(1 for s in summaries if s.get("status") == "empty"),
         "errors": sum(1 for s in summaries if s.get("status") == "error"),
     }
     logger.info("Wiki growth complete: %s", counts)
