@@ -21,7 +21,7 @@ from typing import Optional
 
 import frontmatter
 import markdown
-from flask import Blueprint, abort, jsonify, redirect, render_template, request, url_for
+from flask import Blueprint, abort, jsonify, redirect, render_template, request, send_from_directory, url_for
 
 from app.assistant.utils.logging_config import get_logger
 
@@ -250,6 +250,17 @@ def _group_by_category(articles: list[dict]) -> dict[str, list[dict]]:
     for k in groups:
         groups[k].sort(key=lambda x: x["name"].lower())
     return dict(sorted(groups.items()))
+
+
+@wiki_viewer_bp.route("/images/<path:filename>")
+def wiki_image(filename: str):
+    """Serve files from <vault>/images/. Prose pages embed profile images
+    as ``../images/<file>``; from a ``/wiki/<entity>`` URL the browser
+    resolves that to ``/images/<file>``, which lands here."""
+    images_dir = _wiki_vault_root() / "images"
+    if not images_dir.exists():
+        abort(404)
+    return send_from_directory(images_dir, filename)
 
 
 @wiki_viewer_bp.route("/wiki/")
