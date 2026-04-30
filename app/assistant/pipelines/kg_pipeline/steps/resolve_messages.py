@@ -56,6 +56,13 @@ class ResolveMessagesStep:
     # Set to None to process the entire history (backfill mode).
     START_LOCAL_DATE: Optional[str] = "2026-04-25"
 
+    # Sharper UTC-precise cutoff used to skip a one-time recovery backlog
+    # (2026-04-29: ~13K source-clobbered chat rows revived after the
+    # save_to_unified_db identity-fields fix). Anything older than this
+    # timestamp is invisible to the resolver — no LLM cost, no segmenter
+    # work. Set to None to revert to the START_LOCAL_DATE-only cutoff.
+    START_TIMESTAMP_UTC: Optional[str] = "2026-04-30T03:00:00+00:00"
+
     @staticmethod
     def _local_date(ts: datetime) -> date:
         tz = get_local_timezone()
@@ -78,6 +85,28 @@ class ResolveMessagesStep:
             ),
         )
 
+    def _resolved_cutoff_utc(self) -> Optional[datetime]:
+        """Return the effective UTC cutoff timestamp (the later of
+        START_LOCAL_DATE-midnight and START_TIMESTAMP_UTC)."""
+        from datetime import timezone as _tz
+        cutoffs: list[datetime] = []
+        if self.START_LOCAL_DATE:
+            tz = get_local_timezone()
+            start_local = datetime.combine(
+                date.fromisoformat(self.START_LOCAL_DATE),
+                datetime.min.time(),
+                tzinfo=tz,
+            )
+            cutoffs.append(start_local.astimezone(_tz.utc))
+        if self.START_TIMESTAMP_UTC:
+            ts = datetime.fromisoformat(self.START_TIMESTAMP_UTC)
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=_tz.utc)
+            cutoffs.append(ts.astimezone(_tz.utc))
+        if not cutoffs:
+            return None
+        return max(cutoffs)
+
     def pending_count(self) -> int:
         from sqlalchemy import func as sqlfunc
         with get_db_manager().read_session() as session:
@@ -86,16 +115,9 @@ class ResolveMessagesStep:
                 session.query(sqlfunc.count(UnifiedLog2026.id))
                 .filter(~UnifiedLog2026.id.in_(resolved_ids))
             )
-            if self.START_LOCAL_DATE:
-                from datetime import timezone as _tz
-                tz = get_local_timezone()
-                start_local = datetime.combine(
-                    date.fromisoformat(self.START_LOCAL_DATE),
-                    datetime.min.time(),
-                    tzinfo=tz,
-                )
-                start_utc = start_local.astimezone(_tz.utc)
-                q = q.filter(UnifiedLog2026.timestamp >= start_utc)
+            cutoff = self._resolved_cutoff_utc()
+            if cutoff is not None:
+                q = q.filter(UnifiedLog2026.timestamp >= cutoff)
             return int(q.scalar() or 0)
 
     def _find_next_unresolved_day(self) -> Optional[date]:
@@ -106,16 +128,9 @@ class ResolveMessagesStep:
                 .filter(~UnifiedLog2026.id.in_(resolved_ids))
             ).order_by(UnifiedLog2026.timestamp.asc())
 
-            if self.START_LOCAL_DATE:
-                from datetime import timezone as _tz
-                tz = get_local_timezone()
-                start_local = datetime.combine(
-                    date.fromisoformat(self.START_LOCAL_DATE),
-                    datetime.min.time(),
-                    tzinfo=tz,
-                )
-                start_utc = start_local.astimezone(_tz.utc)
-                q = q.filter(UnifiedLog2026.timestamp >= start_utc)
+            cutoff = self._resolved_cutoff_utc()
+            if cutoff is not None:
+                q = q.filter(UnifiedLog2026.timestamp >= cutoff)
 
             row = q.first()
             if row is None:
@@ -129,6 +144,13 @@ class ResolveMessagesStep:
         from datetime import timezone as _tz
         start_utc = start_local.astimezone(_tz.utc)
         end_utc = end_local.astimezone(_tz.utc)
+
+        # Honor the precise cutoff so messages earlier than START_TIMESTAMP_UTC
+        # on the chosen day are skipped — otherwise picking a day still loads
+        # everything from local-midnight onward.
+        cutoff = self._resolved_cutoff_utc()
+        if cutoff is not None and cutoff > start_utc:
+            start_utc = cutoff
 
         with get_db_manager().read_session() as session:
             rows = self._eligible_filter(
