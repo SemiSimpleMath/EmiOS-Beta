@@ -17,6 +17,23 @@ _ALLOWED_ACTIONS = {
     "set_eco_mode",
     "set_fan_mode",
 }
+
+# Forgiving aliases: agents naturally say "set_temperature" / "set_temp"
+# when the canonical action is set_target_temperature. Normalize at ingress
+# rather than rejecting and forcing a retry. Mirror canonical-mode handling
+# below — synonyms in, single canonical action out.
+_ACTION_ALIASES = {
+    "set_temperature": "set_target_temperature",
+    "set_temp": "set_target_temperature",
+    "set_target_temp": "set_target_temperature",
+    "set_thermostat_temperature": "set_target_temperature",
+    "set_thermostat_mode": "set_mode",
+    "set_hvac_mode": "set_mode",
+    "set_fan": "set_fan_mode",
+    "set_eco": "set_eco_mode",
+    "status": "get_status",
+    "read_status": "get_status",
+}
 _MIN_TARGET_C = 10.0
 _MAX_TARGET_C = 32.0
 _MIN_INFERRED_C = 15.0
@@ -136,9 +153,21 @@ class NestHomeControlTool(BaseTool):
             tool_data = tool_message.tool_data if isinstance(tool_message.tool_data, dict) else {}
             arguments = tool_data.get("arguments", {}) if isinstance(tool_data.get("arguments"), dict) else {}
             action = str(arguments.get("action") or "").strip().lower()
+            # Normalize common aliases (set_temperature -> set_target_temperature, etc.)
+            # before validating. Keep the post-alias canonical value in arguments
+            # so the downstream bridge sees the right name.
+            if action in _ACTION_ALIASES:
+                canonical = _ACTION_ALIASES[action]
+                logger.info(
+                    "nest_home_control.action: aliased '%s' -> '%s'", action, canonical
+                )
+                action = canonical
+                arguments["action"] = canonical
             if action not in _ALLOWED_ACTIONS:
                 raise ValueError(
-                    "nest_home_control.action must be one of: " + ", ".join(sorted(_ALLOWED_ACTIONS))
+                    "nest_home_control.action must be one of: "
+                    + ", ".join(sorted(_ALLOWED_ACTIONS))
+                    + f". Got {action!r}."
                 )
             _validate_action_arguments(action, arguments)
 

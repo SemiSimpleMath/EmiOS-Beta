@@ -1,13 +1,30 @@
 Use this tool to read/control Nest thermostat state.
 
-Required:
-- `action`: one of `get_status`, `set_mode`, `set_target_temperature`, `set_eco_mode`, `set_fan_mode`
+`action` (required) — pick exactly ONE per call:
+  - `get_status`             → read current state. No other args.
+  - `set_target_temperature` → CHANGE THE NUMBER (e.g. "set to 70", "70F", "make it 72"). Requires `target_temperature`.
+  - `set_mode`               → CHANGE COOL vs HEAT vs OFF. Requires `mode`.
+  - `set_fan_mode`           → CHANGE THE FAN. Requires `fan_mode`.
+  - `set_eco_mode`           → ECO ON/OFF. Requires `enabled`.
 
-Conditional fields:
-- `mode` for `set_mode` (`heat`, `cool`, `heat_cool`, `off`)
-- `target_temperature` for `set_target_temperature` (single numeric temperature value)
-- `enabled` for `set_eco_mode` (boolean)
-- `fan_mode` for `set_fan_mode` (`on`, `auto`, `off`)
+The action name is `set_target_temperature` (NOT `set_temperature`,
+NOT `set_temp`, NOT `change_temperature`). Pass the exact name above.
+Aliases are accepted but the canonical name is what you should emit.
+
+Conditional fields (only the one matching your action):
+  - `target_temperature` — single Fahrenheit number (e.g. 70). Required for `set_target_temperature`.
+  - `mode`               — `HEAT`, `COOL`, `HEATCOOL`, or `OFF`. Required for `set_mode`. Uppercase, no underscores.
+  - `fan_mode`           — `ON`, `AUTO`, or `OFF`. Required for `set_fan_mode`.
+  - `enabled`            — `true` / `false`. Required for `set_eco_mode`.
 
 Optional:
-- `device_id` to target a specific thermostat.
+  - `device_id` — target a specific thermostat (omit for the default).
+
+ONE ACTION PER CALL. If the user wants both a mode change and a target
+temperature ("set it to cool at 70"), make TWO sequential calls:
+  1. `nest_home_control(action="set_mode", mode="COOL")`
+  2. `nest_home_control(action="set_target_temperature", target_temperature=70)`
+
+Don't try to bundle `mode` and `target_temperature` into a single
+call — the bridge will run only the action you named and ignore the
+extra arg.
