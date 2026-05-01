@@ -4,7 +4,7 @@ Status: draft for discussion. No code yet. Companion to `cli_emi.md`.
 
 ## TL;DR
 
-Emi has a rich agent runtime, scope/permission discipline, manager system, KG, pods — everything except the **coding-agent primitives** that Claude Code, Aider, Cursor, etc. have built their tools around. The gap is roughly: six new tools, one new agent, one new manager, plus a thought-through sandbox model. Estimate: **1.5–2.5 weeks of focused work** to get to a usable v1; another 2-4 weeks to make it actually nice.
+Emi has a rich agent runtime, scope/permission discipline, manager system, KG, pods — everything except the **coding-agent primitives** that Claude Code, Aider, Cursor, etc. have built their tools around. The gap is roughly: six new tools, one new planner agent, one new critic agent (approves non-obvious commands, proofreads written Python files, peeks at agent-written executables), one new manager, plus a thought-through sandbox model. Estimate: **2–3 weeks of focused work** to get to a usable v1 with the critic gates in place; another 2-4 weeks to make it actually nice.
 
 The interesting design questions are **not** "can it do it" — the runtime is fine. They are: how much sandboxing is enough, what workspace abstraction sits beneath the agent, and how does this slot into Emi's existing room / scope / authority guards without becoming "the room that can do anything."
 
@@ -224,14 +224,15 @@ This is real frontend work and we should defer until v1 is proven. ~1 week if pu
 
 ## Phasing
 
-### Phase 1 — minimum viable (5-7 days)
+### Phase 1 — minimum viable (7-9 days)
 
 1. Build the six core tools (`edit_file`, `glob_files`, `grep_code`, `list_dir`, `read_file_lines`, `run_shell`). ~3 days.
 2. Sandbox basics for `run_shell` — path prefix, blocklist, timeout, audit. ~1 day.
 3. Coder agent (`coder::planner`) + system prompt with discipline. ~1 day.
-4. `coder_manager` config + manager-tool wrapper. ~half day.
-5. CLI entry: `emi-cli --manager coder_manager "fix the bug in X"`. ~half day (assumes `cli_emi` Mode A is shipped first).
-6. Real-world dogfooding: have it do 10 small tasks on this repo. Iterate on prompt and tool descriptions. ~1-2 days.
+4. Critic agent (`coder::critic`) + `coder_critic_pre_node` (allowlist + tier-3 blocklist + LLM gate) + `coder_critic_post_node` (Stage A AST checks + Stage B diff review) + audit log. ~2 days.
+5. `coder_manager` config + manager-tool wrapper. ~half day.
+6. CLI entry: `emi-cli --manager coder_manager "fix the bug in X"`. ~half day (assumes `cli_emi` Mode A is shipped first).
+7. Real-world dogfooding: have it do 10 small tasks on this repo. Iterate on prompt + tool descriptions + critic discipline. ~1-2 days.
 
 After Phase 1: Emi can do mechanical coding work in CLI mode against a single workspace. Good enough for "fix this typo," "rename this function across the repo," "add a route that does X," "refactor this module." Not good enough for "build a Ring viewer from scratch" — that needs Phase 2.
 
@@ -253,6 +254,151 @@ After Phase 2: Emi can drive moderately complex coding tasks. Enough to attempt 
 4. Streaming output for long-running commands.
 
 Defer until Phase 1 + 2 prove themselves. Most of this is nice-to-have, not need-to-have.
+
+## Critic — the safety gate
+
+The coder agent must NOT be the sole approver of its own actions. A separate critic agent reviews three things:
+
+1. **Non-obvious shell commands** before `run_shell` executes them.
+2. **Every written or edited Python file** before the action is considered done.
+3. **Any executable the agent wrote** before the agent is allowed to run it.
+
+This mirrors Emi's existing `critic_pre_node` / `critic_post_node` pattern (used in `emi_team_manager`), specialized for coding work.
+
+### Where the critic sits in the flow
+
+Two integration points, both reusing Emi's existing control-node pattern:
+
+```
+coder::planner → coder_critic_pre_node → tool_caller → coder_critic_post_node → coder::planner (next cycle)
+```
+
+- **`coder_critic_pre_node`** runs BEFORE tool_caller. Reads the proposed action and decides: pass-through (skip critic), invoke critic LLM (review and approve/reject), or hard-block (deterministic refusal). Already-existing infrastructure: `critic_pre_node` in `app/assistant/control_nodes/` is config-driven and reusable; we'd add a new `config.critic_routing` section that decides based on tool name + args.
+- **`coder_critic_post_node`** runs AFTER tool_caller, BEFORE the result reaches the planner's next cycle. Reads the tool result and runs deterministic + LLM checks on file edits. Same pattern as the existing post-critic node.
+
+### Pre-execution critic — non-obvious shell commands
+
+Three-tier policy on `run_shell` calls:
+
+**Tier 1 — Obvious-safe allowlist (skip critic, no LLM cost).** Deterministic check on the first token of the command:
+
+- Read-only inspection: `ls`, `cat`, `head`, `tail`, `pwd`, `which`, `find`, `du`, `stat`, `file`
+- Test runners: `pytest`, `npm test`, `cargo test`, `go test`, `mvn test`, `python -m pytest`, `python -m unittest`
+- Git read: `git status`, `git diff`, `git log`, `git show`, `git branch`, `git remote`
+- Lint / type-check: `mypy`, `pyright`, `ruff`, `flake8`, `eslint`, `tsc --noEmit`
+- Build (read-mostly): `python -m py_compile`, `tsc --noEmit`
+- Workspace internals: `wc`, `grep`, `awk`, `sed -n` (read-only), `tree`
+
+If first token (and its immediate args, where relevant) match an allowlisted shape AND command contains no shell metacharacters that change scope (`;`, `&&`, `|>`, backticks), skip the critic.
+
+**Tier 2 — Non-obvious commands (critic LLM reviews).** Anything not on the allowlist. The critic agent receives:
+- The exact command string
+- The cwd
+- A short summary of what the planner said it was trying to accomplish (`what_i_am_thinking` from the planner output)
+- Recent agent actions for context
+
+Critic produces:
+- `approve: true|false`
+- `reason: str` (always — for the audit log)
+- Optionally: a suggested safer command to run instead
+
+If `approve: false`, the action is rejected and routed back to the planner with the critic's reason. Planner adjusts and retries (or asks the user via `chat_response`).
+
+**Tier 3 — Hard-blocked (no critic, just refuse).** Patterns the system refuses outright regardless of approval:
+
+- Anything attempting to write outside the workspace (`> /etc/...`, `cd /; rm ...`)
+- Network exfiltration shapes (`curl ... | sh`, `wget ... | bash`)
+- Privilege escalation (`sudo`, `su`, `doas`)
+- Shell-out patterns that defeat path restrictions (`bash -c '...'`, `sh < /dev/...`)
+- Crypto / mining tools by name (heuristic, not perfect)
+
+Tier 3 violations also escalate to the operator — an alert message in the room, log entry with severity, and the planner is told "this command was hard-blocked, do not retry it; explain to the user what you were trying to do."
+
+### Post-write critic — Python file proofread
+
+Triggered when `edit_file` or `write_text_file` modifies a `.py` file. Two-stage check:
+
+**Stage A — Deterministic syntax + import validation (no LLM cost):**
+
+- `python -m py_compile <file>` — catches syntax errors immediately. Free, fast.
+- AST parse + walk — catches obvious bad shapes:
+  - Bare `except:` clauses
+  - `eval(`, `exec(` invocations (flagged for human review, not auto-rejected — they're sometimes legitimate)
+  - Imports that don't resolve (rough check: try resolving against `sys.path`).
+- For changes inside a known framework (e.g., Flask routes), simple shape checks ("function decorated with `@app.route` has the right signature").
+
+If Stage A fails, the action is rejected, error reported back to the planner, planner re-edits.
+
+**Stage B — LLM proofread on the diff (cost-controlled):**
+
+- Critic gets: the unified diff (not the whole file), the planner's stated intent for this turn, and the broader task description.
+- Critic checks:
+  - Does the change match the stated intent? (Anti-scope-creep guard.)
+  - Are there obvious nonsense imports / function calls that don't exist in the file?
+  - Hardcoded secrets, credentials, API keys?
+  - Logic patterns that look wrong (off-by-one, wrong comparison, etc.) — soft signal, not a blocker.
+  - Does it follow the conventions visible in surrounding code?
+- Critic produces: `approve: true|false`, `concerns: list[str]`. If `approve: true` with concerns, the concerns are surfaced to the user but the change proceeds.
+
+Stage B is skipped for tiny edits (e.g., one-line changes) under a configurable threshold, since the LLM cost outweighs the value.
+
+### Pre-execute critic — agent-written executables
+
+Triggered when `run_shell` is about to invoke a file the agent itself created or modified during this session. Track this via the session's edit log: every `edit_file` / `write_text_file` adds the path to a `dirty_files` set. If `run_shell`'s command tries to invoke any path in that set (e.g., `python new_script.py`, `./build.sh`, `bash setup.sh`), the critic reads the file contents first and applies the same proofread rules as Stage B above, with extra weight on:
+
+- Side-effect operations (file deletion, network, environment variable manipulation)
+- Embedded shell-out (the script itself calling subprocess with risky args)
+- Recursion (the script invokes Emi or runs the agent — would be a loop)
+
+If approved, `run_shell` proceeds. If not, planner is told the script needs revision.
+
+### What the critic agent looks like
+
+```yaml
+name: coder::critic
+class_name: Agent
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5-mini"
+  model_tier: "mini"
+
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+
+user_context_items:
+  - date_time
+  - critic_target          # NEW — the action being reviewed (command / diff / file)
+  - critic_intent          # NEW — what the planner said it was doing
+  - recent_history         # for context
+
+system_context_items:
+  - resource_critic_discipline    # NEW — the rules the critic enforces
+  - tool_descriptions             # so it knows what tool was called
+```
+
+Use a smaller / cheaper model than the planner (mini tier). The critic's job is constraint-checking, not creative reasoning. Cost stays bounded.
+
+### Effort impact
+
+This adds to the Phase 1 estimate:
+
+- `coder_critic_pre_node` — extends existing `critic_pre_node` pattern. ~half day. Includes the allowlist + tier-3 blocklist deterministic checks.
+- `coder_critic_post_node` — Python proofread plumbing (Stage A is deterministic, Stage B is the LLM call). ~1 day. The deterministic AST-walk piece can use the standard library's `ast` module + a small ruleset.
+- `coder::critic` agent — config + system.j2 + agent_form. ~half day. The hard part is iterating on the discipline ruleset to be neither too strict (rejects legitimate work) nor too loose (waves through bad code).
+- Audit log integration — every critic decision (approve/reject/concerns) writes to a `coder_audit_log` table for review. ~half day.
+
+**Phase 1 with critic: 7-9 days instead of 5-7.** The critic pays for itself the first time it catches a destructive command.
+
+### Trade-offs and notes
+
+- **Latency cost.** Every non-allowlisted shell command and every Python edit adds an LLM round-trip. For a 30-action coder loop, that's potentially 30 extra LLM calls. Allowlisting hard, so most tier-1 commands skip the critic entirely.
+- **Cost cost.** Mini-tier critic at, say, 1k tokens per invocation × 20 critic calls = 20k tokens/task. At current pricing, fractions of a cent. Fine.
+- **False rejection.** A critic that rejects too many legitimate things makes the agent miserable to use. Iteration on the discipline ruleset is the cure. Audit log gives us the data to tune.
+- **Two-LLM-agent failure modes.** If the critic and planner disagree pathologically (planner: "do X" / critic: "no" / planner: "do X again"), bound it. After N rejections of a similar action in a row, the planner is forced to `return_control` and surface the disagreement to the user.
+- **Critic blind spots.** A critic LLM can be fooled by the same prompt-injection patterns the planner can. Defense-in-depth: deterministic checks (Stage A, allowlist, tier-3 blocklist) are NOT bypassable by clever prompts. They run before the LLM.
+
+This design follows your "guarded" principle: every dangerous action passes through a deterministic check, then an LLM second opinion, then is logged. The coder is fast on safe paths and slow on risky paths, exactly the asymmetry you want.
 
 ## How this plugs into Emi's guards
 
@@ -300,6 +446,9 @@ This is what claude-code-style work looks like, on Emi's runtime, against your r
 4. **Test command discovery.** Does the coder agent guess (`pytest` for python, `npm test` for js)? Or does the workspace declare it (`workspace.json` with `"test_command": "pytest"`)? The latter is more robust; the former is friendlier in the common case.
 5. **Editing the running Emi.** If `coder_manager` is invoked from CLI Emi while Flask Emi is running, and the coder edits `app/assistant/...`, does Flask hot-reload? Crash? Should we explicitly forbid the coder from touching the workspace it's running inside? **Probably forbid for v1.**
 6. **Pair with `kg_dev_manager`?** A real coding task in this repo often needs to query the KG for examples or check pod tags. Should `coder_manager` have `kg_dev_manager` and `pod_search` in its allowed_tools? Or stay minimal and let the user route those manually? Probably yes — being able to grep AND ask the KG is a unique Emi superpower.
+7. **Critic strictness defaults.** Stage B diff review on every Python edit, or skip for trivial diffs (single-line, comment-only)? The strict default is safer; the relaxed default keeps cost down. Recommendation: start strict, relax based on dogfooding.
+8. **Critic veto vs critic warning.** When the critic disapproves a non-allowlisted shell command, does the planner have to obey, or can it override with explicit user confirmation? v1 should be hard-veto (no override). Override requires a user-in-the-loop confirmation pattern.
+9. **Allowlist evolution.** The tier-1 obvious-safe allowlist for shell commands: starts small. Should it auto-grow ("if a command was approved by the critic 5 times in a row, promote to allowlist")? Probably not for v1 — too many ways to game it. Manual curation with audit-log driven additions.
 
 ## Recommended decision path
 
