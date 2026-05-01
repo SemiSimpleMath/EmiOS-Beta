@@ -338,10 +338,19 @@ def api_investigate_finding(finding_id):
 
 def _persist_report_field(finding_id: str, field: str, value) -> None:
     """Update one top-level key inside investigation_report_json (e.g.
-    'operator_notes', 'closed_by_user_at'). Read-modify-write because
-    SQLite JSON support varies by version."""
+    'operator_notes', 'closed_by_user_at').
+
+    SQLAlchemy doesn't auto-track in-place mutations on JSON columns —
+    if we read the dict, mutate it in place, and reassign the same
+    object, SQLAlchemy doesn't see a change and commit becomes a no-op.
+    We reassign with a shallow copy AND call flag_modified to be
+    explicit. Verified: without flag_modified the write is silently
+    dropped on commit (operator notes appeared to save in the UI but
+    never persisted).
+    """
     from app.models.base import get_session as _get_session
     from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
+    from sqlalchemy.orm.attributes import flag_modified
     session = _get_session()
     try:
         finding = session.query(KGMaintenanceFinding).filter_by(id=finding_id).first()
@@ -353,8 +362,12 @@ def _persist_report_field(finding_id: str, field: str, value) -> None:
                 report = json.loads(report) if isinstance(report, str) else {}
             except Exception:
                 report = {}
+        else:
+            # Shallow copy so we have a new object identity (cheap, defensive).
+            report = dict(report)
         report[field] = value
         finding.investigation_report_json = report
+        flag_modified(finding, "investigation_report_json")
         session.commit()
     except Exception:
         session.rollback()
