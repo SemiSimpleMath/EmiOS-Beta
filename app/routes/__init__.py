@@ -36,3 +36,6 @@ try:
 except ImportError as e:
     kg_visualizer_bp = None
     taxonomy_viewer_bp = None
+
+# /me — the lens (clean-room rewrite of the visualizer).
+from .me import me_bp

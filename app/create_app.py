@@ -210,6 +210,12 @@ def create_app(config_class="config.DevelopmentConfig"):
         app.register_blueprint(kg_visualizer_bp)
     if taxonomy_viewer_bp is not None:
         app.register_blueprint(taxonomy_viewer_bp)
+
+    # /me — clean-room rewrite of the visualizer.
+    from app.routes.me import me_bp
+    app.register_blueprint(me_bp)
+    from app.me.api import me_api
+    app.register_blueprint(me_api)
     if graph_api is not None:
         app.register_blueprint(graph_api)
     
