@@ -128,6 +128,7 @@ def compute_seed_graph(
     time_from: Optional[str] = None,
     time_to: Optional[str] = None,
     state_score_multiplier: float = 0.4,
+    include_concepts: bool = False,
 ) -> SeedGraphResult:
     """Compute the bounded subgraph for the lens.
 
@@ -157,6 +158,7 @@ def compute_seed_graph(
         time_to or "",
         limit,
         state_score_multiplier,
+        include_concepts,
     )
     now = time.time()
     cached = _CACHE.get(cache_key)
@@ -169,10 +171,22 @@ def compute_seed_graph(
 
     with get_db_manager().read_session() as session:
         all_nodes = session.query(Node).all()
+        seed_set_for_filter = set(seed_ids)
         node_by_id: Dict[str, Node] = {}
         for n in all_nodes:
-            if _node_active_in_window(n, time_mode, tf, tt):
-                node_by_id[str(n.id)] = n
+            if not _node_active_in_window(n, time_mode, tf, tt):
+                continue
+            # Concept nodes are pure taxonomy scaffolding ("animal",
+            # "career", "city") — visual noise in the personal lens.
+            # Excluded by default; opt-in via include_concepts when the
+            # user explicitly asks. Seeds always survive the filter.
+            if (
+                not include_concepts
+                and (n.node_type or "") == "Concept"
+                and str(n.id) not in seed_set_for_filter
+            ):
+                continue
+            node_by_id[str(n.id)] = n
 
         all_edges = session.query(Edge).all()
         active_edges: List[Edge] = []

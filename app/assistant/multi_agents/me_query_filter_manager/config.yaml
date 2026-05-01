@@ -1,0 +1,67 @@
+name: me_query_filter_manager
+class_name: MultiAgentManager
+description: "Translates lens chat-input into a structured filter intent. Single Planner with read-only kg_query access, then a dedicated final-answer agent that emits the typed AgentForm (intent + seed_node_ids + time params)."
+max_cycles: 12
+
+role_bindings:
+  delegator: shared::delegator
+  tool_selector: shared::tool_selector
+
+agents:
+  - name: shared::delegator
+    class: Delegator
+  - name: me::query_planner
+    class: Planner
+  - name: me::query_final
+    class: Agent
+
+control_nodes:
+  - name: tool_return_router
+    class: ToolReturnRouter
+  - name: critic_pre_node
+    class: CriticPreNode
+    config:
+      enabled: false
+      critic_agent: "me::query_planner"
+      continue_agent: "tool_caller"
+  - name: summary_pre_node
+    class: SummaryPreNode
+    config:
+      enabled: false
+      summary_agent: "me::query_planner"
+      resume_agent: "me::query_planner"
+  - name: tool_caller
+    class: ToolCaller
+  - name: tool_result_handler
+    class: ToolResultHandler
+  - name: return_control
+    class: ReturnControlNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+  - name: graceful_exit_control_node
+    class: GracefulExitControlNode
+
+tools:
+  allowed_tools:
+    - kg_query
+  except_tools: []
+
+scope_contract:
+  tools:
+    allowed_tools: ["all"]
+    blocked_tools: []
+    requires_approval_tools: []
+
+flow_config:
+  tool_return:
+    tool_call_result_handler_node: "tool_result_handler"
+  state_map:
+    "shared::delegator": "me::query_planner"
+    "me::query_planner": "critic_pre_node"
+    "tool_result_handler": "tool_return_router"
+    "tool_return_router": "summary_pre_node"
+    "summary_pre_node": "me::query_planner"
+    "me::query_planner_return_control": "me::query_final"
+    "me::query_final": "manager_exit_node"
+    "graceful_exit": "graceful_exit_control_node"
+    "graceful_exit_control_node": "me::query_final"

@@ -1,0 +1,17 @@
+Today is {{ date_time }}.
+
+User input: {{ task }}
+
+{%- if information %}
+
+Lens state at request time:
+{{ information }}
+{%- endif %}
+
+{%- if recent_history %}
+
+Planner's history (its kg_query calls + observations):
+{{ recent_history }}
+{%- endif %}
+
+Emit the structured filter intent.

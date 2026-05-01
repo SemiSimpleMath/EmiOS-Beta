@@ -58,6 +58,11 @@ def seed_graph():
     time_from = (request.args.get("time_from") or "").strip() or None
     time_to = (request.args.get("time_to") or "").strip() or None
 
+    include_concepts = (
+        str(request.args.get("include_concepts") or "").strip().lower()
+        in ("1", "true", "yes")
+    )
+
     # Empty seeds → fall back to default (the user's node).
     if not seeds:
         default_id = _resolve_default_seed_id()
@@ -70,6 +75,7 @@ def seed_graph():
         time_mode=time_mode,
         time_from=time_from,
         time_to=time_to,
+        include_concepts=include_concepts,
     )
 
     return jsonify({
@@ -115,14 +121,18 @@ def node_detail(node_id: str):
 
 @me_api.route("/api/me/parse-query", methods=["POST"])
 def parse_query():
-    """Run the me::query_filter agent on user chat input.
+    """Run me_query_filter_manager on user chat input.
+
+    The manager runs me::query_planner (Planner with kg_query SQL access),
+    which executes one or more SQL queries to resolve named entities, then
+    me::query_final emits the structured filter intent.
 
     Body:
       { "text": str,
         "current_seeds": [node_id, ...],
         "visible_nodes": [{"id": str, "label": str, "node_type": str}, ...] }
 
-    Returns the agent's structured intent. Frontend applies it to its state.
+    Returns the structured intent. Frontend applies it to its state.
     """
     body = request.get_json(silent=True) or {}
     text = str(body.get("text") or "").strip()
@@ -136,7 +146,7 @@ def parse_query():
             "message": "",
         })
 
-    # Deterministic shortcuts — don't burn an LLM call on these.
+    # Deterministic shortcuts — don't pay for an LLM call on these.
     lowered = text.lower().strip()
     if lowered in ("reset", "clear", "start over"):
         return jsonify({
@@ -159,9 +169,9 @@ def parse_query():
             "message": "Showing currently-true.",
         })
 
-    # Build the agent context: catalog of visible nodes + current seeds.
-    catalog_lines: List[str] = ["## Available nodes (id  label  type):"]
-    for n in visible_nodes[:80]:  # cap to avoid blowing the prompt
+    # Build the lens-state context the planner gets in `information`.
+    catalog_lines: List[str] = ["## Currently visible nodes (id  label  type):"]
+    for n in visible_nodes[:80]:
         if not isinstance(n, dict):
             continue
         nid = str(n.get("id") or "").strip()
@@ -173,21 +183,22 @@ def parse_query():
     if current_seeds:
         catalog_lines.append("")
         catalog_lines.append(f"## Current seeds: {', '.join(current_seeds)}")
-
     information_text = "\n".join(catalog_lines)
 
+    # Invoke me_query_filter_manager via ManagerInterface — the same path
+    # other manager-tools use. The planner's kg_query loop resolves names
+    # to ids; me::query_final emits the structured intent.
     try:
-        from app.assistant.ServiceLocator.service_locator import DI
+        from app.assistant.lib.core_tools.manager_interface.manager_interface import (
+            ManagerInterface,
+        )
         from app.assistant.utils.pydantic_classes import (
-            Message,
             ScopeApprovalPolicy,
             ScopeContext,
             ScopeResourcePolicy,
+            ToolMessage,
         )
-
-        agent = DI.agent_factory.create_agent("me::query_filter")
-        if agent is None:
-            return jsonify({"error": "agent unavailable"}), 500
+        import uuid
 
         scope = ScopeContext(
             scope_id="scope::me::query_filter",
@@ -199,28 +210,58 @@ def parse_query():
             resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
         )
 
-        msg = Message(
-            agent_input={
-                "task": text,
-                "information": information_text,
+        tool_message = ToolMessage(
+            request_id=f"me_parse_{uuid.uuid4().hex[:8]}",
+            tool_name="me_query_filter_manager",
+            tool_data={
+                "arguments": {
+                    "task": text,
+                    "information": information_text,
+                },
             },
-            task=text,
-            information=information_text,
             scope_context=scope,
         )
-        result = agent.action_handler(msg)
+
+        interface = ManagerInterface("me_query_filter_manager")
+        result = interface.execute(tool_message)
         data = getattr(result, "data", None) or {}
 
+        # me::query_final packs a JSON payload into final_answer_answer.
+        # Parse it; fall back to a noop if the JSON is malformed.
+        import json as _json
+        payload_text = str(data.get("final_answer_answer") or "").strip()
+        intent = "noop"
+        seed_ids: List[str] = []
+        time_mode_v = None
+        time_from_v = None
+        time_to_v = None
+        message_v = str(result.content or "").strip()
+        try:
+            if payload_text.startswith("{"):
+                payload = _json.loads(payload_text)
+                if isinstance(payload, dict):
+                    intent = str(payload.get("intent") or "noop")
+                    seed_ids = [
+                        str(s) for s in (payload.get("seed_node_ids") or [])
+                        if isinstance(s, str)
+                    ]
+                    time_mode_v = payload.get("time_mode")
+                    time_from_v = payload.get("time_from")
+                    time_to_v = payload.get("time_to")
+                    message_v = str(payload.get("message") or message_v)
+        except Exception as parse_err:
+            logger.warning("parse-query: JSON decode failed: %s", parse_err)
+
         return jsonify({
-            "intent": str(data.get("intent") or "noop"),
-            "seed_node_ids": list(data.get("seed_node_ids") or []),
-            "time_mode": data.get("time_mode"),
-            "time_from": data.get("time_from"),
-            "time_to": data.get("time_to"),
-            "message": str(data.get("message") or ""),
+            "intent": intent,
+            "seed_node_ids": seed_ids,
+            "time_mode": time_mode_v,
+            "time_from": time_from_v,
+            "time_to": time_to_v,
+            "message": message_v,
         })
     except Exception as e:
-        logger.error("parse_query agent invocation failed: %s", e, exc_info=True)
+        logger.error("parse_query manager invocation failed: %s", e, exc_info=True)
         return jsonify({
             "intent": "noop",
             "seed_node_ids": [],

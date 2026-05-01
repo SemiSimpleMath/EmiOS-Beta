@@ -1,4 +1,4 @@
-name: me::query_filter
+name: me::query_final
 class_name: Agent
 action_required: false
 llm_params:
@@ -9,12 +9,15 @@ llm_params:
 allowed_tools: []
 except_tools: []
 allowed_nodes: []
-entity_scan_keys: [task]
+entity_scan_keys: []
 entity_card_level: 0
 
 user_context_items:
   - date_time
   - task
   - information
+  - recent_history
+  - checklist
+  - progress_report
 
 system_context_items: []
