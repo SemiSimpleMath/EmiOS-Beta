@@ -102,7 +102,14 @@ def _parse_iso(value: Any) -> Optional[datetime]:
 
 
 def _list_prose_pages(vault_path: Path) -> List[Dict[str, Any]]:
-    """Return one entry per prose page with (label, path, generated_at, kg_node_id)."""
+    """Return one entry per prose page with (label, path, generated_at, kg_node_id).
+
+    ``label`` is the canonical KG label from frontmatter (`name:` field), not
+    the filename stem. Stems are sanitized via ``_safe_filename`` (chars like
+    '&', ',', '@' become '_'), so a page about AT&T lives at ``AT_T.md`` —
+    the stem is unsafe to use as the KG lookup key. Fall back to the stem
+    only when frontmatter is missing or malformed (legacy / hand-edited).
+    """
     prose_dir = vault_path / "prose"
     if not prose_dir.exists():
         return []
@@ -116,8 +123,9 @@ def _list_prose_pages(vault_path: Path) -> List[Dict[str, Any]]:
         except Exception as e:
             logger.warning("Skipping %s — frontmatter parse failed: %s", p, e)
             continue
+        canonical = str(meta.get("name") or "").strip() or p.stem
         out.append({
-            "label": p.stem,
+            "label": canonical,
             "path": p,
             "generated_at": _parse_iso(meta.get("generated_at")),
             "kg_node_id": meta.get("kg_node_id"),
