@@ -2,8 +2,8 @@ name: me::query_planner
 class_name: Planner
 llm_params:
   llm_provider: "openai"
-  engine: "gpt-5.4"
-  model_tier: "smart"
+  engine: "gpt-5-mini"
+  model_tier: "mini"
 
 allowed_tools: [kg_query]
 except_tools: []

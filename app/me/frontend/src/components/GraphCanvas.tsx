@@ -45,9 +45,9 @@ const ENTITY_HEIGHT = 36;
 const STATE_WIDTH = 56;
 const STATE_HEIGHT = 16;
 const PHOTO_SIZE = 44;
-const SEED_RING_RADIUS = 320;
-const COLLIDE_PADDING = 14;
-const CLUSTER_STRENGTH = 0.075;
+const SEED_RING_RADIUS = 480;
+const COLLIDE_PADDING = 22;
+const CLUSTER_STRENGTH = 0.04;
 
 function roundRect(
   ctx: CanvasRenderingContext2D,
@@ -91,96 +91,122 @@ function collideRadius(n: ForceNode): number {
   return Math.hypot(w / 2, ENTITY_HEIGHT / 2) + COLLIDE_PADDING;
 }
 
-// Compute the entry point on a node's bounding rectangle along the line
-// from the node center to (toX, toY). Used so links land on the box edge,
-// not on the box center (which they'd otherwise overlap).
-function rectEdgeAnchor(
-  cx: number,
-  cy: number,
-  halfW: number,
-  halfH: number,
-  toX: number,
-  toY: number,
-): { x: number; y: number } {
-  const dx = toX - cx;
-  const dy = toY - cy;
-  if (dx === 0 && dy === 0) return { x: cx, y: cy };
-  const ax = Math.abs(dx);
-  const ay = Math.abs(dy);
-  // Scale to land on the rectangle's edge.
-  const sx = ax === 0 ? Infinity : halfW / ax;
-  const sy = ay === 0 ? Infinity : halfH / ay;
-  const s = Math.min(sx, sy);
-  return { x: cx + dx * s, y: cy + dy * s };
-}
-
-function nodeFootprint(n: ForceNode): { halfW: number; halfH: number; bottom: number } {
+function nodeFootprint(n: ForceNode): { halfW: number; halfH: number } {
   if (STATE_TYPES.has(n.node_type)) {
-    return { halfW: STATE_WIDTH / 2, halfH: STATE_HEIGHT / 2, bottom: STATE_HEIGHT / 2 };
+    return { halfW: STATE_WIDTH / 2, halfH: STATE_HEIGHT / 2 };
   }
   if (n.photo_url) {
-    // Photo + label below; treat the visual block as the rectangle plus label.
-    return { halfW: PHOTO_SIZE / 2, halfH: PHOTO_SIZE / 2, bottom: PHOTO_SIZE / 2 + 14 };
+    return { halfW: PHOTO_SIZE / 2, halfH: PHOTO_SIZE / 2 };
   }
   const w = entityWidth(n.pagerank_score);
-  return { halfW: w / 2, halfH: ENTITY_HEIGHT / 2, bottom: ENTITY_HEIGHT / 2 };
+  return { halfW: w / 2, halfH: ENTITY_HEIGHT / 2 };
 }
 
-// Orthogonal routing with rounded corners. Path: from source edge anchor,
-// goes one axis, bends, goes the other axis, ends at target edge anchor.
-// For shorter horizontal/vertical pairs, a single bend; for diagonals, two
-// bends produce a soft staircase shape.
+// Side-locked anchor: pick the side of a node's bounding rectangle whose
+// orientation matches the route's primary axis. For horizontal routes this
+// is left or right at the node's vertical center; for vertical routes it's
+// top or bottom at the node's horizontal center. This guarantees lines
+// emerge from the middle of a side, not from a corner.
+function sideAnchor(
+  n: ForceNode,
+  axis: "horizontal" | "vertical",
+  toward: { x: number; y: number },
+): { x: number; y: number } {
+  const cx = n.x ?? 0;
+  const cy = n.y ?? 0;
+  const fp = nodeFootprint(n);
+  if (axis === "horizontal") {
+    return {
+      x: cx + (toward.x >= cx ? fp.halfW : -fp.halfW),
+      y: cy,
+    };
+  }
+  return {
+    x: cx,
+    y: cy + (toward.y >= cy ? fp.halfH : -fp.halfH),
+  };
+}
+
+// Single-bend orthogonal routing. Picks the dominant axis. If the boxes
+// are aligned on that axis (low cross-axis delta), draws a straight line.
+// Otherwise, exits the source on the dominant-axis side and turns once
+// (rounded) to land on the target's perpendicular-axis side.
 function drawOrthogonalLink(
   ctx: CanvasRenderingContext2D,
-  s: { x: number; y: number },
-  t: { x: number; y: number },
+  src: ForceNode,
+  tgt: ForceNode,
   globalScale: number,
 ) {
-  const dx = t.x - s.x;
-  const dy = t.y - s.y;
+  const sx = src.x ?? 0;
+  const sy = src.y ?? 0;
+  const tx = tgt.x ?? 0;
+  const ty = tgt.y ?? 0;
+  const dx = tx - sx;
+  const dy = ty - sy;
   const ax = Math.abs(dx);
   const ay = Math.abs(dy);
-  const radius = Math.min(14, Math.min(ax, ay) / 3, 14);
+
+  // Pick the dominant axis. Tie goes to horizontal — most labels are wider
+  // than tall, so horizontal-first connectors read cleaner.
+  const horizontal = ax >= ay;
+
+  // Source side anchor on the dominant axis.
+  const s = sideAnchor(src, horizontal ? "horizontal" : "vertical", { x: tx, y: ty });
+
+  // For straight-line cases (boxes well-aligned on the cross-axis), land
+  // on the target's same-axis side too. The line is then truly straight,
+  // zero bends.
+  const STRAIGHT_TOLERANCE = 6;
+  const crossDelta = horizontal ? ay : ax;
+  if (crossDelta <= STRAIGHT_TOLERANCE) {
+    const t = sideAnchor(tgt, horizontal ? "horizontal" : "vertical", { x: sx, y: sy });
+    ctx.beginPath();
+    ctx.moveTo(s.x, s.y);
+    ctx.lineTo(t.x, t.y);
+    ctx.lineWidth = 1.0 / globalScale;
+    ctx.strokeStyle = "rgba(107, 114, 128, 0.5)";
+    ctx.stroke();
+    return;
+  }
+
+  // Single-bend route: leave source on dominant axis, turn 90 degrees,
+  // land on target's perpendicular-axis side. Bend is at the elbow point.
+  const t = sideAnchor(tgt, horizontal ? "vertical" : "horizontal", { x: sx, y: sy });
+  const elbow = horizontal ? { x: t.x, y: s.y } : { x: s.x, y: t.y };
+
+  // Rounded corner at the elbow.
+  const radius = Math.min(
+    14,
+    Math.abs(s.x - elbow.x) / 2,
+    Math.abs(s.y - elbow.y) / 2,
+    Math.abs(elbow.x - t.x) / 2,
+    Math.abs(elbow.y - t.y) / 2,
+  );
+  const r = Math.max(0, radius);
 
   ctx.beginPath();
   ctx.moveTo(s.x, s.y);
-
-  if (ax < 1 || ay < 1) {
-    // Pure vertical or horizontal — one straight segment.
-    ctx.lineTo(t.x, t.y);
-  } else if (ax > ay * 2.2) {
-    // Mostly horizontal — single H/V bend at midpoint.
-    const midX = s.x + dx / 2;
-    ctx.lineTo(midX - Math.sign(dx) * radius, s.y);
-    ctx.quadraticCurveTo(midX, s.y, midX, s.y + Math.sign(dy) * radius);
-    ctx.lineTo(midX, t.y - Math.sign(dy) * radius);
-    ctx.quadraticCurveTo(midX, t.y, midX + Math.sign(dx) * radius, t.y);
-    ctx.lineTo(t.x, t.y);
-  } else if (ay > ax * 2.2) {
-    // Mostly vertical — single V/H bend at midpoint.
-    const midY = s.y + dy / 2;
-    ctx.lineTo(s.x, midY - Math.sign(dy) * radius);
-    ctx.quadraticCurveTo(s.x, midY, s.x + Math.sign(dx) * radius, midY);
-    ctx.lineTo(t.x - Math.sign(dx) * radius, midY);
-    ctx.quadraticCurveTo(t.x, midY, t.x, midY + Math.sign(dy) * radius);
+  if (r < 0.5) {
+    ctx.lineTo(elbow.x, elbow.y);
     ctx.lineTo(t.x, t.y);
   } else {
-    // Diagonal — staircase: H, V, H with two rounded bends.
-    const stepX = dx / 3;
-    const x1 = s.x + stepX;
-    const x2 = s.x + 2 * stepX;
-    ctx.lineTo(x1 - Math.sign(dx) * radius, s.y);
-    ctx.quadraticCurveTo(x1, s.y, x1, s.y + Math.sign(dy) * radius);
-    ctx.lineTo(x1, t.y - Math.sign(dy) * radius);
-    ctx.quadraticCurveTo(x1, t.y, x1 + Math.sign(dx) * radius, t.y);
-    // Second bend skipped — single staircase reads cleaner. The variable
-    // x2 is left available if we ever want a 3-segment staircase.
-    void x2;
-    ctx.lineTo(t.x, t.y);
+    if (horizontal) {
+      // Pre-elbow: horizontal segment, stop r before elbow.
+      const preX = elbow.x - Math.sign(elbow.x - s.x) * r;
+      ctx.lineTo(preX, s.y);
+      const postY = elbow.y + Math.sign(t.y - elbow.y) * r;
+      ctx.quadraticCurveTo(elbow.x, elbow.y, elbow.x, postY);
+      ctx.lineTo(t.x, t.y);
+    } else {
+      const preY = elbow.y - Math.sign(elbow.y - s.y) * r;
+      ctx.lineTo(s.x, preY);
+      const postX = elbow.x + Math.sign(t.x - elbow.x) * r;
+      ctx.quadraticCurveTo(elbow.x, elbow.y, postX, elbow.y);
+      ctx.lineTo(t.x, t.y);
+    }
   }
-
   ctx.lineWidth = 1.0 / globalScale;
-  ctx.strokeStyle = "rgba(107, 114, 128, 0.45)";
+  ctx.strokeStyle = "rgba(107, 114, 128, 0.5)";
   ctx.stroke();
 }
 
@@ -401,25 +427,7 @@ export function GraphCanvas({ nodes, edges, onNodeClick }: Props) {
       ) {
         return;
       }
-      const sFp = nodeFootprint(src);
-      const tFp = nodeFootprint(tgt);
-      const sAnchor = rectEdgeAnchor(
-        src.x,
-        src.y,
-        sFp.halfW,
-        sFp.halfH,
-        tgt.x,
-        tgt.y,
-      );
-      const tAnchor = rectEdgeAnchor(
-        tgt.x,
-        tgt.y,
-        tFp.halfW,
-        tFp.halfH,
-        src.x,
-        src.y,
-      );
-      drawOrthogonalLink(ctx, sAnchor, tAnchor, globalScale);
+      drawOrthogonalLink(ctx, src, tgt, globalScale);
     },
     [],
   );
