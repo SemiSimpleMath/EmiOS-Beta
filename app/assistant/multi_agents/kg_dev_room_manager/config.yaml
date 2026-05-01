@@ -36,8 +36,11 @@ tools:
 
 scope_contract:
   tools:
-    allowed_tools:
-      - kg_dev_manager
+    # ["all"] so the inner kg_dev_manager (invoked as a tool) can use its own
+    # planner-loop tools (kg_query, pod_search, pod_fetch). The outer
+    # `tools.allowed_tools` above already restricts what the chat_gate path
+    # can dispatch — kg_dev_manager only.
+    allowed_tools: ["all"]
     blocked_tools: []
     requires_approval_tools: []
 
