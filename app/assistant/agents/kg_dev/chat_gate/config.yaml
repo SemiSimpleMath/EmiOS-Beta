@@ -1,0 +1,24 @@
+name: kg_dev::chat_gate
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "gemini"
+  engine: "gemini-3-flash-preview"
+  model_tier: "mini"
+
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+entity_scan_keys: [incoming_message, task, recent_history]
+entity_card_level: 0
+
+user_context_items:
+  - date_time
+  - task
+  - recent_history
+
+system_context_items:
+  - room_identity
+  - room_conversation
+  - room_safety
+  - resource_kg_node_reading

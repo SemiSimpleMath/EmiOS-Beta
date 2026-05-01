@@ -1,0 +1,62 @@
+name: kg_dev_room_manager
+class_name: MultiAgentManager
+description: "Outer chat front for the KG dev console. chat_gate disambiguates with the user; on handoff, dispatches the single tool kg_dev_manager (the existing planner-loop manager-tool). No switchboard agent — only one tool, so the router synthesizes the tool call directly."
+max_cycles: 12
+
+role_bindings:
+  delegator: shared::delegator
+  tool_selector: shared::tool_selector
+
+agents:
+  - name: shared::delegator
+    class: Delegator
+  - name: kg_dev::chat_gate
+    class: Agent
+  - name: room::response_formatter
+    class: Agent
+
+control_nodes:
+  - name: kg_dev_chat_task_router_node
+    class: KgDevChatTaskRouterNode
+  - name: room_tool_caller
+    class: RoomToolCaller
+  - name: tool_result_handler
+    class: ToolResultHandler
+  - name: final_answer_node
+    class: FinalAnswerNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+  - name: graceful_exit_control_node
+    class: GracefulExitControlNode
+
+tools:
+  allowed_tools:
+    - kg_dev_manager
+  except_tools: []
+
+scope_contract:
+  tools:
+    allowed_tools:
+      - kg_dev_manager
+    blocked_tools: []
+    requires_approval_tools: []
+
+flow_config:
+  strict_routing: true
+  chat_gate:
+    source_agent: "kg_dev::chat_gate"
+    final_node: "final_answer_node"
+    exit_flag_key: "handoff_tf"
+    no_op_flag_key: "no_op_tf"
+    chat_response_key: "chat_response"
+    switchboard_task_key: "switchboard_task"
+    switchboard_information_key: "switchboard_information"
+  state_map:
+    "shared::delegator": "kg_dev::chat_gate"
+    "kg_dev::chat_gate": "kg_dev_chat_task_router_node"
+    "kg_dev_chat_task_router_node": "room_tool_caller"
+    "room_tool_caller": "room::response_formatter"
+    "room::response_formatter": "final_answer_node"
+    "final_answer_node": "manager_exit_node"
+    "graceful_exit": "graceful_exit_control_node"
+    "graceful_exit_control_node": "final_answer_node"

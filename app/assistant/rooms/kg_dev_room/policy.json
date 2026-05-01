@@ -1,6 +1,6 @@
 {
   "policy_id": "room_policy::kg_dev_room::v1",
-  "manager_name": "kg_dev_manager",
+  "manager_name": "kg_dev_room_manager",
   "surface": "ui",
   "default_visibility": "owner_only",
   "default_context_id": "main",

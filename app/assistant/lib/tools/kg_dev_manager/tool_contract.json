@@ -1,0 +1,45 @@
+{
+  "name": "kg_dev_manager",
+  "description": "Read-only KG investigation surface for the developer console. Runs a planner loop over kg_query / pod_search / pod_fetch. Pass a fully disambiguated investigative question; the planner returns a structured answer.",
+  "inputs": [
+    {
+      "name": "task",
+      "type": "string",
+      "required": true,
+      "description": "The fully disambiguated investigative question."
+    },
+    {
+      "name": "information",
+      "type": "string",
+      "required": true,
+      "description": "Supporting context the planner may need (prior chat snippets, evidence, constraints). Empty string allowed."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload from the planner loop."
+    }
+  ],
+  "arguments_prompt": "kg_dev_manager arguments:\ntask: the fully disambiguated investigative question.\ninformation: supporting context (prior chat, evidence, constraints).",
+  "metadata": {
+    "category": "knowledge_graph",
+    "verbs": ["query", "investigate"],
+    "entities": ["node", "edge"],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "medium",
+    "latency_class": "moderate",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}
