@@ -144,8 +144,13 @@
           </div>
 
           <div class="inv-actions">
-            <button type="button" class="inv-btn inv-btn-accept" onclick="acceptFinding('${esc(f.id)}')">
-              Accept (close as executed)
+            <button type="button" class="inv-btn inv-btn-apply" onclick="applyFinding('${esc(f.id)}')"
+                    title="Hand off to kg_mutation_manager — planner applies the proposed_action via audit-wired tools, or escalates if irreversible / low confidence.">
+              ⚡ Apply via mutation_manager
+            </button>
+            <button type="button" class="inv-btn inv-btn-accept" onclick="acceptFinding('${esc(f.id)}')"
+                    title="Mark as resolved without running a KG mutation. Use for op=no_action or when the diagnosis itself resolves the question.">
+              Accept (no mutation)
             </button>
             <button type="button" class="inv-btn inv-btn-dismiss" onclick="dismissFinding('${esc(f.id)}')">
               Dismiss (close as rejected)
@@ -205,6 +210,44 @@
 
     window.acceptFinding = (id) => closeFinding(id, 'accept', 'Accept');
     window.dismissFinding = (id) => closeFinding(id, 'dismiss', 'Dismiss');
+
+    window.applyFinding = async function applyFinding(id) {
+      const notes = notesValue(id);
+      const card = document.getElementById('card-' + id);
+      const proposed = card?.querySelector('.inv-proposed code')?.textContent || '(unknown op)';
+      const confirmMsg =
+        `Apply this finding via kg_mutation_manager?\n\n` +
+        `Planner will read the proposed_action (op=${proposed}) from the investigation report ` +
+        `and either apply the matching mutation tool, mark as no_action, or escalate.\n\n` +
+        (notes ? `Notes: ${notes}\n\n` : '') +
+        `The mutation is audit-logged in kg_revision_log. Continue?`;
+      if (!confirm(confirmMsg)) return;
+      const actions = card?.querySelector('.inv-actions');
+      const prevHtml = actions?.innerHTML;
+      if (actions) actions.innerHTML = '<span class="inv-applying">⚡ Applying via kg_mutation_manager… (5-30s)</span>';
+      try {
+        const res = await fetch(`/kg-maintenance/api/finding/${id}/apply`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ notes }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || res.statusText);
+        card.classList.add('is-closed');
+        const summary = data.result_summary || '(no summary)';
+        const term = data.terminal_status || 'unknown';
+        if (actions) {
+          actions.innerHTML = `
+            <div class="inv-applied-block">
+              <span class="inv-closed-badge inv-closed-applied">Applied → ${esc(term)}</span>
+              <p class="inv-applied-summary">${esc(summary)}</p>
+            </div>`;
+        }
+      } catch (e) {
+        if (actions) actions.innerHTML = prevHtml || '';
+        alert('Apply failed: ' + e.message);
+      }
+    };
 
     document.addEventListener('DOMContentLoaded', loadFindings);
   })();

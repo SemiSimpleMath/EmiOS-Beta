@@ -33,6 +33,7 @@ from app.models.db_manager import get_db_manager
 logger = get_logger(__name__)
 
 MANAGER_NAME = "kg_investigation_manager"
+MUTATION_MANAGER_NAME = "kg_mutation_manager"
 
 
 def _investigation_scope() -> ScopeContext:
@@ -60,6 +61,144 @@ def _investigation_scope() -> ScopeContext:
         resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
         writes=ScopeWritePolicy(write_kg=False, write_unified_log=False),
     )
+
+
+def _mutation_scope() -> ScopeContext:
+    """Scope context for the kg_mutation_manager.
+
+    The mutator's purpose is to apply a previously-recorded proposed_action to
+    the KG via narrow audit-wired tools (kg_merge_nodes, kg_rename_label,
+    kg_update_node_field, kg_finding_resolve, kg_finding_escalate). Therefore
+    write_kg is True here.
+    """
+    return ScopeContext(
+        scope_id="scope::kg_investigator::finding_executor",
+        owner_id="jukka",
+        actor_id="kg_finding_executor",
+        surface="system",
+        room_id=None,
+        approval=ScopeApprovalPolicy(authority_level=100),
+        resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
+        writes=ScopeWritePolicy(write_kg=True, write_unified_log=False),
+    )
+
+
+def _build_apply_brief(finding_id: str) -> Optional[tuple[str, str]]:
+    """Build (task, information) for the mutation_manager planner from a
+    finding's investigation report. Returns None if the finding is missing,
+    not investigated, or has no structured report."""
+    import json
+    with get_db_manager().read_session() as session:
+        f = (
+            session.query(KGMaintenanceFinding)
+            .filter(KGMaintenanceFinding.id == finding_id)
+            .first()
+        )
+        if f is None:
+            return None
+        if f.status != "investigated":
+            return None
+        report = f.investigation_report_json
+        if report is None:
+            return None
+        if isinstance(report, str):
+            try:
+                report = json.loads(report)
+            except Exception:
+                return None
+        finding_view = {
+            "finding_id": f.id,
+            "finding_type": f.finding_type,
+            "primary_node_id": f.primary_node_id,
+            "secondary_node_id": f.secondary_node_id,
+            "edge_id": f.edge_id,
+            "suggested_action": f.suggested_action,
+            "reason": f.reason,
+            "priority": f.priority,
+        }
+
+    task = (
+        f"Apply the proposed_action from finding {finding_id} per the "
+        "investigation report. Follow the kg_mutation::planner decision rules "
+        "(no_action / escalate / apply mutation+resolve)."
+    )
+    information = json.dumps(
+        {"finding": finding_view, "investigation_report": report},
+        indent=2,
+        default=str,
+    )
+    return task, information
+
+
+def apply_one(finding_id: str) -> Dict[str, Any]:
+    """Hand an investigated finding to kg_mutation_manager so its planner can
+    apply the proposed_action (or escalate) per the report's decision rules.
+
+    Returns ``{"status": "applied" | "no_report" | "wrong_status" |
+    "not_found" | "error", "finding_id": ..., "result_summary": ..., ...}``.
+    The terminal finding-row status (executed / rejected / escalated) is
+    written by the planner via ``kg_finding_resolve`` /
+    ``kg_finding_escalate`` — we don't touch it directly here.
+    """
+    import json
+
+    brief = _build_apply_brief(finding_id)
+    if brief is None:
+        with get_db_manager().read_session() as session:
+            f = session.query(KGMaintenanceFinding).filter_by(id=finding_id).first()
+        if f is None:
+            return {"status": "not_found", "finding_id": finding_id}
+        if f.status != "investigated":
+            return {
+                "status": "wrong_status",
+                "finding_id": finding_id,
+                "current_status": f.status,
+            }
+        return {"status": "no_report", "finding_id": finding_id}
+
+    task, information = brief
+    mgr = DI.multi_agent_manager_factory.create_manager(MUTATION_MANAGER_NAME)
+    msg = Message(task=task, information=information, scope_context=_mutation_scope())
+    try:
+        DI.manager_invoker.invoke(mgr, msg)
+    except Exception as e:
+        logger.error("apply failed for finding %s: %s", finding_id, e)
+        logger.debug("apply exception details", exc_info=True)
+        return {"status": "error", "finding_id": finding_id, "error": str(e)}
+
+    # Read back the finding's terminal state so the caller can see what the
+    # planner actually did (executed / rejected / escalated / unchanged).
+    with get_db_manager().read_session() as session:
+        f = session.query(KGMaintenanceFinding).filter_by(id=finding_id).first()
+        terminal_status = f.status if f else None
+        execution_notes = f.execution_notes if f else None
+
+    # Pull a result summary from the mutation_manager's final_answer if there is one.
+    result_summary: Optional[str] = None
+    try:
+        msgs = mgr.blackboard.get_messages()
+        for m in msgs:
+            sender = str(getattr(m, "sender", "") or "")
+            if sender.endswith("final_answer") and "kg_mutation" in sender:
+                data = getattr(m, "data", None) or {}
+                result_summary = (
+                    data.get("result_summary")
+                    or data.get("final_answer_answer")
+                    or data.get("diagnosis")
+                )
+                if isinstance(result_summary, str):
+                    result_summary = result_summary[:600]
+                break
+    except Exception as e:
+        logger.debug("could not extract final_answer from mutation manager: %s", e)
+
+    return {
+        "status": "applied",
+        "finding_id": finding_id,
+        "terminal_status": terminal_status,
+        "execution_notes": execution_notes,
+        "result_summary": result_summary,
+    }
 
 
 def _claim_pending_finding_ids(*, limit: int, finding_types: Optional[List[str]] = None) -> List[str]:

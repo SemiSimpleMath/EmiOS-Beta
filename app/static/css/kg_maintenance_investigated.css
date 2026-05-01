@@ -277,6 +277,28 @@
 .inv-btn-accept:hover { background: #2a6a2a; }
 .inv-btn-dismiss { background: #4a2a2a; border-color: #6a3535; color: #f5d0d0; }
 .inv-btn-dismiss:hover { background: #6a3535; }
+.inv-btn-apply { background: #1d3a55; border-color: #2a5a85; color: #cfe5ff; font-weight: 500; }
+.inv-btn-apply:hover { background: #2a5a85; }
+
+.inv-applying {
+  color: var(--info, #4a9eff);
+  padding: 6px 14px;
+  font-size: 13px;
+  font-style: italic;
+}
+.inv-applied-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 0;
+}
+.inv-applied-summary {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted, #aaa);
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
 
 .inv-closed-badge {
   background: #2a2a2a;
@@ -286,3 +308,4 @@
   font-size: 13px;
   font-style: italic;
 }
+.inv-closed-applied { background: #1f3a55; color: #cfe5ff; font-style: normal; font-weight: 500; }

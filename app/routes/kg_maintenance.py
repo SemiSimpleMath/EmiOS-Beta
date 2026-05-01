@@ -438,6 +438,40 @@ def api_finding_accept(finding_id):
         return jsonify({"error": str(e)}), 500
 
 
+@kg_maintenance_bp.route("/api/finding/<finding_id>/apply", methods=["POST"])
+def api_finding_apply(finding_id):
+    """Hand an investigated finding to kg_mutation_manager so its planner
+    decides (apply / escalate / no_action) per the report's proposed_action.
+
+    The terminal status is written by the mutation planner via
+    kg_finding_resolve / kg_finding_escalate, not by this route. Synchronous —
+    blocks until the planner finishes (typical 5-30s for a single mutation).
+
+    Body (optional): { "notes": str } — operator notes saved on the finding
+    before the mutation runs. Useful for "I'm applying because <context>".
+    """
+    data = request.get_json(silent=True) or {}
+    notes = str(data.get("notes") or "").strip()
+    try:
+        finding = get_finding(finding_id)
+        if finding is None:
+            return jsonify({"error": "Finding not found"}), 404
+        if finding["status"] != "investigated":
+            return jsonify({"error": f"Cannot apply finding in status {finding['status']!r}"}), 409
+        if notes:
+            try:
+                _persist_report_field(finding_id, "operator_notes", notes)
+            except Exception:
+                logger.debug("[apply] persisting notes failed", exc_info=True)
+
+        from app.assistant.kg_investigator.finding_processor import apply_one
+        result = apply_one(finding_id)
+        return jsonify(result)
+    except Exception as e:
+        logger.error("[kg_maintenance] apply failed id=%s: %s", finding_id, e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
 @kg_maintenance_bp.route("/api/finding/<finding_id>/dismiss", methods=["POST"])
 def api_finding_dismiss(finding_id):
     """Close an investigated finding as 'rejected' — proposed action shouldn't
