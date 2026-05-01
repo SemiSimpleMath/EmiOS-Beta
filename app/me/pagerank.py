@@ -112,6 +112,13 @@ def _node_active_in_window(
     if time_mode == "lifetime":
         return True
 
+    # Entity nodes (people, places, organizations) are persistent. Any
+    # dates that happen to live on their row come from extraction noise
+    # ("Katy was first mentioned on 2026-03-12") and don't bound her
+    # existence. Only State/Event/Goal nodes are genuinely time-bounded.
+    if (node.node_type or "") == "Entity":
+        return True
+
     start = _parse_iso_date(node.start_date.isoformat() if node.start_date else None)
     end = _parse_iso_date(node.end_date.isoformat() if node.end_date else None)
 
@@ -395,28 +402,31 @@ def compute_seed_graph(
             else:
                 biased[nid] = score
 
-        # Two-phase top-K selection.
-        # Phase 1: entities (and seeds) fill ~80% of the cap by personalized PR.
-        #          State/Goal nodes are skipped here — they fill phase 2 only
-        #          if they bridge selected entities.
-        # Phase 2: add State/Goal nodes that connect ≥2 already-visible nodes
-        #          (bridge nodes). Without these, visible entities have no
-        #          connecting edges in the rendered subgraph.
+        # Tier-priority top-K selection. Persons are admitted FIRST so that
+        # the lens never shows "Mewgenics" while hiding "Katy" — a structural
+        # answer to the importance-ranking gap. Order:
+        #   Phase A: all persons (Entity + category=person), ranked by PR.
+        #   Phase B: bridge State/Event/Goal nodes connecting ≥2 visible.
+        #   Phase C: state/goal touching a seed directly (anchor connector).
+        #   Phase D: remaining non-person Entity nodes by PR (foods, software,
+        #            video games, places, etc.) — only if cap not yet hit.
         ranked = sorted(biased.items(), key=lambda kv: (-kv[1], kv[0]))
         visible: Set[str] = set(valid_seeds)
-        entity_cap = max(1, int(limit * 0.8))
 
+        # A: persons.
         for nid, _score in ranked:
-            if len(visible) >= entity_cap:
+            if len(visible) >= limit:
                 break
+            if nid in visible:
+                continue
             n = node_by_id.get(nid)
             if n is None:
                 continue
-            if (n.node_type or "") in STATE_NODE_TYPES:
+            if not _is_person(n):
                 continue
             visible.add(nid)
 
-        # Phase 2: add bridge states/goals (still ranked highest first).
+        # B: bridge state/goal nodes (connect ≥2 visible).
         for nid, _score in ranked:
             if len(visible) >= limit:
                 break
@@ -425,7 +435,6 @@ def compute_seed_graph(
             n = node_by_id.get(nid)
             if n is None or (n.node_type or "") not in STATE_NODE_TYPES:
                 continue
-            # Count visible neighbors — only admit if it bridges ≥2.
             try:
                 neighbors = list(g.neighbors(nid))
             except nx.NetworkXError:
@@ -434,9 +443,7 @@ def compute_seed_graph(
             if visible_neighbors >= 2:
                 visible.add(nid)
 
-        # Phase 3: if we still have room and there are non-bridge state/goal
-        # nodes that touch a seed directly, admit them so seeds aren't
-        # represented as disconnected dots.
+        # C: state/goal touching a seed directly.
         for nid, _score in ranked:
             if len(visible) >= limit:
                 break
@@ -451,6 +458,19 @@ def compute_seed_graph(
                 continue
             if seed_set & neighbors:
                 visible.add(nid)
+
+        # D: remaining non-person Entity nodes by PR. Only if there's room.
+        for nid, _score in ranked:
+            if len(visible) >= limit:
+                break
+            if nid in visible:
+                continue
+            n = node_by_id.get(nid)
+            if n is None:
+                continue
+            if (n.node_type or "") != "Entity":
+                continue
+            visible.add(nid)
 
         # Auto-anchor promotion. Each seed's top-K first-degree Entity
         # neighbors become co-equal "districts" on the canvas. This breaks

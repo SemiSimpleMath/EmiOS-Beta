@@ -60,8 +60,37 @@ const ENTITY_HEIGHT = 36;
 const STATE_WIDTH = 56;
 const STATE_HEIGHT = 16;
 const PHOTO_SIZE = 44;
+
+// Screen-pixel bounds per tier. Above natural size we clamp DOWN so the
+// node doesn't blow up when zoomed in; below natural size we clamp UP so
+// the node doesn't shrink past readability when zoomed out.
+const PERSON_MIN_SCREEN_W = 60;
+const PERSON_MAX_SCREEN_W = 180;
+const PERSON_MIN_SCREEN_H = 24;
+const PERSON_MAX_SCREEN_H = 60;
+const PERSON_MIN_FONT_PX = 11;
+const PERSON_MAX_FONT_PX = 22;
+const STATE_MIN_FONT_PX = 8;
+const STATE_MAX_FONT_PX = 14;
+
+/**
+ * Clamp the on-screen pixel size of a graph-coord measurement so it stays
+ * readable when zoomed out and doesn't blow up when zoomed in. Returns the
+ * graph-coord size to actually draw at given the current globalScale.
+ */
+function clampScreen(
+  graphSize: number,
+  globalScale: number,
+  minPx: number,
+  maxPx: number,
+): number {
+  const naturalScreen = graphSize * globalScale;
+  const clamped = Math.max(minPx, Math.min(maxPx, naturalScreen));
+  return clamped / globalScale;
+}
+
 // Map-mode layout: every node is pinned at its global (x, y). No force
-// sim runs. SEED_RING_RADIUS / CLUSTER_STRENGTH retired.
+// sim runs.
 
 function roundRect(
   ctx: CanvasRenderingContext2D,
@@ -318,8 +347,10 @@ export function GraphCanvas({
       const y = node.y ?? 0;
 
       if (isState) {
-        const w = STATE_WIDTH;
-        const h = STATE_HEIGHT;
+        // States: small chips that scale modestly with zoom but never
+        // shrink past readability or balloon on close zoom.
+        const w = clampScreen(STATE_WIDTH, globalScale, 32, 120);
+        const h = clampScreen(STATE_HEIGHT, globalScale, 10, 32);
         roundRect(ctx, x - w / 2, y - h / 2, w, h, h / 2);
         ctx.fillStyle = "#f3f4f6";
         ctx.fill();
@@ -327,7 +358,8 @@ export function GraphCanvas({
         ctx.strokeStyle = "#d1d5db";
         ctx.stroke();
 
-        const fontSize = 8;
+        const fontPx = Math.max(STATE_MIN_FONT_PX, Math.min(STATE_MAX_FONT_PX, 8 * globalScale));
+        const fontSize = fontPx / globalScale;
         ctx.font = `${fontSize}px Inter, system-ui, sans-serif`;
         ctx.fillStyle = "#6b7280";
         ctx.textAlign = "center";
@@ -371,8 +403,11 @@ export function GraphCanvas({
         return;
       }
 
-      const w = entityWidth(node.pagerank_score);
-      const h = ENTITY_HEIGHT;
+      // Person/entity boxes: clamp screen size so they stay readable when
+      // zoomed out and don't balloon when zoomed in.
+      const naturalW = entityWidth(node.pagerank_score);
+      const w = clampScreen(naturalW, globalScale, PERSON_MIN_SCREEN_W, PERSON_MAX_SCREEN_W);
+      const h = clampScreen(ENTITY_HEIGHT, globalScale, PERSON_MIN_SCREEN_H, PERSON_MAX_SCREEN_H);
       let fill = "#ffffff";
       let stroke = "#d1d5db";
       let textColor = "#111827";
@@ -391,7 +426,8 @@ export function GraphCanvas({
       ctx.strokeStyle = stroke;
       ctx.stroke();
 
-      const fontSize = 12;
+      const fontPx = Math.max(PERSON_MIN_FONT_PX, Math.min(PERSON_MAX_FONT_PX, 12 * globalScale));
+      const fontSize = fontPx / globalScale;
       ctx.font = `500 ${fontSize}px Inter, system-ui, sans-serif`;
       ctx.fillStyle = textColor;
       ctx.textAlign = "center";
