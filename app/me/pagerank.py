@@ -388,8 +388,15 @@ def compute_seed_graph(
             logger.warning("pagerank did not converge: %s — falling back to uniform", e)
             scores = nx.pagerank(g, alpha=0.85, weight="weight")
 
-        # Apply state-score-multiplier bias so entities dominate the cut,
-        # but seeds are always preserved (they're what the user picked).
+        # Blend personalized PageRank with the LLM-rated importance signal.
+        # PageRank captures graph-centrality (lots of mentions); importance
+        # captures meaning to the user. Multiplying them: a node that BOTH
+        # has good graph centrality AND high LLM-judged importance rises;
+        # noise (extraction artifacts that happen to have many edges)
+        # gets penalized by its low importance score.
+        from app.me.importance import get_importance_map, DEFAULT_SCORE
+        importance_map = get_importance_map()
+
         biased: Dict[str, float] = {}
         seed_set: Set[str] = set(valid_seeds)
         for nid, score in scores.items():
@@ -397,10 +404,14 @@ def compute_seed_graph(
                 biased[nid] = score
                 continue
             n = node_by_id.get(nid)
+            imp = importance_map.get(nid, DEFAULT_SCORE) / 10.0  # normalize to 0..1
+            # Floor at 0.05 so a bad rating doesn't completely zero out
+            # an otherwise high-PR node.
+            imp_factor = max(0.05, imp)
             if n is not None and (n.node_type or "") in STATE_NODE_TYPES:
-                biased[nid] = score * state_score_multiplier
+                biased[nid] = score * state_score_multiplier * imp_factor
             else:
-                biased[nid] = score
+                biased[nid] = score * imp_factor
 
         # Tier-priority top-K selection. Persons are admitted FIRST so that
         # the lens never shows "Mewgenics" while hiding "Katy" — a structural
@@ -549,6 +560,7 @@ def compute_seed_graph(
         for nid in visible:
             n = node_by_id[nid]
             pos = layout.get(nid, (0.0, 0.0))
+            llm_imp = importance_map.get(nid, DEFAULT_SCORE)
             nodes_out.append({
                 "id": nid,
                 "label": n.label or "",
@@ -559,6 +571,7 @@ def compute_seed_graph(
                 "start_date": n.start_date.isoformat() if n.start_date else None,
                 "end_date": n.end_date.isoformat() if n.end_date else None,
                 "importance": float(n.importance or 0.5),
+                "llm_importance": float(llm_imp),
                 "pagerank_score": float(scores.get(nid, 0.0)),
                 "is_seed": nid in seed_set,
                 "is_anchor": nid in anchor_set,

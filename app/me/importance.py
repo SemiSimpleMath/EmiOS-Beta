@@ -1,0 +1,193 @@
+"""LLM-rated node importance for the lens.
+
+Hits the cheap nano model in batches over all Entity nodes, stores the
+result in a JSON file. The lens uses these scores instead of (or
+alongside) personalized PageRank to decide which nodes to admit at the
+top-K cut and which to surface at far zoom.
+
+Why this exists: PageRank ranks by graph centrality, which doesn't always
+match the user's intuition. Mewgenics had high PR (lots of mentions),
+Katy had low PR (few KG edges) — but Katy is obviously more important.
+A small LLM with good calibration anchors gives a much closer signal at
+trivial cost (~50 calls × ~5000 tokens each = a few cents per refresh).
+
+Usage:
+    python -m app.me.importance         # rate everything, persist to JSON
+    from app.me.importance import get_importance
+    score = get_importance(node_id)     # 0-10 float; 5.0 default if unrated
+"""
+from __future__ import annotations
+
+import json
+import time
+from pathlib import Path
+from typing import Dict, List, Optional
+
+from app.assistant.kg.db.knowledge_graph_db_sqlite import Node
+from app.assistant.utils.logging_config import get_logger
+from app.models.db_manager import get_db_manager
+
+logger = get_logger(__name__)
+
+IMPORTANCE_PATH = (
+    Path(__file__).resolve().parents[2] / "data" / "me_node_importance.json"
+)
+
+DEFAULT_SCORE = 5.0
+BATCH_SIZE = 60  # ~50-60 nodes per LLM call. Bigger → cheaper but riskier.
+
+_CACHE: Optional[Dict[str, float]] = None
+
+
+def get_importance_map() -> Dict[str, float]:
+    """Lazy-loaded importance map keyed by node id."""
+    global _CACHE
+    if _CACHE is not None:
+        return _CACHE
+    if IMPORTANCE_PATH.exists():
+        try:
+            data = json.loads(IMPORTANCE_PATH.read_text(encoding="utf-8"))
+            _CACHE = {str(k): float(v) for k, v in data.items()}
+            logger.info("me importance: loaded %d scores from %s", len(_CACHE), IMPORTANCE_PATH)
+            return _CACHE
+        except Exception as e:
+            logger.warning("me importance: failed to load %s: %s", IMPORTANCE_PATH, e)
+    _CACHE = {}
+    return _CACHE
+
+
+def get_importance(node_id: str) -> float:
+    return get_importance_map().get(node_id, DEFAULT_SCORE)
+
+
+def invalidate() -> None:
+    global _CACHE
+    _CACHE = None
+
+
+def _build_node_block(node: Node) -> str:
+    """Compact text representation of one node for the rater prompt."""
+    parts: List[str] = [f"id={node.id}"]
+    parts.append(f"label={node.label!r}")
+    parts.append(f"type={node.node_type or '-'}")
+    if node.category:
+        parts.append(f"category={node.category!r}")
+    desc = (node.description or "").strip()
+    if desc:
+        if len(desc) > 240:
+            desc = desc[:237] + "..."
+        parts.append(f"desc={desc!r}")
+    return " | ".join(parts)
+
+
+def regenerate_importance(
+    *,
+    batch_size: int = BATCH_SIZE,
+    only_node_types: Optional[List[str]] = None,
+) -> Dict[str, float]:
+    """Rate every Entity node and persist to JSON.
+
+    Args:
+        batch_size: nodes per LLM call.
+        only_node_types: defaults to ["Entity"]. Pass ["Entity", "State"]
+            to also rate states (rarely useful — the lens treats states as
+            connective tissue, not standalone-rankable).
+    """
+    from app.assistant.ServiceLocator.service_locator import DI
+    from app.assistant.utils.pydantic_classes import (
+        Message,
+        ScopeApprovalPolicy,
+        ScopeContext,
+        ScopeResourcePolicy,
+    )
+
+    types_filter = only_node_types or ["Entity"]
+    started = time.time()
+
+    with get_db_manager().read_session() as session:
+        query = session.query(Node).filter(Node.node_type.in_(types_filter))
+        all_nodes = query.all()
+
+    logger.info(
+        "me importance: rating %d nodes in batches of %d",
+        len(all_nodes), batch_size,
+    )
+
+    scope = ScopeContext(
+        scope_id="scope::me::importance",
+        owner_id="jukka",
+        actor_id="me_importance_runner",
+        surface="ui",
+        room_id="me_lens",
+        approval=ScopeApprovalPolicy(authority_level=99),
+        resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
+    )
+
+    scores: Dict[str, float] = {}
+    failures = 0
+
+    for i in range(0, len(all_nodes), batch_size):
+        batch = all_nodes[i : i + batch_size]
+        batch_text = "\n".join(_build_node_block(n) for n in batch)
+        agent = DI.agent_factory.create_agent("me::importance_rater")
+        if agent is None:
+            logger.error("me importance: agent unavailable")
+            break
+
+        msg = Message(
+            agent_input={
+                "task": batch_text,
+                "information": "",
+            },
+            task=batch_text,
+            information="",
+            scope_context=scope,
+        )
+        try:
+            result = agent.action_handler(msg)
+            data = getattr(result, "data", None) or {}
+            ratings = data.get("ratings") or []
+            id_set = {str(n.id) for n in batch}
+            for r in ratings:
+                if not isinstance(r, dict):
+                    continue
+                nid = str(r.get("id") or "").strip()
+                if nid not in id_set:
+                    continue
+                try:
+                    score = float(r.get("score") or DEFAULT_SCORE)
+                except (TypeError, ValueError):
+                    continue
+                scores[nid] = max(0.0, min(10.0, score))
+            logger.info(
+                "me importance: batch %d/%d → %d ratings (running total %d)",
+                (i // batch_size) + 1,
+                (len(all_nodes) + batch_size - 1) // batch_size,
+                len([r for r in ratings if isinstance(r, dict)]),
+                len(scores),
+            )
+        except Exception as e:
+            failures += 1
+            logger.error("me importance: batch %d failed: %s", (i // batch_size) + 1, e)
+            if failures >= 5:
+                logger.error("me importance: too many failures, aborting")
+                break
+
+    # Default-fill anything we didn't rate so the lens doesn't see Nones.
+    for n in all_nodes:
+        scores.setdefault(str(n.id), DEFAULT_SCORE)
+
+    IMPORTANCE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    IMPORTANCE_PATH.write_text(json.dumps(scores, indent=0), encoding="utf-8")
+    invalidate()  # force reload next get
+    elapsed = time.time() - started
+    logger.info(
+        "me importance: persisted %d scores to %s in %.1fs (%d failures)",
+        len(scores), IMPORTANCE_PATH, elapsed, failures,
+    )
+    return scores
+
+
+if __name__ == "__main__":  # pragma: no cover
+    import app.assistant.tests.test_setup  # noqa: F401
+    regenerate_importance()

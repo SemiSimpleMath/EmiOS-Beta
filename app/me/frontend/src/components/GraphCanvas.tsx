@@ -10,6 +10,7 @@ interface ForceNode {
   is_seed: boolean;
   is_anchor: boolean;
   importance: number;
+  llm_importance: number;
   photo_url: string | null;
   primary_anchor_id: string | null;
   lod_tier: number;
@@ -52,8 +53,13 @@ const MID_ZOOM = 1.0;
 // subdued chips that read as edge-decorations.
 const STATE_TYPES = new Set(["State", "Goal"]);
 
-function entityWidth(prScore: number): number {
-  return 70 + Math.min(60, prScore * 250);
+function entityWidth(node: { llm_importance?: number; pagerank_score: number }): number {
+  // Width grows with LLM importance (0-10 scale → 70-150 px). PageRank
+  // is a tiebreaker for unrated nodes (default importance 5.0).
+  const imp = node.llm_importance ?? 5.0;
+  const fromImp = 70 + (imp / 10.0) * 80; // 70..150
+  const fromPr = Math.min(20, node.pagerank_score * 80);
+  return Math.min(160, fromImp + fromPr);
 }
 
 const ENTITY_HEIGHT = 36;
@@ -128,7 +134,7 @@ function nodeFootprint(n: ForceNode): { halfW: number; halfH: number } {
   if (n.photo_url) {
     return { halfW: PHOTO_SIZE / 2, halfH: PHOTO_SIZE / 2 };
   }
-  const w = entityWidth(n.pagerank_score);
+  const w = entityWidth(n);
   return { halfW: w / 2, halfH: ENTITY_HEIGHT / 2 };
 }
 
@@ -263,6 +269,7 @@ export function GraphCanvas({
       is_seed: n.is_seed,
       is_anchor: n.is_anchor,
       importance: n.importance,
+      llm_importance: n.llm_importance ?? 5.0,
       photo_url: null,
       primary_anchor_id: n.primary_anchor_id,
       lod_tier: n.lod_tier ?? 0,
@@ -405,7 +412,7 @@ export function GraphCanvas({
 
       // Person/entity boxes: clamp screen size so they stay readable when
       // zoomed out and don't balloon when zoomed in.
-      const naturalW = entityWidth(node.pagerank_score);
+      const naturalW = entityWidth(node);
       const w = clampScreen(naturalW, globalScale, PERSON_MIN_SCREEN_W, PERSON_MAX_SCREEN_W);
       const h = clampScreen(ENTITY_HEIGHT, globalScale, PERSON_MIN_SCREEN_H, PERSON_MAX_SCREEN_H);
       let fill = "#ffffff";
@@ -519,7 +526,7 @@ export function GraphCanvas({
       } else if (node.photo_url) {
         roundRect(ctx, x - PHOTO_SIZE / 2, y - PHOTO_SIZE / 2, PHOTO_SIZE, PHOTO_SIZE, 6);
       } else {
-        const w = entityWidth(node.pagerank_score);
+        const w = entityWidth(node);
         roundRect(ctx, x - w / 2, y - ENTITY_HEIGHT / 2, w, ENTITY_HEIGHT, 8);
       }
       ctx.fillStyle = color;

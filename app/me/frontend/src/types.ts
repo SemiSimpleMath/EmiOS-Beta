@@ -16,6 +16,9 @@ export interface LensNode {
   start_date: string | null;
   end_date: string | null;
   importance: number;
+  // LLM-rated importance (0-10). Defaults to 5.0 for unrated nodes.
+  // Used for visual sizing — bigger box = more important.
+  llm_importance: number;
   pagerank_score: number;
   is_seed: boolean;
   is_anchor: boolean;
