@@ -14,6 +14,7 @@ user_context_items:
   - prose
   - ground_truth_block
 
-system_context_items: []
+system_context_items:
+  - resource_kg_node_reading
 
 type: agent

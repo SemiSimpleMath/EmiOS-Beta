@@ -266,6 +266,7 @@ resources/instructions/*
 !resources/instructions/resource_doordash_guidelines.md
 !resources/instructions/resource_pod_skill_finder.md
 !resources/instructions/resource_pod_skill_admin.md
+!resources/instructions/resource_kg_node_reading.md
 
 # Personal soul/identity doc
 SOUL.md

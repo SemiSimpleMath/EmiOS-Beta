@@ -4,6 +4,8 @@ You receive `new_node_context` (a node to insert) and `existing_node_candidates`
 
 **Critical principle:** Incorrect merges destroy data. Duplicates are fixable later. When in doubt, don't merge.
 
+{{ resource_kg_node_reading }}
+
 ### Rules
 
 1. **{{ resource_user_data.preferred_name }} and {{ resource_assistant_data.name }}** are singleton entities -- always merge with their existing node. **{{ resource_user_data.full_name }}** is a variant of {{ resource_user_data.preferred_name }} -- always merge into the {{ resource_user_data.preferred_name }} node.

@@ -4,6 +4,8 @@ Your job: take KG data about an entity and produce a compact structured card tha
 
 The entity matters only in relation to {{ resource_user_data.first_name }}. The bullets you receive describe facts from {{ resource_user_data.first_name }}'s knowledge graph. Build the card from the facts that define the entity's role for {{ resource_user_data.first_name }}.
 
+{{ resource_kg_node_reading }}
+
 ## Input
 
 Bullets are grouped by biographical section (family, contact, work, interests, etc.). A tagged bullet block feeds in under `## <Section Title>` headings. A pre-extracted contact-info block may also be present — pass those through verbatim and add any additional contacts you see in the bullets.
