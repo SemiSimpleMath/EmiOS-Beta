@@ -110,14 +110,36 @@ No active plans.
 
 {%- set non_plan_open = [] %}
 {%- set non_plan_closed = [] %}
+{%- set pending_directives = [] %}
 {%- for ex in (active_dayflow_items or []) %}
 {%- set m = ex.get("metadata", {}) %}
-{%- if not m.get("plan_id") %}
+{%- if m.get("state","") == "pending_directive" %}{% if pending_directives.append(ex) %}{% endif %}
+{%- elif not m.get("plan_id") %}
 {%- if m.get("state","") in ["important_open", "actionable", "dispatched", "waiting", "watching"] %}{% if non_plan_open.append(ex) %}{% endif %}
 {%- elif m.get("state","") in ["closed"] %}{% if non_plan_closed.append(ex) %}{% endif %}
 {%- endif %}
 {%- endif %}
 {%- endfor %}
+
+{%- if pending_directives %}
+
+########## PENDING USER DIRECTIVES (act on these) ##########
+*The user added a follow-up instruction to a ticket reply. The original artifact stays alive here so you have the full context. Plan an action that fulfills the directive (most often: dispatch a tool). Close the item via acted_on_item_ids when the action lands.*
+{%- for ex in pending_directives %}
+{%- set m = ex.get("metadata", {}) %}
+- artifact: {{ m.get("summary","(no summary)") }}{% if m.get("source_type","") %} ({{ m.get("source_type") }}){% endif %}
+  artifact_id: {{ m.get("short_id", m.get("item_id","")) }}
+  user directive: "{{ m.get("directive_text","") }}"{% if m.get("directive_source_ticket_id") %}
+  source ticket: {{ m.get("directive_source_ticket_id") }}{% endif %}
+{%- if m.get("source_type","") == "email" %}
+  email: from {{ m.get("email_sender","Unknown") }} — "{{ m.get("email_subject","") }}"
+  body: {{ m.get("email_summary","") }}
+{%- endif %}
+{%- if m.get("enrichment") %}
+  context: {{ m.get("enrichment") }}
+{%- endif %}
+{%- endfor %}
+{%- endif %}
 
 {%- if non_plan_open %}
 

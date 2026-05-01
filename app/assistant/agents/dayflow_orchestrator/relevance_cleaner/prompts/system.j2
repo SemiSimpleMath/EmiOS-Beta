@@ -22,6 +22,7 @@ Your job is to close completed tasks and suppress items that are safe to forget.
 - Items in ``closed`` state for over 1 hour with no related active plans are candidates for suppress.
 - **NEVER suppress a plan_task item that is not closed.** Close it first (or in the same pass), then suppress on a future run. This rule applies to plan_task items only — not to email/artifact items.
 - **NEVER try to close or suppress action log entries.** The ACTION LOG section is read-only history.
+- **NEVER touch items in state ``pending_directive``.** The user attached a follow-up instruction to a ticket reply; the strategic_planner owes a decision on it. Closing or suppressing strands the directive. The runtime also enforces this deterministically — your decision will be ignored — but do not waste output on it.
 - Only emit decisions for items you want to close or suppress. Omit items you want to keep.
 
 ## Email / artifact items (``reason: triage_admit``)

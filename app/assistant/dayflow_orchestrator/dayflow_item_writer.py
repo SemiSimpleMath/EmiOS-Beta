@@ -33,18 +33,23 @@ DAYFLOW_ROOM_ID = "dayflow_orchestrator"
 # Maps current_state → set of allowed next states.
 # Any transition not listed here is rejected.
 ALLOWED_TRANSITIONS: Dict[str, frozenset] = {
-    "new":             frozenset({"artifact", "needs_planning", "important_open", "actionable", "suppressed"}),
-    "artifact":        frozenset({"needs_planning", "important_open", "actionable", "watching", "closed", "suppressed"}),
-    "needs_planning":  frozenset({"important_open", "actionable", "waiting", "closed", "suppressed"}),
-    "important_open":  frozenset({"actionable", "waiting", "watching", "dispatched", "closed", "suppressed"}),
-    "actionable":      frozenset({"dispatched", "waiting", "watching", "closed", "suppressed"}),
-    "dispatched":      frozenset({"closed", "waiting", "actionable"}),
-    "waiting":         frozenset({"actionable", "dispatched", "closed", "suppressed"}),
-    "watching":        frozenset({"actionable", "important_open", "closed", "suppressed"}),
-    "closed":          frozenset({"suppressed", "actionable"}),  # reopen allowed
-    "suppressed":      frozenset(),  # terminal, no transitions out
+    "new":                frozenset({"artifact", "needs_planning", "important_open", "actionable", "suppressed"}),
+    "artifact":           frozenset({"needs_planning", "important_open", "actionable", "watching", "closed", "suppressed", "pending_directive"}),
+    "needs_planning":     frozenset({"important_open", "actionable", "waiting", "closed", "suppressed"}),
+    "important_open":     frozenset({"actionable", "waiting", "watching", "dispatched", "closed", "suppressed", "pending_directive"}),
+    "actionable":         frozenset({"dispatched", "waiting", "watching", "closed", "suppressed", "pending_directive"}),
+    "dispatched":         frozenset({"closed", "waiting", "actionable", "pending_directive"}),
+    "waiting":            frozenset({"actionable", "dispatched", "closed", "suppressed"}),
+    "watching":           frozenset({"actionable", "important_open", "closed", "suppressed"}),
+    "closed":             frozenset({"suppressed", "actionable", "pending_directive"}),  # reopen allowed; user-directive can revive
+    "suppressed":         frozenset({"pending_directive"}),  # narrow exception: a user directive references this artifact
+    # User responded to a ticket with a follow-up directive in user_text. The
+    # planner owes a decision: dispatch, ignore, or escalate. Closes via the
+    # normal dispatched→closed path or directly to closed/suppressed if the
+    # planner determines no action is needed.
+    "pending_directive":  frozenset({"actionable", "dispatched", "closed", "suppressed"}),
     # Plan synopsis states:
-    "active":          frozenset({"closed", "suppressed"}),
+    "active":             frozenset({"closed", "suppressed"}),
 }
 
 # States that are terminal or resolved.

@@ -42,6 +42,10 @@ class RelevanceCleanerPersistNode(ControlNode):
             self.blackboard.update_state_value("last_agent", self.name)
             return
 
+        from app.assistant.dayflow_orchestrator.state_store import (
+            get_latest_dayflow_item_by_id,
+        )
+
         mutations: List[Dict[str, Any]] = []
         for decision in decisions:
             if not isinstance(decision, dict):
@@ -59,6 +63,20 @@ class RelevanceCleanerPersistNode(ControlNode):
 
             # Resolve short_id → real item_id.
             item_id = resolve_short_id(raw_id)
+
+            # Deterministic guard: never close/suppress an item in
+            # state=pending_directive. The user attached a follow-up
+            # instruction to a ticket reply that the strategic_planner has
+            # not yet acted on; suppressing here strands the directive.
+            current = get_latest_dayflow_item_by_id(item_id)
+            if isinstance(current, dict):
+                cur_meta = current.get("metadata") or {}
+                if isinstance(cur_meta, dict) and str(cur_meta.get("state") or "").strip().lower() == "pending_directive":
+                    logger.warning(
+                        "[%s] refusing to %s pending_directive item %s — strategic_planner owes a decision first. (cleaner reason: %s)",
+                        self.name, action, item_id, reason,
+                    )
+                    continue
 
             mutations.append({
                 "item_id": item_id,

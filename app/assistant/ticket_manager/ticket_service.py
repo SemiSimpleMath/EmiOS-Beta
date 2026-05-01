@@ -193,12 +193,85 @@ class TicketService:
         if success and target_state != "expired":
             self._publish_ticket_responded(ticket_id, action, target_state, effective_text)
 
+        # Pending-directive transition: if the user accepted the ticket AND added
+        # free-form text on top of the canned action prefix, that text is a
+        # follow-up instruction the planner needs to act on. Move every linked
+        # dayflow item (acted_on_item_ids) into state=pending_directive with the
+        # directive stamped on metadata.
+        if (
+            success
+            and target_state == "accepted"
+            and user_elaboration
+        ):
+            self._mark_linked_items_pending_directive(
+                ticket=ticket,
+                directive_text=user_elaboration,
+                ticket_id=ticket_id,
+            )
+
         return TicketResponse(
             ticket_id=ticket_id,
             action=action,
             success=success,
             snooze_until=snooze_until,
         )
+
+    @staticmethod
+    def _mark_linked_items_pending_directive(
+        *,
+        ticket,
+        directive_text: str,
+        ticket_id: str,
+    ) -> None:
+        """Move the ticket's acted_on_item_ids into state=pending_directive.
+
+        Called when a user accepts a ticket with non-empty extra text — that
+        text is a directive the planner owes a decision on. The artifact stays
+        alive (not suppressed) and shows up in active_dayflow_items with the
+        directive attached.
+        """
+        trigger_context = getattr(ticket, "trigger_context", None) or {}
+        if not isinstance(trigger_context, dict):
+            return
+        acted_on = trigger_context.get("acted_on_item_ids") or []
+        if not isinstance(acted_on, list) or not acted_on:
+            return
+
+        from app.assistant.dayflow_orchestrator.dayflow_item_writer import write_dayflow_item
+        from app.assistant.dayflow_orchestrator.state_store import (
+            get_latest_dayflow_item_by_id,
+        )
+
+        for raw_id in acted_on:
+            item_id = str(raw_id or "").strip()
+            if not item_id:
+                continue
+            current = get_latest_dayflow_item_by_id(item_id)
+            current_state = ""
+            if isinstance(current, dict):
+                meta = current.get("metadata") or {}
+                if isinstance(meta, dict):
+                    current_state = str(meta.get("state") or "").strip().lower()
+            try:
+                write_dayflow_item(
+                    item_id,
+                    state="pending_directive",
+                    updates={
+                        "directive_text": directive_text,
+                        "directive_source_ticket_id": ticket_id,
+                    },
+                    reason=f"user directive on ticket {ticket_id}",
+                    caller="ticket_service.respond",
+                )
+                logger.info(
+                    "TicketService: marked %s pending_directive (was=%r) directive=%r",
+                    item_id, current_state, directive_text[:80],
+                )
+            except Exception as e:
+                logger.warning(
+                    "TicketService: could not mark %s pending_directive: %s",
+                    item_id, e,
+                )
 
     @staticmethod
     def _publish_ticket_responded(ticket_id: str, action: str, target_state: str, user_text: str = "") -> None:
