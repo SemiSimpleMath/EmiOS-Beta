@@ -745,8 +745,16 @@ class ToolRegistry:
 
 
     def get_tool_descriptions(self, allowed_tools: list) -> dict:
-        """Retrieve descriptions only for allowed tools."""
-        return {tool: self.get_tool_description_compact(tool) for tool in allowed_tools}
+        """Retrieve descriptions only for allowed tools.
+
+        Uses the FULL description template (not the compact one). Each tool
+        already has two planner-facing files by design — `_description.j2`
+        for the planner / picker and `_args.j2` for tool_arguments. The
+        description template is meant to be shown verbatim. The compact
+        path is still available via get_tool_description_compact() when a
+        caller explicitly wants the one-line summary.
+        """
+        return {tool: self.get_tool_description(tool) for tool in allowed_tools}
 
     def get_tool_contract(self, tool_name: str):
         tool = self.registry.get(tool_name)
