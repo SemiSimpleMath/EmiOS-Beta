@@ -166,6 +166,7 @@ def compute_seed_graph(
     state_score_multiplier: float = 0.4,
     include_concepts: bool = False,
     auto_anchors_per_seed: int = 6,
+    categories: Optional[List[str]] = None,
 ) -> SeedGraphResult:
     """Compute the bounded subgraph for the lens.
 
@@ -194,6 +195,12 @@ def compute_seed_graph(
     if auto_anchors_per_seed > 0 and len(seed_ids) <= 2 and limit < 80:
         limit = min(80, HARD_LIMIT)
 
+    cat_filter: Optional[Set[str]] = None
+    if categories:
+        cat_filter = {c.lower().strip() for c in categories if c}
+        if not cat_filter:
+            cat_filter = None
+
     cache_key = (
         tuple(sorted(seed_ids)),
         time_mode,
@@ -203,6 +210,7 @@ def compute_seed_graph(
         state_score_multiplier,
         include_concepts,
         auto_anchors_per_seed,
+        tuple(sorted(cat_filter)) if cat_filter else (),
     )
     now = time.time()
     cached = _CACHE.get(cache_key)
@@ -218,6 +226,8 @@ def compute_seed_graph(
         seed_set_for_filter = set(seed_ids)
         node_by_id: Dict[str, Node] = {}
         for n in all_nodes:
+            nid_str = str(n.id)
+            is_seed_self = nid_str in seed_set_for_filter
             if not _node_active_in_window(n, time_mode, tf, tt):
                 continue
             # Concept nodes are pure taxonomy scaffolding ("animal",
@@ -227,10 +237,18 @@ def compute_seed_graph(
             if (
                 not include_concepts
                 and (n.node_type or "") == "Concept"
-                and str(n.id) not in seed_set_for_filter
+                and not is_seed_self
             ):
                 continue
-            node_by_id[str(n.id)] = n
+            # Category filter (experimental persons-only mode). Seeds
+            # always survive even if their category doesn't match —
+            # otherwise the user's own seed could be filtered away.
+            if cat_filter is not None and not is_seed_self:
+                if (n.node_type or "") != "Entity":
+                    continue
+                if (n.category or "").lower().strip() not in cat_filter:
+                    continue
+            node_by_id[nid_str] = n
 
         all_edges = session.query(Edge).all()
         active_edges: List[Edge] = []
@@ -420,8 +438,9 @@ def compute_seed_graph(
 
         # Pull global layout positions. Lazy-computed on first call. Each
         # node has a stable (x, y) regardless of which query brought it in.
+        # Layout is per-category-filter — persons-only mode has its own.
         from app.me.layout import get_layout
-        layout = get_layout()
+        layout = get_layout(categories=list(cat_filter) if cat_filter else None)
 
         nodes_out: List[Dict] = []
         for nid in visible:

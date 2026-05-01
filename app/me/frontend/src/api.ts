@@ -8,6 +8,7 @@ export async function fetchSeedGraph(opts: {
   timeMode?: "current" | "lifetime" | "range";
   timeFrom?: string;
   timeTo?: string;
+  categories?: string[];
 }): Promise<SeedGraphResponse> {
   const params = new URLSearchParams();
   if (opts.seeds.length > 0) params.set("seeds", opts.seeds.join(","));
@@ -15,6 +16,10 @@ export async function fetchSeedGraph(opts: {
   if (opts.timeMode) params.set("time_mode", opts.timeMode);
   if (opts.timeFrom) params.set("time_from", opts.timeFrom);
   if (opts.timeTo) params.set("time_to", opts.timeTo);
+  // Persons-only experiment: default to person entities. Pass an empty
+  // array via opts.categories=[] to disable the filter.
+  const cats = opts.categories ?? ["person"];
+  if (cats.length > 0) params.set("categories", cats.join(","));
 
   const res = await fetch(`${API_BASE}/api/me/seed-graph?${params}`);
   if (!res.ok) throw new Error(`seed-graph failed: ${res.status}`);

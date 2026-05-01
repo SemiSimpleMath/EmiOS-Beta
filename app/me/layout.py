@@ -25,7 +25,7 @@ import json
 import math
 import time
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import networkx as nx
 
@@ -35,9 +35,21 @@ from app.models.db_manager import get_db_manager
 
 logger = get_logger(__name__)
 
-LAYOUT_PATH = (
-    Path(__file__).resolve().parents[2] / "data" / "me_layout.json"
-)
+LAYOUT_DIR = Path(__file__).resolve().parents[2] / "data"
+
+# Default cache: full unfiltered KG layout.
+LAYOUT_PATH = LAYOUT_DIR / "me_layout.json"
+
+
+def _layout_path_for(categories: Optional[List[str]] = None) -> Path:
+    """Per-filter layout file. Persons-only is the most useful mode today."""
+    if not categories:
+        return LAYOUT_PATH
+    cleaned = sorted({c.lower().strip() for c in categories if c})
+    if not cleaned:
+        return LAYOUT_PATH
+    suffix = "+".join(cleaned)
+    return LAYOUT_DIR / f"me_layout.{suffix}.json"
 
 # Tuned for ~5,000 nodes on a multi-megapixel canvas.
 COMMUNITY_BASE_RADIUS = 1500.0   # how far the first community center sits
@@ -46,62 +58,95 @@ COMMUNITY_LOCAL_SCALE = 1100.0   # spread of nodes within a community
 SINGLETON_RADIUS = 600.0         # singleton communities scatter on a small ring
 GOLDEN_ANGLE = math.pi * (3 - math.sqrt(5))
 
-_LAYOUT_CACHE: Optional[Dict[str, Tuple[float, float]]] = None
+_LAYOUT_CACHE: Dict[str, Dict[str, Tuple[float, float]]] = {}
 
 
 def _empty_position() -> Tuple[float, float]:
     return (0.0, 0.0)
 
 
-def get_layout() -> Dict[str, Tuple[float, float]]:
+def _cache_key(categories: Optional[List[str]]) -> str:
+    if not categories:
+        return ""
+    return "+".join(sorted({c.lower().strip() for c in categories if c}))
+
+
+def get_layout(
+    categories: Optional[List[str]] = None,
+) -> Dict[str, Tuple[float, float]]:
     """Return the cached layout, loading from disk on first call.
 
-    Computes from scratch if the file is missing.
+    Computes from scratch if the file is missing. Per-filter cache.
     """
-    global _LAYOUT_CACHE
-    if _LAYOUT_CACHE is not None:
-        return _LAYOUT_CACHE
-    if LAYOUT_PATH.exists():
+    key = _cache_key(categories)
+    cached = _LAYOUT_CACHE.get(key)
+    if cached is not None:
+        return cached
+    path = _layout_path_for(categories)
+    if path.exists():
         try:
-            data = json.loads(LAYOUT_PATH.read_text(encoding="utf-8"))
-            _LAYOUT_CACHE = {
+            data = json.loads(path.read_text(encoding="utf-8"))
+            parsed = {
                 str(k): (float(v[0]), float(v[1]))
                 for k, v in data.items()
                 if isinstance(v, (list, tuple)) and len(v) == 2
             }
-            logger.info("me layout: loaded %d positions from %s", len(_LAYOUT_CACHE), LAYOUT_PATH)
-            return _LAYOUT_CACHE
+            _LAYOUT_CACHE[key] = parsed
+            logger.info("me layout: loaded %d positions from %s", len(parsed), path)
+            return parsed
         except Exception as e:
-            logger.warning("me layout: failed to load %s, will recompute: %s", LAYOUT_PATH, e)
+            logger.warning("me layout: failed to load %s, will recompute: %s", path, e)
     # Lazy compute on first call.
-    _LAYOUT_CACHE = regenerate_layout()
-    return _LAYOUT_CACHE
+    fresh = regenerate_layout(categories=categories)
+    _LAYOUT_CACHE[key] = fresh
+    return fresh
 
 
-def invalidate() -> None:
-    """Force the next get_layout() to recompute. Call after large KG mutations."""
-    global _LAYOUT_CACHE
-    _LAYOUT_CACHE = None
+def invalidate(categories: Optional[List[str]] = None) -> None:
+    """Force the next get_layout() to recompute."""
+    if categories is None:
+        _LAYOUT_CACHE.clear()
+    else:
+        _LAYOUT_CACHE.pop(_cache_key(categories), None)
 
 
-def regenerate_layout() -> Dict[str, Tuple[float, float]]:
+def regenerate_layout(
+    categories: Optional[List[str]] = None,
+) -> Dict[str, Tuple[float, float]]:
     """Recompute the global layout and persist to disk."""
     started = time.time()
-    g = _build_full_graph()
+    g = _build_full_graph(categories=categories)
     positions = _layout_graph(g)
-    _save_layout(positions)
+    _save_layout(positions, categories=categories)
     elapsed = time.time() - started
     logger.info(
-        "me layout: regenerated %d positions in %.1fs", len(positions), elapsed,
+        "me layout: regenerated %d positions in %.1fs (categories=%s)",
+        len(positions), elapsed, categories,
     )
     return positions
 
 
-def _build_full_graph() -> nx.Graph:
-    """Build a NetworkX graph from the entire KG. Time-filter-agnostic."""
+def _build_full_graph(
+    categories: Optional[List[str]] = None,
+) -> nx.Graph:
+    """Build a NetworkX graph from the KG, optionally filtered by category.
+
+    When categories is provided, only Entity-type nodes whose category is in
+    the filter survive. Edges between surviving nodes are kept; edges to
+    filtered-out nodes are dropped.
+    """
+    cat_filter: Optional[Set[str]] = None
+    if categories:
+        cat_filter = {c.lower().strip() for c in categories if c}
+
     g = nx.Graph()
     with get_db_manager().read_session() as session:
         for n in session.query(Node).all():
+            if cat_filter is not None:
+                if (n.node_type or "") != "Entity":
+                    continue
+                if (n.category or "").lower().strip() not in cat_filter:
+                    continue
             g.add_node(str(n.id), node_type=str(n.node_type or ""))
         for e in session.query(Edge).all():
             sid = str(e.source_id)
@@ -197,12 +242,21 @@ def _layout_graph(g: nx.Graph) -> Dict[str, Tuple[float, float]]:
     return positions
 
 
-def _save_layout(positions: Dict[str, Tuple[float, float]]) -> None:
-    LAYOUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+def _save_layout(
+    positions: Dict[str, Tuple[float, float]],
+    *,
+    categories: Optional[List[str]] = None,
+) -> None:
+    path = _layout_path_for(categories)
+    path.parent.mkdir(parents=True, exist_ok=True)
     serial = {k: [v[0], v[1]] for k, v in positions.items()}
-    LAYOUT_PATH.write_text(json.dumps(serial), encoding="utf-8")
+    path.write_text(json.dumps(serial), encoding="utf-8")
 
 
-def position_for(node_id: str) -> Tuple[float, float]:
+def position_for(
+    node_id: str,
+    *,
+    categories: Optional[List[str]] = None,
+) -> Tuple[float, float]:
     """Look up a node's position, returning (0, 0) if unknown."""
-    return get_layout().get(node_id, _empty_position())
+    return get_layout(categories).get(node_id, _empty_position())

@@ -63,6 +63,11 @@ def seed_graph():
         in ("1", "true", "yes")
     )
 
+    categories_param = (request.args.get("categories") or "").strip()
+    categories: Optional[List[str]] = None
+    if categories_param:
+        categories = [c.strip() for c in categories_param.split(",") if c.strip()]
+
     # Empty seeds → fall back to default (the user's node).
     if not seeds:
         default_id = _resolve_default_seed_id()
@@ -76,6 +81,7 @@ def seed_graph():
         time_from=time_from,
         time_to=time_to,
         include_concepts=include_concepts,
+        categories=categories,
     )
 
     return jsonify({
