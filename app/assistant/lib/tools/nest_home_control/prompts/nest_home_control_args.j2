@@ -1,22 +1,19 @@
-Use this tool to read/control Nest thermostat state.
+Use this tool to read or set Nest thermostat state.
 
-`action` (required) — pick exactly ONE per call:
-  - `get_status`             → read current state. No other args.
-  - `set_target_temperature` → CHANGE THE NUMBER (e.g. "set to 70", "70F", "make it 72"). Requires `target_temperature`.
-  - `set_mode`               → CHANGE COOL vs HEAT vs OFF. Requires `mode`.
-  - `set_fan_mode`           → CHANGE THE FAN. Requires `fan_mode`.
-  - `set_eco_mode`           → ECO ON/OFF. Requires `enabled`.
+Pass any combination of these state fields to set them. The tool applies
+each present field; omit a field to leave it unchanged. Pass nothing to
+read current state.
 
-Conditional fields (only the one matching your action):
-  - `target_temperature` — single Fahrenheit number (e.g. 70). Required for `set_target_temperature`.
-  - `mode`               — `HEAT`, `COOL`, `HEATCOOL`, or `OFF`. Required for `set_mode`. Uppercase, no underscores.
-  - `fan_mode`           — `ON`, `AUTO`, or `OFF`. Required for `set_fan_mode`.
-  - `enabled`            — `true` / `false`. Required for `set_eco_mode`.
+State fields (all optional):
+  - `mode`               — `HEAT`, `COOL`, `HEATCOOL`, or `OFF`. Bare uppercase.
+  - `target_temperature` — Fahrenheit number (e.g. 75).
+  - `fan_mode`           — `ON`, `AUTO`, or `OFF`.
+  - `eco_enabled`        — true/false. Eco-mode toggle.
 
-Optional:
-  - `device_id` — target a specific thermostat (omit for the default).
+Selector (optional):
+  - `device_id` — target a specific thermostat. Omit for default.
 
-One action per call. For combined intents ("set it to cool at 70"),
-issue two sequential calls:
-  1. `nest_home_control(action="set_mode", mode="COOL")`
-  2. `nest_home_control(action="set_target_temperature", target_temperature=70)`
+Examples of correct shape:
+  Change setpoint:           `{ "target_temperature": 75 }`
+  Switch to cooling at 72:   `{ "mode": "COOL", "target_temperature": 72 }`
+  Read current state:        `{}`

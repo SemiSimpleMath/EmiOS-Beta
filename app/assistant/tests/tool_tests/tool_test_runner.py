@@ -318,7 +318,7 @@ def test_L1_nest_status():
     """Direct call: nest_home_control get_status (read-only)"""
     t0 = time.time()
     try:
-        result = _invoke_tool_direct("nest_home_control", {"action": "get_status"})
+        result = _invoke_tool_direct("nest_home_control", {"get_status": True})
         passed = result is not None and isinstance(result.content, str)
         details = "" if passed else f"result={result}"
         _record("nest_status", 1, passed, details, time.time() - t0)

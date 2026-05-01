@@ -118,14 +118,11 @@ One-shot tool playbook:
 
 12) nest_home_control
 - Use for: thermostat status/mode/target temperature commands.
-- Required action:
-  - action: str MUST be one of:
-    - get_status
-    - set_mode
-    - set_target_temperature
-- Conditional fields:
-  - mode: str (required for set_mode; "heat" | "cool" | "heat_cool" | "off")
-  - target_temperature: float (required for set_target_temperature)
+- Pass any combination of state fields in one call; omit all to read.
+  - mode: str (HEAT | COOL | HEATCOOL | OFF)
+  - target_temperature: float (Fahrenheit, e.g. 75)
+  - fan_mode: str (ON | AUTO | OFF)
+  - eco_enabled: bool
 
 13) lights_control
 - Use for: light power and brightness commands. Always targets ALL lights.

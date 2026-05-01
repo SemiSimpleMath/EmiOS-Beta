@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, List, Tuple
 
 from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
 from app.assistant.lib.core_tools.tool_error_protocol import make_tool_error
@@ -10,30 +10,6 @@ from app.assistant.utils.pydantic_classes import ToolMessage, ToolResult
 
 logger = get_logger(__name__)
 
-_ALLOWED_ACTIONS = {
-    "get_status",
-    "set_mode",
-    "set_target_temperature",
-    "set_eco_mode",
-    "set_fan_mode",
-}
-
-# Forgiving aliases: agents naturally say "set_temperature" / "set_temp"
-# when the canonical action is set_target_temperature. Normalize at ingress
-# rather than rejecting and forcing a retry. Mirror canonical-mode handling
-# below — synonyms in, single canonical action out.
-_ACTION_ALIASES = {
-    "set_temperature": "set_target_temperature",
-    "set_temp": "set_target_temperature",
-    "set_target_temp": "set_target_temperature",
-    "set_thermostat_temperature": "set_target_temperature",
-    "set_thermostat_mode": "set_mode",
-    "set_hvac_mode": "set_mode",
-    "set_fan": "set_fan_mode",
-    "set_eco": "set_eco_mode",
-    "status": "get_status",
-    "read_status": "get_status",
-}
 _MIN_TARGET_C = 10.0
 _MAX_TARGET_C = 32.0
 _MIN_INFERRED_C = 15.0
@@ -68,78 +44,69 @@ def _fahrenheit_to_celsius(value_f: float) -> float:
     return (value_f - 32.0) * (5.0 / 9.0)
 
 
-def _validate_target_temperature_range_c(value_c: float) -> None:
-    if value_c < _MIN_TARGET_C or value_c > _MAX_TARGET_C:
+def _resolve_target_temperature_c(value: Any) -> float:
+    raw = _coerce_numeric(value, "target_temperature")
+    if _MIN_INFERRED_F <= raw <= _MAX_INFERRED_F:
+        target_c = _fahrenheit_to_celsius(raw)
+    elif _MIN_INFERRED_C <= raw <= _MAX_INFERRED_C:
+        target_c = raw
+    else:
         raise ValueError(
-            "target temperature is outside safe range: "
-            f"{_MIN_TARGET_C:.1f}C to {_MAX_TARGET_C:.1f}C."
+            "target_temperature outside accepted range. "
+            "Auto-inference accepts 50-80 as Fahrenheit or 15-30 as Celsius."
         )
-
-
-def _resolve_target_temperature_c(arguments: Dict[str, Any]) -> tuple[float, str]:
-    generic_keys = ["target_temperature", "temperature", "temp"]
-    explicit_c = "target_temperature_c"
-    explicit_f = "target_temperature_f"
-
-    provided_keys = []
-    for key in [explicit_c, explicit_f, *generic_keys]:
-        if key in arguments and arguments.get(key) is not None:
-            provided_keys.append(key)
-
-    if not provided_keys:
+    if target_c < _MIN_TARGET_C or target_c > _MAX_TARGET_C:
         raise ValueError(
-            "nest_home_control.set_target_temperature requires one temperature value. "
-            "Use target_temperature (auto-infers C/F), or provide target_temperature_c or target_temperature_f."
+            f"target temperature outside safe range: {_MIN_TARGET_C:.1f}C to {_MAX_TARGET_C:.1f}C."
         )
-    if len(provided_keys) > 1:
-        raise ValueError(
-            "nest_home_control.set_target_temperature received multiple temperature fields "
-            f"{provided_keys}. Provide exactly one."
-        )
-
-    key = provided_keys[0]
-    if key == explicit_c:
-        target_c = _coerce_numeric(arguments.get(explicit_c), explicit_c)
-        return target_c, "C"
-    if key == explicit_f:
-        target_f = _coerce_numeric(arguments.get(explicit_f), explicit_f)
-        return _fahrenheit_to_celsius(target_f), "F"
-
-    raw_temp = _coerce_numeric(arguments.get(key), key)
-    if _MIN_INFERRED_F <= raw_temp <= _MAX_INFERRED_F:
-        return _fahrenheit_to_celsius(raw_temp), "F"
-    if _MIN_INFERRED_C <= raw_temp <= _MAX_INFERRED_C:
-        return raw_temp, "C"
-    raise ValueError(
-        "nest_home_control.set_target_temperature rejected this temperature. "
-        "Auto-inference accepts 50-80 as Fahrenheit or 15-30 as Celsius. "
-        "Values below 15, between 30 and 50, or above 80 are rejected."
-    )
+    return round(target_c, 2)
 
 
-def _validate_action_arguments(action: str, arguments: Dict[str, Any]) -> None:
-    if action == "set_mode":
-        mode = str(arguments.get("mode") or "").strip().lower()
-        if mode not in {"heat", "cool", "heat_cool", "off"}:
-            raise ValueError("nest_home_control.set_mode requires mode in: heat|cool|heat_cool|off.")
-    elif action == "set_target_temperature":
-        target_c, inferred_unit = _resolve_target_temperature_c(arguments)
-        # Normalize downstream contract so bridge always receives Celsius.
-        arguments["target_temperature_c"] = round(target_c, 2)
-        if inferred_unit == "F":
-            arguments.pop("target_temperature_f", None)
-        arguments.pop("target_temperature", None)
-        arguments.pop("temperature", None)
-        arguments.pop("temp", None)
-        _validate_target_temperature_range_c(target_c)
-    elif action == "set_eco_mode":
-        enabled = arguments.get("enabled")
-        if not isinstance(enabled, bool):
-            raise ValueError("nest_home_control.set_eco_mode requires boolean enabled.")
-    elif action == "set_fan_mode":
+def _build_operations(arguments: Dict[str, Any]) -> List[Tuple[str, Dict[str, Any]]]:
+    """Decompose a combined-intent payload into one bridge call per state field.
+
+    Stable order: mode → target_temperature → fan_mode → eco_enabled. Mode goes
+    first so a follow-on temperature applies under the freshly-selected mode.
+    """
+    ops: List[Tuple[str, Dict[str, Any]]] = []
+    device_id = arguments.get("device_id")
+
+    if arguments.get("mode") is not None:
+        mode = str(arguments.get("mode") or "").strip().lower().replace("-", "_")
+        if mode not in {"heat", "cool", "heat_cool", "heatcool", "off"}:
+            raise ValueError("mode must be one of: HEAT, COOL, HEATCOOL, OFF.")
+        if mode == "heatcool":
+            mode = "heat_cool"
+        op_args: Dict[str, Any] = {"mode": mode}
+        if device_id is not None:
+            op_args["device_id"] = device_id
+        ops.append(("set_mode", op_args))
+
+    if arguments.get("target_temperature") is not None:
+        target_c = _resolve_target_temperature_c(arguments.get("target_temperature"))
+        op_args = {"target_temperature_c": target_c}
+        if device_id is not None:
+            op_args["device_id"] = device_id
+        ops.append(("set_target_temperature", op_args))
+
+    if arguments.get("fan_mode") is not None:
         fan_mode = str(arguments.get("fan_mode") or "").strip().lower()
         if fan_mode not in {"on", "auto", "off"}:
-            raise ValueError("nest_home_control.set_fan_mode requires fan_mode in: on|auto|off.")
+            raise ValueError("fan_mode must be one of: ON, AUTO, OFF.")
+        op_args = {"fan_mode": fan_mode}
+        if device_id is not None:
+            op_args["device_id"] = device_id
+        ops.append(("set_fan_mode", op_args))
+
+    if arguments.get("eco_enabled") is not None:
+        if not isinstance(arguments.get("eco_enabled"), bool):
+            raise ValueError("eco_enabled must be a boolean.")
+        op_args = {"enabled": arguments.get("eco_enabled")}
+        if device_id is not None:
+            op_args["device_id"] = device_id
+        ops.append(("set_eco_mode", op_args))
+
+    return ops
 
 
 class NestHomeControlTool(BaseTool):
@@ -152,35 +119,46 @@ class NestHomeControlTool(BaseTool):
         try:
             tool_data = tool_message.tool_data if isinstance(tool_message.tool_data, dict) else {}
             arguments = tool_data.get("arguments", {}) if isinstance(tool_data.get("arguments"), dict) else {}
-            action = str(arguments.get("action") or "").strip().lower()
-            # Normalize common aliases (set_temperature -> set_target_temperature, etc.)
-            # before validating. Keep the post-alias canonical value in arguments
-            # so the downstream bridge sees the right name.
-            if action in _ACTION_ALIASES:
-                canonical = _ACTION_ALIASES[action]
-                logger.info(
-                    "nest_home_control.action: aliased '%s' -> '%s'", action, canonical
-                )
-                action = canonical
-                arguments["action"] = canonical
-            if action not in _ALLOWED_ACTIONS:
-                raise ValueError(
-                    "nest_home_control.action must be one of: "
-                    + ", ".join(sorted(_ALLOWED_ACTIONS))
-                    + f". Got {action!r}."
-                )
-            _validate_action_arguments(action, arguments)
 
-            response_data = send_smart_home_command(
-                integration="nest",
-                action=action,
-                arguments=arguments,
-                request_id=tool_message.request_id,
-            )
+            # Read path: explicit get_status flag, OR no state fields at all.
+            state_keys = ("mode", "target_temperature", "fan_mode", "eco_enabled")
+            has_state = any(arguments.get(k) is not None for k in state_keys)
+            if arguments.get("get_status") is True or not has_state:
+                read_args: Dict[str, Any] = {}
+                if arguments.get("device_id") is not None:
+                    read_args["device_id"] = arguments["device_id"]
+                response = send_smart_home_command(
+                    integration="nest",
+                    action="get_status",
+                    arguments=read_args,
+                    request_id=tool_message.request_id,
+                )
+                return ToolResult(
+                    result_type="smart_home",
+                    content="Nest get_status executed successfully.",
+                    data=response,
+                )
+
+            ops = _build_operations(arguments)
+            if not ops:
+                raise ValueError("nest_home_control: no recognized state fields supplied.")
+
+            applied: List[str] = []
+            responses: List[Dict[str, Any]] = []
+            for action, op_args in ops:
+                response = send_smart_home_command(
+                    integration="nest",
+                    action=action,
+                    arguments=op_args,
+                    request_id=tool_message.request_id,
+                )
+                applied.append(action)
+                responses.append({"action": action, "response": response})
+
             return ToolResult(
                 result_type="smart_home",
-                content=f"Nest action '{action}' executed successfully.",
-                data=response_data,
+                content=f"Nest applied: {', '.join(applied)}.",
+                data={"operations": responses},
             )
         except Exception as e:
             logger.error("nest_home_control execution failed: %s", e)

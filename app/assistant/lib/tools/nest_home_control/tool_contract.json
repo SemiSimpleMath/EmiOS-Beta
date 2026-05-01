@@ -1,36 +1,42 @@
 {
   "name": "nest_home_control",
-  "description": "Read and control the Nest thermostat.",
+  "description": "Read or set Nest thermostat state. Pass any combination of state fields (mode, target_temperature, fan_mode, eco_enabled) in one call to set them. Omit all fields to read current state.",
   "inputs": [
-    {
-      "name": "action",
-      "type": "string",
-      "required": true,
-      "description": "Choose ONE based on user intent:\n- ``set_target_temperature`` — when the user asks to change the temperature (e.g. 'set to 70', 'make it cooler', '70F'). Requires ``target_temperature``. Most common action.\n- ``set_mode`` — when the user asks to switch between heating, cooling, or off. Requires ``mode``.\n- ``set_fan_mode`` — when the user asks about the fan. Requires ``fan_mode``.\n- ``set_eco_mode`` — when the user asks to turn eco on/off. Requires ``enabled``.\n- ``get_status`` — read current state; no other args.\n\nHeuristic: a number of degrees in the request → use ``set_target_temperature``."
-    },
     {
       "name": "mode",
       "type": "string",
       "required": false,
-      "description": "Required when action=set_mode. Pass the canonical uppercase value as a single bare word:\n- ``HEAT`` — heating only. User says 'set to heat', 'turn the heat on', 'heat mode'.\n- ``COOL`` — cooling only (A/C). User says 'set to cool', 'turn on the A/C', 'cooling mode', 'AC'.\n- ``HEATCOOL`` — auto heat-or-cool (year-round auto). User says 'auto', 'auto mode', 'heat and cool'.\n- ``OFF`` — thermostat off. User says 'turn it off', 'shut it off'.\n\nThe bridge normalizes case/spacing variants, but the canonical bare-uppercase form above is what you should emit.\n\nOmit when action=set_target_temperature."
+      "description": "Bare uppercase one of: HEAT, COOL, HEATCOOL, OFF."
     },
     {
       "name": "target_temperature",
       "type": "number",
       "required": false,
-      "description": "Required for action=set_target_temperature. A single numeric value in Fahrenheit (e.g. 70 for '70F')."
-    },
-    {
-      "name": "enabled",
-      "type": "boolean",
-      "required": false,
-      "description": "Required for set_eco_mode."
+      "description": "Fahrenheit number, e.g. 75."
     },
     {
       "name": "fan_mode",
       "type": "string",
       "required": false,
-      "description": "Required when action=set_fan_mode. Canonical uppercase values:\n- ``ON`` — fan always on.\n- ``AUTO`` — fan cycles with system.\n- ``OFF`` — fan off."
+      "description": "Bare uppercase one of: ON, AUTO, OFF."
+    },
+    {
+      "name": "eco_enabled",
+      "type": "boolean",
+      "required": false,
+      "description": "Eco-mode toggle. true to enable, false to disable."
+    },
+    {
+      "name": "device_id",
+      "type": "string",
+      "required": false,
+      "description": "Target a specific thermostat. Omit for default."
+    },
+    {
+      "name": "get_status",
+      "type": "boolean",
+      "required": false,
+      "description": "Verbose read flag. Equivalent to passing no fields."
     }
   ],
   "outputs": [
@@ -55,7 +61,8 @@
     "selectors": [
       "mode",
       "temperature",
-      "fan_mode"
+      "fan_mode",
+      "eco_enabled"
     ],
     "risk_level": "medium",
     "side_effects": "external_action",
