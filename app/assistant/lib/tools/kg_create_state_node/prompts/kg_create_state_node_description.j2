@@ -1,0 +1,9 @@
+Create a new State (or Event) node + an edge from owner → state in one
+transaction. Use for residence-eras, job-eras, event participations,
+etc. that the extractor missed but the operator now wants modeled.
+
+Both rows are written to kg_revision_log under a single revision_log_id
+so reverse is a clean two-row delete. Refuses node_type outside
+{State, Event} — for new Entity nodes go through the regular ingest path.
+
+Always pass a non-empty `reason`. Pass `dry_run: true` to preview.

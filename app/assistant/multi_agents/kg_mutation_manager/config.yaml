@@ -64,6 +64,8 @@ tools:
     - kg_merge_nodes
     - kg_rename_label
     - kg_update_node_field
+    - kg_create_state_node
+    - kg_close_state
     - kg_finding_resolve
     - kg_finding_escalate
     - ask_user
@@ -76,6 +78,8 @@ scope_contract:
       - kg_merge_nodes
       - kg_rename_label
       - kg_update_node_field
+      - kg_create_state_node
+      - kg_close_state
       - kg_finding_resolve
       - kg_finding_escalate
       - ask_user

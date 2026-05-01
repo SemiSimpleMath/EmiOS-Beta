@@ -1,0 +1,9 @@
+Set end_date (and optional end_date_confidence / end_date_prose) on an
+existing State or Event node. Use when a residence / job / membership
+era ended.
+
+Refuses on non-State/Event node_types, or on a node that already has
+an end_date — pass force=true to overwrite (the prior value is captured
+in kg_revision_log so reverse is possible).
+
+Always pass a non-empty `reason`. Pass `dry_run: true` to preview.

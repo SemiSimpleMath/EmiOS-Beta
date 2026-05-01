@@ -1,0 +1,9 @@
+Arguments for kg_close_state:
+- node_id (required): existing State or Event node
+- end_date (required): ISO date, e.g. "1992-06-01"
+- end_date_confidence (optional, default "operator_close")
+- end_date_prose (optional): free-form prose
+- force (optional, default false): allow overwriting an existing end_date
+- reason (required): why the era ended; goes into kg_revision_log
+- dry_run (optional): preview only
+- finding_id (optional): source kg_maintenance_finding.id

@@ -1,11 +1,14 @@
 """KGMutatorTool — narrow typed mutators against the live KG, audit-wired.
 
-Backs six tool names (one BaseTool, dispatched on tool_name):
+Backs nine tool names (one BaseTool, dispatched on tool_name):
 
   kg_merge_nodes(keep_id, fold_id, reason, dry_run=False)
   kg_rename_label(node_id, new_label, reason, dry_run=False)
   kg_update_node_field(node_id, field, value, reason, dry_run=False)
   kg_delete_edge(edge_id, reason, dry_run=False)
+  kg_create_state_node(owner_node_id, predicate, label, ..., reason, dry_run=False)
+  kg_create_edge(source_id, target_id, relationship_type, ..., reason, dry_run=False)
+  kg_close_state(node_id, end_date, ..., reason, dry_run=False)
   kg_finding_resolve(finding_id, action, notes, reason)
   kg_finding_escalate(finding_id, summary, suggested_action, reason)
 
@@ -74,9 +77,17 @@ def _parse_date(s: Any) -> Optional[datetime]:
     if isinstance(s, datetime):
         return s
     s = str(s).strip()
+    # Try fromisoformat first (handles 'YYYY-MM-DD', 'YYYY-MM-DDTHH:MM:SS',
+    # plus offsets like '+00:00' on Python 3.11+).
+    try:
+        # Normalize a trailing 'Z' to +00:00 so fromisoformat accepts it.
+        normalized = s.replace("Z", "+00:00") if s.endswith("Z") else s
+        return datetime.fromisoformat(normalized)
+    except Exception:
+        pass
     for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
         try:
-            return datetime.strptime(s[:len(fmt) + 3] if "%z" in fmt else s[:len(fmt)], fmt)
+            return datetime.strptime(s, fmt)
         except Exception:
             continue
     raise ValueError(f"Could not parse date {s!r}")
@@ -502,6 +513,345 @@ class KGMutatorTool(BaseTool):
                 result_type="kg_delete_edge",
                 content=f"Deleted edge {edge_id[:8]} ({before['relationship_type']}). revision_log_id={rid}",
                 data={"ok": True, "revision_log_id": rid, "deleted": before},
+            ))
+
+    # ---- create-side mutations (option-A leeway, 2026-04-30) -------------------
+
+    _ALLOWED_NEW_NODE_TYPES = frozenset({"State", "Event"})
+
+    def handle_kg_create_state_node(self, arguments: Dict[str, Any], tool_message: ToolMessage) -> ToolResult:
+        """Create a new State (or Event) node + an edge from owner → state in
+        one transaction. Both rows are referenced in the kg_revision_log entry
+        so reverse is a clean two-row delete.
+
+        Required: owner_node_id, predicate, label, reason.
+        Optional: node_type ('State' default; 'Event' allowed), category,
+        description, original_sentence, start_date, end_date,
+        start_date_confidence, end_date_confidence, sentence (for the edge),
+        attributes, finding_id, dry_run.
+        """
+        owner_id = str(arguments.get("owner_node_id") or "").strip()
+        predicate = str(arguments.get("predicate") or "").strip()
+        label = str(arguments.get("label") or "").strip()
+        if not owner_id or not predicate or not label:
+            raise ValueError("`owner_node_id`, `predicate`, `label` are all required.")
+        node_type = str(arguments.get("node_type") or "State").strip()
+        if node_type not in self._ALLOWED_NEW_NODE_TYPES:
+            raise ValueError(
+                f"node_type {node_type!r} not allowed for kg_create_state_node; "
+                f"use one of {sorted(self._ALLOWED_NEW_NODE_TYPES)}."
+            )
+        reason = self._require_reason(arguments)
+        dry_run = bool(arguments.get("dry_run", False))
+        finding_id = arguments.get("finding_id") or None
+
+        category = arguments.get("category")
+        description = arguments.get("description")
+        original_sentence = arguments.get("original_sentence")
+        start_date = _parse_date(arguments.get("start_date"))
+        end_date = _parse_date(arguments.get("end_date"))
+        start_date_confidence = arguments.get("start_date_confidence")
+        end_date_confidence = arguments.get("end_date_confidence")
+        edge_sentence = arguments.get("sentence")
+        attributes = arguments.get("attributes") or {}
+        if not isinstance(attributes, dict):
+            raise ValueError("`attributes` must be a dict.")
+
+        with get_db_manager().transaction(op="kg_mutator.create_state_node") as session:
+            owner = session.query(Node).filter(Node.id == owner_id).first()
+            if owner is None:
+                raise ValueError(f"owner_node_id {owner_id!r} not found")
+
+            new_node_id = str(uuid.uuid4())
+            new_edge_id = str(uuid.uuid4())
+
+            # Compose the after-preview before any session.add so dry_run
+            # gets the same shape as the real result.
+            preview_node = {
+                "id": new_node_id,
+                "label": label,
+                "node_type": node_type,
+                "category": category,
+                "description": description,
+                "original_sentence": original_sentence,
+                "start_date": start_date.isoformat() if start_date else None,
+                "end_date": end_date.isoformat() if end_date else None,
+                "start_date_confidence": start_date_confidence,
+                "end_date_confidence": end_date_confidence,
+                "attributes": attributes,
+            }
+            preview_edge = {
+                "id": new_edge_id,
+                "source_id": owner_id,
+                "target_id": new_node_id,
+                "relationship_type": predicate,
+                "sentence": edge_sentence,
+            }
+            after = {"new_node": preview_node, "new_edge": preview_edge}
+            before = "ABSENT"  # nothing existed before this op
+
+            if dry_run:
+                return self.publish_result(ToolResult(
+                    result_type="kg_create_state_node",
+                    content=(
+                        f"DRY RUN: would create {node_type} {label!r} (id={new_node_id[:8]}) "
+                        f"and edge {owner.label!r} -[{predicate}]-> {label!r} "
+                        f"(edge_id={new_edge_id[:8]}). "
+                        f"Dates: start={preview_node['start_date']}, end={preview_node['end_date']}."
+                    ),
+                    data={"ok": True, "dry_run": True, "before": before, "after": after},
+                ))
+
+            new_node = Node(
+                id=new_node_id,
+                label=label,
+                node_type=node_type,
+                category=category,
+                description=description,
+                original_sentence=original_sentence,
+                start_date=start_date,
+                end_date=end_date,
+                start_date_confidence=start_date_confidence,
+                end_date_confidence=end_date_confidence,
+                attributes=attributes,
+            )
+            session.add(new_node)
+            session.flush()  # node_id must exist before the edge FK fires
+
+            new_edge = Edge(
+                id=new_edge_id,
+                source_id=owner_id,
+                target_id=new_node_id,
+                relationship_type=predicate,
+                sentence=edge_sentence,
+            )
+            session.add(new_edge)
+            session.flush()
+
+            after["new_node"] = _node_snapshot(new_node)
+            after["new_edge"] = _edge_snapshot(new_edge)
+
+            rid = _write_revision_log(
+                session=session,
+                op="create_state_node",
+                args={
+                    "owner_node_id": owner_id,
+                    "predicate": predicate,
+                    "label": label,
+                    "node_type": node_type,
+                    "new_node_id": new_node_id,
+                    "new_edge_id": new_edge_id,
+                    "finding_id": finding_id,
+                },
+                before=before,
+                after=after,
+                reason=reason,
+                finding_id=finding_id,
+                agent_id=self._agent_id(tool_message),
+            )
+
+            return self.publish_result(ToolResult(
+                result_type="kg_create_state_node",
+                content=(
+                    f"Created {node_type} {label!r} (id={new_node_id[:8]}) "
+                    f"and edge {owner.label!r} -[{predicate}]-> {label!r} "
+                    f"(edge_id={new_edge_id[:8]}). revision_log_id={rid}"
+                ),
+                data={
+                    "ok": True,
+                    "revision_log_id": rid,
+                    "new_node_id": new_node_id,
+                    "new_edge_id": new_edge_id,
+                },
+            ))
+
+    def handle_kg_create_edge(self, arguments: Dict[str, Any], tool_message: ToolMessage) -> ToolResult:
+        """Create one edge between two existing nodes. Refuses if both
+        endpoints aren't already in the KG, or if a same-predicate edge
+        already exists between them.
+
+        Required: source_id, target_id, relationship_type, reason.
+        Optional: sentence, relationship_descriptor, finding_id, dry_run.
+        """
+        source_id = str(arguments.get("source_id") or "").strip()
+        target_id = str(arguments.get("target_id") or "").strip()
+        relationship_type = str(arguments.get("relationship_type") or "").strip()
+        if not source_id or not target_id or not relationship_type:
+            raise ValueError("`source_id`, `target_id`, `relationship_type` are all required.")
+        if source_id == target_id:
+            raise ValueError("source_id and target_id must differ (no self-loops).")
+        reason = self._require_reason(arguments)
+        dry_run = bool(arguments.get("dry_run", False))
+        finding_id = arguments.get("finding_id") or None
+        sentence = arguments.get("sentence")
+        descriptor = arguments.get("relationship_descriptor")
+
+        with get_db_manager().transaction(op="kg_mutator.create_edge") as session:
+            src = session.query(Node).filter(Node.id == source_id).first()
+            tgt = session.query(Node).filter(Node.id == target_id).first()
+            if src is None:
+                raise ValueError(f"source_id {source_id!r} not found")
+            if tgt is None:
+                raise ValueError(f"target_id {target_id!r} not found")
+
+            existing = (
+                session.query(Edge)
+                .filter(
+                    Edge.source_id == source_id,
+                    Edge.target_id == target_id,
+                    Edge.relationship_type == relationship_type,
+                )
+                .first()
+            )
+            if existing is not None:
+                raise ValueError(
+                    f"Refusing to create edge: {src.label!r} -[{relationship_type}]-> {tgt.label!r} "
+                    f"already exists (id={existing.id}). Use kg_update_node_field on attributes "
+                    "or kg_delete_edge first if you mean to replace."
+                )
+
+            new_edge_id = str(uuid.uuid4())
+            preview = {
+                "id": new_edge_id,
+                "source_id": source_id,
+                "target_id": target_id,
+                "relationship_type": relationship_type,
+                "sentence": sentence,
+                "relationship_descriptor": descriptor,
+            }
+            before = "ABSENT"
+
+            if dry_run:
+                return self.publish_result(ToolResult(
+                    result_type="kg_create_edge",
+                    content=(
+                        f"DRY RUN: would create edge {src.label!r} -[{relationship_type}]-> {tgt.label!r} "
+                        f"(id={new_edge_id[:8]})."
+                    ),
+                    data={"ok": True, "dry_run": True, "before": before, "after": preview},
+                ))
+
+            new_edge = Edge(
+                id=new_edge_id,
+                source_id=source_id,
+                target_id=target_id,
+                relationship_type=relationship_type,
+                sentence=sentence,
+                relationship_descriptor=descriptor,
+            )
+            session.add(new_edge)
+            session.flush()
+            after = _edge_snapshot(new_edge)
+
+            rid = _write_revision_log(
+                session=session,
+                op="create_edge",
+                args={
+                    "source_id": source_id,
+                    "target_id": target_id,
+                    "relationship_type": relationship_type,
+                    "new_edge_id": new_edge_id,
+                    "finding_id": finding_id,
+                },
+                before=before,
+                after=after,
+                reason=reason,
+                finding_id=finding_id,
+                agent_id=self._agent_id(tool_message),
+            )
+            return self.publish_result(ToolResult(
+                result_type="kg_create_edge",
+                content=(
+                    f"Created edge {src.label!r} -[{relationship_type}]-> {tgt.label!r} "
+                    f"(id={new_edge_id[:8]}). revision_log_id={rid}"
+                ),
+                data={"ok": True, "revision_log_id": rid, "new_edge_id": new_edge_id},
+            ))
+
+    def handle_kg_close_state(self, arguments: Dict[str, Any], tool_message: ToolMessage) -> ToolResult:
+        """Set ``end_date`` (and optional ``end_date_confidence`` /
+        ``end_date_prose``) on an existing State or Event node. Use this
+        when a residence / job / membership era ends.
+
+        Refuses if the node already has an end_date unless ``force=True``.
+
+        Required: node_id, end_date, reason.
+        Optional: end_date_confidence (default 'operator_close'),
+        end_date_prose, force, finding_id, dry_run.
+        """
+        node_id = str(arguments.get("node_id") or "").strip()
+        if not node_id:
+            raise ValueError("`node_id` is required.")
+        end_date = _parse_date(arguments.get("end_date"))
+        if end_date is None:
+            raise ValueError("`end_date` is required and must be a parseable ISO date.")
+        reason = self._require_reason(arguments)
+        dry_run = bool(arguments.get("dry_run", False))
+        force = bool(arguments.get("force", False))
+        finding_id = arguments.get("finding_id") or None
+        end_date_confidence = arguments.get("end_date_confidence") or "operator_close"
+        end_date_prose = arguments.get("end_date_prose")
+
+        with get_db_manager().transaction(op="kg_mutator.close_state") as session:
+            node = session.query(Node).filter(Node.id == node_id).first()
+            if node is None:
+                raise ValueError(f"node {node_id!r} not found")
+            if (node.node_type or "") not in self._ALLOWED_NEW_NODE_TYPES:
+                raise ValueError(
+                    f"node_type={node.node_type!r} is not closeable; "
+                    f"close_state expects one of {sorted(self._ALLOWED_NEW_NODE_TYPES)}."
+                )
+            if node.end_date is not None and not force:
+                raise ValueError(
+                    f"node {node_id!r} already has end_date={node.end_date.isoformat()}. "
+                    "Pass force=true to override (kg_revision_log will record the prior value)."
+                )
+
+            before = _node_snapshot(node)
+
+            if dry_run:
+                preview = {**before,
+                           "end_date": end_date.isoformat(),
+                           "end_date_confidence": end_date_confidence,
+                           "end_date_prose": end_date_prose if end_date_prose is not None else before.get("end_date_prose")}
+                return self.publish_result(ToolResult(
+                    result_type="kg_close_state",
+                    content=(
+                        f"DRY RUN: would set end_date={preview['end_date']} "
+                        f"on {node.node_type} {node.label!r} ({node_id[:8]})."
+                    ),
+                    data={"ok": True, "dry_run": True, "before": before, "after": preview},
+                ))
+
+            node.end_date = end_date
+            node.end_date_confidence = end_date_confidence
+            if end_date_prose is not None:
+                node.end_date_prose = end_date_prose
+            after = _node_snapshot(node)
+
+            rid = _write_revision_log(
+                session=session,
+                op="close_state",
+                args={
+                    "node_id": node_id,
+                    "end_date": end_date.isoformat(),
+                    "end_date_confidence": end_date_confidence,
+                    "force": force,
+                    "finding_id": finding_id,
+                },
+                before=before,
+                after=after,
+                reason=reason,
+                finding_id=finding_id,
+                agent_id=self._agent_id(tool_message),
+            )
+            return self.publish_result(ToolResult(
+                result_type="kg_close_state",
+                content=(
+                    f"Closed {node.node_type} {node.label!r} ({node_id[:8]}) at "
+                    f"end_date={end_date.isoformat()}. revision_log_id={rid}"
+                ),
+                data={"ok": True, "revision_log_id": rid, "node_id": node_id},
             ))
 
     def handle_kg_finding_resolve(self, arguments: Dict[str, Any], tool_message: ToolMessage) -> ToolResult:

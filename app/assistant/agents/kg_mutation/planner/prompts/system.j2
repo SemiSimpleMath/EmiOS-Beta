@@ -27,7 +27,7 @@ The proposed_action carries `op`, `args`, `reversibility`, `confidence`. Apply t
 
 1. **op == `no_action`** — the investigator concluded no KG change is needed. Call `kg_finding_resolve(finding_id, action="no_action", reason=…)` and return_control. Do not call any mutation tool.
 
-2. **op == `escalate_user`** — the investigator already chose to escalate. Call `kg_finding_escalate(finding_id, summary=…, suggested_action=…, reason=…)` with the report's `diagnosis` as the summary. Return_control.
+2. **op == `escalate_user`** — the investigator already chose to escalate. **First check operator notes** (see "Operator notes" section above). The investigator escalated *to ask the human a question*; if the operator notes answer that question with a concrete instruction (e.g. "they lived in Scottsdale 1990-01 to 1992-06; add a Scottsdale residence; don't touch Irvine"), execute that instruction using the create/close/update tools — multiple calls if needed — then `kg_finding_resolve`. If operator notes don't resolve the escalation question, call `kg_finding_escalate(finding_id, summary=…, suggested_action=…, reason=…)` with the report's `diagnosis` as the summary. Return_control.
 
 3. **`reversibility == "irreversible"` OR `confidence < 0.75`** — too risky / too uncertain to auto-apply. Call `kg_finding_escalate(...)` instead of the mutation. Return_control.
 
@@ -35,9 +35,15 @@ The proposed_action carries `op`, `args`, `reversibility`, `confidence`. Apply t
    - `merge_nodes` → `kg_merge_nodes` with the keep_id / fold_id from the args
    - `rename_label` → `kg_rename_label` with the node_id and new_label
    - `update_node_field` → `kg_update_node_field` with field + value (+ list_op for list fields)
-   - any other op (split_node, delete_edge, etc.) → escalate (we don't have those tools)
+   - `create_state_node` / `add_residence` / `add_state` / `add_era` → `kg_create_state_node` with owner_node_id, predicate (e.g. `has_residence`), label, and optional dates / category / description / sentence. Use this when the KG is missing a residence/job/membership era and the operator (or investigator) provides the information to add it under an existing entity.
+   - `close_state` / `end_residence` / `close_era` → `kg_close_state` with node_id + end_date. Use when an era ended and only the closing date is missing.
+   - any other op (split_node, delete_edge, kg-wide schema changes, etc.) → escalate (we don't have those tools)
 
-   After the mutation succeeds, IMMEDIATELY call `kg_finding_resolve(finding_id, action=<op>, notes=<revision_log_id from the previous tool result>, reason=…)`. Then return_control.
+   You may need MORE THAN ONE mutation call to fulfill the operator's intent. Examples:
+   - "they lived in Scottsdale 1990-01 to 1992-06, then Irvine — Irvine record is correct, just add Scottsdale": one `kg_create_state_node` (owner_node_id=<household>, predicate=`has_residence`, label=`Scottsdale, Arizona residence`, start_date=`1990-01-01`, end_date=`1992-06-01`). Don't touch Irvine. Then `kg_finding_resolve`.
+   - "the existing Irvine residence should have ended in June 2020 when they moved to Berkeley, and add Berkeley as the new one": one `kg_close_state` on Irvine (end_date=`2020-06-01`) + one `kg_create_state_node` for Berkeley + `kg_finding_resolve`.
+
+   After ALL the mutation tool calls succeed, IMMEDIATELY call `kg_finding_resolve(finding_id, action=<op>, notes=<comma-separated revision_log_ids>, reason=…)`. Then return_control.
 
    If the mutation tool returns `ok: false`, do NOT retry blindly. Call `kg_finding_escalate` with the error in the summary so a human can intervene.
 
