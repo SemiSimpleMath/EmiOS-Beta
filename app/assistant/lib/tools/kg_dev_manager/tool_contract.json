@@ -1,6 +1,6 @@
 {
   "name": "kg_dev_manager",
-  "description": "Read-only KG investigation surface for the developer console. Runs a planner loop over kg_query / pod_search / pod_fetch. Pass a fully disambiguated investigative question; the planner returns a structured answer.",
+  "description": "Specialized KG manager — investigates and mutates the live emi.db knowledge graph. Runs a planner loop with full SQL read (kg_query), pod search/fetch, and the typed KG mutators (kg_merge_nodes, kg_create_edge, kg_create_state_node, kg_close_state, kg_rename_label, kg_update_node_field, kg_delete_edge). Every commit writes a reversible kg_revision_log row. Pass a fully disambiguated instruction; for mutations include concrete node ids and a reason. Use this whenever a task involves the KG — emi_team and master_room should delegate here rather than reasoning about the KG themselves.",
   "inputs": [
     {
       "name": "task",
@@ -30,10 +30,10 @@
   "arguments_prompt": "kg_dev_manager arguments:\ntask: the fully disambiguated investigative question.\ninformation: supporting context (prior chat, evidence, constraints).",
   "metadata": {
     "category": "knowledge_graph",
-    "verbs": ["query", "investigate"],
+    "verbs": ["query", "investigate", "mutate"],
     "entities": ["node", "edge"],
-    "risk_level": "low",
-    "side_effects": "read_only",
+    "risk_level": "medium",
+    "side_effects": "writes_kg",
     "requires_auth": [],
     "requires_network": false,
     "cost_level": "medium",

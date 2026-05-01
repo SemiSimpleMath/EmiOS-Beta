@@ -1,1 +1,10 @@
-Read-only KG investigation + targeted mutation surface for the dev console. Runs a planner loop over kg_query, pod_search, pod_fetch and the typed KG mutators (kg_merge_nodes, kg_create_edge, kg_create_state_node, kg_close_state, kg_rename_label, kg_update_node_field, kg_delete_edge). Pass a fully disambiguated instruction; for mutations, include concrete node ids and a reason.
+Specialized KG manager — investigates and mutates the live emi.db knowledge graph.
+
+Runs a planner loop with these capabilities:
+- Read: kg_query (full SQL SELECT), pod_search, pod_fetch.
+- Mutate (typed, audit-logged): kg_merge_nodes, kg_create_edge, kg_create_state_node, kg_close_state, kg_rename_label, kg_update_node_field, kg_delete_edge.
+- Finding lifecycle: kg_finding_resolve, kg_finding_escalate.
+
+Every commit writes a reversible kg_revision_log row. The planner dry-runs destructive ops first when uncertain.
+
+Use this whenever a task involves the KG. emi_team and master_room should delegate here rather than reasoning about the KG themselves. Pass a fully disambiguated instruction; for mutations include concrete node ids and a reason for the audit log.

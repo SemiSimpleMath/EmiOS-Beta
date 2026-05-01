@@ -50,7 +50,25 @@ control_nodes:
     class: GracefulExitControlNode
 
 tools:
-  allowed_tools: [kg_query, pod_search, pod_fetch]
+  allowed_tools:
+    # Investigation
+    - kg_query
+    - pod_search
+    - pod_fetch
+    # Typed mutators — every commit writes to kg_revision_log so changes
+    # are reversible. Planner is expected to dry_run first for any
+    # destructive op and pass a non-empty `reason`.
+    - kg_merge_nodes
+    - kg_rename_label
+    - kg_update_node_field
+    - kg_delete_edge
+    - kg_create_edge
+    - kg_create_state_node
+    - kg_close_state
+    # Finding lifecycle (the planner can resolve/escalate when working
+    # from a kg_maintenance_finding row).
+    - kg_finding_resolve
+    - kg_finding_escalate
   except_tools: []
 
 # State map mirrors emi_team_manager. The Planner class runs
