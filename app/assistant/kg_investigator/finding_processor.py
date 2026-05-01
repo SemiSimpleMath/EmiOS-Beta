@@ -86,7 +86,13 @@ def _mutation_scope() -> ScopeContext:
 def _build_apply_brief(finding_id: str) -> Optional[tuple[str, str]]:
     """Build (task, information) for the mutation_manager planner from a
     finding's investigation report. Returns None if the finding is missing,
-    not investigated, or has no structured report."""
+    not investigated, or has no structured report.
+
+    Operator notes (saved on the finding before clicking Apply) are
+    surfaced prominently in the task string. The planner prompt renders
+    {{ task }} at the top, so notes there are read first; embedding them
+    only inside the JSON information blob risks the planner skimming past.
+    """
     import json
     with get_db_manager().read_session() as session:
         f = (
@@ -117,11 +123,26 @@ def _build_apply_brief(finding_id: str) -> Optional[tuple[str, str]]:
             "priority": f.priority,
         }
 
-    task = (
+    operator_notes = ""
+    if isinstance(report, dict):
+        raw_notes = report.get("operator_notes")
+        if isinstance(raw_notes, str):
+            operator_notes = raw_notes.strip()
+
+    task_parts = [
         f"Apply the proposed_action from finding {finding_id} per the "
         "investigation report. Follow the kg_mutation::planner decision rules "
-        "(no_action / escalate / apply mutation+resolve)."
-    )
+        "(no_action / escalate / apply mutation+resolve).",
+    ]
+    if operator_notes:
+        task_parts.append(
+            "OPERATOR NOTES (added by the human reviewer before clicking "
+            "Apply — weight these against the investigator's proposed_action; "
+            "they may override, refine, or veto it):"
+        )
+        task_parts.append(operator_notes)
+    task = "\n\n".join(task_parts)
+
     information = json.dumps(
         {"finding": finding_view, "investigation_report": report},
         indent=2,
