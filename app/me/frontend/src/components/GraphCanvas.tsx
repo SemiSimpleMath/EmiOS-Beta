@@ -375,6 +375,27 @@ export function GraphCanvas({ nodes, edges, onNodeClick }: Props) {
       ) {
         return;
       }
+
+      // Viewport-cull: if either endpoint is offscreen (with a small margin
+      // for edges that originate from a just-offscreen node), skip drawing.
+      // Without this, panning shows edges flying off into emptiness.
+      const fg = fgRef.current;
+      if (fg && typeof fg.screen2GraphCoords === "function") {
+        const canvas = ctx.canvas;
+        const tl = fg.screen2GraphCoords(0, 0);
+        const br = fg.screen2GraphCoords(canvas.width, canvas.height);
+        const margin = 80 / globalScale;
+        const minX = Math.min(tl.x, br.x) - margin;
+        const maxX = Math.max(tl.x, br.x) + margin;
+        const minY = Math.min(tl.y, br.y) - margin;
+        const maxY = Math.max(tl.y, br.y) + margin;
+        const sIn =
+          src.x >= minX && src.x <= maxX && src.y >= minY && src.y <= maxY;
+        const tIn =
+          tgt.x >= minX && tgt.x <= maxX && tgt.y >= minY && tgt.y <= maxY;
+        if (!sIn || !tIn) return;
+      }
+
       drawOrthogonalLink(ctx, src, tgt, globalScale);
     },
     [],
