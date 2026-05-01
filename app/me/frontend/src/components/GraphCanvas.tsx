@@ -8,10 +8,12 @@ interface ForceNode {
   node_type: string;
   pagerank_score: number;
   is_seed: boolean;
+  is_anchor: boolean;
   importance: number;
   photo_url: string | null;
-  primary_seed_id: string | null;
-  // d3-force runtime fields (mutated by the engine).
+  primary_anchor_id: string | null;
+  // d3-force runtime fields. We PIN every node via fx/fy from the global
+  // map layout, so the engine doesn't actually move anything.
   x?: number;
   y?: number;
   vx?: number;
@@ -45,9 +47,8 @@ const ENTITY_HEIGHT = 36;
 const STATE_WIDTH = 56;
 const STATE_HEIGHT = 16;
 const PHOTO_SIZE = 44;
-const SEED_RING_RADIUS = 480;
-const COLLIDE_PADDING = 22;
-const CLUSTER_STRENGTH = 0.04;
+// Map-mode layout: every node is pinned at its global (x, y). No force
+// sim runs. SEED_RING_RADIUS / CLUSTER_STRENGTH retired.
 
 function roundRect(
   ctx: CanvasRenderingContext2D,
@@ -78,19 +79,6 @@ function fitLabel(label: string, maxWidth: number, charPx: number): string {
 }
 
 // Footprint radius for collision purposes. Nodes are not circles, so we use
-// the half-diagonal of the bounding rect plus padding. State chips are tight,
-// entity boxes are loose so neighborhoods can spread.
-function collideRadius(n: ForceNode): number {
-  if (STATE_TYPES.has(n.node_type)) {
-    return Math.hypot(STATE_WIDTH / 2, STATE_HEIGHT / 2) + COLLIDE_PADDING;
-  }
-  if (n.photo_url) {
-    return Math.hypot(PHOTO_SIZE / 2, PHOTO_SIZE / 2 + 14) + COLLIDE_PADDING;
-  }
-  const w = entityWidth(n.pagerank_score);
-  return Math.hypot(w / 2, ENTITY_HEIGHT / 2) + COLLIDE_PADDING;
-}
-
 function nodeFootprint(n: ForceNode): { halfW: number; halfH: number } {
   if (STATE_TYPES.has(n.node_type)) {
     return { halfW: STATE_WIDTH / 2, halfH: STATE_HEIGHT / 2 };
@@ -222,9 +210,16 @@ export function GraphCanvas({ nodes, edges, onNodeClick }: Props) {
       node_type: n.node_type,
       pagerank_score: n.pagerank_score,
       is_seed: n.is_seed,
+      is_anchor: n.is_anchor,
       importance: n.importance,
       photo_url: null,
-      primary_seed_id: n.primary_seed_id,
+      primary_anchor_id: n.primary_anchor_id,
+      // Pin every node at its global map position. The d3 sim won't move
+      // pinned nodes, so the layout is fully deterministic.
+      x: n.x,
+      y: n.y,
+      fx: n.x,
+      fy: n.y,
     }));
     const fLinks: ForceLink[] = edges.map((e) => ({
       source: e.source_id,
@@ -235,82 +230,35 @@ export function GraphCanvas({ nodes, edges, onNodeClick }: Props) {
     return { nodes: fNodes, links: fLinks };
   }, [nodes, edges]);
 
-  // Pin seeds in a ring around the canvas so each cluster has its own
-  // anchor. Then add a cluster force that pulls each non-seed toward its
-  // primary seed's pinned position. This produces the "neighborhood" feel.
+  // Map mode: every node is pinned via fx/fy from the backend's global
+  // layout. We zero out the d3-force "charge" so the engine doesn't try
+  // to push pinned nodes around (it won't succeed, but it wastes ticks).
+  // The collide force is also disabled — global layout already spaced
+  // nodes appropriately at compute time.
   useEffect(() => {
     const fg = fgRef.current;
     if (!fg) return;
-    const seeds = graphData.nodes.filter((n) => n.is_seed);
-    const N = seeds.length;
-    if (N === 0) return;
 
-    seeds.forEach((s, i) => {
-      if (N === 1) {
-        s.fx = 0;
-        s.fy = 0;
-      } else {
-        const angle = (2 * Math.PI * i) / N - Math.PI / 2;
-        s.fx = Math.cos(angle) * SEED_RING_RADIUS;
-        s.fy = Math.sin(angle) * SEED_RING_RADIUS;
-      }
-    });
-    // Non-seed nodes: clear any prior fx/fy so they can be pulled.
-    graphData.nodes.forEach((n) => {
-      if (!n.is_seed) {
-        n.fx = undefined;
-        n.fy = undefined;
-      }
-    });
-
-    // Build seed lookup once for the cluster force.
-    const seedById = new Map<string, ForceNode>();
-    seeds.forEach((s) => seedById.set(s.id, s));
-
-    // Custom cluster force: pull each non-seed toward its primary seed.
-    const clusterForce = (alpha: number) => {
-      graphData.nodes.forEach((n) => {
-        if (n.is_seed) return;
-        const sid = n.primary_seed_id;
-        if (!sid) return;
-        const anchor = seedById.get(sid);
-        if (!anchor || anchor.x === undefined || anchor.y === undefined) return;
-        if (n.x === undefined || n.y === undefined) return;
-        if (n.vx === undefined) n.vx = 0;
-        if (n.vy === undefined) n.vy = 0;
-        n.vx -= (n.x - anchor.x) * alpha * CLUSTER_STRENGTH;
-        n.vy -= (n.y - anchor.y) * alpha * CLUSTER_STRENGTH;
-      });
-    };
-
-    // d3-force has a `force(name, force)` API. The third-party type for
-    // ForceGraphMethods is loose here; pull through `any`.
-    fg.d3Force("cluster", clusterForce);
-
-    // Bump collision so rectangles stop overlapping.
-    // Replace the default circle-collide with a per-node-radius variant.
-    // d3-force isn't re-imported here — react-force-graph-2d ships its own
-    // d3 internally. We can swap the existing 'collide' force by giving it
-    // a function-radius if it exists.
-    const collide = fg.d3Force("collide");
-    if (collide && typeof collide.radius === "function") {
-      collide.radius((n: ForceNode) => collideRadius(n));
-      collide.strength(0.95);
-      collide.iterations(2);
-    }
-
-    // Charge & link tuning.
     const charge = fg.d3Force("charge");
     if (charge && typeof charge.strength === "function") {
-      charge.strength(-180);
+      charge.strength(0);
     }
     const link = fg.d3Force("link");
-    if (link && typeof link.distance === "function") {
-      link.distance(95).strength(0.35);
+    if (link && typeof link.strength === "function") {
+      link.strength(0);
     }
+    fg.d3Force("center", null);
+    fg.d3Force("collide", null);
+    fg.d3Force("cluster", null);
 
-    // Re-heat so the changes take effect on the visible frame.
-    fg.d3ReheatSimulation();
+    // Center viewport on the user / first seed at default zoom.
+    const seedNode = graphData.nodes.find((n) => n.is_seed);
+    if (seedNode && typeof fg.centerAt === "function") {
+      fg.centerAt(seedNode.x ?? 0, seedNode.y ?? 0, 0);
+      if (typeof fg.zoom === "function") {
+        fg.zoom(0.45, 0);
+      }
+    }
   }, [graphData]);
 
   const handleClick = useCallback(
@@ -471,9 +419,10 @@ export function GraphCanvas({ nodes, edges, onNodeClick }: Props) {
       nodeCanvasObject={drawNode}
       nodePointerAreaPaint={nodePointerArea}
       onNodeClick={handleClick}
-      cooldownTicks={200}
-      d3AlphaDecay={0.025}
-      d3VelocityDecay={0.32}
+      cooldownTicks={0}
+      warmupTicks={0}
+      d3AlphaDecay={1}
+      d3VelocityDecay={1}
       enableZoomInteraction
       enablePanInteraction
     />

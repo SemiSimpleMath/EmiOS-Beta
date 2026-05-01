@@ -120,6 +120,42 @@ def _node_active_in_window(
     return True
 
 
+def _pick_anchors_around_seed(
+    seed_id: str,
+    g: "nx.Graph",
+    node_by_id: Dict[str, "Node"],
+    *,
+    k: int = 6,
+) -> List[str]:
+    """Promote the seed's top-K first-degree Entity neighbors to anchors.
+
+    Anchors become layout cluster centers — each gets its own district on
+    the canvas. Without this, a single user-seed produces a mono-cluster
+    "epicenter with everything orbiting" view, which is the wrong mental
+    model. With auto-anchors, the seed's most-important people become
+    co-equal districts in their own right.
+    """
+    if not g.has_node(seed_id):
+        return []
+    candidates: List[tuple] = []
+    for nb in g.neighbors(seed_id):
+        n = node_by_id.get(nb)
+        if n is None:
+            continue
+        # Anchor only Entity-class nodes — not states, goals, events. Those
+        # are intermediating relationships, not co-equal districts.
+        if (n.node_type or "") != "Entity":
+            continue
+        edge_data = g.get_edge_data(seed_id, nb) or {}
+        weight = float(edge_data.get("weight", 1.0))
+        importance = float(getattr(n, "importance", None) or 0.5)
+        # Score: edge weight to seed + node importance. Both signal "matters
+        # to the user" in different ways.
+        candidates.append((weight + importance, nb))
+    candidates.sort(reverse=True)
+    return [nb for _, nb in candidates[:k]]
+
+
 def compute_seed_graph(
     *,
     seed_ids: List[str],
@@ -129,6 +165,7 @@ def compute_seed_graph(
     time_to: Optional[str] = None,
     state_score_multiplier: float = 0.4,
     include_concepts: bool = False,
+    auto_anchors_per_seed: int = 6,
 ) -> SeedGraphResult:
     """Compute the bounded subgraph for the lens.
 
@@ -150,6 +187,12 @@ def compute_seed_graph(
     """
     seed_ids = [s for s in (seed_ids or []) if isinstance(s, str) and s.strip()]
     limit = max(1, min(int(limit or DEFAULT_LIMIT), HARD_LIMIT))
+    # When auto-anchoring, bump effective limit so each district has room
+    # for a real neighborhood. Each anchor needs ~3-5 cluster items to feel
+    # populated; with k=6 anchors per seed plus the seed itself, we need
+    # at least ~50 + (6 × 4) = ~75 items.
+    if auto_anchors_per_seed > 0 and len(seed_ids) <= 2 and limit < 80:
+        limit = min(80, HARD_LIMIT)
 
     cache_key = (
         tuple(sorted(seed_ids)),
@@ -159,6 +202,7 @@ def compute_seed_graph(
         limit,
         state_score_multiplier,
         include_concepts,
+        auto_anchors_per_seed,
     )
     now = time.time()
     cached = _CACHE.get(cache_key)
@@ -312,6 +356,19 @@ def compute_seed_graph(
             if seed_set & neighbors:
                 visible.add(nid)
 
+        # Auto-anchor promotion. Each seed's top-K first-degree Entity
+        # neighbors become co-equal "districts" on the canvas. This breaks
+        # the mono-cluster "epicenter" view: instead of everything orbiting
+        # one node, the major people get their own neighborhoods.
+        anchor_set: Set[str] = set(valid_seeds)
+        if auto_anchors_per_seed > 0:
+            for sid in valid_seeds:
+                for anchor_id in _pick_anchors_around_seed(
+                    sid, g, node_by_id, k=auto_anchors_per_seed,
+                ):
+                    anchor_set.add(anchor_id)
+                    visible.add(anchor_id)  # guarantee anchors are visible
+
         # Inter-visible edges only.
         edges_out: List[Dict] = []
         seen_edge_ids: Set[str] = set()
@@ -334,23 +391,22 @@ def compute_seed_graph(
                 "confidence": float(e.confidence or 0.5),
             })
 
-        # Assign each visible node a `primary_seed_id` — the seed it should
-        # cluster under in the layout. For seeds themselves, primary = self.
-        # For non-seeds: shortest-path to the nearest seed in the visible
-        # subgraph (BFS on the visible-only adjacency, edge weights ignored
-        # for the v0 layout signal). If no path (rare), fall back to the
-        # first seed.
+        # Assign each visible node a `primary_anchor_id` — the anchor it
+        # should cluster under in the layout. Anchors are seeds plus the
+        # auto-promoted top-K first-degree neighbors per seed. For an anchor
+        # itself, primary = self. For non-anchors: shortest path to the
+        # nearest anchor in the visible subgraph.
         visible_subgraph = g.subgraph(visible).copy()
         primary_by_node: Dict[str, str] = {}
-        seed_list_for_fallback = list(valid_seeds) or [next(iter(visible))]
+        anchor_list_for_fallback = list(anchor_set) or list(valid_seeds) or [next(iter(visible))]
 
         for nid in visible:
-            if nid in seed_set:
+            if nid in anchor_set:
                 primary_by_node[nid] = nid
                 continue
             best_seed = None
             best_dist = float("inf")
-            for sid in valid_seeds:
+            for sid in anchor_set:
                 if not visible_subgraph.has_node(sid):
                     continue
                 try:
@@ -360,11 +416,17 @@ def compute_seed_graph(
                         best_seed = sid
                 except (nx.NetworkXNoPath, nx.NodeNotFound):
                     continue
-            primary_by_node[nid] = best_seed or seed_list_for_fallback[0]
+            primary_by_node[nid] = best_seed or anchor_list_for_fallback[0]
+
+        # Pull global layout positions. Lazy-computed on first call. Each
+        # node has a stable (x, y) regardless of which query brought it in.
+        from app.me.layout import get_layout
+        layout = get_layout()
 
         nodes_out: List[Dict] = []
         for nid in visible:
             n = node_by_id[nid]
+            pos = layout.get(nid, (0.0, 0.0))
             nodes_out.append({
                 "id": nid,
                 "label": n.label or "",
@@ -377,7 +439,10 @@ def compute_seed_graph(
                 "importance": float(n.importance or 0.5),
                 "pagerank_score": float(scores.get(nid, 0.0)),
                 "is_seed": nid in seed_set,
-                "primary_seed_id": primary_by_node.get(nid),
+                "is_anchor": nid in anchor_set,
+                "primary_anchor_id": primary_by_node.get(nid),
+                "x": float(pos[0]),
+                "y": float(pos[1]),
             })
 
         result = SeedGraphResult(

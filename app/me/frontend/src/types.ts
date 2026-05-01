@@ -18,7 +18,12 @@ export interface LensNode {
   importance: number;
   pagerank_score: number;
   is_seed: boolean;
-  primary_seed_id: string | null;
+  is_anchor: boolean;
+  primary_anchor_id: string | null;
+  // Global stable map position. Same node always has the same (x, y)
+  // regardless of which query brought it into view.
+  x: number;
+  y: number;
 }
 
 export interface LensEdge {
