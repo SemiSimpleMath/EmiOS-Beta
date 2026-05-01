@@ -7,10 +7,6 @@ Use this tool to read/control Nest thermostat state.
   - `set_fan_mode`           → CHANGE THE FAN. Requires `fan_mode`.
   - `set_eco_mode`           → ECO ON/OFF. Requires `enabled`.
 
-The action name is `set_target_temperature` (NOT `set_temperature`,
-NOT `set_temp`, NOT `change_temperature`). Pass the exact name above.
-Aliases are accepted but the canonical name is what you should emit.
-
 Conditional fields (only the one matching your action):
   - `target_temperature` — single Fahrenheit number (e.g. 70). Required for `set_target_temperature`.
   - `mode`               — `HEAT`, `COOL`, `HEATCOOL`, or `OFF`. Required for `set_mode`. Uppercase, no underscores.
@@ -20,11 +16,7 @@ Conditional fields (only the one matching your action):
 Optional:
   - `device_id` — target a specific thermostat (omit for the default).
 
-ONE ACTION PER CALL. If the user wants both a mode change and a target
-temperature ("set it to cool at 70"), make TWO sequential calls:
+One action per call. For combined intents ("set it to cool at 70"),
+issue two sequential calls:
   1. `nest_home_control(action="set_mode", mode="COOL")`
   2. `nest_home_control(action="set_target_temperature", target_temperature=70)`
-
-Don't try to bundle `mode` and `target_temperature` into a single
-call — the bridge will run only the action you named and ignore the
-extra arg.
