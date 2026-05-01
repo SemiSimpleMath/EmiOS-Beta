@@ -4,11 +4,19 @@ Status: draft for discussion. No code yet.
 
 ## TL;DR
 
-Emi's runtime (DI, agents, managers, orchestrators, tools, KG, pods, blackboard) does not depend on Flask. Flask is one of several front-ends: it routes HTTP / WebSocket traffic into `process_request` and out via socketio / event_hub. Strip it away and the same runtime is callable from a Python entry point.
+**The right mental model: CLI isn't a separate runtime. It's just another room.** `cli_room` has a policy, a manager, a scope, a chat history — exactly like master_room or kg_dev_room. The thing that's "CLI" is the *transport* the user chose to talk to that room with. Two transports work, independently:
 
-A CLI version of Emi is therefore mechanically simple — bootstrap DI, build a `Message`, invoke a manager or orchestrator, print the result. The interesting design questions are not "can it be done" but "what does it cost to maintain a second front-end" and "what scope is it allowed to touch."
+- **Browser / Flask UI.** A `/cli` page renders a terminal-styled chat against `cli_room`. No new runtime, no new bootstrap, no daemon. Same Flask, same socketio, just a different room being addressed and a different CSS for the page.
+- **Actual command line.** A Python entry point bootstraps DI without Flask, posts a Message to `cli_room`, prints the result. No browser involved.
 
-This doc proposes three CLI shapes (one-shot, REPL, headless daemon), defines a `cli_room` policy + scope, and lays out a phased path: ship the one-shot first, evaluate, then decide on REPL and daemon.
+Both transports route to the same `cli_room` and the same manager runs in both cases. So "make CLI" is two small projects done independently:
+
+1. **Build `cli_room`** (room policy + chat-styled manager). One small build. Available immediately in the Flask UI as a `/cli` page.
+2. **Build the headless transport** (terminal entry point that bypasses Flask). A second small build. Worthwhile when you want to script Emi from a shell.
+
+A third axis — **headless daemon mode** (no UI, no CLI prompt, Emi-as-service) — IS genuinely a different runtime question, because that's about whether Flask runs at all and whether dayflow ticks autonomously. We treat that separately from the room/transport story.
+
+This doc walks through all three concerns and proposes phases that ship `cli_room` first (smallest, most value), terminal-transport second, daemon last.
 
 ## Goals
 
@@ -25,64 +33,74 @@ This doc proposes three CLI shapes (one-shot, REPL, headless daemon), defines a 
 - Streaming token output. Manager / orchestrator results are emitted as a single ToolResult / final_answer. Streaming would be a later add.
 - Browser-driving tools (`playwright_manager`, web_*). Those need a browser process; out of scope for CLI v1. CLI's cli_room policy will exclude them.
 
-## Three CLI shapes
+## Two axes: transport vs room
 
-### Mode A — one-shot
+Two questions to answer separately:
 
-```
-$ emi-cli "find duplicate Person nodes"
-Found 4 candidate pairs:
-  Isa (d6ce2baf) ↔ Jorma (41fb3423)
-  ...
-```
+1. **Which room is the user talking to?** That determines the manager, the chat_gate (or absence of one), the discipline, the allowed tools, the authority. Today we have master_room, kg_dev_room, slack rooms, telegram rooms, etc. Adding `cli_room` is a small additive change.
+2. **What transport delivers the message?** Today: Flask HTTP/WebSocket. We can add: terminal stdin/stdout. Both can address any room.
 
-- Entry point: `app/cli/emi_cli.py` (or `emi-cli` script in repo root).
-- Boots DI, builds one Message, invokes the chosen manager or orchestrator, prints `final_answer.final_answer_answer`, exits.
-- Default target: `kg_dev_manager` (the specialized KG manager). Override via `--manager` flag.
-- Default authority: 99 (developer at the keyboard).
-- No session persistence. Each invocation is independent.
+The matrix:
 
-Use cases: maintenance scripts, ops one-liners, CI checks, bash-piped operations.
+| | Browser/Flask | Terminal |
+|---|---|---|
+| **master_room** | works today (the UI you use) | could work — if you wanted to chat with master_room from a shell, the entry point lets you |
+| **kg_dev_room** | works today (the `/kg-dev` page we just built) | could work — same |
+| **cli_room** (new) | a `/cli` page rendered terminal-style | a `emi` shell command |
 
-### Mode B — REPL
+Both transports → cli_room is the "two ways to use the same dev console" path. Same manager, same chat_gate (if any), same scope, same audit log. The user picks the transport based on whether they're in a browser tab or a shell.
 
-```
-$ emi-cli
-emi> find duplicate Person nodes
-[5/10] kg_query: ...
-Found 4 candidate pairs.
-emi> merge d6ce2baf into 41fb3423
-✓ Merged 'Isa' into 'Jorma'. revision_log_id=e7ba2f4e
-emi> ^D
-```
+## What `cli_room` actually is
 
-- Same entry point with `--repl` flag (or no args).
-- Persists transcript to `~/.emi_cli/sessions/<session_id>.jsonl` — same JSONL shape Claude Code uses (one event per line).
-- `--continue` resumes the most recent session. `--session <id>` resumes a specific one.
-- Recent transcript is fed to chat_gate so the agent sees context across turns.
-- Single-thread input; while a manager is running, terminal is blocked. Ctrl-C cancels.
+A new room directory: `app/assistant/rooms/cli_room/`. Six files (policy, permissions, access, identity, conversation, room_context). Mirrors kg_dev_room's shape closely. Key choices:
 
-Use cases: interactive debugging, exploratory investigation, "developer console for everything".
+- `manager_name`: probably `kg_dev_room_manager` for v1 (the chat_gate-fronted KG console). cli_room could swap to a different manager once the coder agent ships, or even have a router up front that picks "kg work? coding work? something else?"
+- `surface: "cli"` — distinguishes outbound rendering. Flask UI uses different CSS for `surface=cli` (monospace, no avatars, no chat bubbles); terminal transport renders to stdout. Both honor "this is a CLI room, format accordingly."
+- `authority_level: 99` — developer console.
+- `history.scope: "session"` — the chat_gate's `recent_history` injection picks up prior turns within the session.
 
-### Mode C — headless daemon
+That's the entire room build. ~10 lines of JSON, copy-pasted from kg_dev_room with minor edits.
 
-```
-$ emi-daemon --config emi.daemon.toml
-[2026-05-01 10:00:00] dayflow tick: 2 new email rows ingested
-[2026-05-01 10:00:03] dispatched ticket #t_abc to telegram:jukka
-[2026-05-01 10:00:15] routine: nightly_kg_maintenance starting
-...
-```
+The `/cli` Flask page is also small: a template that renders cli_room's chat history with terminal styling, posts to the existing `/process_request` endpoint, room_id=cli_room. ~50 lines of HTML+JS, ~20 lines of route. Half-day total.
 
-- Same code as REPL but with stdin disabled and a daemon config.
-- Runs `dayflow_orchestrator` ticking, `routine_manager`, `socket_manager` for outbound (Telegram, etc.).
-- Inputs come from existing ingress paths (email, Telegram, scheduled routines).
-- Outputs go to logs and configured outbound rooms (Telegram, SMS, etc.) — NOT to the (absent) UI.
-- Best for "Emi as a service on a server" without humans staring at it.
+**At this point you can use cli_room from a browser today.** It doesn't unlock anything new yet (kg_dev_room already does this), but the room exists, the routing is wired, and adding the terminal transport later is purely additive.
 
-Use cases: home-server Emi, VPS deployment, multi-machine setups where the UI is on one box and the worker is on another.
+## Three CLI shapes (transport + behavior combinations)
 
-**Phasing recommendation:** ship A first (single-shot, no session, no daemon). It's the smallest. Evaluate. Then decide on B and C separately.
+### Shape 1 — `/cli` page in Flask UI
+
+What it is: a browser tab styled like a terminal. Same back-end as the rest of Flask. Routes user input to cli_room → cli_room's manager → response → render.
+
+What it gets you: terminal-flavored interaction without a separate process. No bootstrap juggling, no SQLite-locking concerns, no daemon. Whenever Flask is running, this page is available.
+
+Effort: half a day. Mostly CSS and a thin route.
+
+### Shape 2 — terminal entry point (`emi` shell command)
+
+What it is: a Python entry point that bootstraps DI without Flask, posts a Message to cli_room (or any room you specify), prints the result, exits. Or runs a stdin-loop REPL persisting transcript to JSONL.
+
+What it gets you: scriptable Emi — pipes, shell composition, CI integration, no browser required.
+
+Effort: 1-2 days. Bootstrap-without-Flask is the largest piece. The room itself already exists from Shape 1, so this is purely about transport.
+
+Sub-shapes inside Shape 2:
+
+- **Single-shot.** `emi "find duplicate Person nodes"` — one message, one result, exit. Best for scripting.
+- **REPL.** `emi` with no args drops into a prompt. Each line is a Message. Persists transcript. Ctrl-C cancels current turn; Ctrl-D exits.
+
+Both are the same code; REPL is "single-shot in a loop with stdin input."
+
+### Shape 3 — headless daemon
+
+What it is: Emi running as a service with no UI and no interactive prompt. Dayflow ticks. Routines run on schedule. Inputs come from existing ingress (email, telegram, etc.). Outputs go to outbound channels (telegram, sms, log file).
+
+This is genuinely different from Shapes 1 and 2 because it's about whether Flask runs at all, not which room is addressed. It's "Emi the autonomous service" rather than "Emi the responsive interface."
+
+Effort: 2-3 days, separate from the room/transport work.
+
+Use cases: home-server Emi on a Pi, VPS deployment, multi-machine setups.
+
+**Phasing recommendation:** Shape 1 first (half day, available immediately in Flask). Shape 2 second (1-2 days, scriptable Emi). Shape 3 only if a real deployment target emerges.
 
 ## Architecture
 
@@ -99,42 +117,69 @@ Use cases: home-server Emi, VPS deployment, multi-machine setups where the UI is
 
 In other words: **almost everything**. The runtime never knew it was running inside Flask.
 
-### What's new
+### Shape 1 — `/cli` page in Flask UI
 
-A small CLI layer:
-
-```
-app/cli/
-├── emi_cli.py          # main entry point, arg parsing, dispatch
-├── cli_session.py      # transcript persistence (REPL only)
-├── cli_event_sink.py   # subscribes to event_hub, prints progress to stdout
-└── README.md
-```
-
-A new room:
+Net-new:
 
 ```
 app/assistant/rooms/cli_room/
-├── policy.json         # authority, scope_contract, retention
+├── policy.json
 ├── permissions.json
 ├── access.json
 ├── resource_identity.json
 ├── resource_conversation.json
 ├── resource_room_context.json
 └── resource_safety.json
+
+app/templates/cli.html       # terminal-styled page
+app/static/css/cli.css       # monospace, no chat bubbles
+app/static/js/cli.js         # send/receive against /process_request
+app/routes/cli.py            # GET /cli  → render template
 ```
 
-That's the entire net-new code. ~150 lines of CLI + a room directory.
+That's it. No new runtime. No new transport. Same Flask, same socketio, same `/process_request` endpoint. The only thing different about cli_room from kg_dev_room is what its manager allows and how the page renders.
+
+### Shape 2 — terminal entry point
+
+Net-new on top of Shape 1:
+
+```
+app/cli/
+├── emi.py              # entry point: arg parsing, dispatch, stdin loop
+├── cli_session.py      # transcript persistence (REPL mode)
+├── cli_event_sink.py   # subscribes to event_hub, prints progress to stdout
+└── README.md
+
+app/bootstrap_cli.py    # DI bootstrap that skips Flask things
+
+emi (or emi.bat)        # repo-root shell wrapper
+```
+
+About 250 lines of new code total.
+
+### Shape 3 — headless daemon
+
+Net-new on top of Shapes 1 and 2:
+
+```
+app/cli/
+├── emi_daemon.py       # daemon entry point, no stdin
+└── daemon_config.toml  # example config
+
+# plus pidfile / signal handling / outbound routing config
+```
+
+About 200 more lines, plus operational glue.
 
 ### What's removed
 
-Nothing. Flask remains the primary front-end. CLI is additive.
+Nothing. Flask remains the primary front-end. The new transports are additive.
 
-### What we touch (small edits)
+### What we touch (small edits, all shapes)
 
-- `app/bootstrap.py` — accept a `mode="cli" | "flask" | "daemon"` flag so Flask-only services (socketio binding, route registration) skip when not needed.
-- `event_hub` — add a CLI-aware sink alongside the existing socketio sink. Optional in v1 (CLI can ignore progress events).
-- Routine manager — needs a flag to disable scheduled ticking when running in one-shot mode (so you don't fire a routine in the middle of a single command).
+- `app/bootstrap.py` — refactor to extract Flask-specific initialization into `bootstrap_flask()` so `bootstrap_cli()` can reuse the rest. Trivial.
+- `event_hub` — ensure it can have multiple sinks (it probably already does for socketio + logging; CLI is just another sink).
+- `_resolve_reply_to` (in chat_task_router_node etc.) — handle `surface == "cli"` to route ack messages to stdout (Shape 2) or to a cli-styled emit (Shape 1).
 
 ## Entry-point sketch (Mode A)
 
@@ -300,18 +345,19 @@ This is the JSONL transcript pattern that's been working for Claude Code, Aider,
 
 ## SQLite concurrency
 
-Critical constraint: SQLite is single-writer. If both Flask and CLI-Emi target `emi.db` concurrently:
+Critical constraint: SQLite is single-writer. If both Flask and the terminal entry point target `emi.db` concurrently:
 
 - **Reads are fine** in WAL mode (which the project uses).
 - **Writes will conflict** under load. The user's existing rule (memory: `feedback_no_db_lock_over_llm`) already names this.
 
 So:
 
-- **Mode A (one-shot):** safe alongside Flask if the operation is short and read-mostly. Locking conflict is possible during writes (e.g. `kg_merge_nodes`); the manager would retry or fail.
-- **Mode B (REPL):** same caveat, but you're more likely to do bursts of writes. Practical advice in the doc: "stop Flask before opening the REPL for write-heavy work."
-- **Mode C (daemon):** mutually exclusive with Flask on the same DB. The daemon IS Emi for that machine.
+- **Shape 1 (`/cli` page in Flask UI):** no conflict. Same Flask process, no contention.
+- **Shape 2 (terminal one-shot):** safe alongside running Flask if the operation is short and read-mostly. Locking conflict is possible during writes (e.g. `kg_merge_nodes`); the manager would retry or fail.
+- **Shape 2 (terminal REPL):** same caveat, but more likely to do bursts of writes. Practical advice: "stop Flask before opening a REPL for write-heavy work."
+- **Shape 3 (daemon):** mutually exclusive with Flask on the same DB. The daemon IS Emi for that machine.
 
-A future hardening: a small lock file (`emi.db.cli.lock`) that CLI takes on launch for write-intensive modes; Flask's `process_request` can check for it and refuse to start a new turn while CLI holds it. Out of scope for v1.
+A future hardening: a small lock file (`emi.db.cli.lock`) that the terminal transport takes on launch for write-intensive sessions; Flask's `process_request` can check for it and refuse to start a new turn while the CLI holds it. Out of scope for v1.
 
 ## What we reuse vs. build
 
@@ -338,48 +384,51 @@ Edit (small):
 
 ## Phasing
 
-**Phase 1 — Mode A only (1-2 days):**
+**Phase 1 — Shape 1 (`/cli` page in Flask UI, half day):**
 
-1. `app/bootstrap_cli.py`.
-2. `app/cli/emi_cli.py` for one-shot.
-3. `cli_room/` policy.
-4. `_resolve_reply_to` handles cli surface (no-op or stdout print).
-5. `--manager`, `--orchestrator`, `--authority`, `--json` flags.
-6. Smoke test: invoke `kg_dev_manager` with a known task; verify result matches Flask output.
+1. `app/assistant/rooms/cli_room/` — six JSON files, copy-edited from kg_dev_room.
+2. `app/routes/cli.py` — GET /cli renders the template.
+3. `app/templates/cli.html` + `app/static/css/cli.css` — terminal styling.
+4. `app/static/js/cli.js` — POST to existing `/process_request` with room_id=cli_room.
+5. Verify the existing chat_gate / scope / approval guards work unchanged.
 
-Ship and use. Validates the runtime can be driven without Flask. Probably 90% of the value.
+Ship same-day. Available immediately whenever Flask is running. This validates that "cli is just a room" works and doesn't unlock anything new yet — but the room exists, the routing is wired, and Shape 2 layers on cleanly afterward.
 
-**Phase 2 — Mode B (REPL, +1 day):**
+**Phase 2 — Shape 2 (terminal transport, 1-2 days):**
 
-1. `cli_session.py` for JSONL transcripts.
-2. `--repl`, `--continue`, `--session` flags.
-3. Stdin loop, blackboard re-seeding from transcript.
-4. `cli_event_sink.py` for progress lines.
+1. `app/bootstrap_cli.py` — DI bootstrap without Flask.
+2. `app/cli/emi.py` — entry point; one-shot mode (`emi "task"`) and REPL mode (`emi` with no args).
+3. `app/cli/cli_session.py` — JSONL transcript persistence (REPL only).
+4. `app/cli/cli_event_sink.py` — event_hub subscriber printing progress to stdout.
+5. `_resolve_reply_to` handles `surface=cli` for stdout output.
+6. `--room`, `--manager`, `--orchestrator`, `--authority`, `--json` flags.
+7. Smoke test: invoke `kg_dev_manager` from a shell; verify result matches Flask output.
 
-Ship after Phase 1 has been used for a week and we know what's missing.
+Ship after Phase 1. Adds the scriptable / pipeable Emi.
 
-**Phase 3 — Mode C (daemon, +2-3 days):**
+**Phase 3 — Shape 3 (headless daemon, 2-3 days):**
 
-1. `app/cli/emi_daemon.py` — different entry, no stdin.
+1. `app/cli/emi_daemon.py` — daemon entry point.
 2. Daemon config file format (toml or yaml).
 3. Disable Flask routes in bootstrap; enable scheduler / dayflow ticking.
-4. Outbound routing — telegram / SMS / log file as default reply destinations.
+4. Outbound routing — telegram / SMS / log file as default reply destinations (no UI to receive them).
 5. Process management — pidfile, signal handling, graceful shutdown.
 6. SQLite single-writer enforcement — refuse to start if another process holds the lock.
 
-Ship only if there's a concrete deployment target. Mode C is real ops work.
+Ship only if there's a concrete deployment target. Phase 3 is real ops work.
 
 ## Use cases that justify the effort
 
-For each, mark which mode covers it:
+For each, mark which shape covers it:
 
-- **"Find every duplicate Person node and propose merges"** — Mode A. Single command, structured output, pipe to a review tool.
-- **"Investigate the KG interactively for an hour"** — Mode B. REPL with session history.
-- **"Run the nightly KG maintenance batch"** — Mode A or C. Single command can be cron'd; daemon ticks naturally.
-- **"Build an integration test suite that exercises real managers"** — Mode A. CLI is the test harness.
-- **"Run Emi on a Raspberry Pi at home, no monitor, talks to Telegram"** — Mode C.
-- **"Pipe email content into Emi, get a structured summary, pipe to next tool"** — Mode A with `--json`.
-- **"Debug why a manager's prompt is producing weird output"** — Mode A or B; in either, the LLM call still goes through, you can `--verbose` to see prompt construction.
+- **"Browser-based terminal-styled chat against the dev console"** — Shape 1. The `/cli` page. No new transport needed.
+- **"Find every duplicate Person node and propose merges from a shell"** — Shape 2 (one-shot). Single command, structured output, pipe to a review tool.
+- **"Investigate the KG interactively for an hour from a terminal"** — Shape 2 (REPL). Session history persisted to JSONL.
+- **"Run the nightly KG maintenance batch"** — Shape 2 (cron'd one-shot) or Shape 3 (daemon ticks naturally).
+- **"Build an integration test suite that exercises real managers"** — Shape 2 (one-shot). CLI is the test harness.
+- **"Run Emi on a Raspberry Pi at home, no monitor, talks to Telegram"** — Shape 3.
+- **"Pipe email content into Emi, get a structured summary, pipe to next tool"** — Shape 2 with `--json`.
+- **"Debug why a manager's prompt is producing weird output"** — Shape 1 or 2. Both walk the same runtime; pick by what's faster to launch.
 
 ## Risks
 
