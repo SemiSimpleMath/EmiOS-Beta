@@ -334,6 +334,34 @@ def compute_seed_graph(
                 "confidence": float(e.confidence or 0.5),
             })
 
+        # Assign each visible node a `primary_seed_id` — the seed it should
+        # cluster under in the layout. For seeds themselves, primary = self.
+        # For non-seeds: shortest-path to the nearest seed in the visible
+        # subgraph (BFS on the visible-only adjacency, edge weights ignored
+        # for the v0 layout signal). If no path (rare), fall back to the
+        # first seed.
+        visible_subgraph = g.subgraph(visible).copy()
+        primary_by_node: Dict[str, str] = {}
+        seed_list_for_fallback = list(valid_seeds) or [next(iter(visible))]
+
+        for nid in visible:
+            if nid in seed_set:
+                primary_by_node[nid] = nid
+                continue
+            best_seed = None
+            best_dist = float("inf")
+            for sid in valid_seeds:
+                if not visible_subgraph.has_node(sid):
+                    continue
+                try:
+                    d = nx.shortest_path_length(visible_subgraph, source=sid, target=nid)
+                    if d < best_dist:
+                        best_dist = d
+                        best_seed = sid
+                except (nx.NetworkXNoPath, nx.NodeNotFound):
+                    continue
+            primary_by_node[nid] = best_seed or seed_list_for_fallback[0]
+
         nodes_out: List[Dict] = []
         for nid in visible:
             n = node_by_id[nid]
@@ -349,6 +377,7 @@ def compute_seed_graph(
                 "importance": float(n.importance or 0.5),
                 "pagerank_score": float(scores.get(nid, 0.0)),
                 "is_seed": nid in seed_set,
+                "primary_seed_id": primary_by_node.get(nid),
             })
 
         result = SeedGraphResult(

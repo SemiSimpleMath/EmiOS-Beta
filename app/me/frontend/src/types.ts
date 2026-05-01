@@ -18,6 +18,7 @@ export interface LensNode {
   importance: number;
   pagerank_score: number;
   is_seed: boolean;
+  primary_seed_id: string | null;
 }
 
 export interface LensEdge {
