@@ -92,17 +92,13 @@ class StateMoverPrepNode(ControlNode):
         from app.assistant.pipelines.dayflow.utils.context_sources import (
             get_responded_tickets_categorized,
         )
-        _DAYFLOW_TYPES = {"dayflow_advice", "dayflow_notify", "dayflow_decision"}
-        raw_responded = get_responded_tickets_categorized(
+        # Scope to dayflow tickets at the DB layer — the formatted dict from
+        # get_responded_tickets_categorized() does not carry ticket_type, so a
+        # downstream filter on it would silently drop everything (and did).
+        responded_tickets = get_responded_tickets_categorized(
             since_utc=now_utc - timedelta(hours=2),
+            ticket_type="dayflow_orchestrator",
         )
-        responded_tickets = {
-            category: [
-                t for t in tickets
-                if str(t.get("ticket_type") or "").lower() in _DAYFLOW_TYPES
-            ]
-            for category, tickets in raw_responded.items()
-        }
 
         self.blackboard.update_state_value("active_dayflow_items", active_items)
         self.blackboard.update_state_value("active_plan_synopses", plan_synopses)

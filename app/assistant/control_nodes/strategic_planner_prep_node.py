@@ -23,6 +23,13 @@ logger = get_logger(__name__)
 _CHAT_HISTORY_HOURS = 12
 _ACTION_LOG_HOURS = 18
 
+# Dayflow tickets carry ticket_type="dayflow_orchestrator". The older values
+# (dayflow_advice / dayflow_notify / dayflow_decision) were renamed; the
+# filter below was not. Without this fix, every dayflow ticket — active OR
+# responded — was filtered out before reaching the planner, hiding user
+# directives like "Email it to katy" written into ticket replies.
+_DAYFLOW_TYPES = frozenset({"dayflow_orchestrator"})
+
 
 def _enrich_for_prompt(item: Dict[str, Any], now_utc: datetime) -> Dict[str, Any]:
     """Wrap item with computed presentation fields, preserving metadata shape."""
@@ -98,7 +105,6 @@ def _load_active_tickets() -> List[Dict[str, Any]]:
     """Load active dayflow tickets from the ticket manager."""
     from app.assistant.ticket_manager import get_ticket_manager, TicketState
 
-    _DAYFLOW_TYPES = {"dayflow_advice", "dayflow_notify", "dayflow_decision"}
     active = get_ticket_manager().get_tickets(
         states=[TicketState.PENDING, TicketState.PROPOSED, TicketState.SNOOZED],
         limit=50,
@@ -123,20 +129,20 @@ def _load_active_tickets() -> List[Dict[str, Any]]:
 
 
 def _load_responded_tickets(since_utc: datetime) -> Dict[str, List[Dict[str, Any]]]:
-    """Load recent ticket responses categorized by action."""
+    """Load recent ticket responses categorized by action.
+
+    Scopes to dayflow tickets at the DB layer because the formatter dict
+    returned by get_responded_tickets_categorized() does not include the
+    ticket_type field — a downstream filter on it would be a no-op.
+    """
     from app.assistant.pipelines.dayflow.utils.context_sources import (
         get_responded_tickets_categorized,
     )
 
-    _DAYFLOW_TYPES = {"dayflow_advice", "dayflow_notify", "dayflow_decision"}
-    raw = get_responded_tickets_categorized(since_utc=since_utc)
-    return {
-        category: [
-            t for t in tickets
-            if str(t.get("ticket_type") or "").lower() in _DAYFLOW_TYPES
-        ]
-        for category, tickets in raw.items()
-    }
+    return get_responded_tickets_categorized(
+        since_utc=since_utc,
+        ticket_type="dayflow_orchestrator",
+    )
 
 
 _WATERMARK_PATH = None  # Lazy init
