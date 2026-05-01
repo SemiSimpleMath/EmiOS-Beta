@@ -248,11 +248,54 @@ class KGMutatorTool(BaseTool):
             in_edges = session.query(Edge).filter(Edge.target_id == fold_id).all()
             out_edges = session.query(Edge).filter(Edge.source_id == fold_id).all()
 
+            # Index keep's existing edges so we can detect collisions BEFORE the
+            # rewrite hits the (source_id, target_id, relationship_type) UNIQUE
+            # constraint. Two ways a collision arises:
+            #   (a) keep already has the same (other_endpoint, rel_type) pair —
+            #       rewriting fold's edge to point at keep would duplicate it.
+            #   (b) the fold edge connects fold↔keep — rewriting both/one
+            #       endpoint would create a self-loop (source==target).
+            # In both cases we drop the redundant fold edge instead of rewriting.
+            keep_in_keys = {
+                (e.source_id, (e.relationship_type or "").strip().lower())
+                for e in session.query(Edge).filter(Edge.target_id == keep_id).all()
+            }
+            keep_out_keys = {
+                (e.target_id, (e.relationship_type or "").strip().lower())
+                for e in session.query(Edge).filter(Edge.source_id == keep_id).all()
+            }
+
+            in_edges_to_rewrite: List[Edge] = []
+            in_edges_to_drop: List[Edge] = []
+            for e in in_edges:
+                rel = (e.relationship_type or "").strip().lower()
+                if e.source_id == keep_id or e.source_id == fold_id:
+                    # fold↔keep or fold↔fold becomes a self-loop after rewrite.
+                    in_edges_to_drop.append(e)
+                elif (e.source_id, rel) in keep_in_keys:
+                    in_edges_to_drop.append(e)
+                else:
+                    in_edges_to_rewrite.append(e)
+
+            out_edges_to_rewrite: List[Edge] = []
+            out_edges_to_drop: List[Edge] = []
+            for e in out_edges:
+                rel = (e.relationship_type or "").strip().lower()
+                if e.target_id == keep_id or e.target_id == fold_id:
+                    out_edges_to_drop.append(e)
+                elif (e.target_id, rel) in keep_out_keys:
+                    out_edges_to_drop.append(e)
+                else:
+                    out_edges_to_rewrite.append(e)
+
             before = {
                 "keep": _node_snapshot(keep),
                 "fold": _node_snapshot(fold),
                 "in_edges": [_edge_snapshot(e) for e in in_edges],
                 "out_edges": [_edge_snapshot(e) for e in out_edges],
+                "dropped_redundant_edges": [
+                    _edge_snapshot(e) for e in (in_edges_to_drop + out_edges_to_drop)
+                ],
             }
 
             # Build the after preview: aliases unioned, edges rewritten.
@@ -266,10 +309,13 @@ class KGMutatorTool(BaseTool):
                 "keep": {**_node_snapshot(keep), "aliases": new_aliases},
                 "fold": "DELETED",
                 "rewritten_in_edges": [
-                    {**_edge_snapshot(e), "target_id": keep_id} for e in in_edges
+                    {**_edge_snapshot(e), "target_id": keep_id} for e in in_edges_to_rewrite
                 ],
                 "rewritten_out_edges": [
-                    {**_edge_snapshot(e), "source_id": keep_id} for e in out_edges
+                    {**_edge_snapshot(e), "source_id": keep_id} for e in out_edges_to_rewrite
+                ],
+                "dropped_redundant_edges": [
+                    _edge_snapshot(e) for e in (in_edges_to_drop + out_edges_to_drop)
                 ],
             }
 
@@ -279,16 +325,23 @@ class KGMutatorTool(BaseTool):
                     content=(
                         f"DRY RUN: would merge {fold.label!r} ({fold_id[:8]}) into "
                         f"{keep.label!r} ({keep_id[:8]}); "
-                        f"rewrite {len(in_edges)} incoming + {len(out_edges)} outgoing edges; "
+                        f"rewrite {len(in_edges_to_rewrite)} incoming + "
+                        f"{len(out_edges_to_rewrite)} outgoing edges; "
+                        f"drop {len(in_edges_to_drop) + len(out_edges_to_drop)} redundant edge(s); "
                         f"add {len(new_aliases) - len(keep.aliases or [])} alias(es)."
                     ),
                     data={"ok": True, "dry_run": True, "before": before, "after": after_preview},
                 ))
 
-            # Commit the rewrites.
-            for e in in_edges:
+            # Drop redundant edges first so the rewrite below can't collide
+            # with a row that's about to be replaced anyway.
+            for e in in_edges_to_drop + out_edges_to_drop:
+                session.delete(e)
+            session.flush()
+
+            for e in in_edges_to_rewrite:
                 e.target_id = keep_id
-            for e in out_edges:
+            for e in out_edges_to_rewrite:
                 e.source_id = keep_id
             keep.aliases = new_aliases
             # Flush BEFORE delete so the FK CASCADE on Edge.{source,target}_id
@@ -309,18 +362,21 @@ class KGMutatorTool(BaseTool):
                 agent_id=self._agent_id(tool_message),
             )
 
+            rewritten_count = len(in_edges_to_rewrite) + len(out_edges_to_rewrite)
+            dropped_count = len(in_edges_to_drop) + len(out_edges_to_drop)
             return self.publish_result(ToolResult(
                 result_type="kg_merge_nodes",
                 content=(
                     f"Merged {fold.label!r} into {keep.label!r}. "
-                    f"Rewrote {len(in_edges) + len(out_edges)} edge(s); "
+                    f"Rewrote {rewritten_count} edge(s), dropped {dropped_count} redundant; "
                     f"aliases now {new_aliases}. "
                     f"revision_log_id={rid}"
                 ),
                 data={
                     "ok": True,
                     "revision_log_id": rid,
-                    "edges_rewritten": len(in_edges) + len(out_edges),
+                    "edges_rewritten": rewritten_count,
+                    "edges_dropped_redundant": dropped_count,
                     "new_aliases": new_aliases,
                 },
             ))
