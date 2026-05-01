@@ -42,6 +42,7 @@ export default function App() {
 
   const nodes = data?.nodes ?? [];
   const edges = data?.edges ?? [];
+  const bridgeEdges = data?.bridge_edges ?? [];
 
   const seedNodeMap = useMemo(() => {
     const m = new Map<string, LensNode>();
@@ -134,6 +135,7 @@ export default function App() {
       <GraphCanvas
         nodes={nodes}
         edges={edges}
+        bridgeEdges={bridgeEdges}
         onNodeClick={handleNodeClick}
       />
 

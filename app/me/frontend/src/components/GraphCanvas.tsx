@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ForceGraph2D from "react-force-graph-2d";
-import { LensEdge, LensNode } from "../types";
+import { LensBridgeEdge, LensEdge, LensNode } from "../types";
 
 interface ForceNode {
   id: string;
@@ -12,6 +12,7 @@ interface ForceNode {
   importance: number;
   photo_url: string | null;
   primary_anchor_id: string | null;
+  lod_tier: number;
   // d3-force runtime fields. We PIN every node via fx/fy from the global
   // map layout, so the engine doesn't actually move anything.
   x?: number;
@@ -27,13 +28,25 @@ interface ForceLink {
   target: string | ForceNode;
   relationship_type: string;
   importance: number;
+  is_bridge: boolean;
+  bridge_label: string;
 }
 
 interface Props {
   nodes: LensNode[];
   edges: LensEdge[];
+  bridgeEdges: LensBridgeEdge[];
   onNodeClick: (node: LensNode, event: MouseEvent) => void;
 }
+
+// Zoom thresholds for LOD. globalScale is roughly the zoom factor —
+// higher = more zoomed in.
+//   < FAR_ZOOM    : "California" view. Persons + bridge edges only.
+//   FAR–MID_ZOOM  : States/events appear with their real edges.
+//                   Bridge edges hide (real edges replace them).
+//   ≥ MID_ZOOM    : Everything else (minor entities) appears too.
+const FAR_ZOOM = 0.45;
+const MID_ZOOM = 1.0;
 
 // Visual hierarchy: entities = rounded-rectangle boxes; states/goals = small
 // subdued chips that read as edge-decorations.
@@ -198,10 +211,19 @@ function drawOrthogonalLink(
   ctx.stroke();
 }
 
-export function GraphCanvas({ nodes, edges, onNodeClick }: Props) {
+export function GraphCanvas({
+  nodes,
+  edges,
+  bridgeEdges,
+  onNodeClick,
+}: Props) {
   const photoCache = useRef<Map<string, HTMLImageElement>>(new Map());
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fgRef = useRef<any>(null);
+  // Track current zoom so LOD decisions update on pan/zoom.
+  const [zoom, setZoom] = useState(FAR_ZOOM);
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
 
   const graphData = useMemo(() => {
     const fNodes: ForceNode[] = nodes.map((n) => ({
@@ -214,21 +236,33 @@ export function GraphCanvas({ nodes, edges, onNodeClick }: Props) {
       importance: n.importance,
       photo_url: null,
       primary_anchor_id: n.primary_anchor_id,
-      // Pin every node at its global map position. The d3 sim won't move
-      // pinned nodes, so the layout is fully deterministic.
+      lod_tier: n.lod_tier ?? 0,
+      // Pin every node at its global map position.
       x: n.x,
       y: n.y,
       fx: n.x,
       fy: n.y,
     }));
-    const fLinks: ForceLink[] = edges.map((e) => ({
+    // Real KG edges + synthetic bridge edges, both as ForceLinks. The
+    // is_bridge flag drives LOD visibility in drawLink.
+    const realLinks: ForceLink[] = edges.map((e) => ({
       source: e.source_id,
       target: e.target_id,
       relationship_type: e.relationship_type,
       importance: e.importance,
+      is_bridge: false,
+      bridge_label: "",
     }));
-    return { nodes: fNodes, links: fLinks };
-  }, [nodes, edges]);
+    const bridgeLinks: ForceLink[] = bridgeEdges.map((b) => ({
+      source: b.source_id,
+      target: b.target_id,
+      relationship_type: "",
+      importance: 0.6,
+      is_bridge: true,
+      bridge_label: b.label,
+    }));
+    return { nodes: fNodes, links: [...realLinks, ...bridgeLinks] };
+  }, [nodes, edges, bridgeEdges]);
 
   // Map mode: every node is pinned via fx/fy from the backend's global
   // layout. We zero out the d3-force "charge" so the engine doesn't try
@@ -271,6 +305,13 @@ export function GraphCanvas({ nodes, edges, onNodeClick }: Props) {
 
   const drawNode = useCallback(
     (node: ForceNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
+      // LOD visibility: at far zoom only tier-0 nodes (persons + seeds);
+      // at mid zoom tiers 0–1; at close zoom everything. Seeds are always
+      // visible regardless of tier.
+      if (!node.is_seed && !node.is_anchor) {
+        if (globalScale < FAR_ZOOM && (node.lod_tier ?? 0) > 0) return;
+        if (globalScale < MID_ZOOM && (node.lod_tier ?? 0) > 1) return;
+      }
       const isState = STATE_TYPES.has(node.node_type);
       const isSeed = node.is_seed;
       const x = node.x ?? 0;
@@ -376,9 +417,33 @@ export function GraphCanvas({ nodes, edges, onNodeClick }: Props) {
         return;
       }
 
-      // Viewport-cull: if either endpoint is offscreen (with a small margin
-      // for edges that originate from a just-offscreen node), skip drawing.
-      // Without this, panning shows edges flying off into emptiness.
+      // LOD: at far zoom show only person↔person bridge edges; at mid+
+      // zoom show real KG edges (and hide bridges since they're
+      // redundant with the visible state nodes).
+      if (globalScale < FAR_ZOOM) {
+        if (!link.is_bridge) return;
+      } else {
+        if (link.is_bridge) return;
+      }
+
+      // Suppress edges to nodes that LOD has hidden.
+      if (
+        !src.is_seed && !src.is_anchor &&
+        ((globalScale < FAR_ZOOM && (src.lod_tier ?? 0) > 0) ||
+          (globalScale < MID_ZOOM && (src.lod_tier ?? 0) > 1))
+      ) {
+        return;
+      }
+      if (
+        !tgt.is_seed && !tgt.is_anchor &&
+        ((globalScale < FAR_ZOOM && (tgt.lod_tier ?? 0) > 0) ||
+          (globalScale < MID_ZOOM && (tgt.lod_tier ?? 0) > 1))
+      ) {
+        return;
+      }
+
+      // Viewport-cull: if either endpoint is offscreen (with a small margin)
+      // skip drawing — without this, panning shows edges flying off-screen.
       const fg = fgRef.current;
       if (fg && typeof fg.screen2GraphCoords === "function") {
         const canvas = ctx.canvas;
@@ -440,6 +505,18 @@ export function GraphCanvas({ nodes, edges, onNodeClick }: Props) {
       nodeCanvasObject={drawNode}
       nodePointerAreaPaint={nodePointerArea}
       onNodeClick={handleClick}
+      onZoom={({ k }: { k: number }) => {
+        // Re-render only when zoom crosses an LOD threshold to avoid a
+        // re-render per pixel of mouse-wheel motion.
+        const cur = zoomRef.current;
+        const wasFar = cur < FAR_ZOOM;
+        const wasMid = cur >= FAR_ZOOM && cur < MID_ZOOM;
+        const isFar = k < FAR_ZOOM;
+        const isMid = k >= FAR_ZOOM && k < MID_ZOOM;
+        if (wasFar !== isFar || wasMid !== isMid) {
+          setZoom(k);
+        }
+      }}
       cooldownTicks={0}
       warmupTicks={0}
       d3AlphaDecay={1}

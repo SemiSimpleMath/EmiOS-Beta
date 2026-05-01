@@ -45,12 +45,27 @@ _CACHE_TTL_SECONDS = 30
 class SeedGraphResult:
     nodes: List[Dict]
     edges: List[Dict]
+    bridge_edges: List[Dict]
     pagerank: Dict[str, float]
     seeds: List[str]
     time_mode: str
     time_from: Optional[str]
     time_to: Optional[str]
     total_candidates: int
+
+
+def _lod_tier_for(node: "Node") -> int:
+    """LOD tier: 0 = always shown (persons + seeds), 1 = mid-zoom (states/events
+    /goals — the connective tissue), 2 = close-zoom only (everything else).
+    """
+    if node is None:
+        return 2
+    if _is_person(node):
+        return 0
+    nt = (node.node_type or "")
+    if nt in ("State", "Event", "Goal"):
+        return 1
+    return 2
 
 
 def _parse_iso_date(value: Optional[str]) -> Optional[date]:
@@ -118,6 +133,69 @@ def _node_active_in_window(
         return True
 
     return True
+
+
+def _is_person(n: "Node") -> bool:
+    return (
+        n is not None
+        and (n.node_type or "") == "Entity"
+        and (n.category or "").lower().strip() == "person"
+    )
+
+
+def _compute_bridge_edges(
+    visible: Set[str],
+    g: "nx.Graph",
+    node_by_id: Dict[str, "Node"],
+    *,
+    max_per_pair: int = 2,
+) -> List[Dict]:
+    """Synthetic person↔person edges that route via shared State/Event/Goal nodes.
+
+    KG modeling rule: two persons never connect directly — every relationship
+    runs through an intermediating State (Marriage, Parent, Career-with, ...).
+    For a far-zoom view that hides states, persons would otherwise look
+    disconnected. Bridge edges restore the visual connection while keeping
+    the relationship label (the state's label) as metadata.
+
+    Returns {id, source_id, target_id, via_node_id, label} dicts. Capped
+    to ``max_per_pair`` bridges per pair to avoid clutter.
+    """
+    person_ids: List[str] = [
+        nid for nid in visible if _is_person(node_by_id.get(nid))
+    ]
+    bridges: List[Dict] = []
+    BRIDGE_VIA_TYPES = {"State", "Event", "Goal"}
+
+    for i, a in enumerate(person_ids):
+        if not g.has_node(a):
+            continue
+        a_neighbors = set(g.neighbors(a))
+        for b in person_ids[i + 1:]:
+            if not g.has_node(b):
+                continue
+            shared = a_neighbors & set(g.neighbors(b))
+            if not shared:
+                continue
+            count_for_pair = 0
+            for via in shared:
+                via_node = node_by_id.get(via)
+                if via_node is None:
+                    continue
+                if (via_node.node_type or "") not in BRIDGE_VIA_TYPES:
+                    continue
+                bridges.append({
+                    "id": f"bridge:{a[:8]}:{b[:8]}:{via[:8]}",
+                    "source_id": a,
+                    "target_id": b,
+                    "via_node_id": via,
+                    "label": via_node.label or "",
+                })
+                count_for_pair += 1
+                if count_for_pair >= max_per_pair:
+                    break
+
+    return bridges
 
 
 def _pick_anchors_around_seed(
@@ -277,7 +355,7 @@ def compute_seed_graph(
             g.add_edge(sid, tid, weight=max(0.1, weight))
 
         if g.number_of_nodes() == 0:
-            empty = SeedGraphResult([], [], {}, seed_ids, time_mode, time_from, time_to, 0)
+            empty = SeedGraphResult([], [], [], {}, seed_ids, time_mode, time_from, time_to, 0)
             _CACHE[cache_key] = (now, empty)
             return empty
 
@@ -442,6 +520,11 @@ def compute_seed_graph(
         from app.me.layout import get_layout
         layout = get_layout(categories=list(cat_filter) if cat_filter else None)
 
+        # Bridge edges: synthetic person↔person connectors via shared
+        # State/Event/Goal neighbors. Used by the far-zoom view that hides
+        # state nodes — without bridges, persons would look disconnected.
+        bridge_edges_out = _compute_bridge_edges(visible, g, node_by_id)
+
         nodes_out: List[Dict] = []
         for nid in visible:
             n = node_by_id[nid]
@@ -460,6 +543,7 @@ def compute_seed_graph(
                 "is_seed": nid in seed_set,
                 "is_anchor": nid in anchor_set,
                 "primary_anchor_id": primary_by_node.get(nid),
+                "lod_tier": _lod_tier_for(n),
                 "x": float(pos[0]),
                 "y": float(pos[1]),
             })
@@ -467,6 +551,7 @@ def compute_seed_graph(
         result = SeedGraphResult(
             nodes=nodes_out,
             edges=edges_out,
+            bridge_edges=bridge_edges_out,
             pagerank={n["id"]: n["pagerank_score"] for n in nodes_out},
             seeds=valid_seeds,
             time_mode=time_mode,
@@ -477,9 +562,9 @@ def compute_seed_graph(
         _CACHE[cache_key] = (now, result)
 
         logger.info(
-            "compute_seed_graph: seeds=%s mode=%s window=%s..%s → %d/%d nodes, %d edges",
+            "compute_seed_graph: seeds=%s mode=%s window=%s..%s → %d/%d nodes, %d edges, %d bridges",
             valid_seeds, time_mode, time_from, time_to,
-            len(nodes_out), len(node_by_id), len(edges_out),
+            len(nodes_out), len(node_by_id), len(edges_out), len(bridge_edges_out),
         )
         return result
 

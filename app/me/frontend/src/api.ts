@@ -16,10 +16,12 @@ export async function fetchSeedGraph(opts: {
   if (opts.timeMode) params.set("time_mode", opts.timeMode);
   if (opts.timeFrom) params.set("time_from", opts.timeFrom);
   if (opts.timeTo) params.set("time_to", opts.timeTo);
-  // Persons-only experiment: default to person entities. Pass an empty
-  // array via opts.categories=[] to disable the filter.
-  const cats = opts.categories ?? ["person"];
-  if (cats.length > 0) params.set("categories", cats.join(","));
+  // No category filter by default — backend returns persons, states,
+  // and minor entities together, each with an lod_tier so the frontend
+  // can show/hide based on zoom.
+  if (opts.categories && opts.categories.length > 0) {
+    params.set("categories", opts.categories.join(","));
+  }
 
   const res = await fetch(`${API_BASE}/api/me/seed-graph?${params}`);
   if (!res.ok) throw new Error(`seed-graph failed: ${res.status}`);

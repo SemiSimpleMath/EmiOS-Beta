@@ -20,10 +20,22 @@ export interface LensNode {
   is_seed: boolean;
   is_anchor: boolean;
   primary_anchor_id: string | null;
-  // Global stable map position. Same node always has the same (x, y)
-  // regardless of which query brought it into view.
+  // LOD tier for zoom-based visibility:
+  //   0 = always (persons, seeds)
+  //   1 = mid-zoom (states, events, goals — connective tissue)
+  //   2 = close-zoom only (everything else)
+  lod_tier: number;
+  // Global stable map position.
   x: number;
   y: number;
+}
+
+export interface LensBridgeEdge {
+  id: string;
+  source_id: string;
+  target_id: string;
+  via_node_id: string;
+  label: string;
 }
 
 export interface LensEdge {
@@ -39,6 +51,7 @@ export interface LensEdge {
 export interface SeedGraphResponse {
   nodes: LensNode[];
   edges: LensEdge[];
+  bridge_edges: LensBridgeEdge[];
   seeds: string[];
   time_mode: "current" | "lifetime" | "range";
   time_from: string | null;

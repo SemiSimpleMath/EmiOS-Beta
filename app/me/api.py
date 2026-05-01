@@ -87,6 +87,7 @@ def seed_graph():
     return jsonify({
         "nodes": result.nodes,
         "edges": result.edges,
+        "bridge_edges": result.bridge_edges,
         "seeds": result.seeds,
         "time_mode": result.time_mode,
         "time_from": result.time_from,
