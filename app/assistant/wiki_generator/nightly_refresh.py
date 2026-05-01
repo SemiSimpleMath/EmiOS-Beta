@@ -231,9 +231,14 @@ def refresh_one_page(
         return {"label": label, "status": "no_kg_node_id", "changed": 0}
     if generated_at is None:
         # Never been generated under tracking — regenerate fully.
-        regenerate_entity_page(label=label, vault_path=vault_path)
-        generate_prose_page_tagged(entity_label=label, vault_path=vault_path)
-        crit = run_consistency_critic(entity_label=label, vault_path=vault_path) if run_critic else None
+        regenerate_entity_page(node_id=kg_node_id, vault_path=vault_path)
+        generate_prose_page_tagged(
+            entity_node_id=kg_node_id, vault_path=vault_path,
+        )
+        crit = (
+            run_consistency_critic(entity_label=label, vault_path=vault_path)
+            if run_critic else None
+        )
         return {
             "label": label, "status": "full_regen_no_timestamp",
             "changed": None,
@@ -250,14 +255,17 @@ def refresh_one_page(
     changed = sorted(changed)
 
     # Rough needs to be up-to-date with current KG before we diff bullets.
-    regenerate_entity_page(label=label, vault_path=vault_path)
+    regenerate_entity_page(node_id=kg_node_id, vault_path=vault_path)
 
     result = regenerate_affected_sections(
-        entity_label=label,
+        entity_node_id=kg_node_id,
         vault_path=vault_path,
         changed_node_ids=changed,
     )
-    crit = run_consistency_critic(entity_label=label, vault_path=vault_path) if run_critic else None
+    crit = (
+        run_consistency_critic(entity_label=label, vault_path=vault_path)
+        if run_critic else None
+    )
     return {
         "label": label,
         "status": "updated" if result else "incremental_failed_or_noop",

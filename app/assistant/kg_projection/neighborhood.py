@@ -133,16 +133,43 @@ class EntityNeighborhood:
 # ---------- main loader ----------
 
 
-def get_entity_neighborhood(label: str) -> EntityNeighborhood:
+def get_entity_neighborhood(
+    label: Optional[str] = None,
+    *,
+    node_id: Optional[str] = None,
+) -> EntityNeighborhood:
+    """Load the neighborhood for one Entity node.
+
+    Lookup keys, in priority order:
+      1. ``node_id`` — primary key, immutable. Use this when you have it
+         (e.g. from a wiki page's frontmatter ``kg_node_id``). Survives
+         renames and label edge cases (special chars, sanitization).
+      2. ``label`` — display name, mutable. Use as a fallback when only
+         a name is known (scratch scripts, ad-hoc lookups).
+
+    At least one must be provided. If ``node_id`` is given the label is
+    ignored for lookup but reported in errors.
+    """
+    if not node_id and not label:
+        raise ValueError("get_entity_neighborhood requires node_id or label.")
     session = get_session()
     try:
-        entity = (
-            session.query(Node)
-            .filter(Node.label == label, Node.node_type == "Entity")
-            .first()
-        )
-        if entity is None:
-            raise LookupError(f"No Entity node with label={label!r}")
+        if node_id:
+            entity = session.query(Node).filter(Node.id == str(node_id)).first()
+            if entity is None:
+                raise LookupError(f"No node with id={node_id!r}")
+            if (entity.node_type or "") != "Entity":
+                raise LookupError(
+                    f"Node {node_id!r} has node_type={entity.node_type!r}; expected Entity."
+                )
+        else:
+            entity = (
+                session.query(Node)
+                .filter(Node.label == label, Node.node_type == "Entity")
+                .first()
+            )
+            if entity is None:
+                raise LookupError(f"No Entity node with label={label!r}")
 
         entity_card = _load_entity_card(session, entity.id)
         outgoing = session.query(Edge).filter(Edge.source_id == entity.id).all()

@@ -97,17 +97,28 @@ def _scope() -> ScopeContext:
     )
 
 
-def collect_entity_window_ids(entity_label: str, limit: int = MAX_WINDOWS_FOR_EXCERPTS) -> List[str]:
-    """Distinct window_ids associated with any edge OR node touching the entity."""
+def collect_entity_window_ids(
+    entity_label: Optional[str] = None,
+    limit: int = MAX_WINDOWS_FOR_EXCERPTS,
+    *,
+    entity_id: Optional[str] = None,
+) -> List[str]:
+    """Distinct window_ids associated with any edge OR node touching the entity.
+
+    Pass ``entity_id`` when known — skips the label lookup entirely.
+    """
     session = get_session()
     try:
-        entity = (
-            session.query(Node)
-            .filter(Node.label == entity_label, Node.node_type == "Entity")
-            .first()
-        )
-        if entity is None:
-            return []
+        eid = entity_id
+        if not eid:
+            entity = (
+                session.query(Node)
+                .filter(Node.label == entity_label, Node.node_type == "Entity")
+                .first()
+            )
+            if entity is None:
+                return []
+            eid = entity.id
         rows = session.execute(
             text(
                 """
@@ -123,7 +134,7 @@ def collect_entity_window_ids(entity_label: str, limit: int = MAX_WINDOWS_FOR_EX
                 LIMIT :lim
                 """
             ),
-            {"eid": entity.id, "lim": limit},
+            {"eid": eid, "lim": limit},
         ).fetchall()
         return [r[0] for r in rows if r[0]]
     finally:
@@ -294,7 +305,8 @@ def _save_section_outputs(vault_path: Path, entity_label: str, outputs: Dict[str
 
 def generate_prose_page_tagged(
     *,
-    entity_label: str,
+    entity_label: Optional[str] = None,
+    entity_node_id: Optional[str] = None,
     vault_path: Path,
 ) -> Optional[Path]:
     """Tag-based sectioned generation. Each rough bullet is classified into
@@ -302,7 +314,20 @@ def generate_prose_page_tagged(
     then each section is written from its dedicated bullet slice. Section
     slices are built by tag, not by rough-renderer bucket, so themes don't
     overlap and no section gets rewritten twice.
+
+    Pass ``entity_node_id`` when known — survives renames + filename
+    sanitization edge cases. The canonical label is taken from the loaded
+    neighborhood, so downstream filenames, prompts, and sidecars all track
+    the live KG label.
     """
+    if not entity_node_id and not entity_label:
+        raise ValueError("generate_prose_page_tagged requires entity_node_id or entity_label.")
+
+    # Load bullets directly from the KG neighborhood — structured, with
+    # provenance. No more regex round-trip through the rough markdown.
+    neighborhood = get_entity_neighborhood(entity_label, node_id=entity_node_id)
+    entity_label = neighborhood.entity.label
+
     rough = read_rough_page(vault_path, entity_label)
     if not rough:
         logger.warning("No rough page for %s at %s", entity_label, vault_path)
@@ -317,9 +342,6 @@ def generate_prose_page_tagged(
     allowed_keys = {s.key for s in sections_meta}
     allowed_block = sections_as_prompt_list(sections_meta)
 
-    # Load bullets directly from the KG neighborhood — structured, with
-    # provenance. No more regex round-trip through the rough markdown.
-    neighborhood = get_entity_neighborhood(entity_label)
     structured_bullets = render_bullets(neighborhood)
     if not structured_bullets:
         logger.warning("No biographical bullets rendered for %s", entity_label)
@@ -354,7 +376,7 @@ def generate_prose_page_tagged(
     if writer is None:
         raise RuntimeError(f"agent_factory returned None for {WRITER_AGENT!r}")
 
-    window_ids = collect_entity_window_ids(entity_label)
+    window_ids = collect_entity_window_ids(entity_id=neighborhood.entity.id)
     excerpts = build_window_excerpts(window_ids)
 
     section_outputs: list[tuple[str, str]] = []
@@ -447,7 +469,8 @@ def generate_prose_page_tagged(
 
 def regenerate_affected_sections(
     *,
-    entity_label: str,
+    entity_label: Optional[str] = None,
+    entity_node_id: Optional[str] = None,
     vault_path: Path,
     changed_node_ids: list[str],
 ) -> Optional[Path]:
@@ -462,10 +485,17 @@ def regenerate_affected_sections(
     Falls back to full ``generate_prose_page_tagged`` if the section_outputs
     sidecar is missing or empty (can't do incremental without a baseline).
     """
+    if not entity_node_id and not entity_label:
+        raise ValueError("regenerate_affected_sections requires entity_node_id or entity_label.")
+
     changed_set = {str(x).strip() for x in changed_node_ids if str(x).strip()}
     if not changed_set:
         logger.info("regenerate_affected_sections: no changed_node_ids; nothing to do.")
         return None
+
+    # Load bullets from the current KG (structured, with explicit provenance).
+    neighborhood = get_entity_neighborhood(entity_label, node_id=entity_node_id)
+    entity_label = neighborhood.entity.label
 
     cached_outputs = _load_section_outputs(vault_path, entity_label)
     if not cached_outputs:
@@ -473,7 +503,11 @@ def regenerate_affected_sections(
             "No section_outputs sidecar for %s; falling back to full tagged regen.",
             entity_label,
         )
-        return generate_prose_page_tagged(entity_label=entity_label, vault_path=vault_path)
+        return generate_prose_page_tagged(
+            entity_label=entity_label,
+            entity_node_id=neighborhood.entity.id,
+            vault_path=vault_path,
+        )
 
     rough = read_rough_page(vault_path, entity_label)
     if not rough:
@@ -489,12 +523,14 @@ def regenerate_affected_sections(
     allowed_keys = {s.key for s in sections_meta}
     allowed_block = sections_as_prompt_list(sections_meta)
 
-    # Load bullets from the current KG (structured, with explicit provenance).
-    neighborhood = get_entity_neighborhood(entity_label)
     structured_bullets = render_bullets(neighborhood)
     if not structured_bullets:
         logger.warning("No bullets rendered for %s; falling back to full regen.", entity_label)
-        return generate_prose_page_tagged(entity_label=entity_label, vault_path=vault_path)
+        return generate_prose_page_tagged(
+            entity_label=entity_label,
+            entity_node_id=neighborhood.entity.id,
+            vault_path=vault_path,
+        )
 
     bullet_texts = [b.text for b in structured_bullets]
     parsed = parse_rough_sections(rough)

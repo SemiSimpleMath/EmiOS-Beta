@@ -33,22 +33,33 @@ def _safe_filename(label: str) -> str:
 
 def regenerate_entity_page(
     *,
-    label: str,
+    label: Optional[str] = None,
+    node_id: Optional[str] = None,
     vault_path: Path,
     neighborhood: Optional[EntityNeighborhood] = None,
 ) -> Path:
-    """Render and write the page for ``label`` to the vault. Returns the path."""
+    """Render and write the entity page to the vault. Returns the path.
+
+    Pass ``node_id`` when known (durable, survives renames + filename
+    sanitization edge cases). ``label`` is kept as a fallback for scratch
+    callers. The canonical label is taken from the loaded neighborhood —
+    so the filename always tracks the live KG label, not whatever the
+    caller happened to have.
+    """
+    if not node_id and not label and neighborhood is None:
+        raise ValueError("regenerate_entity_page requires node_id, label, or neighborhood.")
     vault_path.mkdir(parents=True, exist_ok=True)
     if neighborhood is None:
-        neighborhood = get_entity_neighborhood(label)
+        neighborhood = get_entity_neighborhood(label, node_id=node_id)
+    canonical_label = neighborhood.entity.label
     markdown = render_page(neighborhood)
-    filename = _safe_filename(label) + ".md"
+    filename = _safe_filename(canonical_label) + ".md"
     target = vault_path / filename
     target.write_text(markdown, encoding="utf-8")
     _append_log(
         vault_path=vault_path,
         kind="regen",
-        label=label,
+        label=canonical_label,
         gap_count=len(neighborhood.kg_gaps),
         relationship_count=len(neighborhood.relationships),
         event_count=len(neighborhood.events),
