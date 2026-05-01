@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useRef } from "react";
-import ForceGraph2D, { ForceGraphMethods } from "react-force-graph-2d";
+import { useCallback, useMemo } from "react";
+import ForceGraph2D from "react-force-graph-2d";
 import { LensEdge, LensNode } from "../types";
 
 interface ForceNode {
@@ -33,7 +33,6 @@ interface Props {
 const STATE_TYPES = new Set(["State", "Goal"]);
 
 export function GraphCanvas({ nodes, edges, onNodeClick }: Props) {
-  const fgRef = useRef<ForceGraphMethods>();
 
   const graphData = useMemo(() => {
     const fNodes: ForceNode[] = nodes.map((n) => ({
@@ -130,7 +129,6 @@ export function GraphCanvas({ nodes, edges, onNodeClick }: Props) {
 
   return (
     <ForceGraph2D
-      ref={fgRef}
       graphData={graphData}
       nodeId="id"
       linkSource="source"
