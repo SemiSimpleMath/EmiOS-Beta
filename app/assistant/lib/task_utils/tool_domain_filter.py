@@ -80,6 +80,14 @@ _DOMAIN_KEYWORDS: dict[str, tuple[str, ...]] = {
         "check out", "go to ", "on that page", "in the browser",
         "modal", "scroll down", "scroll up", "snapshot",
     ),
+    "filesystem": (
+        "documents folder", "documents directory", "my documents",
+        "downloads folder", "downloads directory", "desktop folder",
+        "file in", "files in", "list files", "list folders",
+        "list the files", "list the folders", "folder names",
+        "directory listing", "shell", "bash", "command line",
+        "run command", "ls ", "grep ", "what's in my", "what is in my",
+    ),
 }
 
 # --- Task-keyword to action map ---

@@ -207,6 +207,11 @@ class ContextEnricherPrepNode(ControlNode):
 
                 email_sender = str(meta.get("email_sender") or "").strip()
                 email_subject = str(meta.get("email_subject") or "").strip()
+                # First ~2000 chars of the email body — gives the agent the
+                # salutation ("Dear Parent of <name>") and first paragraph,
+                # which is the most reliable disambiguating signal for who an
+                # email is about (vs. inferring from summary alone).
+                email_body_excerpt = str(meta.get("email_body_excerpt") or "").strip()
 
                 # Search terms from the item's own text.
                 search_terms = _extract_search_terms(summary, email_sender, email_subject)
@@ -229,6 +234,8 @@ class ContextEnricherPrepNode(ControlNode):
                     task_lines.append(f"From: {email_sender}")
                 if email_subject:
                     task_lines.append(f"Subject: {email_subject}")
+                if email_body_excerpt:
+                    task_lines.append(f"Body excerpt:\n{email_body_excerpt}")
                 task_text = "\n".join(task_lines)
 
                 try:

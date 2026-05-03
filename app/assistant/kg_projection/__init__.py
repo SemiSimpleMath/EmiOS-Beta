@@ -43,7 +43,9 @@ from app.assistant.kg_projection.sections import (
 )
 from app.assistant.kg_projection.tag_cache import (
     bullet_key,
+    load_bullet_index,
     load_tags,
+    save_bullet_index,
     save_tags,
 )
 from app.assistant.kg_projection.tagger import (
@@ -71,7 +73,9 @@ __all__ = [
     "sections_as_prompt_list",
     # tag cache
     "bullet_key",
+    "load_bullet_index",
     "load_tags",
+    "save_bullet_index",
     "save_tags",
     # tagger
     "TAGGER_BATCH_SIZE",

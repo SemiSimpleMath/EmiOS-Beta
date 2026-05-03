@@ -1,7 +1,7 @@
 name: knowledge_graph_add::fact_extractor
 class_name: Agent
 llm_params:
-  engine: gpt-5.4
+  engine: gpt-5.5
   model_tier: "powerful"
   timeout: 240
   llm_provider: "openai"

@@ -221,6 +221,21 @@ def _resolve_thermostat_device_name(devices: List[Dict[str, Any]], device_id: st
             continue
         if requested == name or name.endswith(f"/{requested}"):
             return name
+    # device_id didn't match an actual thermostat. If there's exactly
+    # one thermostat, fall back to it — the planner often passes the
+    # entity-card label ("Nest thermostat") as device_id, which won't
+    # match Google's internal device name. Logging the substitution
+    # so the failure is visible in the audit trail without bouncing
+    # the user-visible call.
+    if len(thermostats) == 1:
+        name = str(thermostats[0].get("name") or "").strip()
+        if name:
+            logger.warning(
+                "[smart_home/nest] device_id %r did not match; falling back to "
+                "the only thermostat %r",
+                requested, name,
+            )
+            return name
     raise RuntimeError(f"No thermostat matches device_id '{requested}'.")
 
 
@@ -306,17 +321,15 @@ def _nest_get_status(access_token: str, arguments: Dict[str, Any]) -> Dict[str, 
 
 
 def _nest_set_mode(access_token: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
-    # Normalize common variants before comparing: lowercase, underscore-separated,
-    # and hyphenated forms (e.g. 'heat_cool', 'heat-cool', 'Heat Cool') all map to
-    # the SDM API's canonical 'HEATCOOL'. Without this, LLM-generated arguments
-    # that follow the contract's documented lowercase style ('heat_cool') got
-    # rejected, which silently broke set_mode calls.
+    # Normalize common variants before comparing: lowercase / underscore /
+    # hyphen / space-separated forms all map to the SDM canonical form.
+    # HEATCOOL was removed (Jukka's preference — only single-mode HEAT or COOL).
     raw = str(arguments.get("mode") or "").strip()
     mode = raw.upper().replace("_", "").replace("-", "").replace(" ", "")
-    allowed = {"HEAT", "COOL", "HEATCOOL", "OFF"}
+    allowed = {"HEAT", "COOL", "OFF"}
     if mode not in allowed:
         raise ValueError(
-            f"Nest set_mode requires mode in: HEAT, COOL, HEATCOOL, OFF. Got {raw!r}."
+            f"Nest set_mode requires mode in: HEAT, COOL, OFF. Got {raw!r}."
         )
     devices = _sdm_devices_list(access_token)
     device_name = _resolve_thermostat_device_name(devices, str(arguments.get("device_id") or ""))

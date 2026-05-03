@@ -104,6 +104,7 @@ tools:
     - emi_team_manager
     - personal_admin_manager
     - devices_manager
+    - bash_manager
   except_tools: []
 
 scope_contract:

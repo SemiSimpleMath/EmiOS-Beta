@@ -1,0 +1,8 @@
+- **Purpose**: Mint a pod from a file on disk. Auto-indexes (hashes the bytes, content-addressed storage, dedupes against existing pods, kind-tags by mime type) so the resulting pod_id is stable for the same file forever.
+- **Use case**: Bridge between filesystem and the pod-currency layer. Most common flow is `run_shell ls` → pick file → `mint_pod_from_path` → pass `pod_id` to `send_email` as `pod_ids: [...]`.
+- **Idempotent**: minting the same file twice returns the same pod_id; second call is a cheap no-op.
+- **Kind tagging**: derived from mime type — `image`, `video`, `audio`, `document`, or `file` (catch-all). Use `pod_search(kind="image")` etc. to filter later.
+- **Storage**: images go to `data/images/<hash>/`, everything else to `data/pods/<hash>/`. Pod's `metadata.stored_path` is what `send_email` reads when attaching.
+- **Arguments**:
+  - `path` (str, required): absolute or `~/`-prefixed path to the file.
+- **Returns**: `pod_id`, `kind`, `mime_type`, `sha256`, `stored_path`, `file_size_bytes`.

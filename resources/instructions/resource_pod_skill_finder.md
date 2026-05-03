@@ -10,13 +10,29 @@ take it from there.
 
 - The task asks to find / locate / look up / show / list a picture,
   photo, image, video, audio, document, email, conversation, receipt,
-  invoice, or any other media artifact.
+  invoice, or any other media artifact **and the answer plausibly lives
+  in stored memory** (something the user mentioned, sent, or worked with
+  before).
 - The task references "pods" or contains a `datapod:<kind>:<id>` URI.
-- The task says "find me X" / "do I have any Y" / "search for Z" in a
-  context that could be answered from stored memory rather than a
-  live external API.
 
 If none of the above apply, ignore this skill.
+
+## When NOT to use this skill — call bash_manager instead
+
+The pod store is **stored memory**, not a filesystem index. If the task
+is anchored on a local filesystem location, the source of truth is the
+disk, not the pod store. Route to `bash_manager` instead:
+
+- "find any picture in my Pictures folder" / "from `~/Pictures`"
+- "the doc in `~/Documents/...`"
+- any task that names a real path (`~/X`, `C:\Users\...\X`)
+- "send me a [file kind] from my [folder name]" — file is on disk
+
+`bash_manager` lists the directory, picks the file, mints a pod via
+`mint_pod_from_path`, and returns the pod_id. That pod_id is what you
+pass forward (e.g. to `send_email`). Never `pod_search` for files in a
+named filesystem location — pods only exist for files that have already
+been minted, and most filesystem files have not.
 
 ## Two retrieval surfaces
 

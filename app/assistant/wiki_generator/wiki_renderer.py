@@ -173,15 +173,51 @@ def _render_frontmatter(n: EntityNeighborhood) -> str:
 
 
 def _render_summary_section(n: EntityNeighborhood) -> str:
-    # Use the entity_card summary if available (LLM-authored once, at card
-    # generation time). Fall back to the node's own description.
-    summary = ""
-    if n.entity_card and n.entity_card.get("summary"):
-        summary = str(n.entity_card["summary"]).strip()
-    elif n.entity.description:
-        summary = str(n.entity.description).strip()
+    # Build the Summary section from raw KG facts: the entity's own canonical
+    # sentence + every edge sentence touching it (out + in across all
+    # connection types). The prose writer composes the Summary paragraph
+    # from these bullets.
+    #
+    # We deliberately do NOT seed from entity_card.summary or node.description:
+    # those are DOWNSTREAM derivations of the wiki page itself. Reading them
+    # here would be circular — the wiki is what we're generating. Each node
+    # carries its own canonical fact (original_sentence) and each edge carries
+    # the per-edge sentence; that's the source material.
+    bullets: List[str] = []
+    seen: set = set()
 
-    body = summary if summary else _comment("No summary — entity_card.summary and node.description are both empty.")
+    def _add(s):
+        if not s:
+            return
+        s = str(s).strip()
+        if s and s not in seen:
+            seen.add(s)
+            bullets.append(f"- {s}")
+
+    _add(n.entity.original_sentence)
+
+    for sc in (n.relationships or []) + (n.inbound_relationships or []):
+        try:
+            _add(sc.edge.sentence)
+        except Exception:
+            pass
+    for ec in (n.events or []) + (n.inbound_events or []):
+        try:
+            _add(ec.edge.sentence)
+        except Exception:
+            pass
+    for b in (n.beliefs_about or []):
+        _add(getattr(b.edge_in, "sentence", None))
+    for g in (n.goals_targeting or []):
+        _add(getattr(g.edge_in, "sentence", None))
+    for edge, _node in (n.misc_outgoing or []):
+        _add(getattr(edge, "sentence", None))
+    for _node, edge in (n.misc_incoming or []):
+        _add(getattr(edge, "sentence", None))
+
+    body = "\n".join(bullets) if bullets else _comment(
+        "No canonical sentence on entity yet and no edge sentences touch it."
+    )
     return "\n".join([
         _det_open("summary"),
         "## Summary",

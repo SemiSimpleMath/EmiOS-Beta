@@ -135,13 +135,14 @@ There is also an older `generate_prose_page` (full single-call writer, `page_wri
 
 ### 3. `regenerate_affected_sections` — incremental
 
-Defined in `page_writer.py:652`. Used by the nightly refresh whenever a baseline `section_outputs` sidecar exists. Steps:
+Defined in `page_writer.py`. Used by the nightly refresh whenever a baseline `section_outputs` sidecar exists. Steps:
 
 1. Load the cached sidecar; fall back to full `generate_prose_page_tagged` if absent.
 2. Re-fetch the neighborhood, re-render structured bullets, re-tag (cache hits avoid LLM calls for unchanged bullets).
-3. **Dirty detection from structured provenance**: a bullet is dirty iff `set(bullet.source_node_ids) & changed_node_ids`. Sections containing a dirty bullet are dirty. Newly-populated sections that didn't exist before are also flagged dirty.
-4. Re-call `wiki_writer` for dirty sections only; leave the cached prose for everything else.
-5. Persist a new sidecar, restitch in taxonomy order, re-run the lead writer (because the body it summarizes may have changed), and write the new prose page.
+3. **Dirty detection via bullet-text diff**: a `bullet_index` sidecar (`<vault>/bullet_index/<entity>.json`) records the bullet keys (`sha256(text)[:16]`) present at the LAST successful rewrite. Compare against currently-rendered keys to compute `added` and `removed` sets. A section is dirty iff it contains an added or removed bullet. Unchanged keys imply identical bullet text — even when the underlying node was touched for unrelated reasons (importance recalc, description refresh, new edges that don't touch this neighborhood). The `changed_node_ids` argument survives only as the cheap pre-filter at the caller level (`refresh_one_page`) that decides whether to even open the page's neighborhood.
+4. **Critic gate**: addition-driven dirty sections go through `wiki_inclusion_critic` per added bullet. Removal-driven sections always rewrite (no bullet to evaluate, and the existing prose mentions a fact that's gone).
+5. Re-call `wiki_writer` for approved-dirty sections only; leave the cached prose for everything else.
+6. Persist new section_outputs, restitch in taxonomy order, re-run the lead writer (because the body it summarizes may have changed), write the new prose page, then save the updated `bullet_index` (after section_outputs so a crash mid-rewrite leaves the old index in place — next run re-detects and self-heals).
 
 ## Section taxonomy
 

@@ -1,0 +1,44 @@
+{
+  "name": "mint_pod_from_path",
+  "description": "Mint a pod from a file on disk and return its pod_id. Auto-indexes: hashes the bytes, copies into content-addressed storage (data/pods/ or data/images/), dedupes against existing pods (same bytes → same pod_id), and tags by kind (image/video/audio/document/file) so pod_search can filter.\n\nUse when you need to attach a local file to an outbound action — most commonly: pick file with `run_shell ls`, mint with this tool, pass the returned pod_id to `send_email` as `pod_ids: [...]`.",
+  "inputs": [
+    {
+      "name": "path",
+      "type": "string",
+      "required": true,
+      "description": "Absolute filesystem path to the file. Tilde paths (~/Pictures/foo.jpg) are accepted."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable confirmation with the pod_id and kind."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "{pod_id, kind, mime_type, sha256, stored_path, file_size_bytes, deduped: bool}."
+    }
+  ],
+  "metadata": {
+    "domain": "filesystem",
+    "actions": [
+      "ingest",
+      "create"
+    ],
+    "selectors": [
+      "path"
+    ],
+    "risk_level": "low",
+    "side_effects": "local_state",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false,
+    "approval_min_authority": 95
+  }
+}

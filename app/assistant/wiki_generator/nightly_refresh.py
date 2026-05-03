@@ -212,6 +212,42 @@ def _apply_pre_refresh_revision_log_effects(
     return dict(force)
 
 
+PER_PAGE_REFRESH_COOLDOWN_DAYS = 7
+
+# Minimum node importance (0-10 scale) for a changed node to even be
+# considered for triggering a section refresh. Drops ephemeral chat-extracted
+# noise before the critic gate runs. Tunable; 4 keeps "median-ish" content
+# moving and excludes the long tail of trivia.
+CHANGE_IMPORTANCE_THRESHOLD = 4.0
+
+
+def _filter_changed_by_importance(
+    changed_ids: List[str], threshold: float = CHANGE_IMPORTANCE_THRESHOLD,
+) -> List[str]:
+    """Drop ids whose node.importance is NULL or below threshold.
+
+    NULL is treated as "below threshold" — unrated content shouldn't trigger
+    refresh until the periodic importance_backfill routine has rated it.
+    """
+    if not changed_ids:
+        return []
+    from app.assistant.kg.db.knowledge_graph_db_sqlite import Node
+    from app.models.db_manager import get_db_manager
+    kept: List[str] = []
+    with get_db_manager().read_session() as session:
+        rows = (
+            session.query(Node.id, Node.importance)
+            .filter(Node.id.in_(list(changed_ids)))
+            .all()
+        )
+        imp_by_id = {str(rid): (None if imp is None else float(imp)) for rid, imp in rows}
+    for nid in changed_ids:
+        imp = imp_by_id.get(str(nid))
+        if imp is not None and imp >= threshold:
+            kept.append(nid)
+    return kept
+
+
 def refresh_one_page(
     *,
     label: str,
@@ -226,6 +262,12 @@ def refresh_one_page(
 
     ``force_changed_node_ids`` lets callers seed the changed-node set with
     ids the timestamp diff can't see (e.g., endpoints of deleted edges).
+
+    Per-page cooldown: a page is never rewritten more than once per
+    PER_PAGE_REFRESH_COOLDOWN_DAYS, regardless of how often the refresh
+    routine runs (catch-up or otherwise). Applied AFTER the no-id and
+    first-time-generation gates so brand-new pages still get their initial
+    generation, but any subsequent refresh is throttled.
     """
     if kg_node_id is None:
         return {"label": label, "status": "no_kg_node_id", "changed": 0}
@@ -245,6 +287,17 @@ def refresh_one_page(
             "critic_findings": (crit or {}).get("findings_count"),
         }
 
+    # Per-page cooldown — protects against catch-up thrash and ad-hoc invocations.
+    age = datetime.now(timezone.utc) - generated_at
+    if age.days < PER_PAGE_REFRESH_COOLDOWN_DAYS:
+        return {
+            "label": label,
+            "status": "cooldown_skip",
+            "changed": 0,
+            "age_days": age.days,
+            "cooldown_days": PER_PAGE_REFRESH_COOLDOWN_DAYS,
+        }
+
     changed = set(find_changed_neighborhood_nodes(
         entity_node_id=kg_node_id, since_ts=generated_at,
     ))
@@ -252,7 +305,19 @@ def refresh_one_page(
         changed |= force_changed_node_ids
     if not changed:
         return {"label": label, "status": "unchanged", "changed": 0}
-    changed = sorted(changed)
+
+    # Importance pre-filter: drop low-importance changes before the critic
+    # gate / writer ever sees them. Most chat-extracted ephemera dies here
+    # for free (no LLM cost). Only nodes meeting the threshold proceed.
+    raw_count = len(changed)
+    changed = sorted(_filter_changed_by_importance(list(changed)))
+    if not changed:
+        return {
+            "label": label,
+            "status": "unchanged_after_importance_filter",
+            "changed": 0,
+            "raw_changed_count": raw_count,
+        }
 
     # Rough needs to be up-to-date with current KG before we diff bullets.
     regenerate_entity_page(node_id=kg_node_id, vault_path=vault_path)

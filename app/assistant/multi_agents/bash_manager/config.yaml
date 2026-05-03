@@ -1,0 +1,82 @@
+name: bash_manager
+class_name: MultiAgentManager
+description: "Personal-assistant manager that runs tightly-scoped shell commands on the user's machine. v1: read-only inspection inside ~/Documents only. Requires authority 99 (Jukka-origin only); inbound emails / SMS / external messages cannot invoke this through dayflow without explicit user authorization."
+max_cycles: 30
+role_bindings:
+  delegator: bash_team::delegator
+  tool_selector: shared::tool_selector
+
+agents:
+  - name: bash_team::delegator
+    class: Delegator
+  - name: bash_team::planner
+    class: Planner
+  - name: bash_team::critic
+    class: Agent
+  - name: bash_team::summary
+    class: Agent
+  - name: bash_team::final_answer
+    class: Agent
+
+control_nodes:
+  - name: tool_return_router
+    class: ToolReturnRouter
+  - name: critic_pre_node
+    class: CriticPreNode
+    config:
+      enabled: true
+      critic_agent: "bash_team::critic"
+      continue_agent: "tool_caller"
+  - name: critic_post_node
+    class: CriticPostNode
+    config:
+      critic_agent: "bash_team::critic"
+  - name: summary_pre_node
+    class: SummaryPreNode
+    config:
+      enabled: false   # v1 has narrow tool surface — context won't grow
+      summary_agent: "bash_team::summary"
+      resume_agent: "bash_team::planner"
+  - name: summary_post_node
+    class: SummaryPostNode
+    config:
+      summary_agent: "bash_team::summary"
+      resume_agent: "bash_team::planner"
+  - name: tool_caller
+    class: ToolCaller
+  - name: tool_result_handler
+    class: ToolResultHandler
+  - name: tool_approve_node
+    class: ToolApproveNode
+  - name: return_control
+    class: ReturnControlNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+  - name: graceful_exit_control_node
+    class: GracefulExitControlNode
+
+# Narrow surface for hello world. No `all` here — every tool added is
+# a deliberate widening of capability.
+tools:
+  allowed_tools:
+    - run_shell
+    - ask_user
+    - mint_pod_from_path
+  except_tools: []
+
+flow_config:
+  tool_return:
+    tool_call_result_handler_node: "tool_result_handler"
+  state_map:
+    "bash_team::delegator": "bash_team::planner"
+    "bash_team::planner": "critic_pre_node"
+    "bash_team::critic": "critic_post_node"
+    "tool_result_handler": "tool_return_router"
+    "tool_return_router": "summary_pre_node"
+    "summary_pre_node": "bash_team::planner"
+    "bash_team::summary": "summary_post_node"
+    "summary_post_node": "bash_team::planner"
+    "bash_team::planner_return_control": "bash_team::final_answer"
+    "bash_team::final_answer": "manager_exit_node"
+    "graceful_exit": "graceful_exit_control_node"
+    "graceful_exit_control_node": "bash_team::final_answer"

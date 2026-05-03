@@ -5,7 +5,43 @@ llm_params:
   engine: "gpt-5-mini"
   model_tier: "mini"
 
-allowed_tools: all
+# Curated list — was `all` (149 tools) which bloated prompt + leaked
+# off-domain guidance (pod search workflow, KG mutations, etc.) into
+# every personal_admin call. personal_admin's job is email + calendar
+# + todos + reminders. Pod work here is "act on a pod the task already
+# named" (attach via send_email pod_ids, fetch to read), NOT pod search
+# — that's emi_team's job per resource_pod_skill_admin.
+allowed_tools:
+  # Email — read/find/send/triage
+  - send_email
+  - get_email
+  - get_email_messages
+  - get_email_thread
+  - get_important_emails
+  - get_email_stats
+  - trash_emails
+  # Calendar
+  - create_calendar_event
+  - create_repeating_calendar_event
+  - update_calendar_event
+  - delete_calendar_event
+  - delete_repeating_calendar_event
+  - find_calendar_event_by_name
+  - get_calendar_events
+  # Todos
+  - create_todo_task
+  - delete_todo_task
+  - get_todo_tasks
+  # Scheduler / reminders
+  - create_scheduler_event
+  - create_repeating_scheduler_event
+  - delete_scheduler_event
+  - get_scheduler_events
+  # User interaction
+  - ask_user
+  # Pod actions on a pod_id the task already references — read body.
+  # (Attaching is via send_email's pod_ids field, no extra tool needed.)
+  - pod_fetch
 except_tools: []
 allowed_nodes: [personal_admin::final_answer]
 entity_scan_keys: [incoming_message, task, information, recent_history]

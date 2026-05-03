@@ -50,6 +50,31 @@ logger = get_logger(__name__)
 _LABEL_MAX = 200          # kg_node_metadata.label is TEXT but keep readable
 _ORIGINAL_SENTENCE_MAX = 400
 
+# Pod kinds that ARE mirrored as KG nodes — strict allow list.
+# Anything not in this set is silently skipped (still lives in pod_store and
+# is reachable via pod_search; just doesn't get a kg_node_metadata row).
+#
+# Allow list, not deny list, so that adding a new pod kind never auto-flows
+# into the KG by default — opt-in is required. Email is excluded by design
+# because email content is noisy / sensitive / token-heavy; we'd want a real
+# attribution / extraction policy decision before letting it back in.
+_KG_MIRROR_ALLOWED_KINDS = frozenset({"chat_cluster", "image"})
+
+# Pod source_kind values that ALWAYS admit to the KG, regardless of pod kind.
+# The principle: when the user introduces a pod into chat — by attaching a file,
+# pasting an image, or asking Emi to mint one from disk — the pod is part of the
+# conversation and must be KG-addressable so any extracted relationships ("here
+# is my advisor", "this is my contract") can edge into it.
+#
+# Email-sourced pods (source_kind="email_attachment" or similar) intentionally
+# do NOT trigger this admit-on-source rule — they go through the normal allow
+# list and are excluded by default.
+_KG_MIRROR_CHAT_INTRODUCED_SOURCES = frozenset({
+    "chat_attachment",   # user uploaded/pasted file in master_room chat
+    "manual_mint",       # bash_team minted from disk on user's request
+    "manual_upload",     # generic user-initiated upload
+})
+
 
 def _truncate(s: Optional[str], max_len: int) -> Optional[str]:
     if s is None:
@@ -60,7 +85,7 @@ def _truncate(s: Optional[str], max_len: int) -> Optional[str]:
     return s[: max_len - 1].rstrip() + "…"
 
 
-def ensure_pod_node(pod: Pod) -> str:
+def ensure_pod_node(pod: Pod, *, force: bool = False) -> str:
     """Insert or refresh the kg_node_metadata mirror row for a pod.
 
     Returns the node id (== pod.pod_id). Caller doesn't need this — it's
@@ -71,9 +96,37 @@ def ensure_pod_node(pod: Pod) -> str:
     immutable. Other kg_node fields (importance, dates, attributes) are
     untouched — they're either unset (typical for Pod nodes) or have been
     set by an upstream agent and we shouldn't clobber.
+
+    Args:
+        force: bypass the allow-list check. Use when something downstream
+            (e.g. proposal_promoter writing an edge whose endpoint is a pod
+            URI mentioned in chat) needs the mirror node to exist regardless
+            of pod kind. The rule: kinds in the allow list are mirrored at
+            mint time; kinds outside the allow list are admitted only when
+            chat references them.
     """
     if not pod.pod_id:
         raise ValueError("ensure_pod_node: pod.pod_id is required")
+
+    # Two paths admit a pod to the KG:
+    #   1. force=True (caller knows what it's doing — used by lazy-admit code).
+    #   2. The pod was user-introduced into chat (source_kind in the chat-
+    #      introduced set), regardless of pod kind. The user pasting a PDF
+    #      saying "here's my contract" should produce a KG-addressable pod
+    #      so extracted relationships can edge into it.
+    #   3. The pod kind is in the static allow list (chat_cluster, image).
+    # Everything else is silently skipped — automated/inbound sources
+    # (email arrival, scheduled scans, etc.) do not get auto-mirrored.
+    source_kind = ((pod.metadata or {}).get("source_kind") or "").strip()
+    chat_introduced = source_kind in _KG_MIRROR_CHAT_INTRODUCED_SOURCES
+    kind_allowed = (pod.kind or "").strip() in _KG_MIRROR_ALLOWED_KINDS
+
+    if not (force or chat_introduced or kind_allowed):
+        logger.debug(
+            "[kg_mirror] skipping mirror — kind=%r source_kind=%r pod=%s (no admission path)",
+            pod.kind, source_kind, pod.pod_id[:30],
+        )
+        return pod.pod_id
 
     label = _truncate(pod.one_liner or pod.pod_id, _LABEL_MAX) or pod.pod_id
     original_sentence = _truncate(pod.body, _ORIGINAL_SENTENCE_MAX) or None

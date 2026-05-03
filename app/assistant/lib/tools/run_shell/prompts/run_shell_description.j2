@@ -1,0 +1,6 @@
+- **Purpose**: Run a sandboxed read-only shell command on Jukka's local machine. Try it — refusals come back with precise reasons (out-of-scope path, denied executable, etc.) so adapt from the refusal.
+- **Allowed executables**: read-only inspection only (`ls`, `find`, `cat`, `head`, `tail`, `grep`, `wc`, `pwd`).
+- **Limits**: 30s timeout, output capped at 4 KB.
+- **Arguments**:
+  - `command` (str, required): the shell command to execute.
+  - `reason` (str, required): one-line audit-log explanation of why.

@@ -600,32 +600,33 @@ def _ensure_list(value):
 
 
 def _derive_level0_view(entity_card: "EntityCard") -> dict:
-    """Fallback L0 view for cards without structured metadata."""
+    """Fallback L0 view for cards without structured metadata.
+
+    Falls back to the full summary verbatim when user_relevance_reason is
+    missing — never truncates. Core entity memory in prompts must stay
+    intact: a chopped summary loses meaning, breaks disambiguation, and
+    can flip the planner's reasoning. If summary length is ever a real
+    problem, fix it at write time (better summaries) or via a documented
+    cap, not silently here.
+    """
     urr = (getattr(entity_card, "user_relevance_reason", None) or "").strip()
     if not urr:
-        summary = (entity_card.summary or "").strip()
-        if len(summary) > 120:
-            cut = summary[:120]
-            last_period = cut.rfind(".")
-            urr = cut[: last_period + 1].strip() if last_period > 20 else (cut.strip() + "...")
-        else:
-            urr = summary
+        urr = (entity_card.summary or "").strip()
     return {"user_relevance_reason": urr}
 
 
 def _derive_level1_view(entity_card: "EntityCard") -> dict:
-    """Fallback L1 view for cards without structured metadata."""
+    """Fallback L1 view for cards without structured metadata.
+
+    Same principle as L0: no silent truncation of the summary text.
+    """
     summary = (entity_card.summary or "").strip()
-    if len(summary) > 400:
-        cut = summary[:400]
-        last_period = cut.rfind(".")
-        summary = cut[: last_period + 1].strip() if last_period > 40 else (cut.strip() + "...")
     contact_info = _extract_contact_from_legacy_key_facts(entity_card)
     return {
         "summary": summary,
         "contact_info": contact_info,
-        "key_facts": _ensure_list(entity_card.key_facts)[:5],
-        "relationships": _ensure_list(entity_card.relationships)[:3],
+        "key_facts": _ensure_list(entity_card.key_facts),
+        "relationships": _ensure_list(entity_card.relationships),
     }
 
 

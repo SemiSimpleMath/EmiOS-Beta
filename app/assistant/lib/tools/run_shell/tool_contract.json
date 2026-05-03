@@ -1,0 +1,27 @@
+{
+  "name": "run_shell",
+  "description": "- **Purpose**: Execute a tightly-scoped shell command on the user's local machine. Hello-world v1: read-only inspection inside ~/Documents only.\n- **Allowed executables**: ls, find, cat, head, tail, grep, wc, pwd. Anything else is refused.\n- **Allowed paths**: must reference paths inside ~/Documents. Path traversal (`..`) is refused. The EmiAi repo path is denied even if it sits under home.\n- **Refused outright**: pipes (`|`), redirects (`>`, `<`, `>>`), command chaining (`;`, `&&`, `||`), backticks, command substitution (`$(...)`), network executables (curl, wget, ssh, scp, nc), destructive commands (rm, mv, cp, dd, sudo, chmod, chown).\n- **Limits**: 30s timeout, output capped at 4 KB.\n- **Authority**: requires `approval_min_authority: 99` — only the user (master_room session, CLI session) can invoke. Inbound emails / SMS / external messages cannot trigger this through dayflow without explicit user authorization.\n- **Arguments**:\n  - `command` (str, required): the shell command to execute.\n  - `reason` (str, required): one-line explanation of why this command. Becomes part of the audit log.\n",
+  "inputs": [
+    {"name": "command", "type": "string", "required": true, "description": "The shell command to execute. Single command only — no chaining or redirects."},
+    {"name": "reason", "type": "string", "required": true, "description": "One-line explanation of intent. Recorded in the audit log."}
+  ],
+  "outputs": [
+    {"path": "content", "type": "text", "description": "Combined stdout/stderr (truncated to 4 KB) plus exit code."},
+    {"path": "data", "type": "object", "description": "{ok, command, exit_code, stdout, stderr, refused_reason}"}
+  ],
+  "arguments_prompt": "Arguments for run_shell:\n- command (required): single shell command, e.g. `ls -la ~/Documents`. No pipes, no redirects, no chaining.\n- reason (required): one-line intent.\n\nExample:\n{\n  \"command\": \"ls -la ~/Documents\",\n  \"reason\": \"User asked for the file listing of their Documents folder.\"\n}",
+  "metadata": {
+    "domain": "filesystem",
+    "actions": ["read", "list", "search", "inspect"],
+    "entities": ["filesystem"],
+    "risk_level": "high",
+    "side_effects": "executes_shell_command",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_min_authority": 99
+  }
+}

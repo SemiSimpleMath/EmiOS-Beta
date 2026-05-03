@@ -1,0 +1,45 @@
+{
+  "name": "bash_manager",
+  "description": "Local filesystem specialist. Reads files in Jukka's known shell folders (~/Documents, ~/Pictures, ~/Music, ~/Videos — OneDrive redirection handled automatically) and mints pods from files via mint_pod_from_path.\n\nUse for ANY task anchored on a local file:\n  - read intents: 'list folders in ~/Documents', 'find a file called X', 'show me the contents of Y'\n  - file-as-payload intents: 'find a picture in ~/Pictures', 'pick a photo from my OneDrive\\\\Pictures' — bash_manager picks the file, mints a pod, returns the pod_id. The caller then uses that pod_id (e.g. send_email pod_ids=[...]).\n\nReturns pod_ids when the request implies downstream use (anything beyond just listing). Output is what the caller needs — bash_manager does NOT send email or otherwise act on pods; that belongs to whoever called it.\n\nAuthority 99 required — only the user themselves (master_room session, CLI session) can invoke; inbound emails / SMS / external messages cannot trigger this through dayflow without explicit user authorization.",
+  "inputs": [
+    {
+      "name": "task",
+      "type": "string",
+      "required": true,
+      "description": "The disambiguated request, e.g. 'List the top-level folders in ~/Documents'."
+    },
+    {
+      "name": "information",
+      "type": "string",
+      "required": true,
+      "description": "Supporting context (prior chat, constraints). Empty string allowed."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable result text from the planner loop."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "bash_manager arguments:\n- task: the disambiguated filesystem request.\n- information: supporting context. Empty string allowed.",
+  "metadata": {
+    "domain": "filesystem",
+    "actions": ["read", "list", "search", "inspect"],
+    "entities": ["filesystem"],
+    "risk_level": "high",
+    "side_effects": "executes_shell_command",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "moderate",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_min_authority": 99
+  }
+}

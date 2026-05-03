@@ -1,6 +1,6 @@
 {
   "name": "send_email",
-  "description": "Sends an email. Needs a To email address and body; subject is optional. Can be used to send a text message via the SMS-via-email gateway.\nSupports file attachments via pod_ids — each pod_id is resolved to its backing file (image / video / etc.) and attached. Use when the user asks to email a photo / receipt / video / etc. Use pod_search first to find the right pod_id(s).\nDo not use email to communicate with the user directly unless instructed to do so.",
+  "description": "Send an email. Required: `to` + `body`; `subject` is optional. Can also reach a phone via the SMS-via-email gateway. To attach files, pass `pod_ids` (see that field). Do not use email to talk to the user directly unless explicitly instructed.",
   "inputs": [
     {
       "name": "to",
@@ -24,7 +24,7 @@
       "name": "pod_ids",
       "type": "array",
       "required": false,
-      "description": "Optional list of pod URIs (e.g. ['datapod:image:abc...']) to attach to the email. Each pod must have a backing file via metadata.stored_path; image/video/audio/document pods all work. The file is read from disk and attached with its original filename and inferred MIME type. If any pod is missing or unbacked the whole send fails — resolve pod_ids upstream via pod_search before calling."
+      "description": "Optional list of pod URIs to attach. Pass each pod_id EXACTLY as returned by pod_search or mint_pod_from_path — including the `datapod:<kind>:` prefix. Do NOT strip the prefix to bare hex; lookup is exact-match and a stripped id will fail with 'missing pods'. Each pod must have a backing file via metadata.stored_path; image/video/audio/document pods all work. The file is attached with its original filename and inferred MIME type. If any pod is missing the whole send fails — mint a fresh pod via mint_pod_from_path (or call bash_manager) instead of guessing."
     }
   ],
   "outputs": [

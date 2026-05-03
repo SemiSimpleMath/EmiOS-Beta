@@ -46,13 +46,13 @@ export function WikiPanel({ node, onClose, onAddToFocus }: Props) {
       </header>
 
       <div className="flex-1 overflow-y-auto p-5">
-        {detail?.description && (
+        {detail && (detail.description || detail.original_sentence) && (
           <section className="mb-4">
             <h3 className="text-xs uppercase tracking-wide text-gray-500 mb-1">
               About
             </h3>
             <p className="text-sm text-gray-800 leading-relaxed">
-              {detail.description}
+              {detail.description || detail.original_sentence}
             </p>
           </section>
         )}

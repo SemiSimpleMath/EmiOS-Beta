@@ -12,6 +12,15 @@ Schema cheatsheet (read-only):
 - kg_node_metadata(id, label, node_type, category, aliases, description,
   original_sentence, start_date, end_date, importance, pagerank_score,
   window_id, source, created_at)
+  • node_type values are CAPITALIZED: 'Entity', 'State', 'Event',
+    'Goal', 'Concept', 'Property', 'Pod'. SQLite is case-sensitive on
+    `=` — `node_type='entity'` will return 0 rows.
+  • For fuzzy / case-insensitive label search use `LOWER(label) LIKE`
+    or `aliases LIKE` (aliases is a JSON-encoded text column).
+  • When a query returns 0 rows or behaves unexpectedly, run
+    `PRAGMA table_info('<table>')` to confirm the column names and
+    types — column rename, missing column, or unexpected NULL pattern
+    is a common cause. Use it BEFORE retrying with guessed names.
 - kg_edge_metadata(id, source_id, target_id, relationship_type, sentence,
   window_id, source, created_at)
 - kg_node_evidence(id, node_id, source_table, source_id, derived_sentence,
@@ -41,3 +50,30 @@ Returns rows as both a markdown table (in `content`) and structured
 `data.rows`. Default cap is 200 rows; pass `max_rows` up to 5000 if
 needed. Long cells truncate to 200 chars in the table; full values
 remain in `data.rows`.
+
+High-leverage query patterns:
+- "Where did this node come from?" → kg_node_evidence has `source_text`
+  (compact pipe-delimited chat snippet) and `derived_sentence` (the
+  LLM's extracted fact). For an edge, kg_edge_evidence has the same
+  shape. Always prefer `source_text` over guessing intent.
+- "What did the extractor actually say?" → `kg_edge_metadata.sentence`
+  is the canonical per-edge fact. Reading it tells you why the edge
+  exists; guessing from `relationship_type` alone is unreliable.
+- Importance values are 0-10 (NOT 0-1). Both node `importance` and
+  edge `importance` use this scale. `> 8` is high; `> 5` is roughly
+  median; below 3 is low.
+- "What do these two entities share?" → SELECT the entity_neighbors
+  set of each via kg_edge_metadata, then INTERSECT. State/Event
+  nodes whose neighbor set spans demonstrably-different subgraphs
+  are likely over-merged.
+- "Find over-merged generic-label states/events" → group
+  kg_edge_metadata by source/target (with node_type filter) to find
+  State/Event nodes with many distinct entity neighbors. Generic
+  labels (Sibling Relationship, Parenthood, Driving, Question) with
+  4+ entity participants are candidates.
+- "What got merged into this node?" → kg_merge_log has
+  loser_id / winner_id / merged_at / loser_snapshot_json — use it
+  to trace why a node has unexpected edges or aliases.
+- Look up node IDs by label/alias FIRST, then use the full UUID in
+  follow-up queries. Don't guess UUIDs. The aliases column is JSON
+  text — search with `aliases LIKE '%name%'`.

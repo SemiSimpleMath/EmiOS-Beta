@@ -6,6 +6,7 @@ logger = get_logger(__name__)
 from app.assistant.lib.core_tools.email_tool.utils.gmail_api_client import GmailAPIClient
 
 from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
+from app.assistant.lib.core_tools.tool_error_protocol import make_tool_error
 from app.assistant.utils.pydantic_classes import (
     ToolMessage,
     ToolResult,
@@ -57,8 +58,12 @@ class SendEmail(BaseTool):
             if not to:
                 error_msg = "Missing required email argument: 'to'."
                 logger.error(f"Error: {error_msg}")
-                error_result = ToolResult(result_type="error", content="Missing required email argument: 'to'.")
-                return self.publish_msg(error_result)
+                return self.publish_msg(make_tool_error(
+                    error_code="missing_recipient",
+                    message=error_msg,
+                    abort_policy="abort_tool",
+                    retryable=True,
+                ))
 
             # Resolve pod_ids to absolute file paths via PodStore + metadata.
             attachment_paths: list = []
@@ -92,11 +97,23 @@ class SendEmail(BaseTool):
                         err.append(f"missing pods: {missing_pods}")
                     if unbacked_pods:
                         err.append(f"pods without backing files: {unbacked_pods}")
-                    error_result = ToolResult(
-                        result_type="error",
-                        content=f"Cannot attach: {'; '.join(err)}",
+                    hint = (
+                        " Pod IDs must be the EXACT full URI returned by pod_search "
+                        "or mint_pod_from_path (e.g. 'datapod:image:abc...'). Don't "
+                        "strip the 'datapod:<kind>:' prefix. If the pod truly doesn't "
+                        "exist, mint a fresh one via bash_manager + mint_pod_from_path."
                     )
-                    return self.publish_msg(error_result)
+                    return self.publish_msg(make_tool_error(
+                        error_code="pod_attachment_failed",
+                        message=f"Cannot attach: {'; '.join(err)}.{hint}",
+                        abort_policy="abort_tool",
+                        retryable=True,
+                        details={
+                            "missing_pod_ids": list(missing_pods),
+                            "unbacked_pod_ids": list(unbacked_pods),
+                            "received_pod_ids": list(pod_ids),
+                        },
+                    ))
 
             gmail_client = GmailAPIClient()
             sent = gmail_client.send_email(
@@ -106,8 +123,13 @@ class SendEmail(BaseTool):
                 attachment_paths=attachment_paths or None,
             )
             if not isinstance(sent, dict) or not str(sent.get("id") or "").strip():
-                error_result = ToolResult(result_type="error", content="failed to send email.")
-                return self.publish_msg(error_result)
+                return self.publish_msg(make_tool_error(
+                    error_code="gmail_send_failed",
+                    message="Gmail API did not return a message id; the send did not succeed.",
+                    abort_policy="abort_tool",
+                    retryable=True,
+                    details={"to": str(to), "had_attachments": bool(attachment_paths)},
+                ))
             else:
                 logger.info("Email sent successfully to %s (attachments=%d)",
                             to, len(attachment_paths))
@@ -132,12 +154,13 @@ class SendEmail(BaseTool):
         except Exception as e:
             logger.error("Error in SendEmailTool: %s", e)
             logger.debug("error in SendEmailTool exception details", exc_info=True)
-            tool_result_msg = ToolResult(
-                result_type="error",
-                content=f"Email could not be sent to {to}"
-            )
-
-            return self.publish_msg(tool_result_msg)
+            return self.publish_msg(make_tool_error(
+                error_code="send_email_exception",
+                message=f"Email to {to} failed: {e}",
+                abort_policy="abort_tool",
+                retryable=True,
+                details={"exception_type": type(e).__name__, "exception_str": str(e)},
+            ))
 
     def publish_msg(self, msg):
             return msg

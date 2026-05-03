@@ -1,0 +1,10 @@
+User: {{ resource_user_data.full_name if resource_user_data else "Jukka" }}
+
+Rate each of these KG edges 0-10 by importance to the source.
+
+{{ task }}
+
+{%- if information %}
+
+{{ information }}
+{%- endif %}

@@ -1,0 +1,22 @@
+name: bash_team::summary
+class_name: Agent
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5-mini"
+  model_tier: "mini"
+
+prompt_debug:
+  system: true
+  user: true
+  results: true
+
+allowed_tools: []
+except_tools: []
+
+user_context_items:
+  - date_time
+  - task
+  - information
+  - summary_payload
+
+system_context_items: []

@@ -1,0 +1,36 @@
+name: bash_team::planner
+class_name: Planner
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.1"
+  model_tier: "smart"
+
+
+# Narrow surface for hello-world v1: just run_shell + ask_user.
+# Widen one tool at a time once we know what reads on this foundation
+# feel limiting.
+# bash_team's job is filesystem inspection + minting pods from files.
+# Outbound actions (email, sms, etc.) belong to other managers — emi_team
+# orchestrates compound flows by calling bash_manager for the file/pod
+# part and then personal_admin_manager (or send_email directly) for the
+# outbound part. Overloading bash_team with send_email led to a planner
+# that didn't know how to chain mint→send and gave up with "no email tool".
+allowed_tools: [run_shell, ask_user, mint_pod_from_path]
+except_tools: []
+allowed_nodes: [return_control]
+entity_scan_keys: [incoming_message, task, information, recent_history]
+entity_card_level: 0
+
+user_context_items:
+  - date_time
+  - task
+  - information
+  - recent_history
+  - checklist
+  - progress_report
+  - action_count
+
+system_context_items:
+  - tool_descriptions
+  - allowed_nodes
+  - task

@@ -14,6 +14,7 @@ Routing:
 ++ personal_admin_manager
 More complex operations involving email, todo tasks are reminders.  Especially if it involves first finding a specific email or event and then doing something to it. eg. rescheduling calendar, deleting events because deleting involves first finding then deleting.
 Sending emails.
+- EXCEPTION: when the email's payload is a local file ("email me the X from my Y", "send the photo in ~/Pictures to ..."), route to emi_team_manager. emi_team orchestrates: bash_manager finds + mints the pod, then personal_admin sends the email with the pod_id attached.
 
 ++ web_manager
 - web research/browsing/lookups that do not require a live browser (search engine queries, quick URL reads, distance calculations)
@@ -30,6 +31,11 @@ Sending emails.
 ++ devices_manager
 - smart-home control intents focused on Nest thermostat, lights, and Ring cameras.
 - use this when smart-home work is multi-step, ambiguous, or needs planning/coordination.
+
+++ bash_manager
+- local filesystem work on Jukka's machine: list folders / files, find a file by name, show contents of a text file, mint a pod from a file.
+- read intents only: "list my Documents", "what's in my Pictures", "find a file called X", "show me the contents of Y".
+- For compound tasks that involve sending the file somewhere (email, etc.), route to emi_team_manager — it orchestrates bash + personal_admin. bash_manager itself does NOT send.
 
 ++ run_task — run a pre-made task, routine, or job by name.
 - When user says "run task X", "run job X", "run routine X", "execute task X".

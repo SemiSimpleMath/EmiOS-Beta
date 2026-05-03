@@ -180,6 +180,32 @@ def _lazy_wiki_nightly_refresh(*, target_date=None, routine=None):
 wiki_nightly_refresh = _lazy_wiki_nightly_refresh
 
 
+def _lazy_importance_backfill(*, target_date=None, routine=None):
+    """Periodic: rate any node/edge with NULL importance via the existing
+    batch raters. Cheap, idempotent, runs every ~30 min so newly-promoted
+    content is rated by the time the wiki refresh's importance pre-filter
+    runs against it. First run handles the historical NULL backlog.
+
+    Reads ``spec.batch_size_edges`` / ``spec.batch_size_nodes`` if you want
+    to tune throughput per call.
+    """
+    from app.me.edge_importance import regenerate_edge_importance
+    from app.me.importance import regenerate_importance
+    spec = (routine.spec if routine and hasattr(routine, "spec") else {}) or {}
+    batch_edges = int(spec.get("batch_size_edges", 50))
+    batch_nodes = int(spec.get("batch_size_nodes", 60))
+
+    edge_count = regenerate_edge_importance(batch_size=batch_edges, only_unrated=True)
+    node_scores = regenerate_importance(batch_size=batch_nodes, only_unrated=True)
+    return {
+        "edges_rated": int(edge_count or 0),
+        "nodes_rated": len(node_scores or {}),
+    }
+
+
+importance_backfill = _lazy_importance_backfill
+
+
 def _lazy_wiki_growth(*, target_date=None, routine=None):
     """Nightly: build up to N new wiki pages for the highest-degree Entity
     nodes that don't yet have one. Pairs with wiki_nightly_refresh —

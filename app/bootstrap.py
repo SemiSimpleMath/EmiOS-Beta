@@ -175,6 +175,14 @@ def initialize_services(app):
     resource_manager = ResourceManager()
     ServiceLocator.register("resource_manager", resource_manager)
     resource_manager.load_all_from_directory("resources")
+    # Skills are durable, hand-authored knowledge files (e.g. "when working
+    # with Documents on this machine, also check OneDrive"). They live in a
+    # separate top-level dir from `resources/` (which is mostly data and
+    # pipeline outputs) so the skill library is easy to curate and review.
+    # They use the same loader so agents can reference them via context_items
+    # the same way as resources (id = filename stem).
+    if (resource_manager.base_dir / "skills").is_dir():
+        resource_manager.load_all_from_directory("skills")
 
     # Reply routing (multi-transport: socketio, sms, etc.)
     from app.services.reply_router import ReplyRouter

@@ -73,10 +73,8 @@ def _build_operations(arguments: Dict[str, Any]) -> List[Tuple[str, Dict[str, An
 
     if arguments.get("mode") is not None:
         mode = str(arguments.get("mode") or "").strip().lower().replace("-", "_")
-        if mode not in {"heat", "cool", "heat_cool", "heatcool", "off"}:
-            raise ValueError("mode must be one of: HEAT, COOL, HEATCOOL, OFF.")
-        if mode == "heatcool":
-            mode = "heat_cool"
+        if mode not in {"heat", "cool", "off"}:
+            raise ValueError("mode must be one of: HEAT, COOL, OFF.")
         op_args: Dict[str, Any] = {"mode": mode}
         if device_id is not None:
             op_args["device_id"] = device_id

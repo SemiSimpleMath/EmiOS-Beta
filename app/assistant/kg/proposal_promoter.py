@@ -436,7 +436,13 @@ def _create_kg_node_from_proposal(
         # raw extractor sentence for Entity/Concept/Property. Verbatim source
         # is preserved in evidence + window_id, not on the node.
         original_sentence=sentence_for_node,
-        description=proposal_node.description_draft or "",
+        # Description is intentionally LEFT BLANK at promotion time. A single
+        # observation isn't enough to write a meaningful description; that's
+        # the entity_card pipeline's job once enough evidence accumulates.
+        # The card pipeline writes back to node.description when the card is
+        # generated. The extractor's draft is preserved on the proposal row
+        # (description_draft) for diagnostics; it just isn't promoted.
+        description="",
         aliases=[],
         category=proposal_node.category,
         attributes=attrs,

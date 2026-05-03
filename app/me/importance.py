@@ -84,14 +84,19 @@ def regenerate_importance(
     *,
     batch_size: int = BATCH_SIZE,
     only_node_types: Optional[List[str]] = None,
+    only_unrated: bool = False,
 ) -> Dict[str, float]:
-    """Rate every Entity node and persist to JSON.
+    """Rate Entity nodes and persist to JSON + kg_node_metadata.importance.
 
     Args:
         batch_size: nodes per LLM call.
         only_node_types: defaults to ["Entity"]. Pass ["Entity", "State"]
             to also rate states (rarely useful — the lens treats states as
             connective tissue, not standalone-rankable).
+        only_unrated: when True, skip nodes whose ``kg_node_metadata.importance``
+            is non-null. Used by the periodic backfill routine to rate only
+            newly-promoted content without re-rating the whole graph each
+            tick. Default False = re-rate everything (full-refresh mode).
     """
     from app.assistant.ServiceLocator.service_locator import DI
     from app.assistant.utils.pydantic_classes import (
@@ -106,6 +111,8 @@ def regenerate_importance(
 
     with get_db_manager().read_session() as session:
         query = session.query(Node).filter(Node.node_type.in_(types_filter))
+        if only_unrated:
+            query = query.filter(Node.importance.is_(None))
         all_nodes = query.all()
 
     logger.info(
@@ -174,16 +181,50 @@ def regenerate_importance(
                 break
 
     # Default-fill anything we didn't rate so the lens doesn't see Nones.
-    for n in all_nodes:
-        scores.setdefault(str(n.id), DEFAULT_SCORE)
+    # In only_unrated mode we DON'T default-fill — we only persist real scores
+    # for nodes we actually rated this run (otherwise we'd write 5.0 to every
+    # unrated node and immediately lose the "is unrated?" signal).
+    if not only_unrated:
+        for n in all_nodes:
+            scores.setdefault(str(n.id), DEFAULT_SCORE)
 
+    # Persist to JSON (lens cache).
     IMPORTANCE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    IMPORTANCE_PATH.write_text(json.dumps(scores, indent=0), encoding="utf-8")
+    if only_unrated:
+        # Merge into the existing JSON map so we don't lose prior scores.
+        existing = {}
+        if IMPORTANCE_PATH.exists():
+            try:
+                existing = json.loads(IMPORTANCE_PATH.read_text(encoding="utf-8"))
+                existing = {str(k): float(v) for k, v in existing.items()}
+            except Exception as e:
+                logger.warning("me importance: could not read existing JSON for merge: %s", e)
+        existing.update(scores)
+        IMPORTANCE_PATH.write_text(json.dumps(existing, indent=0), encoding="utf-8")
+    else:
+        IMPORTANCE_PATH.write_text(json.dumps(scores, indent=0), encoding="utf-8")
     invalidate()  # force reload next get
+
+    # Persist to kg_node_metadata.importance — this is what the wiki refresh's
+    # importance pre-filter reads. Without the DB write, the SQL filter would
+    # always see NULL and either drop or admit everything depending on policy.
+    persisted_to_db = 0
+    if scores:
+        with get_db_manager().write_session() as session:
+            for nid, sc in scores.items():
+                try:
+                    session.query(Node).filter(Node.id == nid).update(
+                        {Node.importance: float(sc)}
+                    )
+                    persisted_to_db += 1
+                except Exception as e:
+                    logger.warning("me importance: DB write failed for node %s: %s", nid, e)
+            session.commit()
+
     elapsed = time.time() - started
     logger.info(
-        "me importance: persisted %d scores to %s in %.1fs (%d failures)",
-        len(scores), IMPORTANCE_PATH, elapsed, failures,
+        "me importance: rated %d nodes in %.1fs (%d failures); JSON=%s DB_writes=%d",
+        len(scores), elapsed, failures, IMPORTANCE_PATH, persisted_to_db,
     )
     return scores
 

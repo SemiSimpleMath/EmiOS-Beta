@@ -50,3 +50,39 @@ def save_tags(root: Path, entity_label: str, tags: Dict[str, List[str]]) -> None
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{entity_label}.json"
     path.write_text(json.dumps(tags, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def load_bullet_index(root: Path, entity_label: str) -> List[str]:
+    """Read the bullet-index sidecar — the set of bullet keys present at the
+    last successful rewrite. Used by incremental refresh to detect which
+    bullets were added/removed since the prose was last written.
+
+    Distinct from the tags sidecar (which is the tagger cache, written
+    immediately after tagging): bullet_index is the rewrite checkpoint,
+    written only after the prose actually lands. A crash mid-rewrite leaves
+    the old index in place so the next run re-detects everything as dirty
+    and self-heals.
+
+    Missing file → empty list (first-run; everything will appear "added").
+    """
+    path = root / "bullet_index" / f"{entity_label}.json"
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, list):
+            return [str(k) for k in data if isinstance(k, str)]
+    except Exception as e:
+        logger.warning("Failed reading bullet_index sidecar %s: %s", path, e)
+    return []
+
+
+def save_bullet_index(root: Path, entity_label: str, keys: List[str]) -> None:
+    """Write the bullet-index sidecar (sorted for diffability)."""
+    out_dir = root / "bullet_index"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"{entity_label}.json"
+    path.write_text(
+        json.dumps(sorted(set(keys)), indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )

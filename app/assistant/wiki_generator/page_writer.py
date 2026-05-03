@@ -26,9 +26,11 @@ from app.assistant.kg_projection import (
     bullet_key as _bullet_key,
     get_entity_neighborhood,
     group_bullets_by_section as _group_bullets_by_section_raw,
+    load_bullet_index as _load_bullet_index_sidecar,
     load_tags as _load_tag_sidecar,
     load_taxonomy,
     render_bullets,
+    save_bullet_index as _save_bullet_index_sidecar,
     save_tags as _save_tag_sidecar,
     sections_as_prompt_list,
     tag_bullets,
@@ -421,6 +423,13 @@ def generate_prose_page_tagged(
         {k: v for k, v in section_outputs},
     )
 
+    # Snapshot the bullet keys we just wrote prose from. The next refresh will
+    # diff against this to detect added/removed bullets — the dirty signal that
+    # decides which sections actually need rewriting.
+    _save_bullet_index_sidecar(
+        vault_path, entity_label, [b.key for b in structured_bullets],
+    )
+
     see_also_rough = parsed.get("see_also", "").strip()
 
     # Build the body first (sections + see_also) so the lead writer has the
@@ -442,6 +451,8 @@ def generate_prose_page_tagged(
         article_body=article_body,
     )
 
+    _sync_lead_to_node_description(neighborhood.entity.id, lead, entity_label)
+
     from app.assistant.wiki_generator.profile_image import materialize_profile_image_for_vault
     profile_image_rel = materialize_profile_image_for_vault(entity_label, vault_path)
 
@@ -460,6 +471,31 @@ def generate_prose_page_tagged(
 
     final = apply_references(stitched)
     return write_prose_page(vault_path, entity_label, final)
+
+
+def _sync_lead_to_node_description(
+    node_id: str, lead: str, entity_label: str,
+) -> None:
+    """Push the wiki lead into kg_node_metadata.description.
+
+    The wiki page is the canonical "About" — Node.description is a downstream
+    projection of it, used by the visualizer's ABOUT sidebar. persist_description
+    preserves Node.updated_at so this write is invisible to wiki change
+    detection (otherwise every lead update would ripple into every neighbor's
+    refresh — see the docstring there).
+    """
+    if not lead:
+        return
+    try:
+        from app.assistant.pipelines.kg_maintenance_pipeline.description_creator import (
+            persist_description,
+        )
+        persist_description(node_id, lead.strip())
+    except Exception as e:
+        logger.warning(
+            "Failed to sync wiki lead → Node.description for %s (%s): %s",
+            entity_label, node_id, e,
+        )
 
 
 # ----------------------------------------------------------------------
@@ -555,28 +591,110 @@ def regenerate_affected_sections(
 
     grouped = _group_bullets_by_section_raw(bullet_texts, tags)
 
-    # Dirty detection from structured provenance — a bullet is dirty iff its
-    # source_node_ids intersect changed_set. No markdown regex needed.
-    dirty_bullet_texts: set[str] = set()
-    dirty_sections: set[str] = set()
-    for b in structured_bullets:
-        if set(b.source_node_ids) & changed_set:
-            dirty_bullet_texts.add(b.text)
-            for sec in tags.get(b.key, []):
-                dirty_sections.add(sec)
-    # New-section case: a section that didn't exist before but now has
-    # bullets (e.g. a retargeted edge brought content in).
-    for sec_key, bullets_for_sec in grouped.items():
-        if sec_key not in cached_outputs and bullets_for_sec:
-            if any(text in dirty_bullet_texts for text in bullets_for_sec):
-                dirty_sections.add(sec_key)
+    # ---------- structural dirty detection via bullet-key diff ----------
+    # A bullet's key is hash(bullet.text), so identical text → identical key.
+    # The bullet_index sidecar records the keys present at the LAST successful
+    # rewrite. Comparing against current keys gives us:
+    #   added   = current - prev → section gained a bullet (dirty, gate)
+    #   removed = prev - current → section lost a bullet (dirty, no gate —
+    #                              section text mentions a fact that's gone)
+    #   unchanged keys imply unchanged TEXT, even if the underlying nodes
+    #   were touched for unrelated reasons (importance recalc, description
+    #   refresh, new edges that don't touch this neighborhood). Those changes
+    #   leave bullet text identical → no rewrite needed.
+    #
+    # changed_node_ids is no longer the dirty trigger — it survives only as
+    # the cheap pre-filter at the caller level (refresh_one_page) that
+    # decides whether to even open this page's neighborhood.
+    prev_index = set(_load_bullet_index_sidecar(vault_path, entity_label))
+    curr_keys = {b.key for b in structured_bullets}
+    added_keys = curr_keys - prev_index
+    removed_keys = prev_index - curr_keys
+
+    addition_sections: set[str] = set()
+    for k in added_keys:
+        for sec in tags.get(k, []):
+            addition_sections.add(sec)
+    removal_sections: set[str] = set()
+    for k in removed_keys:
+        for sec in cached_tags.get(k, []):
+            removal_sections.add(sec)
+    dirty_sections: set[str] = addition_sections | removal_sections
 
     if not dirty_sections:
         logger.info(
-            "regenerate_affected_sections: no sections touched by %d changed node(s) for %s.",
-            len(changed_set), entity_label,
+            "regenerate_affected_sections: %s — %d added / %d removed bullets, "
+            "no sections touched (text-diff clean).",
+            entity_label, len(added_keys), len(removed_keys),
         )
         return None
+
+    # ---------- nano critic gate ----------
+    # Per dirty section, ask wiki_inclusion_critic whether ADDED bullets are
+    # worth incorporating. Sections dirty due to REMOVAL skip the gate
+    # entirely — there's no bullet to evaluate, and the section's current
+    # prose mentions a fact that no longer exists, so it must be rewritten.
+    # Most chat-extracted ephemera fails this gate, dropping the section
+    # back to clean before we pay for the expensive prose writer.
+    sec_meta_by_key_for_gate = {s.key: s for s in sections_meta}
+    added_bullet_texts = {b.text for b in structured_bullets if b.key in added_keys}
+    critic = DI.agent_factory.create_agent("wiki_inclusion_critic")
+    if critic is None:
+        logger.warning(
+            "wiki_inclusion_critic agent unavailable; falling back to ungated dirty_sections."
+        )
+    else:
+        approved_sections: set[str] = set(removal_sections)  # always include removals
+        gate_candidates = addition_sections - removal_sections  # remaining for critic
+        for sec_key in sorted(gate_candidates):
+            sec = sec_meta_by_key_for_gate.get(sec_key)
+            if sec is None:
+                continue
+            current_text = (cached_outputs.get(sec_key) or "").strip()
+            triggering_bullets = [
+                b.text for b in structured_bullets
+                if b.key in added_keys and sec_key in tags.get(b.key, [])
+            ]
+            if not triggering_bullets:
+                continue
+            for b_text in triggering_bullets:
+                try:
+                    msg = Message(
+                        agent_input={
+                            "task": "",
+                            "information": "",
+                            "section_title": sec.title,
+                            "section_slug": sec_key,
+                            "current_section_text": current_text,
+                            "new_fact_sentence": b_text,
+                        },
+                        scope_context=_SCOPE_SECTION_WRITER,
+                    )
+                    result = critic.action_handler(msg)
+                    data = getattr(result, "data", None) or {}
+                    if bool(data.get("include")):
+                        approved_sections.add(sec_key)
+                        break
+                except Exception as e:
+                    logger.warning(
+                        "wiki_inclusion_critic failed on %s/%s: %s — admitting by default",
+                        entity_label, sec_key, e,
+                    )
+                    approved_sections.add(sec_key)
+                    break
+        gated_out = dirty_sections - approved_sections
+        if gated_out:
+            logger.info(
+                "wiki_inclusion_critic gated out %d section(s) for %s: %s",
+                len(gated_out), entity_label, sorted(gated_out),
+            )
+        dirty_sections = approved_sections
+        if not dirty_sections:
+            logger.info(
+                "All dirty sections gated out by critic for %s — nothing to rewrite.",
+                entity_label,
+            )
+            return None
 
     logger.info(
         "Regenerating %d dirty section(s) for %s: %s",
@@ -635,6 +753,11 @@ def regenerate_affected_sections(
 
     _save_section_outputs(vault_path, entity_label, new_outputs)
 
+    # Checkpoint the bullet keys we just successfully wrote prose from.
+    # Saved AFTER section_outputs so a crash here at worst leaves the next
+    # run re-detecting everything as dirty — self-healing.
+    _save_bullet_index_sidecar(vault_path, entity_label, list(curr_keys))
+
     # Restitch in the taxonomy's preferred order.
     see_also_rough = parsed.get("see_also", "").strip()
 
@@ -655,6 +778,8 @@ def regenerate_affected_sections(
         entity_type=entity_type,
         article_body=article_body,
     )
+
+    _sync_lead_to_node_description(neighborhood.entity.id, lead, entity_label)
 
     from app.assistant.wiki_generator.profile_image import materialize_profile_image_for_vault
     profile_image_rel = materialize_profile_image_for_vault(entity_label, vault_path)

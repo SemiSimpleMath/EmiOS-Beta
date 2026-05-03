@@ -189,18 +189,39 @@ def persist_description(node_id: str, description: str) -> bool:
     """
     Write description to the node row.  Returns True if the row was actually
     changed, False if the value was identical.
+
+    Description is a downstream projection of the node's KG neighborhood
+    (currently filled by either this maintenance pipeline or the wiki lead),
+    not a structural property of the node itself. Writing it MUST NOT bump
+    Node.updated_at — otherwise change_detection.find_changed_neighborhood_nodes
+    sees the node as freshly modified and triggers a wiki refresh on every
+    page that links to it, which in turn rewrites their leads, which bumps
+    THEIR updated_at, cascading without bound.
+
+    Implementation: Core UPDATE with `updated_at = Node.updated_at` self-
+    reference. Explicitly providing a value for a column suppresses its
+    `onupdate=func.now()` hook, so the timestamp is preserved verbatim.
     """
+    from sqlalchemy import update
     from app.assistant.kg.db.knowledge_graph_db import Node
 
     write_session = get_session()
     try:
-        node = write_session.query(Node).filter(Node.id == node_id).first()
-        if node is None:
+        current = (
+            write_session.query(Node.description)
+            .filter(Node.id == node_id)
+            .scalar()
+        )
+        if current is None and not write_session.query(Node.id).filter(Node.id == node_id).scalar():
             logger.debug("[description_creator] Node %s not found at write time", node_id)
             return False
-        if description == node.description:
+        if description == current:
             return False
-        node.description = description
+        write_session.execute(
+            update(Node)
+            .where(Node.id == node_id)
+            .values(description=description, updated_at=Node.updated_at)
+        )
         write_session.commit()
         return True
     except Exception:

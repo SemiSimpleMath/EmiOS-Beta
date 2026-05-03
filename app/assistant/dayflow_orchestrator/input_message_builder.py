@@ -113,6 +113,12 @@ def _build_email_message(*, email_data: Dict[str, Any], now_utc: datetime) -> Me
     subject = str(email_data.get("subject") or "").strip() or "[No Subject]"
     sender = str(email_data.get("sender") or "").strip() or "Unknown"
     summary = str(email_data.get("summary") or "").strip()
+    # First ~2000 chars of the email body — enough to capture the salutation
+    # ("Dear Parent of <name>", account IDs, first paragraph of context) which
+    # is what disambiguates the subject person for transactional/school emails.
+    # Used by context_enricher to attribute artifacts to the right person.
+    body_full = str(email_data.get("body") or "").strip()
+    body_excerpt = body_full[:2000]
 
     importance_raw = email_data.get("importance")
     if importance_raw is None:
@@ -173,6 +179,7 @@ def _build_email_message(*, email_data: Dict[str, Any], now_utc: datetime) -> Me
         "email_sender": sender,
         "email_subject": subject,
         "email_summary": summary,
+        "email_body_excerpt": body_excerpt,
         "email_importance_score": importance_int,
         "email_action_items": action_items,
         "email_direction": str(email_data.get("direction") or "inbound").strip(),
