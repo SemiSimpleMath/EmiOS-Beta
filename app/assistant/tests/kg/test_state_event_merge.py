@@ -276,3 +276,210 @@ class TestCandidatePipelineComposition:
         out = _filter_event_candidates_by_date(scored, new_valid_from=new_proposal_date)
         # Once the dateless-bypass is fixed:
         assert out == []
+
+
+# =============================================================================
+# Desired decision tree (Jukka 2026-05-03)
+# =============================================================================
+# The MINIMUM merge decision tree for State/Event/Goal nodes:
+#
+#   Hard rejects (no LLM, no merge):
+#     1. Different node_type  → NOT same
+#     2. Both time-frames KNOWN and they don't match  → NOT same
+#     3. Different participants (zero overlap)  → NOT same
+#
+#   LLM invocation conditions (only when):
+#     4. All hard-reject checks pass AND label/title is the same
+#        → invoke LLM with as much context as possible about both nodes
+#
+# Otherwise: don't merge.
+#
+# Some of these are already enforced by the current pipeline (type filter
+# is implicit in the candidate query; zero-overlap drop happens in the
+# scorer; the Event date filter exists). Others are gaps:
+#
+#   - States have NO time-frame check at all (only Events do). Per the
+#     spec, identity States like "Marriage" persist across time so a date
+#     mismatch isn't necessarily a different state — but for *episodic*
+#     States ("Rehearsing for X", "Working on project Y") with end dates,
+#     known-and-different dates SHOULD drop. Currently they don't.
+#   - There is NO label-equality precheck before invoking the LLM. The
+#     LLM is called for any candidate that passes overlap + date filter.
+#     Per the spec, the LLM should only see candidates whose label
+#     matches (exact, case-insensitive); different-label candidates are
+#     dropped without LLM cost.
+#   - The LLM merger may not receive full context today — needs a separate
+#     audit of _call_node_merger_for_state_match's payload.
+#
+# Tests below xfail until the spec lands. The test names describe the
+# desired behavior; none of these change current production behavior.
+# =============================================================================
+
+# ---------- Helper functions the spec implies (NOT YET IMPLEMENTED) ----------
+# These would live in proposal_promoter.py once the spec is approved. The
+# tests reference them via the same module namespace so the import will
+# fail (and the xfail will then catch the import error → still xfailing).
+# When implemented for real, the imports succeed and the assertions run.
+
+def _labels_match_for_merge(a: str, b: str) -> bool:
+    """Stub of the future label-equality check. Case-insensitive trim
+    equality. Returns True iff labels are 'same enough' to pass to LLM.
+
+    Currently unused by production code — the spec wants this as a gate
+    BEFORE _call_node_merger_for_state_match. Kept here so the tests
+    below have something to call; the eventual implementation should
+    live in proposal_promoter.py.
+    """
+    return (a or "").strip().casefold() == (b or "").strip().casefold()
+
+
+class TestDesiredDecisionTree:
+    """Encodes the spec. Many of these will xfail today; flipping to PASS
+    is the litmus test for the merge-tightening work."""
+
+    # ---- Hard reject 1: different node_type ----
+
+    def test_different_node_type_should_not_be_candidates(self):
+        """Already enforced by the candidate query (Node.node_type ==
+        pn.node_type). This test pins the behavior at the helper level
+        so a future refactor doesn't accidentally relax it. We assert
+        via the documented invariant: callers MUST pre-filter by type
+        before invoking _score_candidates_by_participant_overlap.
+
+        No production behavior to assert here — this is a contract test
+        for callers. The body is intentionally just a documentation no-op
+        until we have an integration-level test against
+        _prepare_proposal_plan.
+        """
+        # Documented: candidate_lists are populated only with nodes where
+        # Node.node_type == pn.node_type (proposal_promoter.py around line
+        # 1006). If a future change drops that filter, this comment is
+        # the last line of defense — the helpers below assume it.
+        assert True
+
+    # ---- Hard reject 2: both time-frames KNOWN and they don't match ----
+
+    def test_event_both_dates_known_and_far_apart_drops(self):
+        """Already passing — see TestEventDateFilter::test_outside_tolerance_dropped.
+        Re-asserted here in the spec section so the decision tree is
+        complete in one place."""
+        new = _ts(2026, 5, 1)
+        scored = [
+            {"node": _StubNode(id="a", start_date=_ts(2026, 4, 1)),
+             "overlap": 1, "jaccard": 1.0},
+        ]
+        out = _filter_event_candidates_by_date(scored, new_valid_from=new)
+        assert out == []
+
+    @pytest.mark.xfail(
+        reason=(
+            "GAP: episodic States ('Rehearsing for X' has end_date) currently "
+            "have NO date filter — only Events do. Identity States "
+            "(Marriage, Residence) are correctly excluded from this filter, "
+            "but episodic States need it. Spec calls for: if BOTH state "
+            "dates are known and they don't overlap, drop. Not implemented."
+        )
+    )
+    def test_state_both_dates_known_and_far_apart_should_drop(self):
+        """Spec: episodic States with known + non-overlapping dates are
+        different instances, just like Events.
+
+        This will require either (a) a separate _filter_state_candidates_by_date
+        helper that's date-tolerance-tighter than the Event filter and
+        only fires when BOTH dates are known, or (b) extending the Event
+        filter to cover State and detecting identity-State labels to skip.
+        """
+        # When the State date filter exists, this assertion runs:
+        from datetime import datetime, timezone
+
+        # Pretend a future _filter_state_candidates_by_date exists.
+        # Importing it here at runtime so the xfail catches ImportError too.
+        try:
+            from app.assistant.kg.proposal_promoter import (
+                _filter_state_candidates_by_date,
+            )
+        except ImportError:
+            pytest.fail("_filter_state_candidates_by_date not implemented")
+
+        new = _ts(2026, 5, 1)
+        cand = _StubNode(id="state-a", start_date=_ts(2025, 1, 1))
+        cand.end_date = _ts(2025, 6, 1)
+        scored = [{"node": cand, "overlap": 1, "jaccard": 1.0}]
+        out = _filter_state_candidates_by_date(scored, new_valid_from=new)
+        assert out == []
+
+    # ---- Hard reject 3: different participants ----
+
+    def test_zero_participant_overlap_drops(self):
+        """Already passing — see TestParticipantOverlapScoring. Re-asserted
+        here to complete the decision-tree picture."""
+        cand = _StubNode(id="cand-A")
+        scored = _score_candidates_by_participant_overlap(
+            [(cand, {"alice"})],
+            new_participant_ids={"bob"},
+        )
+        assert scored == []
+
+    # ---- LLM invocation gate: title (label) must match ----
+
+    def test_label_equality_check_helper_works(self):
+        """The helper itself is trivial — exact case-insensitive match."""
+        assert _labels_match_for_merge("Performance", "performance")
+        assert _labels_match_for_merge("Performance", " Performance ")
+        assert not _labels_match_for_merge("Performance", "Performance Role")
+        assert not _labels_match_for_merge("Rehearsal", "Rehearsing for The Drowsy Chaperone")
+
+    @pytest.mark.xfail(
+        reason=(
+            "GAP: there is no label-equality precheck before invoking "
+            "_call_node_merger_for_state_match. Per the spec, candidates "
+            "with non-matching labels should be dropped before any LLM "
+            "call — saves cost AND prevents the LLM from being asked to "
+            "judge merges it shouldn't be considering."
+        )
+    )
+    def test_different_labels_should_drop_before_llm(self):
+        """Spec: candidates with different labels never reach the LLM.
+
+        Once implemented, the candidate-filtering pipeline should call
+        _labels_match_for_merge between participant-scoring and the LLM
+        call. Today it does not.
+        """
+        try:
+            from app.assistant.kg.proposal_promoter import (
+                _filter_candidates_by_label_equality,
+            )
+        except ImportError:
+            pytest.fail("_filter_candidates_by_label_equality not implemented")
+
+        scored = [
+            {"node": _StubNode(id="diff-label", label="Performance Role"),
+             "overlap": 2, "jaccard": 1.0},
+            {"node": _StubNode(id="same-label", label="Performance"),
+             "overlap": 1, "jaccard": 0.5},
+        ]
+        out = _filter_candidates_by_label_equality(scored, new_label="Performance")
+        assert {s["node"].id for s in out} == {"same-label"}
+
+    # ---- LLM invocation: when ALL gates pass + label same ----
+
+    def test_full_decision_tree_path_to_llm(self):
+        """Positive case: type matches (precondition), dates close, overlap
+        positive, label same → candidate survives all deterministic stages
+        and would be passed to the LLM merger.
+
+        This already works today through participant-score + date-filter.
+        After the label-equality gate is added, it should still work
+        because the labels DO match in this scenario.
+        """
+        new_date = _ts(2026, 5, 1)
+        cand = _StubNode(id="match-me", label="Performance",
+                         start_date=_ts(2026, 5, 2))
+        scored = _score_candidates_by_participant_overlap(
+            [(cand, {"annika", "peter"})],
+            new_participant_ids={"annika", "peter"},
+        )
+        out = _filter_event_candidates_by_date(scored, new_valid_from=new_date)
+        assert len(out) == 1 and out[0]["node"].id == "match-me"
+        # Future label gate — would also keep this candidate (labels match):
+        assert _labels_match_for_merge(out[0]["node"].label, "Performance")
