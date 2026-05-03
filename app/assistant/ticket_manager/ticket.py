@@ -49,6 +49,7 @@ class TicketType(str, Enum):
     DAYFLOW_ADVICE   = "dayflow_advice"
     DAYFLOW_NOTIFY   = "dayflow_notify"
     DAYFLOW_DECISION = "dayflow_decision"
+    ASK_USER         = "ask_user"
 
 
 class TicketState(str, Enum):

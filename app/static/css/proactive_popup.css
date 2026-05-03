@@ -239,12 +239,14 @@
     box-shadow: 0 2px 8px rgba(128, 90, 213, 0.4);
 }
 
-.proactive-btn-sm.proactive-btn-accept {
+.proactive-btn-sm.proactive-btn-accept,
+.proactive-btn-sm.proactive-btn-answer {
     background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
     color: white;
 }
 
-.proactive-btn-sm.proactive-btn-accept:hover {
+.proactive-btn-sm.proactive-btn-accept:hover,
+.proactive-btn-sm.proactive-btn-answer:hover {
     transform: translateY(-1px);
     box-shadow: 0 2px 8px rgba(72, 187, 120, 0.4);
 }

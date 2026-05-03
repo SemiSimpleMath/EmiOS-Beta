@@ -88,15 +88,16 @@ def respond_to_ticket():
     Request body:
     {
         "ticket_id": "...",
-        "action": "done" | "skip" | "later" | "acknowledge" | "willdo" | "no" | "accept" | "dismiss",
-        "user_text": "optional user explanation",
+        "action": "done" | "skip" | "later" | "acknowledge" | "willdo" | "no" | "accept" | "dismiss" | "answer",
+        "user_text": "optional user explanation, OR the user's free-form answer for ask_user tickets",
         "snooze_minutes": 30  // only used if action is "later"
     }
-    
+
     Actions:
     - Activity layout: "done" (completed), "skip" (dismissed), "later" (snoozed)
     - Advice layout: "acknowledge" (received), "willdo" (will act), "no" (not applicable), "later"
     - Tool approval: "accept" (allow), "dismiss" (deny)
+    - ask_user: "answer" (text-bearing acceptance — user_text is the raw answer), "dismiss" (declined to answer)
     """
     try:
         from app.assistant.ticket_manager.ticket_service import get_ticket_service

@@ -171,6 +171,7 @@ class ProactiveSuggestionPopup {
             case 'tool_approval':    return { layout: 'tool_approval', planMode: false };
             case 'dayflow_notify':   return { layout: 'notify',        planMode: false };
             case 'dayflow_decision': return { layout: 'decision',      planMode: true  };
+            case 'ask_user':         return { layout: 'question',      planMode: false };
             default:                 return { layout: 'advice',        planMode: true  };
         }
     }
@@ -207,6 +208,7 @@ class ProactiveSuggestionPopup {
             const isNotify    = layout === 'notify';
             const isDecision  = layout === 'decision';
             const isAdvice    = layout === 'advice';
+            const isQuestion  = layout === 'question';
             
             let buttonHtml;
             if (isToolApproval) {
@@ -237,8 +239,8 @@ class ProactiveSuggestionPopup {
                 const planModeHtml = '';
                 buttonHtml = `
                     <div class="proactive-text-container">
-                        <input type="text" 
-                               class="proactive-user-text" 
+                        <input type="text"
+                               class="proactive-user-text"
                                data-idx="${idx}"
                                placeholder="Optional: Add a note"
                                maxlength="200">
@@ -252,6 +254,24 @@ class ProactiveSuggestionPopup {
                         </select>
                         <button class="proactive-btn-sm proactive-btn-later" data-idx="${idx}">⏰ Later</button>
                         ${planModeHtml}
+                    </div>
+                `;
+            } else if (isQuestion) {
+                // ask_user layout: free-form text answer + Submit / Skip.
+                // The Submit button uses action="answer" which the backend
+                // maps to state="accepted" with raw user_text (no descriptive
+                // prefix). Skip dismisses the question without an answer.
+                buttonHtml = `
+                    <div class="proactive-text-container">
+                        <input type="text"
+                               class="proactive-user-text"
+                               data-idx="${idx}"
+                               placeholder="Your answer..."
+                               maxlength="2000">
+                    </div>
+                    <div class="proactive-actions-row">
+                        <button class="proactive-btn-sm proactive-btn-answer" data-idx="${idx}" title="Submit answer">✓ Submit</button>
+                        <button class="proactive-btn-sm proactive-btn-dismiss" data-idx="${idx}" title="Decline to answer">✗ Skip</button>
                     </div>
                 `;
             } else {
@@ -339,7 +359,25 @@ class ProactiveSuggestionPopup {
         listContainer.querySelectorAll('.proactive-btn-plan-mode').forEach(btn => {
             btn.addEventListener('click', () => this.startPlanMode(parseInt(btn.dataset.idx)));
         });
-        
+        // ask_user layout: Submit + Enter-to-submit
+        listContainer.querySelectorAll('.proactive-btn-answer').forEach(btn => {
+            btn.addEventListener('click', () => this.respond(parseInt(btn.dataset.idx), 'answer'));
+        });
+        listContainer.querySelectorAll('.proactive-item').forEach(item => {
+            const layoutInput = item.querySelector('.proactive-btn-answer');
+            if (!layoutInput) return;
+            const idx = parseInt(layoutInput.dataset.idx);
+            const textInput = item.querySelector('.proactive-user-text');
+            if (textInput) {
+                textInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        this.respond(idx, 'answer');
+                    }
+                });
+            }
+        });
+
         popup.classList.remove('hidden');
     }
 

@@ -72,6 +72,9 @@ class TicketService:
         # Tool approval layout
         "accept": "User has approved this tool action.",
         "dismiss": "User has denied this tool action.",
+        # ask_user layout — `user_text` is the raw answer, no descriptive
+        # prefix so the calling agent gets the user's words verbatim.
+        "answer": "",
         # Close (X button) — not a user opinion, just clearing the UI
         "close": "User closed the ticket without expressing an opinion. Treat as if it was never shown.",
     }
@@ -83,6 +86,7 @@ class TicketService:
         "accept": "accepted",
         "acknowledge": "accepted",
         "willdo": "accepted",
+        "answer": "accepted",  # ask_user — text-bearing acceptance
         # Dismissal actions
         "skip": "dismissed",
         "dismiss": "dismissed",
@@ -145,13 +149,19 @@ class TicketService:
             )
 
         # Build effective text: action description + optional user elaboration
-        # This gives agents full context about what the user meant
+        # This gives agents full context about what the user meant.
+        # Special case: actions with an EMPTY description (e.g. "answer" for
+        # ask_user tickets) pass user_text through verbatim so the calling
+        # agent gets the user's words without a descriptive wrapper.
         action_desc = self.ACTION_DESCRIPTIONS.get(action, "")
         user_elaboration = user_text.strip() if user_text else ""
-        
-        if user_elaboration:
+
+        if user_elaboration and action_desc:
             # Combine: "User has acknowledged... Additional: I'll do it after lunch"
             effective_text = f"{action_desc} Additional from user: {user_elaboration}"
+        elif user_elaboration:
+            # No descriptive prefix — answer-style actions (ask_user).
+            effective_text = user_elaboration
         else:
             effective_text = action_desc
 
