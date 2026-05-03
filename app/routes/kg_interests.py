@@ -94,11 +94,29 @@ def kg_interests_save():
 
     new_value = {"description": description, "categories": categories}
 
+    # Write the file directly first. resource_manager.update_resource(persist=True)
+    # only persists if the resource was originally loaded from a file (it writes
+    # back to that path); when no file existed at startup, persist silently skips
+    # — the user's prior saves dropped on the floor that way. By writing the
+    # canonical path here ourselves, the next get_resource picks it up via the
+    # mtime staleness check and the in-memory update_resource keeps the running
+    # cache in sync immediately.
+    path = _resource_path()
     try:
-        DI.resource_manager.update_resource(RESOURCE_ID, new_value, persist=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(new_value, indent=2, ensure_ascii=False), encoding="utf-8",
+        )
     except Exception as e:
-        logger.error("Failed to update %s: %s", RESOURCE_ID, e)
-        return jsonify({"ok": False, "error": f"update failed: {e}"}), 500
+        logger.error("Failed to write %s to disk: %s", path, e)
+        return jsonify({"ok": False, "error": f"disk write failed: {e}"}), 500
+
+    try:
+        DI.resource_manager.update_resource(RESOURCE_ID, new_value, persist=False)
+    except Exception as e:
+        # In-memory update failed; disk write succeeded. Log loudly but don't
+        # error out — next startup will load from disk anyway.
+        logger.error("Failed to update %s in memory (disk write OK): %s", RESOURCE_ID, e)
 
     return jsonify({"ok": True, "categories": categories, "description": description})
 

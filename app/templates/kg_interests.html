@@ -155,7 +155,7 @@
         status.className = "kg-save-status error";
         return;
       }
-      status.textContent = "Saved. Restart Flask for agents to reload the prompt.";
+      status.textContent = "Saved. Next agent call uses the new categories — no restart needed.";
       status.className = "kg-save-status ok";
     } catch (e) {
       status.textContent = "Error: " + e.message;
