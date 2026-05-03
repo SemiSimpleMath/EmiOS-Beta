@@ -62,13 +62,19 @@ export default function App() {
 
   function handleNodeClick(node: LensNode, event: MouseEvent) {
     if (event.shiftKey) {
-      // Shift-click: open the wiki side panel for inspection.
-      setOpenWikiNode(node);
+      // Shift-click: toggle multi-seed selection. With 2+ seeds the
+      // canvas filters to the INTERSECTION of their neighborhoods —
+      // "show me the entities both of these people share." Removing
+      // a seed by shift-clicking it again drops it from the set.
+      setSeeds((prev) =>
+        prev.includes(node.id)
+          ? prev.filter((s) => s !== node.id)
+          : [...prev, node.id],
+      );
       return;
     }
-    // Plain click on the anchor itself: open wiki. On any other node:
-    // switch the anchor to it — the lens then re-fetches its subgraph
-    // and re-ranks neighbors by edge-derived importance from that anchor.
+    // Plain click on a current seed: open wiki. On any other node:
+    // switch the anchor to it (replaces all seeds with just this one).
     if (seeds.includes(node.id)) {
       setOpenWikiNode(node);
     } else {

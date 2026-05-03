@@ -82,6 +82,31 @@ const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));   // angular step
 // Wheel UP = zoom in = entities move OUTWARD = currentScroll grows.
 const SCROLL_PER_PIXEL = 0.25;
 
+// ---------- Intersection mode (2+ seeds) ----------
+// Layout: anchors at left/right of canvas, shared items in a vertical
+// column down the middle. Scroll = page through batches — nodes do
+// NOT move; current batch fades out, brief blank gap, next fades in.
+//
+// Hierarchy of items in the column (page 0 first, then later pages):
+//   1. Direct shared State/Event/Goal nodes (connected to ALL seeds)
+//      — the literal one-hop relationships BETWEEN the anchors
+//      (Marriage, Family Time, Parent of Annika ...).
+//   2. Shared entities (in every seed's 1-hop neighborhood) — people /
+//      places / things both anchors connect to.
+const ISEC_ANCHOR_X = 320;            // |x| of L/R anchors
+const ISEC_COLUMN_X = 0;              // x of the middle column
+const ISEC_COLUMN_HALF_HEIGHT = 360;  // taller column → more breathing room
+const ISEC_BATCH_SIZE = 10;           // items per page
+const ISEC_SCROLL_PER_BATCH = 100;    // graph units per page
+// Crossfade with a hard gap: full opacity within ±FULL of the current
+// batch index; linear fade over FADE; zero beyond that. Total visible
+// width per batch = 2*(FULL+FADE). With FULL=0.25, FADE=0.10, each
+// batch holds full opacity over 0.5 of a batch-step and is fully off
+// after 0.7 — leaving a clean 0.3-wide blank gap between consecutive
+// batches.
+const ISEC_BATCH_FULL_HALFWIDTH = 0.25;
+const ISEC_BATCH_FADE_HALFWIDTH = 0.10;
+
 // Visibility set is computed in the component (depends on logicalZoom).
 // This module-level shim lets the static draw functions read whether a
 // given node id is currently visible without threading state through
@@ -317,6 +342,84 @@ export function GraphCanvas({
   //   single most-important state mediating each (seed, entity) pair.
   const [showLines, setShowLines] = useState(true);
   const [showStates, setShowStates] = useState(false);
+  // Intersection-mode level toggles. Default both on; turning one off
+  // collapses the column to just that hop level. With both off the
+  // column is empty (only the two anchors render).
+  const [showZeroHop, setShowZeroHop] = useState(true);
+  const [showOneHop, setShowOneHop] = useState(true);
+
+  // 0-hop intersection: State/Event/Goal nodes connected DIRECTLY to
+  // every seed (Marriage, Parenthood, Family Time, Co-residence, ...).
+  // These are the actual one-hop relationships BETWEEN the two anchors.
+  // Returns null in single-seed mode.
+  const directSharedStateIds = useMemo<Set<string> | null>(() => {
+    const seedIds = propNodes.filter((n) => n.is_seed).map((n) => n.id);
+    if (seedIds.length < 2) return null;
+    const result = new Set<string>();
+    for (const n of propNodes) {
+      if (!STATE_TYPES.has(n.node_type)) continue;
+      const stateNeighbors = new Set<string>();
+      for (const e of edges) {
+        if (e.source_id === n.id) stateNeighbors.add(e.target_id);
+        else if (e.target_id === n.id) stateNeighbors.add(e.source_id);
+      }
+      if (seedIds.every((sid) => stateNeighbors.has(sid))) {
+        result.add(n.id);
+      }
+    }
+    return result;
+  }, [propNodes, edges]);
+
+  // 1-hop intersection. With 2+ seeds, restrict the rendered entity
+  // set to the entities that appear in EVERY seed's 1-hop neighborhood —
+  // "show me what these people share". With 0 or 1 seeds returns null
+  // (no filter).
+  //
+  // 1-hop neighborhood = entities directly connected by an edge OR
+  // entities reachable through a single intermediating State/Event/Goal.
+  // The state-mediated path matters because most real KG connections
+  // between two people run through a shared state (Marriage, Friendship,
+  // Co-residence) rather than a direct entity↔entity edge.
+  const intersectionEntityIds = useMemo<Set<string> | null>(() => {
+    const seedIds = propNodes.filter((n) => n.is_seed).map((n) => n.id);
+    if (seedIds.length < 2) return null;
+
+    const nodeById = new Map(propNodes.map((n) => [n.id, n] as const));
+
+    const neighborhoodOf = (seedId: string): Set<string> => {
+      const out = new Set<string>();
+      // Direct entity neighbors
+      for (const e of edges) {
+        let other: string | null = null;
+        if (e.source_id === seedId) other = e.target_id;
+        else if (e.target_id === seedId) other = e.source_id;
+        if (!other || other === seedId) continue;
+        const on = nodeById.get(other);
+        if (!on) continue;
+        if (on.node_type === "Entity") {
+          out.add(other);
+        } else if (STATE_TYPES.has(on.node_type)) {
+          // Walk the state to its other entity neighbors
+          for (const e2 of edges) {
+            let viaOther: string | null = null;
+            if (e2.source_id === other) viaOther = e2.target_id;
+            else if (e2.target_id === other) viaOther = e2.source_id;
+            if (!viaOther || viaOther === seedId) continue;
+            const von = nodeById.get(viaOther);
+            if (von && von.node_type === "Entity") out.add(viaOther);
+          }
+        }
+      }
+      return out;
+    };
+
+    const sets = seedIds.map(neighborhoodOf);
+    let inter = sets[0];
+    for (let i = 1; i < sets.length; i++) {
+      inter = new Set([...inter].filter((x) => sets[i].has(x)));
+    }
+    return inter;
+  }, [propNodes, edges]);
 
   // Per-pair best-state selection. For each visible Entity X (≠ seed),
   // pick the SINGLE highest-scoring state S that mediates (seed, X).
@@ -406,13 +509,25 @@ export function GraphCanvas({
   }, [propNodes, edges]);
 
   const nodes = useMemo(() => {
+    // Intersection mode: keep seeds + 0-hop direct shared states +
+    // 1-hop intersection entities, gated by the per-level toggles.
+    // Ignores the showStates toggle (states-as-intersection are
+    // their own thing here).
+    if (intersectionEntityIds) {
+      return propNodes.filter(
+        (n) => n.is_seed
+          || (showOneHop && intersectionEntityIds.has(n.id))
+          || (showZeroHop && (directSharedStateIds?.has(n.id) ?? false)),
+      );
+    }
+    // Single-anchor mode
     if (!showStates) {
       return propNodes.filter((n) => !STATE_TYPES.has(n.node_type));
     }
     return propNodes.filter(
       (n) => !STATE_TYPES.has(n.node_type) || stateSelection.allowedStates.has(n.id),
     );
-  }, [propNodes, showStates, stateSelection]);
+  }, [propNodes, showStates, stateSelection, intersectionEntityIds, directSharedStateIds, showZeroHop, showOneHop]);
 
   // Mirror showLines to the module-level shim so the empty-deps drawLink
   // useCallback can read the latest value without re-binding.
@@ -531,8 +646,12 @@ export function GraphCanvas({
     // Use propNodes (not the toggle-filtered `nodes`) so entity ranks
     // stay stable when "show states" is toggled — toggling shouldn't
     // shuffle which entity is at which batch.
+    // BUT: in intersection mode (2+ seeds) restrict to the intersection
+    // set so visible entities occupy contiguous ranks 0..N — no gappy
+    // rings from filtered-out entities holding their original positions.
     const entities = propNodes
       .filter((n) => !n.is_seed && n.node_type === "Entity")
+      .filter((n) => !intersectionEntityIds || intersectionEntityIds.has(n.id))
       .slice()
       .sort((a, b) => {
         const aa = anchorImportance.get(a.id) ?? 0;
@@ -556,7 +675,7 @@ export function GraphCanvas({
       stateAnchorEntityById: stateSelection.stateAnchor,
       seedId: seedNodeId,
     };
-  }, [propNodes, stateSelection, anchorImportance]);
+  }, [propNodes, stateSelection, anchorImportance, intersectionEntityIds]);
 
   // Linear radius: r = ENTRY + scroll − batch * BATCH_TRIGGER.
   // BATCH_TRIGGER < (EXIT − ENTRY) so consecutive batches overlap during
@@ -569,9 +688,63 @@ export function GraphCanvas({
     [currentScroll],
   );
 
+  // Sorted seed-id list, used to deterministically assign anchors to
+  // L/R positions in intersection mode (smallest id → left).
+  const seedIdsSorted = useMemo(
+    () => propNodes.filter((n) => n.is_seed).map((n) => n.id).sort(),
+    [propNodes],
+  );
+
+  // Unified intersection-mode rank: 0-hop direct shared states first
+  // (sorted by importance), then 1-hop intersection entities (sorted
+  // by importance). Same column, sequential pages. Toggles gate which
+  // hop levels participate in the ranking.
+  const intersectionRanks = useMemo<Map<string, number> | null>(() => {
+    if (!intersectionEntityIds) return null;
+    const nodeById = new Map(propNodes.map((n) => [n.id, n] as const));
+    const ranks = new Map<string, number>();
+    let r = 0;
+    if (showZeroHop && directSharedStateIds) {
+      const items = [...directSharedStateIds]
+        .map((id) => nodeById.get(id))
+        .filter((n): n is LensNode => !!n)
+        .sort((a, b) => (b.llm_importance ?? 5) - (a.llm_importance ?? 5));
+      for (const n of items) ranks.set(n.id, r++);
+    }
+    if (showOneHop) {
+      const ents = [...intersectionEntityIds]
+        .map((id) => nodeById.get(id))
+        .filter((n): n is LensNode => !!n)
+        .sort((a, b) => (b.llm_importance ?? 5) - (a.llm_importance ?? 5));
+      for (const n of ents) ranks.set(n.id, r++);
+    }
+    return ranks;
+  }, [propNodes, intersectionEntityIds, directSharedStateIds, showZeroHop, showOneHop]);
+
   // Compute (x, y) for each node given the current scroll.
   const positionFor = useCallback(
     (n: LensNode): { x: number; y: number } => {
+      // ---- Intersection mode (2+ seeds) ----
+      if (intersectionEntityIds) {
+        if (n.is_seed) {
+          const idx = seedIdsSorted.indexOf(n.id);
+          if (idx === 0) return { x: -ISEC_ANCHOR_X, y: 0 };
+          if (idx === 1) return { x: +ISEC_ANCHOR_X, y: 0 };
+          // 3+ seeds: stack the extras above/below right anchor.
+          return { x: +ISEC_ANCHOR_X, y: (idx - 1) * 80 };
+        }
+        // Both 0-hop states and 1-hop entities use the unified
+        // intersection rank for column placement.
+        const rank = intersectionRanks?.get(n.id);
+        if (rank === undefined) return { x: 0, y: 0 };
+        const positionInBatch = rank % ISEC_BATCH_SIZE;
+        const slots = Math.max(1, ISEC_BATCH_SIZE - 1);
+        const yStep = (ISEC_COLUMN_HALF_HEIGHT * 2) / slots;
+        const y = -ISEC_COLUMN_HALF_HEIGHT + positionInBatch * yStep;
+        return { x: ISEC_COLUMN_X, y };
+      }
+
+      // ---- Single-anchor depth-cursor mode ----
       if (n.is_seed) return { x: 0, y: 0 };
       if (n.node_type === "Entity") {
         const m = entityMetaById.get(n.id);
@@ -599,7 +772,8 @@ export function GraphCanvas({
       const py = norm > 0 ? ex / norm : 0;
       return { x: mx + px * jitter, y: my + py * jitter };
     },
-    [entityMetaById, stateAnchorEntityById, radiusForBatch],
+    [entityMetaById, stateAnchorEntityById, radiusForBatch,
+     intersectionEntityIds, intersectionRanks, seedIdsSorted],
   );
 
   // Visibility:
@@ -609,6 +783,34 @@ export function GraphCanvas({
   //   • State opacity = its anchor-entity's opacity × 0.7 (subordinate).
   const visibleOpacity = useMemo(() => {
     const op = new Map<string, number>();
+
+    // ---- Intersection mode: batch-paged crossfade with a hard gap ----
+    // Both 0-hop states and 1-hop entities use the unified intersection
+    // rank. The gap formula gives full opacity over a flat plateau,
+    // then a short fade to zero — leaves a visible blank window
+    // between consecutive batches so it's obvious the page changed.
+    if (intersectionEntityIds) {
+      const currentBatchFloat = currentScroll / ISEC_SCROLL_PER_BATCH;
+      const opacityForBatch = (batch: number): number => {
+        const dist = Math.abs(batch - currentBatchFloat);
+        if (dist <= ISEC_BATCH_FULL_HALFWIDTH) return 1;
+        if (dist >= ISEC_BATCH_FULL_HALFWIDTH + ISEC_BATCH_FADE_HALFWIDTH) return 0;
+        return 1 - (dist - ISEC_BATCH_FULL_HALFWIDTH) / ISEC_BATCH_FADE_HALFWIDTH;
+      };
+      for (const n of nodes) {
+        if (n.is_seed) {
+          op.set(n.id, 1);
+          continue;
+        }
+        const rank = intersectionRanks?.get(n.id);
+        if (rank === undefined) continue;
+        const batch = Math.floor(rank / ISEC_BATCH_SIZE);
+        op.set(n.id, opacityForBatch(batch));
+      }
+      return op;
+    }
+
+    // ---- Single-anchor depth-cursor mode ----
     const radialAlpha = (r: number) => {
       if (r < ENTRY_RADIUS) return 0;
       if (r < ENTRY_RADIUS + FADE_BAND) return (r - ENTRY_RADIUS) / FADE_BAND;
@@ -634,7 +836,8 @@ export function GraphCanvas({
       op.set(n.id, radialAlpha(radiusForBatch(m.batch)) * 0.7);
     }
     return op;
-  }, [nodes, entityMetaById, stateAnchorEntityById, radiusForBatch]);
+  }, [nodes, entityMetaById, stateAnchorEntityById, radiusForBatch,
+      intersectionEntityIds, intersectionRanks, currentScroll]);
 
   const visibleIds = useMemo(
     () => new Set(Array.from(visibleOpacity.entries()).filter(([, v]) => v > 0).map(([k]) => k)),
@@ -714,17 +917,19 @@ export function GraphCanvas({
     fg.d3Force("collide", null);
     fg.d3Force("cluster", null);
 
-    // Center viewport on the seed at canvas zoom 1.0. Canvas physical
-    // zoom is FIXED at 1.0 — all zooming is logical (depth cursor).
-    // 1 graph unit = 1 screen pixel under this convention.
-    const seedNode = graphData.nodes.find((n) => n.is_seed);
-    if (seedNode && typeof fg.centerAt === "function") {
-      fg.centerAt(seedNode.x ?? 0, seedNode.y ?? 0, 0);
-      if (typeof fg.zoom === "function") {
-        fg.zoom(1.0, 0);
+    // Center viewport. Single-anchor mode: center on the seed (which
+    // sits at (0,0)). Intersection mode: center on (0,0) which is
+    // between the L/R anchors so both are visible.
+    if (typeof fg.centerAt === "function") {
+      if (intersectionEntityIds) {
+        fg.centerAt(0, 0, 0);
+      } else {
+        const seedNode = graphData.nodes.find((n) => n.is_seed);
+        if (seedNode) fg.centerAt(seedNode.x ?? 0, seedNode.y ?? 0, 0);
       }
+      if (typeof fg.zoom === "function") fg.zoom(1.0, 0);
     }
-  }, [graphData]);
+  }, [graphData, intersectionEntityIds]);
 
   const handleClick = useCallback(
     (node: ForceNode, event: MouseEvent) => {
@@ -1060,7 +1265,7 @@ export function GraphCanvas({
       <div
         style={{
           position: "fixed",
-          top: 8,
+          bottom: 8,
           right: 8,
           background: "rgba(255, 255, 255, 0.9)",
           border: "1px solid #d1d5db",
@@ -1150,6 +1355,55 @@ export function GraphCanvas({
       >
         {showStates ? "Hide states" : "Show states"}
       </button>
+      {/* 0-hop / 1-hop toggles — only meaningful in intersection mode */}
+      {intersectionEntityIds && (
+        <>
+          <button
+            type="button"
+            onClick={() => setShowZeroHop((v) => !v)}
+            style={{
+              position: "fixed",
+              top: 8,
+              right: 8,
+              marginTop: 232,
+              padding: "6px 12px",
+              background: showZeroHop ? "#2563eb" : "#ffffff",
+              color: showZeroHop ? "#ffffff" : "#111827",
+              border: "1px solid #d1d5db",
+              borderRadius: 6,
+              font: "12px ui-sans-serif, system-ui, sans-serif",
+              cursor: "pointer",
+              zIndex: 100,
+              boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+            }}
+            title="0-hop: State/Event nodes connected directly to BOTH anchors (Marriage, Family Time, Parent of Annika, ...)."
+          >
+            {showZeroHop ? "Hide 0-hop" : "Show 0-hop"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowOneHop((v) => !v)}
+            style={{
+              position: "fixed",
+              top: 8,
+              right: 8,
+              marginTop: 266,
+              padding: "6px 12px",
+              background: showOneHop ? "#2563eb" : "#ffffff",
+              color: showOneHop ? "#ffffff" : "#111827",
+              border: "1px solid #d1d5db",
+              borderRadius: 6,
+              font: "12px ui-sans-serif, system-ui, sans-serif",
+              cursor: "pointer",
+              zIndex: 100,
+              boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+            }}
+            title="1-hop: entities reachable from BOTH anchors via one mediating state (people / places / things they share)."
+          >
+            {showOneHop ? "Hide 1-hop" : "Show 1-hop"}
+          </button>
+        </>
+      )}
     </>
   );
 }
