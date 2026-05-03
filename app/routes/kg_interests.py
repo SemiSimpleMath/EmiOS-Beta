@@ -28,15 +28,25 @@ def _resource_path() -> Path:
     return Path(__file__).resolve().parents[2] / "resources" / "user" / f"{RESOURCE_ID}.json"
 
 
+def _example_path() -> Path:
+    # Seed defaults shipped in the repo so a fresh checkout has something
+    # meaningful to display + edit before the user has saved their own.
+    return Path(__file__).resolve().parents[2] / "resources" / "user" / f"{RESOURCE_ID}.json.example"
+
+
 def _load_resource() -> dict:
+    """Read the user's saved kg_interests, falling back to the .example
+    file if no saved version exists. Empty dict only if both are missing."""
     path = _resource_path()
-    if not path.exists():
-        return {"description": "", "categories": []}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception as e:
-        logger.warning("Failed to parse %s: %s", path, e)
-        return {"description": "", "categories": []}
+    candidates = [path, _example_path()]
+    for candidate in candidates:
+        if not candidate.exists():
+            continue
+        try:
+            return json.loads(candidate.read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.warning("Failed to parse %s: %s", candidate, e)
+    return {"description": "", "categories": []}
 
 
 @kg_interests_bp.route("/kg-interests", methods=["GET"])
