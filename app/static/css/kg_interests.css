@@ -214,3 +214,95 @@
   line-height: 1.5;
   color: #333;
 }
+
+.kg-test-verdict-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #666;
+  margin-right: 6px;
+}
+
+/* ---------- Recent-windows picker ---------- */
+
+.kg-test-recent {
+  margin-bottom: 22px;
+  padding: 14px 16px;
+  border: 1px solid #e0e4ec;
+  border-radius: 6px;
+  background: #fbfcfe;
+}
+
+.kg-test-recent-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  color: #444;
+  margin-bottom: 10px;
+}
+
+.kg-test-window-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.kg-test-window-list:empty::before {
+  content: "Click 'Load recent' to fetch the last 20 chat windows.";
+  display: block;
+  font-size: 13px;
+  color: #888;
+  font-style: italic;
+}
+
+.kg-test-window-row {
+  padding: 8px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  margin-bottom: 4px;
+}
+
+.kg-test-window-row:hover {
+  background: #f0f4fb;
+  border-color: #c5d2eb;
+}
+
+.kg-test-window-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: #555;
+  margin-bottom: 3px;
+}
+
+.kg-test-window-meta .kg-test-pill {
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.kg-test-window-ts {
+  font-variant-numeric: tabular-nums;
+}
+
+.kg-test-window-count {
+  color: #888;
+}
+
+.kg-test-window-summary {
+  font-size: 13px;
+  color: #222;
+  line-height: 1.4;
+}
+
+.kg-test-window-empty {
+  padding: 8px;
+  font-size: 13px;
+  color: #888;
+  font-style: italic;
+}

@@ -9,12 +9,20 @@
 <div class="kg-interests-page">
   <h1>KG Critic Tester</h1>
   <p class="kg-interests-intro">
-    Paste chat lines and see whether the live <code>window_critic</code> would
-    accept or reject them for extraction. Read-only — nothing is written to the
-    KG. Useful for confirming that the current
-    <a href="/kg-interests">KG Interests</a> categories agree with what you
-    expect to be extraction-worthy.
+    Paste chat lines (or pull a real window from your chat history below) and
+    see whether the live <code>window_critic</code> would accept or reject them
+    for extraction. Read-only — nothing is written to the KG. Useful for
+    confirming that the current <a href="/kg-interests">KG Interests</a>
+    categories agree with what you expect to be extraction-worthy.
   </p>
+
+  <div class="kg-test-recent">
+    <div class="kg-test-recent-header">
+      <span>Recent chat windows</span>
+      <button type="button" id="kg-test-load-windows" class="kg-btn kg-btn-secondary">Load recent</button>
+    </div>
+    <ol id="kg-test-window-list" class="kg-test-window-list"></ol>
+  </div>
 
   <label class="kg-field">
     <span>User lines (what to judge — one user message per line)</span>
@@ -33,11 +41,19 @@
 
   <div id="kg-test-result" class="kg-test-result hidden">
     <div class="kg-test-verdict">
+      <span class="kg-test-verdict-label">Live critic:</span>
       <span id="kg-test-pill" class="kg-test-pill"></span>
     </div>
     <div class="kg-test-reason-block">
       <div class="kg-test-reason-label">Reason</div>
       <pre id="kg-test-reason" class="kg-test-reason"></pre>
+    </div>
+    <div id="kg-test-historical-block" class="kg-test-reason-block hidden">
+      <div class="kg-test-reason-label">Historical verdict (from when the pipeline last processed this window)</div>
+      <div class="kg-test-verdict">
+        <span id="kg-test-historical-pill" class="kg-test-pill"></span>
+      </div>
+      <pre id="kg-test-historical-reason" class="kg-test-reason"></pre>
     </div>
   </div>
 </div>
@@ -51,6 +67,94 @@
   const result = document.getElementById("kg-test-result");
   const pill = document.getElementById("kg-test-pill");
   const reason = document.getElementById("kg-test-reason");
+  const loadBtn = document.getElementById("kg-test-load-windows");
+  const winList = document.getElementById("kg-test-window-list");
+  const histBlock = document.getElementById("kg-test-historical-block");
+  const histPill = document.getElementById("kg-test-historical-pill");
+  const histReason = document.getElementById("kg-test-historical-reason");
+
+  // Most-recent verdict pulled with the loaded window — used to render the
+  // "historical verdict" comparison block when the user runs the live test.
+  let pendingHistorical = null;
+
+  function fmtTs(iso) {
+    if (!iso) return "?";
+    try { return new Date(iso).toLocaleString(); } catch (_) { return iso; }
+  }
+
+  function verdictPillText(v) {
+    if (!v) return { text: "no record", cls: "" };
+    const map = {
+      extracted: { text: "ACCEPT (extracted)", cls: "accept" },
+      rejected:  { text: "REJECT", cls: "reject" },
+      skipped:   { text: "SKIPPED", cls: "reject" },
+      error:     { text: "ERROR", cls: "reject" },
+    };
+    return map[v] || { text: v, cls: "" };
+  }
+
+  async function loadRecentWindows() {
+    loadBtn.disabled = true;
+    winList.innerHTML = '<li class="kg-test-window-empty">Loading…</li>';
+    try {
+      const resp = await fetch("/kg-interests/test/recent-windows?limit=20");
+      const data = await resp.json();
+      if (!resp.ok || !data.ok) {
+        winList.innerHTML = '<li class="kg-test-window-empty">Error: ' + (data.error || resp.statusText) + '</li>';
+        return;
+      }
+      if (!data.windows || data.windows.length === 0) {
+        winList.innerHTML = '<li class="kg-test-window-empty">No windows yet.</li>';
+        return;
+      }
+      winList.innerHTML = data.windows.map(w => {
+        const v = verdictPillText(w.historical_verdict);
+        const summaryEsc = (w.summary || "").replace(/[<>&]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
+        return `
+          <li class="kg-test-window-row" data-window-id="${w.window_id}">
+            <div class="kg-test-window-meta">
+              <span class="kg-test-window-ts">${fmtTs(w.start_timestamp)}</span>
+              <span class="kg-test-window-count">${w.message_count || 0} msg</span>
+              <span class="kg-test-pill ${v.cls}">${v.text}</span>
+            </div>
+            <div class="kg-test-window-summary">${summaryEsc || "(no summary)"}</div>
+          </li>`;
+      }).join('');
+      winList.querySelectorAll(".kg-test-window-row").forEach(li => {
+        li.addEventListener("click", () => loadWindow(li.dataset.windowId));
+      });
+    } catch (e) {
+      winList.innerHTML = '<li class="kg-test-window-empty">Error: ' + e.message + '</li>';
+    } finally {
+      loadBtn.disabled = false;
+    }
+  }
+
+  async function loadWindow(windowId) {
+    status.textContent = "Loading window " + windowId.slice(0, 8) + "…";
+    status.className = "kg-save-status";
+    try {
+      const resp = await fetch("/kg-interests/test/window/" + encodeURIComponent(windowId));
+      const data = await resp.json();
+      if (!resp.ok || !data.ok) {
+        status.textContent = "Error: " + (data.error || resp.statusText);
+        status.className = "kg-save-status error";
+        return;
+      }
+      userField.value = data.user_lines || "";
+      ctxField.value = data.context_lines || "";
+      pendingHistorical = data.historical_verdict ? {
+        verdict: data.historical_verdict,
+        reason: data.historical_reason || "",
+      } : null;
+      result.classList.add("hidden");
+      status.textContent = "Loaded window " + windowId.slice(0, 8) + ". Click Test to run the live critic.";
+      status.className = "kg-save-status ok";
+    } catch (e) {
+      status.textContent = "Error: " + e.message;
+      status.className = "kg-save-status error";
+    }
+  }
 
   async function runTest() {
     const userText = (userField.value || "").trim();
@@ -81,6 +185,17 @@
       pill.textContent = data.extractable ? "ACCEPT — would extract" : "REJECT — would skip";
       pill.className = "kg-test-pill " + (data.extractable ? "accept" : "reject");
       reason.textContent = data.reason || "(no reason returned)";
+      // Show historical verdict block if a loaded window had one — lets you
+      // see at a glance whether the live critic agrees with what got stored.
+      if (pendingHistorical) {
+        const v = verdictPillText(pendingHistorical.verdict);
+        histPill.textContent = v.text;
+        histPill.className = "kg-test-pill " + v.cls;
+        histReason.textContent = pendingHistorical.reason || "(no reason recorded)";
+        histBlock.classList.remove("hidden");
+      } else {
+        histBlock.classList.add("hidden");
+      }
       result.classList.remove("hidden");
     } catch (e) {
       status.textContent = "Error: " + e.message;
@@ -91,6 +206,7 @@
   }
 
   runBtn.addEventListener("click", runTest);
+  loadBtn.addEventListener("click", loadRecentWindows);
   // Cmd/Ctrl+Enter in either textarea triggers the test.
   [userField, ctxField].forEach(el => {
     el.addEventListener("keydown", (e) => {
