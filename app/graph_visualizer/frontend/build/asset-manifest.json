@@ -1,13 +1,13 @@
 {
   "files": {
     "main.css": "/kg-visualizer/static/css/main.b9698512.css",
-    "main.js": "/kg-visualizer/static/js/main.e85da29f.js",
+    "main.js": "/kg-visualizer/static/js/main.55c35c62.js",
     "index.html": "/kg-visualizer/index.html",
     "main.b9698512.css.map": "/kg-visualizer/static/css/main.b9698512.css.map",
-    "main.e85da29f.js.map": "/kg-visualizer/static/js/main.e85da29f.js.map"
+    "main.55c35c62.js.map": "/kg-visualizer/static/js/main.55c35c62.js.map"
   },
   "entrypoints": [
     "static/css/main.b9698512.css",
-    "static/js/main.e85da29f.js"
+    "static/js/main.55c35c62.js"
   ]
 }

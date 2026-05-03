@@ -84,8 +84,12 @@ Thumbs.db
 # ── Node / frontend builds ────────────────────────────────────────────────────
 node_modules/
 app/graph_visualizer/frontend/node_modules/
-# Note: app/graph_visualizer/frontend/build/ IS shipped (prebuilt React bundle)
-# so users don't need Node + npm to use the KG Visualizer.
+# app/graph_visualizer/frontend/build/ IS shipped (prebuilt React bundle)
+# so users don't need Node + npm to use the KG Visualizer. Negate the
+# global `build/` rule for this specific path. Without this exception
+# the JS bundle silently fails to track and Flask serves a stale ref.
+!app/graph_visualizer/frontend/build/
+!app/graph_visualizer/frontend/build/**
 app/agent_flow/node_modules/
 
 # ── Test & coverage artifacts ─────────────────────────────────────────────────

@@ -46,34 +46,20 @@ export const getNodeSize = (node: Node, graphData: GraphData): number => {
   return Math.max(4, Math.min(20, 4 + degree * 0.5));
 };
 
-// Get edge width based on importance or confidence
-export const getEdgeWidth = (edge: Edge): number => {
-  if (edge.importance) {
-    return Math.max(1, Math.min(5, edge.importance * 5));
-  }
-  if (edge.confidence) {
-    return Math.max(1, Math.min(5, edge.confidence * 5));
-  }
-  return 1;
-};
+// Flat edge width. Mapping importance to width made the high-importance
+// edges (most of them) overwhelmingly dominant — visually noisy and the
+// hub structure hard to read. Edge importance is now strictly a backend
+// signal (used by the /me lens for ranking); the 3D viz keeps every
+// edge thin and equal so type-based color carries the meaning.
+export const getEdgeWidth = (_edge: Edge): number => 1;
 
-// Get edge color based on type or confidence
+// Get edge color. Type-first because that's the most semantically
+// meaningful signal — color groups conceptually similar edges (all
+// "Has_State" edges read as one family, all "Located_In" edges
+// another). Importance and confidence drive width / opacity instead;
+// using them for color too made every edge gray once the rater
+// populated importance for the whole graph.
 export const getEdgeColor = (edge: Edge): string => {
-  // Color by confidence if available
-  if (edge.confidence) {
-    if (edge.confidence > 0.8) return '#22c55e'; // Green for high confidence
-    if (edge.confidence > 0.6) return '#eab308'; // Yellow for medium confidence
-    return '#ef4444'; // Red for low confidence
-  }
-  
-  // Color by importance if available
-  if (edge.importance) {
-    if (edge.importance > 0.8) return '#3b82f6'; // Blue for high importance
-    if (edge.importance > 0.6) return '#8b5cf6'; // Purple for medium importance
-    return '#6b7280'; // Gray for low importance
-  }
-  
-  // Default color by type - only the most common edge types
   const typeColors: { [key: string]: string } = {
     'Has_State': '#10b981',
     'About': '#f59e0b',
@@ -87,6 +73,5 @@ export const getEdgeColor = (edge: Edge): string => {
     'Belongs_To': '#f97316',
     'default': '#6b7280' // Gray for unknown types
   };
-  
   return typeColors[edge.type] || typeColors['default'];
 };
