@@ -180,6 +180,88 @@ def _resolve_property(
 _EVENT_DATE_TOLERANCE_DAYS = 7  # events more than this many days apart → different instances
 
 
+def _score_candidates_by_participant_overlap(
+    candidates_with_participants: list,
+    new_participant_ids: set,
+) -> list:
+    """Jaccard-score State/Event candidates by participant overlap with a
+    new proposal's participants. Drops candidates with zero overlap.
+
+    Args:
+        candidates_with_participants: list of (cand_node, set_of_participant_ids).
+            cand_node is anything with an `id` attribute (a Node instance in
+            production; a stub in tests).
+        new_participant_ids: set of KG node ids that the new proposal
+            connects to as participants.
+
+    Returns:
+        list of {"node", "overlap", "jaccard"} dicts, sorted desc by
+        (jaccard, overlap).
+    """
+    scored: list = []
+    for cand, cand_parts in candidates_with_participants:
+        if not cand_parts:
+            continue
+        inter = cand_parts & new_participant_ids
+        if not inter:
+            continue
+        union = cand_parts | new_participant_ids
+        scored.append({
+            "node": cand,
+            "overlap": len(inter),
+            "jaccard": len(inter) / max(1, len(union)),
+        })
+    scored.sort(key=lambda s: (s["jaccard"], s["overlap"]), reverse=True)
+    return scored
+
+
+def _filter_event_candidates_by_date(
+    scored: list,
+    new_valid_from,
+    tolerance_days: int = _EVENT_DATE_TOLERANCE_DAYS,
+) -> list:
+    """Drop Event candidates whose start_date differs from the new
+    proposal's valid_from by more than tolerance_days.
+
+    KNOWN ISSUE (see project_merger_label_vs_subject.md and the dateless
+    bypass discussion): when a candidate's start_date is None, this filter
+    currently KEEPS it as a match candidate. That lets a generic dateless
+    catch-all hub absorb dated proposals — exactly how the Performance
+    event id 0b4416dd accumulated edges from Beetlejuice and Drowsy
+    Chaperone productions. The intended-future behavior is to REJECT
+    dateless candidates against dated new proposals; tests in
+    test_state_event_merge.py document this gap as xfail.
+
+    Args:
+        scored: candidate list as returned by
+            _score_candidates_by_participant_overlap. Each item has a
+            "node" with a `.start_date` attribute (datetime or None).
+        new_valid_from: datetime or None. If None, no filtering applied
+            (a dateless new proposal can match anything).
+        tolerance_days: days of slack on either side of new_valid_from.
+
+    Returns:
+        Filtered scored list, same shape.
+    """
+    if new_valid_from is None:
+        return scored
+    kept: list = []
+    for s in scored:
+        cs = s["node"].start_date
+        if cs is None:
+            # Dateless candidate — current behavior is KEEP. See docstring.
+            kept.append(s)
+            continue
+        try:
+            delta = abs((cs.date() - new_valid_from.date()).days)
+        except Exception:
+            kept.append(s)
+            continue
+        if delta <= tolerance_days:
+            kept.append(s)
+    return kept
+
+
 def _first_window_id_for_node(session, node_id: str) -> Optional[str]:
     """Return the earliest window_id recorded on kg_node_evidence for this node,
     or None if the node has no evidence rows."""
@@ -1011,42 +1093,23 @@ def _prepare_proposal_plan(proposal_id: str) -> Optional[_PromoterPlan]:
                 candidate_lists[pn.id] = []
                 continue
 
-            # Score by participant overlap (Jaccard).
-            scored: List[Dict[str, Any]] = []
-            for cand in cands:
-                cand_parts = _get_participant_kg_ids(session, cand.id)
-                if not cand_parts:
-                    continue
-                inter = cand_parts & participant_uuids
-                if not inter:
-                    continue
-                union = cand_parts | participant_uuids
-                scored.append({
-                    "node": cand,
-                    "overlap": len(inter),
-                    "jaccard": len(inter) / max(1, len(union)),
-                })
-            scored.sort(key=lambda s: (s["jaccard"], s["overlap"]), reverse=True)
+            # Score by participant overlap (Jaccard) — extracted to a pure
+            # function for unit-testability. See test_state_event_merge.py.
+            cands_with_parts = [
+                (cand, _get_participant_kg_ids(session, cand.id))
+                for cand in cands
+            ]
+            scored = _score_candidates_by_participant_overlap(
+                cands_with_parts, participant_uuids,
+            )
 
             # Event-class disparate-date exclusion (Stage 2 of the old
             # _resolve_state_event). States have no such filter — identity
-            # states (Marriage, Residence) persist across time.
-            if (pn.node_type or "").lower() == "event" and pn.valid_from is not None:
-                pv = pn.valid_from
-                kept: List[Dict[str, Any]] = []
-                for s in scored:
-                    cs = s["node"].start_date
-                    if cs is None:
-                        kept.append(s)
-                        continue
-                    try:
-                        delta = abs((cs.date() - pv.date()).days)
-                    except Exception:
-                        kept.append(s)
-                        continue
-                    if delta <= _EVENT_DATE_TOLERANCE_DAYS:
-                        kept.append(s)
-                scored = kept
+            # states (Marriage, Residence) persist across time. Extracted
+            # for unit-testability — and the current "dateless KEPT" rule
+            # is a documented gap; see helper docstring.
+            if (pn.node_type or "").lower() == "event":
+                scored = _filter_event_candidates_by_date(scored, pn.valid_from)
 
             # Cap LLM input — hub participants (Jukka) explode candidate count.
             candidate_lists[pn.id] = [
