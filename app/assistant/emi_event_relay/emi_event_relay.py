@@ -179,7 +179,14 @@ class EmiEventRelay:
         from app.services.socket_manager import RoomNotBound
         room_id = str(reply_to.get("room_id") or "").strip()
         if not room_id:
-            logger.error("Cannot emit %s: reply_to missing room_id. reply_to=%r", event, reply_to)
+            # stack=True reveals the upstream caller that constructed the
+            # invalid reply_to. Without it the error is unactionable — every
+            # bad reply_to looks the same and you can't tell which control
+            # node / pipeline / agent built it.
+            logger.error(
+                "Cannot emit %s: reply_to missing room_id. reply_to=%r",
+                event, reply_to, stack_info=True,
+            )
             return
         try:
             socket_id = DI.socket_manager.resolve_socket(room_id)

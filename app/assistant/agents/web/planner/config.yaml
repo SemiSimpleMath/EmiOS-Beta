@@ -9,8 +9,24 @@ llm_params:
 
 allowed_nodes: [shared::writer, shared::mathematician]
 
+# Curated tool list. Previously was `all` (149 tools), which produced
+# such a long tool_descriptions list in the system prompt that the model
+# didn't notice search_web and instead resorted to find_tool — which
+# returned only find_tool + ask_user, so the model hallucinated a
+# "google_search" tool name and crashed (Amy Santiago / Brooklyn 99
+# incident, 2026-05-01). Keeping the list short makes search_web the
+# obvious primary action.
 allowed_tools:
-  all
+  - search_web
+  - scrape_url
+  - web_get_content
+  - peak_at_link
+  - summarize_link
+  - web_navigate_snapshot
+  - web_visual_scout
+  - web_modal_scan
+  - find_tool
+  - ask_user
 
 except_tools: [emi_team]
 
