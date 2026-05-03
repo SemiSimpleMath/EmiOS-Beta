@@ -25,6 +25,7 @@ Dry-run by default — prints outcomes without writing.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -36,6 +37,7 @@ from app.assistant.database.claim_proposals import (
 from app.assistant.kg.db.knowledge_graph_db_sqlite import Edge, Node
 from app.assistant.utils.logging_config import get_logger
 from app.models.base import get_session
+from app.models.db_manager import get_db_manager
 
 logger = get_logger(__name__)
 
@@ -72,9 +74,15 @@ def _is_placeholder_label(label: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def _resolve_entity_like(session, label: str) -> Optional[Node]:
-    """Match an Entity/Concept/Goal/Property node by canonical label or alias.
+    """Match an Entity/Concept/Goal node by canonical label or alias.
 
     Prefers locked + higher pagerank when multiple match.
+
+    NOT for Property — Property nodes are subject-scoped (each entity gets
+    its own "Date of Birth" / "Phone Number" / etc.) and must use
+    `_resolve_property` instead. Label-only match would otherwise glob
+    every "Date of Birth" mention into a single shared node, attaching
+    unrelated people as participants.
     """
     if not label:
         return None
@@ -85,6 +93,7 @@ def _resolve_entity_like(session, label: str) -> Optional[Node]:
     hit = (
         session.query(Node)
         .filter(func.lower(Node.label) == label_lower)
+        .filter(Node.node_type != "Property")
         .order_by(Node.locked_by_user_at.desc().nulls_last(),
                   Node.pagerank_score.desc().nulls_last())
         .first()
@@ -95,7 +104,73 @@ def _resolve_entity_like(session, label: str) -> Optional[Node]:
     like_pat = f'%"{label_lower}"%'
     return (
         session.query(Node)
+        .filter(Node.node_type != "Property")
         .filter(func.lower(func.coalesce(func.cast(Node.aliases, type_=__import__("sqlalchemy").String), "")).like(like_pat))
+        .order_by(Node.locked_by_user_at.desc().nulls_last(),
+                  Node.pagerank_score.desc().nulls_last())
+        .first()
+    )
+
+
+def _resolve_property(
+    session, label: str, subject_kg_ids: Set[str],
+) -> Optional[Node]:
+    """Match a Property node by label AND shared subject.
+
+    Properties are subject-scoped: "Date of Birth" for Jouko is a
+    different node from "Date of Birth" for Jaime. The resolver must
+    match BOTH the label AND at least one subject (any entity connected
+    to the candidate Property via any edge) before merging.
+
+    Without this, generic property labels (Date of Birth, Place of
+    Birth, Phone Number, Email Address, Age, etc.) become global magnet
+    nodes that all entities collide on.
+
+    Falls back to None if no subject_kg_ids — without a subject we can't
+    safely scope the match, so we let the caller create a new node.
+    """
+    if not label or not subject_kg_ids:
+        return None
+    label_lower = label.lower().strip()
+    if not label_lower:
+        return None
+    subject_list = list(subject_kg_ids)
+
+    # Candidate Property nodes by label.
+    cands = (
+        session.query(Node)
+        .filter(func.lower(Node.label) == label_lower)
+        .filter(Node.node_type == "Property")
+        .all()
+    )
+    if not cands:
+        return None
+    cand_ids = [c.id for c in cands]
+
+    # Find which of those candidates share an edge with any subject.
+    matching_cand_ids: Set[str] = set()
+    rows = (
+        session.query(Edge.source_id, Edge.target_id)
+        .filter(or_(
+            Edge.source_id.in_(cand_ids), Edge.target_id.in_(cand_ids),
+        ))
+        .filter(or_(
+            Edge.source_id.in_(subject_list), Edge.target_id.in_(subject_list),
+        ))
+        .all()
+    )
+    for src, tgt in rows:
+        if src in cand_ids and tgt in subject_list:
+            matching_cand_ids.add(src)
+        elif tgt in cand_ids and src in subject_list:
+            matching_cand_ids.add(tgt)
+    if not matching_cand_ids:
+        return None
+
+    # Pick highest-priority match (locked + pagerank).
+    return (
+        session.query(Node)
+        .filter(Node.id.in_(matching_cand_ids))
         .order_by(Node.locked_by_user_at.desc().nulls_last(),
                   Node.pagerank_score.desc().nulls_last())
         .first()
@@ -142,139 +217,50 @@ def _first_window_id_for_proposal(session, proposal_id: str) -> Optional[str]:
         return None
 
 
-def _resolve_state_event(
-    session,
-    proposal_node: ClaimProposalNode,
-    participant_kg_ids: List[str],
-    *,
-    proposal_window_id: Optional[str] = None,
-) -> Optional[Node]:
-    """Decide whether this proposal State/Event node refers to an existing
-    one in the KG.
-
-    Three-stage, with NO auto-merge on surface metadata:
-      1. Deterministic candidate prune: same node_type + participant
-         overlap ≥ 1. Dates and labels are NOT used here because extractor
-         labels are LLM-generated and dates are often NULL on legacy rows.
-      2. Deterministic EXCLUSION only (shrinks the LLM pool, never merges):
-           - Event-class with known disparate start_dates (>N days apart)
-             → definitely different instances, drop the candidate.
-      3. LLM judgment on every surviving candidate, with enriched context
-         (original_sentence, window_ids, participant labels, TTL, dates).
-
-    Why no auto-merge:
-      Label + participants + date + window can't tell "same claim extracted
-      twice" from "two claims in one window" — morning-walk vs afternoon-
-      walk, two beliefs in the same utterance, recurring events. That
-      distinguishing signal lives in the source text. Wrong-merge is
-      silent corruption; wrong-split is a duplicate the weekly maintenance
-      scan catches. The asymmetry mandates always calling the LLM.
+def _node_window_text(session, node_id: str, max_chars: int = 600) -> Optional[str]:
+    """Source text from kg_node_evidence's first window for this node.
+    Compact pipe-delimited message snippet (already in the table) — gives
+    the merger the actual chat context the node was extracted from, which
+    is what disambiguates same-label states whose participants overlap by
+    chance. Returns None if no evidence text exists.
     """
-    if not participant_kg_ids:
+    try:
+        from sqlalchemy import text as sql_text
+        row = session.execute(
+            sql_text(
+                "SELECT source_text FROM kg_node_evidence "
+                "WHERE node_id = :nid AND source_text IS NOT NULL "
+                "ORDER BY created_at ASC LIMIT 1"
+            ),
+            {"nid": node_id},
+        ).fetchone()
+        if not row or not row[0]:
+            return None
+        txt = str(row[0])
+        return txt if len(txt) <= max_chars else txt[:max_chars] + "…"
+    except Exception:
         return None
 
-    participant_set = set(participant_kg_ids)
 
-    # Pre-filter candidates via SQL: State/Event nodes that share at least
-    # one participant edge with our proposal.
-    candidate_ids_q = (
-        session.query(Edge.source_id, Edge.target_id)
-        .filter(
-            ((Edge.source_id.in_(participant_set)) | (Edge.target_id.in_(participant_set))),
-        )
-    )
-    connected_node_ids: set = set()
-    for src, tgt in candidate_ids_q.all():
-        if src in participant_set and tgt not in participant_set:
-            connected_node_ids.add(tgt)
-        elif tgt in participant_set and src not in participant_set:
-            connected_node_ids.add(src)
-
-    if not connected_node_ids:
+def _proposal_window_text(session, proposal_id: str, max_chars: int = 600) -> Optional[str]:
+    """raw_text from claim_proposal_evidence's first window for this
+    proposal — the new-side counterpart of _node_window_text."""
+    try:
+        from sqlalchemy import text as sql_text
+        row = session.execute(
+            sql_text(
+                "SELECT raw_text FROM claim_proposal_evidence "
+                "WHERE proposal_id = :pid AND raw_text IS NOT NULL "
+                "ORDER BY created_at ASC LIMIT 1"
+            ),
+            {"pid": proposal_id},
+        ).fetchone()
+        if not row or not row[0]:
+            return None
+        txt = str(row[0])
+        return txt if len(txt) <= max_chars else txt[:max_chars] + "…"
+    except Exception:
         return None
-
-    # Same node_type + connected via at least one participant. No start_date
-    # filter here — NULL start_dates on legacy candidates used to slip
-    # through this as mismatches; we handle date compatibility in Stage 2.
-    candidates = (
-        session.query(Node)
-        .filter(Node.node_type == proposal_node.node_type)
-        .filter(Node.id.in_(connected_node_ids))
-        .all()
-    )
-    if not candidates:
-        return None
-
-    # Score by participant overlap (Jaccard). Drop zero-overlap leftovers
-    # that slipped the SQL pre-filter on a false-positive edge.
-    scored: List[Dict[str, Any]] = []
-    for cand in candidates:
-        cand_parts = _get_participant_kg_ids(session, cand.id)
-        if not cand_parts:
-            continue
-        inter = cand_parts & participant_set
-        union = cand_parts | participant_set
-        if not inter:
-            continue
-        scored.append({
-            "node": cand,
-            "cand_participants": cand_parts,
-            "overlap": len(inter),
-            "jaccard": len(inter) / max(1, len(union)),
-        })
-    if not scored:
-        return None
-    scored.sort(key=lambda s: (s["jaccard"], s["overlap"]), reverse=True)
-
-    # Deliberately no deterministic auto-merge for States/Events/Goals.
-    # Surface metadata (label + participants + date + window) can't
-    # distinguish "same claim extracted twice" from "two claims in one
-    # window" — morning-walk vs afternoon-walk, two beliefs stated
-    # together, recurring events. That signal lives in the source text
-    # and requires the LLM. We route every surviving candidate through
-    # node_merger. Wrong-merge is silent corruption; wrong-split is a
-    # duplicate the weekly maintenance scan recovers. The asymmetry
-    # dictates: never auto-merge on metadata alone.
-
-    # Stage 2: Event-class disparate-date exclusion. If both proposal and
-    # candidate have known start_dates more than N days apart, treat as
-    # distinct instances. States have no such exclusion — identity-class
-    # states (Marriage, Residence, Ownership) persist across time.
-    if (proposal_node.node_type or "").lower() == "event" and proposal_node.valid_from is not None:
-        pv = proposal_node.valid_from
-        kept: List[Dict[str, Any]] = []
-        for s in scored:
-            cs = s["node"].start_date
-            if cs is None:
-                kept.append(s)  # unknown date; let LLM decide
-                continue
-            try:
-                delta = abs((cs.date() - pv.date()).days)
-            except Exception:
-                kept.append(s)
-                continue
-            if delta <= _EVENT_DATE_TOLERANCE_DAYS:
-                kept.append(s)
-            # else: different days, drop — definitely different events
-        scored = kept
-    if not scored:
-        return None
-
-    # Top candidates — cap the LLM input to avoid context bloat on hub
-    # participants (e.g. nodes with Jukka in them are legion).
-    top = scored[:5]
-    top_candidates = [s["node"] for s in top]
-
-    # Stage 3: LLM judgment with enriched context. The earlier exact-label
-    # fast-path was removed because it over-merged recurring events
-    # (Walking + Walking on different days). Let the LLM weigh label +
-    # participants + time + window together.
-    return _ask_node_merger_for_state_match(
-        session,
-        proposal_node,
-        top_candidates,
-        proposal_window_id=proposal_window_id,
-    )
 
 
 def _participant_labels(session, node_id: str, limit: int = 6) -> List[str]:
@@ -319,24 +305,19 @@ def _window_end_ts(session, window_id: Optional[str]) -> Optional[str]:
     return None
 
 
-def _ask_node_merger_for_state_match(
-    session,
-    proposal_node: ClaimProposalNode,
-    candidates: List[Node],
-    *,
-    proposal_window_id: Optional[str] = None,
-) -> Optional[Node]:
-    """Call node_merger with rich context for a State/Event merge decision.
+def _call_node_merger_for_state_match(
+    new_node_ctx: Dict[str, Any],
+    candidate_payload: List[Dict[str, Any]],
+) -> Optional[str]:
+    """Session-free node_merger call for State/Event merge decisions.
 
-    Context includes both the proposal and each candidate's:
-      - label, node_type, category, description, original_sentence
-      - valid_from / valid_to (structured + prose)
-      - first_observed (from attributes)
-      - source window id + window end timestamp
-      - participant labels (not just ids)
-      - TTL duration class (ephemeral vs long_term vs durable)
+    Both ``new_node_ctx`` and ``candidate_payload`` are pre-built by
+    ``_prepare_proposal_plan`` from a closed read session. This function
+    only makes the LLM call — no DB access — so it can run safely outside
+    any write transaction.
 
-    Hard merge decisions depend on the LLM seeing all of this at once.
+    Returns the matched candidate's KG ``node_id`` (a string), or None if
+    no merge.
     """
     import json
     try:
@@ -352,67 +333,19 @@ def _ask_node_merger_for_state_match(
         logger.warning("[promoter] could not create node_merger agent")
         return None
 
-    proposal_attrs = proposal_node.attributes_json or {}
-    if not isinstance(proposal_attrs, dict):
-        proposal_attrs = {}
-    proposal_ttl = proposal_attrs.get("ttl") if isinstance(proposal_attrs, dict) else None
-
-    new_node_ctx = {
-        "label": proposal_node.label,
-        "node_type": proposal_node.node_type,
-        "category": proposal_node.category,
-        "description": proposal_node.description_draft,
-        "original_sentence": getattr(proposal_node, "sentence", None),
-        "valid_from": proposal_node.valid_from.isoformat() if proposal_node.valid_from else None,
-        "valid_to": proposal_node.valid_to.isoformat() if proposal_node.valid_to else None,
-        "valid_from_prose": proposal_node.valid_from_prose,
-        "valid_to_prose": proposal_node.valid_to_prose,
-        "source_window_id": proposal_window_id,
-        "source_window_end_ts": _window_end_ts(session, proposal_window_id),
-        "first_observed": proposal_attrs.get("first_observed") if isinstance(proposal_attrs, dict) else None,
-        "ttl_duration_class": (proposal_ttl.get("duration_class") if isinstance(proposal_ttl, dict) else None),
-        # Participants for the proposal come from its sibling proposal_edges;
-        # we don't have them here without a round-trip. Label-only context.
-    }
-
-    cand_payload = []
-    for cand in candidates:
-        cand_attrs = cand.attributes or {}
-        if not isinstance(cand_attrs, dict):
-            cand_attrs = {}
-        cand_ttl = cand_attrs.get("ttl") if isinstance(cand_attrs, dict) else None
-        cand_window = _first_window_id_for_node(session, cand.id)
-        cand_payload.append({
-            "node_id": cand.id,
-            "label": cand.label,
-            "node_type": cand.node_type,
-            "category": cand.category,
-            "description": (cand.description or "")[:500],
-            "original_sentence": cand.original_sentence,
-            "start_date": cand.start_date.isoformat() if cand.start_date else None,
-            "end_date": cand.end_date.isoformat() if cand.end_date else None,
-            "start_date_prose": cand.start_date_prose,
-            "end_date_prose": cand.end_date_prose,
-            "first_observed": cand_attrs.get("first_observed") if isinstance(cand_attrs, dict) else None,
-            "ttl_duration_class": (cand_ttl.get("duration_class") if isinstance(cand_ttl, dict) else None),
-            "source_window_id": cand_window,
-            "source_window_end_ts": _window_end_ts(session, cand_window),
-            "participant_labels": _participant_labels(session, cand.id),
-        })
-
     scope = build_pipeline_scope_context(
         pipeline_id="kg_pipeline", actor_id="proposal_promoter",
     )
     agent_input = {
         "new_node_context": json.dumps(new_node_ctx, ensure_ascii=True, indent=2),
-        "existing_node_candidates": json.dumps(cand_payload, ensure_ascii=True, indent=2),
+        "existing_node_candidates": json.dumps(candidate_payload, ensure_ascii=True, indent=2),
     }
     try:
         resp = agent.action_handler(Message(agent_input=agent_input, scope_context=scope))
         data = resp.data if resp and hasattr(resp, "data") else {}
     except Exception as exc:
         logger.warning("[promoter] node_merger call failed for state %r: %s",
-                       proposal_node.label, exc)
+                       new_node_ctx.get("label"), exc)
         return None
 
     if not bool(data.get("merge_nodes")):
@@ -420,20 +353,19 @@ def _ask_node_merger_for_state_match(
     merged_id = str(data.get("merged_node_id") or "").strip()
     if not merged_id:
         return None
-    cand_by_id = {c.id: c for c in candidates}
-    chosen = cand_by_id.get(merged_id)
-    if chosen is None:
+    cand_ids = {c.get("node_id") for c in candidate_payload}
+    if merged_id not in cand_ids:
         logger.warning(
             "[promoter] node_merger returned id %s not in candidate set",
             merged_id,
         )
         return None
     logger.info(
-        "[promoter] LLM merged state %r → %s (%s): %s",
-        proposal_node.label, chosen.id[:8], chosen.label,
+        "[promoter] LLM merged state %r → %s: %s",
+        new_node_ctx.get("label"), merged_id[:8],
         (data.get("reasoning") or "")[:120],
     )
-    return chosen
+    return merged_id
 
 
 def _get_participant_kg_ids(session, node_id: str) -> Set[str]:
@@ -465,29 +397,6 @@ def _get_participant_kg_ids(session, node_id: str) -> Set[str]:
     return {r[0] for r in entities}
 
 
-def _participants_of_proposal_state(
-    proposal_nodes: List[ClaimProposalNode],
-    proposal_edges: List[ClaimProposalEdge],
-    state_node_id: str,
-) -> List[str]:
-    """Return KG ids of participant nodes attached to this state/event
-    within its proposal group. Participants are the entity-like proposal
-    nodes connected to the state via any edge."""
-    nodes_by_id = {n.id: n for n in proposal_nodes}
-    participant_uuids: Set[str] = set()
-    for e in proposal_edges:
-        if e.source_node_id == state_node_id:
-            other = e.target_node_id
-        elif e.target_node_id == state_node_id:
-            other = e.source_node_id
-        else:
-            continue
-        cn = nodes_by_id.get(other)
-        if cn and cn.node_type in ENTITY_LIKE_TYPES and cn.resolved_node_id:
-            participant_uuids.add(cn.resolved_node_id)
-    return list(participant_uuids)
-
-
 # ---------------------------------------------------------------------------
 # Node / edge creation
 # ---------------------------------------------------------------------------
@@ -495,45 +404,30 @@ def _participants_of_proposal_state(
 def _create_kg_node_from_proposal(
     session, proposal_node: ClaimProposalNode, proposal_id: str,
     *,
-    originating_sentence: Optional[str] = None,
-    participant_labels: Optional[List[str]] = None,
+    ttl: Optional[Dict[str, Any]] = None,
+    canonical_sentence: Optional[str] = None,
 ) -> Node:
     """Create a fresh kg_node_metadata row from this proposal_node.
 
-    For State and Event nodes, ask the ``state_ttl_estimator`` agent for a
-    duration estimate and stash it in ``attributes.ttl`` so the nightly
-    decay job can auto-close the era when it expires.
+    ``ttl`` and ``canonical_sentence`` MUST be precomputed by the caller via
+    ``_prepare_proposal_plan`` before opening any write transaction. They
+    are LLM-derived (state_ttl_estimator, fact_canonicalizer) and computing
+    them while the writer slot is held cascades "database is locked" errors
+    across every other writer in the process.
 
-    For State/Event/Goal nodes, ask the ``fact_canonicalizer`` agent to
-    rewrite the extractor sentence into its present-tense canonical form
-    before storing it as ``Node.original_sentence``. This pairs cleanly with
-    the validity dates: the sentence is the proposition; the dates bound
-    when it's true. Verbatim source stays recoverable via window_id +
-    claim_proposal_evidence.
+    For State/Event nodes, ``ttl`` lands in ``attributes.ttl`` so the
+    nightly decay job can auto-close the era when it expires. For
+    State/Event/Goal nodes, ``canonical_sentence`` becomes
+    ``Node.original_sentence``; entity-like nodes (Entity/Concept/Goal/
+    Property) take the raw extractor sentence verbatim.
     """
     attrs = dict(proposal_node.attributes_json or {}) if isinstance(proposal_node.attributes_json, dict) else {}
+    if ttl is not None and proposal_node.node_type in RELATIONSHIP_LIKE_TYPES:
+        attrs["ttl"] = ttl
 
-    # TTL estimation for State/Event nodes only. Entity/Concept/Goal/Property
-    # nodes don't decay — their identity is timeless.
-    if proposal_node.node_type in RELATIONSHIP_LIKE_TYPES:
-        ttl = _estimate_state_ttl(
-            proposal_node,
-            originating_sentence=originating_sentence,
-            participant_labels=participant_labels,
-        )
-        if ttl is not None:
-            attrs["ttl"] = ttl  # {duration_class, estimated_duration_days, confidence, reasoning}
-
-    # Canonicalize for State/Event/Goal — produces the present-tense
-    # proposition that downstream agents read as the node's claim. Falls
-    # back to the raw extractor sentence on failure.
-    canonical_sentence = (proposal_node.sentence or "") if hasattr(proposal_node, "sentence") else ""
-    if proposal_node.node_type in {"State", "Event", "Goal"}:
-        rewritten = _canonicalize_sentence(
-            proposal_node, participant_labels=participant_labels,
-        )
-        if rewritten:
-            canonical_sentence = rewritten
+    sentence_for_node = (proposal_node.sentence or "") if hasattr(proposal_node, "sentence") else ""
+    if proposal_node.node_type in {"State", "Event", "Goal"} and canonical_sentence:
+        sentence_for_node = canonical_sentence
 
     new = Node(
         label=proposal_node.label,
@@ -541,7 +435,7 @@ def _create_kg_node_from_proposal(
         # Present-tense canonical for State/Event/Goal (via fact_canonicalizer);
         # raw extractor sentence for Entity/Concept/Property. Verbatim source
         # is preserved in evidence + window_id, not on the node.
-        original_sentence=canonical_sentence,
+        original_sentence=sentence_for_node,
         description=proposal_node.description_draft or "",
         aliases=[],
         category=proposal_node.category,
@@ -842,14 +736,439 @@ class _ProposalDecision:
 
 
 # ---------------------------------------------------------------------------
-# Core: evaluate one proposal
+# Prepared plan — built without holding any write lock
+# ---------------------------------------------------------------------------
+#
+# The promoter runs in three phases per proposal:
+#
+#   Phase 1 (READ): open a read session, snapshot the proposal + nodes +
+#     edges + candidate context for any state/event nodes. Close the
+#     session before any LLM call. Reads do not block writers under WAL.
+#
+#   Phase 2 (LLM): with no session held, call the three LLM agents that
+#     drive the decision: state_ttl_estimator, fact_canonicalizer, and
+#     node_merger (only when there are candidates to consider). The
+#     results are stored in a `_PromoterPlan` keyed by proposal-node id.
+#
+#   Phase 3 (APPLY): open a SHORT db_manager.transaction() and call
+#     `_evaluate_and_apply(session, proposal, plan, commit=...)`. This
+#     phase makes ZERO LLM calls; every decision is read from the plan.
+#     The writer slot is held only for the deterministic SQL work, which
+#     finishes in milliseconds.
+#
+# This split is the documented pattern in db_manager.py: do the LLM work
+# without a session, then a single fast transaction to apply. Holding the
+# SQLite write lock through an LLM call cascades "database is locked"
+# errors across every other writer in the process (root cause of the
+# 2026-05-02 cascade — see audit memo + commit message).
+
+
+@dataclass
+class _PreparedNode:
+    """Per-proposal-node decision computed by `_prepare_proposal_plan`."""
+    pn_id: str
+    pn_label: str
+    pn_node_type: str
+    decision: str  # "match" | "create"
+    matched_node_id: Optional[str] = None
+    # Populated only for "create" decisions on RELATIONSHIP_LIKE_TYPES.
+    ttl: Optional[Dict[str, Any]] = None
+    # Populated only for "create" decisions on State/Event/Goal.
+    canonical_sentence: Optional[str] = None
+
+
+@dataclass
+class _PromoterPlan:
+    """All LLM-derived per-proposal data the apply phase needs."""
+    proposal_id: str
+    placeholder_labels: List[str] = field(default_factory=list)
+    nodes: Dict[str, _PreparedNode] = field(default_factory=dict)
+
+
+def _snapshot_state_candidate(session, cand: Node) -> Dict[str, Any]:
+    """Plain-dict snapshot of a state/event candidate for the LLM merger
+    call — captured while the read session is still open so the LLM call
+    that follows can run with no session at all.
+    """
+    cand_attrs = cand.attributes if isinstance(cand.attributes, dict) else {}
+    cand_ttl = cand_attrs.get("ttl") if isinstance(cand_attrs, dict) else None
+    cand_window = _first_window_id_for_node(session, cand.id)
+    return {
+        "node_id": cand.id,
+        "label": cand.label,
+        "node_type": cand.node_type,
+        "category": cand.category,
+        "description": (cand.description or "")[:500],
+        "original_sentence": cand.original_sentence,
+        "start_date": cand.start_date.isoformat() if cand.start_date else None,
+        "end_date": cand.end_date.isoformat() if cand.end_date else None,
+        "start_date_prose": cand.start_date_prose,
+        "end_date_prose": cand.end_date_prose,
+        "first_observed": cand_attrs.get("first_observed") if isinstance(cand_attrs, dict) else None,
+        "ttl_duration_class": (cand_ttl.get("duration_class") if isinstance(cand_ttl, dict) else None),
+        "source_window_id": cand_window,
+        "source_window_end_ts": _window_end_ts(session, cand_window),
+        # Compact chat-window snippet THIS candidate was extracted from.
+        # Lets the merger see the actual context that produced it, instead
+        # of guessing identity from label + truncated description.
+        "source_window_text": _node_window_text(session, cand.id),
+        "participant_labels": _participant_labels(session, cand.id),
+    }
+
+
+class _ProposalNodeStub:
+    """Lightweight stand-in for ClaimProposalNode used when calling
+    `_estimate_state_ttl` / `_canonicalize_sentence` from the prepare
+    phase. We can't pass the real ORM instance because the read session
+    has already closed — accessing it would trigger a lazy load.
+    """
+    __slots__ = (
+        "label", "node_type", "category", "description_draft",
+        "valid_from", "valid_to", "valid_from_prose", "valid_to_prose",
+        "attributes_json", "sentence",
+        "start_date_confidence", "end_date_confidence",
+    )
+
+    def __init__(self, snap: Dict[str, Any]):
+        self.label = snap["label"]
+        self.node_type = snap["node_type"]
+        self.category = snap["category"]
+        self.description_draft = snap["description_draft"]
+        self.valid_from = snap["valid_from"]
+        self.valid_to = snap["valid_to"]
+        self.valid_from_prose = snap["valid_from_prose"]
+        self.valid_to_prose = snap["valid_to_prose"]
+        self.attributes_json = snap["attributes_json"]
+        self.sentence = snap["sentence"]
+        self.start_date_confidence = snap.get("start_date_confidence")
+        self.end_date_confidence = snap.get("end_date_confidence")
+
+
+def _prepare_proposal_plan(proposal_id: str) -> Optional[_PromoterPlan]:
+    """Phase 1+2 for a single proposal: read everything we need, close the
+    session, then run the LLM agents (TTL, canonicalize, node_merger).
+
+    Returns a `_PromoterPlan` the apply phase consumes deterministically.
+    Returns None if the proposal vanished between read and now.
+
+    Crucially: NO SQLAlchemy session is held while any LLM call runs.
+    """
+    # ---- Phase 1: read snapshot ----
+    pnode_snaps: Dict[str, Dict[str, Any]] = {}
+    pedge_relations: List[Tuple[Optional[str], Optional[str]]] = []  # (source_pn_id, target_pn_id) per edge for state participants
+    entity_resolutions: Dict[str, Optional[str]] = {}
+    candidate_lists: Dict[str, List[Dict[str, Any]]] = {}
+    representative_sentence: str = ""
+    group_entity_labels: List[str] = []
+    proposal_window_id: Optional[str] = None
+    proposal_window_end_ts: Optional[str] = None
+    placeholder_labels: List[str] = []
+
+    with get_db_manager().read_session() as session:
+        proposal = (
+            session.query(ClaimProposal)
+            .filter(ClaimProposal.id == proposal_id)
+            .first()
+        )
+        if proposal is None:
+            return None
+
+        pnodes = (
+            session.query(ClaimProposalNode)
+            .filter(ClaimProposalNode.proposal_id == proposal_id)
+            .all()
+        )
+        pedges = (
+            session.query(ClaimProposalEdge)
+            .filter(ClaimProposalEdge.proposal_id == proposal_id)
+            .all()
+        )
+
+        representative_sentence = proposal.representative_sentence or ""
+        group_entity_labels = [
+            p.label for p in pnodes if p.node_type in ENTITY_LIKE_TYPES and p.label
+        ]
+        proposal_window_id = _first_window_id_for_proposal(session, proposal_id)
+        proposal_window_end_ts = _window_end_ts(session, proposal_window_id)
+        proposal_window_text = _proposal_window_text(session, proposal_id)
+
+        placeholder_labels = [pn.label for pn in pnodes if _is_placeholder_label(pn.label)]
+        if placeholder_labels:
+            return _PromoterPlan(
+                proposal_id=proposal_id,
+                placeholder_labels=placeholder_labels,
+                nodes={},
+            )
+
+        for pn in pnodes:
+            pnode_snaps[pn.id] = {
+                "id": pn.id,
+                "label": pn.label,
+                "node_type": pn.node_type,
+                "category": pn.category,
+                "description_draft": pn.description_draft,
+                "sentence": getattr(pn, "sentence", None),
+                "valid_from": pn.valid_from,
+                "valid_to": pn.valid_to,
+                "valid_from_prose": pn.valid_from_prose,
+                "valid_to_prose": pn.valid_to_prose,
+                "attributes_json": pn.attributes_json or {},
+                "start_date_confidence": pn.start_date_confidence,
+                "end_date_confidence": pn.end_date_confidence,
+            }
+
+        for pe in pedges:
+            pedge_relations.append((pe.source_node_id, pe.target_node_id))
+
+        # Entity-like resolution: deterministic match against existing KG.
+        # Done in the read session so resolved_node_ids are available for
+        # the relationship-like participant lookup below.
+        # Two passes: first the true entity-likes (Entity, Concept, Goal),
+        # then Property — so Property's subject lookup can use the
+        # already-resolved entity ids.
+        for pn in pnodes:
+            if pn.node_type in ENTITY_LIKE_TYPES and pn.node_type != "Property":
+                m = _resolve_entity_like(session, pn.label)
+                entity_resolutions[pn.id] = m.id if m else None
+
+        for pn in pnodes:
+            if pn.node_type != "Property":
+                continue
+            # Subjects = entity-like neighbors of this Property in the
+            # proposal's own edges. Resolve via entity_resolutions to get
+            # KG ids the property might already be attached to.
+            subject_kg_ids: Set[str] = set()
+            for src_pn, tgt_pn in pedge_relations:
+                if src_pn == pn.id:
+                    other = tgt_pn
+                elif tgt_pn == pn.id:
+                    other = src_pn
+                else:
+                    continue
+                resolved = entity_resolutions.get(other) if other else None
+                if resolved:
+                    subject_kg_ids.add(resolved)
+            m = _resolve_property(session, pn.label, subject_kg_ids)
+            entity_resolutions[pn.id] = m.id if m else None
+
+        # Relationship-like candidates: gather everything node_merger
+        # would need, snapshot it, so the LLM call below has no session.
+        for pn in pnodes:
+            if pn.node_type not in RELATIONSHIP_LIKE_TYPES:
+                continue
+
+            # Participant KG ids: walk this proposal's edges, look up the
+            # other endpoint in entity_resolutions. Only entity-like
+            # nodes that resolved against the KG count as participants.
+            participant_uuids: Set[str] = set()
+            for src_pn, tgt_pn in pedge_relations:
+                if src_pn == pn.id:
+                    other = tgt_pn
+                elif tgt_pn == pn.id:
+                    other = src_pn
+                else:
+                    continue
+                if other and other in entity_resolutions:
+                    resolved = entity_resolutions[other]
+                    if resolved:
+                        participant_uuids.add(resolved)
+
+            if not participant_uuids:
+                candidate_lists[pn.id] = []
+                continue
+
+            # Pre-filter: state/event nodes connected to any participant.
+            connected_ids: Set[str] = set()
+            for src, tgt in (
+                session.query(Edge.source_id, Edge.target_id)
+                .filter(or_(
+                    Edge.source_id.in_(participant_uuids),
+                    Edge.target_id.in_(participant_uuids),
+                ))
+                .all()
+            ):
+                if src in participant_uuids and tgt not in participant_uuids:
+                    connected_ids.add(tgt)
+                elif tgt in participant_uuids and src not in participant_uuids:
+                    connected_ids.add(src)
+            if not connected_ids:
+                candidate_lists[pn.id] = []
+                continue
+
+            cands = (
+                session.query(Node)
+                .filter(Node.node_type == pn.node_type)
+                .filter(Node.id.in_(connected_ids))
+                .all()
+            )
+            if not cands:
+                candidate_lists[pn.id] = []
+                continue
+
+            # Score by participant overlap (Jaccard).
+            scored: List[Dict[str, Any]] = []
+            for cand in cands:
+                cand_parts = _get_participant_kg_ids(session, cand.id)
+                if not cand_parts:
+                    continue
+                inter = cand_parts & participant_uuids
+                if not inter:
+                    continue
+                union = cand_parts | participant_uuids
+                scored.append({
+                    "node": cand,
+                    "overlap": len(inter),
+                    "jaccard": len(inter) / max(1, len(union)),
+                })
+            scored.sort(key=lambda s: (s["jaccard"], s["overlap"]), reverse=True)
+
+            # Event-class disparate-date exclusion (Stage 2 of the old
+            # _resolve_state_event). States have no such filter — identity
+            # states (Marriage, Residence) persist across time.
+            if (pn.node_type or "").lower() == "event" and pn.valid_from is not None:
+                pv = pn.valid_from
+                kept: List[Dict[str, Any]] = []
+                for s in scored:
+                    cs = s["node"].start_date
+                    if cs is None:
+                        kept.append(s)
+                        continue
+                    try:
+                        delta = abs((cs.date() - pv.date()).days)
+                    except Exception:
+                        kept.append(s)
+                        continue
+                    if delta <= _EVENT_DATE_TOLERANCE_DAYS:
+                        kept.append(s)
+                scored = kept
+
+            # Cap LLM input — hub participants (Jukka) explode candidate count.
+            candidate_lists[pn.id] = [
+                _snapshot_state_candidate(session, s["node"]) for s in scored[:5]
+            ]
+
+    # ---- Read session closed. Phase 2: LLM calls, no session held. ----
+    nodes: Dict[str, _PreparedNode] = {}
+
+    # Entity-like nodes: decision is just match-or-create, no LLM.
+    for pn_id, snap in pnode_snaps.items():
+        if snap["node_type"] not in ENTITY_LIKE_TYPES:
+            continue
+        match_id = entity_resolutions.get(pn_id)
+        nodes[pn_id] = _PreparedNode(
+            pn_id=pn_id,
+            pn_label=snap["label"] or "",
+            pn_node_type=snap["node_type"],
+            decision="match" if match_id else "create",
+            matched_node_id=match_id,
+        )
+
+    # Relationship-like nodes: optionally call node_merger if there are
+    # candidates, then either record the match or precompute TTL +
+    # canonical sentence for the create path.
+    for pn_id, snap in pnode_snaps.items():
+        if snap["node_type"] not in RELATIONSHIP_LIKE_TYPES:
+            continue
+
+        candidates = candidate_lists.get(pn_id, [])
+        matched_node_id: Optional[str] = None
+        if candidates:
+            attrs = snap["attributes_json"] if isinstance(snap["attributes_json"], dict) else {}
+            proposal_ttl = attrs.get("ttl") if isinstance(attrs, dict) else None
+            new_node_ctx = {
+                "label": snap["label"],
+                "node_type": snap["node_type"],
+                "category": snap["category"],
+                "description": snap["description_draft"],
+                "original_sentence": snap["sentence"],
+                "valid_from": snap["valid_from"].isoformat() if snap["valid_from"] else None,
+                "valid_to": snap["valid_to"].isoformat() if snap["valid_to"] else None,
+                "valid_from_prose": snap["valid_from_prose"],
+                "valid_to_prose": snap["valid_to_prose"],
+                "source_window_id": proposal_window_id,
+                "source_window_end_ts": proposal_window_end_ts,
+                # Chat-window snippet for the NEW node — paired with
+                # `source_window_text` on each candidate so the merger
+                # can compare actual context, not just labels.
+                "source_window_text": proposal_window_text,
+                "first_observed": attrs.get("first_observed") if isinstance(attrs, dict) else None,
+                "ttl_duration_class": (proposal_ttl.get("duration_class") if isinstance(proposal_ttl, dict) else None),
+            }
+            matched_node_id = _call_node_merger_for_state_match(new_node_ctx, candidates)
+
+        if matched_node_id:
+            nodes[pn_id] = _PreparedNode(
+                pn_id=pn_id,
+                pn_label=snap["label"] or "",
+                pn_node_type=snap["node_type"],
+                decision="match",
+                matched_node_id=matched_node_id,
+            )
+            continue
+
+        # No match — going to create. Precompute the LLM-derived fields.
+        stub = _ProposalNodeStub(snap)
+        ttl: Optional[Dict[str, Any]] = None
+        canonical_sentence: Optional[str] = None
+        if snap["node_type"] in RELATIONSHIP_LIKE_TYPES:
+            ttl = _estimate_state_ttl(
+                stub,
+                originating_sentence=representative_sentence,
+                participant_labels=group_entity_labels,
+            )
+        if snap["node_type"] in {"State", "Event", "Goal"}:
+            canonical_sentence = _canonicalize_sentence(
+                stub, participant_labels=group_entity_labels,
+            )
+
+        nodes[pn_id] = _PreparedNode(
+            pn_id=pn_id,
+            pn_label=snap["label"] or "",
+            pn_node_type=snap["node_type"],
+            decision="create",
+            ttl=ttl,
+            canonical_sentence=canonical_sentence,
+        )
+
+    return _PromoterPlan(
+        proposal_id=proposal_id,
+        placeholder_labels=[],
+        nodes=nodes,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Core: apply one proposal's prepared plan
 # ---------------------------------------------------------------------------
 
 def _evaluate_and_apply(
-    session, proposal: ClaimProposal, *, commit: bool,
+    session, proposal: ClaimProposal, plan: _PromoterPlan, *, commit: bool,
 ) -> _ProposalDecision:
-    """Walk one proposal group — resolve/create nodes, then create edges."""
+    """Apply a precomputed `_PromoterPlan` against the KG.
+
+    Caller MUST be inside a write transaction (use db_manager.transaction).
+    This function makes ZERO LLM calls — every match/create decision is
+    read from `plan`. The plan must have been built by
+    `_prepare_proposal_plan` with no session held during its LLM calls.
+    """
     dec = _ProposalDecision(proposal.id)
+
+    if plan.placeholder_labels:
+        dec.final_status = "contradicted"
+        dec.error = f"placeholder labels present: {plan.placeholder_labels}"
+        # Emit one outcome per pnode for symmetry with prior callers.
+        pnodes_for_outcome = (
+            session.query(ClaimProposalNode)
+            .filter(ClaimProposalNode.proposal_id == proposal.id)
+            .all()
+        )
+        for pn in pnodes_for_outcome:
+            dec.node_outcomes.append(_NodeOutcome(
+                pn.id, "skipped_locked",
+                reason=f"group rejected (placeholder labels: {plan.placeholder_labels})",
+            ))
+        return dec
+
     pnodes = (
         session.query(ClaimProposalNode)
         .filter(ClaimProposalNode.proposal_id == proposal.id)
@@ -861,105 +1180,99 @@ def _evaluate_and_apply(
         .all()
     )
 
-    # Reject outright if any placeholder labels snuck through.
-    placeholders = [pn.label for pn in pnodes if _is_placeholder_label(pn.label)]
-    if placeholders:
-        dec.final_status = "contradicted"
-        dec.error = f"placeholder labels present: {placeholders}"
-        for pn in pnodes:
-            dec.node_outcomes.append(
-                _NodeOutcome(pn.id, "skipped_locked",
-                             reason=f"group rejected (placeholder labels: {placeholders})")
-            )
-        return dec
+    # ----- Nodes: entity-like first, then relationship-like.
+    # The plan tells us match-or-create for each. We just write.
 
-    # ----- Nodes: entity-like first, then relationship-like -----
-    # Entity-like match by label; relationship-like needs their participants
-    # resolved first to use participant-based matching.
-
-    # Phase 1a: entity-like nodes.
+    # Phase 1a: entity-like.
     for pn in pnodes:
         if pn.node_type not in ENTITY_LIKE_TYPES:
             continue
-        match = _resolve_entity_like(session, pn.label)
-        if match is not None:
-            pn.resolved_node_id = match.id
+        prepared = plan.nodes.get(pn.id)
+        if prepared is None:
+            # New pnode appeared between prepare and apply — rare, but
+            # don't silently drop it; mark as skipped.
+            dec.node_outcomes.append(_NodeOutcome(
+                pn.id, "skipped_conflict", None,
+                "no plan entry (proposal mutated between prepare and apply)",
+            ))
+            continue
+
+        if prepared.decision == "match" and prepared.matched_node_id:
+            pn.resolved_node_id = prepared.matched_node_id
             pn.resolution_action = "matched_existing"
             if commit:
-                _refresh_on_reobservation(match, proposal)
-            dec.node_outcomes.append(
-                _NodeOutcome(pn.id, "matched_existing", match.id,
-                             f"{pn.node_type} {pn.label!r} matched {match.id[:8]}")
-            )
+                match_node = session.get(Node, prepared.matched_node_id)
+                if match_node is not None:
+                    _refresh_on_reobservation(match_node, proposal)
+            dec.node_outcomes.append(_NodeOutcome(
+                pn.id, "matched_existing", prepared.matched_node_id,
+                f"{pn.node_type} {pn.label!r} matched {prepared.matched_node_id[:8]}",
+            ))
         else:
             if commit:
                 new = _create_kg_node_from_proposal(session, pn, proposal.id)
                 pn.resolved_node_id = new.id
                 pn.resolution_action = "created_new"
-                dec.node_outcomes.append(
-                    _NodeOutcome(pn.id, "created_new", new.id,
-                                 f"created {pn.node_type} {pn.label!r} as {new.id[:8]}")
-                )
+                dec.node_outcomes.append(_NodeOutcome(
+                    pn.id, "created_new", new.id,
+                    f"created {pn.node_type} {pn.label!r} as {new.id[:8]}",
+                ))
             else:
-                # dry-run: pretend we'd create
-                dec.node_outcomes.append(
-                    _NodeOutcome(pn.id, "created_new", None,
-                                 f"(dry-run) would create {pn.node_type} {pn.label!r}")
-                )
+                dec.node_outcomes.append(_NodeOutcome(
+                    pn.id, "created_new", None,
+                    f"(dry-run) would create {pn.node_type} {pn.label!r}",
+                ))
 
-    # Phase 1b: relationship-like nodes (match by participants+valid_from).
-    # Collect labels of all entity-like nodes in this group once; used as
-    # the participant-list context for TTL estimation.
-    group_entity_labels = [
-        p.label for p in pnodes if p.node_type in ENTITY_LIKE_TYPES and p.label
-    ]
-    # Best-effort originating sentence for TTL context: proposal's rep sentence.
-    originating_sentence = proposal.representative_sentence or ""
-
-    # Resolve once: the proposal's source window id (used by
-    # _resolve_state_event for same-window deterministic merge).
-    proposal_window_id = _first_window_id_for_proposal(session, proposal.id)
-
+    # Phase 1b: relationship-like.
     for pn in pnodes:
         if pn.node_type not in RELATIONSHIP_LIKE_TYPES:
             continue
-        participant_kg_ids = _participants_of_proposal_state(pnodes, pedges, pn.id)
-        match = _resolve_state_event(
-            session, pn, participant_kg_ids,
-            proposal_window_id=proposal_window_id,
-        ) if participant_kg_ids else None
-        if match is not None:
-            pn.resolved_node_id = match.id
+        prepared = plan.nodes.get(pn.id)
+        if prepared is None:
+            dec.node_outcomes.append(_NodeOutcome(
+                pn.id, "skipped_conflict", None,
+                "no plan entry (proposal mutated between prepare and apply)",
+            ))
+            continue
+
+        if prepared.decision == "match" and prepared.matched_node_id:
+            pn.resolved_node_id = prepared.matched_node_id
             pn.resolution_action = "matched_existing"
             if commit:
-                _refresh_on_reobservation(match, proposal)
-            dec.node_outcomes.append(
-                _NodeOutcome(pn.id, "matched_existing", match.id,
-                             f"{pn.node_type} {pn.label!r} matched {match.id[:8]} "
-                             f"via participants")
-            )
+                match_node = session.get(Node, prepared.matched_node_id)
+                if match_node is not None:
+                    _refresh_on_reobservation(match_node, proposal)
+            dec.node_outcomes.append(_NodeOutcome(
+                pn.id, "matched_existing", prepared.matched_node_id,
+                f"{pn.node_type} {pn.label!r} matched {prepared.matched_node_id[:8]} "
+                f"via participants",
+            ))
         else:
             if commit:
                 new = _create_kg_node_from_proposal(
                     session, pn, proposal.id,
-                    originating_sentence=originating_sentence,
-                    participant_labels=group_entity_labels,
+                    ttl=prepared.ttl,
+                    canonical_sentence=prepared.canonical_sentence,
                 )
                 pn.resolved_node_id = new.id
                 pn.resolution_action = "created_new"
                 ttl_blurb = ""
                 if isinstance(new.attributes, dict) and "ttl" in new.attributes:
                     t = new.attributes["ttl"]
-                    ttl_blurb = f" [ttl: {t.get('duration_class')}={t.get('estimated_duration_days')}d, conf={t.get('confidence'):.2f}]"
-                dec.node_outcomes.append(
-                    _NodeOutcome(pn.id, "created_new", new.id,
-                                 f"created {pn.node_type} {pn.label!r} as {new.id[:8]}{ttl_blurb}")
-                )
+                    ttl_blurb = (
+                        f" [ttl: {t.get('duration_class')}="
+                        f"{t.get('estimated_duration_days')}d, "
+                        f"conf={t.get('confidence'):.2f}]"
+                    )
+                dec.node_outcomes.append(_NodeOutcome(
+                    pn.id, "created_new", new.id,
+                    f"created {pn.node_type} {pn.label!r} as {new.id[:8]}{ttl_blurb}",
+                ))
             else:
-                dec.node_outcomes.append(
-                    _NodeOutcome(pn.id, "created_new", None,
-                                 f"(dry-run) would create {pn.node_type} {pn.label!r}")
-                )
+                dec.node_outcomes.append(_NodeOutcome(
+                    pn.id, "created_new", None,
+                    f"(dry-run) would create {pn.node_type} {pn.label!r}",
+                ))
 
     # ----- Edges: create fresh or reinforce, respect locks + conflicts -----
     # Build quick lookup of resolved_node_id by proposal_node.id
@@ -1065,7 +1378,10 @@ def _evaluate_and_apply(
 def run_promoter(*, limit: int = 100, commit: bool = False) -> Dict[str, Any]:
     """Iterate pending proposals, evaluate each, optionally apply.
 
-    Returns a stats dict + a small sample of per-proposal decisions.
+    Per proposal: read snapshot + LLM canonicalize (no write lock held)
+    → short db_manager.transaction to apply. The writer slot is never
+    held across an LLM call. See `_prepare_proposal_plan` for the
+    contract; see db_manager.py for why this matters.
     """
     # Gate via the UI-controlled subsystem flag. See /dev/subsystems
     # to toggle. Default is enabled.
@@ -1091,25 +1407,51 @@ def run_promoter(*, limit: int = 100, commit: bool = False) -> Dict[str, Any]:
     }
     samples: List[Dict[str, Any]] = []
 
-    session = get_session()
-    try:
-        pending = (
-            session.query(ClaimProposal)
-            .filter(ClaimProposal.status == "pending")
-            .order_by(ClaimProposal.created_at.asc())
-            .limit(limit)
-            .all()
-        )
-        for p in pending:
-            try:
-                # Each proposal gets its own SAVEPOINT via begin_nested.
-                session.begin_nested()
+    # Pull pending ids in a tiny read session — no write lock acquired.
+    with get_db_manager().read_session() as session:
+        pending_ids = [
+            p.id for p in (
+                session.query(ClaimProposal)
+                .filter(ClaimProposal.status == "pending")
+                .order_by(ClaimProposal.created_at.asc())
+                .limit(limit)
+                .all()
+            )
+        ]
+
+    for pid in pending_ids:
+        try:
+            # Phase 1+2: read snapshot + LLM. NO write lock held.
+            plan = _prepare_proposal_plan(pid)
+            if plan is None:
+                logger.warning("[promoter] proposal %s vanished before plan", pid)
+                continue
+
+            # Phase 3: short write transaction. NO LLM calls.
+            with get_db_manager().transaction(op="promoter.apply") as session:
+                p = (
+                    session.query(ClaimProposal)
+                    .filter(ClaimProposal.id == pid)
+                    .first()
+                )
+                if p is None:
+                    logger.warning("[promoter] proposal %s vanished before apply", pid)
+                    continue
+                if (p.status or "") != "pending":
+                    # Someone else moved this proposal between prepare and
+                    # apply. Skip — don't double-promote.
+                    continue
+
+                # Wrap the apply work in a SAVEPOINT so we can roll back
+                # node/edge writes on a contradiction while still keeping
+                # the outer status='contradicted' update.
+                sp = session.begin_nested()
                 try:
-                    dec = _evaluate_and_apply(session, p, commit=commit)
+                    dec = _evaluate_and_apply(session, p, plan, commit=commit)
                 except Exception as inner:
-                    session.rollback()
+                    sp.rollback()
                     stats["errors"] += 1
-                    logger.exception("[promoter] proposal %s threw: %s", p.id, inner)
+                    logger.exception("[promoter] proposal %s threw during apply: %s", pid, inner)
                     continue
 
                 stats["evaluated"] += 1
@@ -1127,7 +1469,7 @@ def run_promoter(*, limit: int = 100, commit: bool = False) -> Dict[str, Any]:
                         stats["edges_skipped"] += 1
 
                 if dec.final_status == "contradicted":
-                    session.rollback()
+                    sp.rollback()
                     if commit:
                         p.status = "contradicted"
                         p.retraction_reason = dec.error or "conflict"
@@ -1135,20 +1477,21 @@ def run_promoter(*, limit: int = 100, commit: bool = False) -> Dict[str, Any]:
                 else:
                     if commit:
                         p.status = "promoted"
+                    else:
+                        # Dry-run: discard the pnode.resolved_node_id /
+                        # resolution_action mutations the apply phase made
+                        # on the live ORM rows. Without this rollback, the
+                        # outer transaction commits them.
+                        sp.rollback()
                     stats["promoted"] += 1
 
                 if len(samples) < 10:
                     samples.append(dec.summary())
-            except Exception:
-                stats["errors"] += 1
-                logger.exception("[promoter] outer handler on proposal %s", p.id)
-
-        if commit:
-            session.commit()
-        else:
-            session.rollback()
-    finally:
-        session.close()
+                # outer transaction commits at end of `with` — status update
+                # only when commit=True. Dry-run commits an empty transaction.
+        except Exception:
+            stats["errors"] += 1
+            logger.exception("[promoter] outer handler on proposal %s", pid)
 
     stats["_samples"] = samples
     return stats

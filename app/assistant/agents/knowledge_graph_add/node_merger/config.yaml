@@ -14,6 +14,7 @@ system_context_items:
 - resource_assistant_data
 - resource_user_data
 - resource_kg_node_reading
+- resource_kg_node_disambiguation
 type: agent
 
 entity_scan_keys: [new_node_context]

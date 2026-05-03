@@ -93,15 +93,22 @@ class Node(Base):
     # IMPORTANT:
     # Use local class names + lambda-based FK resolution so module moves/renames
     # don't break mapper initialization (SQLAlchemy evaluates these at configure time).
+    # passive_deletes=True is REQUIRED. Without it, SQLAlchemy walks the
+    # collection on Node delete and emits UPDATE kg_edge_metadata SET
+    # source_id/target_id = NULL — which violates the NOT NULL constraint
+    # before the DB-level ON DELETE CASCADE on the FK can fire. With it,
+    # the ORM trusts the cascade and the delete works in one shot.
     outgoing_edges = relationship(
         "Edge",
         back_populates="source_node",
         foreign_keys=lambda: [Edge.source_id],
+        passive_deletes=True,
     )
     incoming_edges = relationship(
         "Edge",
         back_populates="target_node",
         foreign_keys=lambda: [Edge.target_id],
+        passive_deletes=True,
     )
     
     @property

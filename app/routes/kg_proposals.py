@@ -311,37 +311,49 @@ def approve(proposal_id: str):
     Use case: the auto-promoter left a proposal in ``pending`` (e.g. it
     couldn't confidently match against existing nodes). After eyeballing
     the proposal in the UI, the user clicks Approve to push it through.
-    The same evaluator the auto-promoter uses runs against this single
-    proposal in a savepoint, then status is updated to ``promoted`` or
-    ``contradicted`` based on the decision.
+
+    Same prepare→apply split as `run_promoter`: LLM canonicalization
+    happens with no session held, then a short db_manager.transaction
+    applies the decision. Holding the writer slot through the LLM call
+    cascades "database is locked" errors across every other writer.
     """
-    from app.assistant.kg.proposal_promoter import _evaluate_and_apply
+    from app.assistant.kg.proposal_promoter import _prepare_proposal_plan, _evaluate_and_apply
+    from app.models.db_manager import get_db_manager
 
-    session = get_session()
+    # Phase 1+2: read snapshot + LLM. NO write lock held.
+    plan = _prepare_proposal_plan(proposal_id)
+    if plan is None:
+        return jsonify({"ok": False, "error": "not found"}), 404
+
+    # Phase 3: short write transaction. NO LLM calls.
     try:
-        p = session.query(ClaimProposal).filter(ClaimProposal.id == proposal_id).first()
-        if p is None:
-            return jsonify({"ok": False, "error": "not found"}), 404
-        if (p.status or "").strip() != "pending":
-            return jsonify({
-                "ok": False,
-                "error": f"proposal status is {p.status!r}; only pending proposals can be approved",
-            }), 409
+        with get_db_manager().transaction(op="approve.apply") as session:
+            p = (
+                session.query(ClaimProposal)
+                .filter(ClaimProposal.id == proposal_id)
+                .first()
+            )
+            if p is None:
+                return jsonify({"ok": False, "error": "not found"}), 404
+            if (p.status or "").strip() != "pending":
+                return jsonify({
+                    "ok": False,
+                    "error": f"proposal status is {p.status!r}; only pending proposals can be approved",
+                }), 409
 
-        try:
-            session.begin_nested()
+            sp = session.begin_nested()
             try:
-                dec = _evaluate_and_apply(session, p, commit=True)
+                dec = _evaluate_and_apply(session, p, plan, commit=True)
             except Exception as exc:
-                session.rollback()
+                sp.rollback()
                 logger.exception("[approve] proposal %s threw: %s", p.id, exc)
                 return jsonify({"ok": False, "error": str(exc)}), 500
 
             if dec.final_status == "contradicted":
-                session.rollback()
+                sp.rollback()
                 p.status = "contradicted"
                 p.retraction_reason = dec.error or "conflict during manual approve"
-                session.commit()
+                # outer transaction commits this status update on `with` exit.
                 return jsonify({
                     "ok": False,
                     "status": "contradicted",
@@ -350,18 +362,14 @@ def approve(proposal_id: str):
                 }), 409
 
             p.status = "promoted"
-            session.commit()
             return jsonify({
                 "ok": True,
                 "status": "promoted",
                 "decision": dec.summary(),
             })
-        except Exception as outer:
-            session.rollback()
-            logger.exception("[approve] outer handler on proposal %s", p.id)
-            return jsonify({"ok": False, "error": str(outer)}), 500
-    finally:
-        session.close()
+    except Exception as outer:
+        logger.exception("[approve] outer handler on proposal %s", proposal_id)
+        return jsonify({"ok": False, "error": str(outer)}), 500
 
 
 # ---------------------------------------------------------------------------

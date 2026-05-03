@@ -63,6 +63,7 @@ tools:
     - kg_update_node_field
     - kg_delete_edge
     - kg_create_edge
+    - kg_create_node           # general node creation (any node_type)
     - kg_create_state_node
     - kg_close_state
     # Finding lifecycle (the planner can resolve/escalate when working

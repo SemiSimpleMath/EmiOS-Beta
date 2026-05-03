@@ -66,8 +66,21 @@ NODE_ID_REFERENCES: List[Tuple[str, str]] = [
 
 
 def ensure_merge_log_table(session: Session) -> None:
-    """Create the kg_merge_log table if it doesn't exist yet. Idempotent."""
-    Base.metadata.create_all(session.get_bind(), tables=[KGMergeLog.__table__], checkfirst=True)
+    """Create the kg_merge_log table if it doesn't exist yet. Idempotent.
+
+    Uses the session's existing connection (not the engine) so the DDL runs
+    on the same SQLite connection that holds the in-flight transaction.
+    Calling ``session.get_bind()`` returns the engine, which would open a
+    NEW connection from the pool — that fresh connection then waits forever
+    for the write lock the current session is already holding (self-
+    deadlock). Reusing ``session.connection()`` avoids the second-connection
+    trap entirely.
+    """
+    Base.metadata.create_all(
+        session.connection(),
+        tables=[KGMergeLog.__table__],
+        checkfirst=True,
+    )
 
 
 def snapshot_node(node) -> Dict[str, Any]:
@@ -268,17 +281,57 @@ def rebind_node_references(
     for table_name, column_name in NODE_ID_REFERENCES:
         if table_name not in existing_tables:
             continue
-        # Capture row ids first so unmerge can target exactly these rows.
-        # Cap the captured list; if something is stupendously large, record a
-        # count-only rebind entry. Unmerge in that case falls back to
-        # "reverse by (table, column, old_id → new_id)" matching.
-        pk_rows = session.execute(
-            text(f"SELECT id FROM {table_name} WHERE {column_name} = :loser"),
-            {"loser": loser_id},
-        ).fetchall()
-        row_ids = [str(r[0]) for r in pk_rows]
-        if not row_ids:
-            continue
+
+        # Discover the PK shape so we can (a) capture row identity for unmerge
+        # and (b) pre-resolve composite-PK conflicts. Some junction tables
+        # (e.g. node_taxonomy_links) use a composite PK like (node_id,
+        # taxonomy_id) with no surrogate `id` column — the old code SELECT'd
+        # `id` blindly and crashed.
+        col_info = session.execute(text(f"PRAGMA table_info({table_name})")).fetchall()
+        # PRAGMA returns: cid, name, type, notnull, dflt_value, pk(0 or position)
+        pk_cols = [str(r[1]) for r in col_info if int(r[5]) > 0]
+        has_surrogate_id = any(str(r[1]) == "id" for r in col_info)
+
+        # Pre-clear conflicting rows on composite-PK junction tables.
+        # If the rebind column is part of a composite PK, then UPDATE-ing it
+        # from loser to winner can collide with an existing (winner, ...) row.
+        # Drop the loser-side row in that case — the winner already represents
+        # the same junction, and the winner's row wins (its data is canonical
+        # post-merge). For single-PK tables this is a no-op.
+        if column_name in pk_cols and len(pk_cols) > 1:
+            other_pk_cols = [c for c in pk_cols if c != column_name]
+            other_cols_sql = ", ".join(other_pk_cols)
+            session.execute(
+                text(
+                    f"DELETE FROM {table_name} "
+                    f"WHERE {column_name} = :loser "
+                    f"AND ({other_cols_sql}) IN "
+                    f"(SELECT {other_cols_sql} FROM {table_name} WHERE {column_name} = :winner)"
+                ),
+                {"loser": loser_id, "winner": winner_id},
+            )
+
+        # Capture row ids for unmerge if the table has a surrogate `id`.
+        # Composite-PK tables: skip exact capture; unmerge falls back to
+        # (table, column, winner→loser) inverse-update. The merge log records
+        # row_ids_truncated=True for that case.
+        if has_surrogate_id:
+            pk_rows = session.execute(
+                text(f"SELECT id FROM {table_name} WHERE {column_name} = :loser"),
+                {"loser": loser_id},
+            ).fetchall()
+            row_ids = [str(r[0]) for r in pk_rows]
+            if not row_ids:
+                continue
+        else:
+            # Count remaining loser-rows after conflict pre-clear.
+            n_remaining = session.execute(
+                text(f"SELECT COUNT(*) FROM {table_name} WHERE {column_name} = :loser"),
+                {"loser": loser_id},
+            ).scalar() or 0
+            if n_remaining == 0:
+                continue
+            row_ids = []
 
         result = session.execute(
             text(
@@ -293,7 +346,7 @@ def rebind_node_references(
         # old→new) inverse-update during unmerge. This is a pragmatic ceiling
         # to keep merge log entries from blowing up.
         row_ids_for_log = row_ids[:500]
-        truncated = len(row_ids) > len(row_ids_for_log)
+        truncated = (not has_surrogate_id) or (len(row_ids) > len(row_ids_for_log))
 
         rebinds.append({
             "table": table_name,
