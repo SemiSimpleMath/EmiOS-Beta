@@ -149,3 +149,68 @@
 .kg-save-status.error {
   color: #b33;
 }
+
+/* ---------- KG critic tester (kg_interests_test.html) ---------- */
+
+.kg-test-result {
+  margin-top: 28px;
+  padding: 20px;
+  border: 1px solid #e2e6ee;
+  border-radius: 6px;
+  background: #fafbfd;
+}
+
+.kg-test-result.hidden {
+  display: none;
+}
+
+.kg-test-verdict {
+  margin-bottom: 14px;
+}
+
+.kg-test-pill {
+  display: inline-block;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.kg-test-pill.accept {
+  background: #e0f3e3;
+  color: #2a7a2a;
+  border: 1px solid #a4d8a8;
+}
+
+.kg-test-pill.reject {
+  background: #fde6e6;
+  color: #b33;
+  border: 1px solid #f0a9a9;
+}
+
+.kg-test-reason-block {
+  margin-top: 8px;
+}
+
+.kg-test-reason-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #666;
+  margin-bottom: 4px;
+}
+
+.kg-test-reason {
+  margin: 0;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid #e0e4ec;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+  color: #333;
+}

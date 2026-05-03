@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}KG Critic Tester{% endblock %}
+
+{% block optional_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/kg_interests.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="kg-interests-page">
+  <h1>KG Critic Tester</h1>
+  <p class="kg-interests-intro">
+    Paste chat lines and see whether the live <code>window_critic</code> would
+    accept or reject them for extraction. Read-only — nothing is written to the
+    KG. Useful for confirming that the current
+    <a href="/kg-interests">KG Interests</a> categories agree with what you
+    expect to be extraction-worthy.
+  </p>
+
+  <label class="kg-field">
+    <span>User lines (what to judge — one user message per line)</span>
+    <textarea id="kg-test-user" rows="6" placeholder="e.g. We bought a new car yesterday — it's a black 2024 Tesla Model Y."></textarea>
+  </label>
+
+  <label class="kg-field">
+    <span>Optional: assistant context (for understanding only — not judged)</span>
+    <textarea id="kg-test-context" rows="3" placeholder="e.g. Earlier in the conversation, the assistant said something."></textarea>
+  </label>
+
+  <div class="kg-interests-actions">
+    <button type="button" id="kg-test-run" class="kg-btn kg-btn-primary">Test</button>
+    <span id="kg-test-status" class="kg-save-status"></span>
+  </div>
+
+  <div id="kg-test-result" class="kg-test-result hidden">
+    <div class="kg-test-verdict">
+      <span id="kg-test-pill" class="kg-test-pill"></span>
+    </div>
+    <div class="kg-test-reason-block">
+      <div class="kg-test-reason-label">Reason</div>
+      <pre id="kg-test-reason" class="kg-test-reason"></pre>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const userField = document.getElementById("kg-test-user");
+  const ctxField = document.getElementById("kg-test-context");
+  const runBtn = document.getElementById("kg-test-run");
+  const status = document.getElementById("kg-test-status");
+  const result = document.getElementById("kg-test-result");
+  const pill = document.getElementById("kg-test-pill");
+  const reason = document.getElementById("kg-test-reason");
+
+  async function runTest() {
+    const userText = (userField.value || "").trim();
+    const contextText = (ctxField.value || "").trim();
+    if (!userText) {
+      status.textContent = "Paste at least one user line first.";
+      status.className = "kg-save-status error";
+      result.classList.add("hidden");
+      return;
+    }
+    runBtn.disabled = true;
+    status.textContent = "Running critic...";
+    status.className = "kg-save-status";
+    result.classList.add("hidden");
+    try {
+      const resp = await fetch("/kg-interests/test", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({user_text: userText, context_text: contextText}),
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.ok) {
+        status.textContent = "Error: " + (data.error || resp.statusText);
+        status.className = "kg-save-status error";
+        return;
+      }
+      status.textContent = "";
+      pill.textContent = data.extractable ? "ACCEPT — would extract" : "REJECT — would skip";
+      pill.className = "kg-test-pill " + (data.extractable ? "accept" : "reject");
+      reason.textContent = data.reason || "(no reason returned)";
+      result.classList.remove("hidden");
+    } catch (e) {
+      status.textContent = "Error: " + e.message;
+      status.className = "kg-save-status error";
+    } finally {
+      runBtn.disabled = false;
+    }
+  }
+
+  runBtn.addEventListener("click", runTest);
+  // Cmd/Ctrl+Enter in either textarea triggers the test.
+  [userField, ctxField].forEach(el => {
+    el.addEventListener("keydown", (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        runTest();
+      }
+    });
+  });
+})();
+</script>
+{% endblock %}

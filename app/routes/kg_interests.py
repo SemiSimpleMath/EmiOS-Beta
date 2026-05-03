@@ -69,3 +69,66 @@ def kg_interests_save():
         return jsonify({"ok": False, "error": f"update failed: {e}"}), 500
 
     return jsonify({"ok": True, "categories": categories, "description": description})
+
+
+# ---------------------------------------------------------------------------
+# /kg-interests/test — paste chat lines, see whether window_critic accepts them.
+# Read-only: no DB writes. Lets Jukka verify the live critic prompt + the
+# current resource_kg_interests categories agree on what's extraction-worthy.
+# ---------------------------------------------------------------------------
+
+WINDOW_CRITIC_AGENT_NAME = "knowledge_graph_add::window_critic"
+
+
+@kg_interests_bp.route("/kg-interests/test", methods=["GET"])
+def kg_interests_test_view():
+    return render_template("kg_interests_test.html")
+
+
+@kg_interests_bp.route("/kg-interests/test", methods=["POST"])
+def kg_interests_test_run():
+    payload = request.get_json(silent=True) or {}
+    user_text = str(payload.get("user_text") or "").strip()
+    context_text = str(payload.get("context_text") or "").strip()
+
+    if not user_text:
+        return jsonify({"ok": False, "error": "user_text is required"}), 400
+
+    from app.assistant.pipelines.scope_policy import build_pipeline_scope_context
+    from app.assistant.utils.pydantic_classes import Message
+
+    user_block = user_text
+    context_block = context_text or "(no assistant context)"
+
+    try:
+        agent = DI.agent_factory.create_agent(WINDOW_CRITIC_AGENT_NAME)
+    except Exception as e:
+        logger.error("Failed to create window_critic agent: %s", e)
+        return jsonify({"ok": False, "error": f"agent_factory failed: {e}"}), 500
+    if agent is None:
+        return jsonify({"ok": False, "error": "window_critic agent unavailable"}), 500
+
+    scope = build_pipeline_scope_context(
+        pipeline_id="kg_pipeline", actor_id="window_critic_tester",
+    )
+    agent_input = {"context_lines": context_block, "user_lines": user_block}
+
+    try:
+        result = agent.action_handler(Message(agent_input=agent_input, scope_context=scope))
+    except Exception as e:
+        logger.error("window_critic call failed: %s", e, exc_info=True)
+        return jsonify({"ok": False, "error": f"critic call failed: {e}"}), 500
+
+    data = result.data if result and hasattr(result, "data") else {}
+    if not isinstance(data, dict):
+        data = {}
+    extractable = bool(data.get("extractable", True))
+    reason = str(data.get("reason") or "")[:1000]
+
+    return jsonify({
+        "ok": True,
+        "extractable": extractable,
+        "reason": reason,
+        "user_lines": user_block,
+        "context_lines": context_block if context_text else "",
+    })
