@@ -62,6 +62,9 @@ class _StubNode:
     id: str
     label: str = ""
     start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    start_date_prose: str = ""  # "in 2023", "last fall" — partial info
+    end_date_prose: str = ""
 
 
 def _ts(year: int, month: int, day: int) -> datetime:
@@ -462,6 +465,119 @@ class TestDesiredDecisionTree:
         assert {s["node"].id for s in out} == {"same-label"}
 
     # ---- LLM invocation: when ALL gates pass + label same ----
+
+    # ---- Hard reject 2 (richer): "enough known" time-frame check ----
+    #
+    # The current Event-only date filter is too narrow. Per the spec
+    # (Jukka 2026-05-03), the time-frame hard reject should fire whenever
+    # ENOUGH date info is known to determine non-overlap — even if exact
+    # dates aren't. Examples below. The helper that would implement this
+    # (_filter_candidates_by_time_frame, applies to State/Event/Goal alike)
+    # doesn't exist yet — these xfail with ImportError until it lands.
+
+    def test_state_end_before_other_start_should_drop(self):
+        """One state explicitly ENDED before the other's start = sequential
+        instances. Same Marriage label, two separate marriages with a divorce
+        gap between them. Different instances; do not merge."""
+        try:
+            from app.assistant.kg.proposal_promoter import (
+                _filter_candidates_by_time_frame,
+            )
+        except ImportError:
+            pytest.xfail("_filter_candidates_by_time_frame not implemented")
+
+        cand = _StubNode(
+            id="ended-marriage",
+            label="Marriage",
+            start_date=_ts(2010, 1, 1),
+            end_date=_ts(2018, 6, 1),
+        )
+        new_start = _ts(2023, 5, 1)
+        scored = [{"node": cand, "overlap": 1, "jaccard": 1.0}]
+        out = _filter_candidates_by_time_frame(
+            scored, new_valid_from=new_start, new_valid_to=None,
+        )
+        assert out == []
+
+    def test_other_end_before_new_start_should_drop(self):
+        """Symmetric: candidate ended in the past, new proposal starts
+        well after. Different sequential instances."""
+        try:
+            from app.assistant.kg.proposal_promoter import (
+                _filter_candidates_by_time_frame,
+            )
+        except ImportError:
+            pytest.xfail("_filter_candidates_by_time_frame not implemented")
+
+        cand = _StubNode(id="old-job", label="Employment",
+                         start_date=_ts(2015, 1, 1),
+                         end_date=_ts(2020, 12, 31))
+        new_start = _ts(2024, 1, 1)
+        scored = [{"node": cand, "overlap": 1, "jaccard": 1.0}]
+        out = _filter_candidates_by_time_frame(
+            scored, new_valid_from=new_start, new_valid_to=None,
+        )
+        assert out == []
+
+    def test_year_mismatch_via_prose_should_drop(self):
+        """Partial date info: prose says 'in 2023' on the candidate and
+        'in 2025' on the new proposal. Years differ — different instances
+        even without exact dates."""
+        try:
+            from app.assistant.kg.proposal_promoter import (
+                _filter_candidates_by_time_frame,
+            )
+        except ImportError:
+            pytest.xfail("_filter_candidates_by_time_frame not implemented")
+
+        cand = _StubNode(id="conf-2023", label="Conference",
+                         start_date_prose="in 2023")
+        scored = [{"node": cand, "overlap": 1, "jaccard": 1.0}]
+        out = _filter_candidates_by_time_frame(
+            scored,
+            new_valid_from=None,
+            new_valid_to=None,
+            new_start_prose="in 2025",
+        )
+        assert out == []
+
+    def test_overlapping_open_states_should_be_kept(self):
+        """Both states are open-ended (start_date set, end_date None) and
+        the windows overlap. Could be same persistent state — keep for LLM."""
+        try:
+            from app.assistant.kg.proposal_promoter import (
+                _filter_candidates_by_time_frame,
+            )
+        except ImportError:
+            pytest.xfail("_filter_candidates_by_time_frame not implemented")
+
+        cand = _StubNode(id="ongoing", label="Residence",
+                         start_date=_ts(2020, 1, 1), end_date=None)
+        new_start = _ts(2023, 6, 1)
+        scored = [{"node": cand, "overlap": 1, "jaccard": 1.0}]
+        out = _filter_candidates_by_time_frame(
+            scored, new_valid_from=new_start, new_valid_to=None,
+        )
+        assert len(out) == 1
+
+    def test_both_dateless_pass_through_to_llm(self):
+        """Both completely dateless: time-frame check has no evidence to
+        dismiss on. Pass through to LLM. (This is INTENTIONAL — the
+        dateless-bypass for Events was wrong because the new proposal HAD
+        dates; here neither side does.)"""
+        try:
+            from app.assistant.kg.proposal_promoter import (
+                _filter_candidates_by_time_frame,
+            )
+        except ImportError:
+            pytest.xfail("_filter_candidates_by_time_frame not implemented")
+
+        cand = _StubNode(id="dateless", label="Habit", start_date=None)
+        scored = [{"node": cand, "overlap": 1, "jaccard": 1.0}]
+        out = _filter_candidates_by_time_frame(
+            scored, new_valid_from=None, new_valid_to=None,
+        )
+        assert len(out) == 1
 
     def test_full_decision_tree_path_to_llm(self):
         """Positive case: type matches (precondition), dates close, overlap
