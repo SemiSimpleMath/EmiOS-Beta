@@ -2,6 +2,18 @@ import { NodeDetail, SeedGraphResponse } from "./types";
 
 const API_BASE = ""; // proxied in dev, same-origin in prod
 
+export async function fetchDemoGraph(opts: {
+  seed?: string;
+  n?: number;
+}): Promise<SeedGraphResponse> {
+  const params = new URLSearchParams();
+  if (opts.seed) params.set("seed", opts.seed);
+  if (opts.n) params.set("n", String(opts.n));
+  const res = await fetch(`${API_BASE}/api/me/demo-graph?${params}`);
+  if (!res.ok) throw new Error(`demo-graph failed: ${res.status}`);
+  return res.json();
+}
+
 export async function fetchSeedGraph(opts: {
   seeds: string[];
   limit?: number;

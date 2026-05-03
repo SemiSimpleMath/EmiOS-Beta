@@ -34,7 +34,10 @@ STATE_NODE_TYPES = frozenset({"State", "Goal"})
 
 # Default cap for visible nodes per query.
 DEFAULT_LIMIT = 50
-HARD_LIMIT = 100
+# Effectively unlimited — the lens wants the entire positioned map so
+# zoom-LOD can reveal more nodes the closer you zoom in (fractal style).
+# Importance threshold + viewport cull do the actual culling at render time.
+HARD_LIMIT = 20000
 
 # Cache: (sorted seeds tuple, time_mode, time_from, time_to) → (timestamp, result)
 _CACHE: Dict[Tuple, Tuple[float, "SeedGraphResult"]] = {}
@@ -156,30 +159,58 @@ def _compute_bridge_edges(
     node_by_id: Dict[str, "Node"],
     *,
     max_per_pair: int = 2,
+    seed_set: Optional[Set[str]] = None,
 ) -> List[Dict]:
-    """Synthetic person↔person edges that route via shared State/Event/Goal nodes.
+    """Synthetic entity↔entity edges that route via shared State/Event/Goal nodes.
 
-    KG modeling rule: two persons never connect directly — every relationship
-    runs through an intermediating State (Marriage, Parent, Career-with, ...).
-    For a far-zoom view that hides states, persons would otherwise look
-    disconnected. Bridge edges restore the visual connection while keeping
-    the relationship label (the state's label) as metadata.
+    KG modeling rule: two entities rarely connect directly — most
+    relationships run through an intermediating State/Event/Goal
+    (Marriage, Possession, Comparative-Belief, ...). When the camera
+    can't show the bridging state (zoomed too far in for the state's
+    midpoint position to be in viewport, or zoomed too far out and the
+    state was culled by the LOD), the two endpoint entities would look
+    disconnected. Bridge edges are synthetic direct lines between the
+    two entities labeled with the state's name, drawn in addition to or
+    instead of the real state-mediated edges depending on the frontend's
+    bridge-mode flag.
+
+    Was previously person↔person only — that left non-person entities
+    (Bike, School, Most Doctors, San Diego Credit Union, …) without any
+    fallback line when their bridging state dropped out. Generalized to
+    all entity types for connectivity-completeness.
 
     Returns {id, source_id, target_id, via_node_id, label} dicts. Capped
-    to ``max_per_pair`` bridges per pair to avoid clutter.
+    to ``max_per_pair`` bridges per pair to avoid clutter when two
+    entities share many states.
     """
-    person_ids: List[str] = [
-        nid for nid in visible if _is_person(node_by_id.get(nid))
+    BRIDGE_VIA_TYPES = {"State", "Event", "Goal"}
+    # Bridges are entity-to-entity. Skip the bridging via-types themselves
+    # as endpoints (a State doesn't bridge to another State via a third
+    # State — that's just graph noise) and skip Concepts (they're scaffold,
+    # not the kind of node a user expects a labeled connection to).
+    entity_ids: List[str] = [
+        nid for nid in visible
+        if (n := node_by_id.get(nid)) is not None
+        and (n.node_type or "") == "Entity"
     ]
     bridges: List[Dict] = []
-    BRIDGE_VIA_TYPES = {"State", "Event", "Goal"}
+    seed_set = seed_set or set()
 
-    for i, a in enumerate(person_ids):
+    # Bridges only radiate FROM the seed. Without this restriction
+    # entity-pair bridges generate for any two visible entities sharing a
+    # state, which surfaced edges like "Haliburton ↔ Legoland via some
+    # travel-state" — entities that have nothing to do with Jukka but
+    # happen to share a neighbor in his admitted scope. The lens is
+    # focal-node-centric: every line on screen should be Jukka's line.
+    for i, a in enumerate(entity_ids):
         if not g.has_node(a):
             continue
         a_neighbors = set(g.neighbors(a))
-        for b in person_ids[i + 1:]:
+        for b in entity_ids[i + 1:]:
             if not g.has_node(b):
+                continue
+            # Require one endpoint to be a seed.
+            if seed_set and (a not in seed_set) and (b not in seed_set):
                 continue
             shared = a_neighbors & set(g.neighbors(b))
             if not shared:
@@ -212,31 +243,42 @@ def _pick_anchors_around_seed(
     *,
     k: int = 6,
 ) -> List[str]:
-    """Promote the seed's top-K first-degree Entity neighbors to anchors.
+    """Promote the top-K persons in the seed's 2-hop neighborhood to anchors.
 
     Anchors become layout cluster centers — each gets its own district on
-    the canvas. Without this, a single user-seed produces a mono-cluster
-    "epicenter with everything orbiting" view, which is the wrong mental
-    model. With auto-anchors, the seed's most-important people become
-    co-equal districts in their own right.
+    the canvas. Restricted to category=person so routines / phone numbers /
+    devices / lists never get promoted, even if they have heavy KG edges to
+    the seed. Scored by LLM-rated importance, NOT by raw edge weight, so
+    family beats a daily-routine even when the daily-routine has more
+    extracted KG edges.
+
+    2-hop coverage matters because Jorma/Sinikka often connect to Jukka
+    through State nodes (shared experiences) rather than directly.
     """
+    from app.me.importance import get_importance_map, DEFAULT_SCORE
+    importance = get_importance_map()
+
     if not g.has_node(seed_id):
         return []
+
+    # Collect all nodes within 2 hops of the seed.
+    one_hop = set(g.neighbors(seed_id))
+    two_hop: Set[str] = set()
+    for nb in one_hop:
+        for nb2 in g.neighbors(nb):
+            if nb2 != seed_id and nb2 not in one_hop:
+                two_hop.add(nb2)
+    candidate_ids = one_hop | two_hop
+
     candidates: List[tuple] = []
-    for nb in g.neighbors(seed_id):
-        n = node_by_id.get(nb)
+    for nid in candidate_ids:
+        n = node_by_id.get(nid)
         if n is None:
             continue
-        # Anchor only Entity-class nodes — not states, goals, events. Those
-        # are intermediating relationships, not co-equal districts.
         if (n.node_type or "") != "Entity":
             continue
-        edge_data = g.get_edge_data(seed_id, nb) or {}
-        weight = float(edge_data.get("weight", 1.0))
-        importance = float(getattr(n, "importance", None) or 0.5)
-        # Score: edge weight to seed + node importance. Both signal "matters
-        # to the user" in different ways.
-        candidates.append((weight + importance, nb))
+        score = float(importance.get(nid, DEFAULT_SCORE))
+        candidates.append((score, nid))
     candidates.sort(reverse=True)
     return [nb for _, nb in candidates[:k]]
 
@@ -252,6 +294,7 @@ def compute_seed_graph(
     include_concepts: bool = False,
     auto_anchors_per_seed: int = 6,
     categories: Optional[List[str]] = None,
+    max_graph_hops: Optional[int] = 2,
 ) -> SeedGraphResult:
     """Compute the bounded subgraph for the lens.
 
@@ -296,6 +339,7 @@ def compute_seed_graph(
         include_concepts,
         auto_anchors_per_seed,
         tuple(sorted(cat_filter)) if cat_filter else (),
+        max_graph_hops,
     )
     now = time.time()
     cached = _CACHE.get(cache_key)
@@ -368,6 +412,37 @@ def compute_seed_graph(
 
         # Filter seeds to those that survived the time filter.
         valid_seeds = [s for s in seed_ids if s in node_by_id]
+
+        # Hop scoping. The KG wires entities through state nodes
+        # (entity → State → entity), so 2 graph hops = 1 entity hop =
+        # "Jukka's immediate orbit." By default we cut everything past
+        # `max_graph_hops` from any seed — this is the right cut for the
+        # current concentric-ring layout and visibility design, both of
+        # which were built around a single focal anchor and its direct
+        # neighbors. Looking past 1 entity hop needs a different layout
+        # story (multi-anchor districts, intersection views, etc.) that
+        # we haven't built yet. Pass max_graph_hops=None to opt out of
+        # the cut and see the full reachable cone.
+        if max_graph_hops is not None and valid_seeds:
+            reachable: Set[str] = set()
+            for sid in valid_seeds:
+                if g.has_node(sid):
+                    reachable.update(
+                        nx.single_source_shortest_path_length(
+                            g, sid, cutoff=int(max_graph_hops),
+                        ).keys()
+                    )
+            node_by_id = {nid: n for nid, n in node_by_id.items() if nid in reachable}
+            g = g.subgraph(reachable).copy()
+            active_edges = [
+                e for e in active_edges
+                if str(e.source_id) in reachable and str(e.target_id) in reachable
+            ]
+            if g.number_of_nodes() == 0:
+                empty = SeedGraphResult([], [], [], {}, seed_ids, time_mode, time_from, time_to, 0)
+                _CACHE[cache_key] = (now, empty)
+                return empty
+
         personalization: Optional[Dict[str, float]] = None
         if valid_seeds:
             personalization = {nid: 0.0 for nid in g.nodes}
@@ -388,30 +463,63 @@ def compute_seed_graph(
             logger.warning("pagerank did not converge: %s — falling back to uniform", e)
             scores = nx.pagerank(g, alpha=0.85, weight="weight")
 
-        # Blend personalized PageRank with the LLM-rated importance signal.
-        # PageRank captures graph-centrality (lots of mentions); importance
-        # captures meaning to the user. Multiplying them: a node that BOTH
-        # has good graph centrality AND high LLM-judged importance rises;
-        # noise (extraction artifacts that happen to have many edges)
-        # gets penalized by its low importance score.
+        # Blend LLM importance (dominant) with PageRank (tiebreaker).
+        # The user wants importance to lead the ranking: a routine Jukka
+        # interacts with daily should not outrank Sinikka just because
+        # Jukka's personalization pumps PageRank into the routine. So
+        # importance (0-10) is the primary score; PR contributes at most
+        # +0.5 — a tiebreaker that disambiguates among nodes of similar
+        # importance, never enough to leapfrog a calibration band.
         from app.me.importance import get_importance_map, DEFAULT_SCORE
-        importance_map = get_importance_map()
+        importance_map = dict(get_importance_map())
+
+        # Ownership cap: a non-person Entity (phone number, address, device,
+        # account, etc.) cannot be more important than the highest-rated
+        # person it touches, scaled down. Without this the rater can score
+        # "Katy's phone" 9.5 just because Katy is 9.5 — the structure of the
+        # KG already says the phone is downstream of Katy, so we enforce
+        # phone < Katy in importance regardless of the rater's score.
+        OWNERSHIP_CAP_FACTOR = 0.7
+        for nid in list(g.nodes):
+            n = node_by_id.get(nid)
+            if n is None or (n.node_type or "") != "Entity":
+                continue
+            if (n.category or "").lower().strip() == "person":
+                continue
+            max_owner = 0.0
+            for nbr in g.neighbors(nid):
+                nbr_n = node_by_id.get(nbr)
+                if nbr_n is None:
+                    continue
+                if (nbr_n.category or "").lower().strip() != "person":
+                    continue
+                max_owner = max(max_owner, importance_map.get(nbr, DEFAULT_SCORE))
+            if max_owner > 0:
+                cap = max_owner * OWNERSHIP_CAP_FACTOR
+                cur = importance_map.get(nid, DEFAULT_SCORE)
+                if cur > cap:
+                    importance_map[nid] = cap
+
+        max_pr = max(scores.values()) if scores else 1.0
+        max_pr = max(max_pr, 1e-9)
+        PR_TIEBREAKER_WEIGHT = 0.5  # at most this much added to importance
 
         biased: Dict[str, float] = {}
         seed_set: Set[str] = set(valid_seeds)
         for nid, score in scores.items():
             if nid in seed_set:
-                biased[nid] = score
+                biased[nid] = 100.0  # seed always ranks first; arbitrary high
                 continue
             n = node_by_id.get(nid)
-            imp = importance_map.get(nid, DEFAULT_SCORE) / 10.0  # normalize to 0..1
-            # Floor at 0.05 so a bad rating doesn't completely zero out
-            # an otherwise high-PR node.
-            imp_factor = max(0.05, imp)
+            imp = float(importance_map.get(nid, DEFAULT_SCORE))  # 0-10
+            pr_contrib = (score / max_pr) * PR_TIEBREAKER_WEIGHT
+            blended = imp + pr_contrib
             if n is not None and (n.node_type or "") in STATE_NODE_TYPES:
-                biased[nid] = score * state_score_multiplier * imp_factor
-            else:
-                biased[nid] = score * imp_factor
+                # States are connective tissue, never co-equal with persons.
+                # Multiplying by state_score_multiplier (0.4) keeps them
+                # below the lowest-importance Entity in the visible cap.
+                blended = blended * state_score_multiplier
+            biased[nid] = blended
 
         # Tier-priority top-K selection. Persons are admitted FIRST so that
         # the lens never shows "Mewgenics" while hiding "Katy" — a structural
@@ -496,13 +604,58 @@ def compute_seed_graph(
                     anchor_set.add(anchor_id)
                     visible.add(anchor_id)  # guarantee anchors are visible
 
-        # Inter-visible edges only.
+        # Connective-tissue pass: admit every State/Event/Goal that bridges
+        # ≥2 already-visible nodes. Uncapped — the count is naturally
+        # bounded by the visible edge count, and previous attempts at
+        # capping by state-importance left the lowest-importance entities
+        # stranded (their bridging states are themselves low-importance,
+        # so they lost the cap competition). Connectivity is not optional;
+        # if we admitted the entity we owe it its bridging state.
+        #
+        # Most KG relationships go entity→State→entity (Marriage,
+        # Possession, Struggling, ...). Without admitting the State, the
+        # edge filter below drops both legs of the path and the endpoint
+        # entity looks orphaned even though it has a real connection in
+        # the KG.
+        for nid, _score in ranked:
+            if nid in visible:
+                continue
+            n = node_by_id.get(nid)
+            if n is None or (n.node_type or "") not in STATE_NODE_TYPES:
+                continue
+            try:
+                neighbors = list(g.neighbors(nid))
+            except nx.NetworkXError:
+                continue
+            visible_neighbors = sum(1 for nb in neighbors if nb in visible)
+            if visible_neighbors >= 2:
+                visible.add(nid)
+
+        # Inter-visible edges only — AND additionally restrict to edges
+        # that are within 1 graph hop of a seed (i.e., at least one
+        # endpoint is a seed or a direct neighbor of a seed). This is the
+        # "every line on screen passes through Jukka" rule: state-mediated
+        # paths from Jukka show, but edges between two non-Jukka entities
+        # (or between two states neither of which touches Jukka) are
+        # filtered out. Without this we'd surface things like a Visit
+        # edge between two travel destinations because they happen to
+        # share a state that's somewhere downstream of Jukka.
+        seed_neighbor_set: Set[str] = set()
+        for sid in valid_seeds:
+            if g.has_node(sid):
+                seed_neighbor_set.update(g.neighbors(sid))
+        seed_or_neighbor: Set[str] = set(valid_seeds) | seed_neighbor_set
+
         edges_out: List[Dict] = []
         seen_edge_ids: Set[str] = set()
         for e in active_edges:
             sid = str(e.source_id)
             tid = str(e.target_id)
             if sid not in visible or tid not in visible:
+                continue
+            # Require at least one endpoint to be the seed itself or a
+            # direct (graph-distance-1) neighbor of a seed.
+            if seed_or_neighbor and sid not in seed_or_neighbor and tid not in seed_or_neighbor:
                 continue
             eid = str(e.id)
             if eid in seen_edge_ids:
@@ -551,16 +704,38 @@ def compute_seed_graph(
         from app.me.layout import get_layout
         layout = get_layout(categories=list(cat_filter) if cat_filter else None)
 
-        # Bridge edges: synthetic person↔person connectors via shared
-        # State/Event/Goal neighbors. Used by the far-zoom view that hides
-        # state nodes — without bridges, persons would look disconnected.
-        bridge_edges_out = _compute_bridge_edges(visible, g, node_by_id)
+        # Bridge edges: synthetic seed↔entity connectors via shared
+        # State/Event/Goal neighbors. Used when the via-state isn't
+        # visible (zoomed out, off viewport). Restricted to bridges with
+        # the seed as one endpoint — entity↔entity bridges between two
+        # non-seed entities surfaced spurious lines like Haliburton↔
+        # Legoland just because they shared some travel state.
+        bridge_edges_out = _compute_bridge_edges(
+            visible, g, node_by_id, seed_set=set(valid_seeds),
+        )
+
+        # Per-type defaults so unrated nodes don't all bunch at 5.0 and
+        # cause a visibility cliff right at the calibration midpoint.
+        # The rater scores Entity nodes; for everything else, give a
+        # type-appropriate default that spreads them across the threshold
+        # range so reveal feels gradual rather than a step function.
+        TYPE_DEFAULT_IMPORTANCE: Dict[str, float] = {
+            "Entity": 2.0,  # rare — most Entities are rated
+            "State": 4.0,   # connective tissue, mid-zoom
+            "Event": 3.0,   # episodic
+            "Goal": 3.0,
+            "Concept": 0.5, # taxonomy scaffolding
+        }
 
         nodes_out: List[Dict] = []
         for nid in visible:
             n = node_by_id[nid]
             pos = layout.get(nid, (0.0, 0.0))
-            llm_imp = importance_map.get(nid, DEFAULT_SCORE)
+            rated = importance_map.get(nid)
+            if rated is None:
+                llm_imp = TYPE_DEFAULT_IMPORTANCE.get(str(n.node_type or ""), 2.0)
+            else:
+                llm_imp = float(rated)
             nodes_out.append({
                 "id": nid,
                 "label": n.label or "",

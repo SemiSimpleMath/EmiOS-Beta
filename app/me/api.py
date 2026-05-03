@@ -33,6 +33,291 @@ def _parse_csv_param(name: str) -> List[str]:
     return [s.strip() for s in raw.split(",") if s.strip()]
 
 
+@me_api.route("/api/me/demo-graph", methods=["GET"])
+def demo_graph():
+    """PoC endpoint: top-N entities around a single seed, laid out fresh.
+
+    Ignores the global me_layout.json. Computes a Jukka-centric (or any
+    seed) layout where the seed sits at origin and its top-N most-important
+    1-hop entity neighbors orbit on a Vogel spiral, sorted by importance
+    descending (most important closest to seed).
+
+    Used to validate the claim-collision visibility on a small set
+    without 6000 nodes muddying the picture.
+
+    Query params:
+      seed   single seed node id. Defaults to the user's own node.
+      n      max neighbors to include. Default 10, max 50.
+    """
+    import math
+    from app.me.importance import get_importance_map, DEFAULT_SCORE
+
+    seed_id = (request.args.get("seed") or "").strip()
+    if not seed_id:
+        seed_id = _resolve_default_seed_id() or ""
+    if not seed_id:
+        return jsonify({"error": "no seed"}), 400
+
+    try:
+        n = int(request.args.get("n", 10))
+    except (TypeError, ValueError):
+        n = 10
+    n = max(1, min(n, 50))
+
+    importance = get_importance_map()
+
+    with get_db_manager().read_session() as session:
+        seed_node = session.query(Node).filter(Node.id == seed_id).first()
+        if seed_node is None:
+            return jsonify({"error": "seed not found"}), 404
+
+        # 1-hop entity neighbors via shared state/event/goal envelopes
+        # (= 2-hop physical). Get all 1-hop neighbors, then for each State/
+        # Event/Goal neighbor get their other endpoint.
+        edges_at_seed = (
+            session.query(Edge)
+            .filter((Edge.source_id == seed_id) | (Edge.target_id == seed_id))
+            .all()
+        )
+        one_hop_ids: set = set()
+        for e in edges_at_seed:
+            other = str(e.target_id) if str(e.source_id) == seed_id else str(e.source_id)
+            one_hop_ids.add(other)
+        # Through state/event/goal nodes, find the other entity.
+        two_hop_entity_ids: set = set()
+        for nid in one_hop_ids:
+            n_obj = session.query(Node).filter(Node.id == nid).first()
+            if n_obj is None or (n_obj.node_type or "") == "Entity":
+                continue  # one-hop entity already counted
+            # State/Event/Goal — look for its other endpoints
+            for e in session.query(Edge).filter(
+                (Edge.source_id == nid) | (Edge.target_id == nid)
+            ).all():
+                other = str(e.target_id) if str(e.source_id) == nid else str(e.source_id)
+                if other == seed_id:
+                    continue
+                ne = session.query(Node).filter(Node.id == other).first()
+                if ne is not None and (ne.node_type or "") == "Entity":
+                    two_hop_entity_ids.add(other)
+
+        # Combine: direct 1-hop entities + 2-hop entities via state envelopes.
+        candidate_entity_ids = {
+            nid for nid in one_hop_ids
+            if (q := session.query(Node).filter(Node.id == nid).first()) is not None
+            and (q.node_type or "") == "Entity"
+        } | two_hop_entity_ids
+        candidate_entity_ids.discard(seed_id)
+
+        # Selection: take a *spread* across importance bands instead of
+        # just top-N. With Jukka's neighborhood, top-N alone yields all
+        # 9-9.5 family nodes — rings collapse. By picking a few from
+        # each integer importance band, we get ring spacing that
+        # actually exercises the layout.
+        from collections import defaultdict as _dd
+        per_band: Dict[int, List[str]] = _dd(list)
+        for nid in candidate_entity_ids:
+            imp = float(importance.get(nid, DEFAULT_SCORE))
+            band = max(0, min(10, int(round(imp))))
+            per_band[band].append(nid)
+        # Sort each band's members by importance desc and take a slice.
+        per_band_cap = max(1, n // 6)  # ~n/6 per band, ≥1
+        ranked: List[str] = []
+        for band in sorted(per_band.keys(), reverse=True):
+            members = sorted(
+                per_band[band],
+                key=lambda nid: -float(importance.get(nid, DEFAULT_SCORE)),
+            )
+            ranked.extend(members[:per_band_cap])
+            if len(ranked) >= n:
+                break
+        ranked = ranked[:n]
+
+        # Concentric-rings layout: anchor at center, importance bins are
+        # rings around it. Less-important nodes orbit closer to the
+        # anchor (inner rings) — discoverable by zooming in. Important
+        # nodes orbit farther out — visible at overview zoom via
+        # priority-collision.
+        # Radial mapping non-linear so the dense low-importance bands
+        # get more area: r = R_OUTER × (imp/10)^EXPONENT where exponent
+        # < 1 expands the low-imp band.
+        from collections import defaultdict
+        # Geometric-progression ring radii (validated in layout_sim.py):
+        # r_i = R_BASE × RING_RATIO^(imp - 1).
+        # Less important closer to anchor; each step out is 1.6× the
+        # previous, so when the comfortably-displayed ring (500px) moves
+        # to periphery (800px), the next inner ring reaches 500px.
+        R_BASE = 300.0
+        RING_RATIO = 1.6
+        GOLDEN = math.pi * (3 - math.sqrt(5))
+
+        def radius_for(imp: float) -> float:
+            return R_BASE * (RING_RATIO ** max(0.0, float(imp) - 1.0))
+
+        # Bin by integer importance (10 bins: 0..10).
+        by_band: Dict[int, List[str]] = defaultdict(list)
+        for nid in ranked:
+            imp = float(importance.get(nid, DEFAULT_SCORE))
+            band = max(0, min(10, int(round(imp))))
+            by_band[band].append(nid)
+
+        positions: Dict[str, tuple] = {seed_id: (0.0, 0.0)}
+        # Stable angular start per ring (golden-angle by ring index)
+        # so adjacent rings don't clump on the same axis.
+        for band, members in by_band.items():
+            r = radius_for(float(band))
+            theta_start = band * GOLDEN
+            slot_step = (2 * math.pi) / max(1, len(members))
+            for i, nid in enumerate(members):
+                theta = theta_start + i * slot_step
+                positions[nid] = (r * math.cos(theta), r * math.sin(theta))
+
+        # State/Event/Goal nodes: fetch states adjacent to ANY pair of
+        # currently-visible entities. Place each at the midpoint of its
+        # two endpoints; if multiple states share the same endpoint pair,
+        # fan them perpendicular to the connecting line so they don't stack.
+        # Limit to MAX_STATES_PER_PAIR to keep things uncluttered.
+        visible_entity_ids = set([seed_id, *ranked])
+        MAX_STATES_PER_PAIR = 3
+        # Group states by their (endpoint_a, endpoint_b) pair, keyed with
+        # the strongest edge (importance) for ranking.
+        state_candidates: Dict[tuple, List[tuple]] = _dd(list)  # pair → [(score, state_nid)]
+        state_endpoints: Dict[str, tuple] = {}
+        for state_nid in one_hop_ids:
+            state_node = session.query(Node).filter(Node.id == state_nid).first()
+            if state_node is None or (state_node.node_type or "") not in (
+                "State", "Event", "Goal"
+            ):
+                continue
+            # Find this state's other entity endpoint (besides seed) AND
+            # the strongest edge importance touching this state.
+            other_entity = None
+            best_edge_imp = 0.0
+            for e in session.query(Edge).filter(
+                (Edge.source_id == state_nid) | (Edge.target_id == state_nid)
+            ).all():
+                other = str(e.target_id) if str(e.source_id) == state_nid else str(e.source_id)
+                edge_imp = float(e.importance or 5.0)
+                if edge_imp > best_edge_imp:
+                    best_edge_imp = edge_imp
+                if other == seed_id:
+                    continue
+                if other in visible_entity_ids and other_entity is None:
+                    other_entity = other
+            if other_entity is None:
+                continue  # state doesn't bridge two visible entities
+            pair = tuple(sorted([seed_id, other_entity]))
+            # Score for ranking within a pair-group.
+            state_candidates[pair].append((best_edge_imp, state_nid))
+
+        # Apply per-pair cap.
+        state_groups: Dict[tuple, List[str]] = {}
+        for pair, candidates in state_candidates.items():
+            candidates.sort(reverse=True)  # highest edge importance first
+            kept = [sid for _, sid in candidates[:MAX_STATES_PER_PAIR]]
+            state_groups[pair] = kept
+            for sid in kept:
+                state_endpoints[sid] = pair
+
+        # Place states: midpoint + perpendicular fan.
+        FAN_SPACING = 450.0  # graph-coord spacing between fanned states
+        for pair, states in state_groups.items():
+            a_id, b_id = pair
+            ax, ay = positions[a_id]
+            bx, by = positions[b_id]
+            mx, my = (ax + bx) / 2, (ay + by) / 2
+            # Perpendicular direction (rotate 90°).
+            dx, dy = bx - ax, by - ay
+            length = math.hypot(dx, dy)
+            if length < 1e-6:
+                px, py = 0.0, 1.0
+            else:
+                px, py = -dy / length, dx / length
+            n_states = len(states)
+            for i, s_nid in enumerate(states):
+                offset = (i - (n_states - 1) / 2.0) * FAN_SPACING
+                positions[s_nid] = (mx + px * offset, my + py * offset)
+
+        # Post-placement collision resolution for states. Different
+        # entity-pairs can produce midpoints near each other even after
+        # the perpendicular fan separates within-pair states. Iteratively
+        # push too-close state-pairs apart until none collide.
+        state_ids = list(state_endpoints.keys())
+        MIN_STATE_SEPARATION = 500.0
+        for _ in range(30):
+            moved = False
+            for i, sa in enumerate(state_ids):
+                ax, ay = positions[sa]
+                for sb in state_ids[i + 1:]:
+                    bx, by = positions[sb]
+                    dx, dy = bx - ax, by - ay
+                    d = math.hypot(dx, dy)
+                    if d < MIN_STATE_SEPARATION and d > 1e-3:
+                        push = (MIN_STATE_SEPARATION - d) / 2.0
+                        ux, uy = dx / d, dy / d
+                        positions[sa] = (ax - ux * push, ay - uy * push)
+                        positions[sb] = (bx + ux * push, by + uy * push)
+                        ax, ay = positions[sa]
+                        moved = True
+            if not moved:
+                break
+
+        # Build response.
+        all_ids = [seed_id] + ranked + list(state_endpoints.keys())
+        nodes_out = []
+        for nid in all_ids:
+            node = session.query(Node).filter(Node.id == nid).first()
+            if node is None:
+                continue
+            x, y = positions[nid]
+            nodes_out.append({
+                "id": nid,
+                "label": node.label or "",
+                "node_type": str(node.node_type or ""),
+                "category": node.category,
+                "description": node.description or "",
+                "llm_importance": float(importance.get(nid, DEFAULT_SCORE)),
+                "is_seed": nid == seed_id,
+                "is_anchor": False,
+                "primary_anchor_id": seed_id,
+                "x": x,
+                "y": y,
+                "pagerank_score": 0.0,
+                "importance": float(node.importance or 0.5),
+                "aliases": list(node.aliases or []),
+                "start_date": None,
+                "end_date": None,
+            })
+
+        # Edges between visible nodes only (so the demo isn't cluttered).
+        visible_set = set(all_ids)
+        edges_out = []
+        for e in session.query(Edge).all():
+            sid = str(e.source_id)
+            tid = str(e.target_id)
+            if sid in visible_set and tid in visible_set:
+                edges_out.append({
+                    "id": str(e.id),
+                    "source_id": sid,
+                    "target_id": tid,
+                    "relationship_type": e.relationship_type or "",
+                    "sentence": e.sentence or "",
+                    "importance": float(e.importance or 0.5),
+                    "confidence": float(e.confidence or 0.5),
+                })
+
+    return jsonify({
+        "nodes": nodes_out,
+        "edges": edges_out,
+        "bridge_edges": [],
+        "seeds": [seed_id],
+        "time_mode": "current",
+        "time_from": None,
+        "time_to": None,
+        "total_candidates": len(candidate_entity_ids),
+        "timestamp": datetime.utcnow().isoformat(),
+    })
+
+
 @me_api.route("/api/me/seed-graph", methods=["GET"])
 def seed_graph():
     """Bounded subgraph computed from personalized PageRank.

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { fetchDefaultSeed, fetchSeedGraph, parseChatQuery } from "./api";
+import { fetchDefaultSeed, fetchDemoGraph, fetchSeedGraph, parseChatQuery } from "./api";
 import { GraphCanvas } from "./components/GraphCanvas";
 import { SeedChips } from "./components/SeedChips";
 import { ChatInput } from "./components/ChatInput";
@@ -27,16 +27,26 @@ export default function App() {
     }
   }, [defaultSeed, seeds.length]);
 
+  // Default = real seed-graph endpoint (full KG cut around the seed, with
+  // hybrid LLM+PR importance, bridge-glue states, entity↔entity bridges,
+  // global stable layout). ?demo=true falls back to the small N=15 demo
+  // subgraph, useful for iterating layout in isolation against a fixed
+  // tiny set without the full graph noise.
+  const useDemo = typeof window !== "undefined"
+    && new URLSearchParams(window.location.search).get("demo") === "true";
+
   const { data, isLoading, error } = useQuery({
-    queryKey: ["seed-graph", seeds, timeMode, timeRange.from, timeRange.to],
+    queryKey: ["seed-graph", seeds, timeMode, timeRange.from, timeRange.to, useDemo],
     queryFn: () =>
-      fetchSeedGraph({
-        seeds,
-        limit: 50,
-        timeMode,
-        timeFrom: timeRange.from,
-        timeTo: timeRange.to,
-      }),
+      useDemo
+        ? fetchDemoGraph({ seed: seeds[0], n: 15 })
+        : fetchSeedGraph({
+            seeds,
+            limit: 20000,
+            timeMode,
+            timeFrom: timeRange.from,
+            timeTo: timeRange.to,
+          }),
     enabled: seeds.length > 0,
   });
 
@@ -52,16 +62,18 @@ export default function App() {
 
   function handleNodeClick(node: LensNode, event: MouseEvent) {
     if (event.shiftKey) {
-      // Shift-click: add to seed set (or remove if already a seed).
-      setSeeds((prev) =>
-        prev.includes(node.id)
-          ? prev.filter((s) => s !== node.id)
-          : [...prev, node.id],
-      );
+      // Shift-click: open the wiki side panel for inspection.
+      setOpenWikiNode(node);
       return;
     }
-    // Plain click: open the wiki side panel.
-    setOpenWikiNode(node);
+    // Plain click on the anchor itself: open wiki. On any other node:
+    // switch the anchor to it — the lens then re-fetches its subgraph
+    // and re-ranks neighbors by edge-derived importance from that anchor.
+    if (seeds.includes(node.id)) {
+      setOpenWikiNode(node);
+    } else {
+      setSeeds([node.id]);
+    }
   }
 
   function handleRemoveSeed(id: string) {
@@ -157,9 +169,8 @@ export default function App() {
           node={openWikiNode}
           onClose={() => setOpenWikiNode(null)}
           onAddToFocus={(id) => {
-            setSeeds((prev) =>
-              prev.includes(id) ? prev : [...prev, id],
-            );
+            // Make this node the new anchor (replaces previous).
+            setSeeds([id]);
             setOpenWikiNode(null);
           }}
         />
