@@ -22,6 +22,16 @@ kg_interests_bp = Blueprint("kg_interests", __name__)
 
 RESOURCE_ID = "resource_kg_interests"
 
+# The window_critic system prompt — exposed for live edit on /kg-interests so
+# Jukka can iterate on the rule text without leaving the UI. Jinja2's default
+# auto_reload picks up file mtime changes between calls, so saved changes take
+# effect on the next agent invocation without a Flask restart.
+_CRITIC_PROMPT_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "app" / "assistant" / "agents" / "knowledge_graph_add" / "window_critic"
+    / "prompts" / "system.j2"
+)
+
 
 def _resource_path() -> Path:
     # Lives alongside other user resources.
@@ -49,6 +59,17 @@ def _load_resource() -> dict:
     return {"description": "", "categories": []}
 
 
+def _load_critic_prompt() -> str:
+    try:
+        return _CRITIC_PROMPT_PATH.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        logger.warning("Critic system.j2 not found at %s", _CRITIC_PROMPT_PATH)
+        return ""
+    except Exception as e:
+        logger.warning("Failed reading critic system.j2: %s", e)
+        return ""
+
+
 @kg_interests_bp.route("/kg-interests", methods=["GET"])
 def kg_interests_view():
     data = _load_resource()
@@ -56,6 +77,7 @@ def kg_interests_view():
         "kg_interests.html",
         description=data.get("description", ""),
         categories=data.get("categories", []) or [],
+        critic_prompt=_load_critic_prompt(),
     )
 
 
@@ -79,6 +101,23 @@ def kg_interests_save():
         return jsonify({"ok": False, "error": f"update failed: {e}"}), 500
 
     return jsonify({"ok": True, "categories": categories, "description": description})
+
+
+@kg_interests_bp.route("/kg-interests/critic-prompt", methods=["POST"])
+def kg_interests_save_critic_prompt():
+    """Persist the user-edited critic system.j2 to disk. Jinja's auto_reload
+    means the next agent call picks up the change — no Flask restart needed."""
+    payload = request.get_json(silent=True) or {}
+    new_text = str(payload.get("system_prompt") or "")
+    if not new_text.strip():
+        return jsonify({"ok": False, "error": "system_prompt cannot be empty"}), 400
+    try:
+        _CRITIC_PROMPT_PATH.write_text(new_text, encoding="utf-8")
+    except Exception as e:
+        logger.error("Failed to write critic system.j2: %s", e)
+        return jsonify({"ok": False, "error": f"write failed: {e}"}), 500
+    logger.info("Critic system.j2 saved (%d chars)", len(new_text))
+    return jsonify({"ok": True, "chars": len(new_text)})
 
 
 # ---------------------------------------------------------------------------

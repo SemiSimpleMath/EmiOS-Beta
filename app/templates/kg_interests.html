@@ -37,8 +37,24 @@
   </ol>
 
   <div class="kg-interests-actions">
-    <button type="button" id="kg-save-btn" class="kg-btn kg-btn-primary">Save</button>
+    <button type="button" id="kg-save-btn" class="kg-btn kg-btn-primary">Save categories</button>
     <span id="kg-save-status" class="kg-save-status"></span>
+  </div>
+
+  <div class="kg-prompt-section">
+    <h2>Critic system prompt</h2>
+    <p class="kg-prompt-help">
+      The full <code>window_critic</code> system prompt as a Jinja template.
+      Variables like <code>{{ '{{' }}&nbsp;resource_kg_interests.categories&nbsp;{{ '}}' }}</code>
+      get rendered against the live resources. Saved changes take effect on the
+      next critic call (no Flask restart) — try a sentence on the
+      <a href="/kg-interests/test">tester</a> to see the effect.
+    </p>
+    <textarea id="kg-critic-prompt" rows="20" class="kg-critic-prompt" spellcheck="false">{{ critic_prompt }}</textarea>
+    <div class="kg-interests-actions">
+      <button type="button" id="kg-prompt-save-btn" class="kg-btn kg-btn-primary">Save critic prompt</button>
+      <span id="kg-prompt-save-status" class="kg-save-status"></span>
+    </div>
   </div>
 </div>
 
@@ -77,6 +93,40 @@
     const row = makeRow("");
     list.appendChild(row);
     row.querySelector("textarea").focus();
+  });
+
+  // Critic system-prompt save
+  const promptField = document.getElementById("kg-critic-prompt");
+  const promptSaveBtn = document.getElementById("kg-prompt-save-btn");
+  const promptStatus = document.getElementById("kg-prompt-save-status");
+
+  promptSaveBtn.addEventListener("click", async () => {
+    const text = (promptField.value || "").trim();
+    if (!text) {
+      promptStatus.textContent = "Prompt cannot be empty.";
+      promptStatus.className = "kg-save-status error";
+      return;
+    }
+    promptStatus.textContent = "Saving...";
+    promptStatus.className = "kg-save-status";
+    try {
+      const resp = await fetch("/kg-interests/critic-prompt", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({system_prompt: promptField.value}),
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.ok) {
+        promptStatus.textContent = "Error: " + (data.error || resp.statusText);
+        promptStatus.className = "kg-save-status error";
+        return;
+      }
+      promptStatus.textContent = `Saved (${data.chars} chars). Next critic call uses the new prompt.`;
+      promptStatus.className = "kg-save-status ok";
+    } catch (e) {
+      promptStatus.textContent = "Error: " + e.message;
+      promptStatus.className = "kg-save-status error";
+    }
   });
 
   saveBtn.addEventListener("click", async () => {

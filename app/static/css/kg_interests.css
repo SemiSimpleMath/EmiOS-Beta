@@ -150,6 +150,44 @@
   color: #b33;
 }
 
+/* ---------- Critic system prompt editor ---------- */
+
+.kg-prompt-section {
+  margin-top: 36px;
+  padding-top: 24px;
+  border-top: 1px solid #e0e4ec;
+}
+
+.kg-prompt-section h2 {
+  margin: 0 0 6px;
+  font-size: 18px;
+}
+
+.kg-prompt-help {
+  font-size: 13px;
+  color: #555;
+  margin: 0 0 12px;
+}
+
+.kg-prompt-help code {
+  background: #eef1f8;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+
+.kg-critic-prompt {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  resize: vertical;
+  line-height: 1.5;
+  background: #fafbfd;
+}
+
 /* ---------- KG critic tester (kg_interests_test.html) ---------- */
 
 .kg-test-result {
