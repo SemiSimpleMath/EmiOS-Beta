@@ -195,31 +195,30 @@ class TestEventDateFilter:
         out = _filter_event_candidates_by_date(scored, new_valid_from=new)
         assert {s["node"].id for s in out} == {"plus_tol", "minus_tol"}
 
-    def test_dateless_candidate_currently_kept(self):
-        """Documents current behavior: dateless candidate is KEPT against
-        a dated new proposal. See ``test_dateless_candidate_should_be_rejected_*``
-        below for the intended-future behavior.
+    def test_dateless_candidate_kept_against_dated_proposal(self):
+        """A dateless candidate is KEPT for the LLM to evaluate when the
+        new proposal has a date. This is INTENTIONAL: most State/Event
+        nodes start dateless and get dates filled in over time. A vague
+        dateless mention being refined later by a dated one is a normal
+        graph-evolution flow; both should resolve to the same node.
+
+        The 2026-05-03 Performance over-merge problem is NOT a date-filter
+        bug — it's caught by participant-overlap-strength filters (Jaccard
+        threshold / hub weighting) instead.
         """
         new = _ts(2026, 5, 1)
         scored = self._scored(("dateless", None))
         out = _filter_event_candidates_by_date(scored, new_valid_from=new)
         assert [s["node"].id for s in out] == ["dateless"]
 
-    @pytest.mark.xfail(
-        reason=(
-            "KNOWN BUG (2026-05-03): a dateless candidate should be REJECTED "
-            "when the new proposal has a date — generic dateless hubs are "
-            "ambiguous catch-alls and should not absorb dated specifics. The "
-            "Performance event 0b4416dd hit this exact path. Fix is a one-line "
-            "semantic change in _filter_event_candidates_by_date."
-        )
-    )
-    def test_dateless_candidate_should_be_rejected_against_dated_proposal(self):
-        new = _ts(2026, 5, 1)
-        scored = self._scored(("dateless", None))
-        out = _filter_event_candidates_by_date(scored, new_valid_from=new)
-        # Once the fix lands: dateless candidate dropped, scored becomes empty.
-        assert out == []
+    # NOTE: an earlier xfail here proposed REJECTING dateless candidates
+    # against dated proposals as the fix for the 2026-05-03 Performance
+    # over-merge. That hypothesis was retracted: most State/Event nodes
+    # start dateless and get dates filled in over time; rejecting them
+    # would break the legitimate "vague mention later refined by dated
+    # mention" merge flow. The Performance over-merge is instead caught
+    # at the participant-overlap-strength layer (Jaccard threshold /
+    # hub-weighted overlap). See test_actual_performance_case_via_jaccard_threshold.
 
     def test_custom_tolerance_argument(self):
         new = _ts(2026, 5, 1)
@@ -259,16 +258,12 @@ class TestCandidatePipelineComposition:
             "must NOT survive the date filter — these are different productions."
         )
 
-    @pytest.mark.xfail(
-        reason=(
-            "KNOWN BUG: when the existing Beetlejuice-era hub had its date "
-            "stripped (or was never populated), the dateless bypass means "
-            "high-overlap participants will glue any new dated proposal to "
-            "it. This is the exact 2026-05-03 Drowsy-Chaperone-into-"
-            "Performance failure mode."
-        )
-    )
-    def test_high_overlap_dateless_hub_should_not_absorb_dated_proposal(self):
+    def test_high_overlap_dateless_hub_kept_for_llm(self):
+        """A dateless candidate with strong participant overlap is KEPT
+        for LLM evaluation. The candidate may legitimately be a vague
+        mention of the same event the new proposal is now refining with
+        a date. The LLM (or Jaccard-threshold layer) decides; the date
+        filter alone is not evidence of non-match."""
         dateless_hub = _StubNode(id="generic-performance", start_date=None)
         new_proposal_date = _ts(2026, 3, 21)
 
@@ -277,8 +272,7 @@ class TestCandidatePipelineComposition:
             new_participant_ids={"annika", "peter"},
         )
         out = _filter_event_candidates_by_date(scored, new_valid_from=new_proposal_date)
-        # Once the dateless-bypass is fixed:
-        assert out == []
+        assert len(out) == 1
 
 
 # =============================================================================

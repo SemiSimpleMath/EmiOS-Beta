@@ -220,17 +220,20 @@ def _filter_event_candidates_by_date(
     new_valid_from,
     tolerance_days: int = _EVENT_DATE_TOLERANCE_DAYS,
 ) -> list:
-    """Drop Event candidates whose start_date differs from the new
-    proposal's valid_from by more than tolerance_days.
+    """Decide-not-a-match for Event candidates whose start_date differs
+    from the new proposal's valid_from by more than tolerance_days.
 
-    KNOWN ISSUE (see project_merger_label_vs_subject.md and the dateless
-    bypass discussion): when a candidate's start_date is None, this filter
-    currently KEEPS it as a match candidate. That lets a generic dateless
-    catch-all hub absorb dated proposals — exactly how the Performance
-    event id 0b4416dd accumulated edges from Beetlejuice and Drowsy
-    Chaperone productions. The intended-future behavior is to REJECT
-    dateless candidates against dated new proposals; tests in
-    test_state_event_merge.py document this gap as xfail.
+    Dateless candidates are KEPT (the LLM still gets to evaluate them).
+    Most State/Event nodes don't have dates initially — dates get refined
+    over time as more is learned. A vague dateless mention being later
+    refined by a dated mention is a legitimate evolution flow; both should
+    resolve to the same node. So "no date on the candidate" is not
+    evidence of non-match — only "both sides have known time-frames AND
+    they don't overlap" is.
+
+    Hub-only over-merge cases (e.g. the 2026-05-03 Performance hub) are
+    caught at the participant-overlap-strength layer (Jaccard threshold
+    or hub-weighted overlap), not here.
 
     Args:
         scored: candidate list as returned by
@@ -249,7 +252,10 @@ def _filter_event_candidates_by_date(
     for s in scored:
         cs = s["node"].start_date
         if cs is None:
-            # Dateless candidate — current behavior is KEEP. See docstring.
+            # Dateless candidate — KEEP. Time-frame unknown on this side
+            # is not evidence of non-match; the LLM (or a later filter
+            # like Jaccard threshold) decides using participants, sentence,
+            # window_text.
             kept.append(s)
             continue
         try:
