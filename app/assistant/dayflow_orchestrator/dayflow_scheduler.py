@@ -90,7 +90,7 @@ class DayflowScheduler:
 
         self._schedule_tick(delay_seconds=DEBOUNCE_SECONDS, reason=reason)
 
-    def _schedule_tick(self, *, delay_seconds: float, reason: str) -> None:
+    def _schedule_tick(self, *, delay_seconds: float, reason: str, triggered_item_id: Optional[str] = None) -> None:
         now_utc = datetime.now(timezone.utc)
 
         with self._lock:
@@ -106,7 +106,7 @@ class DayflowScheduler:
                 func=self._execute_tick,
                 trigger="date",
                 run_date=run_date,
-                args=[reason],
+                args=[reason, triggered_item_id],
                 id=JOB_ID,
                 replace_existing=True,
                 misfire_grace_time=300,
@@ -121,7 +121,7 @@ class DayflowScheduler:
             logger.debug("[DayflowScheduler] schedule tick exception details", exc_info=True)
             raise
 
-    def _execute_tick(self, reason: str) -> None:
+    def _execute_tick(self, reason: str, triggered_item_id: Optional[str] = None) -> None:
         if not setup_complete():
             logger.info("[DayflowScheduler] Setup not complete; skipping tick.")
             return
@@ -150,16 +150,22 @@ class DayflowScheduler:
             self._pending_poke_reason = None
 
         run_id = uuid.uuid4().hex[:8]
+        fast_tick = reason == "item_timer" and bool(triggered_item_id)
         logger.info(
-            "[DayflowScheduler] === TICK START === run_id=%s reason=%s",
-            run_id, reason,
+            "[DayflowScheduler] === TICK START === run_id=%s reason=%s fast_tick=%s triggered_item_id=%s",
+            run_id, reason, fast_tick, triggered_item_id or "-",
         )
         try:
             with self._app.app_context():
                 from app.assistant.dayflow_orchestrator.dayflow_tick import (
                     dayflow_orchestrator_cadence_tick,
                 )
-                dayflow_orchestrator_cadence_tick(routine=_SchedulerRoutineStub(run_id))
+                dayflow_orchestrator_cadence_tick(
+                    routine=_SchedulerRoutineStub(run_id),
+                    wake_reason=reason,
+                    fast_tick=fast_tick,
+                    triggered_item_id=triggered_item_id,
+                )
         except Exception as e:
             logger.error(
                 "[DayflowScheduler] Tick failed run_id=%s: %s", run_id, e,
@@ -204,6 +210,7 @@ class DayflowScheduler:
 
             now_utc = datetime.now(timezone.utc)
             earliest: Optional[datetime] = None
+            earliest_item_id: Optional[str] = None
             ancient_skipped = 0
 
             items = load_existing_dayflow_items()
@@ -229,6 +236,7 @@ class DayflowScheduler:
                     )
                     logger.debug("[DayflowScheduler] reactivate_at_utc parse exception details", exc_info=True)
                     raise
+                item_id = str(meta.get("item_id") or item.get("id") or "").strip()
                 if parsed <= now_utc:
                     overdue_seconds = (now_utc - parsed).total_seconds()
                     if overdue_seconds > ANCIENT_ITEM_OVERDUE_SECONDS:
@@ -241,15 +249,17 @@ class DayflowScheduler:
                             "[DayflowScheduler] Ignoring ancient stale item "
                             "(overdue %.1fh) item_id=%s state=%s reactivate_at_utc=%s",
                             overdue_seconds / 3600.0,
-                            meta.get("item_id", "?"),
+                            item_id or "?",
                             state,
                             raw,
                         )
                         continue
                     earliest = now_utc + timedelta(seconds=MIN_GAP_SECONDS)
+                    earliest_item_id = item_id
                     break
                 if earliest is None or parsed < earliest:
                     earliest = parsed
+                    earliest_item_id = item_id
             if ancient_skipped:
                 logger.warning(
                     "[DayflowScheduler] Skipped %d ancient stale item(s) when scheduling — "
@@ -260,10 +270,14 @@ class DayflowScheduler:
             if earliest is not None:
                 delay = max(MIN_GAP_SECONDS, (earliest - now_utc).total_seconds())
                 delay = min(delay, MAX_CEILING_SECONDS)
-                self._schedule_tick(delay_seconds=delay, reason="item_timer")
+                self._schedule_tick(
+                    delay_seconds=delay,
+                    reason="item_timer",
+                    triggered_item_id=earliest_item_id,
+                )
                 logger.info(
-                    "[DayflowScheduler] Next item timer in %.0fs (%s)",
-                    delay, earliest.isoformat(),
+                    "[DayflowScheduler] Next item timer in %.0fs (%s) item=%s",
+                    delay, earliest.isoformat(), earliest_item_id or "?",
                 )
             else:
                 self._schedule_tick(delay_seconds=MAX_CEILING_SECONDS, reason="ceiling")

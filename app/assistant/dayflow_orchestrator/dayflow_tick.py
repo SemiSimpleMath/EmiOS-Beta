@@ -33,7 +33,14 @@ from app.assistant.utils.time_utils import parse_iso_utc_strict
 logger = get_logger(__name__)
 
 
-def dayflow_orchestrator_cadence_tick(*, target_date: str | None = None, routine=None) -> None:
+def dayflow_orchestrator_cadence_tick(
+    *,
+    target_date: str | None = None,
+    routine=None,
+    wake_reason: str = "",
+    fast_tick: bool = False,
+    triggered_item_id: str | None = None,
+) -> None:
     if target_date is not None:
         logger.warning("dayflow_orchestrator_cadence_tick: target_date='%s' is not implemented and will be ignored.", target_date)
     now_utc = datetime.now(timezone.utc)
@@ -91,6 +98,9 @@ def dayflow_orchestrator_cadence_tick(*, target_date: str | None = None, routine
     msg_data: Dict[str, Any] = {
         "trigger": "routine_cadence",
         "routine_id": routine_id,
+        "wake_reason": wake_reason,
+        "fast_tick": fast_tick and bool(triggered_item_id),
+        "triggered_item_id": triggered_item_id or "",
     }
     if isinstance(blackboard_extras, dict):
         msg_data.update(blackboard_extras)

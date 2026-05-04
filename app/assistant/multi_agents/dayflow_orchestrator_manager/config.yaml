@@ -26,6 +26,10 @@ agents:
     class: Agent
 
 control_nodes:
+  - name: tick_router_node
+    class: TickRouterNode
+  - name: fast_tick_promoter_node
+    class: FastTickPromoterNode
   - name: intake_triage_prep_node
     class: IntakeTriagePrepNode
   - name: strategic_planner_prep_node
@@ -116,7 +120,7 @@ flow_config:
   strict_routing: true
   flow:
     normal:
-      source_agent: "intake_triage_prep_node"
+      source_agent: "tick_router_node"
     planning_mode:
       source_agent: "dayflow_orchestrator::plan_mode"
   action_selector:
@@ -134,7 +138,9 @@ flow_config:
     planning_done_key: "planning_done_tf"
     plan_summary_key: "plan_summary"
   state_map:
-    "room::delegator": "intake_triage_prep_node"
+    "room::delegator": "tick_router_node"
+    "tick_router_node": "intake_triage_prep_node"
+    "fast_tick_promoter_node": "view_materializer_node"
     "intake_triage_prep_node": "dayflow_orchestrator::intake_triage"
     "dayflow_orchestrator::intake_triage": "triage_spawn_guard_node"
     "triage_spawn_guard_node": "triage_persist_node"
