@@ -114,7 +114,6 @@ def _node_snapshot(node: Node) -> Dict[str, Any]:
         "goal_status": getattr(node, "goal_status", None),
         "semantic_label": getattr(node, "semantic_label", None),
         "hash_tags": list(getattr(node, "hash_tags", None) or []),
-        "window_id": node.window_id,
     }
 
 

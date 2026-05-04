@@ -250,9 +250,7 @@ Articles that don't exist in the vault render as a stub page rather than 404, so
 
 ## Source reconstruction (debug)
 
-`source_reconstruct.reconstruct_source_window` (`source_reconstruct.py:92`) is a QA helper, not part of the generation flow. Given an awkward sentence on a wiki page (or a `window_id`), it walks the legacy `kg_chat_conversation_window` / `kg_chat_extracted_edge` tables to return the original chat messages, the parsed sentences, and sibling edges from the same window. Used to diagnose whether a bad wiki sentence came from a prompt issue, the segmenter, or the fact_extractor.
-
-> Note: this module reads only the **legacy** chat-window tables (`kg_chat_conversation_window_item`, `kg_chat_extracted_edge`). Windows produced by the current pipeline live in `kg_window` / `kg_window_message` / `kg_window_extraction`. `page_writer.build_window_excerpts` (`page_writer.py:133`) handles both — it tries the legacy table first and falls through to the current pipeline tables — but `source_reconstruct` has not yet been updated to do the same.
+To trace a bad wiki sentence back to its origin, walk the canonical provenance chain: `kg_node_evidence.node_id` → `(window_id, source_id)` → `kg_window_message` → `unified_log_2026`. The kg_node_viewer's `_load_provenance` (`app/routes/kg_node_viewer.py:109`) is the reference implementation — it returns each contributing window with its full message list and the derived sentences the extractor produced. The legacy `source_reconstruct.py` helper and the `kg_chat_conversation_window` / `kg_chat_extracted_edge` tables it walked were retired in the 2026-04-26 KG-pipeline rebuild.
 
 ## Key files
 

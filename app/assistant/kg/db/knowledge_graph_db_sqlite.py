@@ -39,15 +39,16 @@ class Node(Base):
     # Flexible attributes
     attributes = Column(JSON, nullable=False, default=dict)
     
-    # Message tracking and provenance
-    original_message_id = Column(String, nullable=True)
+    # Provenance: ``original_sentence`` carries the canonical sentence the
+    # node represents (present-tense canonical for State/Event/Goal via
+    # fact_canonicalizer; raw extractor sentence for Entity/Concept/Property).
+    # Per-observation provenance (window_id, source message, derived sentence,
+    # merge action) lives in kg_node_evidence — JOIN through node_id rather
+    # than denormalizing onto this row. The legacy window_id /
+    # original_message_id / sentence_id columns were dropped 2026-05-04 after
+    # the post-rebuild evidence backfill (commit ced1d8b7).
     original_sentence = Column(Text, nullable=True)
-    sentence_id = Column(String, nullable=True)
-    # Window-level provenance (2026-04-19 pivot).
-    # Points to kg_chat_conversation_window.id so consumers can trace any
-    # KG node back to the full chat conversation it was extracted from.
-    window_id = Column(String, nullable=True)
-    
+
     # Timestamps
     start_date = Column(DateTime, nullable=True)
     end_date = Column(DateTime, nullable=True)

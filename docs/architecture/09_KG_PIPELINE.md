@@ -218,12 +218,14 @@ No LLM calls — component-splitting and enrichment have already happened in Sta
 **Input:** `claim_proposal` rows where `status = 'pending'`
 **Output:** `kg_node_metadata` + `kg_edge_metadata` (live KG)
 
-This is the only path that writes to the live KG. Unchanged from today's design. Two existing per-node enrichments happen here (NOT moved to earlier stages):
+This is the only path that writes to the live KG. Two existing per-node enrichments happen here (NOT moved to earlier stages):
 
 - **TTL estimation** for State/Event nodes via `state_ttl_estimator` agent. Stashes `{duration_class, estimated_duration_days, confidence, reasoning}` in `node.attributes["ttl"]`. The classes are: ephemeral (≤1 day), short_term (2–30 days), medium_term (30–180 days), long_term (180–730 days), durable (null = never expires).
 - **Sentence canonicalization** for State/Event/Goal nodes via `fact_canonicalizer` agent. Rewrites the extractor sentence into present-tense canonical form before storing as `Node.original_sentence`.
 
 Both of these happen at the moment a fresh `kg_node_metadata` row is created — they're shipping decisions, not extraction concerns, so they live in the promoter not in the enrich stage.
+
+**Provenance is written to evidence, not to the node row.** Every node create / match and every edge create / match also writes one `kg_node_evidence` / `kg_edge_evidence` row carrying `(window_id, source_table='unified_log_2026', source_id=unified_log_id, source_text=raw_text, derived_sentence, message_timestamp, merge_action)`. `merge_action` is `created` for fresh rows or `confirmed` for matched-existing reinforcements. This is the canonical provenance store for every consumer (the kg_node_viewer's "Evidence" panel, `node_merger`'s context for State/Event match decisions, forensics). Denormalized provenance columns on `kg_node_metadata` (`window_id`, `original_message_id`, `sentence_id`) were dropped 2026-05-04 — they were intentionally NULL post-rebuild and only invited confusion. `original_sentence` stays on the node row as the canonical claim sentence; everything per-observation lives in evidence.
 
 ### Decay (separate maintenance routine)
 

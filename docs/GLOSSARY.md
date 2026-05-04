@@ -114,7 +114,7 @@ Pub-sub messaging service exposed via `DI.event_hub`. Topics like `socket_emit`,
 
 ### evidence
 
-(KG) Rows in `kg_node_evidence` / `kg_edge_evidence` that link a KG record back to its source window in `kg_window` (or `kg_chat_conversation_window`, the read-only provenance archive — see [09_KG_PIPELINE.md](architecture/09_KG_PIPELINE.md)).
+(KG) Append-only rows in `kg_node_evidence` / `kg_edge_evidence` — one per observation. Every time the promoter creates or matches a node/edge from a `claim_proposal`, a row is appended carrying `source_table` (`unified_log_2026`), `source_id` (the source message id), `source_text` (raw chat snippet), `derived_sentence` (extractor's sentence), `message_timestamp`, `window_id` (FK to `kg_window`), and `merge_action` (`created` | `confirmed` | `updated`). This is the canonical provenance store — JOIN here, don't read denormalized columns off the node row. See [09_KG_PIPELINE.md](architecture/09_KG_PIPELINE.md).
 
 (Investigator) The `evidence` array in an investigation report — list of `(query, finding)` pairs grounding the diagnosis.
 
@@ -194,7 +194,7 @@ Base class for agent-orchestrating managers. Lives in `manager_classes/MultiAgen
 
 ### Node
 
-(KG) A row in `kg_node_metadata`. Has `id`, `label`, `node_type` (Entity / State / Event / Goal / Concept), `category`, `aliases`, `description`, `original_sentence`, `start_date`, `end_date`, `start_date_prose`, `end_date_prose`, `valid_during`, `importance`, `goal_status`, `semantic_label`, `hash_tags`, `window_id`.
+(KG) A row in `kg_node_metadata`. Has `id`, `label`, `node_type` (Entity / State / Event / Goal / Concept / Property), `category`, `aliases`, `description`, `original_sentence`, `start_date`, `end_date`, `start_date_prose`, `end_date_prose`, `valid_during`, `importance`, `goal_status`, `semantic_label`, `hash_tags`. Per-observation provenance (window, source message, derived sentence, merge action) lives in `kg_node_evidence` — JOIN through `node_id` rather than denormalizing onto the row. The legacy `window_id` / `original_message_id` / `sentence_id` columns were dropped 2026-05-04.
 
 (Code) A class in `app/assistant/kg/db/knowledge_graph_db_sqlite.py`.
 

@@ -98,9 +98,8 @@ def _load_node(session, node_id: str) -> dict | None:
         "source": node.source,
         "created_at": _iso(node.created_at),
         "updated_at": _iso(node.updated_at),
-        "window_id": getattr(node, "window_id", None),
-        "original_message_id": node.original_message_id,
-        "original_sentence_id": getattr(node, "sentence_id", None),
+        # Per-observation provenance (window_id, source message, etc.) is
+        # rendered separately by _load_provenance() reading kg_node_evidence.
         "in_edges": in_list,
         "out_edges": out_list,
     }
