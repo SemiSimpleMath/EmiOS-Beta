@@ -1,5 +1,16 @@
-- **Purpose**: Run a sandboxed read-only shell command on Jukka's local machine. Try it — refusals come back with precise reasons (out-of-scope path, denied executable, etc.) so adapt from the refusal.
-- **Allowed executables**: read-only inspection only (`ls`, `find`, `cat`, `head`, `tail`, `grep`, `wc`, `pwd`).
+- **Purpose**: Run a sandboxed read-only shell command on Jukka's local machine via Git Bash.
+- **Working directory**: every command starts in `$HOME` (`/c/Users/semis`). **Use absolute paths.** Relative paths like `docs/architecture` will not find anything outside `$HOME`.
+- **Tilde expansion is unreliable when OneDrive is involved.** On this machine `~/Documents` expands to `/c/Users/semis/Documents` (the empty original location), but the real Documents folder is OneDrive-redirected to `/c/Users/semis/OneDrive/Documents`. Use the explicit OneDrive path instead of `~/Documents`. Same risk for `~/Pictures`. `~/Music`, `~/Videos`, and `~/EmiWiki` are not redirected and `~` works fine for those — but absolute paths always work.
+- **Readable roots** (use these exact paths):
+  - `/c/Users/semis/OneDrive/Documents` — user's personal docs
+  - `/c/Users/semis/OneDrive/Pictures` — user's photos
+  - `/c/Users/semis/Music`, `/c/Users/semis/Videos` — media
+  - `/c/Users/semis/EmiWiki` — Emi's KG-derived prose pages (Annika.md, Jorma.md, etc.)
+  - `/e/EmiAi_sqlite/docs` — Emi's own architecture docs (`/e/EmiAi_sqlite/docs/architecture/00_OVERVIEW.md`, `05_DAYFLOW.md`, `14_PODS.md`, etc.)
+- **Allowed executables**: `ls`, `find`, `cat`, `head`, `tail`, `grep`, `wc`, `pwd`. Nothing else.
+- **Pipes (`|`) are allowed**, max 5 stages, e.g. `find /e/EmiAi_sqlite/docs -name "*.md" | head -10`. Each pipe segment is independently validated against the executable allowlist.
+- **Forbidden**: `>`, `<`, `;`, `&`, `&&`, `||`, backticks, `$(...)`. No redirects, sequencing, or substitution. Anything that would write to disk or chain side effects is rejected.
+- **Refusals are informative** — read the reason text; it tells you exactly which path/token/executable is out of scope. Adapt from it, don't guess.
 - **Limits**: 30s timeout, output capped at 4 KB.
 - **Arguments**:
   - `command` (str, required): the shell command to execute.

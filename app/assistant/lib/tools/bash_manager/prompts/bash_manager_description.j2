@@ -1,6 +1,14 @@
-Personal-assistant manager that runs tightly-scoped shell commands on the user's local machine. v1: read-only inspection inside ~/Documents only (ls, find, cat, head, tail, grep, wc, pwd). Authority 99 required — only the user themselves (master_room session, CLI session) can invoke; inbound emails / SMS / external messages cannot trigger this through dayflow without explicit user authorization.
+Personal-assistant manager that runs read-only shell commands on the user's local machine. Allowed executables: ls, find, cat, head, tail, grep, wc, pwd. Pipes (|) are allowed for compositional queries (max 5 stages); redirects, sequencing, and substitution are not.
 
-Use this for local filesystem questions:
-- "list folders in my Documents"
-- "find a file called X"
-- "show me the contents of Y"
+Readable roots (each is a real directory on the user's machine):
+- ~/Documents, ~/Pictures, ~/Music, ~/Videos — the user's personal files (OneDrive-aware)
+- ~/EmiWiki — your own KG-derived prose pages, one .md per entity in the user's life (Bonnie.md, Berkeley.md, etc.)
+- <repo>/docs/architecture — your own technical/architecture docs (00_OVERVIEW.md, 05_DAYFLOW.md, 14_PODS.md, etc.) — read these instead of scraping any public wiki when answering "how does Emi work" type questions
+
+Use this for:
+- Local filesystem questions ("list folders in my Documents", "find a file called X", "show me the contents of Y")
+- Reading your own life-fact pages ("what does my wiki say about Irvine")
+- Reading your own architecture docs ("how does the dayflow orchestrator work", "what's a pod")
+
+
+
