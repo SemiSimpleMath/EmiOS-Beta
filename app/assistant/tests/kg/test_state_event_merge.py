@@ -368,41 +368,22 @@ class TestDesiredDecisionTree:
         out = _filter_event_candidates_by_date(scored, new_valid_from=new)
         assert out == []
 
-    @pytest.mark.xfail(
-        reason=(
-            "GAP: episodic States ('Rehearsing for X' has end_date) currently "
-            "have NO date filter — only Events do. Identity States "
-            "(Marriage, Residence) are correctly excluded from this filter, "
-            "but episodic States need it. Spec calls for: if BOTH state "
-            "dates are known and they don't overlap, drop. Not implemented."
-        )
-    )
     def test_state_both_dates_known_and_far_apart_should_drop(self):
-        """Spec: episodic States with known + non-overlapping dates are
-        different instances, just like Events.
-
-        This will require either (a) a separate _filter_state_candidates_by_date
-        helper that's date-tolerance-tighter than the Event filter and
-        only fires when BOTH dates are known, or (b) extending the Event
-        filter to cover State and detecting identity-State labels to skip.
-        """
-        # When the State date filter exists, this assertion runs:
-        from datetime import datetime, timezone
-
-        # Pretend a future _filter_state_candidates_by_date exists.
-        # Importing it here at runtime so the xfail catches ImportError too.
-        try:
-            from app.assistant.kg.proposal_promoter import (
-                _filter_state_candidates_by_date,
-            )
-        except ImportError:
-            pytest.fail("_filter_state_candidates_by_date not implemented")
+        """Episodic States with known + non-overlapping dates are different
+        instances, just like Events. The universal _filter_candidates_by_time_frame
+        handles this (sequential check: cand.end_date < new.valid_from)."""
+        from app.assistant.kg.proposal_promoter import (
+            _filter_candidates_by_time_frame,
+        )
 
         new = _ts(2026, 5, 1)
-        cand = _StubNode(id="state-a", start_date=_ts(2025, 1, 1))
-        cand.end_date = _ts(2025, 6, 1)
+        cand = _StubNode(
+            id="state-a",
+            start_date=_ts(2025, 1, 1),
+            end_date=_ts(2025, 6, 1),
+        )
         scored = [{"node": cand, "overlap": 1, "jaccard": 1.0}]
-        out = _filter_state_candidates_by_date(scored, new_valid_from=new)
+        out = _filter_candidates_by_time_frame(scored, new_valid_from=new)
         assert out == []
 
     # ---- Hard reject 3: different participants ----

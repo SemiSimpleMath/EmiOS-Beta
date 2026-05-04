@@ -291,6 +291,113 @@ def _filter_candidates_by_min_jaccard(
     return [s for s in scored if s.get("jaccard", 0.0) >= threshold]
 
 
+_YEAR_RE = __import__("re").compile(r"\b(?:19|20|21)\d{2}\b")
+
+
+def _extract_years_from_prose(*texts: str) -> set:
+    """Pull 4-digit years (1900-2199) out of one or more prose strings.
+    Used by _filter_candidates_by_time_frame to compare partial date info
+    when structured start/end dates are missing."""
+    out: set = set()
+    for t in texts:
+        if not t:
+            continue
+        for m in _YEAR_RE.findall(str(t)):
+            try:
+                out.add(int(m))
+            except ValueError:
+                continue
+    return out
+
+
+def _filter_candidates_by_time_frame(
+    scored: list,
+    new_valid_from=None,
+    new_valid_to=None,
+    new_start_prose: str = "",
+    new_end_prose: str = "",
+    event_tolerance_days: int = _EVENT_DATE_TOLERANCE_DAYS,
+) -> list:
+    """Decide-not-a-match for State/Event/Goal candidates whose time-frame
+    contradicts the new proposal. Universal — applies to all node types
+    that have time-frame fields. Replaces the old Event-only date filter.
+
+    A candidate is dismissed when ANY of these conditions is true:
+
+      - Both sides have fully-known dates AND windows differ by more than
+        ``event_tolerance_days`` (preserves the original Event behavior).
+      - Sequential — the candidate ENDED before the new proposal STARTED
+        (cand.end_date strictly before new.valid_from), or vice versa
+        (new.valid_to strictly before cand.start_date). No tolerance —
+        if a state explicitly ended before another started, they are
+        sequential instances by definition.
+      - Year mismatch via prose — both sides have prose date info, both
+        contain at least one 4-digit year, and the year sets are disjoint.
+
+    A candidate is KEPT when:
+      - Both sides are fully dateless (no evidence either way).
+      - Either side is dateless and the other side has dates (legitimate
+        evolution flow: vague mention later refined).
+      - Open-ended overlapping (cand.start set, end None; new.valid_from
+        within cand's window).
+
+    Args:
+        scored: candidate list as returned by
+            ``_score_candidates_by_participant_overlap``. Each item's
+            ``"node"`` should have ``.start_date`` / ``.end_date`` /
+            ``.start_date_prose`` / ``.end_date_prose`` (any of which
+            may be None / "").
+        new_valid_from / new_valid_to: structured datetimes for the new
+            proposal, or None.
+        new_start_prose / new_end_prose: partial date prose for the new
+            proposal, or "".
+        event_tolerance_days: slack for the both-fully-dated case.
+
+    Returns:
+        Filtered scored list, same shape.
+    """
+    new_years = _extract_years_from_prose(new_start_prose, new_end_prose)
+    kept: list = []
+    for s in scored:
+        node = s["node"]
+        cs = getattr(node, "start_date", None)
+        ce = getattr(node, "end_date", None)
+        cstart_prose = getattr(node, "start_date_prose", "") or ""
+        cend_prose = getattr(node, "end_date_prose", "") or ""
+
+        # Sequential check 1: candidate ended before new proposal started.
+        if ce is not None and new_valid_from is not None:
+            try:
+                if ce.date() < new_valid_from.date():
+                    continue  # not a match
+            except Exception:
+                pass
+
+        # Sequential check 2: new proposal ended before candidate started.
+        if new_valid_to is not None and cs is not None:
+            try:
+                if new_valid_to.date() < cs.date():
+                    continue
+            except Exception:
+                pass
+
+        # Year-mismatch via prose. Only fires when both sides have year
+        # info AND the year sets are disjoint.
+        cand_years = _extract_years_from_prose(cstart_prose, cend_prose)
+        if cand_years and new_years and cand_years.isdisjoint(new_years):
+            continue
+
+        # NOTE: an Event-specific start-date distance tolerance lives in
+        # the separate _filter_event_candidates_by_date helper, applied
+        # by _prepare_proposal_plan for Event-typed proposals. We do NOT
+        # apply it here — it would wrongly drop legitimate open-ended
+        # State observations (Residence since 2020, new observation in
+        # 2023). Sequential is the only universal time-rejection signal.
+
+        kept.append(s)
+    return kept
+
+
 def _filter_event_candidates_by_date(
     scored: list,
     new_valid_from,
@@ -1185,10 +1292,22 @@ def _prepare_proposal_plan(proposal_id: str) -> Optional[_PromoterPlan]:
                 cands_with_parts, participant_uuids,
             )
 
-            # Event-class disparate-date exclusion (Stage 2 of the old
-            # _resolve_state_event). States have no such filter — identity
-            # states (Marriage, Residence) persist across time. Extracted
-            # for unit-testability.
+            # Universal time-frame exclusion (sequential + year-mismatch).
+            # Applies to State/Event/Goal alike. Identity States (Marriage,
+            # Residence) survive because their windows overlap or one side
+            # is dateless.
+            scored = _filter_candidates_by_time_frame(
+                scored,
+                new_valid_from=pn.valid_from,
+                new_valid_to=pn.valid_to,
+                new_start_prose=getattr(pn, "valid_from_prose", "") or "",
+                new_end_prose=getattr(pn, "valid_to_prose", "") or "",
+            )
+
+            # Event-specific start-date distance tolerance (legacy behavior).
+            # Catches "two Events with start dates more than 7 days apart"
+            # — the universal filter doesn't do this because it would
+            # over-reject open-ended State observations.
             if (pn.node_type or "").lower() == "event":
                 scored = _filter_event_candidates_by_date(scored, pn.valid_from)
 
