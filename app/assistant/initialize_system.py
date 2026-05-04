@@ -9,6 +9,7 @@ from app.assistant.emi_event_relay.emi_event_relay import EmiEventRelay
 from app.assistant.slack_interface.slack_interface import SlackInterface
 from app.assistant.agent_runtime.services.question_service import QuestionService
 from app.assistant.progress_curator import ProgressCurator
+from app.assistant.chat_narrator import ChatNarrator
 from app.assistant.signal_router import SignalRouterService
 from app.assistant.task_ir_runtime import get_task_ir_runner
 from app.services.socket_manager import SocketManager
@@ -47,6 +48,8 @@ def initialize_system():
 
     progress_curator = ProgressCurator()
     ServiceLocator.register("progress_curator", progress_curator)
+    chat_narrator = ChatNarrator()
+    ServiceLocator.register("chat_narrator", chat_narrator)
     ServiceLocator.register("question_service", QuestionService())
 
     logger.info("Loading emi_result_handler...")
