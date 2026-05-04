@@ -30,6 +30,13 @@ DEBOUNCE_SECONDS = 60
 MIN_GAP_SECONDS = 120
 MAX_CEILING_SECONDS = 1800
 
+# A waiting/watching item whose reactivate_at_utc is overdue by more than
+# this is treated as broken-and-stuck — it won't drag the scheduler into a
+# 2-minute hot loop. The item stays in its current state (a separate
+# sweeper / dispatcher fix is needed to actually resolve them); the
+# scheduler just stops using it as wake-up bait.
+ANCIENT_ITEM_OVERDUE_SECONDS = 24 * 3600  # 24 hours
+
 
 class DayflowScheduler:
 
@@ -197,6 +204,7 @@ class DayflowScheduler:
 
             now_utc = datetime.now(timezone.utc)
             earliest: Optional[datetime] = None
+            ancient_skipped = 0
 
             items = load_existing_dayflow_items()
             for item in items:
@@ -222,10 +230,32 @@ class DayflowScheduler:
                     logger.debug("[DayflowScheduler] reactivate_at_utc parse exception details", exc_info=True)
                     raise
                 if parsed <= now_utc:
+                    overdue_seconds = (now_utc - parsed).total_seconds()
+                    if overdue_seconds > ANCIENT_ITEM_OVERDUE_SECONDS:
+                        # Ancient stale item — should have fired long ago and
+                        # didn't. Treat as broken; do NOT let it drive a
+                        # 2-minute reschedule loop. Keep scanning for items
+                        # that are either not stale or only-recently-overdue.
+                        ancient_skipped += 1
+                        logger.warning(
+                            "[DayflowScheduler] Ignoring ancient stale item "
+                            "(overdue %.1fh) item_id=%s state=%s reactivate_at_utc=%s",
+                            overdue_seconds / 3600.0,
+                            meta.get("item_id", "?"),
+                            state,
+                            raw,
+                        )
+                        continue
                     earliest = now_utc + timedelta(seconds=MIN_GAP_SECONDS)
                     break
                 if earliest is None or parsed < earliest:
                     earliest = parsed
+            if ancient_skipped:
+                logger.warning(
+                    "[DayflowScheduler] Skipped %d ancient stale item(s) when scheduling — "
+                    "they are stuck in waiting/watching and need dispatcher attention.",
+                    ancient_skipped,
+                )
 
             if earliest is not None:
                 delay = max(MIN_GAP_SECONDS, (earliest - now_utc).total_seconds())
