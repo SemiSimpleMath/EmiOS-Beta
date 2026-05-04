@@ -179,6 +179,18 @@ def _resolve_property(
 
 _EVENT_DATE_TOLERANCE_DAYS = 7  # events more than this many days apart → different instances
 
+# Minimum Jaccard score (intersection / union of participant sets) for a
+# State/Event/Goal candidate to even reach the LLM merger. Below this, the
+# candidate's only overlap with the new proposal is via a small handful of
+# hub-y participants ("Jukka's children", "Jukka") and is not meaningful
+# evidence of being the same instance — every kid-related event would
+# otherwise look related to every other kid-related event.
+#
+# 0.5 chosen so that majority of either participant set must overlap; this
+# is what would have caught the 2026-05-03 Performance over-merge
+# (jaccard 1/6 ≈ 0.17). Tunable.
+_MIN_JACCARD_FOR_LLM_CONSIDERATION = 0.5
+
 
 def _score_candidates_by_participant_overlap(
     candidates_with_participants: list,
@@ -213,6 +225,39 @@ def _score_candidates_by_participant_overlap(
         })
     scored.sort(key=lambda s: (s["jaccard"], s["overlap"]), reverse=True)
     return scored
+
+
+def _filter_candidates_by_min_jaccard(
+    scored: list,
+    threshold: float = _MIN_JACCARD_FOR_LLM_CONSIDERATION,
+) -> list:
+    """Decide-not-a-match for State/Event/Goal candidates whose participant-
+    overlap Jaccard is below ``threshold``.
+
+    Why: the candidate-search pre-filter (participant overlap > 0) is too
+    permissive. Sharing a single hub-y participant like "Jukka's children"
+    is enough to put a candidate in the LLM's queue, but a single hub
+    overlap is near-zero evidence of being the same instance — it just
+    means both events involve some family member. A meaningful merge
+    signal needs MAJORITY overlap (the participant fingerprints have to
+    actually look the same).
+
+    The 2026-05-03 Performance over-merge had jaccard 1/6 ≈ 0.17 — a
+    single hub overlap with a totally different specific participant
+    ("Drowsy Chaperone") on the new side and four unrelated participants
+    ("South Lake Middle School", "Annika", "Jorma", "Seija" from
+    Beetlejuice context) on the existing side. A 0.5 threshold drops it.
+
+    Args:
+        scored: candidate list as returned by
+            ``_score_candidates_by_participant_overlap``.
+        threshold: minimum jaccard (0..1) required to keep the candidate.
+            Default ``_MIN_JACCARD_FOR_LLM_CONSIDERATION``.
+
+    Returns:
+        Filtered scored list, same shape.
+    """
+    return [s for s in scored if s.get("jaccard", 0.0) >= threshold]
 
 
 def _filter_event_candidates_by_date(
@@ -1112,10 +1157,17 @@ def _prepare_proposal_plan(proposal_id: str) -> Optional[_PromoterPlan]:
             # Event-class disparate-date exclusion (Stage 2 of the old
             # _resolve_state_event). States have no such filter — identity
             # states (Marriage, Residence) persist across time. Extracted
-            # for unit-testability — and the current "dateless KEPT" rule
-            # is a documented gap; see helper docstring.
+            # for unit-testability.
             if (pn.node_type or "").lower() == "event":
                 scored = _filter_event_candidates_by_date(scored, pn.valid_from)
+
+            # Hub-only-overlap exclusion. The candidate query above is
+            # generous (any non-zero participant overlap qualifies), which
+            # makes single-hub-entity overlaps ("Jukka's children" alone)
+            # noise-grade evidence. Require majority participant overlap
+            # before sending to the LLM. See the 2026-05-03 Performance
+            # over-merge investigation for the failure mode this prevents.
+            scored = _filter_candidates_by_min_jaccard(scored)
 
             # Cap LLM input — hub participants (Jukka) explode candidate count.
             candidate_lists[pn.id] = [
