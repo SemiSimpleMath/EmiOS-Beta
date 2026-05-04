@@ -227,6 +227,37 @@ def _score_candidates_by_participant_overlap(
     return scored
 
 
+def _filter_candidates_by_label_equality(
+    scored: list,
+    new_label: str,
+) -> list:
+    """Decide-not-a-match for candidates whose label differs from the new
+    proposal's label (case-insensitive, trimmed equality).
+
+    Why: labels are intentionally drawn from a narrow standardized set,
+    so SAME label is weak evidence (the narrow set conflates many distinct
+    things — still need LLM). But DIFFERENT labels are strong evidence:
+    the standardization wouldn't put truly-related instances in different
+    buckets. So label-mismatch is a hard reject without LLM.
+
+    Args:
+        scored: candidate list as returned by
+            ``_score_candidates_by_participant_overlap``. Each item's
+            ``"node"`` must have a ``.label`` attribute.
+        new_label: the new proposal's label.
+
+    Returns:
+        Filtered scored list, same shape.
+    """
+    new_norm = (new_label or "").strip().casefold()
+    if not new_norm:
+        return scored  # no new label to compare against — pass through
+    return [
+        s for s in scored
+        if (getattr(s["node"], "label", "") or "").strip().casefold() == new_norm
+    ]
+
+
 def _filter_candidates_by_min_jaccard(
     scored: list,
     threshold: float = _MIN_JACCARD_FOR_LLM_CONSIDERATION,
@@ -1168,6 +1199,13 @@ def _prepare_proposal_plan(proposal_id: str) -> Optional[_PromoterPlan]:
             # before sending to the LLM. See the 2026-05-03 Performance
             # over-merge investigation for the failure mode this prevents.
             scored = _filter_candidates_by_min_jaccard(scored)
+
+            # Label-mismatch exclusion. Labels are intentionally drawn from
+            # a narrow standardized set, so SAME label is weak evidence and
+            # still requires LLM, but DIFFERENT labels are strong evidence
+            # of non-match — the standardization wouldn't put truly-related
+            # instances in different buckets.
+            scored = _filter_candidates_by_label_equality(scored, pn.label)
 
             # Cap LLM input — hub participants (Jukka) explode candidate count.
             candidate_lists[pn.id] = [

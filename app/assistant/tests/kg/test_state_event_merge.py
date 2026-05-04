@@ -426,15 +426,6 @@ class TestDesiredDecisionTree:
         assert not _labels_match_for_merge("Performance", "Performance Role")
         assert not _labels_match_for_merge("Rehearsal", "Rehearsing for The Drowsy Chaperone")
 
-    @pytest.mark.xfail(
-        reason=(
-            "GAP: there is no label-equality precheck before invoking "
-            "_call_node_merger_for_state_match. Per the spec, candidates "
-            "with non-matching labels should be dropped before any LLM "
-            "call — saves cost AND prevents the LLM from being asked to "
-            "judge merges it shouldn't be considering."
-        )
-    )
     def test_different_labels_should_drop_before_llm(self):
         """Spec: candidates with different labels never reach the LLM.
 
