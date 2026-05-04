@@ -947,37 +947,95 @@ def _canonicalize_sentence(
     return canonical.strip()
 
 
-def _write_edge_evidence_for_reinforcement(
-    session, edge_id: str, proposal: ClaimProposal, proposal_edge: ClaimProposalEdge,
-) -> None:
-    """When promoter matches a proposal_edge to an existing KG edge, append
-    a kg_edge_evidence row so the graph's own provenance log records the
-    reinforcement. Without this, the edge doesn't know about proposals that
-    re-observed it — evidence only lives on the shadow layer.
-    """
-    try:
-        from app.assistant.database.kg_chat_projection import KGEdgeEvidence
-        from app.assistant.database.claim_proposals import ClaimProposalEvidence
-    except Exception as exc:
-        logger.warning("[promoter] evidence cascade unavailable: %s", exc)
-        return
+def _earliest_proposal_evidence(session, proposal_id: str):
+    """Pick the earliest claim_proposal_evidence row for this proposal.
 
-    # Pick the earliest evidence row on this proposal as the observation source.
-    ev = (
+    Used as the observation source for KG node/edge evidence rows the
+    promoter writes — claim_proposal_evidence carries the canonical
+    (window_id, unified_log_id, raw_text, observed_at, room_id, speaker_*)
+    snapshot for each proposal.
+    """
+    from app.assistant.database.claim_proposals import ClaimProposalEvidence
+    return (
         session.query(ClaimProposalEvidence)
-        .filter(ClaimProposalEvidence.proposal_id == proposal.id)
+        .filter(ClaimProposalEvidence.proposal_id == proposal_id)
         .order_by(ClaimProposalEvidence.observed_at.asc())
         .first()
     )
+
+
+def _write_node_evidence(
+    session,
+    *,
+    node_id: str,
+    proposal: ClaimProposal,
+    proposal_node: ClaimProposalNode,
+    merge_action: str,
+) -> None:
+    """Append one kg_node_evidence row for a node observation.
+
+    merge_action conventions match the existing KGNodeEvidence model
+    docstring: "created" | "confirmed" | "updated". The promoter uses
+    "created" when this proposal materialized a fresh kg_node row, and
+    "confirmed" when it matched an existing one (reinforcement).
+
+    Provenance fields are sourced from claim_proposal_evidence so the
+    chain `kg_node_evidence → unified_log_id` resolves to the original
+    chat message. Without this writer the entire post-rebuild cohort
+    has empty evidence and the kg_node_viewer + node_merger LLM cannot
+    see source context.
+    """
+    try:
+        from app.assistant.database.kg_chat_projection import KGNodeEvidence
+    except Exception as exc:
+        logger.warning("[promoter] node evidence cascade unavailable: %s", exc)
+        return
+
+    ev = _earliest_proposal_evidence(session, proposal.id)
+    session.add(KGNodeEvidence(
+        node_id=node_id,
+        source_table="unified_log_2026" if (ev and ev.unified_log_id) else None,
+        source_id=(ev.unified_log_id if ev else None),
+        source_text=(ev.raw_text if ev else None),
+        derived_sentence=(proposal_node.sentence or None),
+        message_timestamp=(ev.observed_at if ev else None),
+        window_id=(ev.window_id if ev else None),
+        merge_action=merge_action,
+    ))
+
+
+def _write_edge_evidence(
+    session,
+    *,
+    edge_id: str,
+    proposal: ClaimProposal,
+    proposal_edge: ClaimProposalEdge,
+    merge_action: str,
+) -> None:
+    """Append one kg_edge_evidence row for an edge observation.
+
+    Replaces the previous _write_edge_evidence_for_reinforcement which
+    was only called from the matched-existing path; the create path was
+    silently skipping evidence too. merge_action is now a parameter so
+    the same writer covers both: "created" for fresh edges, "confirmed"
+    for reinforcement of an existing edge.
+    """
+    try:
+        from app.assistant.database.kg_chat_projection import KGEdgeEvidence
+    except Exception as exc:
+        logger.warning("[promoter] edge evidence cascade unavailable: %s", exc)
+        return
+
+    ev = _earliest_proposal_evidence(session, proposal.id)
     session.add(KGEdgeEvidence(
         edge_id=edge_id,
-        source_table="claim_proposal",
-        source_id=proposal.id,
+        source_table="unified_log_2026" if (ev and ev.unified_log_id) else None,
+        source_id=(ev.unified_log_id if ev else None),
         source_text=(ev.raw_text if ev else None),
         derived_sentence=proposal_edge.sentence,
         message_timestamp=(ev.observed_at if ev else None),
         window_id=(ev.window_id if ev else None),
-        merge_action="confirmed",
+        merge_action=merge_action,
     ))
 
 
@@ -1578,6 +1636,13 @@ def _evaluate_and_apply(
                 match_node = session.get(Node, prepared.matched_node_id)
                 if match_node is not None:
                     _refresh_on_reobservation(match_node, proposal)
+                _write_node_evidence(
+                    session,
+                    node_id=prepared.matched_node_id,
+                    proposal=proposal,
+                    proposal_node=pn,
+                    merge_action="confirmed",
+                )
             dec.node_outcomes.append(_NodeOutcome(
                 pn.id, "matched_existing", prepared.matched_node_id,
                 f"{pn.node_type} {pn.label!r} matched {prepared.matched_node_id[:8]}",
@@ -1587,6 +1652,13 @@ def _evaluate_and_apply(
                 new = _create_kg_node_from_proposal(session, pn, proposal.id)
                 pn.resolved_node_id = new.id
                 pn.resolution_action = "created_new"
+                _write_node_evidence(
+                    session,
+                    node_id=new.id,
+                    proposal=proposal,
+                    proposal_node=pn,
+                    merge_action="created",
+                )
                 dec.node_outcomes.append(_NodeOutcome(
                     pn.id, "created_new", new.id,
                     f"created {pn.node_type} {pn.label!r} as {new.id[:8]}",
@@ -1616,6 +1688,13 @@ def _evaluate_and_apply(
                 match_node = session.get(Node, prepared.matched_node_id)
                 if match_node is not None:
                     _refresh_on_reobservation(match_node, proposal)
+                _write_node_evidence(
+                    session,
+                    node_id=prepared.matched_node_id,
+                    proposal=proposal,
+                    proposal_node=pn,
+                    merge_action="confirmed",
+                )
             dec.node_outcomes.append(_NodeOutcome(
                 pn.id, "matched_existing", prepared.matched_node_id,
                 f"{pn.node_type} {pn.label!r} matched {prepared.matched_node_id[:8]} "
@@ -1630,6 +1709,13 @@ def _evaluate_and_apply(
                 )
                 pn.resolved_node_id = new.id
                 pn.resolution_action = "created_new"
+                _write_node_evidence(
+                    session,
+                    node_id=new.id,
+                    proposal=proposal,
+                    proposal_node=pn,
+                    merge_action="created",
+                )
                 ttl_blurb = ""
                 if isinstance(new.attributes, dict) and "ttl" in new.attributes:
                     t = new.attributes["ttl"]
@@ -1686,8 +1772,12 @@ def _evaluate_and_apply(
             # the KG edge's provenance log. The graph itself now knows the
             # edge was re-observed (not just our proposal layer).
             if commit:
-                _write_edge_evidence_for_reinforcement(
-                    session, existing.id, proposal, pe,
+                _write_edge_evidence(
+                    session,
+                    edge_id=existing.id,
+                    proposal=proposal,
+                    proposal_edge=pe,
+                    merge_action="confirmed",
                 )
             dec.edge_outcomes.append(
                 _EdgeOutcome(pe.id, "matched_existing", existing.id,
@@ -1731,6 +1821,13 @@ def _evaluate_and_apply(
             session.add(new_edge)
             session.flush()
             pe.resolved_edge_id = new_edge.id
+            _write_edge_evidence(
+                session,
+                edge_id=new_edge.id,
+                proposal=proposal,
+                proposal_edge=pe,
+                merge_action="created",
+            )
             dec.edge_outcomes.append(
                 _EdgeOutcome(pe.id, "created_new", new_edge.id,
                              f"new edge {new_edge.id[:8]} {pe.predicate}")

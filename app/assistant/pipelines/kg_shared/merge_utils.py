@@ -482,6 +482,6 @@ def create_edge_if_missing(
 # legacy kg_chat_* staging tables. Removed when those tables were retired
 # in favor of the unified kg_window / kg_window_message / kg_resolved_message
 # schema. The live evidence-writing path now lives in
-# proposal_promoter._write_edge_evidence_for_reinforcement.
+# proposal_promoter._write_edge_evidence and ._write_node_evidence.
 # ---------------------------------------------------------------------------
 
