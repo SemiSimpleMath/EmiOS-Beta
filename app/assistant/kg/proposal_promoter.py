@@ -865,6 +865,15 @@ def _refresh_on_reobservation(node: Node, proposal: ClaimProposal) -> None:
       - ``attributes.observation_count`` — increment.
       - ``attributes.confidence`` — gentle bump (+0.05, capped at 1.0) but
         only if already set; don't invent a confidence from nothing.
+
+    CRITICAL: must NOT bump Node.updated_at. Re-observation is bookkeeping
+    on existing claims — the underlying KG content didn't change. Bumping
+    updated_at marks every wiki + entity card whose neighborhood includes
+    this node as "changed" (see kg_projection.change_detection), cascading
+    refreshes on no semantic change. Mutating ``node.attributes`` via ORM
+    would trigger SQLAlchemy's onupdate=func.now() hook on commit, so we
+    issue an explicit UPDATE with ``updated_at = Node.updated_at`` self-ref
+    to preserve the timestamp verbatim. Same pattern as persist_description.
     """
     observed = proposal.last_observed_at or proposal.first_observed_at
     if observed is None:
@@ -879,7 +888,26 @@ def _refresh_on_reobservation(node: Node, proposal: ClaimProposal) -> None:
             attrs["confidence"] = min(1.0, float(attrs["confidence"]) + 0.05)
         except (TypeError, ValueError):
             pass
-    node.attributes = attrs
+
+    from sqlalchemy import update as sql_update
+    from sqlalchemy.orm import object_session
+    session = object_session(node)
+    if session is None:
+        # Defensive fallback: no session in scope means we can't issue our
+        # explicit UPDATE. Leave the ORM-tracked mutation as the write path;
+        # caller's commit will flush it (with the unwanted updated_at bump).
+        # This branch shouldn't fire in production — _refresh_on_reobservation
+        # is only called from _evaluate_and_apply with a live session.
+        node.attributes = attrs
+        return
+    session.execute(
+        sql_update(Node)
+        .where(Node.id == node.id)
+        .values(attributes=attrs, updated_at=Node.updated_at)
+    )
+    # Force ORM to reload attributes on next access so downstream callers
+    # see the post-update value rather than the cached pre-update one.
+    session.expire(node, ["attributes"])
 
 
 def _canonicalize_sentence(

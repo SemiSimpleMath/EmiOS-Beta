@@ -124,6 +124,15 @@ def run(ctx: PipelineContext) -> dict:
     scores, iterations, converged = _compute_pagerank(node_ids, edges)
 
     # ── WRITE PHASE (batched) ─────────────────────────────────────────────────
+    #
+    # CRITICAL: must NOT bump Node.updated_at. PageRank is a derived score
+    # (recomputed nightly from graph topology) — a fresh score is not a fresh
+    # node. Bumping updated_at here would mark every node in the graph as
+    # "changed" each nightly run, triggering wiki + entity card refreshes on
+    # no semantic change at all. The Node.updated_at = Node.updated_at self-
+    # reference in .values() suppresses the column's onupdate=func.now() hook
+    # so the timestamp is preserved verbatim. Same pattern as
+    # persist_description and me/importance.
     write_session = get_session()
     try:
         items = list(scores.items())
@@ -132,7 +141,7 @@ def run(ctx: PipelineContext) -> dict:
             chunk = items[i : i + chunk_size]
             for node_id, score in chunk:
                 write_session.query(Node).filter(Node.id == node_id).update(
-                    {"pagerank_score": round(score, 8)},
+                    {Node.pagerank_score: round(score, 8), Node.updated_at: Node.updated_at},
                     synchronize_session=False,
                 )
         write_session.commit()

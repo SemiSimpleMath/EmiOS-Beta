@@ -208,13 +208,24 @@ def regenerate_importance(
     # Persist to kg_node_metadata.importance — this is what the wiki refresh's
     # importance pre-filter reads. Without the DB write, the SQL filter would
     # always see NULL and either drop or admit everything depending on policy.
+    #
+    # CRITICAL: must NOT bump Node.updated_at. Importance is a derived score
+    # (recomputed from graph topology each lens run) — a fresh score is not
+    # a fresh node. Bumping updated_at here triggers
+    # change_detection.find_changed_neighborhood_nodes to mark every wiki +
+    # entity card whose neighborhood includes the rated node as "changed",
+    # cascading into wiki refreshes and card regenerations on no semantic
+    # change at all. The Node.updated_at = Node.updated_at self-reference
+    # in .values() suppresses the column's onupdate=func.now() hook so the
+    # timestamp is preserved verbatim. Same pattern as persist_description.
     persisted_to_db = 0
     if scores:
         with get_db_manager().write_session() as session:
             for nid, sc in scores.items():
                 try:
                     session.query(Node).filter(Node.id == nid).update(
-                        {Node.importance: float(sc)}
+                        {Node.importance: float(sc), Node.updated_at: Node.updated_at},
+                        synchronize_session=False,
                     )
                     persisted_to_db += 1
                 except Exception as e:
