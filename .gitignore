@@ -368,3 +368,11 @@ app/assistant/kg_repair_pipeline/results/*.json
 # ── CSS backups & drafts ─────────────────────────────────────────────────────
 *_backup_*.css
 emi_shared.css
+
+# ── Personal-graph forensic cleanup scripts ──────────────────────────────────
+# These were one-off scripts containing real entity labels (family member names,
+# school names, specific events). Useful as patterns for similar cleanups but
+# the live versions hard-code personal data — not for the public repo.
+/scripts/unmerge_performance_hub.py
+/scripts/cleanup_collaboration_node.py
+/scripts/delete_grocery_stuff.py
