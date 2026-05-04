@@ -579,6 +579,149 @@ class TestDesiredDecisionTree:
         )
         assert len(out) == 1
 
+    # ---- Hard reject 3 (refined): hub-overlap-only is too weak ----
+    #
+    # The actual 2026-05-03 Performance over-merge happened with a Jaccard
+    # of 1/6 ≈ 0.17 — only "Jukka's children" overlapped (the most hub-y
+    # entity in the personal graph). Today's filter accepts ANY non-zero
+    # overlap. The spec says: weak overlap is evidence the candidates are
+    # different, not similar.
+    #
+    # Two cuts at the same problem; either would have prevented the
+    # Performance case. Both are xfail — neither helper exists yet.
+
+    # --- Cut A: minimum Jaccard threshold (cheap, deterministic) ---
+
+    def test_jaccard_below_threshold_should_drop(self):
+        """Single shared participant out of 6 total = 0.167. Below a 0.5
+        threshold → drop without LLM. Catches the Performance case."""
+        try:
+            from app.assistant.kg.proposal_promoter import (
+                _filter_candidates_by_min_jaccard,
+            )
+        except ImportError:
+            pytest.xfail("_filter_candidates_by_min_jaccard not implemented")
+
+        cand = _StubNode(id="weak-overlap")
+        # Existing has 5 participants, new has 2 — only 1 shared.
+        scored = _score_candidates_by_participant_overlap(
+            [(cand, {"hub", "p1", "p2", "p3", "p4"})],
+            new_participant_ids={"hub", "newthing"},
+        )
+        # Sanity: jaccard should be ~0.167
+        assert scored[0]["jaccard"] == pytest.approx(1 / 6, rel=0.01)
+        out = _filter_candidates_by_min_jaccard(scored, threshold=0.5)
+        assert out == []
+
+    def test_jaccard_above_threshold_kept(self):
+        """2 shared / 3 total = 0.667 > 0.5 → kept for LLM."""
+        try:
+            from app.assistant.kg.proposal_promoter import (
+                _filter_candidates_by_min_jaccard,
+            )
+        except ImportError:
+            pytest.xfail("_filter_candidates_by_min_jaccard not implemented")
+
+        cand = _StubNode(id="strong-overlap")
+        scored = _score_candidates_by_participant_overlap(
+            [(cand, {"alice", "bob"})],
+            new_participant_ids={"alice", "bob", "carol"},
+        )
+        assert scored[0]["jaccard"] == pytest.approx(2 / 3, rel=0.01)
+        out = _filter_candidates_by_min_jaccard(scored, threshold=0.5)
+        assert len(out) == 1
+
+    def test_actual_performance_case_via_jaccard_threshold(self):
+        """The exact 2026-05-03 over-merge data, run through a 0.5 Jaccard
+        threshold. Existing Performance hub: {children, SLMS, Annika, Jorma,
+        Seija}. New Drowsy Chaperone proposal: {children, Drowsy Chaperone}.
+        Overlap = {children}, union = 6 → 0.167. Threshold drops it."""
+        try:
+            from app.assistant.kg.proposal_promoter import (
+                _filter_candidates_by_min_jaccard,
+            )
+        except ImportError:
+            pytest.xfail("_filter_candidates_by_min_jaccard not implemented")
+
+        beetlejuice_hub = _StubNode(id="0b4416dd", label="Performance")
+        existing_participants = {
+            "467c96e6",  # Jukka's children
+            "08eb7b81",  # South Lake Middle School
+            "5397189b",  # Annika
+            "41fb3423",  # Jorma
+            "495f38f8",  # Seija
+        }
+        new_participants = {
+            "467c96e6",  # Jukka's children (the only overlap — and it's the hub)
+            "06c15571",  # The Drowsy Chaperone (never in existing)
+        }
+        scored = _score_candidates_by_participant_overlap(
+            [(beetlejuice_hub, existing_participants)],
+            new_participant_ids=new_participants,
+        )
+        assert scored[0]["jaccard"] == pytest.approx(1 / 6, rel=0.01)
+        out = _filter_candidates_by_min_jaccard(scored, threshold=0.5)
+        assert out == [], (
+            "The Drowsy Chaperone-into-Performance over-merge would have "
+            "been prevented by a Jaccard threshold of 0.5."
+        )
+
+    # --- Cut B: hub-weighted overlap (more principled, needs degrees) ---
+
+    def test_hub_only_overlap_should_drop(self):
+        """Sharing one hub-entity (high edge-count) is near-zero evidence.
+        Hub-weighted overlap dismisses candidates whose only shared
+        participants are hubs."""
+        try:
+            from app.assistant.kg.proposal_promoter import (
+                _filter_candidates_by_weighted_overlap,
+            )
+        except ImportError:
+            pytest.xfail("_filter_candidates_by_weighted_overlap not implemented")
+
+        cand = _StubNode(id="hub-only-shared")
+        # The shared "hub_entity" connects to hundreds of nodes; the new
+        # proposal's other participant is a low-degree specific entity.
+        scored = _score_candidates_by_participant_overlap(
+            [(cand, {"hub_entity"})],
+            new_participant_ids={"hub_entity", "specific_low_degree"},
+        )
+        out = _filter_candidates_by_weighted_overlap(
+            scored,
+            entity_degrees={"hub_entity": 500, "specific_low_degree": 2},
+            min_weighted_score=0.1,
+        )
+        assert out == [], (
+            "A hub-only overlap (degree=500) carries near-zero evidence "
+            "of being the same node. Should drop."
+        )
+
+    def test_low_degree_overlap_kept(self):
+        """Sharing a low-degree (specific) entity is strong evidence —
+        keep for LLM."""
+        try:
+            from app.assistant.kg.proposal_promoter import (
+                _filter_candidates_by_weighted_overlap,
+            )
+        except ImportError:
+            pytest.xfail("_filter_candidates_by_weighted_overlap not implemented")
+
+        cand = _StubNode(id="specific-shared")
+        scored = _score_candidates_by_participant_overlap(
+            [(cand, {"specific_low_degree", "another_thing"})],
+            new_participant_ids={"specific_low_degree", "yet_another"},
+        )
+        out = _filter_candidates_by_weighted_overlap(
+            scored,
+            entity_degrees={
+                "specific_low_degree": 2,
+                "another_thing": 5,
+                "yet_another": 3,
+            },
+            min_weighted_score=0.1,
+        )
+        assert len(out) == 1
+
     def test_full_decision_tree_path_to_llm(self):
         """Positive case: type matches (precondition), dates close, overlap
         positive, label same → candidate survives all deterministic stages
