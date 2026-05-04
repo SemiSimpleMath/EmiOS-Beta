@@ -20,10 +20,10 @@ agents:
 control_nodes:
   - name: chat_task_router_node
     class: ChatTaskRouterNode
-  - name: room_switchboard_arguments_node
-    class: RoomSwitchboardArgumentsNode
-  - name: room_tool_caller
-    class: RoomToolCaller
+  - name: chat_switchboard_arguments_node
+    class: ChatSwitchboardArgumentsNode
+  - name: chat_tool_caller
+    class: ChatToolCaller
   - name: return_control
     class: ReturnControlNode
   - name: final_answer_node
@@ -121,9 +121,9 @@ flow_config:
     "room::delegator": "room::chat_gate"
     "room::chat_gate": "chat_task_router_node"
     "chat_task_router_node": "room::switchboard"
-    "room::switchboard": "room_switchboard_arguments_node"
-    "room_switchboard_arguments_node": "room_tool_caller"
-    "room_tool_caller": "room::response_formatter"
+    "room::switchboard": "chat_switchboard_arguments_node"
+    "chat_switchboard_arguments_node": "chat_tool_caller"
+    "chat_tool_caller": "room::response_formatter"
     "room::response_formatter": "final_answer_node"
     "room::switchboard_return_control": "final_answer_node"
     "final_answer_node": "manager_exit_node"

@@ -108,10 +108,12 @@ ChatTaskRouterNode
 
 switchboard agent
   -> outputs: delegate_to="one_shot_tool_runner", action="get_weather"
-  -> sets next_agent = "room_switchboard_arguments"
+  -> sets next_agent = "chat_switchboard_arguments_node" (or master_room_/dayflow_ variant)
 
-RoomSwitchboardArgumentsNode
-  -> normalizes tool_arguments dict
+ChatSwitchboardArgumentsNode / MasterRoomSwitchboardArgumentsNode / DayflowSwitchboardArgumentsNode
+  -> normalizes tool_arguments dict (shared helper in _switchboard_arguments_util.py)
+  -> domain-specific extras (master_room writes a dispatch marker; dayflow writes
+     its own action_dispatch provenance; chat does neither)
   -> sets next_agent = "tool_caller"
 
 ToolCaller

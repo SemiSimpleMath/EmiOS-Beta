@@ -1,57 +1,56 @@
+"""Dayflow switchboard arguments node.
+
+Standalone sibling of ChatSwitchboardArgumentsNode and
+MasterRoomSwitchboardArgumentsNode. All three extend ``ControlNode``
+directly and share only the pure normalization helper from
+``_switchboard_arguments_util``. Dayflow does NOT inherit from the chat-side
+nodes — they're parallel constructions for different domains.
+
+Responsibilities specific to dayflow:
+- Reject direct nest_home_control dispatches (must go through devices_manager).
+- Defensively recover delegate_to from task when the LLM forgets to repeat it.
+- Parse a JSON string in task_information into a dict before normalization.
+- After the shared normalization runs, write the canonical dispatch
+  provenance: an ``action_dispatch:UUID`` row + stamp every acted_on item to
+  state="dispatched" + inject ``trigger_context`` into the outgoing tool args
+  so the dispatched tool/manager has a backlink to its source dayflow item.
+"""
 from __future__ import annotations
 
 from datetime import datetime, timezone
 import uuid
 from typing import Any, Dict, List
 
-from app.assistant.control_nodes.room_switchboard_arguments_node import RoomSwitchboardArgumentsNode
+from app.assistant.control_nodes._switchboard_arguments_util import (
+    normalize_switchboard_args,
+)
+from app.assistant.control_nodes.control_node import ControlNode
 from app.assistant.dayflow_orchestrator.contracts import get_meta
-from app.assistant.dayflow_orchestrator.dayflow_item_writer import resolve_short_id, write_dayflow_item, write_dayflow_items_batch
-from app.assistant.dayflow_orchestrator.state_store import DAYFLOW_ROOM_ID, get_dayflow_items
+from app.assistant.dayflow_orchestrator.dayflow_item_writer import (
+    resolve_short_id,
+    write_dayflow_item,
+    write_dayflow_items_batch,
+)
+from app.assistant.dayflow_orchestrator.state_store import (
+    DAYFLOW_ROOM_ID,
+    get_dayflow_items,
+)
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import Message
 
 logger = get_logger(__name__)
 
 
-class DayflowSwitchboardArgumentsNode(RoomSwitchboardArgumentsNode):
-    """
-    Dayflow-specific switchboard arguments node.
-
-    Extends generic switchboard argument normalization with deterministic
-    dispatch provenance writes before tool execution.
-    """
-
-    def _create_dayflow_dispatch_item(self, *, action_name: str, task_summary: str):
-        """Override the base-class marker write to a no-op for the dayflow path.
-
-        ``RoomSwitchboardArgumentsNode._create_dayflow_dispatch_item`` writes a
-        ``task:UUID`` plan_task row whose intent was anti-duplication for
-        master_room user-initiated dispatches (so dayflow's planner could see
-        in-flight chat work and not duplicate it). Inheriting it here is wrong
-        on three counts:
-
-        1. Dayflow already writes its own canonical provenance row via
-           ``_persist_dispatch_records`` below (source_type=action_dispatch),
-           so the inherited marker is a literal duplicate of the same event.
-        2. The marker is mislabeled ``source_type=plan_task`` and lacks a
-           ``plan_id`` — every dayflow dispatch produced an orphan plan_task
-           row indistinguishable from real planner-emitted tasks.
-        3. The marker's ``dispatch_origin`` falls back to "master_room" when
-           the blackboard has no room_id, so the row showed up tagged with
-           master_room even when the user never chatted there. (Misleading
-           noise during the 2026-05-04 Porto's-loop investigation.)
-
-        The base-class marker is still useful for true room-initiated chat
-        dispatches (master_room.chat → tool); this override only skips it
-        on the dayflow_orchestrator path.
-        """
-        return None
+class DayflowSwitchboardArgumentsNode(ControlNode):
+    """Dayflow-specific switchboard arguments node — sibling of Chat / MasterRoom."""
 
     def action_handler(self, message):
+        self.blackboard.update_state_value("next_agent", None)
+
         delegate_to = str(self.blackboard.get_state_value("delegate_to", "") or "").strip()
         task = str(self.blackboard.get_state_value("task", "") or "").strip()
         task_information = self.blackboard.get_state_value("task_information", None)
+
         if delegate_to == "nest_home_control":
             raise ValueError(
                 f"[{self.name}] direct nest_home_control dispatch is disabled. "
@@ -61,16 +60,16 @@ class DayflowSwitchboardArgumentsNode(RoomSwitchboardArgumentsNode):
         # Defensive normalization: the switchboard LLM sometimes produces
         # task == "create_dayflow_ticket" without repeating it in
         # delegate_to. Inherit delegate_to from task in that case so the
-        # generic dispatch path sees a valid target. Applies to any known
-        # tool name, not just ticket dispatch — keeps tickets symmetric
-        # with every other tool.
+        # dispatch path sees a valid target. Applies to any known tool
+        # name, not just ticket dispatch — keeps tickets symmetric with
+        # every other tool.
         if not delegate_to and task and self.tool_registry.get_tool(task):
             delegate_to = task
             self.blackboard.update_state_value("delegate_to", delegate_to)
 
-        # If task_information is a JSON string, parse it to dict before the
-        # parent switchboard node processes it.  The form declares str but
-        # the parent expects dict for tool argument construction.
+        # If task_information is a JSON string, parse it to dict before
+        # normalize_switchboard_args runs. The form declares str but the
+        # downstream tool argument construction expects a dict.
         if isinstance(task_information, str) and task_information.strip():
             import json as _json
             try:
@@ -78,16 +77,28 @@ class DayflowSwitchboardArgumentsNode(RoomSwitchboardArgumentsNode):
                 if isinstance(parsed, dict):
                     self.blackboard.update_state_value("task_information", parsed)
             except (ValueError, TypeError):
-                pass  # Let parent handle the string — may still work for simple dispatches.
+                pass  # Non-JSON string, leave as-is for the normalizer.
 
-        super().action_handler(message)
+        # Shared normalization — sets blackboard action / action_input /
+        # tool_arguments. Same code path used by Chat and MasterRoom nodes.
+        normalize_switchboard_args(self.blackboard, name=self.name)
 
         action_name = str(self.blackboard.get_state_value("action", "") or "").strip()
         arguments = self.blackboard.get_state_value("action_input", None)
         if not action_name or not isinstance(arguments, dict):
-            raise ValueError(f"[{self.name}] action/action_input missing after switchboard normalization.")
+            raise ValueError(
+                f"[{self.name}] action/action_input missing after switchboard normalization."
+            )
 
+        # Dayflow's own provenance machinery — distinct from the master_room
+        # marker write. Creates an action_dispatch:UUID row + stamps every
+        # acted_on item to state=dispatched + injects trigger_context into
+        # the outgoing tool args.
         self._persist_dispatch_records(action_name=action_name, arguments=arguments)
+
+        self.blackboard.update_state_value("calling_agent", None)
+        self.blackboard.update_state_value("next_agent", None)
+        self.blackboard.update_state_value("last_agent", self.name)
 
     def _persist_dispatch_records(
         self,
@@ -101,18 +112,23 @@ class DayflowSwitchboardArgumentsNode(RoomSwitchboardArgumentsNode):
         if acted_on_raw is None:
             acted_on_raw = []
         if not isinstance(acted_on_raw, list):
-            raise ValueError(f"[{self.name}] acted_on_item_ids must be a list for dispatch provenance.")
+            raise ValueError(
+                f"[{self.name}] acted_on_item_ids must be a list for dispatch provenance."
+            )
         if not acted_on_raw:
-            raise ValueError(f"[{self.name}] dispatch requires non-empty acted_on_item_ids.")
+            raise ValueError(
+                f"[{self.name}] dispatch requires non-empty acted_on_item_ids."
+            )
 
         resolved_ids = [resolve_short_id(str(v or "").strip()) for v in acted_on_raw]
         resolved_ids = [v for v in resolved_ids if v]
         if not resolved_ids:
-            raise ValueError(f"[{self.name}] could not resolve acted_on_item_ids for dispatch.")
+            raise ValueError(
+                f"[{self.name}] could not resolve acted_on_item_ids for dispatch."
+            )
 
         existing_items = get_dayflow_items()
         meta_by_id: Dict[str, Dict[str, Any]] = {}
-        item_by_id: Dict[str, Dict[str, Any]] = {}
         for item in existing_items:
             if not isinstance(item, dict):
                 continue
@@ -120,7 +136,6 @@ class DayflowSwitchboardArgumentsNode(RoomSwitchboardArgumentsNode):
             item_id = str(meta.get("item_id") or item.get("id") or "").strip()
             if item_id:
                 meta_by_id[item_id] = meta
-                item_by_id[item_id] = item
 
         # Inject trigger_context into the outgoing tool arguments so every
         # dispatched tool (ticket, email, anything) gets a backlink to its
@@ -147,7 +162,9 @@ class DayflowSwitchboardArgumentsNode(RoomSwitchboardArgumentsNode):
         for acted_id in resolved_ids:
             source_meta = meta_by_id.get(acted_id, {})
             task_summary = str(source_meta.get("summary") or acted_id).strip() or acted_id
-            task_id = str(source_meta.get("task_id") or source_meta.get("item_id") or acted_id).strip()
+            task_id = str(
+                source_meta.get("task_id") or source_meta.get("item_id") or acted_id
+            ).strip()
             plan_id = str(source_meta.get("plan_id") or "").strip()
             dispatch_id = str(uuid.uuid4())
             dispatch_item_id = f"action_dispatch:{dispatch_id}"
@@ -186,17 +203,15 @@ class DayflowSwitchboardArgumentsNode(RoomSwitchboardArgumentsNode):
                     metadata=metadata,
                 )
             )
-            dispatch_records.append(
-                {
-                    "dispatch_id": dispatch_id,
-                    "dispatch_item_id": dispatch_item_id,
-                    "acted_on_item_id": acted_id,
-                    "task_id": task_id,
-                    "plan_id": plan_id,
-                    "task_summary": task_summary,
-                    "action_type": action_name,
-                }
-            )
+            dispatch_records.append({
+                "dispatch_id": dispatch_id,
+                "dispatch_item_id": dispatch_item_id,
+                "acted_on_item_id": acted_id,
+                "task_id": task_id,
+                "plan_id": plan_id,
+                "task_summary": task_summary,
+                "action_type": action_name,
+            })
 
         # Stamp dispatched_at and move state to "dispatched" for every acted-on
         # item. The room invocation owns the in-flight window; post_room_finalize
@@ -237,4 +252,3 @@ class DayflowSwitchboardArgumentsNode(RoomSwitchboardArgumentsNode):
             stamped_count,
             action_name,
         )
-

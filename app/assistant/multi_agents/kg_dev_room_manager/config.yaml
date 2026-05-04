@@ -18,8 +18,8 @@ agents:
 control_nodes:
   - name: kg_dev_chat_task_router_node
     class: KgDevChatTaskRouterNode
-  - name: room_tool_caller
-    class: RoomToolCaller
+  - name: chat_tool_caller
+    class: ChatToolCaller
   - name: tool_result_handler
     class: ToolResultHandler
   - name: final_answer_node
@@ -57,8 +57,8 @@ flow_config:
   state_map:
     "shared::delegator": "kg_dev::chat_gate"
     "kg_dev::chat_gate": "kg_dev_chat_task_router_node"
-    "kg_dev_chat_task_router_node": "room_tool_caller"
-    "room_tool_caller": "room::response_formatter"
+    "kg_dev_chat_task_router_node": "chat_tool_caller"
+    "chat_tool_caller": "room::response_formatter"
     "room::response_formatter": "final_answer_node"
     "final_answer_node": "manager_exit_node"
     "graceful_exit": "graceful_exit_control_node"

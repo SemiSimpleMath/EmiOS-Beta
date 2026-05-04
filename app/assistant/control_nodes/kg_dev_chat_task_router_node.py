@@ -116,7 +116,7 @@ class KgDevChatTaskRouterNode(ChatTaskRouterNode):
         chat_response = str(self.blackboard.get_state_value(chat_response_key, "") or "").strip() or "On it."
         self._send_ack_to_user(chat_response)
 
-        # Synthesize the tool call. Mirror RoomSwitchboardArgumentsNode shape so
+        # Synthesize the tool call. Mirror ChatSwitchboardArgumentsNode shape so
         # the downstream tool_caller is unchanged.
         arguments = {"task": task_text, "information": info_text}
         self.blackboard.update_state_value("task", task_text)

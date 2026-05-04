@@ -43,10 +43,10 @@ control_nodes:
     class: DocCreateFinalRouterNode
   - name: geoguessr_router_node
     class: GeoguessrRouterNode
-  - name: room_switchboard_arguments_node
-    class: RoomSwitchboardArgumentsNode
-  - name: room_tool_caller
-    class: RoomToolCaller
+  - name: master_room_switchboard_arguments_node
+    class: MasterRoomSwitchboardArgumentsNode
+  - name: master_room_tool_caller
+    class: MasterRoomToolCaller
   - name: return_control_node
     class: ReturnControlNode
   - name: tool_caller
@@ -175,9 +175,9 @@ flow_config:
     "master_room::geoguessr_host": "geoguessr_router_node"
     "geoguessr_router_node": "final_answer_node"
     "master_room_chat_task_router_node": "master_room::switchboard"
-    "master_room::switchboard": "room_switchboard_arguments_node"
-    "room_switchboard_arguments_node": "room_tool_caller"
-    "room_tool_caller": "master_room::response_formatter"
+    "master_room::switchboard": "master_room_switchboard_arguments_node"
+    "master_room_switchboard_arguments_node": "master_room_tool_caller"
+    "master_room_tool_caller": "master_room::response_formatter"
     "master_room::response_formatter": "final_answer_node"
     "final_answer_node": "manager_exit_node"
     "graceful_exit": "graceful_exit_control_node"
