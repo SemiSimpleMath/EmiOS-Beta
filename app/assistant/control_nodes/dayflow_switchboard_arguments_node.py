@@ -22,6 +22,32 @@ class DayflowSwitchboardArgumentsNode(RoomSwitchboardArgumentsNode):
     dispatch provenance writes before tool execution.
     """
 
+    def _create_dayflow_dispatch_item(self, *, action_name: str, task_summary: str):
+        """Override the base-class marker write to a no-op for the dayflow path.
+
+        ``RoomSwitchboardArgumentsNode._create_dayflow_dispatch_item`` writes a
+        ``task:UUID`` plan_task row whose intent was anti-duplication for
+        master_room user-initiated dispatches (so dayflow's planner could see
+        in-flight chat work and not duplicate it). Inheriting it here is wrong
+        on three counts:
+
+        1. Dayflow already writes its own canonical provenance row via
+           ``_persist_dispatch_records`` below (source_type=action_dispatch),
+           so the inherited marker is a literal duplicate of the same event.
+        2. The marker is mislabeled ``source_type=plan_task`` and lacks a
+           ``plan_id`` — every dayflow dispatch produced an orphan plan_task
+           row indistinguishable from real planner-emitted tasks.
+        3. The marker's ``dispatch_origin`` falls back to "master_room" when
+           the blackboard has no room_id, so the row showed up tagged with
+           master_room even when the user never chatted there. (Misleading
+           noise during the 2026-05-04 Porto's-loop investigation.)
+
+        The base-class marker is still useful for true room-initiated chat
+        dispatches (master_room.chat → tool); this override only skips it
+        on the dayflow_orchestrator path.
+        """
+        return None
+
     def action_handler(self, message):
         delegate_to = str(self.blackboard.get_state_value("delegate_to", "") or "").strip()
         task = str(self.blackboard.get_state_value("task", "") or "").strip()
