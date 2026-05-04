@@ -2,7 +2,7 @@
 Dayflow blackboard context builder (minimal).
 
 Per-agent pre-LLM nodes now call ``get_dayflow_items()`` directly for
-context, and wait_interrupt_promoter_node reads active dispatches via
+context, and view_materializer_node reads active dispatches via
 ``dispatch_sweeper.list_active_dispatches()`` at the point of use. This
 module emits ``day_of_week`` and provides ``enrich_items_with_local_times``
 for callers that need to decorate item metadata with local-time strings.

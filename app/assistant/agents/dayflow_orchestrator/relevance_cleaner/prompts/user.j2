@@ -19,12 +19,14 @@ No plans.
 {%- if active_dayflow_items %}
 {%- set actionable = [] %}
 {%- set dispatched = [] %}
+{%- set waiting = [] %}
 {%- set closed_items = [] %}
 {%- set other = [] %}
 {%- for ex in active_dayflow_items %}
 {%- set m = ex.get("metadata", {}) %}
 {%- if m.get("state","") in ["important_open", "actionable"] %}{% if actionable.append(ex) %}{% endif %}
 {%- elif m.get("state","") == "dispatched" %}{% if dispatched.append(ex) %}{% endif %}
+{%- elif m.get("state","") == "waiting" %}{% if waiting.append(ex) %}{% endif %}
 {%- elif m.get("state","") == "closed" %}{% if closed_items.append(ex) %}{% endif %}
 {%- elif m.get("state","") in ["artifact", "new", "watching", "needs_planning"] %}{% if other.append(ex) %}{% endif %}
 {%- endif %}
@@ -32,6 +34,7 @@ No plans.
 
 {{ task_block(actionable, "Actionable Tasks", 30) }}
 {{ task_block(dispatched, "Dispatched Tasks", 20) }}
+{{ task_block(waiting, "Waiting Tasks (review for stale reactivation — close any whose reactivate_at_utc has long passed)", 30) }}
 {%- if closed_items %}
 
 +++++ Closed Items (review for suppression) +++++

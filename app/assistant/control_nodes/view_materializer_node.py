@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Tuple
 
 from app.assistant.control_nodes.control_node import ControlNode
 from app.assistant.dayflow_orchestrator.contracts import get_meta
+from app.assistant.dayflow_orchestrator.dispatch_sweeper import list_active_dispatches
 from app.assistant.dayflow_orchestrator.state_store import get_dayflow_items
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.time_utils import get_local_timezone, parse_iso_utc
@@ -282,6 +283,26 @@ class ViewMaterializerNode(ControlNode):
                     recently_acted_on.append(view_item)
             elif bucket == "useful_recent_context":
                 context_candidates.append((view_item, meta))
+
+        # Filter out actionable items already covered by an in-flight dispatch.
+        # Reads from DB at point of use; previously lived in wait_interrupt_promoter.
+        dispatched_item_ids: set[str] = set()
+        for d in list_active_dispatches():
+            acted_id = str(d.get("acted_on_item_id") or "").strip()
+            if acted_id:
+                dispatched_item_ids.add(acted_id)
+        if dispatched_item_ids:
+            before = len(actionable_items)
+            actionable_items = [
+                x for x in actionable_items
+                if str(x.get("item_id") or "").strip() not in dispatched_item_ids
+            ]
+            filtered = before - len(actionable_items)
+            if filtered:
+                logger.info(
+                    "[%s] filtered %d actionable item(s) already covered by active dispatches.",
+                    self.name, filtered,
+                )
 
         actionable_items.sort(key=_importance_sort_key)
         artifacts_context.sort(key=_start_utc_sort_key)

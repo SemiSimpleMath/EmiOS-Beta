@@ -71,9 +71,11 @@ def dayflow_orchestrator_cadence_tick(*, target_date: str | None = None, routine
     from app.assistant.dayflow_orchestrator.dispatch_sweeper import (
         sweep_stale_dispatches,
         sweep_orphaned_dispatched_tasks,
+        sweep_zombie_waiting_items,
     )
     sweep_stale_dispatches(now_utc=now_utc)
     sweep_orphaned_dispatched_tasks(now_utc=now_utc)
+    sweep_zombie_waiting_items(now_utc=now_utc)
 
     # Build minimal extras (day_of_week). Per-agent prep nodes own the rest.
     blackboard_extras = build_dayflow_blackboard_extras()

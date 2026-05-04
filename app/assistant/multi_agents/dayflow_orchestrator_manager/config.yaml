@@ -40,8 +40,6 @@ control_nodes:
     class: TriageSpawnGuardNode
   - name: view_materializer_node
     class: ViewMaterializerNode
-  - name: wait_interrupt_promoter_node
-    class: WaitInterruptPromoterNode
   - name: triage_persist_node
     class: TriagePersistNode
   - name: context_enricher_prep_node
@@ -154,8 +152,7 @@ flow_config:
     "relevance_cleaner_prep_node": "dayflow_orchestrator::relevance_cleaner"
     "dayflow_orchestrator::relevance_cleaner": "relevance_cleaner_persist_node"
     "relevance_cleaner_persist_node": "view_materializer_node"
-    "view_materializer_node": "wait_interrupt_promoter_node"
-    "wait_interrupt_promoter_node": "dayflow_orchestrator::action_selector"
+    "view_materializer_node": "dayflow_orchestrator::action_selector"
     "dayflow_orchestrator::action_selector": "action_selector_router_node"
     "action_selector_router_node": "dayflow_orchestrator::switchboard"
     "dayflow_orchestrator::plan_mode": "plan_mode_final_router_node"

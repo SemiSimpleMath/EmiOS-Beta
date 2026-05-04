@@ -108,7 +108,7 @@ class PlannedTaskContract(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# View item (view_materializer output → wait_interrupt_promoter → prompt)
+# View item (view_materializer output → action_selector prompt)
 # ---------------------------------------------------------------------------
 
 

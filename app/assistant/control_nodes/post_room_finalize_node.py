@@ -81,12 +81,7 @@ class PostRoomFinalizeNode(ControlNode):
         existing_items = get_dayflow_items()
         validate_dayflow_items(existing_items, f"{self.name}::existing_dayflow_items")
 
-        incoming_items = self.blackboard.get_state_value("intake_items_deduped", [])
-        if incoming_items is None:
-            incoming_items = []
-        validate_dayflow_items(incoming_items, f"{self.name}::intake_items_deduped")
-
-        all_known_items = list(existing_items) + list(incoming_items)
+        all_known_items = list(existing_items)
         existing_meta_by_id: Dict[str, Dict[str, Any]] = {}
         for item in all_known_items:
             if not isinstance(item, dict):

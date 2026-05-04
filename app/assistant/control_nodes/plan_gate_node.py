@@ -21,7 +21,7 @@ class PlanGateNode(ControlNode):
     The planner is intentionally *not* an always-on runtime brain. It should run
     only when new planning work is requested (``needs_planning``) or when an
     explicit force flag is set. Day-to-day progression is handled by
-    state_mover + wait_interrupt_promoter + action_selector.
+    state_mover + action_selector.
     """
 
     def _collect_resolved_ids(self, existing: List[Dict[str, Any]]) -> Set[str]:

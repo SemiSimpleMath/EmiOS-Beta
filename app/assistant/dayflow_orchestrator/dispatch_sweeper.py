@@ -11,7 +11,8 @@ live in ``blackboard_builder._load_active_dispatches``:
    ``dispatched`` state. Runs as a side effect during the cadence tick.
 
 2. ``list_active_dispatches`` — read-only loader that returns a compact
-   list of in-flight dispatch rows for the wait_interrupt_promoter node.
+   list of in-flight dispatch rows for view_materializer to filter
+   actionable items already covered by an in-flight dispatch.
 
 Keeping the side-effect path separate from the read path removes the
 need to carry ``active_action_dispatches`` across the tick->manager
@@ -42,6 +43,17 @@ _DISPATCH_LIST_CAP: int = 40
 # closed cleanly but the source-task revive step crashed (or where a
 # task was set to dispatched without a paired dispatch row at all).
 _TASK_DISPATCHED_TIMEOUT_HOURS: int = 2
+
+# Zombie waiting sweep: items in state='waiting' whose reactivate_at_utc
+# is more than this many hours past — and which therefore have aged out
+# of the 24h freshness filter that the cleaner / state_mover see — get
+# closed. Without this, a waiting item whose timer fires but doesn't get
+# picked up by action_selector stays in waiting forever; the dayflow
+# scheduler hot-loops on its stale timer (now patched separately) and
+# the cleaner can't see it because get_dayflow_items has its own 24h
+# cutoff. The cleaner closes those that are still visible; this sweep
+# closes those that aren't.
+_WAITING_ZOMBIE_OVERDUE_HOURS: int = 36
 
 
 def _find_item_by_id(items: List[Dict[str, Any]], item_id: str) -> Optional[Dict[str, Any]]:
@@ -259,10 +271,75 @@ def sweep_orphaned_dispatched_tasks(now_utc: Optional[datetime] = None) -> int:
     return revived
 
 
+def sweep_zombie_waiting_items(now_utc: Optional[datetime] = None) -> int:
+    """Close ``state='waiting'`` items whose ``reactivate_at_utc`` is far past.
+
+    Background: the relevance_cleaner closes stale waiting items per its
+    "long-past reactivate, never picked up" rule, but it only sees items
+    inside ``get_dayflow_items``'s 24h freshness window. Items that pass
+    their reactivate time and don't get dispatched within ~24h drop out
+    of the cleaner's view and become zombies — alive in DB, invisible to
+    every agent, and (until ``ANCIENT_ITEM_OVERDUE_SECONDS`` was added)
+    they kept the scheduler hot-looping on their stale timer.
+
+    This sweep runs at tick start and closes any such items past
+    ``_WAITING_ZOMBIE_OVERDUE_HOURS``. Threshold is set comfortably past
+    the cleaner's effective window (cleaner sees up to 24h, runs every
+    30m) so the cleaner gets first crack.
+
+    Returns count closed.
+    """
+    now = now_utc or datetime.now(timezone.utc)
+    all_items = load_existing_dayflow_items(include_terminal=True)
+    cutoff = timedelta(hours=_WAITING_ZOMBIE_OVERDUE_HOURS)
+    closed = 0
+
+    for item in all_items:
+        if not isinstance(item, dict):
+            continue
+        meta = get_meta(item)
+        if str(meta.get("state") or "").strip().lower() != "waiting":
+            continue
+        item_id = str(meta.get("item_id") or item.get("id") or "").strip()
+        if not item_id:
+            continue
+        raw = str(meta.get("reactivate_at_utc") or "").strip()
+        if not raw:
+            # No reactivate timer — the cleaner / state_mover own this case.
+            continue
+        try:
+            reactivate_at_utc = parse_iso_utc_strict(raw)
+        except Exception:
+            logger.error(
+                "dispatch_sweeper: failed to parse reactivate_at_utc=%r for waiting item %s",
+                raw, item_id, exc_info=True,
+            )
+            continue
+        overdue = now - reactivate_at_utc
+        if overdue <= cutoff:
+            continue
+
+        write_dayflow_item(
+            item_id,
+            state="closed",
+            reason=f"zombie_waiting: overdue {overdue.total_seconds() / 3600:.1f}h",
+            caller="dispatch_sweeper::sweep_zombie_waiting_items",
+        )
+        closed += 1
+        logger.info(
+            "dispatch_sweeper: closed zombie waiting item %s (overdue=%s, summary=%r)",
+            item_id, overdue, str(meta.get("summary") or "")[:80],
+        )
+
+    if closed:
+        logger.info("dispatch_sweeper: closed %d zombie waiting item(s).", closed)
+    return closed
+
+
 def list_active_dispatches() -> List[Dict[str, Any]]:
     """Return a compact list of in-flight dispatch rows.
 
-    Read-only. Callers (wait_interrupt_promoter_node) use this to filter
+    Read-only. Caller (view_materializer_node) uses this to filter
     out actionable items already covered by an in-flight dispatch.
     The list is sorted oldest-first and capped at the most recent 40.
     """
