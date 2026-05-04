@@ -41,6 +41,25 @@ from app.models.base import get_session
 logger = get_logger(__name__)
 
 
+def _has_wiki_prose_page(label: str) -> bool:
+    """Return True if a prose wiki page exists for this entity label.
+
+    The wiki is the canonical source of node.description for entities that
+    have a page — its lead paragraph IS the description (synced by
+    page_writer._sync_lead_to_node_description). description_creator must
+    not compete; it only fills descriptions for nodes the wiki doesn't cover.
+    """
+    if not label:
+        return False
+    try:
+        from app.assistant.wiki_generator.nightly_refresh import _default_vault
+        from app.assistant.wiki_generator.wiki_writer import _safe_filename
+        prose_path = _default_vault() / "prose" / (_safe_filename(label) + ".md")
+        return prose_path.exists()
+    except Exception:
+        return False
+
+
 def run(ctx: PipelineContext, max_nodes: int = 50) -> dict:
     from app.assistant.kg.db.knowledge_graph_db import Node
     from app.assistant.pipelines.kg_maintenance_pipeline.description_creator import (
@@ -54,10 +73,21 @@ def run(ctx: PipelineContext, max_nodes: int = 50) -> dict:
         all_important = get_important_nodes(session, run_nano_filter=True)
 
         nodes_without_desc = set()
+        wiki_owned_skipped = 0
         for snap in all_important:
             node = session.query(Node).filter(Node.id == snap.node_id).first()
-            if node and (not node.description or not node.description.strip()):
-                nodes_without_desc.add(snap.node_id)
+            if not node:
+                continue
+            if node.description and node.description.strip():
+                continue
+            # Wiki guard: if a prose wiki page exists for this entity, the
+            # wiki owns its description (lead paragraph → node.description
+            # via page_writer._sync_lead_to_node_description). Skip here so
+            # we don't write a competing description from raw neighborhood.
+            if _has_wiki_prose_page(node.label):
+                wiki_owned_skipped += 1
+                continue
+            nodes_without_desc.add(snap.node_id)
 
         work_queue = [s for s in all_important if s.node_id in nodes_without_desc]
     finally:
@@ -69,8 +99,8 @@ def run(ctx: PipelineContext, max_nodes: int = 50) -> dict:
         "┌─ step_description_fill ─────────────────────────────────────────",
     )
     logger.info(
-        "│  important nodes: %d  |  missing description: %d",
-        eligible, len(work_queue),
+        "│  important nodes: %d  |  missing description: %d  |  wiki-owned skipped: %d",
+        eligible, len(work_queue), wiki_owned_skipped,
     )
 
     work_queue = work_queue[:max_nodes]
