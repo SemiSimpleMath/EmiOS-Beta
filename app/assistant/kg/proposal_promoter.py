@@ -222,9 +222,70 @@ def _score_candidates_by_participant_overlap(
             "node": cand,
             "overlap": len(inter),
             "jaccard": len(inter) / max(1, len(union)),
+            # The actual intersection set — used by the hub-weighted
+            # overlap filter to weight by participant degree.
+            "intersection": set(inter),
         })
     scored.sort(key=lambda s: (s["jaccard"], s["overlap"]), reverse=True)
     return scored
+
+
+_DEFAULT_MIN_WEIGHTED_OVERLAP_SCORE = 0.1
+
+
+def _filter_candidates_by_weighted_overlap(
+    scored: list,
+    entity_degrees: dict,
+    min_weighted_score: float = _DEFAULT_MIN_WEIGHTED_OVERLAP_SCORE,
+) -> list:
+    """Decide-not-a-match for State/Event/Goal candidates whose participant
+    overlap is composed only of high-degree hub entities.
+
+    Why: a sharing of "Jukka's children" (degree ~hundreds) carries near-
+    zero evidence of being the same instance — every kid-related event
+    involves them. Sharing a low-degree specific entity ("Drowsy
+    Chaperone", degree ~3) is strong evidence. Inverse-degree weighting
+    captures this: weight(entity) = 1.0 / max(1, degree(entity)).
+
+    The new proposal's participant fingerprint is implied by the scored
+    candidates (they were scored against it). Each candidate's
+    ``"node"._participant_intersection`` field, populated by
+    ``_score_candidates_by_participant_overlap``, names the overlapping
+    entity ids; we sum their weights.
+
+    Args:
+        scored: candidate list as returned by
+            ``_score_candidates_by_participant_overlap``. Each item may
+            carry an ``"intersection"`` key (a set of node_ids of shared
+            participants) — populated by the scorer when this filter is
+            in the chain. If absent, the filter is a no-op for that
+            candidate (kept).
+        entity_degrees: dict mapping participant node_id → edge count.
+            Higher = more hub-y. Computed in the read phase of
+            ``_prepare_proposal_plan``.
+        min_weighted_score: minimum sum of inverse-degrees across the
+            shared participant set. Defaults to
+            ``_DEFAULT_MIN_WEIGHTED_OVERLAP_SCORE``.
+
+    Returns:
+        Filtered scored list, same shape.
+    """
+    kept: list = []
+    for s in scored:
+        intersection = s.get("intersection")
+        if not intersection:
+            # No intersection info recorded — be lenient (keep). Caller
+            # is responsible for populating "intersection" when this
+            # filter is in the chain.
+            kept.append(s)
+            continue
+        weighted = 0.0
+        for entity_id in intersection:
+            degree = entity_degrees.get(entity_id, 1)
+            weighted += 1.0 / max(1, int(degree or 1))
+        if weighted >= min_weighted_score:
+            kept.append(s)
+    return kept
 
 
 def _filter_candidates_by_label_equality(
@@ -1318,6 +1379,35 @@ def _prepare_proposal_plan(proposal_id: str) -> Optional[_PromoterPlan]:
             # before sending to the LLM. See the 2026-05-03 Performance
             # over-merge investigation for the failure mode this prevents.
             scored = _filter_candidates_by_min_jaccard(scored)
+
+            # Hub-weighted overlap exclusion (complements Min-Jaccard).
+            # Sums inverse-degree weights of shared participants. A high
+            # Jaccard composed only of hub entities still gets dropped
+            # here because hub weights are tiny (1/100s); a low Jaccard
+            # composed of one obscure entity passes because that entity's
+            # weight is large (1/<10).
+            if scored:
+                shared_ids: set = set()
+                for sc in scored:
+                    shared_ids |= sc.get("intersection", set())
+                if shared_ids:
+                    deg_rows = (
+                        session.query(Edge.source_id, Edge.target_id)
+                        .filter(or_(
+                            Edge.source_id.in_(list(shared_ids)),
+                            Edge.target_id.in_(list(shared_ids)),
+                        ))
+                        .all()
+                    )
+                    entity_degrees: Dict[str, int] = {eid: 0 for eid in shared_ids}
+                    for src, tgt in deg_rows:
+                        if src in entity_degrees:
+                            entity_degrees[src] += 1
+                        if tgt in entity_degrees:
+                            entity_degrees[tgt] += 1
+                    scored = _filter_candidates_by_weighted_overlap(
+                        scored, entity_degrees,
+                    )
 
             # Label-mismatch exclusion. Labels are intentionally drawn from
             # a narrow standardized set, so SAME label is weak evidence and
