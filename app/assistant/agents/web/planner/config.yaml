@@ -1,11 +1,11 @@
 name: web::planner
 class_name: Planner
 llm_params:
-  llm_provider: "openai"
-  engine: "gpt-5.4-nano"
-  model_tier: "nano"
+  llm_provider: "gemini"
+  engine: "gemini-3-flash-preview"
+  model_tier: "mini"
   temperature: 1
-
+  
 
 allowed_nodes: [shared::writer, shared::mathematician]
 

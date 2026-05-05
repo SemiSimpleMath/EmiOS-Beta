@@ -2,9 +2,9 @@ name: kg_team::planner
 class_name: Planner
 llm_params:
   llm_provider: "openai"
-  engine: "gpt-5.4-nano"
-  model_tier: "nano"
-
+  engine: "gpt-5-mini"
+  model_tier: "mini"
+  
 
 allowed_tools: [kg_find_edge, kg_describe_node, kg_describe_edge, ask_user, kg_update_node, kg_create_node, kg_create_edge, kg_delete_node, kg_delete_edge]
 allowed_nodes: [kg_team::find_nodes, return_control]
