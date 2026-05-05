@@ -29,6 +29,15 @@ class ProgressEmitter:
             logger.debug("Could not read agent.parent.name", exc_info=True)
             manager_name = ""
 
+        # what_i_am_thinking is the planner's own one-line description of
+        # what it's doing this step — the natural narration source. Far
+        # better than narrating tool names ("running search_web") because
+        # the planner already had to articulate the goal to fill the field.
+        thinking = result_dict.get("what_i_am_thinking")
+        if not isinstance(thinking, str):
+            thinking = ""
+        thinking = thinking.strip()
+
         fact = {
             "kind": "planner_decision",
             "agent": agent.name,
@@ -36,6 +45,7 @@ class ProgressEmitter:
             "task": task,
             "action": result_dict.get("action"),
             "action_input": result_dict.get("action_input"),
+            "what_i_am_thinking": thinking,
             "learned": (result_dict.get("summary") or "").strip() if isinstance(result_dict.get("summary"), str) else "",
             "action_count": agent.blackboard.get_state_value("action_count"),
         }

@@ -80,10 +80,12 @@ class ProgressCurator:
                 logger.warning("ProgressCurator failed to curate/emit", exc_info=True)
 
     def _curate_fact_to_card(self, fact: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """
-        Convert facts into a stable UI card.
+        """Convert facts into a stable UI card.
 
-        We avoid chain-of-thought: do NOT include raw "what_i_am_thinking".
+        ``what_i_am_thinking`` (planner's own one-line self-narration) is
+        passed through unchanged — it's the highest-signal narration source
+        we have. The chat narrator picks it up for in-chat updates;
+        consumers that don't want it just don't read the field.
         """
         kind = str(fact.get("kind") or "unknown")
         agent = str(fact.get("agent") or fact.get("sender") or "")
@@ -151,6 +153,8 @@ class ProgressCurator:
             return None
 
         now = datetime.now(timezone.utc).isoformat()
+        what_i_am_thinking = str(fact.get("what_i_am_thinking") or "").strip()
+
         return {
             "ts": now,
             "kind": kind,
@@ -158,6 +162,7 @@ class ProgressCurator:
             "agent": agent,
             "headline": headline,
             "goal": goal,
+            "what_i_am_thinking": what_i_am_thinking,
             "learned": learned_items,
             "next": {"action": next_action, "input_preview": next_action_input},
             "meta": {

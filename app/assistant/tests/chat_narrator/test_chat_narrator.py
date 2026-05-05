@@ -55,15 +55,17 @@ def narrator():
         yield n
 
 
-def _card(*, manager: str = "web_manager", kind: str = "tool_call",
+def _card(*, manager: str = "web_manager", kind: str = "planner_decision",
           goal: str = "", next_action: str = "",
-          tool: str = "", learned=None) -> dict:
+          tool: str = "", learned=None,
+          what_i_am_thinking: str = "") -> dict:
     return {
         "kind": kind,
         "manager": manager,
         "agent": f"{manager}::test",
         "headline": kind,
         "goal": goal,
+        "what_i_am_thinking": what_i_am_thinking,
         "learned": learned or [],
         "next": {"action": next_action, "input_preview": ""},
         "meta": {"tool": tool},
@@ -79,7 +81,68 @@ def _msg(card: dict) -> Message:
 
 class TestSentenceRendering:
 
-    def test_planner_decision_with_goal_and_next(self, narrator):
+    def test_what_i_am_thinking_is_primary(self, narrator):
+        s = narrator._render_sentence(
+            _card(kind="planner_decision",
+                  what_i_am_thinking="Searching for entry-level EWIs to compare prices",
+                  goal="Find electric saxophones",
+                  next_action="search_web"),
+            "Quimby",
+        )
+        # Planner's own self-narration wins over goal/next templating.
+        assert s == "[Quimby] Searching for entry-level EWIs to compare prices"
+
+    def test_what_i_am_thinking_truncated_when_long(self, narrator):
+        # No sentence breaks → hard-truncate to fit chat line.
+        long = "y" * 400
+        s = narrator._render_sentence(
+            _card(kind="planner_decision", what_i_am_thinking=long),
+            "Quimby",
+        )
+        assert s.startswith("[Quimby] ")
+        assert s.endswith("...")
+        assert len(s) < 240
+
+    def test_what_i_am_thinking_takes_first_sentences(self, narrator):
+        thinking = (
+            "I need to research the current market for electric saxophones. "
+            "I will start with a broad search to identify the latest models. "
+            "Then I will compare features by tier."
+        )
+        s = narrator._render_sentence(
+            _card(kind="planner_decision", what_i_am_thinking=thinking),
+            "Em",
+        )
+        # First two sentences kept; third dropped.
+        assert "I need to research" in s
+        assert "broad search" in s
+        assert "compare features" not in s
+
+    def test_single_long_sentence_hard_truncated(self, narrator):
+        thinking = "I will methodically " + "verify each candidate " * 30
+        s = narrator._render_sentence(
+            _card(kind="planner_decision", what_i_am_thinking=thinking),
+            "Em",
+        )
+        assert s.endswith("...")
+        # Tag + body capped near the configured 200-char body limit.
+        assert len(s) < 240
+
+    def test_multiline_thinking_normalizes_whitespace(self, narrator):
+        thinking = "Line one of thinking.\n\n  Line two of thinking."
+        s = narrator._render_sentence(
+            _card(kind="planner_decision", what_i_am_thinking=thinking),
+            "Em",
+        )
+        # Both sentences present, with single-space joins (no embedded
+        # newlines or runs of spaces).
+        assert "\n" not in s
+        assert "  " not in s
+        assert "Line one of thinking" in s
+        assert "Line two of thinking" in s
+
+    def test_planner_decision_fallback_to_goal_and_next(self, narrator):
+        # No what_i_am_thinking → fall back to old template.
         s = narrator._render_sentence(
             _card(kind="planner_decision", goal="Find Porto's savory items",
                   next_action="search_web"),
@@ -87,32 +150,34 @@ class TestSentenceRendering:
         )
         assert s == "[Quimby] working on: Find Porto's savory items — next: search_web"
 
-    def test_planner_decision_with_only_next(self, narrator):
+    def test_planner_decision_fallback_only_next(self, narrator):
         s = narrator._render_sentence(
             _card(kind="planner_decision", next_action="search_web"),
             "Quimby",
         )
         assert s == "[Quimby] next: search_web"
 
-    def test_tool_call_with_tool_and_goal(self, narrator):
+    def test_tool_call_now_silent(self, narrator):
+        # Tool calls are no longer narrated — the planner_decision that
+        # PRECEDED the tool already told the user what's happening.
         s = narrator._render_sentence(
             _card(kind="tool_call", tool="search_web", goal="Porto's menu"),
             "Quimby",
         )
-        assert s == "[Quimby] running search_web for: Porto's menu"
+        assert s == ""
 
-    def test_tool_result_with_learned(self, narrator):
+    def test_tool_result_now_silent(self, narrator):
         s = narrator._render_sentence(
             _card(kind="tool_result", learned=["Found 12 savory items"]),
             "Quimby",
         )
-        assert s == "[Quimby] got: Found 12 savory items"
+        assert s == ""
 
     def test_unknown_kind_returns_empty(self, narrator):
         s = narrator._render_sentence(_card(kind="mystery_kind"), "Quimby")
         assert s == ""
 
-    def test_long_goal_truncated(self, narrator):
+    def test_long_goal_truncated_in_fallback(self, narrator):
         long_goal = "x" * 200
         s = narrator._render_sentence(
             _card(kind="planner_decision", goal=long_goal, next_action="continue"),
@@ -149,48 +214,73 @@ class TestDisplayNameLookup:
 class TestThrottleAndDedup:
 
     def test_first_card_emits(self, narrator):
-        narrator._on_card(_msg(_card(kind="tool_call", tool="search_web", goal="Porto's")))
+        narrator._on_card(_msg(_card(
+            kind="planner_decision",
+            what_i_am_thinking="Looking up Porto's savory menu",
+        )))
         assert len(narrator._publishes) == 1
         sender, text = narrator._publishes[0]
         assert sender == "Quimby"
-        assert "running search_web" in text
+        assert "Looking up Porto's savory menu" in text
 
     def test_second_card_within_throttle_dropped(self, narrator):
-        narrator._on_card(_msg(_card(kind="tool_call", tool="t1", goal="g1")))
-        narrator._on_card(_msg(_card(kind="tool_call", tool="t2", goal="g2")))
+        narrator._on_card(_msg(_card(
+            kind="planner_decision", what_i_am_thinking="step one",
+        )))
+        narrator._on_card(_msg(_card(
+            kind="planner_decision", what_i_am_thinking="step two",
+        )))
         assert len(narrator._publishes) == 1  # second was throttled
 
     def test_card_after_throttle_window_emits(self, narrator):
-        narrator._on_card(_msg(_card(kind="tool_call", tool="t1", goal="g1")))
-        # Manually advance the throttle bookkeeping back in time so a
-        # second emit can land without sleeping.
+        narrator._on_card(_msg(_card(
+            kind="planner_decision", what_i_am_thinking="first",
+        )))
         manager_key = "web_manager"
         old_ts, old_text = narrator._last_emit[manager_key]
         narrator._last_emit[manager_key] = (old_ts - 100.0, old_text)
 
-        narrator._on_card(_msg(_card(kind="tool_call", tool="t2", goal="g2")))
+        narrator._on_card(_msg(_card(
+            kind="planner_decision", what_i_am_thinking="second",
+        )))
         assert len(narrator._publishes) == 2
 
     def test_identical_sentence_dropped_even_after_throttle(self, narrator):
-        card = _card(kind="tool_call", tool="search_web", goal="Porto's")
+        card = _card(kind="planner_decision",
+                     what_i_am_thinking="same thought")
         narrator._on_card(_msg(card))
-        # Force throttle to expire.
         manager_key = "web_manager"
         old_ts, old_text = narrator._last_emit[manager_key]
         narrator._last_emit[manager_key] = (old_ts - 100.0, old_text)
 
         narrator._on_card(_msg(card))
-        # Still only one publish — verbatim dedup catches it.
         assert len(narrator._publishes) == 1
 
     def test_different_managers_dont_throttle_each_other(self, narrator):
-        narrator._on_card(_msg(_card(manager="web_manager", kind="tool_call",
-                                     tool="search_web", goal="Porto's")))
-        narrator._on_card(_msg(_card(manager="devices_manager", kind="tool_call",
-                                     tool="set_thermostat", goal="cool to 70F")))
+        narrator._on_card(_msg(_card(
+            manager="web_manager", kind="planner_decision",
+            what_i_am_thinking="searching the web",
+        )))
+        narrator._on_card(_msg(_card(
+            manager="devices_manager", kind="planner_decision",
+            what_i_am_thinking="adjusting thermostat",
+        )))
         assert len(narrator._publishes) == 2
         senders = {p[0] for p in narrator._publishes}
         assert senders == {"Quimby", "Watt"}
+
+    def test_tool_call_card_does_not_publish(self, narrator):
+        # tool_call is no longer narrated — verify it doesn't emit OR
+        # consume the throttle slot.
+        narrator._on_card(_msg(_card(
+            kind="tool_call", tool="search_web", goal="x",
+        )))
+        assert narrator._publishes == []
+        # Subsequent planner_decision should still emit (slot wasn't taken).
+        narrator._on_card(_msg(_card(
+            kind="planner_decision", what_i_am_thinking="now I'm planning",
+        )))
+        assert len(narrator._publishes) == 1
 
     def test_empty_card_skipped(self, narrator):
         narrator._on_card(Message(sender="progress_curator", data={}))

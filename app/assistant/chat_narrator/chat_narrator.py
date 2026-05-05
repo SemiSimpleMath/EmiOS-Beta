@@ -24,6 +24,7 @@ re-curate, we just translate the headline into a chat sentence.
 """
 from __future__ import annotations
 
+import re
 import threading
 import time
 from datetime import datetime, timezone
@@ -100,44 +101,73 @@ class ChatNarrator:
     def _render_sentence(self, card: Dict[str, Any], display_name: str) -> str:
         """Compose a brief narration sentence from a curated card.
 
-        Templated for the PoC — keep it simple. A future LLM-driven version
-        could synthesize more natural narration from the card content + the
-        worker's voice profile.
+        Strategy: narrate ONLY ``planner_decision`` cards, using the planner's
+        own ``what_i_am_thinking`` line. The planner already had to articulate
+        what it's about to do to fill that field — far higher signal than
+        tool-name templating ("running search_web").
+
+        ``tool_call`` and ``tool_result`` cards are intentionally skipped —
+        they fire many times per planner cycle and would drown out the actual
+        narration. The planner_decision that PRECEDED the tool already told
+        the user what was about to happen, and the next planner_decision
+        will tell them what was learned.
         """
         kind = str(card.get("kind") or "").strip()
+        if kind != "planner_decision":
+            return ""
+
+        thinking = str(card.get("what_i_am_thinking") or "").strip()
+        if thinking:
+            narration = self._first_sentences(thinking, max_chars=200, max_sentences=2)
+            return f"[{display_name}] {narration}"
+
+        # Fallback when the planner didn't fill what_i_am_thinking — keep
+        # the user informed something is happening, but lower-signal.
         goal = str(card.get("goal") or "").strip()
         next_block = card.get("next") if isinstance(card.get("next"), dict) else {}
         next_action = str(next_block.get("action") or "").strip() if next_block else ""
-        learned = card.get("learned")
-        learned_first = ""
-        if isinstance(learned, list) and learned:
-            learned_first = str(learned[0]).strip()
-
-        # Goal trimming: short for chat.
         goal_short = goal if len(goal) <= 80 else goal[:77] + "..."
-
-        if kind == "planner_decision":
-            if next_action and goal_short:
-                return f"[{display_name}] working on: {goal_short} — next: {next_action}"
-            if next_action:
-                return f"[{display_name}] next: {next_action}"
-            if goal_short:
-                return f"[{display_name}] working on: {goal_short}"
-            return ""
-        if kind == "tool_call":
-            tool = str(card.get("meta", {}).get("tool") or next_action or "").strip()
-            if tool and goal_short:
-                return f"[{display_name}] running {tool} for: {goal_short}"
-            if tool:
-                return f"[{display_name}] running {tool}"
-            return ""
-        if kind == "tool_result":
-            if learned_first:
-                snippet = learned_first if len(learned_first) <= 120 else learned_first[:117] + "..."
-                return f"[{display_name}] got: {snippet}"
-            return ""
-        # Other kinds: skip until we know what they look like.
+        if next_action and goal_short:
+            return f"[{display_name}] working on: {goal_short} — next: {next_action}"
+        if next_action:
+            return f"[{display_name}] next: {next_action}"
+        if goal_short:
+            return f"[{display_name}] working on: {goal_short}"
         return ""
+
+    @staticmethod
+    def _first_sentences(text: str, *, max_chars: int = 200, max_sentences: int = 2) -> str:
+        """Extract the first 1-2 sentences from a planner's what_i_am_thinking
+        for use as a chat narration line. The full text remains available
+        on the card for any consumer that wants the unabbreviated version.
+
+        Splits on ``.``, ``!``, or ``?`` followed by whitespace. Stops adding
+        sentences once the total length would exceed ``max_chars``. If the
+        first sentence alone is too long, hard-truncates with "...".
+        """
+        text = (text or "").strip()
+        if not text:
+            return ""
+        # Normalize whitespace so multi-line thinking renders cleanly.
+        text = re.sub(r"\s+", " ", text)
+        parts = re.split(r"(?<=[.!?])\s+", text)
+        if not parts:
+            return text
+        out = ""
+        for i, sentence in enumerate(parts):
+            sentence = sentence.strip()
+            if not sentence:
+                continue
+            candidate = f"{out} {sentence}".strip() if out else sentence
+            if len(candidate) > max_chars:
+                if not out:
+                    # First sentence alone is too long — hard-truncate.
+                    return sentence[: max_chars - 3].rstrip() + "..."
+                break
+            out = candidate
+            if i + 1 >= max_sentences:
+                break
+        return out
 
     def _publish_chat(self, *, sender: str, text: str) -> None:
         """Build a UserMessage and publish via socket_emit to master_room."""
