@@ -1,6 +1,7 @@
 name: kg_team_manager
 class_name: MultiAgentManager
 description: "A team manager that orchestrates agent execution for task completion."
+display_name: "Mnemo"
 max_cycles: 80  # Prevent infinite loops
 role_bindings:
   delegator: kg_team::delegator

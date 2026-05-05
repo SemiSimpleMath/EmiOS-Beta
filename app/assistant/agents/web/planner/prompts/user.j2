@@ -7,11 +7,6 @@ Task you have been given: {{ task }}
 Additional information: {{ information }}
 {% endif %}
 
-{% if user_steering %}
-**User steering (live, just now):** the user just sent these instructions while you were working. Incorporate them into your next plan step. They override your prior plan only as far as they actually change.
-{{ user_steering }}
-{% endif %}
-
 {% if orchestrator_global_objective %}
 Orchestrator global objective:
 {{ orchestrator_global_objective }}

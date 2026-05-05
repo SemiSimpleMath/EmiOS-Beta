@@ -31,6 +31,24 @@ def initialize_system():
 
     logger.info(f"Preloading completed in {elapsed_time:.2f} seconds.")
 
+    # Build the display-name registry from each manager config's
+    # ``display_name:`` field. Used by the chat narrator + @mention router.
+    from app.assistant.chat_narrator.display_names import (
+        initialize_display_name_registry,
+    )
+    display_names: dict[str, str] = {}
+    for mgr_name, mgr_cfg in (manager_registry.all_configs() or {}).items():
+        if not isinstance(mgr_cfg, dict):
+            continue
+        dn = mgr_cfg.get("display_name")
+        if isinstance(dn, str) and dn.strip():
+            display_names[mgr_name] = dn.strip()
+    initialize_display_name_registry(display_names)
+    logger.info(
+        "Display-name registry initialized with %d named managers: %s",
+        len(display_names), sorted(display_names.values()),
+    )
+
     agent_registry = DI.agent_registry
     validate_all(agent_registry)
 
@@ -50,8 +68,8 @@ def initialize_system():
     ServiceLocator.register("progress_curator", progress_curator)
     chat_narrator = ChatNarrator()
     ServiceLocator.register("chat_narrator", chat_narrator)
-    from app.assistant.manager_runtime.steering_inbox import SteeringInbox
-    ServiceLocator.register("steering_inbox", SteeringInbox())
+    from app.assistant.manager_runtime.mailbox import Mailbox
+    ServiceLocator.register("mailbox", Mailbox())
     ServiceLocator.register("question_service", QuestionService())
 
     logger.info("Loading emi_result_handler...")

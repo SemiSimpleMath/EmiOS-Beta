@@ -168,6 +168,100 @@ class MultiAgentManager:
         except Exception as e:
             logger.debug("[%s] Failed to persist manager_route_trace: %s", self.name, e, exc_info=True)
 
+    # Reserved blackboard key holding per-agent runtime injection lists.
+    # ``{agent_name: [text, text, ...]}`` — append-only, never cleared by
+    # the manager. Agent prompt assembly renders its own slot during each
+    # activation. Underscore-prefixed to signal "system reserved".
+    _RUNTIME_INJECTIONS_BB_KEY = "_runtime_injections"
+
+    def _drain_mailbox(self) -> None:
+        """Drain the per-invocation mailbox and dispatch by message type.
+
+        Called at the top of every cycle in ``_run_loop``. Safe to call
+        when the mailbox or invocation_id isn't set up — silently no-ops.
+        Never raises into the manager loop.
+        """
+        try:
+            invocation_id = self.blackboard.get_state_value("_invocation_id")
+        except Exception:
+            invocation_id = None
+        if not isinstance(invocation_id, str) or not invocation_id.strip():
+            return
+
+        try:
+            from app.assistant.ServiceLocator.service_locator import DI
+            mailbox = getattr(DI, "mailbox", None)
+        except Exception:
+            mailbox = None
+        if mailbox is None:
+            return
+
+        try:
+            messages = mailbox.drain(invocation_id)
+        except Exception:
+            logger.debug(
+                "[%s] mailbox drain raised; skipping cycle", self.name, exc_info=True,
+            )
+            return
+        if not messages:
+            return
+
+        for msg in messages:
+            try:
+                self._dispatch_mailbox_message(msg)
+            except Exception:
+                logger.error(
+                    "[%s] mailbox dispatch failed for type=%s — message dropped",
+                    self.name, getattr(msg, "message_type", "<?>"),
+                    exc_info=True,
+                )
+
+    def _dispatch_mailbox_message(self, msg) -> None:
+        """Apply one MailboxMessage. Add new ``message_type`` cases here."""
+        mtype = getattr(msg, "message_type", "")
+        payload = getattr(msg, "payload", None)
+        if not isinstance(payload, dict):
+            return
+
+        if mtype == "agent_inject":
+            for role_or_name, content in payload.items():
+                target = self.resolve_role_binding(role_or_name)
+                if not isinstance(target, str) or not target.strip():
+                    continue
+                if not isinstance(content, str) or not content.strip():
+                    continue
+                self._append_runtime_injection(target.strip(), content.strip())
+            return
+
+        if mtype == "blackboard_write":
+            for key, value in payload.items():
+                if not isinstance(key, str) or not key.strip():
+                    continue
+                self.blackboard.update_state_value(key.strip(), value)
+            return
+
+        logger.warning(
+            "[%s] mailbox: unknown message_type=%r — dropped", self.name, mtype,
+        )
+
+    def _append_runtime_injection(self, agent_name: str, text: str) -> None:
+        """Append text to the named agent's runtime-injection slot. Append-only —
+        accumulates like chat history. The agent renders its own slot during
+        prompt build."""
+        store = self.blackboard.get_state_value(self._RUNTIME_INJECTIONS_BB_KEY) or {}
+        if not isinstance(store, dict):
+            store = {}
+        existing = store.get(agent_name)
+        if not isinstance(existing, list):
+            existing = []
+        existing.append(text)
+        store[agent_name] = existing
+        self.blackboard.update_state_value(self._RUNTIME_INJECTIONS_BB_KEY, store)
+        logger.info(
+            "[%s] runtime_injection appended for agent=%s len=%d (total=%d)",
+            self.name, agent_name, len(text), len(existing),
+        )
+
     def _seed_local_blackboard_messages(self, seeded_payload: object, *, target_scope_id: str | None = None) -> int:
         if seeded_payload is None:
             return 0
@@ -408,6 +502,12 @@ class MultiAgentManager:
             except Exception:
                 logger.error("[%s] Failed to update manager loop counters", self.name)
                 logger.debug("failed to update manager loop counters exception details", exc_info=True)
+
+            # Drain mailbox: deliver outside-of-loop messages (e.g. @mention
+            # steering, cancel signals from another thread, runtime context
+            # injection) before any agent runs this cycle. Always at the safe
+            # boundary — never mid-LLM-call.
+            self._drain_mailbox()
 
             # Cooperative cancellation hook (used by orchestrators).
             if self.blackboard.get_state_value("cancelled", False) or self.blackboard.get_state_value("cancel", False):

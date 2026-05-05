@@ -1,47 +1,53 @@
 """Display-name registry for sub-managers.
 
-Manager name → user-facing worker name. Centralized here so the chat
-narrator (which renders progress narrations) and the @mention resolver
-(which routes user steering by name) read from the same source of truth.
+Manager name → user-facing worker name. Populated at boot from each
+manager's ``config.yaml`` (``display_name: Quimby``). Centralized so the
+chat narrator (which renders progress narrations) and the @mention
+resolver (which routes user steering by name) read from the same source
+of truth.
 
-To add a new named worker: drop an entry into ``DISPLAY_NAMES`` below.
+To name a new worker: add ``display_name: <Name>`` to its
+``manager_config.yaml``. Re-register at boot picks it up automatically.
+
 Long-running planner-loop managers benefit most from naming. Quick one-shot
 tools should stay anonymous (they finish before the user can address them).
-
-Names should be:
-- Short, human, distinct
-- Chosen, not generated (the affection users develop for them is the point)
-- Stable — once a manager has a name, don't rename it casually
 """
 from __future__ import annotations
 
 from typing import Dict, Optional
 
 
-DISPLAY_NAMES: Dict[str, str] = {
-    "web_manager": "Quimby",
-    "emi_team_manager": "Em",
-    "personal_admin_manager": "Phyllis",
-    "devices_manager": "Watt",
-    "kg_team_manager": "Mnemo",
-}
+# Populated at boot by ``initialize_display_name_registry`` (called from
+# initialize_system.py after ManagerRegistry.preload_all). Empty at import
+# time. Tests can populate manually.
+_FORWARD: Dict[str, str] = {}
+_REVERSE: Dict[str, str] = {}
 
 
-# Reverse lookup, computed once at import. ``@quimby`` (any case) → "web_manager".
-_DISPLAY_TO_MANAGER: Dict[str, str] = {
-    name.lower(): manager for manager, name in DISPLAY_NAMES.items()
-}
+def initialize_display_name_registry(name_to_display: Dict[str, str]) -> None:
+    """Replace the registry contents. Called once at boot from manager
+    configs; safe to call again if managers are reloaded.
+    """
+    _FORWARD.clear()
+    _REVERSE.clear()
+    for manager_name, display in (name_to_display or {}).items():
+        if not isinstance(manager_name, str) or not manager_name.strip():
+            continue
+        if not isinstance(display, str) or not display.strip():
+            continue
+        m = manager_name.strip()
+        d = display.strip()
+        _FORWARD[m] = d
+        _REVERSE[d.lower()] = m
 
 
 def display_name_for(manager_name: str) -> str:
-    """Return the user-facing display name for a manager.
-
-    Falls back to a humanized form of the manager_name so unnamed managers
-    show up visibly (signals "this worker still needs a name").
-    """
+    """User-facing name for a manager. Falls back to a humanized form so
+    unnamed managers still show up visibly (signals "this worker still
+    needs a display_name in its config")."""
     if not manager_name:
         return "Em"
-    name = DISPLAY_NAMES.get(manager_name)
+    name = _FORWARD.get(manager_name)
     if name:
         return name
     return manager_name.replace("_manager", "").replace("_", " ").title() or "Em"
@@ -55,10 +61,10 @@ def manager_for_display_name(display_name: str) -> Optional[str]:
     """
     if not display_name:
         return None
-    return _DISPLAY_TO_MANAGER.get(display_name.strip().lower())
+    return _REVERSE.get(display_name.strip().lower())
 
 
 def all_named_managers() -> Dict[str, str]:
-    """Return a copy of the full registry. Useful for UIs that want to show
-    "the team" or for diagnostic endpoints listing who can be addressed."""
-    return dict(DISPLAY_NAMES)
+    """Snapshot of the full registry — for diagnostic endpoints / "who can
+    I address right now?" UIs."""
+    return dict(_FORWARD)

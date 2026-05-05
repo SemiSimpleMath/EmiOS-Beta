@@ -1,6 +1,7 @@
 name: web_manager
 class_name: MultiAgentManager
 description: "A team manager that controls team of web search agents."
+display_name: "Quimby"
 max_cycles: 120
 role_bindings:
   delegator: web::delegator
@@ -48,8 +49,6 @@ control_nodes:
     class: ToolCaller
   - name: tool_result_handler
     class: ToolResultHandler
-  - name: steering_inject_node
-    class: SteeringInjectNode
   - name: return_control
     class: ReturnControlNode
   - name: manager_exit_node
@@ -86,12 +85,11 @@ flow_config:
   tool_return:
     tool_call_result_handler_node: "tool_result_handler"
   state_map:
-    "web::delegator": "steering_inject_node"
-    "steering_inject_node": "web::planner"
+    "web::delegator": "web::planner"
     "web::planner": "critic_pre_node"
     "web::web_critic": "critic_post_node"
     "tool_result_handler": "tool_return_router"
-    "tool_return_router": "steering_inject_node"
+    "tool_return_router": "web::planner"
     "web::planner_return_control": "shared::final_answer_lite"
     "shared::final_answer_lite": "manager_exit_node"
     "graceful_exit": "graceful_exit_control_node"

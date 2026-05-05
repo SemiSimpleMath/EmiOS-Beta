@@ -1,6 +1,7 @@
 name: devices_manager
 class_name: MultiAgentManager
 description: "Smart-home devices manager for Nest, lights, and Ring controls."
+display_name: "Watt"
 max_cycles: 30
 role_bindings:
   delegator: emi_team::delegator

@@ -30,10 +30,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from app.assistant.ServiceLocator.service_locator import DI
-from app.assistant.chat_narrator.display_names import (
-    DISPLAY_NAMES,
-    display_name_for,
-)
+from app.assistant.chat_narrator.display_names import display_name_for
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import (
     Message,

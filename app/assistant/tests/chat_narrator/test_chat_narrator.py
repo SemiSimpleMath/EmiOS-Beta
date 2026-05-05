@@ -18,6 +18,27 @@ from app.assistant.utils.pydantic_classes import Message
 # ── Fixtures ─────────────────────────────────────────────────────────
 
 
+@pytest.fixture(autouse=True)
+def _seed_display_names():
+    """Populate the display-name registry that ChatNarrator reads from.
+
+    Production fills this at boot from manager configs; tests need it set
+    explicitly because we don't bootstrap the full system here.
+    """
+    from app.assistant.chat_narrator.display_names import (
+        initialize_display_name_registry,
+    )
+    initialize_display_name_registry({
+        "web_manager": "Quimby",
+        "emi_team_manager": "Em",
+        "personal_admin_manager": "Phyllis",
+        "devices_manager": "Watt",
+        "kg_team_manager": "Mnemo",
+    })
+    yield
+    initialize_display_name_registry({})
+
+
 @pytest.fixture
 def narrator():
     """ChatNarrator with mocked DI (event_hub registration is no-op'd

@@ -36,7 +36,6 @@ user_context_items:
   - date_time
   - task
   - information
-  - user_steering
   - orchestrator_global_objective
   - orchestrator_global_guidance
   - orchestrator_job_id

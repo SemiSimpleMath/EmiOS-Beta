@@ -1,17 +1,30 @@
 """Tests for the display-name registry.
 
-Forward (manager → display) was already exercised by the narrator's tests.
-These cover the reverse path used by the @mention resolver, plus
-case-insensitivity and unknown-name handling.
+Registry is populated at boot from manager configs (display_name field).
+Forward (manager → display) used by the narrator; reverse (display → manager)
+used by the @mention resolver.
 """
 from __future__ import annotations
 
+import pytest
+
 from app.assistant.chat_narrator.display_names import (
-    DISPLAY_NAMES,
     all_named_managers,
     display_name_for,
+    initialize_display_name_registry,
     manager_for_display_name,
 )
+
+
+@pytest.fixture(autouse=True)
+def _seeded_registry():
+    initialize_display_name_registry({
+        "web_manager": "Quimby",
+        "emi_team_manager": "Em",
+        "personal_admin_manager": "Phyllis",
+    })
+    yield
+    initialize_display_name_registry({})
 
 
 class TestForwardLookup:
@@ -53,11 +66,40 @@ class TestReverseLookup:
         assert manager_for_display_name("  Quimby  ") == "web_manager"
 
 
-class TestRegistryHelper:
+class TestRegistryHelpers:
 
     def test_all_named_managers_returns_copy(self):
         result = all_named_managers()
-        assert result == DISPLAY_NAMES
+        assert result == {
+            "web_manager": "Quimby",
+            "emi_team_manager": "Em",
+            "personal_admin_manager": "Phyllis",
+        }
         # Mutating the returned dict shouldn't affect the canonical registry.
         result["fake"] = "Faker"
-        assert "fake" not in DISPLAY_NAMES
+        assert manager_for_display_name("Faker") is None
+
+    def test_initialize_replaces_contents(self):
+        initialize_display_name_registry({"only_one": "Solo"})
+        # Old entries are gone.
+        assert manager_for_display_name("Quimby") is None
+        # New entry is present.
+        assert manager_for_display_name("Solo") == "only_one"
+        assert display_name_for("only_one") == "Solo"
+
+    def test_initialize_with_empty_dict_clears(self):
+        initialize_display_name_registry({})
+        assert manager_for_display_name("Quimby") is None
+        assert all_named_managers() == {}
+
+    def test_skips_invalid_entries(self):
+        initialize_display_name_registry({
+            "good": "Goodie",
+            "": "BadKey",
+            "bad_value": "",
+            "another": "AnotherGood",
+        })
+        assert manager_for_display_name("Goodie") == "good"
+        assert manager_for_display_name("AnotherGood") == "another"
+        assert manager_for_display_name("BadKey") is None
+        assert all_named_managers() == {"good": "Goodie", "another": "AnotherGood"}

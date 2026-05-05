@@ -23,6 +23,7 @@ class PromptBuilder:
     def construct_prompt(self, agent, message=None, entity_injection_keys: set[str] | None = None) -> List[Dict[str, str]]:
         system_prompt = self.get_system_prompt(agent, message, entity_injection_keys)
         user_prompt = self.get_user_prompt(agent, message, entity_injection_keys)
+        user_prompt = self._append_runtime_injections(agent, user_prompt)
 
         if not system_prompt:
             logger.error("[%s] Error forming the system prompt.", agent.name)
@@ -146,6 +147,37 @@ class PromptBuilder:
             logger.error("[%s] Context available for rendering: %s", agent.name, list((system_context or {}).keys()))
             logger.debug("[%s] system prompt render exception details", agent.name, exc_info=True)
             raise
+
+    # Reserved blackboard slot maintained by MultiAgentManager for per-agent
+    # runtime injections (see MultiAgentManager._RUNTIME_INJECTIONS_BB_KEY).
+    # Append-only list[str] per agent name; each item is a sender-wrapped
+    # block of text that should be visible to the agent on its NEXT activation
+    # and every subsequent one (chat-style accumulation, never cleared).
+    _RUNTIME_INJECTIONS_BB_KEY = "_runtime_injections"
+
+    def _append_runtime_injections(self, agent, user_prompt: str) -> str:
+        """If anything has been delivered to the agent's runtime-injection slot
+        via the manager mailbox, append it to the rendered user prompt.
+
+        Sender owns the framing (``+++++ Latest instruction from user +++ ...``)
+        — this just concatenates whatever's there, in posting order. Never
+        clears the slot; subsequent activations see the same accumulated
+        history, like chat messages.
+        """
+        try:
+            store = agent.blackboard.get_state_value(self._RUNTIME_INJECTIONS_BB_KEY) or {}
+        except Exception:
+            return user_prompt or ""
+        if not isinstance(store, dict):
+            return user_prompt or ""
+        items = store.get(agent.name)
+        if not isinstance(items, list) or not items:
+            return user_prompt or ""
+        addition = "\n\n".join(str(x) for x in items if isinstance(x, str) and x.strip())
+        if not addition:
+            return user_prompt or ""
+        base = (user_prompt or "").rstrip()
+        return f"{base}\n\n{addition}\n" if base else f"{addition}\n"
 
     def get_user_prompt(self, agent, message=None, entity_injection_keys: set[str] | None = None) -> str:
         user_prompt_template = agent.config.get("prompts", {}).get("user", "")

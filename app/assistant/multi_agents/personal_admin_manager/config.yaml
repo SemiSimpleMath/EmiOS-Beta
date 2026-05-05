@@ -1,6 +1,7 @@
 name: personal_admin_manager
 class_name: MultiAgentManager
 description: "Personal admin manager for calendar, todo, reminders, and email workflows."
+display_name: "Phyllis"
 max_cycles: 60
 role_bindings:
   delegator: personal_admin::delegator

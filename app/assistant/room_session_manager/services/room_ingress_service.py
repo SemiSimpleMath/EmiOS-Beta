@@ -11,6 +11,7 @@ from app.assistant.room_session_manager.services.task_creation_session_service i
 from app.assistant.room_session_manager.services.doc_creation_session_service import DocCreationSessionService
 from app.assistant.room_session_manager.services.geoguessr_session_service import GeoguessrSessionService
 from app.assistant.room_session_manager.services.room_slash_command_router import RoomSlashCommandRouter
+from app.assistant.room_session_manager.services.room_mention_router import RoomMentionRouter
 from app.assistant.utils.pydantic_classes import Message
 from app.assistant.utils.logging_config import get_logger
 
@@ -42,6 +43,33 @@ class RoomIngressService:
             doc_sessions=doc_creation_session_service,
             geo_sessions=geo_session_service,
         )
+        # Built lazily on first use so DI is available (mailbox + active
+        # worker resolvers are registered after RoomIngressService).
+        self._mention_router: RoomMentionRouter | None = None
+
+    def _get_mention_router(self) -> RoomMentionRouter | None:
+        if self._mention_router is not None:
+            return self._mention_router
+        try:
+            from app.assistant.ServiceLocator.service_locator import DI
+            from app.assistant.manager_runtime.active_workers import (
+                find_active_invocation_by_display_name,
+                list_active_display_names,
+                list_active_workers,
+            )
+            mailbox = getattr(DI, "mailbox", None)
+            if mailbox is None:
+                return None
+            self._mention_router = RoomMentionRouter(
+                active_workers_provider=list_active_workers,
+                worker_resolver=find_active_invocation_by_display_name,
+                display_names_lister=list_active_display_names,
+                mailbox=mailbox,
+            )
+            return self._mention_router
+        except Exception:
+            logger.debug("RoomMentionRouter unavailable", exc_info=True)
+            return None
 
     @staticmethod
     def extract_slash_command(content: str) -> tuple[str, str] | None:
@@ -132,6 +160,19 @@ class RoomIngressService:
         Returns: (normalized_body, normalized_metadata, early_result)
         """
         meta = dict(metadata) if isinstance(metadata, dict) else {}
+
+        # @mention takes precedence — runs before slash so e.g. "@em /plan ..."
+        # would still address Em (unlikely but consistent: leading token wins).
+        mention_router = self._get_mention_router()
+        if mention_router is not None:
+            mention_result = mention_router.route(
+                body=body, room_id=room_id, meta=meta,
+            )
+            if mention_result is not None:
+                # @mention always short-circuits — the manager pipeline never
+                # runs for the addressed message.
+                return "", mention_result.meta, mention_result.early_result
+
         cmd = self.extract_slash_command(body)
         if cmd is not None:
             cmd_name, cmd_payload = cmd
