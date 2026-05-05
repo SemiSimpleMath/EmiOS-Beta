@@ -176,8 +176,17 @@ class ChatNarrator:
                 f"Worker display name: {display_name}\n"
                 f"Manager (internal): {manager}"
             )
+            # Direct invocation (no manager request_handler) — pass via
+            # ``agent_input`` so AgentInputApplier writes ``task`` and
+            # ``information`` onto the agent's blackboard. Setting
+            # ``message.task`` / ``message.information`` directly would NOT
+            # work — those fields are only consumed by MultiAgentManager,
+            # not by the agent activation path.
             result = agent.action_handler(
-                Message(task=thinking, information=information)
+                Message(agent_input={
+                    "task": thinking,
+                    "information": information,
+                })
             )
             data = getattr(result, "data", None)
             if not isinstance(data, dict):
