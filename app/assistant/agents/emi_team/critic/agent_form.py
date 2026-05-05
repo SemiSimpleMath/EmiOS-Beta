@@ -1,4 +1,4 @@
-from typing import List, Literal
+from typing import List
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -7,13 +7,12 @@ class AgentForm(BaseModel):
     """
     Structured output for `emi_team::critic`.
 
-    This agent is a synchronous guardrail. It must NOT trigger tools directly.
-    It returns `action="done"` so control stays in the manager flow.
+    Synchronous guardrail — does NOT execute tools. critic_pre_node and
+    critic_post_node handle routing; no participation in the planner's
+    action contract is needed.
     """
 
     model_config = ConfigDict(extra="forbid")
-
-    action: Literal["done"] = Field(..., description="Always 'done'. This agent does not execute tools.")
 
     must_revise_plan: bool = Field(
         ...,

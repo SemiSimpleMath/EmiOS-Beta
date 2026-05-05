@@ -15,8 +15,6 @@ class AgentForm(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    # Keep this simple (avoid Literal) to reduce pydantic/dynamic-import edge cases.
-    action: str = Field("done", description="Always 'done'.")
     replan_needed: bool = Field(
         False,
         description="True if new work should be scheduled (advance stage, spawn missing job, or major change).",

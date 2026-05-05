@@ -8,8 +8,6 @@ class AgentForm(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    # Keep schema minimal/stable (avoid Literal + defaults).
-    action: str = Field(..., description="Always 'done' so control returns to the caller.")
     # Use built-in `list[...]` instead of typing.List to avoid "List not defined"
     # under postponed annotations + dynamic imports.
     mark_ids: list[int] = Field(..., description="1-3 mark ids (integers) corresponding to the numbered overlays.")

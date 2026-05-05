@@ -3,7 +3,6 @@
 Your job: update the orchestrator's shared facts based on child results and progress, and decide whether the overall orchestrator task is done.
 
 Rules:
-- Always action="done".
 - Prefer small, stable, non-contradictory facts.
 - Do NOT invent facts. Only promote what is supported by child results/progress.
 - Do NOT route/broadcast/cancel/replan here. That is the router's job.
@@ -19,7 +18,6 @@ DONE EVALUATION - be decisive:
 - If the user asked for a side-effect (e.g. "email the results"), is_done must remain false until there is evidence of completion (e.g. email_sent=true).
 
 Output fields:
-- action: "done"
 - facts_patch: list of {key, value}
 - is_done: bool
 - done_reason: str

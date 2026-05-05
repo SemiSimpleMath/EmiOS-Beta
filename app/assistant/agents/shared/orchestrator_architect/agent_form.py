@@ -1,4 +1,4 @@
-from typing import List, Literal
+from typing import List
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -17,7 +17,6 @@ class AgentForm(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    action: Literal["done"] = Field(..., description="Always 'done'.")
     spawn: List[ArchitectJob] = Field(default_factory=list, description="DAG jobs for the current phase.")
     notes: str = Field("", description="Short reasoning / status note.")
 

@@ -6,7 +6,6 @@ Your job: take the current orchestrator state (facts, job map, progress, and cur
 - whether we need to replan / advance to the next stage (replan_needed)
 
 Rules:
-- Always action="done".
 - You do NOT edit facts. Facts are owned by the curator.
 - Broadcast is ONLY for currently RUNNING jobs. If no running jobs, broadcast MUST be [].
 - Avoid broadcasting back to the same job that originated a progress item unless it is a correction or a stop/constraint.
@@ -24,7 +23,6 @@ CANCELLATION RULES - read carefully:
 - If unsure whether a child's work is redundant, do NOT cancel. Let it finish.
 
 Output fields:
-- action: "done"
 - replan_needed: bool
 - cancel_running: bool
 - cancel_targets: list[str]

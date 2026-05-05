@@ -1,4 +1,4 @@
-from typing import List, Literal
+from typing import List
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -14,7 +14,6 @@ class AgentForm(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    action: Literal["done"] = Field(..., description="Always 'done'.")
     facts_patch: List[FactPatchItem] = Field(
         default_factory=list,
         description="Shallow facts patch as list of {key,value}.",

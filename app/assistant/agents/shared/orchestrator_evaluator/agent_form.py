@@ -27,8 +27,6 @@ class AgentForm(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    action: Literal["done"] = Field(..., description="Always 'done'.")
-
     is_done: bool = Field(
         False,
         description="True when the overall orchestrator objective is satisfied OR facts indicate it is moot/invalid.",

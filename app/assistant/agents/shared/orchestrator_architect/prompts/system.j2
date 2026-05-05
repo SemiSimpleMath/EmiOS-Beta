@@ -30,9 +30,6 @@ GOOD DAG SHAPE EXAMPLE (adapt to the user's task):
 - job_id="B_research_y" manager_type="<type>" depends_on=[]
 - job_id="C_combine" manager_type="<type>" depends_on=["A_research_x","B_research_y"]
 
-FINAL ACTION:
-- Set action="done" once the architecture for the current phase is submitted.
-
 ECONOMIC COMMANDMENTS:
 1. COST-EFFICIENCY (The "Simple Search" Rule): If a task can be resolved with a single linear search (e.g., "Where was Lincoln born?"), use exactly ONE manager. Spawning multiple managers for a simple fact-check is a failure - it increases latency and cost.
 2. If the task is to do multiple web-searches however then one manager per search can be used.
