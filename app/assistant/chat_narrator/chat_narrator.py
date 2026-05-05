@@ -124,14 +124,28 @@ class ChatNarrator:
             if not thinking:
                 return
 
+            # Detect final-summary turn: planner action == "return_control"
+            # means the planner decided it's done. The thinking on this turn
+            # is the punchline of the whole run. Bypass the throttle so an
+            # earlier mid-loop emit doesn't suppress it.
+            next_action = ""
+            try:
+                nxt = card.get("next")
+                if isinstance(nxt, dict):
+                    next_action = str(nxt.get("action") or "").strip()
+            except Exception:
+                next_action = ""
+            is_final_summary = next_action == "return_control"
+
             # Throttle gate BEFORE the LLM call — don't burn tokens on
-            # cards we'd suppress anyway.
+            # cards we'd suppress anyway. Skipped for final summaries.
             now = time.monotonic()
             throttle_key = manager or display_name or "anon"
-            with self._lock:
-                last = self._last_emit.get(throttle_key)
-                if last is not None and (now - last[0]) < _THROTTLE_SECONDS:
-                    return
+            if not is_final_summary:
+                with self._lock:
+                    last = self._last_emit.get(throttle_key)
+                    if last is not None and (now - last[0]) < _THROTTLE_SECONDS:
+                        return
 
             # Ask the translator agent for a chat-friendly sentence.
             narration = self._invoke_translator(

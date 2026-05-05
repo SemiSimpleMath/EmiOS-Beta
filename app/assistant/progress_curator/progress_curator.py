@@ -93,6 +93,9 @@ class ProgressCurator:
         task = str(fact.get("task") or "")
 
         # Hide unhelpful control-node chatter (this is the #1 "not exciting" failure mode).
+        # EXCEPT: planner_decision with action=return_control is the planner's
+        # final-summary turn — when ``what_i_am_thinking`` has content, that
+        # thinking IS the punchline of the whole run. Let it through.
         _boring_actions = {
             "manager_exit_node",
             "return_control",
@@ -101,7 +104,13 @@ class ProgressCurator:
         if kind in {"tool_call", "planner_decision"}:
             a = str(fact.get("next_action") or fact.get("action") or "").strip()
             if a in _boring_actions or a.endswith("_exit_node"):
-                return None
+                final_thinking = (
+                    kind == "planner_decision"
+                    and a == "return_control"
+                    and str(fact.get("what_i_am_thinking") or "").strip()
+                )
+                if not final_thinking:
+                    return None
 
         # Evidence/learning
         learned = fact.get("learned")
