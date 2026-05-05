@@ -99,6 +99,22 @@ class ManagerInvoker:
                 blackboard.update_state_value("_invocation_id", invocation_id)
         except Exception:
             logger.debug("Failed to stash invocation_id on blackboard", exc_info=True)
+
+        # Publish "Hi, I'm <Name>" intro to chat — once per invocation, for
+        # any manager that has a display_name. Strip the UUID suffix so
+        # the canonical type name resolves against the display registry.
+        try:
+            from app.assistant.manager_runtime.active_workers import (
+                canonical_manager_name,
+            )
+            from app.assistant.ServiceLocator.service_locator import DI as _DI
+            narrator = getattr(_DI, "chat_narrator", None)
+            if narrator is not None:
+                narrator.maybe_introduce_worker(
+                    canonical_manager_name(manager_name), user_message,
+                )
+        except Exception:
+            logger.debug("worker intro publish failed", exc_info=True)
         try:
             normalized_message, immediate = self.preprocessor.preprocess(manager_name, user_message)
             if isinstance(immediate, ToolResult):

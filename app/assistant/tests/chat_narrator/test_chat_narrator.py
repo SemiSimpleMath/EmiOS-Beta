@@ -219,6 +219,50 @@ class TestThrottleAndDedup:
 # ── Display-name lookup ─────────────────────────────────────────────
 
 
+class TestWorkerIntro:
+
+    def test_named_worker_publishes_intro_with_task(self, narrator):
+        msg = Message(task="Research electric saxophones", information="x")
+        narrator.maybe_introduce_worker("emi_team_manager", msg)
+        assert len(narrator._publishes) == 1
+        sender, text = narrator._publishes[0]
+        assert sender == "Em"  # seeded fixture maps emi_team_manager → Em
+        assert "Hi, I'm Em" in text
+        assert "Research electric saxophones" in text
+
+    def test_named_worker_intro_falls_back_when_no_task(self, narrator):
+        msg = Message(task="", information="x")
+        narrator.maybe_introduce_worker("web_manager", msg)
+        assert len(narrator._publishes) == 1
+        sender, text = narrator._publishes[0]
+        assert sender == "Quimby"
+        assert text == "Hi, I'm Quimby. On it!"
+
+    def test_unnamed_manager_skipped(self, narrator):
+        msg = Message(task="do something internal")
+        narrator.maybe_introduce_worker("dayflow_orchestrator_manager", msg)
+        assert narrator._publishes == []
+
+    def test_disabled_manager_skipped(self, narrator):
+        msg = Message(task="x")
+        with patch.object(
+            narrator, "_narration_config_for",
+            return_value={"enabled": False},
+        ):
+            narrator.maybe_introduce_worker("web_manager", msg)
+        assert narrator._publishes == []
+
+    def test_long_task_truncated_in_intro(self, narrator):
+        long_task = "y" * 300
+        msg = Message(task=long_task)
+        narrator.maybe_introduce_worker("emi_team_manager", msg)
+        assert len(narrator._publishes) == 1
+        text = narrator._publishes[0][1]
+        assert text.endswith("...")
+        # body capped near the configured limit (110 task chars + tag)
+        assert len(text) < 180
+
+
 class TestDisplayNameLookup:
 
     def test_known_managers_get_curated_names(self, narrator):
