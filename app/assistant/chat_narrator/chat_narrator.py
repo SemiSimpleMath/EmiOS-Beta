@@ -135,17 +135,20 @@ class ChatNarrator:
         except Exception:
             logger.debug("ChatNarrator failed to process card", exc_info=True)
 
-    def maybe_introduce_worker(self, manager_name: str, user_message) -> None:
-        """Publish a brief "Hi, I'm <Name>" intro into chat when a named
-        worker starts handling something user-facing.
+    def maybe_announce_delegation(self, manager_name: str, user_message) -> None:
+        """Publish a brief "Delegating to <Name>." line when a named worker
+        starts a user-facing invocation.
 
         Fires once per invocation, immediately after ManagerInvoker
-        registers the call. Templated (no LLM) — predictable + cheap.
+        registers the call. Templated (no LLM) — predictable, cheap, and
+        environment-agnostic (the publish is a no-op in environments
+        without a chat surface subscriber).
 
         Skips silently when:
-          - the manager has no display_name in its config
+          - the manager has no display_name in its config (unnamed worker)
           - the manager's narration.enabled is false
-          - any failure (intro must never break the host invocation)
+          - any failure (this announcement must never break the host
+            invocation)
         """
         try:
             display_name = display_name_for(manager_name)
@@ -155,23 +158,12 @@ class ChatNarrator:
             if not cfg["enabled"]:
                 return
 
-            task = ""
-            try:
-                raw_task = getattr(user_message, "task", None) or ""
-                task = str(raw_task).strip()
-            except Exception:
-                task = ""
-
-            if task:
-                short = task if len(task) <= 110 else task[:107].rstrip() + "..."
-                text = f"Hi, I'm {display_name}. I'll be working on: {short}"
-            else:
-                text = f"Hi, I'm {display_name}. On it!"
-
+            text = f"Delegating to {display_name}."
             self._publish_chat(sender=display_name, text=text)
         except Exception:
             logger.debug(
-                "ChatNarrator.maybe_introduce_worker failed", exc_info=True,
+                "ChatNarrator.maybe_announce_delegation failed",
+                exc_info=True,
             )
 
     def _narration_config_for(self, manager_name: str) -> Dict[str, Any]:

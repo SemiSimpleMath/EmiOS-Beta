@@ -219,28 +219,29 @@ class TestThrottleAndDedup:
 # ── Display-name lookup ─────────────────────────────────────────────
 
 
-class TestWorkerIntro:
+class TestDelegationAnnouncement:
 
-    def test_named_worker_publishes_intro_with_task(self, narrator):
+    def test_named_worker_announces_delegation(self, narrator):
         msg = Message(task="Research electric saxophones", information="x")
-        narrator.maybe_introduce_worker("emi_team_manager", msg)
+        narrator.maybe_announce_delegation("emi_team_manager", msg)
         assert len(narrator._publishes) == 1
         sender, text = narrator._publishes[0]
         assert sender == "Em"  # seeded fixture maps emi_team_manager → Em
-        assert "Hi, I'm Em" in text
-        assert "Research electric saxophones" in text
+        assert text == "Delegating to Em."
 
-    def test_named_worker_intro_falls_back_when_no_task(self, narrator):
+    def test_announcement_does_not_depend_on_task(self, narrator):
+        # Delegation line is generic — no task interpolation, no LLM call,
+        # so an empty task still produces a clean announcement.
         msg = Message(task="", information="x")
-        narrator.maybe_introduce_worker("web_manager", msg)
+        narrator.maybe_announce_delegation("web_manager", msg)
         assert len(narrator._publishes) == 1
         sender, text = narrator._publishes[0]
         assert sender == "Quimby"
-        assert text == "Hi, I'm Quimby. On it!"
+        assert text == "Delegating to Quimby."
 
     def test_unnamed_manager_skipped(self, narrator):
         msg = Message(task="do something internal")
-        narrator.maybe_introduce_worker("dayflow_orchestrator_manager", msg)
+        narrator.maybe_announce_delegation("dayflow_orchestrator_manager", msg)
         assert narrator._publishes == []
 
     def test_disabled_manager_skipped(self, narrator):
@@ -249,18 +250,8 @@ class TestWorkerIntro:
             narrator, "_narration_config_for",
             return_value={"enabled": False},
         ):
-            narrator.maybe_introduce_worker("web_manager", msg)
+            narrator.maybe_announce_delegation("web_manager", msg)
         assert narrator._publishes == []
-
-    def test_long_task_truncated_in_intro(self, narrator):
-        long_task = "y" * 300
-        msg = Message(task=long_task)
-        narrator.maybe_introduce_worker("emi_team_manager", msg)
-        assert len(narrator._publishes) == 1
-        text = narrator._publishes[0][1]
-        assert text.endswith("...")
-        # body capped near the configured limit (110 task chars + tag)
-        assert len(text) < 180
 
 
 class TestDisplayNameLookup:
