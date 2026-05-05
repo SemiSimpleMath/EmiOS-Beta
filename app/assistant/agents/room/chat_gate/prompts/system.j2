@@ -21,8 +21,8 @@ Room context:
 {{ room_facts }}
 {% endif %}
 
-{% if resource_slack_format %}
-{{ resource_slack_format }}
+{% if skills and skills["slack-formatting"] %}
+{{ skills["slack-formatting"] }}
 {% endif %}
 
 

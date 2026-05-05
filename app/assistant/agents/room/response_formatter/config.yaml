@@ -16,6 +16,8 @@ user_context_items:
 
 system_context_items:
   - room_participant_facts
-  # Slack uses its own mrkdwn dialect — skill loads always; agent applies
-  # the substitutions only when room_surface == "slack".
-  - resource_slack_format
+
+# Skills (agentskills.io SKILL.md format). Loaded by SkillRegistry,
+# exposed in templates via {{ skills["<name>"] }}.
+skills:
+  - slack-formatting

@@ -1,8 +1,17 @@
-# Slack formatting (skill)
+---
+name: slack-formatting
+description: Slack uses its own mrkdwn dialect, not GitHub-flavored Markdown. Use this when responding on Slack — when room_surface == "slack". Defines the substitutions to apply (** → *, *italic* → _italic_, [text](url) → <url|text>, # heading → bold line) and lists the gotchas. Do NOT apply on UI / SMS / Telegram / Email.
+license: Apache-2.0
+metadata:
+  author: jukka
+  version: "1.0"
+---
 
-When responding on Slack (`room_surface == "slack"`), Slack uses its own
-*mrkdwn* dialect, not GitHub-flavored Markdown. Standard Markdown like
-`**bold**` renders literally with the asterisks visible.
+# Slack formatting
+
+When responding on Slack (`room_surface == "slack"`), use Slack's *mrkdwn*
+dialect, not standard Markdown. Standard Markdown like `**bold**` renders
+literally with the asterisks visible.
 
 Apply these substitutions on Slack only:
 
@@ -14,7 +23,7 @@ Apply these substitutions on Slack only:
 | `[text](url)` | `<url\|text>` |
 
 Notes:
-- Single-asterisk (`*bold*`) is bold in Slack — do NOT use it for italic.
+- Single-asterisk (`*bold*`) is **bold** in Slack — do NOT use it for italic.
 - Backticks for inline code (`` `code` ``) and triple-backtick code fences
   work the same way as GFM. Keep those unchanged.
 - Underscore italic (`_italic_`) and tildes for strikethrough (`~strike~`)

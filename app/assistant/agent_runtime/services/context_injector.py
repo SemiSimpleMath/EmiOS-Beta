@@ -435,6 +435,37 @@ class ContextInjector:
 
         return value
 
+    def resolve_skills(self, agent) -> Dict[str, str]:
+        """Resolve the agent's declared skills into a name → body dict.
+
+        Reads ``agent.config['skills']`` (list of skill names per the
+        agentskills.io standard), looks each up in the SkillRegistry, and
+        returns a dict keyed by skill name. The dict is what templates
+        render via ``{{ skills["slack-formatting"] }}`` — bracket access
+        because skill names contain hyphens.
+
+        Missing skills are logged and silently dropped (analogous to the
+        scope-policy soft-fail for resources). The agent shouldn't crash
+        because someone renamed a skill.
+        """
+        names = agent.config.get("skills", []) or []
+        if not names:
+            return {}
+        registry = getattr(DI, "skill_registry", None)
+        if registry is None:
+            logger.warning("[%s] DI.skill_registry not available — skipping %d declared skill(s)", agent.name, len(names))
+            return {}
+        resolved: Dict[str, str] = {}
+        for name in names:
+            if not isinstance(name, str) or not name.strip():
+                continue
+            skill = registry.get(name.strip())
+            if skill is None:
+                logger.warning("[%s] declared skill %r not registered — dropped", agent.name, name)
+                continue
+            resolved[skill.name] = skill.body
+        return resolved
+
     def generate_injections_block(self, agent, prompt_injections, message=None, entity_injection_keys: set[str] | None = None):
         if not isinstance(prompt_injections, list):
             raise ValueError(
@@ -453,6 +484,11 @@ class ContextInjector:
             "action_count": agent.blackboard.get_state_value(f"{agent.name}_action_count", 0),
             "room_contact_name": str(agent.blackboard.get_state_value("room_contact_name", "") or "").strip(),
             "current_speaker_name": str(agent.blackboard.get_state_value("current_speaker_name", "") or "").strip(),
+            # Skills declared at agent.config.skills are resolved here once,
+            # exposed as a dict that templates access via
+            # ``{{ skills["skill-name"] }}``. Missing skills are dropped
+            # with a warning, never crash the prompt.
+            "skills": self.resolve_skills(agent),
         }
 
         if message is not None:
