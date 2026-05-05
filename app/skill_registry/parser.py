@@ -1,0 +1,148 @@
+"""Parse + validate a SKILL.md file per the agentskills.io spec.
+
+Validation rules applied (see ``docs/architecture/21_SKILLS.md`` and
+<https://agentskills.io/specification>):
+
+  name:
+    - 1-64 characters
+    - lowercase alphanumeric + hyphens only ([a-z0-9-])
+    - cannot start or end with a hyphen
+    - no consecutive hyphens (--)
+    - MUST match the parent directory name
+
+  description:
+    - 1-1024 characters
+    - non-empty after stripping
+
+  license, compatibility, metadata, allowed_tools — optional, well-typed.
+
+  body:
+    - any markdown after the frontmatter
+    - empty body warns but doesn't fail
+
+Errors block loading; warnings are advisory.
+"""
+from __future__ import annotations
+
+import re
+from pathlib import Path
+from typing import Optional, Tuple
+
+import frontmatter
+
+from app.skill_registry.models import Skill, ValidationResult
+
+
+# Per spec: 1-64 chars, [a-z0-9], hyphens allowed but not at edges and no --
+_NAME_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
+_CONSECUTIVE_HYPHEN_RE = re.compile(r"--")
+
+_NAME_MAX = 64
+_DESCRIPTION_MAX = 1024
+_COMPATIBILITY_MAX = 500
+
+
+def parse_skill_md(path: Path) -> Tuple[Optional[Skill], ValidationResult]:
+    """Parse and validate one SKILL.md file.
+
+    Returns ``(skill, result)``. ``skill`` is None when validation fails.
+    ``result.ok`` is True iff no errors. Warnings always advisory.
+
+    The skill's parent directory name is the canonical identity; the
+    frontmatter ``name`` field MUST match it (per spec). This is checked
+    here, not later, because the registry indexes by name and a mismatch
+    would cause silent miswiring.
+    """
+    skill_dir = path.parent
+    dir_name = skill_dir.name
+    result = ValidationResult(ok=False, skill_dir=str(skill_dir))
+
+    # Read file
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        result.errors.append(f"Could not read {path}: {exc}")
+        return None, result
+
+    # Parse frontmatter
+    try:
+        post = frontmatter.loads(text)
+    except Exception as exc:
+        result.errors.append(f"Failed to parse YAML frontmatter: {exc}")
+        return None, result
+
+    fm = post.metadata or {}
+    body = (post.content or "").lstrip("\n")
+
+    # name: required + spec rules + dir match
+    name = fm.get("name")
+    if not isinstance(name, str) or not name:
+        result.errors.append("Frontmatter 'name' is required (non-empty string).")
+    else:
+        if len(name) > _NAME_MAX:
+            result.errors.append(f"Frontmatter 'name' exceeds {_NAME_MAX} chars: {len(name)}.")
+        if not _NAME_RE.match(name):
+            result.errors.append(
+                f"Frontmatter 'name' must match [a-z0-9-], no leading/trailing hyphens. Got: {name!r}"
+            )
+        if _CONSECUTIVE_HYPHEN_RE.search(name):
+            result.errors.append(f"Frontmatter 'name' contains consecutive hyphens: {name!r}")
+        if name != dir_name:
+            result.errors.append(
+                f"Frontmatter 'name' ({name!r}) must match parent directory name ({dir_name!r})."
+            )
+
+    # description: required + length cap
+    description = fm.get("description")
+    if not isinstance(description, str) or not description.strip():
+        result.errors.append("Frontmatter 'description' is required (non-empty string).")
+    elif len(description) > _DESCRIPTION_MAX:
+        result.errors.append(
+            f"Frontmatter 'description' exceeds {_DESCRIPTION_MAX} chars: {len(description)}."
+        )
+
+    # Optional fields — well-typed when present
+    license_field = fm.get("license")
+    if license_field is not None and not isinstance(license_field, str):
+        result.errors.append("Frontmatter 'license' must be a string when provided.")
+
+    compatibility = fm.get("compatibility")
+    if compatibility is not None:
+        if not isinstance(compatibility, str):
+            result.errors.append("Frontmatter 'compatibility' must be a string when provided.")
+        elif len(compatibility) > _COMPATIBILITY_MAX:
+            result.errors.append(
+                f"Frontmatter 'compatibility' exceeds {_COMPATIBILITY_MAX} chars: {len(compatibility)}."
+            )
+
+    md = fm.get("metadata")
+    metadata: dict = {}
+    if md is not None:
+        if not isinstance(md, dict):
+            result.errors.append("Frontmatter 'metadata' must be a mapping when provided.")
+        else:
+            metadata = md
+
+    allowed_tools = fm.get("allowed-tools") or fm.get("allowed_tools")
+    if allowed_tools is not None and not isinstance(allowed_tools, str):
+        result.errors.append("Frontmatter 'allowed-tools' must be a string when provided.")
+
+    # Body — empty warns but does not block
+    if not body.strip():
+        result.warnings.append("SKILL.md body is empty — skill will inject nothing useful.")
+
+    if result.errors:
+        return None, result
+
+    skill = Skill(
+        name=str(name),
+        description=str(description).strip(),
+        license=license_field,
+        compatibility=compatibility,
+        metadata=metadata,
+        allowed_tools=allowed_tools,
+        skill_dir=str(skill_dir),
+        body=body,
+    )
+    result.ok = True
+    return skill, result

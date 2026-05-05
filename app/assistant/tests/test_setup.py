@@ -97,6 +97,10 @@ def initialize_services():
     resource_manager = ResourceManager()
     ServiceLocator.register("resource_manager", resource_manager)
     resource_manager.load_all_from_directory("resources")
+
+    # Initialize SkillRegistry (agentskills.io SKILL.md loader)
+    from app.skill_registry import SkillRegistry
+    ServiceLocator.register("skill_registry", SkillRegistry())
     
     # Initialize Entity Catalog for fast entity detection
     from app.assistant.entity_management.entity_catalog import EntityCatalog
