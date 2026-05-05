@@ -13,6 +13,7 @@ context can be added later if/when forks become common.
 """
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Optional
 
 from app.assistant.chat_narrator.display_names import (
@@ -20,6 +21,17 @@ from app.assistant.chat_narrator.display_names import (
     manager_for_display_name,
 )
 from app.assistant.ServiceLocator.service_locator import DI
+
+
+# Manager invocations from manager_interface get a UUID suffix
+# ``_<8 hex chars>`` appended to the canonical type name (e.g.
+# ``web_manager_55d613a4``). Strip it for lookup against the registry.
+_INVOCATION_SUFFIX_RE = re.compile(r"_[0-9a-f]{8}$")
+
+
+def canonical_manager_name(raw: str) -> str:
+    """Strip the ``_xxxxxxxx`` invocation suffix to get the manager TYPE."""
+    return _INVOCATION_SUFFIX_RE.sub("", str(raw or ""))
 
 
 def list_active_workers() -> List[Dict[str, Any]]:
@@ -41,9 +53,11 @@ def list_active_workers() -> List[Dict[str, Any]]:
     for row in rows:
         if not isinstance(row, dict):
             continue
-        manager_name = str(row.get("manager_name") or "").strip()
-        if not manager_name:
+        raw_name = str(row.get("manager_name") or "").strip()
+        if not raw_name:
             continue
+        # Use the canonical type for both display lookup and matching.
+        manager_name = canonical_manager_name(raw_name)
         out.append({
             "invocation_id": row.get("invocation_id"),
             "manager_name": manager_name,

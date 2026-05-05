@@ -22,11 +22,30 @@ class ProgressEmitter:
             return
 
         task = agent.blackboard.get_state_value("task")
+
+        # The instance .name is suffixed with a UUID when invoked through
+        # manager_interface (e.g. "web_manager_55d613a4"). For consumers
+        # like display-name lookup we want the canonical TYPE ("web_manager")
+        # — that's what's keyed in the manager_registry and the display-name
+        # registry. Prefer manager_config["name"] which is the type from
+        # the YAML; fall back to instance .name with the suffix stripped.
         manager_name = ""
         try:
-            manager_name = getattr(agent.parent, "name", "") if agent.parent is not None else ""
+            parent = agent.parent
+            if parent is not None:
+                cfg = getattr(parent, "manager_config", None)
+                if isinstance(cfg, dict):
+                    cfg_name = cfg.get("name")
+                    if isinstance(cfg_name, str) and cfg_name.strip():
+                        manager_name = cfg_name.strip()
+                if not manager_name:
+                    raw = getattr(parent, "name", "") or ""
+                    # Strip the manager_interface invocation suffix
+                    # ``_<8 hex chars>`` if present.
+                    import re as _re
+                    manager_name = _re.sub(r"_[0-9a-f]{8}$", "", str(raw))
         except Exception:
-            logger.debug("Could not read agent.parent.name", exc_info=True)
+            logger.debug("Could not derive canonical manager name", exc_info=True)
             manager_name = ""
 
         # what_i_am_thinking is the planner's own one-line description of
