@@ -324,9 +324,13 @@ class ChatNarrator:
         if not channel_id:
             logger.warning("[chat_narrator] slack reply_to missing channel_id; dropping")
             return
-        slack_transport = getattr(DI, "slack_transport", None)
+        # SlackRoomTransport lives on RoomSessionManager (single instance,
+        # registered in DI). The same path slack_inbound_service uses to
+        # send replies — we go through it for narrations too.
+        room_session_manager = getattr(DI, "room_session_manager", None)
+        slack_transport = getattr(room_session_manager, "slack_transport", None) if room_session_manager else None
         if slack_transport is None:
-            logger.warning("[chat_narrator] slack_transport not available in DI; dropping")
+            logger.warning("[chat_narrator] slack_transport not available; dropping")
             return
         body = f"[{sender}] {text}" if not text.startswith(f"[{sender}]") else text
         try:

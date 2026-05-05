@@ -299,6 +299,14 @@ def _validate_transition(
         )
         return
 
+    # Idempotent no-op transitions (state X → state X) are always allowed.
+    # state_mover legitimately uses these to update auxiliary fields like
+    # ``reactivate_at`` on a waiting item without changing its state. The
+    # transition allowlist is for genuine state changes; pinning a state
+    # while updating other fields shouldn't be treated as a violation.
+    if current_state == new_state:
+        return
+
     allowed = ALLOWED_TRANSITIONS.get(current_state)
     if allowed is None:
         raise ValueError(
