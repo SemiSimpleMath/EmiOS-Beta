@@ -1,0 +1,4 @@
+{
+  "resource_id": "resource_room_facts",
+  "content": "EmiCode is a UI-only room (not exposed on Slack/SMS/Telegram). Authority level 60. The configured manager is emi_code_room_manager. The single tool dispatched is claude_code_invoke. Sessions are multi-turn via the coding agent's --resume; session_id persists in the unified_log per room context until explicit reset (e.g. /clear)."
+}

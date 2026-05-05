@@ -1,0 +1,45 @@
+{
+  "name": "claude_code_invoke",
+  "description": "Forward a coding request to the user's local Claude Code CLI (or, in v2, OpenAI Codex). Read-only — the coding agent runs with restricted tools (Read / Glob / Grep) and cannot edit files, run shell commands, or take any external action. EmiCode's job is to package context (CLAUDE.md + matched architecture docs) and surface the agent's reply. Multi-turn: session_id is persisted per room, so consecutive calls in the same EmiCode conversation resume the same coding-agent session.",
+  "inputs": [
+    {
+      "name": "task",
+      "type": "string",
+      "required": true,
+      "description": "The user's coding request — verbatim or lightly polished. Don't summarize."
+    },
+    {
+      "name": "information",
+      "type": "string",
+      "required": false,
+      "description": "Optional extra context the user mentioned in earlier turns that's relevant but not in the latest message."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Coding agent's final assistant text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Session id, duration, resumed flag."
+    }
+  ],
+  "arguments_prompt": "Arguments for claude_code_invoke:\n\n- task (required): The user's coding request, verbatim.\n- information (optional): Earlier-turn context the latest message doesn't repeat.",
+  "metadata": {
+    "category": "coding",
+    "verbs": ["explain", "propose"],
+    "entities": ["repo", "code", "architecture"],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "slow",
+    "front_door": false,
+    "room_visibility_default": "owner_only",
+    "approval_required": false
+  }
+}

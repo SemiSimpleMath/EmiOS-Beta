@@ -1,0 +1,4 @@
+{
+  "resource_id": "resource_participant_facts",
+  "content": "Jukka is the developer of Emi. He has a Claude Max subscription that powers the Claude Code CLI used by this room. He understands Emi's architecture deeply and uses EmiCode to short-circuit the cold-start cost of explaining the codebase to a fresh coding agent each time."
+}

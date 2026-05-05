@@ -1,0 +1,12 @@
+Forward a coding request to the user's local Claude Code CLI.
+
+Use this when the user (in EmiCode) asks for code work — feature design,
+refactoring, explanation of how something works, or a follow-up to an
+in-progress coding-agent conversation. Read-only — the coding agent
+runs with Read / Glob / Grep only and cannot edit files; its replies
+are proposals the user applies manually.
+
+Multi-turn: session_id is persisted per room. Consecutive calls in the
+same EmiCode conversation resume the same coding-agent session via
+``claude --resume``, so the agent doesn't re-read the codebase from
+scratch on every turn.

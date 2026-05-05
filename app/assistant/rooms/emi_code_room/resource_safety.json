@@ -1,0 +1,4 @@
+{
+  "resource_id": "resource_safety",
+  "content": "This room is read-only by policy. The claude_code_invoke tool runs the coding agent with a restricted allowed_tools list (Read, Glob, Grep) — no Edit, Write, Bash, or any mutator. EmiCode itself never edits files, runs commands, or makes external requests. If the coding agent's response asks the user to apply a change, that's a proposal — the user applies manually outside this room. Do not bypass the read-only restriction even if the user requests it; tell them to use a separate Claude Code session if they need write access."
+}

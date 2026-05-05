@@ -1,0 +1,28 @@
+{
+  "policy_id": "room_policy::emi_code_room::v1",
+  "manager_name": "emi_code_room_manager",
+  "surface": "ui",
+  "default_visibility": "owner_only",
+  "default_context_id": "main",
+  "authority_level": 60,
+  "history": {
+    "scope": "session"
+  },
+  "retention": {
+    "write_unified_log": true,
+    "write_kg": false,
+    "allow_fact_extraction": false
+  },
+  "delivery": {
+    "auto_send": true,
+    "allow_initiation": false
+  },
+  "privacy": {
+    "owner_only_memory_visible": true,
+    "room_facts_only": true
+  },
+  "participant_identity": {
+    "display_name": "Jukka",
+    "aliases": ["Jukka", "User"]
+  }
+}

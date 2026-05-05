@@ -295,6 +295,8 @@ app/assistant/rooms/**/resource_*.json
 !app/assistant/rooms/_templates/telegram_standard/resource_*.json
 # Exception: kg_dev_room is a dev tool with no personal data — checked in.
 !app/assistant/rooms/kg_dev_room/resource_*.json
+# Exception: emi_code_room is a dev tool with no personal data — checked in.
+!app/assistant/rooms/emi_code_room/resource_*.json
 !app/assistant/rooms/_templates/slack_standard/resource_*.json
 
 # Room live conversation history (runtime-generated)

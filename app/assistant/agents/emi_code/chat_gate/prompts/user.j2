@@ -1,0 +1,14 @@
+{%- set speaker_name = current_speaker_name or room_contact_name or "Jukka" %}
+########## CONTEXT ##########
+**Current Time:** {{ date_time }}
+
+########## CONVERSATION HISTORY ##########
+{%- if recent_history %}
+{{ recent_history }}
+{%- endif %}
+{%- if task %}
+
++++++ THIS IS THE LATEST MESSAGE YOU ARE RESPONDING TO +++++
+[{{ date_time }}] {{ speaker_name }}: {{ task }}
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+{%- endif %}

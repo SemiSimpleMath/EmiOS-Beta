@@ -1,0 +1,86 @@
+name: emi_code_room_manager
+class_name: MultiAgentManager
+description: "Outer chat front for the EmiCode console. chat_gate disambiguates code-task vs chitchat with the user; on handoff, dispatches the single tool claude_code_invoke (which shells out to the user's local Claude Code CLI). No switchboard agent — only one tool, so the router synthesizes the tool call directly."
+display_name: "EmiCode"
+max_cycles: 12
+
+role_bindings:
+  delegator: shared::delegator
+  tool_selector: shared::tool_selector
+
+agents:
+  - name: shared::delegator
+    class: Delegator
+  - name: emi_code::chat_gate
+    class: Agent
+  - name: room::response_formatter
+    class: Agent
+
+control_nodes:
+  - name: emi_code_chat_task_router_node
+    class: EmiCodeChatTaskRouterNode
+  - name: chat_tool_caller
+    class: ChatToolCaller
+  - name: tool_result_handler
+    class: ToolResultHandler
+  - name: final_answer_node
+    class: FinalAnswerNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+  - name: graceful_exit_control_node
+    class: GracefulExitControlNode
+
+tools:
+  allowed_tools:
+    - claude_code_invoke
+  except_tools: []
+
+scope_contract:
+  tools:
+    # Read-only by policy. The coding agent (Claude Code) itself runs with
+    # restricted allowed_tools (Read / Glob / Grep) — no Edit / Write /
+    # Bash. EmiCode's outer scope mirrors that: only the invoker tool is
+    # callable, nothing that could mutate state.
+    allowed_tools:
+      - claude_code_invoke
+      - ask_user
+    blocked_tools:
+      # Hard-block KG mutators in case any sub-path tries to dispatch
+      # them. EmiCode never edits the KG.
+      - kg_create_node
+      - kg_create_edge
+      - kg_update_node
+      - kg_delete_node
+      - kg_delete_edge
+      - kg_merge_nodes
+      - kg_rename_label
+      - kg_update_node_field
+      - kg_finding_resolve
+      - kg_finding_escalate
+      # Hard-block file/system mutators — EmiCode is a read-only chat
+      # surface; the coding agent does any code work in its own process.
+      - send_email
+      - create_calendar_event
+      - update_calendar_event
+      - delete_calendar_event
+    requires_approval_tools: []
+
+flow_config:
+  strict_routing: true
+  chat_gate:
+    source_agent: "emi_code::chat_gate"
+    final_node: "final_answer_node"
+    exit_flag_key: "handoff_tf"
+    no_op_flag_key: "no_op_tf"
+    chat_response_key: "chat_response"
+    switchboard_task_key: "switchboard_task"
+    switchboard_information_key: "switchboard_information"
+  state_map:
+    "shared::delegator": "emi_code::chat_gate"
+    "emi_code::chat_gate": "emi_code_chat_task_router_node"
+    "emi_code_chat_task_router_node": "chat_tool_caller"
+    "chat_tool_caller": "room::response_formatter"
+    "room::response_formatter": "final_answer_node"
+    "final_answer_node": "manager_exit_node"
+    "graceful_exit": "graceful_exit_control_node"
+    "graceful_exit_control_node": "final_answer_node"

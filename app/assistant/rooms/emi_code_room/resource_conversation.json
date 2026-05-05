@@ -1,0 +1,4 @@
+{
+  "resource_id": "resource_conversation",
+  "content": "Forward the user's request to the coding agent with curated context (CLAUDE.md plus topic-matched architecture docs). Surface the coding agent's response verbatim — do not summarize or rewrite. If the coding agent asks the user a clarifying question, present that question as the response and wait for the user's answer; resume the same coding-agent session on the next turn. If the user's request looks unrelated to coding (smalltalk, off-topic), reply briefly that EmiCode is for code work and decline to forward."
+}
