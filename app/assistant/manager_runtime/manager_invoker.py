@@ -90,6 +90,15 @@ class ManagerInvoker:
         request_id = str(getattr(user_message, "request_id", None) or "").strip() or None
         invocation_id = f"{manager_name}:{request_id or 'no_request_id'}:{threading.get_ident()}"
         self._register_invocation(invocation_id=invocation_id, manager_name=manager_name, request_id=request_id)
+        # Stash invocation_id on the manager's blackboard so control nodes
+        # within the manager (e.g. steering-inbox pickup before each planner
+        # iteration) can identify themselves to the cross-invocation services.
+        try:
+            blackboard = getattr(manager_instance, "blackboard", None)
+            if blackboard is not None:
+                blackboard.update_state_value("_invocation_id", invocation_id)
+        except Exception:
+            logger.debug("Failed to stash invocation_id on blackboard", exc_info=True)
         try:
             normalized_message, immediate = self.preprocessor.preprocess(manager_name, user_message)
             if isinstance(immediate, ToolResult):

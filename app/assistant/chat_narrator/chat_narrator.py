@@ -30,6 +30,10 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from app.assistant.ServiceLocator.service_locator import DI
+from app.assistant.chat_narrator.display_names import (
+    DISPLAY_NAMES,
+    display_name_for,
+)
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import (
     Message,
@@ -38,22 +42,6 @@ from app.assistant.utils.pydantic_classes import (
 )
 
 logger = get_logger(__name__)
-
-
-# Display-name registry. Manager name → user-facing worker name. Workers
-# without a name fall back to their manager_name (looks awkward in chat,
-# which is the point — fill this in as you go).
-#
-# Keep names short, distinct, and chosen — the affection users develop for
-# them is the point. Avoid cute-by-default; pick names like you'd pick a
-# pet's, not like a feature ID.
-DISPLAY_NAMES: Dict[str, str] = {
-    "web_manager": "Quimby",
-    "emi_team_manager": "Em",
-    "personal_admin_manager": "Phyllis",
-    "devices_manager": "Watt",
-    "kg_team_manager": "Mnemo",
-}
 
 
 # Per-manager throttle: don't narrate more than one card every N seconds
@@ -110,14 +98,7 @@ class ChatNarrator:
             logger.debug("ChatNarrator failed to process card", exc_info=True)
 
     def _display_name_for(self, manager_name: str) -> str:
-        if not manager_name:
-            return "Em"
-        name = DISPLAY_NAMES.get(manager_name)
-        if name:
-            return name
-        # Fallback: manager_name with underscores → spaces, title case. Looks
-        # ugly on purpose so the gap to fill is visible.
-        return manager_name.replace("_manager", "").replace("_", " ").title() or "Em"
+        return display_name_for(manager_name)
 
     def _render_sentence(self, card: Dict[str, Any], display_name: str) -> str:
         """Compose a brief narration sentence from a curated card.

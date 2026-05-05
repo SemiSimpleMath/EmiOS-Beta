@@ -50,6 +50,8 @@ def initialize_system():
     ServiceLocator.register("progress_curator", progress_curator)
     chat_narrator = ChatNarrator()
     ServiceLocator.register("chat_narrator", chat_narrator)
+    from app.assistant.manager_runtime.steering_inbox import SteeringInbox
+    ServiceLocator.register("steering_inbox", SteeringInbox())
     ServiceLocator.register("question_service", QuestionService())
 
     logger.info("Loading emi_result_handler...")
