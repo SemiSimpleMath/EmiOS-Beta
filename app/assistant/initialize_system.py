@@ -6,7 +6,6 @@ import time
 
 from app.assistant.ServiceLocator.service_locator import DI, ServiceLocator
 from app.assistant.emi_event_relay.emi_event_relay import EmiEventRelay
-from app.assistant.slack_interface.slack_interface import SlackInterface
 from app.assistant.agent_runtime.services.question_service import QuestionService
 from app.assistant.progress_curator import ProgressCurator
 from app.assistant.chat_narrator import ChatNarrator
@@ -90,11 +89,10 @@ def initialize_system():
     notify_user = DI.agent_factory.create_agent('notify_user', DI.global_blackboard)
     ServiceLocator.register('notify_user', notify_user)
 
-    # SlackInterface polling — legacy but functional. Stays until we wire the
-    # webhook path (slack_events.py) with a SLACK_SIGNING_SECRET + public URL.
-    slack_interface = SlackInterface()
-    ServiceLocator.register("slack_interface", slack_interface)
-    logger.info("SlackInterface registered.")
+    # Slack inbound is handled exclusively by the /slack/events webhook
+    # (app/routes/slack_events.py). The legacy SlackInterface polling
+    # adapter was retired 2026-05-05 — running both paths caused
+    # duplicate-message processing.
 
     logger.info(f"Active threads count at end of initialize: {threading.active_count()}")
 
