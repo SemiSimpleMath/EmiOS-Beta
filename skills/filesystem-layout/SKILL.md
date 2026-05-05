@@ -1,3 +1,13 @@
+---
+name: filesystem-layout
+description: Filesystem layout knowledge for Jukka's Windows machine — OneDrive-redirected Documents/Pictures/Music/Videos folders, run_shell scope, and how to send local files via mint_pod_from_path → send_email. Use whenever an agent runs filesystem commands or has to find a local file by path.
+license: Apache-2.0
+metadata:
+  author: jukka
+  version: "1.0"
+  applies_when: "agent uses run_shell or mint_pod_from_path"
+---
+
 # Filesystem layout — Jukka's Windows machine
 
 Knowledge for any agent that runs filesystem commands (e.g. via `run_shell`).

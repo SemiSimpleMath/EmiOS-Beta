@@ -80,3 +80,7 @@ Re-checking tool success is prohibited. If you issued a command to delete an eve
 {{ resource_pod_skill_finder }}
 {% endif %}
 
+{% if skills and skills["filesystem-layout"] %}
+{{ skills["filesystem-layout"] }}
+{% endif %}
+

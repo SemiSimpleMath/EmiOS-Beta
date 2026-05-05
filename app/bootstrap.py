@@ -181,15 +181,8 @@ def initialize_services(app):
     # pipeline outputs) so the skill library is easy to curate and review.
     # They use the same loader so agents can reference them via context_items
     # the same way as resources (id = filename stem).
-    if (resource_manager.base_dir / "skills").is_dir():
-        # Legacy flat-file path (skills/<name>.md). Kept for back-compat
-        # while the directory-based agentskills.io format ramps up; will
-        # retire once any flat-file skills migrate to the new layout.
-        resource_manager.load_all_from_directory("skills")
-
     # SkillRegistry — agentskills.io standard SKILL.md loader. Walks
-    # `skills/<name>/SKILL.md` directories. Distinct from the legacy
-    # flat-file path above; see docs/architecture/21_SKILLS.md.
+    # `skills/<name>/SKILL.md` directories. See docs/architecture/21_SKILLS.md.
     from app.skill_registry import SkillRegistry
     skill_registry = SkillRegistry()
     ServiceLocator.register("skill_registry", skill_registry)
