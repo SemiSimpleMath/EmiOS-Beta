@@ -24,7 +24,13 @@
       "name": "pod_ids",
       "type": "array",
       "required": false,
-      "description": "Optional list of pod URIs to attach. Pass each pod_id EXACTLY as returned by pod_search or mint_pod_from_path — including the `datapod:<kind>:` prefix. Do NOT strip the prefix to bare hex; lookup is exact-match and a stripped id will fail with 'missing pods'. Each pod must have a backing file via metadata.stored_path; image/video/audio/document pods all work. The file is attached with its original filename and inferred MIME type. If any pod is missing the whole send fails — mint a fresh pod via mint_pod_from_path (or call bash_manager) instead of guessing."
+      "description": "Optional list of pod URIs to attach as files. Pass each pod_id EXACTLY as returned by pod_search or mint_pod_from_path — including the `datapod:<kind>:` prefix. Lookup is exact-match. File-backed pods (image / video / audio / document) attach as their stored file with original filename and inferred MIME type. Body-only pods (email / chat_cluster / text / transcript / note) are rendered to a tempfile (.eml for email pods, .txt for the rest) and attached — the agent never reads the body, the render happens at tool execution time. This is the courier path: pass the pod_id, never pod_fetch the body, and the recipient gets the content as an attachment."
+    },
+    {
+      "name": "inline_pod_ids",
+      "type": "array",
+      "required": false,
+      "description": "Optional list of pod URIs to PASTE INLINE into the email body (instead of attaching as a file). For each pod the tool fetches the body and appends a delimited block to `body` — for email pods that's the standard `----- Forwarded message -----` block with From / Subject / Date headers; for other body-only kinds it's a `---` separator + one-liner + body. The agent never reads the body — fetch happens at tool execution, same privacy story as `pod_ids`. Use `inline_pod_ids` when the recipient should see the content directly in the email body (typical for forwarding emails or pasting a transcript); use `pod_ids` when they should get an attachment to download. Both are valid courier paths and should be preferred over pod_fetch + handcrafted body."
     }
   ],
   "outputs": [
@@ -39,7 +45,7 @@
       "description": "Structured tool result payload."
     }
   ],
-  "arguments_prompt": "Arguments for sending an email:\nto: str\nsubject: Optional[str]\nbody: Optional[str]\npod_ids: Optional[List[str]]  # Pod URIs to attach as files (e.g. ['datapod:image:abc...']). Find pod_ids first via pod_search (kind='image', linked_to_entity=...).",
+  "arguments_prompt": "Arguments for sending an email:\nto: str\nsubject: Optional[str]\nbody: Optional[str]\npod_ids: Optional[List[str]]  # Pod URIs to ATTACH as files (file-backed pods → stored file; body-only pods → rendered .eml/.txt). Tool reads body, agent doesn't.\ninline_pod_ids: Optional[List[str]]  # Pod URIs to PASTE INLINE into the email body — email pods get a Gmail-style `----- Forwarded message -----` block; other kinds get a `---` separator. Tool reads body, agent doesn't. Pick pod_ids for attachments, inline_pod_ids for inline forwarding. Don't pod_fetch then handcraft `body` unless you actually need to edit/summarize the content.",
   "metadata": {
     "domain": "email",
     "actions": [
