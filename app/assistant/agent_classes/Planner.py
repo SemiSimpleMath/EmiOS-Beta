@@ -190,6 +190,17 @@ class Planner(Agent):
         self.blackboard.update_state_value(f'{self.name}_action_count', new_action_count)
         logger.info(f"[{self.name}] Action count: {new_action_count}")
 
+        # Emit a high-signal progress fact for the UI / chat narrator.
+        # The base Agent.process_llm_result does this; Planner overrides
+        # the whole method, so we replicate the call here. Without it,
+        # planner_decision cards never reach ProgressCurator → ChatNarrator
+        # and the user gets no in-chat narration of long-running work.
+        try:
+            self.components.progress_emitter.emit_planner_decision(self, result_dict)
+        except Exception as e:
+            logger.error("[%s] Failed to emit planner progress fact: %s", self.name, e)
+            logger.debug("[%s] planner progress emit exception details", self.name, exc_info=True)
+
         # Best-effort: publish high-signal progress to an orchestrator (if this planner is running under one).
         try:
             self._publish_orchestrator_progress(result_dict)
