@@ -101,10 +101,20 @@ class ChatNarrator:
                 return
 
             manager = str(card.get("manager") or "").strip()
-            display_name = self._display_name_for(manager)
-            # No display_name in the manager's config → silent.
-            if not display_name or display_name == manager:
-                return
+            # Gate by base_display_name. Cards from MAMInstanceManager-aware
+            # emitters carry both base + per-instance display_name; if the
+            # base equals the raw manager_name, this manager has no
+            # display_name in config → unnamed → silent.
+            base_display_name = str(card.get("base_display_name") or "").strip()
+            if not base_display_name:
+                base_display_name = self._display_name_for(manager)
+            if not base_display_name or base_display_name == manager:
+                return  # unnamed manager — silent
+            # Use per-instance display_name (Webby_2) as sender; fall back
+            # to base if the card lacks one (older emitters / direct tests).
+            display_name = str(card.get("display_name") or "").strip()
+            if not display_name:
+                display_name = base_display_name
 
             cfg = self._narration_config_for(manager)
             if not cfg["enabled"]:
@@ -163,14 +173,21 @@ class ChatNarrator:
             manager_name = str(data.get("manager_name") or "").strip()
             if not manager_name:
                 return
-            # Per-instance display_name comes from MAMInstanceManager via
-            # the event. Fall back to the base name from config only if
-            # the event lacks it (older publishers / tests).
+            # Gate by BASE display_name. The instance display_name may be
+            # numbered (Webby_2) — we want the gate to ignore the suffix.
+            # If base == manager_name (no ``display_name`` in config), the
+            # manager is unnamed → silent. This is what stops generic
+            # managers (room_manager, dayflow_orchestrator_manager) from
+            # cluttering chat with their numbered aliases.
+            base_display_name = str(data.get("base_display_name") or "").strip()
+            if not base_display_name:
+                base_display_name = display_name_for(manager_name)
+            if not base_display_name or base_display_name == manager_name:
+                return  # unnamed manager — silent
+            # Use the per-instance display_name as sender (e.g. Webby_2).
             display_name = str(data.get("display_name") or "").strip()
             if not display_name:
-                display_name = display_name_for(manager_name)
-            if not display_name or display_name == manager_name:
-                return
+                display_name = base_display_name
             cfg = self._narration_config_for(manager_name)
             if not cfg["enabled"]:
                 return

@@ -72,10 +72,32 @@ class ProgressEmitter:
         except Exception:
             reply_to = None
 
+        # Look up the per-instance display_name (e.g. "Webby_2") and base
+        # name from MAMInstanceManager via the blackboard's invocation_id.
+        # ChatNarrator uses base for the named/unnamed gate and display
+        # for the chat sender. If the lookup fails, downstream falls back
+        # to display_name_for(manager_name) which is fine.
+        instance_display_name = None
+        base_display_name = None
+        try:
+            invocation_id = agent.blackboard.get_state_value("_invocation_id")
+            if isinstance(invocation_id, str) and invocation_id.strip():
+                from app.assistant.ServiceLocator.service_locator import DI
+                mam = getattr(DI, "mam_instance_manager", None)
+                if mam is not None:
+                    record = mam.find_by_invocation_id(invocation_id)
+                    if record is not None:
+                        instance_display_name = record.display_name
+                        base_display_name = record.base_display_name
+        except Exception:
+            logger.debug("Could not look up MAM record for progress fact", exc_info=True)
+
         fact = {
             "kind": "planner_decision",
             "agent": agent.name,
             "manager": manager_name,
+            "base_display_name": base_display_name,
+            "display_name": instance_display_name,
             "task": task,
             "action": result_dict.get("action"),
             "action_input": result_dict.get("action_input"),

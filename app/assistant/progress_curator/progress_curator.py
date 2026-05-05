@@ -158,6 +158,11 @@ class ProgressCurator:
         # narrator can route to UI / slack / sms / etc.
         raw_reply_to = fact.get("reply_to")
         reply_to = dict(raw_reply_to) if isinstance(raw_reply_to, dict) else None
+        # Per-instance display_name from MAMInstanceManager (e.g. "Webby_2")
+        # and the base_display_name (used by ChatNarrator's named/unnamed
+        # gate). Both pass through unchanged.
+        base_display_name = str(fact.get("base_display_name") or "").strip() or None
+        display_name = str(fact.get("display_name") or "").strip() or None
 
         return {
             "ts": now,
@@ -166,6 +171,8 @@ class ProgressCurator:
             "agent": agent,
             "headline": headline,
             "goal": goal,
+            "base_display_name": base_display_name,
+            "display_name": display_name,
             "what_i_am_thinking": what_i_am_thinking,
             "reply_to": reply_to,
             "learned": learned_items,

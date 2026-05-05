@@ -223,10 +223,22 @@ class TestThrottleAndDedup:
 
 class TestInvocationStartedHandler:
 
-    def _evt(self, manager_name: str, *, reply_to=None) -> Message:
+    def _evt(
+        self,
+        manager_name: str,
+        *,
+        reply_to=None,
+        base_display_name=None,
+        display_name=None,
+    ) -> Message:
         return Message(
             sender="manager_invoker",
-            data={"manager_name": manager_name, "reply_to": reply_to},
+            data={
+                "manager_name": manager_name,
+                "base_display_name": base_display_name,
+                "display_name": display_name,
+                "reply_to": reply_to,
+            },
             event_topic="manager_invocation_started",
         )
 
@@ -249,6 +261,32 @@ class TestInvocationStartedHandler:
     def test_unnamed_manager_skipped(self, narrator):
         narrator._on_invocation_started(self._evt("dayflow_orchestrator_manager"))
         assert narrator._publishes == []
+
+    def test_unnamed_manager_with_numbered_alias_still_skipped(self, narrator):
+        # MAMInstanceManager assigns Webby_2-style suffixes for collision
+        # detection even on unnamed managers (room_manager → "room_manager_2"
+        # if two are running). The narrator must gate by BASE name, not
+        # the suffixed instance name, so these don't leak into chat as
+        # "[room_manager_2] Delegating to room_manager_2."
+        narrator._on_invocation_started(self._evt(
+            "room_manager",
+            base_display_name="room_manager",
+            display_name="room_manager_2",
+        ))
+        assert narrator._publishes == []
+
+    def test_named_worker_with_suffix_uses_suffix_in_chat(self, narrator):
+        # Two emi_team_managers running in the same room: second one
+        # registered with display_name="Em_2" by the registry.
+        narrator._on_invocation_started(self._evt(
+            "emi_team_manager",
+            base_display_name="Em",
+            display_name="Em_2",
+        ))
+        assert len(narrator._publishes) == 1
+        sender, text, _ = narrator._publishes[0]
+        assert sender == "Em_2"
+        assert text == "Delegating to Em_2."
 
     def test_empty_event_skipped(self, narrator):
         narrator._on_invocation_started(Message(sender="x"))
