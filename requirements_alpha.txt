@@ -89,3 +89,8 @@ diff-match-patch
 # Markdown rendering (used by wiki_viewer + dev_wiki Flask routes)
 markdown>=3.7
 python-frontmatter>=1.1.0
+
+# Playwright — rendered-HTML fallback in scrape_url for paywalled / JS-heavy pages.
+# After installing the python lib, also run:
+#   .venv/Scripts/python.exe -m playwright install chromium
+playwright>=1.59.0
