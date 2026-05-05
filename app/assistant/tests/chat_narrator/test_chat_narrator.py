@@ -1,13 +1,12 @@
-"""Tests for ChatNarrator — sentence translation + throttle + dedup.
+"""Tests for ChatNarrator — manager gating, throttle/dedup, translator-agent
+invocation behavior.
 
-ChatNarrator subscribes to agent_progress_emit and writes brief named
-narrations to master_room chat. These tests exercise the translation
-function directly + the throttle/dedup behavior of _on_card without
-needing a live event_hub.
+Translator agent itself isn't exercised here (it's an LLM agent — would
+need real API calls). We mock _invoke_translator and assert ChatNarrator
+calls it with the right inputs and acts on its return value.
 """
 from __future__ import annotations
 
-import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -20,11 +19,7 @@ from app.assistant.utils.pydantic_classes import Message
 
 @pytest.fixture(autouse=True)
 def _seed_display_names():
-    """Populate the display-name registry that ChatNarrator reads from.
-
-    Production fills this at boot from manager configs; tests need it set
-    explicitly because we don't bootstrap the full system here.
-    """
+    """Populate the display-name registry that ChatNarrator reads from."""
     from app.assistant.chat_narrator.display_names import (
         initialize_display_name_registry,
     )
@@ -41,292 +36,187 @@ def _seed_display_names():
 
 @pytest.fixture
 def narrator():
-    """ChatNarrator with mocked DI (event_hub registration is no-op'd
-    so the constructor doesn't try to wire into real services)."""
+    """ChatNarrator with mocked DI + mocked translator agent.
+
+    The translator returns a deterministic short sentence by default;
+    individual tests can override per test by reassigning
+    ``narrator._translator_returns``.
+    """
     from app.assistant.chat_narrator.chat_narrator import ChatNarrator
 
     with patch("app.assistant.chat_narrator.chat_narrator.DI") as mock_di:
         mock_di.event_hub.register_event = MagicMock()
         n = ChatNarrator()
-        # Track all publish calls for assertions.
+
+        # Capture publishes.
         n._publishes = []
-        n._original_publish = n._publish_chat
         n._publish_chat = lambda *, sender, text: n._publishes.append((sender, text))
+
+        # Mock the translator: by default returns a stub sentence.
+        n._translator_returns = "Searching for the thing"
+        n._invoke_translator = lambda *, display_name, manager, thinking: (
+            n._translator_returns(thinking) if callable(n._translator_returns)
+            else n._translator_returns
+        )
+
         yield n
 
 
 def _card(*, manager: str = "web_manager", kind: str = "planner_decision",
-          goal: str = "", next_action: str = "",
-          tool: str = "", learned=None,
-          what_i_am_thinking: str = "") -> dict:
+          what_i_am_thinking: str = "I am doing things") -> dict:
     return {
         "kind": kind,
         "manager": manager,
         "agent": f"{manager}::test",
         "headline": kind,
-        "goal": goal,
         "what_i_am_thinking": what_i_am_thinking,
-        "learned": learned or [],
-        "next": {"action": next_action, "input_preview": ""},
-        "meta": {"tool": tool},
     }
 
 
 def _msg(card: dict) -> Message:
-    return Message(sender="progress_curator", data=card, event_topic="agent_progress_emit")
+    return Message(sender="progress_curator", data=card,
+                   event_topic="agent_progress_emit")
 
 
-# ── Sentence rendering ─────────────────────────────────────────────
+# ── Manager gating ────────────────────────────────────────────────────
 
 
-class TestSentenceRendering:
+class TestManagerGating:
 
-    def test_what_i_am_thinking_is_primary(self, narrator):
-        s = narrator._render_sentence(
-            _card(kind="planner_decision",
-                  what_i_am_thinking="Searching for entry-level EWIs to compare prices",
-                  goal="Find electric saxophones",
-                  next_action="search_web"),
-            "Quimby",
-        )
-        # Planner's own self-narration wins over goal/next templating.
-        assert s == "[Quimby] Searching for entry-level EWIs to compare prices"
-
-    def test_what_i_am_thinking_truncated_when_long(self, narrator):
-        # No sentence breaks → hard-truncate to fit chat line.
-        long = "y" * 400
-        s = narrator._render_sentence(
-            _card(kind="planner_decision", what_i_am_thinking=long),
-            "Quimby",
-        )
-        assert s.startswith("[Quimby] ")
-        assert s.endswith("...")
-        assert len(s) < 240
-
-    def test_what_i_am_thinking_takes_first_sentences(self, narrator):
-        thinking = (
-            "I need to research the current market for electric saxophones. "
-            "I will start with a broad search to identify the latest models. "
-            "Then I will compare features by tier."
-        )
-        s = narrator._render_sentence(
-            _card(kind="planner_decision", what_i_am_thinking=thinking),
-            "Em",
-        )
-        # First two sentences kept; third dropped.
-        assert "I need to research" in s
-        assert "broad search" in s
-        assert "compare features" not in s
-
-    def test_single_long_sentence_hard_truncated(self, narrator):
-        thinking = "I will methodically " + "verify each candidate " * 30
-        s = narrator._render_sentence(
-            _card(kind="planner_decision", what_i_am_thinking=thinking),
-            "Em",
-        )
-        assert s.endswith("...")
-        # Tag + body capped near the configured 200-char body limit.
-        assert len(s) < 240
-
-    def test_multiline_thinking_normalizes_whitespace(self, narrator):
-        thinking = "Line one of thinking.\n\n  Line two of thinking."
-        s = narrator._render_sentence(
-            _card(kind="planner_decision", what_i_am_thinking=thinking),
-            "Em",
-        )
-        # Both sentences present, with single-space joins (no embedded
-        # newlines or runs of spaces).
-        assert "\n" not in s
-        assert "  " not in s
-        assert "Line one of thinking" in s
-        assert "Line two of thinking" in s
-
-
-# ── Configurable verbosity + skip-phrase filter ───────────────────
-
-
-class TestConfigurableVerbosity:
-
-    def test_max_sentences_one_keeps_only_first(self, narrator):
-        thinking = (
-            "First sentence here. Second sentence here. Third sentence here."
-        )
-        s = narrator._render_sentence(
-            _card(kind="planner_decision", what_i_am_thinking=thinking),
-            "Em",
-            cfg={"max_sentences": 1, "drop_phrases": []},
-        )
-        assert "First sentence here" in s
-        assert "Second sentence here" not in s
-
-    def test_max_sentences_three_keeps_first_three(self, narrator):
-        thinking = (
-            "First. Second. Third. Fourth. Fifth."
-        )
-        s = narrator._render_sentence(
-            _card(kind="planner_decision", what_i_am_thinking=thinking),
-            "Em",
-            cfg={"max_sentences": 3, "drop_phrases": []},
-        )
-        for w in ("First", "Second", "Third"):
-            assert w in s
-        assert "Fourth" not in s
-
-
-class TestSkipPhraseFilter:
-
-    def test_default_drops_critic_meta_talk(self, narrator):
-        thinking = (
-            "Per the critic, I should refine my searches. "
-            "I will now search for specific Yamaha YDS-150 specs."
-        )
-        s = narrator._render_sentence(
-            _card(kind="planner_decision", what_i_am_thinking=thinking),
-            "Em",
-        )
-        # First sentence (critic meta-talk) dropped; second kept.
-        assert "critic" not in s.lower()
-        assert "Yamaha YDS-150" in s
-
-    def test_default_drops_action_count_meta(self, narrator):
-        thinking = (
-            "Action_count is at 12 of 15. I should wrap up. "
-            "I will return the final summary now."
-        )
-        s = narrator._render_sentence(
-            _card(kind="planner_decision", what_i_am_thinking=thinking),
-            "Em",
-        )
-        # Both meta sentences filtered ("action_count", "wrap up").
-        assert "Action_count" not in s
-        assert "wrap up" not in s
-        assert "return the final summary" in s
-
-    def test_per_manager_drop_phrases_extend_defaults(self, narrator):
-        thinking = "I will search Porto's menu next."
-        s = narrator._render_sentence(
-            _card(kind="planner_decision", what_i_am_thinking=thinking),
-            "Em",
-            cfg={
-                "max_sentences": 2,
-                "drop_phrases": list(__import__(
-                    "app.assistant.chat_narrator.chat_narrator",
-                    fromlist=["_DEFAULT_DROP_PHRASES"],
-                )._DEFAULT_DROP_PHRASES) + ["porto's"],
-            },
-        )
-        # Per-manager phrase filtered the only sentence — empty result.
-        assert s == ""
-
-    def test_all_noise_returns_empty(self, narrator):
-        thinking = (
-            "Per the critic, I should retry. "
-            "Action_count is high. "
-            "I should wrap up now."
-        )
-        s = narrator._render_sentence(
-            _card(kind="planner_decision", what_i_am_thinking=thinking),
-            "Em",
-        )
-        assert s == ""
-
-
-# ── _on_card respects manager registry presence + enabled flag ───
-
-
-class TestOnCardManagerGating:
+    def test_manager_with_display_name_emits(self, narrator):
+        narrator._on_card(_msg(_card(manager="web_manager",
+                                      what_i_am_thinking="x")))
+        assert len(narrator._publishes) == 1
+        sender, text = narrator._publishes[0]
+        assert sender == "Quimby"
+        assert "Searching for the thing" in text
 
     def test_manager_without_display_name_silenced(self, narrator):
-        # "unconfigured_manager" not in the seeded display registry →
-        # display_name_for returns the raw manager_name → narrator
-        # silences this card entirely.
+        narrator._on_card(_msg(_card(manager="unconfigured_manager",
+                                      what_i_am_thinking="x")))
+        assert narrator._publishes == []
+
+    def test_disabled_manager_silenced(self, narrator):
+        with patch.object(
+            narrator, "_narration_config_for",
+            return_value={"enabled": False},
+        ):
+            narrator._on_card(_msg(_card(manager="web_manager",
+                                          what_i_am_thinking="x")))
+        assert narrator._publishes == []
+
+
+# ── Card kind filtering ──────────────────────────────────────────────
+
+
+class TestCardKindFiltering:
+
+    def test_only_planner_decision_emits(self, narrator):
+        for kind in ("tool_call", "tool_result", "mystery"):
+            narrator._on_card(_msg(_card(kind=kind, what_i_am_thinking="x")))
+        assert narrator._publishes == []
+
+    def test_planner_decision_with_no_thinking_skipped(self, narrator):
+        narrator._on_card(_msg(_card(what_i_am_thinking="")))
+        assert narrator._publishes == []
+
+
+# ── Translator behavior ──────────────────────────────────────────────
+
+
+class TestTranslatorBehavior:
+
+    def test_translator_empty_string_suppresses_emit(self, narrator):
+        # Agent decided thinking is pure noise → empty narration → no emit.
+        narrator._translator_returns = ""
+        narrator._on_card(_msg(_card(what_i_am_thinking="updating my checklist")))
+        assert narrator._publishes == []
+
+    def test_translator_receives_thinking_and_display_name(self, narrator):
+        captured = {}
+        def capture(*, display_name, manager, thinking):
+            captured.update(display_name=display_name, manager=manager, thinking=thinking)
+            return "ok"
+        narrator._invoke_translator = capture
         narrator._on_card(_msg(_card(
-            manager="unconfigured_manager",
-            kind="planner_decision",
-            what_i_am_thinking="I am doing important work",
+            manager="emi_team_manager",
+            what_i_am_thinking="Looking up the host",
         )))
-        assert narrator._publishes == []
+        assert captured["display_name"] == "Em"
+        assert captured["manager"] == "emi_team_manager"
+        assert captured["thinking"] == "Looking up the host"
 
-    def test_disabled_in_config_silences_emits(self, narrator):
-        # Patch manager_registry.get to return a config that disables
-        # narration for web_manager.
-        with patch.object(
-            narrator,
-            "_narration_config_for",
-            return_value={"enabled": False, "max_sentences": 2, "drop_phrases": []},
-        ):
-            narrator._on_card(_msg(_card(
-                manager="web_manager",
-                kind="planner_decision",
-                what_i_am_thinking="I am thinking hard",
-            )))
-        assert narrator._publishes == []
-
-    def test_enabled_with_higher_verbosity_emits_more(self, narrator):
-        thinking = "First sentence. Second sentence. Third sentence."
-        with patch.object(
-            narrator,
-            "_narration_config_for",
-            return_value={"enabled": True, "max_sentences": 3, "drop_phrases": []},
-        ):
-            narrator._on_card(_msg(_card(
-                manager="web_manager",
-                kind="planner_decision",
-                what_i_am_thinking=thinking,
-            )))
+    def test_runaway_long_translator_output_handled_by_caller(self, narrator):
+        # ChatNarrator wraps the translator's narration in [Name] prefix —
+        # if the translator is well-behaved (≤220 chars), no truncation
+        # in the narrator. (Hard cap is in _invoke_translator itself,
+        # mocked away here.)
+        narrator._translator_returns = "x" * 200
+        narrator._on_card(_msg(_card(what_i_am_thinking="...")))
         assert len(narrator._publishes) == 1
         text = narrator._publishes[0][1]
-        for w in ("First", "Second", "Third"):
-            assert w in text
+        assert text.startswith("[Quimby]")
 
-    def test_planner_decision_fallback_to_goal_and_next(self, narrator):
-        # No what_i_am_thinking → fall back to old template.
-        s = narrator._render_sentence(
-            _card(kind="planner_decision", goal="Find Porto's savory items",
-                  next_action="search_web"),
-            "Quimby",
+
+# ── Throttle / dedup ─────────────────────────────────────────────────
+
+
+class TestThrottleAndDedup:
+
+    def test_first_card_emits(self, narrator):
+        narrator._on_card(_msg(_card(what_i_am_thinking="x")))
+        assert len(narrator._publishes) == 1
+
+    def test_second_card_within_throttle_dropped(self, narrator):
+        narrator._on_card(_msg(_card(what_i_am_thinking="x")))
+        narrator._on_card(_msg(_card(what_i_am_thinking="y")))
+        assert len(narrator._publishes) == 1
+
+    def test_throttle_runs_BEFORE_translator_call(self, narrator):
+        """Important: avoid burning LLM tokens on cards we'd suppress."""
+        invocations = []
+        narrator._invoke_translator = lambda *, display_name, manager, thinking: (
+            invocations.append(thinking) or "ok"
         )
-        assert s == "[Quimby] working on: Find Porto's savory items — next: search_web"
+        narrator._on_card(_msg(_card(what_i_am_thinking="first")))
+        narrator._on_card(_msg(_card(what_i_am_thinking="second-throttled")))
+        # Only the first thinking made it to the translator.
+        assert invocations == ["first"]
 
-    def test_planner_decision_fallback_only_next(self, narrator):
-        s = narrator._render_sentence(
-            _card(kind="planner_decision", next_action="search_web"),
-            "Quimby",
-        )
-        assert s == "[Quimby] next: search_web"
+    def test_card_after_throttle_window_emits(self, narrator):
+        # Distinct translations so dedup doesn't also kick in.
+        outputs = iter(["first sentence", "second sentence"])
+        narrator._invoke_translator = lambda *, display_name, manager, thinking: next(outputs)
 
-    def test_tool_call_now_silent(self, narrator):
-        # Tool calls are no longer narrated — the planner_decision that
-        # PRECEDED the tool already told the user what's happening.
-        s = narrator._render_sentence(
-            _card(kind="tool_call", tool="search_web", goal="Porto's menu"),
-            "Quimby",
-        )
-        assert s == ""
+        narrator._on_card(_msg(_card(what_i_am_thinking="first")))
+        manager_key = "web_manager"
+        old_ts, old_text = narrator._last_emit[manager_key]
+        narrator._last_emit[manager_key] = (old_ts - 100.0, old_text)
+        narrator._on_card(_msg(_card(what_i_am_thinking="second")))
+        assert len(narrator._publishes) == 2
 
-    def test_tool_result_now_silent(self, narrator):
-        s = narrator._render_sentence(
-            _card(kind="tool_result", learned=["Found 12 savory items"]),
-            "Quimby",
-        )
-        assert s == ""
+    def test_identical_translation_dropped_after_throttle(self, narrator):
+        # Translator returns the same sentence twice; dedup catches it
+        # even though the throttle window has expired.
+        narrator._invoke_translator = lambda *, display_name, manager, thinking: "same line"
+        narrator._on_card(_msg(_card(what_i_am_thinking="x")))
+        manager_key = "web_manager"
+        old_ts, old_text = narrator._last_emit[manager_key]
+        narrator._last_emit[manager_key] = (old_ts - 100.0, old_text)
+        narrator._on_card(_msg(_card(what_i_am_thinking="y")))
+        assert len(narrator._publishes) == 1
 
-    def test_unknown_kind_returns_empty(self, narrator):
-        s = narrator._render_sentence(_card(kind="mystery_kind"), "Quimby")
-        assert s == ""
-
-    def test_long_goal_truncated_in_fallback(self, narrator):
-        long_goal = "x" * 200
-        s = narrator._render_sentence(
-            _card(kind="planner_decision", goal=long_goal, next_action="continue"),
-            "Quimby",
-        )
-        # Truncation kicks in for goals > 80 chars (yielding 77 + "...")
-        assert "..." in s
-        assert len(s) < 200
+    def test_different_managers_dont_throttle_each_other(self, narrator):
+        narrator._on_card(_msg(_card(manager="web_manager",
+                                      what_i_am_thinking="x")))
+        narrator._on_card(_msg(_card(manager="emi_team_manager",
+                                      what_i_am_thinking="y")))
+        assert len(narrator._publishes) == 2
+        senders = {p[0] for p in narrator._publishes}
+        assert senders == {"Quimby", "Em"}
 
 
-# ── Display name lookup ─────────────────────────────────────────────
+# ── Display-name lookup ─────────────────────────────────────────────
 
 
 class TestDisplayNameLookup:
@@ -335,95 +225,9 @@ class TestDisplayNameLookup:
         assert narrator._display_name_for("web_manager") == "Quimby"
         assert narrator._display_name_for("emi_team_manager") == "Em"
         assert narrator._display_name_for("personal_admin_manager") == "Phyllis"
-        assert narrator._display_name_for("devices_manager") == "Watt"
-        assert narrator._display_name_for("kg_team_manager") == "Mnemo"
 
     def test_unknown_manager_returns_raw_name(self, narrator):
-        # No humanization — visible gap means "add display_name to config".
         assert narrator._display_name_for("brand_new_manager") == "brand_new_manager"
 
     def test_empty_manager_returns_empty(self, narrator):
         assert narrator._display_name_for("") == ""
-
-
-# ── Throttle + dedup ─────────────────────────────────────────────
-
-
-class TestThrottleAndDedup:
-
-    def test_first_card_emits(self, narrator):
-        narrator._on_card(_msg(_card(
-            kind="planner_decision",
-            what_i_am_thinking="Looking up Porto's savory menu",
-        )))
-        assert len(narrator._publishes) == 1
-        sender, text = narrator._publishes[0]
-        assert sender == "Quimby"
-        assert "Looking up Porto's savory menu" in text
-
-    def test_second_card_within_throttle_dropped(self, narrator):
-        narrator._on_card(_msg(_card(
-            kind="planner_decision", what_i_am_thinking="step one",
-        )))
-        narrator._on_card(_msg(_card(
-            kind="planner_decision", what_i_am_thinking="step two",
-        )))
-        assert len(narrator._publishes) == 1  # second was throttled
-
-    def test_card_after_throttle_window_emits(self, narrator):
-        narrator._on_card(_msg(_card(
-            kind="planner_decision", what_i_am_thinking="first",
-        )))
-        manager_key = "web_manager"
-        old_ts, old_text = narrator._last_emit[manager_key]
-        narrator._last_emit[manager_key] = (old_ts - 100.0, old_text)
-
-        narrator._on_card(_msg(_card(
-            kind="planner_decision", what_i_am_thinking="second",
-        )))
-        assert len(narrator._publishes) == 2
-
-    def test_identical_sentence_dropped_even_after_throttle(self, narrator):
-        card = _card(kind="planner_decision",
-                     what_i_am_thinking="same thought")
-        narrator._on_card(_msg(card))
-        manager_key = "web_manager"
-        old_ts, old_text = narrator._last_emit[manager_key]
-        narrator._last_emit[manager_key] = (old_ts - 100.0, old_text)
-
-        narrator._on_card(_msg(card))
-        assert len(narrator._publishes) == 1
-
-    def test_different_managers_dont_throttle_each_other(self, narrator):
-        narrator._on_card(_msg(_card(
-            manager="web_manager", kind="planner_decision",
-            what_i_am_thinking="searching the web",
-        )))
-        narrator._on_card(_msg(_card(
-            manager="devices_manager", kind="planner_decision",
-            what_i_am_thinking="adjusting thermostat",
-        )))
-        assert len(narrator._publishes) == 2
-        senders = {p[0] for p in narrator._publishes}
-        assert senders == {"Quimby", "Watt"}
-
-    def test_tool_call_card_does_not_publish(self, narrator):
-        # tool_call is no longer narrated — verify it doesn't emit OR
-        # consume the throttle slot.
-        narrator._on_card(_msg(_card(
-            kind="tool_call", tool="search_web", goal="x",
-        )))
-        assert narrator._publishes == []
-        # Subsequent planner_decision should still emit (slot wasn't taken).
-        narrator._on_card(_msg(_card(
-            kind="planner_decision", what_i_am_thinking="now I'm planning",
-        )))
-        assert len(narrator._publishes) == 1
-
-    def test_empty_card_skipped(self, narrator):
-        narrator._on_card(Message(sender="progress_curator", data={}))
-        assert narrator._publishes == []
-
-    def test_unrenderable_kind_skipped_silently(self, narrator):
-        narrator._on_card(_msg(_card(kind="something_weird")))
-        assert narrator._publishes == []
