@@ -50,6 +50,19 @@ class CriticPostNode(ControlNode):
             return
 
         self.blackboard.update_state_value("critic_subject_agent", None)
+
+        # Restore the planner's pending action. The critic agent's form has
+        # ``action: Literal["done"]`` which overwrites the planner's
+        # blackboard ``action`` (e.g. "scrape_url") with "done" via
+        # _apply_llm_result_to_state. When we route back to tool_caller
+        # without a revision, tool_caller would otherwise see
+        # action='done' vs tool_arguments.target_name='<planner_tool>' and
+        # fail with a target_mismatch. The planner's tool name was stashed
+        # by critic_pre_node into ``planned_tool_name`` for exactly this.
+        planned_tool_name = self.blackboard.get_state_value("planned_tool_name", None)
+        if isinstance(planned_tool_name, str) and planned_tool_name.strip():
+            self.blackboard.update_state_value("action", planned_tool_name.strip())
+
         resume_target = get_resume_target(self.blackboard)
         if not isinstance(resume_target, str) or not resume_target.strip():
             resume_target = continue_agent if isinstance(continue_agent, str) else None
