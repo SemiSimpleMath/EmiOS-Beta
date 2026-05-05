@@ -33,17 +33,12 @@ from __future__ import annotations
 
 import threading
 import time
-from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.chat_narrator.display_names import display_name_for
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.pydantic_classes import (
-    Message,
-    UserMessage,
-    UserMessageData,
-)
+from app.assistant.utils.pydantic_classes import Message
 
 logger = get_logger(__name__)
 
@@ -259,86 +254,21 @@ class ChatNarrator:
     def _publish_chat(
         self, *, sender: str, text: str, reply_to: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Route the narration to the originating surface.
+        """Hand off to the outbound chat publisher.
 
-        ``reply_to`` carries the surface's transport coordinates (set at
-        ingress, propagated through ScopeContext). When None, falls back
-        to the default UI socket. Surface-specific dispatch lives in
-        small handler methods so adding a transport is one new branch.
+        ``reply_to`` carries the surface coordinates (set at ingress,
+        propagated through ScopeContext). When None, default to the
+        UI socket so back-compat callers and cron-driven invocations
+        continue to surface in master_room.
         """
-        try:
-            effective = reply_to or {"type": "socketio", "room_id": self.CHAT_ROOM_ID}
-            surface_type = str(effective.get("type") or "").strip().lower()
-            if surface_type == "socketio":
-                self._publish_chat_socketio(sender=sender, text=text, reply_to=effective)
-            elif surface_type == "slack":
-                self._publish_chat_slack(sender=sender, text=text, reply_to=effective)
-            else:
-                logger.warning(
-                    "[chat_narrator] no outbound handler for surface=%r — dropping narration",
-                    surface_type,
-                )
-                return
-            logger.info(
-                "[chat_narrator] emitted narration sender=%r surface=%s len=%d",
-                sender, surface_type, len(text),
-            )
-        except Exception:
-            logger.warning("ChatNarrator publish_chat failed", exc_info=True)
-
-    def _publish_chat_socketio(
-        self, *, sender: str, text: str, reply_to: Dict[str, Any],
-    ) -> None:
-        """UI socketio path — publish a UserMessage to the socket_emit
-        relay (existing chain). EmiEventRelay routes to the right room.
-        """
-        user_msg = UserMessage(
-            data_type="user_msg",
-            sub_data_type=["chat_narration"],
+        effective = reply_to or {"type": "socketio", "room_id": self.CHAT_ROOM_ID}
+        publisher = getattr(DI, "outbound_chat_publisher", None)
+        if publisher is None:
+            logger.warning("[chat_narrator] outbound_chat_publisher unavailable; dropping")
+            return
+        publisher.publish(
             sender=sender,
-            receiver=None,
-            role="assistant",
-            content=text,
-            timestamp=datetime.now(timezone.utc),
-            event_topic="socket_emit",
-            metadata={"reply_to": reply_to},
-            user_message_data=UserMessageData(
-                chat=text,
-                importance=1,
-                generic_type="chat_narration",
-            ),
+            text=text,
+            reply_to=effective,
+            sub_data_type=["chat_narration"],
         )
-        DI.event_hub.publish(user_msg)
-
-    def _publish_chat_slack(
-        self, *, sender: str, text: str, reply_to: Dict[str, Any],
-    ) -> None:
-        """Slack path — call slack_transport's send_reply directly.
-
-        Slack outbound has no event_hub topic today. Worker name is
-        embedded in the body since slack doesn't render arbitrary
-        sender names per-message in a thread.
-        """
-        channel_id = str(reply_to.get("channel_id") or "").strip()
-        thread_ts = str(reply_to.get("thread_ts") or "").strip()
-        if not channel_id:
-            logger.warning("[chat_narrator] slack reply_to missing channel_id; dropping")
-            return
-        # SlackRoomTransport lives on RoomSessionManager (single instance,
-        # registered in DI). The same path slack_inbound_service uses to
-        # send replies — we go through it for narrations too.
-        room_session_manager = getattr(DI, "room_session_manager", None)
-        slack_transport = getattr(room_session_manager, "slack_transport", None) if room_session_manager else None
-        if slack_transport is None:
-            logger.warning("[chat_narrator] slack_transport not available; dropping")
-            return
-        body = f"[{sender}] {text}" if not text.startswith(f"[{sender}]") else text
-        try:
-            slack_transport.send_reply(
-                channel_id=channel_id, body=body, thread_ts=thread_ts,
-            )
-        except Exception:
-            logger.warning(
-                "[chat_narrator] slack send_reply failed (channel=%s)", channel_id,
-                exc_info=True,
-            )

@@ -74,6 +74,8 @@ def initialize_system():
     ServiceLocator.register("mam_instance_manager", MAMInstanceManager(
         resource_manager=DI.resource_manager,
     ))
+    from app.assistant.chat_outbound import OutboundChatPublisher
+    ServiceLocator.register("outbound_chat_publisher", OutboundChatPublisher())
     ServiceLocator.register("question_service", QuestionService())
 
     logger.info("Loading emi_result_handler...")

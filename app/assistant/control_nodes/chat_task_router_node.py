@@ -6,7 +6,7 @@ from app.assistant.control_nodes.control_node import ControlNode
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.utils.identity_names import get_required_assistant_name
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.pydantic_classes import Message as PersistMessage, UserMessage, UserMessageData
+from app.assistant.utils.pydantic_classes import Message as PersistMessage
 
 logger = get_logger(__name__)
 
@@ -122,7 +122,11 @@ class ChatTaskRouterNode(ControlNode):
     def _send_ack_to_user(self, text: str) -> None:
         """Send an acknowledgment to the user through the normal transport layer.
 
-        Also persists the message to blackboard for chat history.
+        Persists the message to blackboard for chat history, then dispatches
+        via ``DI.outbound_chat_publisher`` which routes to the right surface
+        based on ``reply_to.type``. ``reply_to`` itself is read from the
+        canonical home — ``scope_context.reply_to`` (set at ingress and
+        propagated through chained sub-managers).
         """
         if not text.strip():
             return
@@ -169,42 +173,49 @@ class ChatTaskRouterNode(ControlNode):
         )
         DI.global_blackboard.add_msg(outbound_msg)
 
-        # 2. Send to user via event hub (normal transport path).
-        reply_to = self._resolve_reply_to()
-        msg = UserMessage(
-            data_type="user_msg",
+        # 2. Send to user via the outbound publisher (surface-aware).
+        publisher = getattr(DI, "outbound_chat_publisher", None)
+        if publisher is None:
+            logger.warning(
+                "[%s] outbound_chat_publisher unavailable; ack not delivered",
+                self.name,
+            )
+            return
+        publisher.publish(
             sender=assistant_name,
-            receiver=None,
+            text=text,
+            reply_to=self._resolve_reply_to(),
             request_id=request_id.strip() or None,
-            role="assistant",
-            metadata={"reply_to": reply_to},
-            user_message_data=UserMessageData(chat=text),
         )
-        msg.event_topic = "socket_emit"
-        DI.event_hub.publish(msg)
 
-    def _resolve_reply_to(self) -> dict:
-        """Build reply_to routing dict from blackboard state."""
+    def _resolve_reply_to(self) -> dict | None:
+        """Pull reply_to from the canonical home — scope_context.reply_to.
+
+        Falls back to deriving from ``room_surface`` + ``room_id``
+        blackboard keys for back-compat with paths that haven't fully
+        migrated to scope-based reply_to yet.
+        """
+        scope = self.blackboard.get_state_value("scope_context")
+        if isinstance(scope, dict):
+            rt = scope.get("reply_to")
+            if isinstance(rt, dict) and rt:
+                return dict(rt)
+
+        # Fallback: derive a minimal reply_to from blackboard surface info.
+        # Only covers the UI socketio case cleanly; slack/telegram/sms with
+        # missing scope.reply_to will hit this path with insufficient
+        # transport coordinates and fail loudly at the publisher.
         room_surface = str(self.blackboard.get_state_value("room_surface", "") or "").strip().lower()
-
-        if room_surface == "telegram":
-            scope_context = self.blackboard.get_state_value("scope_context")
-            chat_id = ""
-            if isinstance(scope_context, dict):
-                chat_id = str(scope_context.get("actor_id") or "").strip()
-            if not chat_id:
-                chat_id = str(self.blackboard.get_state_value("chat_id", "") or "").strip()
-            room_id = str(self.blackboard.get_state_value("room_id", "") or "").strip()
-            return {"type": "telegram", "chat_id": chat_id, "room_id": room_id, "room_surface": "telegram"}
-
-        if room_surface == "sms":
-            metadata = self.blackboard.get_state_value("metadata")
-            if isinstance(metadata, dict) and isinstance(metadata.get("reply_to"), dict):
-                return metadata["reply_to"]
-
-        # Default: socketio (UI)
         room_id = str(self.blackboard.get_state_value("room_id", "") or "").strip()
-        return {"type": "socketio", "room_id": room_id}
+        if room_surface == "ui" or not room_surface:
+            return {"type": "socketio", "room_id": room_id} if room_id else None
+        # Surface known but no scope.reply_to — log and surface None so
+        # publisher drops with a clear warning.
+        logger.warning(
+            "[%s] no scope_context.reply_to for surface=%s; ack will be dropped",
+            self.name, room_surface,
+        )
+        return None
 
     # ------------------------------------------------------------------
     # Config helpers
