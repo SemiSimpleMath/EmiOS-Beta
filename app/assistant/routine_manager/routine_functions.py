@@ -239,4 +239,5 @@ ROUTINE_FUNCTION_REGISTRY = {
     "wiki_growth": wiki_growth,
     "kg_finding_backlog_drain": kg_finding_backlog_drain,
     "kg_date_gap_drain": kg_date_gap_drain,
+    "importance_backfill": importance_backfill,
 }
