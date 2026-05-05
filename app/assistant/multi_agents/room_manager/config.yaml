@@ -69,16 +69,37 @@ tools:
   except_tools: []
 scope_contract:
   tools:
-    # ``all`` so sub-managers (web_manager, personal_admin_manager, etc.)
-    # invoked from this room don't get their tool sets accidentally
-    # narrowed by the parent. The parent's narrowing was producing
-    # ``Final allowed tools: [ask_user, find_tool]`` for web::planner
-    # when invoked from Slack — search_web/scrape_url got intersected
-    # away because the explicit parent list didn't mention them.
-    # Per-room restrictions belong in each room's permissions.json
-    # (which feeds task_except_tools); the manager scope_contract is
-    # not the right layer for room-policy enforcement.
-    allowed_tools: ["all"]
+    allowed_tools:
+      - get_important_emails
+      - send_email
+      - find_calendar_event_by_name
+      - get_calendar_events
+      - create_calendar_event
+      - create_repeating_calendar_event
+      - delete_calendar_event
+      - delete_repeating_calendar_event
+      - update_calendar_event
+      - get_todo_tasks
+      - create_todo_task
+      - delete_todo_task
+      - update_todo_task
+      - web_manager
+      - personal_admin_manager
+      - ask_user
+      - notify_user
+      - playwright_manager
+      - kg_team_manager
+      - ask_kg
+      - read_text_file
+      - append_text_file
+      - write_text_file
+      - find_tool
+      - set_screen_capture_enabled
+      - capture_and_describe_monitors
+      - capture_monitor_screenshot
+      - vision_image_scout
+      - vision_image_describe
+      - one_shot_tool_runner
     blocked_tools:
       - install_tool
       - mcp::npm/playwright-mcp::browser_run_code
