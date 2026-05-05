@@ -108,6 +108,48 @@ class TestSlackRouting:
         assert body == "[Webby] On it"  # no double-prefix
 
 
+class TestTelegramRouting:
+
+    def test_telegram_calls_telegram_transport_send_reply(self, publisher):
+        telegram_transport = MagicMock()
+        rsm = MagicMock(telegram_transport=telegram_transport)
+        with patch("app.assistant.chat_outbound.outbound_chat_publisher.DI") as mock_di:
+            mock_di.room_session_manager = rsm
+            ok = publisher.publish(
+                sender="Webby",
+                text="Looking up the answer",
+                reply_to={
+                    "type": "telegram",
+                    "chat_id": "123456",
+                    "room_id": "telegram::123456",
+                    "room_surface": "telegram",
+                },
+            )
+        assert ok is True
+        telegram_transport.send_reply.assert_called_once()
+        kwargs = telegram_transport.send_reply.call_args.kwargs
+        assert kwargs["chat_id"] == "123456"
+        assert kwargs["body"] == "[Webby] Looking up the answer"
+
+    def test_telegram_missing_chat_id_drops(self, publisher):
+        with patch("app.assistant.chat_outbound.outbound_chat_publisher.DI") as mock_di:
+            mock_di.room_session_manager = MagicMock(telegram_transport=MagicMock())
+            ok = publisher.publish(
+                sender="Webby", text="hi",
+                reply_to={"type": "telegram"},
+            )
+        assert ok is False
+
+    def test_telegram_no_transport_drops(self, publisher):
+        with patch("app.assistant.chat_outbound.outbound_chat_publisher.DI") as mock_di:
+            mock_di.room_session_manager = MagicMock(spec=[])  # no telegram_transport
+            ok = publisher.publish(
+                sender="Webby", text="hi",
+                reply_to={"type": "telegram", "chat_id": "123"},
+            )
+        assert ok is False
+
+
 class TestUnknownSurface:
 
     def test_unknown_surface_returns_false(self, publisher):
