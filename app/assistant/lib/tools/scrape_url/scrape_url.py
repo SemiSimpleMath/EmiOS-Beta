@@ -88,7 +88,16 @@ class ScrapeURL(BaseTool):
         try:
             page = scrape.scrape_page(url)
             if not page:
-                raise RuntimeError("Failed to scrape any meaningful content from the page.")
+                # Common cause: paywalled / JS-heavy / 403-Forbidden URL
+                # where direct fetch fails and the rendered (Playwright)
+                # fallback isn't available. Tell the planner to move on
+                # explicitly so it doesn't retry the same URL.
+                raise RuntimeError(
+                    f"Could not extract content from {url} (likely paywalled, "
+                    "blocked, or requires JavaScript rendering). Move on to a "
+                    "different source from your search results — do not retry "
+                    "this URL."
+                )
 
             sections = page["sections"]
             full_text = page["full_text"]
@@ -167,10 +176,18 @@ class ScrapeURL(BaseTool):
 
         except Exception as e:
             logger.error(f"Error in execute scrape: {e}")
+            # Always include explicit recovery guidance so the planner
+            # doesn't retry the same URL or abandon the whole task.
+            err_text = str(e)
+            if "move on" not in err_text.lower():
+                err_text = (
+                    f"{err_text} — could not scrape {url}. "
+                    "Try a different source from your search results."
+                )
             return ToolResult(
                 result_type="error",
                 data_type="error",
-                content=f"Error in execute scrape: {e}",
+                content=err_text,
             )
 
 
