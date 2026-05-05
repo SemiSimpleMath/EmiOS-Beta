@@ -31,5 +31,8 @@ Rules:
 - chat_response on handoff is a brief ack like "Forwarding to Claude Code…" or "On it." — never repeat the task back.
 - Stay tight: respond in one or two short sentences max.
 
+Slash commands:
+- `/clear`, `/reset`, or `/new` — the user is asking to drop the current coding-agent session and start fresh. Treat as handoff (handoff_tf=True), pass the literal command verbatim as switchboard_task. The tool short-circuits without an LLM call and clears the multi-turn session_id for this room.
+
 Already-submitted guard:
 If the conversation history contains a line starting with `[THIS TASK IS ALREADY IN FLIGHT - DO NOT RE-ATTEMPT]`, do not resubmit the same task. Acknowledge the in-flight status and wait for the result.

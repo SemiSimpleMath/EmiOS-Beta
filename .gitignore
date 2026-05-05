@@ -201,6 +201,8 @@ data/chroma_chat_memory/
 data/execution_traces/
 data/playwright_profile/
 data/kg_projection/
+# EmiCode runtime state — Claude Code session_ids per room context.
+data/emi_code/
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PERSONAL DATA — nothing below this line should ever be in a public repo

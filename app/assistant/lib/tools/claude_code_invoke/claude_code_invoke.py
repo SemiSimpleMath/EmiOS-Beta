@@ -28,6 +28,35 @@ from app.assistant.utils.pydantic_classes import ToolMessage, ToolResult
 logger = get_logger(__name__)
 
 
+# Settings keys
+_SETTING_PROVIDER = "emi_code.provider"
+_SETTING_CLI_PATH = "emi_code.claude_cli_path"
+_SETTING_TIMEOUT_SECONDS = "emi_code.timeout_seconds"
+_SETTING_ALLOWED_TOOLS = "emi_code.claude_allowed_tools"
+
+# Supported providers. Only "claude_code" (local CLI) is implemented in v1.
+# "codex" / "openai_api" are stubs — they exist as recognized provider names
+# so user_settings can be set to them, but they return a clean tool error
+# until someone wires them up.
+_PROVIDER_CLAUDE_CODE = "claude_code"
+_PROVIDER_CODEX = "codex"
+_KNOWN_PROVIDERS = {_PROVIDER_CLAUDE_CODE, _PROVIDER_CODEX}
+
+
+def _read_setting(key: str, default):
+    """Pull a single user_settings key; default on any failure."""
+    try:
+        from app.assistant.user_settings_manager.user_settings import get_settings_manager
+        mgr = get_settings_manager()
+        if mgr is None:
+            return default
+        val = mgr.get(key, default)
+        return val if val is not None else default
+    except Exception:
+        logger.debug("[claude_code_invoke] failed to read setting %r", key, exc_info=True)
+        return default
+
+
 class ClaudeCodeInvoke(BaseTool):
     """Spawn the user's local ``claude`` CLI with a curated prompt + skills.
 
@@ -56,12 +85,60 @@ class ClaudeCodeInvoke(BaseTool):
                     retryable=True,
                 )
 
+            # Provider gating. v1 only implements claude_code; codex is a
+            # named stub so settings can target it without crashing.
+            provider = str(_read_setting(_SETTING_PROVIDER, _PROVIDER_CLAUDE_CODE)).strip().lower()
+            if provider not in _KNOWN_PROVIDERS:
+                return make_tool_error(
+                    error_code="unknown_provider",
+                    message=(
+                        f"Unknown emi_code provider {provider!r}. Set "
+                        f"user_settings.emi_code.provider to one of: "
+                        f"{sorted(_KNOWN_PROVIDERS)}"
+                    ),
+                    abort_policy="abort_tool",
+                    retryable=False,
+                )
+            if provider == _PROVIDER_CODEX:
+                return make_tool_error(
+                    error_code="codex_provider_not_implemented",
+                    message=(
+                        "OpenAI/Codex provider is not yet implemented in EmiCode. "
+                        "Set user_settings.emi_code.provider back to 'claude_code' "
+                        "to use the local Claude Code CLI."
+                    ),
+                    abort_policy="abort_tool",
+                    retryable=False,
+                )
+
             # room_id / room_context_id come in via tool_message.metadata when
             # invoked from a room manager. Fall back to 'emi_code_room' / 'main'
             # so direct (test) invocations still work.
             md = tool_message.metadata or {}
             room_id = str(md.get("room_id") or "emi_code_room").strip() or "emi_code_room"
             room_context_id = str(md.get("room_context_id") or "main").strip() or "main"
+
+            # /clear resets the multi-turn session without invoking the
+            # coding agent. Recognized commands: "/clear", "/reset",
+            # "/new" (case-insensitive, leading whitespace allowed).
+            stripped = task.lstrip().lower()
+            if stripped in {"/clear", "/reset", "/new"} or stripped.startswith(("/clear ", "/reset ", "/new ")):
+                cleared = session_store.get_session_id(room_id, room_context_id)
+                session_store.clear_session(room_id, room_context_id)
+                msg = (
+                    f"Session cleared (was {cleared})."
+                    if cleared else
+                    "No active session. Next message will start a new coding-agent conversation."
+                )
+                return ToolResult(
+                    result_type="claude_code_invoke",
+                    content=msg,
+                    data={
+                        "command": "clear",
+                        "cleared_session_id": cleared,
+                        "engine": "deterministic",
+                    },
+                )
 
             existing_session_id = session_store.get_session_id(room_id, room_context_id)
 
@@ -97,6 +174,9 @@ class ClaudeCodeInvoke(BaseTool):
                 prompt=prompt,
                 cwd=get_repo_root(),
                 session_id=existing_session_id,
+                cli_path=str(_read_setting(_SETTING_CLI_PATH, coding_agent_runner.DEFAULT_CLI_PATH)),
+                allowed_tools=str(_read_setting(_SETTING_ALLOWED_TOOLS, coding_agent_runner.DEFAULT_ALLOWED_TOOLS)),
+                timeout_seconds=int(_read_setting(_SETTING_TIMEOUT_SECONDS, coding_agent_runner.DEFAULT_TIMEOUT_SECONDS)),
             )
 
             if not result.success:

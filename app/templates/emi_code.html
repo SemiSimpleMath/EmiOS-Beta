@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EmiCode — {{ assistant_name }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/emi_code.css') }}">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="{{ url_for('static', filename='js/emi/socket_heartbeat.js') }}"></script>
+</head>
+<body>
+  <div class="emi-code-shell">
+    <header class="emi-code-header">
+      <h1>EmiCode</h1>
+      <span class="emi-code-sub">read-only · CLAUDE.md + arch docs · multi-turn via Claude Code CLI</span>
+      <span id="emi-code-status" class="emi-code-status">connecting…</span>
+    </header>
+
+    <main class="emi-code-log" id="emi-code-log"></main>
+
+    <form class="emi-code-composer" id="emi-code-composer" autocomplete="off">
+      <textarea
+        id="emi-code-input"
+        rows="3"
+        placeholder="Describe a coding task or ask about Emi's internals — e.g. 'explain how dayflow_orchestrator works', 'how would I add a new pod kind?'"
+        spellcheck="false"></textarea>
+      <button type="submit" id="emi-code-send">Send</button>
+    </form>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/emi_code.js') }}"></script>
+</body>
+</html>
