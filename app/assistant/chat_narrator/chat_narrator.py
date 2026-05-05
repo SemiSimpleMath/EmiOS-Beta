@@ -1,26 +1,33 @@
-"""ChatNarrator — proof of concept for live in-chat narration of long tasks.
+"""ChatNarrator — live in-chat narration of long-running sub-managers.
 
-Subscribes to ``agent_progress_emit`` (already-curated cards from
-ProgressCurator) and writes a short, named, chat-style update into
-master_room as a user-facing message. Each long-running sub-manager (web,
-emi_team, etc.) gets a display name like a member of Emi's team — "Quimby
-is on it" rather than opaque "Emi is thinking".
+Subscribes to ``agent_progress_emit`` (curated cards from ProgressCurator)
+and writes a short, named, chat-style update into master_room. Each
+long-running sub-manager has a display name configured in its
+``manager_config.yaml`` ("Quimby" for web_manager, "Em" for emi_team,
+etc.) and a per-manager narration config:
 
-This is the first leg of the team-naming proof of concept:
-- One-way (narrator → chat). No user steering yet.
-- Cheap throttle to keep chat readable (one narration per manager per N seconds,
-  drop verbatim repeats).
-- Hardcoded display name map for now — can move to per-manager config later.
+  display_name: "Quimby"
+  narration:
+    enabled: true        # default true when display_name is set
+    max_sentences: 2     # default 2 (1 = punchier, 3 = chattier)
+    drop_phrases:        # added to the global noise list
+      - "search_web"
 
-The pipeline below is already in place and unchanged by this module:
-  agents/control nodes → "agent_progress_fact"
-  ProgressCurator      → "agent_progress_emit" (curated cards)
-  EmiEventRelay        → UI room "progress" tab (existing side panel)
+Managers without a ``display_name`` are silenced entirely — explicit
+opt-in keeps every new manager from leaking into chat by default.
 
-ChatNarrator adds a new subscriber to ``agent_progress_emit`` that ALSO
-publishes to master_room chat as a regular Emi-style message. The
-ProgressCurator's existing card output is the source of truth — we don't
-re-curate, we just translate the headline into a chat sentence.
+Sentence-level filtering: each sentence in the planner's
+``what_i_am_thinking`` is dropped if it contains a skip-phrase
+(case-insensitive substring match). Skip-phrases include planner
+meta-talk like "the critic", "action_count", "return_control" — things
+that are real to the planner but noise to the user. Survivors are
+joined and capped at ``max_sentences``. If everything filters out, the
+emit is silently suppressed.
+
+The pipeline upstream is unchanged:
+  agents / control nodes → "agent_progress_fact"
+  ProgressCurator       → "agent_progress_emit" (curated cards)
+  ChatNarrator (here)   → master_room chat (UserMessage via socket_emit)
 """
 from __future__ import annotations
 
@@ -46,6 +53,30 @@ logger = get_logger(__name__)
 # from the same manager. Long planner loops fire many cards; chat would
 # be unreadable without this.
 _THROTTLE_SECONDS = 8.0
+
+# Default narration verbosity (sentences). Per-manager
+# ``narration.max_sentences`` overrides this.
+_DEFAULT_MAX_SENTENCES = 2
+
+# Sentences containing any of these substrings (case-insensitive) get
+# dropped before narration. The planner uses these terms internally to
+# refer to its own scaffolding — useful for the planner, noise to the
+# user. Per-manager ``narration.drop_phrases`` extends this list.
+_DEFAULT_DROP_PHRASES: tuple[str, ...] = (
+    "the critic",
+    "per the critic",
+    "critic correctly",
+    "critic pointed",
+    "action_count",
+    "action count",
+    "return_control",
+    "exit_node",
+    "manager_exit",
+    "checklist-wise",
+    "wrap up",
+    "wrap-up",
+    "i can end",
+)
 
 
 class ChatNarrator:
@@ -74,7 +105,16 @@ class ChatNarrator:
 
             manager = str(card.get("manager") or "").strip()
             display_name = self._display_name_for(manager)
-            sentence = self._render_sentence(card, display_name)
+            # No display_name in the manager's config → silent. Explicit
+            # opt-in keeps every new manager from leaking into chat.
+            if not display_name or display_name == manager:
+                return
+
+            cfg = self._narration_config_for(manager)
+            if not cfg["enabled"]:
+                return
+
+            sentence = self._render_sentence(card, display_name, cfg)
             if not sentence:
                 return
 
@@ -95,30 +135,79 @@ class ChatNarrator:
         except Exception:
             logger.debug("ChatNarrator failed to process card", exc_info=True)
 
+    def _narration_config_for(self, manager_name: str) -> Dict[str, Any]:
+        """Resolve the manager's narration config from its manager_config.yaml.
+
+        Per-manager fields override defaults; ``drop_phrases`` extends the
+        global default list rather than replacing it.
+        """
+        try:
+            registry = getattr(DI, "manager_registry", None)
+            mgr_cfg = registry.get(manager_name) if registry is not None else None
+        except Exception:
+            mgr_cfg = None
+        narration = {}
+        if isinstance(mgr_cfg, dict):
+            n = mgr_cfg.get("narration")
+            if isinstance(n, dict):
+                narration = n
+        max_sentences = narration.get("max_sentences", _DEFAULT_MAX_SENTENCES)
+        try:
+            max_sentences = max(1, int(max_sentences))
+        except (TypeError, ValueError):
+            max_sentences = _DEFAULT_MAX_SENTENCES
+        extra_drops = narration.get("drop_phrases") or []
+        drop_phrases = list(_DEFAULT_DROP_PHRASES) + [
+            str(p).lower() for p in extra_drops if isinstance(p, str) and p.strip()
+        ]
+        return {
+            "enabled": bool(narration.get("enabled", True)),
+            "max_sentences": max_sentences,
+            "drop_phrases": drop_phrases,
+        }
+
     def _display_name_for(self, manager_name: str) -> str:
         return display_name_for(manager_name)
 
-    def _render_sentence(self, card: Dict[str, Any], display_name: str) -> str:
+    def _render_sentence(
+        self,
+        card: Dict[str, Any],
+        display_name: str,
+        cfg: Optional[Dict[str, Any]] = None,
+    ) -> str:
         """Compose a brief narration sentence from a curated card.
 
         Strategy: narrate ONLY ``planner_decision`` cards, using the planner's
-        own ``what_i_am_thinking`` line. The planner already had to articulate
-        what it's about to do to fill that field — far higher signal than
-        tool-name templating ("running search_web").
+        own ``what_i_am_thinking`` line, filtered to drop noise sentences and
+        capped at ``cfg.max_sentences``.
 
         ``tool_call`` and ``tool_result`` cards are intentionally skipped —
-        they fire many times per planner cycle and would drown out the actual
-        narration. The planner_decision that PRECEDED the tool already told
-        the user what was about to happen, and the next planner_decision
-        will tell them what was learned.
+        the planner_decision that PRECEDED the tool already told the user
+        what was about to happen, and the next planner_decision will tell
+        them what was learned.
         """
         kind = str(card.get("kind") or "").strip()
         if kind != "planner_decision":
             return ""
 
+        if cfg is None:
+            cfg = {
+                "max_sentences": _DEFAULT_MAX_SENTENCES,
+                "drop_phrases": list(_DEFAULT_DROP_PHRASES),
+            }
+
         thinking = str(card.get("what_i_am_thinking") or "").strip()
         if thinking:
-            narration = self._first_sentences(thinking, max_chars=200, max_sentences=2)
+            narration = self._first_sentences(
+                thinking,
+                max_chars=200,
+                max_sentences=cfg["max_sentences"],
+                drop_phrases=cfg["drop_phrases"],
+            )
+            if not narration:
+                # Everything was filtered out as noise — silently suppress
+                # rather than emit a low-signal fallback.
+                return ""
             return f"[{display_name}] {narration}"
 
         # Fallback when the planner didn't fill what_i_am_thinking — keep
@@ -136,36 +225,54 @@ class ChatNarrator:
         return ""
 
     @staticmethod
-    def _first_sentences(text: str, *, max_chars: int = 200, max_sentences: int = 2) -> str:
-        """Extract the first 1-2 sentences from a planner's what_i_am_thinking
-        for use as a chat narration line. The full text remains available
-        on the card for any consumer that wants the unabbreviated version.
+    def _first_sentences(
+        text: str,
+        *,
+        max_chars: int = 200,
+        max_sentences: int = 2,
+        drop_phrases: Optional[list[str]] = None,
+    ) -> str:
+        """Extract leading sentences for chat narration.
 
-        Splits on ``.``, ``!``, or ``?`` followed by whitespace. Stops adding
-        sentences once the total length would exceed ``max_chars``. If the
-        first sentence alone is too long, hard-truncates with "...".
+        - Normalizes whitespace.
+        - Splits on ``.``, ``!``, or ``?`` followed by whitespace.
+        - Drops any sentence containing a substring from ``drop_phrases``
+          (case-insensitive) — used to filter planner meta-talk that's
+          internally meaningful but useless to the user.
+        - Concatenates surviving sentences in order, stopping when adding
+          the next would exceed ``max_chars`` OR when ``max_sentences``
+          have been included.
+        - If the first surviving sentence alone exceeds ``max_chars``,
+          hard-truncates with ``...``.
+
+        Returns ``""`` if every sentence was filtered out.
         """
         text = (text or "").strip()
         if not text:
             return ""
-        # Normalize whitespace so multi-line thinking renders cleanly.
         text = re.sub(r"\s+", " ", text)
         parts = re.split(r"(?<=[.!?])\s+", text)
         if not parts:
             return text
+
+        drops_lower = [p.lower() for p in (drop_phrases or []) if p]
+
         out = ""
-        for i, sentence in enumerate(parts):
+        kept = 0
+        for sentence in parts:
             sentence = sentence.strip()
             if not sentence:
                 continue
+            if drops_lower and any(p in sentence.lower() for p in drops_lower):
+                continue  # noise — skip this sentence
             candidate = f"{out} {sentence}".strip() if out else sentence
             if len(candidate) > max_chars:
                 if not out:
-                    # First sentence alone is too long — hard-truncate.
                     return sentence[: max_chars - 3].rstrip() + "..."
                 break
             out = candidate
-            if i + 1 >= max_sentences:
+            kept += 1
+            if kept >= max_sentences:
                 break
         return out
 

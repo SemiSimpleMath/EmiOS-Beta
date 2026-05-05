@@ -33,13 +33,15 @@ class TestForwardLookup:
         assert display_name_for("web_manager") == "Quimby"
         assert display_name_for("emi_team_manager") == "Em"
 
-    def test_unknown_falls_back_to_humanized(self):
-        assert display_name_for("brand_new_manager") == "Brand New"
-        assert display_name_for("foo") == "Foo"
+    def test_unknown_returns_raw_manager_name(self):
+        # No magic humanization — the gap is meant to be visible so the
+        # missing display_name in config gets noticed and added.
+        assert display_name_for("brand_new_manager") == "brand_new_manager"
+        assert display_name_for("foo") == "foo"
 
-    def test_empty_returns_em(self):
-        assert display_name_for("") == "Em"
-        assert display_name_for(None) == "Em"  # type: ignore[arg-type]
+    def test_empty_returns_empty(self):
+        assert display_name_for("") == ""
+        assert display_name_for(None) == ""  # type: ignore[arg-type]
 
 
 class TestReverseLookup:

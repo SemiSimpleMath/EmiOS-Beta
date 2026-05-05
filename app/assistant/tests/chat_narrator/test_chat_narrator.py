@@ -141,6 +141,144 @@ class TestSentenceRendering:
         assert "Line one of thinking" in s
         assert "Line two of thinking" in s
 
+
+# ── Configurable verbosity + skip-phrase filter ───────────────────
+
+
+class TestConfigurableVerbosity:
+
+    def test_max_sentences_one_keeps_only_first(self, narrator):
+        thinking = (
+            "First sentence here. Second sentence here. Third sentence here."
+        )
+        s = narrator._render_sentence(
+            _card(kind="planner_decision", what_i_am_thinking=thinking),
+            "Em",
+            cfg={"max_sentences": 1, "drop_phrases": []},
+        )
+        assert "First sentence here" in s
+        assert "Second sentence here" not in s
+
+    def test_max_sentences_three_keeps_first_three(self, narrator):
+        thinking = (
+            "First. Second. Third. Fourth. Fifth."
+        )
+        s = narrator._render_sentence(
+            _card(kind="planner_decision", what_i_am_thinking=thinking),
+            "Em",
+            cfg={"max_sentences": 3, "drop_phrases": []},
+        )
+        for w in ("First", "Second", "Third"):
+            assert w in s
+        assert "Fourth" not in s
+
+
+class TestSkipPhraseFilter:
+
+    def test_default_drops_critic_meta_talk(self, narrator):
+        thinking = (
+            "Per the critic, I should refine my searches. "
+            "I will now search for specific Yamaha YDS-150 specs."
+        )
+        s = narrator._render_sentence(
+            _card(kind="planner_decision", what_i_am_thinking=thinking),
+            "Em",
+        )
+        # First sentence (critic meta-talk) dropped; second kept.
+        assert "critic" not in s.lower()
+        assert "Yamaha YDS-150" in s
+
+    def test_default_drops_action_count_meta(self, narrator):
+        thinking = (
+            "Action_count is at 12 of 15. I should wrap up. "
+            "I will return the final summary now."
+        )
+        s = narrator._render_sentence(
+            _card(kind="planner_decision", what_i_am_thinking=thinking),
+            "Em",
+        )
+        # Both meta sentences filtered ("action_count", "wrap up").
+        assert "Action_count" not in s
+        assert "wrap up" not in s
+        assert "return the final summary" in s
+
+    def test_per_manager_drop_phrases_extend_defaults(self, narrator):
+        thinking = "I will search Porto's menu next."
+        s = narrator._render_sentence(
+            _card(kind="planner_decision", what_i_am_thinking=thinking),
+            "Em",
+            cfg={
+                "max_sentences": 2,
+                "drop_phrases": list(__import__(
+                    "app.assistant.chat_narrator.chat_narrator",
+                    fromlist=["_DEFAULT_DROP_PHRASES"],
+                )._DEFAULT_DROP_PHRASES) + ["porto's"],
+            },
+        )
+        # Per-manager phrase filtered the only sentence — empty result.
+        assert s == ""
+
+    def test_all_noise_returns_empty(self, narrator):
+        thinking = (
+            "Per the critic, I should retry. "
+            "Action_count is high. "
+            "I should wrap up now."
+        )
+        s = narrator._render_sentence(
+            _card(kind="planner_decision", what_i_am_thinking=thinking),
+            "Em",
+        )
+        assert s == ""
+
+
+# ── _on_card respects manager registry presence + enabled flag ───
+
+
+class TestOnCardManagerGating:
+
+    def test_manager_without_display_name_silenced(self, narrator):
+        # "unconfigured_manager" not in the seeded display registry →
+        # display_name_for returns the raw manager_name → narrator
+        # silences this card entirely.
+        narrator._on_card(_msg(_card(
+            manager="unconfigured_manager",
+            kind="planner_decision",
+            what_i_am_thinking="I am doing important work",
+        )))
+        assert narrator._publishes == []
+
+    def test_disabled_in_config_silences_emits(self, narrator):
+        # Patch manager_registry.get to return a config that disables
+        # narration for web_manager.
+        with patch.object(
+            narrator,
+            "_narration_config_for",
+            return_value={"enabled": False, "max_sentences": 2, "drop_phrases": []},
+        ):
+            narrator._on_card(_msg(_card(
+                manager="web_manager",
+                kind="planner_decision",
+                what_i_am_thinking="I am thinking hard",
+            )))
+        assert narrator._publishes == []
+
+    def test_enabled_with_higher_verbosity_emits_more(self, narrator):
+        thinking = "First sentence. Second sentence. Third sentence."
+        with patch.object(
+            narrator,
+            "_narration_config_for",
+            return_value={"enabled": True, "max_sentences": 3, "drop_phrases": []},
+        ):
+            narrator._on_card(_msg(_card(
+                manager="web_manager",
+                kind="planner_decision",
+                what_i_am_thinking=thinking,
+            )))
+        assert len(narrator._publishes) == 1
+        text = narrator._publishes[0][1]
+        for w in ("First", "Second", "Third"):
+            assert w in text
+
     def test_planner_decision_fallback_to_goal_and_next(self, narrator):
         # No what_i_am_thinking → fall back to old template.
         s = narrator._render_sentence(
@@ -200,12 +338,12 @@ class TestDisplayNameLookup:
         assert narrator._display_name_for("devices_manager") == "Watt"
         assert narrator._display_name_for("kg_team_manager") == "Mnemo"
 
-    def test_unknown_manager_falls_back_to_humanized_name(self, narrator):
-        # "_manager" suffix stripped, underscores → spaces, title-cased.
-        assert narrator._display_name_for("brand_new_manager") == "Brand New"
+    def test_unknown_manager_returns_raw_name(self, narrator):
+        # No humanization — visible gap means "add display_name to config".
+        assert narrator._display_name_for("brand_new_manager") == "brand_new_manager"
 
-    def test_empty_manager_falls_back_to_em(self, narrator):
-        assert narrator._display_name_for("") == "Em"
+    def test_empty_manager_returns_empty(self, narrator):
+        assert narrator._display_name_for("") == ""
 
 
 # ── Throttle + dedup ─────────────────────────────────────────────

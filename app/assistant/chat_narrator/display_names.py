@@ -42,15 +42,18 @@ def initialize_display_name_registry(name_to_display: Dict[str, str]) -> None:
 
 
 def display_name_for(manager_name: str) -> str:
-    """User-facing name for a manager. Falls back to a humanized form so
-    unnamed managers still show up visibly (signals "this worker still
-    needs a display_name in its config")."""
+    """User-facing name for a manager.
+
+    Source of truth is each manager's ``config.yaml`` ``display_name`` field,
+    loaded into the registry at boot. If a manager isn't in the registry,
+    return its raw ``manager_name`` so the gap is visible in chat
+    ("``[web_manager] doing thing``" → "this manager needs a display_name
+    in its config"). No magic humanization, no fallback to other workers'
+    names.
+    """
     if not manager_name:
-        return "Em"
-    name = _FORWARD.get(manager_name)
-    if name:
-        return name
-    return manager_name.replace("_manager", "").replace("_", " ").title() or "Em"
+        return ""
+    return _FORWARD.get(manager_name, manager_name)
 
 
 def manager_for_display_name(display_name: str) -> Optional[str]:
