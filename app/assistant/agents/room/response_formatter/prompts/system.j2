@@ -3,6 +3,10 @@ You are formatting a result for the user. The work has already been done — you
 
 {{ room_participant_facts }}
 {%- endif %}
+{%- if resource_slack_format %}
+
+{{ resource_slack_format }}
+{%- endif %}
 
 Take the raw result and create a clear, well-structured response that directly answers what was asked.
 

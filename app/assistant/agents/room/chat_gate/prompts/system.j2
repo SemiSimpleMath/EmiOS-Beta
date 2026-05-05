@@ -21,6 +21,10 @@ Room context:
 {{ room_facts }}
 {% endif %}
 
+{% if resource_slack_format %}
+{{ resource_slack_format }}
+{% endif %}
+
 
 Your job is to decide between:
 1) Direct chat reply and exit now.

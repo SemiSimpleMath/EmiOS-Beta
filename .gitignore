@@ -273,6 +273,7 @@ resources/instructions/*
 !resources/instructions/resource_pod_skill_finder.md
 !resources/instructions/resource_pod_skill_admin.md
 !resources/instructions/resource_kg_node_reading.md
+!resources/instructions/resource_slack_format.md
 !resources/instructions/resource_kg_node_disambiguation.md
 
 # Personal soul/identity doc

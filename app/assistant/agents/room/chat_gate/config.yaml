@@ -37,3 +37,6 @@ system_context_items:
   - room_safety
   - room_facts
   - room_participant_facts
+  # Slack uses its own mrkdwn dialect — skill loads always; agent applies
+  # the substitutions only when room_surface == "slack".
+  - resource_slack_format
