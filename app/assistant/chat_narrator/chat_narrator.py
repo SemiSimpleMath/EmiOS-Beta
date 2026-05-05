@@ -59,9 +59,22 @@ _TRANSLATOR_AGENT = "chat_narrator::translator"
 
 
 class ChatNarrator:
-    """Subscribes to agent_progress_emit and posts brief, named chat updates."""
+    """Subscribes to event_hub topics and posts brief, named chat updates.
+
+    Two subscriptions:
+      ``agent_progress_emit``       — curated cards from ProgressCurator;
+                                       translated to chat narration.
+      ``manager_invocation_started`` — fired by ManagerInvoker each time
+                                       a manager starts; emits the
+                                       ``Delegating to <Name>.`` line.
+
+    Both paths share the same display-name registry, narration-config
+    lookup, and ``_publish_chat`` socket-emit helper. The narrator does
+    not import any manager / invoker code — purely a listener.
+    """
 
     EMIT_TOPIC = "agent_progress_emit"
+    INVOCATION_TOPIC = "manager_invocation_started"
     CHAT_ROOM_ID = "master_room"
 
     def __init__(self) -> None:
@@ -70,10 +83,13 @@ class ChatNarrator:
         self._last_emit: Dict[str, tuple[float, str]] = {}
 
         DI.event_hub.register_event(self.EMIT_TOPIC, self._on_card)
+        DI.event_hub.register_event(
+            self.INVOCATION_TOPIC, self._on_invocation_started,
+        )
         logger.info(
-            "✅ ChatNarrator initialized (subscribed to %s, target room=%s, "
-            "translator=%s).",
-            self.EMIT_TOPIC, self.CHAT_ROOM_ID, _TRANSLATOR_AGENT,
+            "✅ ChatNarrator initialized (topics=%s, target room=%s, translator=%s).",
+            [self.EMIT_TOPIC, self.INVOCATION_TOPIC],
+            self.CHAT_ROOM_ID, _TRANSLATOR_AGENT,
         )
 
     def _on_card(self, message: Message) -> None:
@@ -135,35 +151,34 @@ class ChatNarrator:
         except Exception:
             logger.debug("ChatNarrator failed to process card", exc_info=True)
 
-    def maybe_announce_delegation(self, manager_name: str, user_message) -> None:
-        """Publish a brief "Delegating to <Name>." line when a named worker
-        starts a user-facing invocation.
+    def _on_invocation_started(self, message: Message) -> None:
+        """Handle a ``manager_invocation_started`` event.
 
-        Fires once per invocation, immediately after ManagerInvoker
-        registers the call. Templated (no LLM) — predictable, cheap, and
-        environment-agnostic (the publish is a no-op in environments
-        without a chat surface subscriber).
+        Publishes ``Delegating to <Name>.`` in chat for any named worker.
+        Silent for unnamed workers, disabled narration, or any failure
+        in the chain — never breaks the firing manager.
 
-        Skips silently when:
-          - the manager has no display_name in its config (unnamed worker)
-          - the manager's narration.enabled is false
-          - any failure (this announcement must never break the host
-            invocation)
+        Expected event ``data`` keys:
+          ``manager_name`` — canonical type name (UUID suffix already stripped)
         """
         try:
+            data = message.data if isinstance(getattr(message, "data", None), dict) else {}
+            manager_name = str(data.get("manager_name") or "").strip()
+            if not manager_name:
+                return
             display_name = display_name_for(manager_name)
             if not display_name or display_name == manager_name:
-                return  # unnamed worker — silent
+                return
             cfg = self._narration_config_for(manager_name)
             if not cfg["enabled"]:
                 return
-
-            text = f"Delegating to {display_name}."
-            self._publish_chat(sender=display_name, text=text)
+            self._publish_chat(
+                sender=display_name,
+                text=f"Delegating to {display_name}.",
+            )
         except Exception:
             logger.debug(
-                "ChatNarrator.maybe_announce_delegation failed",
-                exc_info=True,
+                "ChatNarrator._on_invocation_started failed", exc_info=True,
             )
 
     def _narration_config_for(self, manager_name: str) -> Dict[str, Any]:

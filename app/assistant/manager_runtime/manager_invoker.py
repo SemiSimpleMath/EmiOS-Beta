@@ -57,6 +57,39 @@ class ManagerInvoker:
     def get_invocation_status(self) -> dict[str, Any]:
         return self._build_invocation_status_payload()
 
+    @staticmethod
+    def _publish_invocation_started_event(
+        manager_name: str, request_id: str | None, invocation_id: str,
+    ) -> None:
+        """Fire a generic ``manager_invocation_started`` event on event_hub.
+
+        ManagerInvoker doesn't know what consumes this — chat narrators,
+        progress UIs, audit pipelines, etc. all subscribe at their own
+        layer. In environments with no subscriber, the publish is a
+        no-op. Never raises into the host invocation.
+        """
+        try:
+            from app.assistant.manager_runtime.active_workers import (
+                canonical_manager_name,
+            )
+            from app.assistant.ServiceLocator.service_locator import DI
+            from app.assistant.utils.pydantic_classes import Message
+            DI.event_hub.publish(
+                Message(
+                    sender="manager_invoker",
+                    receiver=None,
+                    event_topic="manager_invocation_started",
+                    data={
+                        "manager_name": canonical_manager_name(manager_name),
+                        "manager_instance_name": manager_name,
+                        "request_id": request_id,
+                        "invocation_id": invocation_id,
+                    },
+                )
+            )
+        except Exception:
+            logger.debug("manager_invocation_started publish failed", exc_info=True)
+
     def _publish_invocation_status(self) -> None:
         payload = self._build_invocation_status_payload()
         status_path = status_dir() / "resource_manager_invocation_status.json"
@@ -100,26 +133,7 @@ class ManagerInvoker:
         except Exception:
             logger.debug("Failed to stash invocation_id on blackboard", exc_info=True)
 
-        # Announce delegation to chat — once per invocation, for any
-        # manager that has a display_name. The publish is generic
-        # (event_hub) — surfaces with a chat narrator subscribe and
-        # render; environments without one (cron, batch, tests) just
-        # see no-op. Strip the UUID suffix so the canonical type name
-        # resolves against the display registry.
-        try:
-            from app.assistant.manager_runtime.active_workers import (
-                canonical_manager_name,
-            )
-            from app.assistant.ServiceLocator.service_locator import DI as _DI
-            narrator = getattr(_DI, "chat_narrator", None)
-            if narrator is not None:
-                narrator.maybe_announce_delegation(
-                    canonical_manager_name(manager_name), user_message,
-                )
-        except Exception:
-            logger.debug(
-                "delegation announcement publish failed", exc_info=True,
-            )
+        self._publish_invocation_started_event(manager_name, request_id, invocation_id)
         try:
             normalized_message, immediate = self.preprocessor.preprocess(manager_name, user_message)
             if isinstance(immediate, ToolResult):

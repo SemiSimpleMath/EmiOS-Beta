@@ -1,17 +1,22 @@
-"""Tests for MultiAgentManager._drain_mailbox + _dispatch_mailbox_message.
+"""Tests for MailboxDispatcher — drain + dispatch logic for the typed
+message bus into a running manager.
 
-Validates the manager-side of the typed-message bus: drain → dispatch by
-message_type → either accumulate per-agent runtime injection or write to
-blackboard.
+Validates the dispatcher in isolation: each ``message_type`` lands on
+the right blackboard slot, role bindings are honored, unknown types are
+dropped without crashing.
 """
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.assistant.manager_runtime.mailbox import MailboxMessage
+from app.assistant.manager_runtime.mailbox import (
+    MailboxDispatcher,
+    MailboxMessage,
+    _RUNTIME_INJECTIONS_BB_KEY,
+)
 
 
 class _FakeBlackboard:
@@ -24,23 +29,6 @@ class _FakeBlackboard:
     def update_state_value(self, key, value):
         self._state[key] = value
 
-    def update_global_state_value(self, key, value):
-        self._state[key] = value
-
-
-class _FakeManager:
-    """Minimal stand-in for MultiAgentManager — just the methods we test."""
-
-    _RUNTIME_INJECTIONS_BB_KEY = "_runtime_injections"
-
-    def __init__(self):
-        self.name = "fake_manager"
-        self.blackboard = _FakeBlackboard()
-        self._role_bindings = {"planner": "fake::planner"}
-
-    def resolve_role_binding(self, role_name):
-        return self._role_bindings.get(role_name, role_name)
-
 
 def _make_msg(*, mtype, payload):
     return MailboxMessage(
@@ -50,100 +38,166 @@ def _make_msg(*, mtype, payload):
     )
 
 
-# We attach the real MultiAgentManager methods to the FakeManager so we
-# don't need a full DI bootstrap to test the dispatch logic in isolation.
 @pytest.fixture
-def manager():
-    from app.assistant.manager_classes.MultiAgentManager import MultiAgentManager
-    m = _FakeManager()
-    m._dispatch_mailbox_message = MultiAgentManager._dispatch_mailbox_message.__get__(m)
-    m._append_runtime_injection = MultiAgentManager._append_runtime_injection.__get__(m)
-    return m
+def dispatcher():
+    return MailboxDispatcher()
 
 
-# ── agent_inject: appends per agent name ──────────────────────────
+@pytest.fixture
+def role_resolver():
+    return {"planner": "fake::planner"}.get
+
+
+# ── agent_inject: appends per agent name ─────────────────────────
 
 
 class TestAgentInject:
 
-    def test_role_resolved_via_binding(self, manager):
-        manager._dispatch_mailbox_message(_make_msg(
-            mtype="agent_inject",
-            payload={"planner": "do thing X"},
-        ))
-        store = manager.blackboard.get_state_value(manager._RUNTIME_INJECTIONS_BB_KEY)
-        # "planner" → "fake::planner" via role bindings.
-        assert store == {"fake::planner": ["do thing X"]}
+    def test_role_resolved_via_resolver(self, dispatcher, role_resolver):
+        bb = _FakeBlackboard()
+        dispatcher._dispatch_one(
+            _make_msg(mtype="agent_inject", payload={"planner": "do thing X"}),
+            bb, role_resolver,
+        )
+        assert bb.get_state_value(_RUNTIME_INJECTIONS_BB_KEY) == {
+            "fake::planner": ["do thing X"],
+        }
 
-    def test_unknown_role_passes_through_as_literal(self, manager):
-        manager._dispatch_mailbox_message(_make_msg(
-            mtype="agent_inject",
-            payload={"web::planner": "literal name"},
-        ))
-        store = manager.blackboard.get_state_value(manager._RUNTIME_INJECTIONS_BB_KEY)
-        assert store == {"web::planner": ["literal name"]}
+    def test_unknown_role_passes_through_as_literal(self, dispatcher, role_resolver):
+        bb = _FakeBlackboard()
+        dispatcher._dispatch_one(
+            _make_msg(mtype="agent_inject", payload={"web::planner": "literal name"}),
+            bb, role_resolver,
+        )
+        assert bb.get_state_value(_RUNTIME_INJECTIONS_BB_KEY) == {
+            "web::planner": ["literal name"],
+        }
 
-    def test_multiple_messages_accumulate(self, manager):
-        manager._dispatch_mailbox_message(_make_msg(
-            mtype="agent_inject", payload={"planner": "first"},
-        ))
-        manager._dispatch_mailbox_message(_make_msg(
-            mtype="agent_inject", payload={"planner": "second"},
-        ))
-        store = manager.blackboard.get_state_value(manager._RUNTIME_INJECTIONS_BB_KEY)
-        assert store == {"fake::planner": ["first", "second"]}
+    def test_multiple_messages_accumulate(self, dispatcher, role_resolver):
+        bb = _FakeBlackboard()
+        dispatcher._dispatch_one(
+            _make_msg(mtype="agent_inject", payload={"planner": "first"}),
+            bb, role_resolver,
+        )
+        dispatcher._dispatch_one(
+            _make_msg(mtype="agent_inject", payload={"planner": "second"}),
+            bb, role_resolver,
+        )
+        assert bb.get_state_value(_RUNTIME_INJECTIONS_BB_KEY) == {
+            "fake::planner": ["first", "second"],
+        }
 
-    def test_empty_content_skipped(self, manager):
-        manager._dispatch_mailbox_message(_make_msg(
-            mtype="agent_inject", payload={"planner": "   "},
-        ))
-        store = manager.blackboard.get_state_value(manager._RUNTIME_INJECTIONS_BB_KEY)
-        # Nothing was written.
-        assert store is None
+    def test_empty_content_skipped(self, dispatcher, role_resolver):
+        bb = _FakeBlackboard()
+        dispatcher._dispatch_one(
+            _make_msg(mtype="agent_inject", payload={"planner": "   "}),
+            bb, role_resolver,
+        )
+        assert bb.get_state_value(_RUNTIME_INJECTIONS_BB_KEY) is None
 
-    def test_per_agent_isolation(self, manager):
-        manager._dispatch_mailbox_message(_make_msg(
-            mtype="agent_inject", payload={"planner": "for planner"},
-        ))
-        manager._dispatch_mailbox_message(_make_msg(
-            mtype="agent_inject", payload={"reviewer": "for reviewer"},
-        ))
-        store = manager.blackboard.get_state_value(manager._RUNTIME_INJECTIONS_BB_KEY)
-        assert store == {
+    def test_per_agent_isolation(self, dispatcher, role_resolver):
+        bb = _FakeBlackboard()
+        dispatcher._dispatch_one(
+            _make_msg(mtype="agent_inject", payload={"planner": "for planner"}),
+            bb, role_resolver,
+        )
+        dispatcher._dispatch_one(
+            _make_msg(mtype="agent_inject", payload={"reviewer": "for reviewer"}),
+            bb, role_resolver,
+        )
+        assert bb.get_state_value(_RUNTIME_INJECTIONS_BB_KEY) == {
             "fake::planner": ["for planner"],
             "reviewer": ["for reviewer"],
         }
 
+    def test_no_resolver_falls_back_to_literal_role(self, dispatcher):
+        bb = _FakeBlackboard()
+        dispatcher._dispatch_one(
+            _make_msg(mtype="agent_inject", payload={"planner": "x"}),
+            bb, role_resolver=None,
+        )
+        # No resolver → role string used as agent name verbatim.
+        assert bb.get_state_value(_RUNTIME_INJECTIONS_BB_KEY) == {"planner": ["x"]}
 
-# ── blackboard_write: simple set ──────────────────────────────────
+
+# ── blackboard_write: simple set ─────────────────────────────────
 
 
 class TestBlackboardWrite:
 
-    def test_writes_each_key(self, manager):
-        manager._dispatch_mailbox_message(_make_msg(
-            mtype="blackboard_write",
-            payload={"cancelled": True, "extra_context": "from outside"},
-        ))
-        assert manager.blackboard.get_state_value("cancelled") is True
-        assert manager.blackboard.get_state_value("extra_context") == "from outside"
+    def test_writes_each_key(self, dispatcher, role_resolver):
+        bb = _FakeBlackboard()
+        dispatcher._dispatch_one(
+            _make_msg(mtype="blackboard_write",
+                      payload={"cancelled": True, "extra_context": "from outside"}),
+            bb, role_resolver,
+        )
+        assert bb.get_state_value("cancelled") is True
+        assert bb.get_state_value("extra_context") == "from outside"
 
-    def test_empty_key_skipped(self, manager):
-        manager._dispatch_mailbox_message(_make_msg(
-            mtype="blackboard_write",
-            payload={"": "lost", "real": "kept"},
-        ))
-        assert manager.blackboard.get_state_value("real") == "kept"
+    def test_empty_key_skipped(self, dispatcher, role_resolver):
+        bb = _FakeBlackboard()
+        dispatcher._dispatch_one(
+            _make_msg(mtype="blackboard_write", payload={"": "lost", "real": "kept"}),
+            bb, role_resolver,
+        )
+        assert bb.get_state_value("real") == "kept"
 
 
-# ── unknown type: logged + dropped, no crash ──────────────────────
+# ── unknown type: logged + dropped, no crash ─────────────────────
 
 
 class TestUnknownType:
 
-    def test_unknown_type_does_not_raise(self, manager):
+    def test_unknown_type_does_not_raise(self, dispatcher, role_resolver):
+        bb = _FakeBlackboard()
         # Should not raise; should not write anything.
-        manager._dispatch_mailbox_message(_make_msg(
-            mtype="some_future_type", payload={"k": "v"},
-        ))
-        assert manager.blackboard.get_state_value("k") is None
+        dispatcher._dispatch_one(
+            _make_msg(mtype="some_future_type", payload={"k": "v"}),
+            bb, role_resolver,
+        )
+        assert bb.get_state_value("k") is None
+
+
+# ── drain_to: end-to-end with a mocked Mailbox ──────────────────
+
+
+class TestDrainTo:
+
+    def test_drain_to_applies_all_messages(self, dispatcher, role_resolver):
+        bb = _FakeBlackboard()
+        bb.update_state_value("_invocation_id", "inv-A")
+
+        mock_mailbox = MagicMock()
+        mock_mailbox.drain.return_value = [
+            _make_msg(mtype="agent_inject", payload={"planner": "first"}),
+            _make_msg(mtype="blackboard_write", payload={"cancelled": True}),
+        ]
+        with patch.object(dispatcher, "_resolve_mailbox", return_value=mock_mailbox):
+            applied = dispatcher.drain_to(
+                blackboard=bb,
+                invocation_id="inv-A",
+                role_resolver=role_resolver,
+            )
+
+        assert applied == 2
+        assert bb.get_state_value(_RUNTIME_INJECTIONS_BB_KEY) == {
+            "fake::planner": ["first"],
+        }
+        assert bb.get_state_value("cancelled") is True
+        mock_mailbox.drain.assert_called_once_with("inv-A")
+
+    def test_empty_invocation_id_returns_zero(self, dispatcher, role_resolver):
+        bb = _FakeBlackboard()
+        applied = dispatcher.drain_to(
+            blackboard=bb, invocation_id="", role_resolver=role_resolver,
+        )
+        assert applied == 0
+
+    def test_no_mailbox_returns_zero(self, dispatcher, role_resolver):
+        bb = _FakeBlackboard()
+        with patch.object(dispatcher, "_resolve_mailbox", return_value=None):
+            applied = dispatcher.drain_to(
+                blackboard=bb, invocation_id="inv-A", role_resolver=role_resolver,
+            )
+        assert applied == 0

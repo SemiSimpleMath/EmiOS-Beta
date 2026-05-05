@@ -148,13 +148,6 @@ class PromptBuilder:
             logger.debug("[%s] system prompt render exception details", agent.name, exc_info=True)
             raise
 
-    # Reserved blackboard slot maintained by MultiAgentManager for per-agent
-    # runtime injections (see MultiAgentManager._RUNTIME_INJECTIONS_BB_KEY).
-    # Append-only list[str] per agent name; each item is a sender-wrapped
-    # block of text that should be visible to the agent on its NEXT activation
-    # and every subsequent one (chat-style accumulation, never cleared).
-    _RUNTIME_INJECTIONS_BB_KEY = "_runtime_injections"
-
     def _append_runtime_injections(self, agent, user_prompt: str) -> str:
         """If anything has been delivered to the agent's runtime-injection slot
         via the manager mailbox, append it to the rendered user prompt.
@@ -164,8 +157,16 @@ class PromptBuilder:
         clears the slot; subsequent activations see the same accumulated
         history, like chat messages.
         """
+        # Reserved blackboard slot maintained by MailboxDispatcher: per-agent
+        # runtime injection lists. Append-only — each item is a sender-wrapped
+        # block of text that should be visible to the agent on its NEXT
+        # activation and every subsequent one (chat-style accumulation, never
+        # cleared).
+        from app.assistant.manager_runtime.mailbox import (
+            _RUNTIME_INJECTIONS_BB_KEY,
+        )
         try:
-            store = agent.blackboard.get_state_value(self._RUNTIME_INJECTIONS_BB_KEY) or {}
+            store = agent.blackboard.get_state_value(_RUNTIME_INJECTIONS_BB_KEY) or {}
         except Exception:
             return user_prompt or ""
         if not isinstance(store, dict):
