@@ -324,6 +324,15 @@ class RoomIngressService:
         for key, value in extras.items():
             request_data[key] = value
         metadata = envelope.metadata if isinstance(envelope.metadata, dict) else {}
+        # Lift reply_to from envelope metadata onto request_data so the
+        # scope builder can put it on ScopeContext. From there it
+        # propagates through chained sub-managers via existing scope flow,
+        # giving every layer a single canonical "where do I send back?"
+        # field. Surfaces (UI/slack/sms/telegram inbounds) all set
+        # ``metadata["reply_to"]`` already.
+        env_reply_to = metadata.get("reply_to")
+        if isinstance(env_reply_to, dict) and env_reply_to:
+            request_data["reply_to"] = dict(env_reply_to)
         plan_session_id = metadata.get("plan_session_id")
         ticket_id = metadata.get("ticket_id")
         task_creation_session_id = metadata.get("task_creation_session_id")

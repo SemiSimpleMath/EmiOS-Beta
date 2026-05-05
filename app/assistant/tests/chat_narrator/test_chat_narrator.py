@@ -50,7 +50,9 @@ def narrator():
 
         # Capture publishes.
         n._publishes = []
-        n._publish_chat = lambda *, sender, text: n._publishes.append((sender, text))
+        def _capture(*, sender, text, reply_to=None):
+            n._publishes.append((sender, text, reply_to))
+        n._publish_chat = _capture
 
         # Mock the translator: by default returns a stub sentence.
         n._translator_returns = "Searching for the thing"
@@ -87,7 +89,7 @@ class TestManagerGating:
         narrator._on_card(_msg(_card(manager="web_manager",
                                       what_i_am_thinking="x")))
         assert len(narrator._publishes) == 1
-        sender, text = narrator._publishes[0]
+        sender, text, _ = narrator._publishes[0]
         assert sender == "Quimby"
         assert "Searching for the thing" in text
 
@@ -221,19 +223,28 @@ class TestThrottleAndDedup:
 
 class TestInvocationStartedHandler:
 
-    def _evt(self, manager_name: str) -> Message:
+    def _evt(self, manager_name: str, *, reply_to=None) -> Message:
         return Message(
             sender="manager_invoker",
-            data={"manager_name": manager_name},
+            data={"manager_name": manager_name, "reply_to": reply_to},
             event_topic="manager_invocation_started",
         )
 
     def test_named_worker_announces_delegation(self, narrator):
         narrator._on_invocation_started(self._evt("emi_team_manager"))
         assert len(narrator._publishes) == 1
-        sender, text = narrator._publishes[0]
+        sender, text, _ = narrator._publishes[0]
         assert sender == "Em"  # seeded fixture maps emi_team_manager → Em
         assert text == "Delegating to Em."
+
+    def test_reply_to_propagates_to_publish_call(self, narrator):
+        rt = {"type": "slack", "channel_id": "C12345", "thread_ts": "1234.5"}
+        narrator._on_invocation_started(
+            self._evt("web_manager", reply_to=rt),
+        )
+        assert len(narrator._publishes) == 1
+        _, _, captured_reply_to = narrator._publishes[0]
+        assert captured_reply_to == rt
 
     def test_unnamed_manager_skipped(self, narrator):
         narrator._on_invocation_started(self._evt("dayflow_orchestrator_manager"))

@@ -154,6 +154,10 @@ class ProgressCurator:
 
         now = datetime.now(timezone.utc).isoformat()
         what_i_am_thinking = str(fact.get("what_i_am_thinking") or "").strip()
+        # Pass through the originating surface's reply_to so the chat
+        # narrator can route to UI / slack / sms / etc.
+        raw_reply_to = fact.get("reply_to")
+        reply_to = dict(raw_reply_to) if isinstance(raw_reply_to, dict) else None
 
         return {
             "ts": now,
@@ -163,6 +167,7 @@ class ProgressCurator:
             "headline": headline,
             "goal": goal,
             "what_i_am_thinking": what_i_am_thinking,
+            "reply_to": reply_to,
             "learned": learned_items,
             "next": {"action": next_action, "input_preview": next_action_input},
             "meta": {

@@ -104,6 +104,15 @@ class ScopeContext(ScopeBaseModel):
     visibility: Literal["owner_only", "room_shared", "global_shared"] = "owner_only"
     policy_id: Optional[str] = None
 
+    # Transport reply-to: enough info for any layer downstream of ingress
+    # to send a chat message back to the originating surface (UI socket,
+    # slack channel + thread, sms number, telegram chat). Set by surface
+    # inbound services; propagates through chained sub-managers because
+    # ScopeContext propagates. ChatNarrator and other outbound publishers
+    # read this to route. Shape mirrors what each surface produces today
+    # (``{type, room_id, room_surface, ...surface-specific fields}``).
+    reply_to: Optional[Dict[str, Any]] = None
+
     # Scope dimensions
     history: ScopeHistoryPolicy = Field(default_factory=ScopeHistoryPolicy)
     resources: ScopeResourcePolicy = Field(default_factory=ScopeResourcePolicy)

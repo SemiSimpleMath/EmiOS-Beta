@@ -46,6 +46,14 @@ def build_scope_contract_for_room_request(
     else:
         raise ValueError("task_except_tools must be a list when provided.")
 
+    # ``reply_to`` is the per-request transport-reply dict each surface
+    # builds (UI: {type=socketio, room_id}; slack: {type=slack, channel_id,
+    # thread_ts, ...}; etc.). Carried through scope so chained
+    # sub-managers and outbound publishers can route back without consulting
+    # any ingress-specific state.
+    raw_reply_to = request_data.get("reply_to")
+    reply_to = dict(raw_reply_to) if isinstance(raw_reply_to, dict) else None
+
     scope_dict: Dict[str, Any] = {
         "schema_version": "scope_context_v1",
         "scope_id": f"scope::{envelope.surface}::{envelope.room_id}::{envelope.context_id or 'main'}::{uuid.uuid4().hex[:8]}",
@@ -56,6 +64,7 @@ def build_scope_contract_for_room_request(
         "room_context_id": str(envelope.context_id or "main").strip(),
         "visibility": str((room_ctx.get("room_visibility") or "room_shared")).strip(),
         "policy_id": str((room_ctx.get("room_policy_id") or f"room_policy::{envelope.room_id}")).strip(),
+        "reply_to": reply_to,
         "history": {
             "mode": "summary_plus_recent",
             "source": "unified_log",

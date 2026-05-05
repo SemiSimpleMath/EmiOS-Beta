@@ -59,7 +59,10 @@ class ManagerInvoker:
 
     @staticmethod
     def _publish_invocation_started_event(
-        manager_name: str, request_id: str | None, invocation_id: str,
+        manager_name: str,
+        request_id: str | None,
+        invocation_id: str,
+        user_message,
     ) -> None:
         """Fire a generic ``manager_invocation_started`` event on event_hub.
 
@@ -67,6 +70,10 @@ class ManagerInvoker:
         progress UIs, audit pipelines, etc. all subscribe at their own
         layer. In environments with no subscriber, the publish is a
         no-op. Never raises into the host invocation.
+
+        Includes the inbound message's ``scope_context.reply_to`` in the
+        event payload so listeners can route any chat-back to the
+        originating surface without consulting any other state.
         """
         try:
             from app.assistant.manager_runtime.active_workers import (
@@ -74,6 +81,7 @@ class ManagerInvoker:
             )
             from app.assistant.ServiceLocator.service_locator import DI
             from app.assistant.utils.pydantic_classes import Message
+            reply_to = ManagerInvoker._extract_reply_to(user_message)
             DI.event_hub.publish(
                 Message(
                     sender="manager_invoker",
@@ -84,11 +92,40 @@ class ManagerInvoker:
                         "manager_instance_name": manager_name,
                         "request_id": request_id,
                         "invocation_id": invocation_id,
+                        "reply_to": reply_to,
                     },
                 )
             )
         except Exception:
             logger.debug("manager_invocation_started publish failed", exc_info=True)
+
+    @staticmethod
+    def _extract_reply_to(user_message) -> dict | None:
+        """Pull ``reply_to`` from the inbound message's ScopeContext.
+
+        ScopeContext is the canonical home — propagated through chained
+        sub-managers via ``manager_interface.execute``. Falls back to
+        ``message.metadata['reply_to']`` for inbound paths that haven't
+        adopted scope-based reply_to yet (transitional).
+        """
+        try:
+            scope = getattr(user_message, "scope_context", None)
+            if isinstance(scope, dict):
+                rt = scope.get("reply_to")
+                if isinstance(rt, dict) and rt:
+                    return dict(rt)
+            elif scope is not None:
+                rt = getattr(scope, "reply_to", None)
+                if isinstance(rt, dict) and rt:
+                    return dict(rt)
+            meta = getattr(user_message, "metadata", None)
+            if isinstance(meta, dict):
+                rt = meta.get("reply_to")
+                if isinstance(rt, dict) and rt:
+                    return dict(rt)
+        except Exception:
+            return None
+        return None
 
     def _publish_invocation_status(self) -> None:
         payload = self._build_invocation_status_payload()
@@ -133,7 +170,9 @@ class ManagerInvoker:
         except Exception:
             logger.debug("Failed to stash invocation_id on blackboard", exc_info=True)
 
-        self._publish_invocation_started_event(manager_name, request_id, invocation_id)
+        self._publish_invocation_started_event(
+            manager_name, request_id, invocation_id, user_message,
+        )
         try:
             normalized_message, immediate = self.preprocessor.preprocess(manager_name, user_message)
             if isinstance(immediate, ToolResult):

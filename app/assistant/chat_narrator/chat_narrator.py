@@ -147,7 +147,8 @@ class ChatNarrator:
                     return
                 self._last_emit[throttle_key] = (now, sentence)
 
-            self._publish_chat(sender=display_name, text=sentence)
+            reply_to = card.get("reply_to") if isinstance(card.get("reply_to"), dict) else None
+            self._publish_chat(sender=display_name, text=sentence, reply_to=reply_to)
         except Exception:
             logger.debug("ChatNarrator failed to process card", exc_info=True)
 
@@ -172,9 +173,11 @@ class ChatNarrator:
             cfg = self._narration_config_for(manager_name)
             if not cfg["enabled"]:
                 return
+            reply_to = data.get("reply_to") if isinstance(data.get("reply_to"), dict) else None
             self._publish_chat(
                 sender=display_name,
                 text=f"Delegating to {display_name}.",
+                reply_to=reply_to,
             )
         except Exception:
             logger.debug(
@@ -247,31 +250,85 @@ class ChatNarrator:
             logger.debug("translator agent invocation failed", exc_info=True)
             return ""
 
-    def _publish_chat(self, *, sender: str, text: str) -> None:
-        """Build a UserMessage and publish via socket_emit to master_room."""
+    def _publish_chat(
+        self, *, sender: str, text: str, reply_to: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Route the narration to the originating surface.
+
+        ``reply_to`` carries the surface's transport coordinates (set at
+        ingress, propagated through ScopeContext). When None, falls back
+        to the default UI socket. Surface-specific dispatch lives in
+        small handler methods so adding a transport is one new branch.
+        """
         try:
-            user_msg = UserMessage(
-                data_type="user_msg",
-                sub_data_type=["chat_narration"],
-                sender=sender,
-                receiver=None,
-                role="assistant",
-                content=text,
-                timestamp=datetime.now(timezone.utc),
-                event_topic="socket_emit",
-                metadata={
-                    "reply_to": {"type": "socketio", "room_id": self.CHAT_ROOM_ID},
-                },
-                user_message_data=UserMessageData(
-                    chat=text,
-                    importance=1,
-                    generic_type="chat_narration",
-                ),
-            )
-            DI.event_hub.publish(user_msg)
+            effective = reply_to or {"type": "socketio", "room_id": self.CHAT_ROOM_ID}
+            surface_type = str(effective.get("type") or "").strip().lower()
+            if surface_type == "socketio":
+                self._publish_chat_socketio(sender=sender, text=text, reply_to=effective)
+            elif surface_type == "slack":
+                self._publish_chat_slack(sender=sender, text=text, reply_to=effective)
+            else:
+                logger.warning(
+                    "[chat_narrator] no outbound handler for surface=%r — dropping narration",
+                    surface_type,
+                )
+                return
             logger.info(
-                "[chat_narrator] emitted narration sender=%r len=%d",
-                sender, len(text),
+                "[chat_narrator] emitted narration sender=%r surface=%s len=%d",
+                sender, surface_type, len(text),
             )
         except Exception:
             logger.warning("ChatNarrator publish_chat failed", exc_info=True)
+
+    def _publish_chat_socketio(
+        self, *, sender: str, text: str, reply_to: Dict[str, Any],
+    ) -> None:
+        """UI socketio path — publish a UserMessage to the socket_emit
+        relay (existing chain). EmiEventRelay routes to the right room.
+        """
+        user_msg = UserMessage(
+            data_type="user_msg",
+            sub_data_type=["chat_narration"],
+            sender=sender,
+            receiver=None,
+            role="assistant",
+            content=text,
+            timestamp=datetime.now(timezone.utc),
+            event_topic="socket_emit",
+            metadata={"reply_to": reply_to},
+            user_message_data=UserMessageData(
+                chat=text,
+                importance=1,
+                generic_type="chat_narration",
+            ),
+        )
+        DI.event_hub.publish(user_msg)
+
+    def _publish_chat_slack(
+        self, *, sender: str, text: str, reply_to: Dict[str, Any],
+    ) -> None:
+        """Slack path — call slack_transport's send_reply directly.
+
+        Slack outbound has no event_hub topic today. Worker name is
+        embedded in the body since slack doesn't render arbitrary
+        sender names per-message in a thread.
+        """
+        channel_id = str(reply_to.get("channel_id") or "").strip()
+        thread_ts = str(reply_to.get("thread_ts") or "").strip()
+        if not channel_id:
+            logger.warning("[chat_narrator] slack reply_to missing channel_id; dropping")
+            return
+        slack_transport = getattr(DI, "slack_transport", None)
+        if slack_transport is None:
+            logger.warning("[chat_narrator] slack_transport not available in DI; dropping")
+            return
+        body = f"[{sender}] {text}" if not text.startswith(f"[{sender}]") else text
+        try:
+            slack_transport.send_reply(
+                channel_id=channel_id, body=body, thread_ts=thread_ts,
+            )
+        except Exception:
+            logger.warning(
+                "[chat_narrator] slack send_reply failed (channel=%s)", channel_id,
+                exc_info=True,
+            )

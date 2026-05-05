@@ -57,6 +57,21 @@ class ProgressEmitter:
             thinking = ""
         thinking = thinking.strip()
 
+        # Carry the originating surface's reply_to forward so the chat
+        # narrator (and any other downstream consumer) can route output
+        # back to the right surface — UI socket, slack channel, sms, etc.
+        # Source: scope_context.reply_to populated at ingress and
+        # propagated through chains via manager_interface.
+        reply_to = None
+        try:
+            scope = agent.blackboard.get_state_value("scope_context")
+            if isinstance(scope, dict):
+                rt = scope.get("reply_to")
+                if isinstance(rt, dict) and rt:
+                    reply_to = dict(rt)
+        except Exception:
+            reply_to = None
+
         fact = {
             "kind": "planner_decision",
             "agent": agent.name,
@@ -65,6 +80,7 @@ class ProgressEmitter:
             "action": result_dict.get("action"),
             "action_input": result_dict.get("action_input"),
             "what_i_am_thinking": thinking,
+            "reply_to": reply_to,
             "learned": (result_dict.get("summary") or "").strip() if isinstance(result_dict.get("summary"), str) else "",
             "action_count": agent.blackboard.get_state_value("action_count"),
         }
