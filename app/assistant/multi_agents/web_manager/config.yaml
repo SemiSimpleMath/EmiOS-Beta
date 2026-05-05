@@ -1,7 +1,7 @@
 name: web_manager
 class_name: MultiAgentManager
 description: "A team manager that controls team of web search agents."
-display_name: "Quimby"
+display_name: "Webby"
 max_cycles: 120
 role_bindings:
   delegator: web::delegator

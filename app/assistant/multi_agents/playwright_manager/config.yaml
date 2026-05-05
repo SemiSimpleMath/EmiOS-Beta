@@ -1,6 +1,7 @@
 name: playwright_manager
 class_name: MultiAgentManager
 description: "A manager that drives a real browser via Playwright MCP (npm/playwright-mcp)."
+display_name: "Quimby"
 max_cycles: 300
 
 execution_trace:
