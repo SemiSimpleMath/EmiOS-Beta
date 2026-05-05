@@ -434,9 +434,20 @@ class ScopeAdapter:
             if tools_cfg:
                 if "allowed_tools" in tools_cfg:
                     allowed = _as_str_list(tools_cfg.get("allowed_tools"))
-                    payload["tools"]["allowed_tools"] = _intersect_allowed_tools(
-                        payload["tools"].get("allowed_tools", []), allowed
-                    )
+                    # Manager's own scope_contract is authoritative for its
+                    # own leaves. The parent's ``allowed_tools`` describes
+                    # what the PARENT directly calls — it should NOT
+                    # narrow what a sub-manager can do internally.
+                    # Allowing a manager implicitly allows the tools that
+                    # manager declares it uses.
+                    #
+                    # Restrictions still propagate via ``blocked_tools``:
+                    # parent denylist + sub-manager denylist + room policy
+                    # denylist all union below. So a Slack room can block
+                    # specific tools even inside a delegated web_manager
+                    # call, but it doesn't have to enumerate every leaf
+                    # the sub-manager uses just to allow the manager.
+                    payload["tools"]["allowed_tools"] = allowed
                 if "blocked_tools" in tools_cfg:
                     blocked = _as_str_list(tools_cfg.get("blocked_tools"))
                     payload["tools"]["blocked_tools"] = list({*payload["tools"].get("blocked_tools", []), *blocked})
