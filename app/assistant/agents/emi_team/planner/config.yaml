@@ -2,9 +2,9 @@ name: emi_team::planner
 class_name: Planner
 llm_params:
   llm_provider: "openai"
-  engine: "gpt-5.1"
-  model_tier: "smart"
-  
+  engine: "gpt-5.4-nano"
+  model_tier: "nano"
+
 
 allowed_tools: all
 except_tools: [emi_team]
