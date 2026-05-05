@@ -7,6 +7,7 @@ from sqlalchemy import select
 from jinja2 import Template
 
 from app.assistant.database.db_handler import UnifiedLog2026
+from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.agent_runtime.services.resource_resolver import ResourceResolver
 from app.assistant.agent_runtime.services.user_bio_context_service import UserBioContextService
 from app.models.base import get_session
