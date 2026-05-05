@@ -1,10 +1,12 @@
 name: bash_manager
 class_name: MultiAgentManager
 description: "Personal-assistant manager that runs tightly-scoped shell commands on the user's machine. v1: read-only inspection inside ~/Documents only. Requires authority 99 (Jukka-origin only); inbound emails / SMS / external messages cannot invoke this through dayflow without explicit user authorization."
+display_name: "Hulk"
 max_cycles: 30
 role_bindings:
   delegator: bash_team::delegator
   tool_selector: shared::tool_selector
+  planner: bash_team::planner
 
 agents:
   - name: bash_team::delegator
