@@ -35,8 +35,9 @@ system_context_items:
   - allowed_nodes
   - task
 
-# Skills (agentskills.io SKILL.md format). filesystem-layout teaches the
-# planner about OneDrive-redirected folders, run_shell scope, and the
-# mint_pod_from_path → send_email file-attachment pattern.
+# Skills (agentskills.io SKILL.md format). filesystem-layout always loads
+# (it's foundational for run_shell). pod-finder etc. auto-attach when the
+# task mentions media kinds (image / picture / etc.).
 skills:
   - filesystem-layout
+accept_auto_skills: true

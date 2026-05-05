@@ -183,9 +183,12 @@ def initialize_services(app):
     # the same way as resources (id = filename stem).
     # SkillRegistry — agentskills.io standard SKILL.md loader. Walks
     # `skills/<name>/SKILL.md` directories. See docs/architecture/21_SKILLS.md.
-    from app.skill_registry import SkillRegistry
+    from app.skill_registry import SkillInjector, SkillRegistry
     skill_registry = SkillRegistry()
     ServiceLocator.register("skill_registry", skill_registry)
+    # SkillInjector — evaluates per-skill auto_inject_when triggers against
+    # the current agent context. Replaces per-agent task_keyword_resources.
+    ServiceLocator.register("skill_injector", SkillInjector(skill_registry))
 
     # Reply routing (multi-transport: socketio, sms, etc.)
     from app.services.reply_router import ReplyRouter

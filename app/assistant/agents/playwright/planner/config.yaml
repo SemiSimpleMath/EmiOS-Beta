@@ -14,15 +14,10 @@ allowed_nodes: [return_control]
 
 append_fields: []
 
-# Extra resources injected into the system prompt when the task text contains a matching keyword.
-# key = substring to match (case-insensitive), value = resource_id to inject.
-task_keyword_resources:
-  doordash: resource_doordash_guidelines
-  door dash: resource_doordash_guidelines
-  cnn.com: resource_cnn_guidelines
-  cnn: resource_cnn_guidelines
-  bbc.com: resource_bbc_guidelines
-  bbc: resource_bbc_guidelines
+# Skills are auto-injected by SkillInjector when the task contains a
+# matching keyword (each skill's auto_inject_when.task_keywords). Triggers
+# now live on the skills themselves (skills/*/SKILL.md), not here.
+accept_auto_skills: true
 
 user_context_items:
   - date_time

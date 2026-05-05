@@ -436,34 +436,57 @@ class ContextInjector:
         return value
 
     def resolve_skills(self, agent) -> Dict[str, str]:
-        """Resolve the agent's declared skills into a name → body dict.
+        """Resolve all skills (static + auto-injected) into a name → body dict.
 
-        Reads ``agent.config['skills']`` (list of skill names per the
-        agentskills.io standard), looks each up in the SkillRegistry, and
-        returns a dict keyed by skill name. The dict is what templates
-        render via ``{{ skills["slack-formatting"] }}`` — bracket access
-        because skill names contain hyphens.
+        Two paths produce skills for an agent:
 
-        Missing skills are logged and silently dropped (analogous to the
-        scope-policy soft-fail for resources). The agent shouldn't crash
-        because someone renamed a skill.
+        1. **Static** — ``agent.config['skills']`` lists skill names the
+           agent always wants. Looked up in SkillRegistry and added.
+        2. **Auto-injected** — when ``agent.config['accept_auto_skills']``
+           is true, the SkillInjector evaluates each skill's
+           ``auto_inject_when`` trigger against the current task /
+           incoming_message and adds matching skills.
+
+        Both paths feed the same dict (templates render the same way).
+        Missing skills are logged and dropped — never crash the prompt.
         """
-        names = agent.config.get("skills", []) or []
-        if not names:
-            return {}
         registry = getattr(DI, "skill_registry", None)
         if registry is None:
-            logger.warning("[%s] DI.skill_registry not available — skipping %d declared skill(s)", agent.name, len(names))
+            logger.warning("[%s] DI.skill_registry not available — no skills loaded", agent.name)
             return {}
+
         resolved: Dict[str, str] = {}
-        for name in names:
+
+        # 1. Static skills from agent config.
+        for name in (agent.config.get("skills", []) or []):
             if not isinstance(name, str) or not name.strip():
                 continue
             skill = registry.get(name.strip())
             if skill is None:
-                logger.warning("[%s] declared skill %r not registered — dropped", agent.name, name)
+                logger.warning(
+                    "[%s] declared skill %r not registered — dropped", agent.name, name,
+                )
                 continue
             resolved[skill.name] = skill.body
+
+        # 2. Auto-injected skills (opt-in via accept_auto_skills).
+        if agent.config.get("accept_auto_skills"):
+            injector = getattr(DI, "skill_injector", None)
+            if injector is None:
+                logger.warning(
+                    "[%s] accept_auto_skills=true but DI.skill_injector unavailable", agent.name,
+                )
+                return resolved
+            task = str(agent.blackboard.get_state_value("task", "") or "")
+            incoming = str(agent.blackboard.get_state_value("incoming_message", "") or "")
+            for name in injector.matching_skill_names(task=task, incoming_message=incoming):
+                if name in resolved:
+                    continue
+                skill = registry.get(name)
+                if skill is None:
+                    continue
+                resolved[name] = skill.body
+                logger.debug("[%s] auto-injected skill=%s", agent.name, name)
         return resolved
 
     def generate_injections_block(self, agent, prompt_injections, message=None, entity_injection_keys: set[str] | None = None):

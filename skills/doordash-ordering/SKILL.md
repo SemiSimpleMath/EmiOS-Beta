@@ -1,15 +1,26 @@
+---
+name: doordash-ordering
+description: How to navigate DoorDash via browser automation — modal handling, item customization, cart/checkout, common SPA pitfalls. Use when the playwright agent is operating on doordash.com (ordering food, browsing restaurants, checking out).
+license: Apache-2.0
+metadata:
+  author: jukka
+  version: "1.0"
+  auto_inject_when:
+    task_keywords: ["doordash", "door dash"]
+---
+
 # DoorDash Browser Automation Guidelines
 
 ## Modals and overlays
-- DoorDash frequently shows a modal overlay after landing. 
+- DoorDash frequently shows a modal overlay after landing.
 - Look for signs of a modal and dismiss them, do not sign up for promotional materials or deals and do not concent to anyone emailing or texting you.
 - Some signs of modals:
  uses `position: fixed` covering the viewport with "Agree" and "Not now" (or "Close") buttons. Dismiss unwanted modals if you can detect the close button.  Or call `web_page_coords` with question
  Ordering food is also a modal, so do not dismiss these.
 - Item-detail modals open in a bottom sheet when adding to cart. Often you must scroll down inside the modal to see all required customization options. Use `web_scroll` (not the scrollbar). Make sure modal is active otherwise scrolling may not work. You may need to click inside the modal or at least hover your mouse over it.
-- Inside modal it is often much faster to pick options using snapshot refs, if you can do this without visual tools, do it. However, if you are stuck, then switch to visuals.  
+- Inside modal it is often much faster to pick options using snapshot refs, if you can do this without visual tools, do it. However, if you are stuck, then switch to visuals.
 - When ordering food items you are often asked to customize them.  There is usually something that tells you how many required customizations there are.
-- Once the required customizations are done, the bottom button will turn into SAVE or equivalent.  This SAVE button acts also as continue to next step that may allow you to 
+- Once the required customizations are done, the bottom button will turn into SAVE or equivalent.  This SAVE button acts also as continue to next step that may allow you to
 - do more customizations. For example you might first customize the sandwich, then the drink, then the fries.
 
 ## Navigation
@@ -36,4 +47,4 @@ For text boxes always prefer the `web_fill_xy` tool. This writes your text into 
 - Once the final order is ready notify the user.
 
 ## Common pitfalls
-- DoorDash is a heavy React SPA — refs in snapshots can become stale quickly. Prefer `web_page_coords` for visual targets when refs are unreliable. Your first try should be refs, but you should quickly realize if something is not working and use visual tools. 
+- DoorDash is a heavy React SPA — refs in snapshots can become stale quickly. Prefer `web_page_coords` for visual targets when refs are unreliable. Your first try should be refs, but you should quickly realize if something is not working and use visual tools.

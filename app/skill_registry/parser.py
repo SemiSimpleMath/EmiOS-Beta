@@ -30,7 +30,7 @@ from typing import Optional, Tuple
 
 import frontmatter
 
-from app.skill_registry.models import Skill, ValidationResult
+from app.skill_registry.models import AutoInjectTrigger, Skill, ValidationResult
 
 
 # Per spec: 1-64 chars, [a-z0-9], hyphens allowed but not at edges and no --
@@ -127,6 +127,25 @@ def parse_skill_md(path: Path) -> Tuple[Optional[Skill], ValidationResult]:
     if allowed_tools is not None and not isinstance(allowed_tools, str):
         result.errors.append("Frontmatter 'allowed-tools' must be a string when provided.")
 
+    # auto_inject_when (parsed from metadata.auto_inject_when) — EmiOS extension.
+    # Per spec, metadata is free-form; this key is invisible to other clients
+    # but lets the SkillInjector know when to attach this skill automatically.
+    auto_inject = None
+    raw_auto = metadata.get("auto_inject_when") if isinstance(metadata, dict) else None
+    if raw_auto is not None:
+        if not isinstance(raw_auto, dict):
+            result.errors.append("metadata.auto_inject_when must be a mapping when provided.")
+        else:
+            kw = raw_auto.get("task_keywords")
+            if kw is not None and not (
+                isinstance(kw, list) and all(isinstance(k, str) and k for k in kw)
+            ):
+                result.errors.append(
+                    "metadata.auto_inject_when.task_keywords must be a list of non-empty strings."
+                )
+            else:
+                auto_inject = AutoInjectTrigger(task_keywords=[str(k).lower() for k in (kw or [])])
+
     # Body — empty warns but does not block
     if not body.strip():
         result.warnings.append("SKILL.md body is empty — skill will inject nothing useful.")
@@ -141,6 +160,7 @@ def parse_skill_md(path: Path) -> Tuple[Optional[Skill], ValidationResult]:
         compatibility=compatibility,
         metadata=metadata,
         allowed_tools=allowed_tools,
+        auto_inject_when=auto_inject,
         skill_dir=str(skill_dir),
         body=body,
     )

@@ -55,18 +55,7 @@ class SkillRegistry:
         paying the body-loading cost.
         """
         with self._lock:
-            return [
-                SkillHeader(
-                    name=s.name,
-                    description=s.description,
-                    license=s.license,
-                    compatibility=s.compatibility,
-                    metadata=s.metadata,
-                    allowed_tools=s.allowed_tools,
-                    skill_dir=s.skill_dir,
-                )
-                for s in self._skills.values()
-            ]
+            return [_to_header(s) for s in self._skills.values()]
 
     def discover(self, query: str, limit: int = 5) -> List[SkillHeader]:
         """Return up to ``limit`` skills whose description best matches ``query``.
@@ -197,5 +186,6 @@ def _to_header(skill: Skill) -> SkillHeader:
         compatibility=skill.compatibility,
         metadata=skill.metadata,
         allowed_tools=skill.allowed_tools,
+        auto_inject_when=skill.auto_inject_when,
         skill_dir=skill.skill_dir,
     )

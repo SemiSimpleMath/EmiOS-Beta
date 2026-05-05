@@ -1,3 +1,14 @@
+---
+name: pod-finder
+description: How to search for pods (`pod_search`, `kg_query` escalation) and pass `pod_id` references forward to a downstream agent. The finder does NOT act on pods — searching only. Use when the task asks to find / locate / list a media artifact (picture, photo, image, video, audio, document, email, conversation, receipt, invoice) or references a `datapod:<kind>:<id>` URI.
+license: Apache-2.0
+metadata:
+  author: jukka
+  version: "1.0"
+  auto_inject_when:
+    task_keywords: ["pod", "datapod", "picture", "pic", "photo", "image", "video", "recording", "audio", "receipt", "invoice", "conversation"]
+---
+
 # Pod skill — finder
 
 You search for pods and pass `pod_id` references forward to whichever

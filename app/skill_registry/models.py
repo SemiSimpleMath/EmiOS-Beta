@@ -14,6 +14,31 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
+class AutoInjectTrigger(BaseModel):
+    """Triggers that cause a skill to be auto-injected into an agent's prompt.
+
+    The skill carries its own trigger conditions in frontmatter metadata
+    under ``auto_inject_when``. Any agent with ``accept_auto_skills: true``
+    in its config receives matching skills based on the current task /
+    incoming message / room context / etc. — no per-agent keyword lists.
+
+    Per the agentskills.io spec, ``metadata`` is free-form — putting this
+    here is spec-compliant. Other clients (Claude Code, Codex CLI) just
+    ignore the field.
+
+    v3 supports ``task_keywords`` only. Other triggers (``room_surface``,
+    ``pod_kinds``, ``url_patterns``, etc.) ride in as use cases appear.
+    """
+
+    task_keywords: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Lowercase substrings; if any appears in the agent's task or "
+            "incoming_message (case-insensitive), the skill auto-injects."
+        ),
+    )
+
+
 class SkillHeader(BaseModel):
     """Metadata-only view of a skill — the always-in-context tier.
 
@@ -28,6 +53,11 @@ class SkillHeader(BaseModel):
     compatibility: Optional[str] = Field(default=None)
     metadata: Dict[str, Any] = Field(default_factory=dict)
     allowed_tools: Optional[str] = Field(default=None, description="Experimental — space-separated tool list.")
+
+    # Auto-inject triggers parsed from metadata.auto_inject_when. None means
+    # the skill is static-binding only — agents must declare it explicitly
+    # in their config.skills list to receive it.
+    auto_inject_when: Optional[AutoInjectTrigger] = Field(default=None)
 
     # Where on disk this skill lives. Not part of the spec; helpful for
     # logging and for the body-loader to find supporting files.

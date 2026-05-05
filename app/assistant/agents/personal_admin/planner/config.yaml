@@ -68,17 +68,8 @@ system_context_items:
 # personal_admin's responsibility is acting on pods (attaching to
 # email, fetching to read) — NOT searching for them. Finding pods is
 # emi_team's job (see emi_team/planner/config.yaml). When a task
-# arrives here with pod_ids already in it (or in referenced_pods), the
-# admin skill teaches the right tool composition.
+# arrives here with pod_ids already in it, the pod-courier skill
+# teaches the right tool composition.
 #
-# Trigger keywords are narrow: explicit pod URI scheme, "attach"-
-# shaped vocabulary, and "email" in combination with media kinds (which
-# is what implies "act on a pod" rather than "find a pod").
-task_keyword_resources:
-  datapod: resource_pod_skill_admin
-  attach: resource_pod_skill_admin
-  attached: resource_pod_skill_admin
-  attachment: resource_pod_skill_admin
-  forward: resource_pod_skill_admin
-  unfurl: resource_pod_skill_admin
-  pod_id: resource_pod_skill_admin
+# Triggers live on the skills (skills/pod-courier/SKILL.md auto_inject_when).
+accept_auto_skills: true

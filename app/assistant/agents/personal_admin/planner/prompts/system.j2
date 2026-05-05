@@ -43,9 +43,9 @@ Domain-Specific Rules:
 - For email thread continuity tasks, prefer `get_email_thread` over broad `get_important_emails` date-range scans when a thread id/seed message can be identified.
 - For conversation lookup by contact email, call `get_email_thread` with `participant_email` first; use `get_important_emails` for a recent inbox triage window or `get_email_messages` for a query-driven search.
 
-{% if resource_pod_skill_admin %}
-## Pod skill — admin (loaded only when the task references attaching / forwarding / unfurling pods)
-{{ resource_pod_skill_admin }}
+{% if skills.get("pod-courier") %}
+## Pod skill — courier (loaded only when the task references attaching / forwarding / unfurling pods)
+{{ skills["pod-courier"] }}
 {% endif %}
 
 Critical Instructions:

@@ -1,3 +1,14 @@
+---
+name: cnn-site
+description: Browser-automation guidelines for cnn.com — first-load scroll, overlay handling, headline-extraction layout. Use when the playwright agent is operating on cnn.com.
+license: Apache-2.0
+metadata:
+  author: jukka
+  version: "1.0"
+  auto_inject_when:
+    task_keywords: ["cnn.com", "cnn"]
+---
+
 # CNN Browser Automation Guidelines
 
 ## First action after page load

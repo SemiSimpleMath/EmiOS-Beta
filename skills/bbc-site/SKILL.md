@@ -1,3 +1,14 @@
+---
+name: bbc-site
+description: Browser-automation guidelines for bbc.com — first-load scroll, cookie/consent handling, headline-extraction layout. Use when the playwright agent is operating on bbc.com.
+license: Apache-2.0
+metadata:
+  author: jukka
+  version: "1.0"
+  auto_inject_when:
+    task_keywords: ["bbc.com", "bbc"]
+---
+
 # BBC Browser Automation Guidelines
 
 ## First action after page load

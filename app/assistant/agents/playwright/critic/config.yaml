@@ -11,14 +11,8 @@ except_tools: []
 
 # Same site-specific guidelines the planner gets — so the critic can flag
 # "you should be using the search bar" rather than just rubber-stamping the
-# planner's misuse. Keys must match playwright/planner/config.yaml.
-task_keyword_resources:
-  doordash: resource_doordash_guidelines
-  door dash: resource_doordash_guidelines
-  cnn.com: resource_cnn_guidelines
-  cnn: resource_cnn_guidelines
-  bbc.com: resource_bbc_guidelines
-  bbc: resource_bbc_guidelines
+# planner's misuse. Triggers live on each skill's auto_inject_when block.
+accept_auto_skills: true
 
 system_context_items:
   - resource_assistant_data

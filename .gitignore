@@ -267,11 +267,6 @@ resources/instructions/*
 !resources/instructions/resource_assistant_guidelines.md
 !resources/instructions/resource_auto_planner_instructions.md
 !resources/instructions/resource_orchestrator_user_prefs.md
-!resources/instructions/resource_bbc_guidelines.md
-!resources/instructions/resource_cnn_guidelines.md
-!resources/instructions/resource_doordash_guidelines.md
-!resources/instructions/resource_pod_skill_finder.md
-!resources/instructions/resource_pod_skill_admin.md
 !resources/instructions/resource_kg_node_reading.md
 !resources/instructions/resource_kg_node_disambiguation.md
 

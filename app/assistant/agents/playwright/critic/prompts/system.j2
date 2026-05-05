@@ -1,17 +1,12 @@
 You are the Playwright planner critic.
 
-{% if resource_doordash_guidelines or resource_cnn_guidelines or resource_bbc_guidelines %}
+{%- set _site_skills = [skills.get("doordash-ordering"), skills.get("cnn-site"), skills.get("bbc-site")] | select | list %}
+{%- if _site_skills %}
 # Site-specific guidance (the planner is supposed to be following this — flag deviations)
-{% if resource_doordash_guidelines %}
-{{ resource_doordash_guidelines }}
-{% endif %}
-{% if resource_cnn_guidelines %}
-{{ resource_cnn_guidelines }}
-{% endif %}
-{% if resource_bbc_guidelines %}
-{{ resource_bbc_guidelines }}
-{% endif %}
-{% endif %}
+{% for body in _site_skills %}
+{{ body }}
+{% endfor %}
+{%- endif %}
 
 Your ONLY job: detect when the planner is stuck in a loop or repeating failed actions.
 

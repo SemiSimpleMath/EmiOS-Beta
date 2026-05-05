@@ -260,3 +260,132 @@ def test_registry_discover_empty_query_returns_empty(tmp_path):
     _write_skill(skills_dir, "alpha", {"name": "alpha", "description": "x"})
     reg = SkillRegistry(base_dir=tmp_path)
     assert reg.discover("") == []
+
+
+# ─── auto_inject_when frontmatter ────────────────────────────────
+
+
+def test_auto_inject_when_parses_task_keywords(tmp_path):
+    p = _write_skill(tmp_path, "doordash-ordering", {
+        "name": "doordash-ordering",
+        "description": "DoorDash navigation help.",
+        "metadata": {
+            "auto_inject_when": {"task_keywords": ["doordash", "Door Dash"]},
+        },
+    })
+    skill, result = parse_skill_md(p)
+    assert result.ok
+    assert skill.auto_inject_when is not None
+    # Keywords get lowercased on parse
+    assert skill.auto_inject_when.task_keywords == ["doordash", "door dash"]
+
+
+def test_auto_inject_when_absent_is_none(tmp_path):
+    p = _write_skill(tmp_path, "static-only", {
+        "name": "static-only",
+        "description": "Static-binding only.",
+    })
+    skill, result = parse_skill_md(p)
+    assert result.ok
+    assert skill.auto_inject_when is None
+
+
+def test_auto_inject_when_must_be_mapping(tmp_path):
+    p = _write_skill(tmp_path, "bad-aiw", {
+        "name": "bad-aiw",
+        "description": "x",
+        "metadata": {"auto_inject_when": "not a dict"},
+    })
+    skill, result = parse_skill_md(p)
+    assert skill is None
+    assert any("auto_inject_when must be a mapping" in e for e in result.errors)
+
+
+def test_auto_inject_when_task_keywords_must_be_strings(tmp_path):
+    p = _write_skill(tmp_path, "bad-keywords", {
+        "name": "bad-keywords",
+        "description": "x",
+        "metadata": {"auto_inject_when": {"task_keywords": ["ok", 123, "also-ok"]}},
+    })
+    skill, result = parse_skill_md(p)
+    assert skill is None
+    assert any("task_keywords must be a list of non-empty strings" in e for e in result.errors)
+
+
+# ─── SkillInjector ───────────────────────────────────────────────
+
+
+def test_skill_injector_matches_task_keywords(tmp_path):
+    from app.skill_registry.skill_injector import SkillInjector
+    skills_dir = tmp_path / "skills"
+    _write_skill(skills_dir, "doordash-ordering", {
+        "name": "doordash-ordering",
+        "description": "DoorDash help.",
+        "metadata": {"auto_inject_when": {"task_keywords": ["doordash", "door dash"]}},
+    })
+    _write_skill(skills_dir, "static-only", {
+        "name": "static-only",
+        "description": "No auto trigger.",
+    })
+    reg = SkillRegistry(base_dir=tmp_path)
+    inj = SkillInjector(reg)
+
+    assert inj.matching_skill_names(task="Order me a pizza from doordash") == ["doordash-ordering"]
+    assert inj.matching_skill_names(task="Door Dash run, please") == ["doordash-ordering"]
+    assert inj.matching_skill_names(task="weather report") == []
+
+
+def test_skill_injector_skips_skills_without_auto_inject_when(tmp_path):
+    from app.skill_registry.skill_injector import SkillInjector
+    skills_dir = tmp_path / "skills"
+    _write_skill(skills_dir, "static-only", {
+        "name": "static-only",
+        "description": "Match my keyword but no trigger.",
+    })
+    reg = SkillRegistry(base_dir=tmp_path)
+    inj = SkillInjector(reg)
+    # Even though "static-only" appears in the task, no auto_inject_when → no match.
+    assert inj.matching_skill_names(task="this is static-only territory") == []
+
+
+def test_skill_injector_handles_empty_inputs(tmp_path):
+    from app.skill_registry.skill_injector import SkillInjector
+    skills_dir = tmp_path / "skills"
+    _write_skill(skills_dir, "alpha", {
+        "name": "alpha",
+        "description": "x",
+        "metadata": {"auto_inject_when": {"task_keywords": ["alpha"]}},
+    })
+    reg = SkillRegistry(base_dir=tmp_path)
+    inj = SkillInjector(reg)
+    assert inj.matching_skill_names() == []
+    assert inj.matching_skill_names(task="", incoming_message="") == []
+
+
+def test_skill_injector_de_dupes_when_multiple_keywords_hit(tmp_path):
+    from app.skill_registry.skill_injector import SkillInjector
+    skills_dir = tmp_path / "skills"
+    _write_skill(skills_dir, "doordash-ordering", {
+        "name": "doordash-ordering",
+        "description": "x",
+        "metadata": {"auto_inject_when": {"task_keywords": ["doordash", "door dash"]}},
+    })
+    reg = SkillRegistry(base_dir=tmp_path)
+    inj = SkillInjector(reg)
+    # Both "doordash" and "door dash" appear; skill should be in the list once.
+    assert inj.matching_skill_names(task="doordash door dash food order") == ["doordash-ordering"]
+
+
+def test_skill_injector_searches_incoming_message_too(tmp_path):
+    from app.skill_registry.skill_injector import SkillInjector
+    skills_dir = tmp_path / "skills"
+    _write_skill(skills_dir, "doordash-ordering", {
+        "name": "doordash-ordering",
+        "description": "x",
+        "metadata": {"auto_inject_when": {"task_keywords": ["doordash"]}},
+    })
+    reg = SkillRegistry(base_dir=tmp_path)
+    inj = SkillInjector(reg)
+    assert inj.matching_skill_names(
+        task="order food", incoming_message="from doordash please",
+    ) == ["doordash-ordering"]

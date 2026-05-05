@@ -1,4 +1,15 @@
-# Pod skill — admin (act on pods you've been given)
+---
+name: pod-courier
+description: How to act on pods you've been given — attach to email, fetch body to read, unfurl content. The courier does NOT search for pods (that's pod-finder upstream); it receives pod_ids and acts. Use when a `datapod:<kind>:<id>` URI is in the task or context AND the action is send / email / attach / forward / unfurl / read.
+license: Apache-2.0
+metadata:
+  author: jukka
+  version: "1.0"
+  auto_inject_when:
+    task_keywords: ["datapod", "attach", "attached", "attachment", "forward", "unfurl", "pod_id"]
+---
+
+# Pod skill — courier (act on pods you've been given)
 
 You receive `pod_id` references in your task or in your inbound
 message and you act on them — attach to email, fetch body to read,
