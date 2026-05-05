@@ -54,6 +54,7 @@ class RoomIngressService:
             from app.assistant.ServiceLocator.service_locator import DI
             from app.assistant.manager_runtime.active_workers import (
                 find_active_invocation_by_display_name,
+                find_active_invocations_by_base_display_name,
                 list_active_display_names,
                 list_active_workers,
             )
@@ -63,6 +64,7 @@ class RoomIngressService:
             self._mention_router = RoomMentionRouter(
                 active_workers_provider=list_active_workers,
                 worker_resolver=find_active_invocation_by_display_name,
+                base_name_resolver=find_active_invocations_by_base_display_name,
                 display_names_lister=list_active_display_names,
                 mailbox=mailbox,
             )

@@ -27,17 +27,32 @@ def _seed_display_names():
 
 
 def _make_router(*, active_workers=None):
-    """Build a router with mocked DI dependencies."""
-    workers = active_workers or []
-    by_display = {w["display_name"].lower(): w for w in workers}
+    """Build a router with mocked DI dependencies.
 
-    def fake_resolve(name):
-        return by_display.get((name or "").lower())
+    Each worker dict mirrors the production shape; ``display_name`` is
+    the per-instance alias (``Webby``, ``Webby_2``) and
+    ``base_display_name`` defaults to display_name when unset (back-compat
+    for tests that don't care about the distinction).
+    """
+    workers = list(active_workers or [])
+    for w in workers:
+        w.setdefault("base_display_name", w["display_name"])
 
-    def fake_list_active():
+    def fake_resolve(name, *, room_id=None):
+        target = (name or "").lower()
+        for w in workers:
+            if w["display_name"].lower() == target:
+                return w
+        return None
+
+    def fake_resolve_by_base(base, *, room_id=None):
+        target = (base or "").lower()
+        return [w for w in workers if w["base_display_name"].lower() == target]
+
+    def fake_list_active(*, room_id=None):
         return list(workers)
 
-    def fake_list_display_names():
+    def fake_list_display_names(*, room_id=None):
         return [w["display_name"] for w in workers]
 
     mock_mailbox = MagicMock()
@@ -46,6 +61,7 @@ def _make_router(*, active_workers=None):
     router = RoomMentionRouter(
         active_workers_provider=fake_list_active,
         worker_resolver=fake_resolve,
+        base_name_resolver=fake_resolve_by_base,
         display_names_lister=fake_list_display_names,
         mailbox=mock_mailbox,
     )
@@ -127,7 +143,7 @@ class TestRouteKnownNameButInactive:
                    "manager_name": "personal_admin_manager"}]
         router, mb = _make_router(active_workers=active)
         result = router.route(body="@quimby check", room_id="master_room", meta={})
-        assert "active right now: Phyllis" in result.early_result["reply_text"]
+        assert "active in this room: Phyllis" in result.early_result["reply_text"]
 
 
 # ── route: active worker + body → posts to mailbox + acks ─────────

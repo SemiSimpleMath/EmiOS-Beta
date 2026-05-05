@@ -159,15 +159,21 @@ class ChatNarrator:
         Silent for unnamed workers, disabled narration, or any failure
         in the chain — never breaks the firing manager.
 
-        Expected event ``data`` keys:
-          ``manager_name`` — canonical type name (UUID suffix already stripped)
+        Uses the per-instance ``display_name`` from the event payload
+        (e.g. ``Webby_2``) rather than looking up the base name from
+        config — that's how the @mention router will address it later.
         """
         try:
             data = message.data if isinstance(getattr(message, "data", None), dict) else {}
             manager_name = str(data.get("manager_name") or "").strip()
             if not manager_name:
                 return
-            display_name = display_name_for(manager_name)
+            # Per-instance display_name comes from MAMInstanceManager via
+            # the event. Fall back to the base name from config only if
+            # the event lacks it (older publishers / tests).
+            display_name = str(data.get("display_name") or "").strip()
+            if not display_name:
+                display_name = display_name_for(manager_name)
             if not display_name or display_name == manager_name:
                 return
             cfg = self._narration_config_for(manager_name)

@@ -1,13 +1,9 @@
 from __future__ import annotations
 
-import threading
-from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 from app.assistant.manager_runtime.request_preprocessor import RequestPreprocessor
 from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
-from app.assistant.routine_manager.utils import status_dir, write_json_file
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import Message, ToolResult
 
@@ -15,84 +11,143 @@ logger = get_logger(__name__)
 
 
 class ManagerInvoker:
-    """
-    Canonical manager invocation entrypoint.
+    """Canonical manager-invocation entry point.
+
+    Responsibility: orchestrate ONE call into a manager instance —
+    preprocess the inbound message, apply scope, hand off to the
+    manager's request_handler, and return its result. Cross-cutting
+    concerns (registry of running instances, display-name assignment,
+    cancel/pause control, status panel) live in
+    ``MAMInstanceManager`` and are accessed via ``DI.mam_instance_manager``.
+
+    This class does NOT track running invocations or know about chat
+    surfaces. It registers each call with the instance manager at the
+    start and unregisters in a try/finally so the registry can never
+    drift from reality even if a manager raises.
     """
 
-    def __init__(self, preprocessor: RequestPreprocessor | None = None, *, resource_manager: Any = None):
+    def __init__(
+        self,
+        preprocessor: RequestPreprocessor | None = None,
+        *,
+        resource_manager: Any = None,
+    ) -> None:
         self._resource_manager = resource_manager
-        self.preprocessor = preprocessor or RequestPreprocessor(resource_manager=resource_manager)
+        self.preprocessor = preprocessor or RequestPreprocessor(
+            resource_manager=resource_manager,
+        )
         self.scope_adapter = ScopeAdapter()
-        self._lock = threading.Lock()
-        self._active_invocations: dict[str, dict[str, Any]] = {}
 
-    def _build_invocation_status_payload(self) -> dict[str, Any]:
-        now_utc = datetime.now(timezone.utc)
-        with self._lock:
-            rows = []
-            for invocation_id, item in self._active_invocations.items():
-                started = item.get("started_at_utc")
-                running_for_s = None
-                if isinstance(started, datetime):
-                    running_for_s = round((now_utc - started).total_seconds(), 2)
-                rows.append(
-                    {
-                        "invocation_id": invocation_id,
-                        "manager_name": item.get("manager_name"),
-                        "request_id": item.get("request_id"),
-                        "thread_name": item.get("thread_name"),
-                        "thread_ident": item.get("thread_ident"),
-                        "started_at_utc": started.isoformat() if isinstance(started, datetime) else None,
-                        "running_for_s": running_for_s,
-                    }
-                )
-        return {
-            "schema_version": 1,
-            "component": "manager_invoker",
-            "generated_at_utc": now_utc.isoformat(),
-            "active_invocation_count": len(rows),
-            "active_invocations": sorted(rows, key=lambda row: str(row.get("started_at_utc") or "")),
-        }
+    # ------------------------------------------------------------------
+    # Back-compat shims for callers that still ask the invoker for state.
+    # The actual data lives in MAMInstanceManager.
+    # ------------------------------------------------------------------
 
     def get_invocation_status(self) -> dict[str, Any]:
-        return self._build_invocation_status_payload()
+        from app.assistant.ServiceLocator.service_locator import DI
+        mam = getattr(DI, "mam_instance_manager", None)
+        if mam is None:
+            return {
+                "schema_version": 2,
+                "component": "mam_instance_manager",
+                "active_invocation_count": 0,
+                "active_invocations": [],
+            }
+        return mam.get_status_payload()
+
+    # ------------------------------------------------------------------
+    # Invocation
+    # ------------------------------------------------------------------
+
+    def invoke(self, manager_instance, user_message: Message) -> ToolResult:
+        from app.assistant.ServiceLocator.service_locator import DI
+        from app.assistant.manager_runtime.active_workers import (
+            canonical_manager_name,
+        )
+        from app.assistant.chat_narrator.display_names import display_name_for
+
+        manager_instance_name = str(getattr(manager_instance, "name", "manager") or "manager")
+        canonical_name = canonical_manager_name(manager_instance_name)
+        request_id = str(getattr(user_message, "request_id", None) or "").strip() or None
+        reply_to = self._extract_reply_to(user_message)
+        room_id = self._extract_room_id(user_message, reply_to)
+        base_display_name = display_name_for(canonical_name)
+
+        mam = DI.mam_instance_manager
+        record = mam.register(
+            manager_instance=manager_instance,
+            manager_instance_name=manager_instance_name,
+            manager_name=canonical_name,
+            base_display_name=base_display_name,
+            request_id=request_id,
+            room_id=room_id,
+            reply_to=reply_to,
+        )
+
+        # Stash invocation_id on the manager's blackboard so control nodes
+        # within the manager (mailbox dispatcher, etc.) can identify
+        # themselves to cross-invocation services.
+        try:
+            blackboard = getattr(manager_instance, "blackboard", None)
+            if blackboard is not None:
+                blackboard.update_state_value("_invocation_id", record.invocation_id)
+        except Exception:
+            logger.debug("Failed to stash invocation_id on blackboard", exc_info=True)
+
+        self._publish_invocation_started_event(record)
+        try:
+            normalized_message, immediate = self.preprocessor.preprocess(
+                canonical_name, user_message,
+            )
+            if isinstance(immediate, ToolResult):
+                return immediate
+            manager_cfg = getattr(manager_instance, "manager_config", None)
+            scoped_message = self.scope_adapter.apply(
+                manager_name=canonical_name,
+                manager_config=manager_cfg if isinstance(manager_cfg, dict) else {},
+                message=normalized_message,
+            )
+            return manager_instance.request_handler(scoped_message)
+        except Exception as e:
+            logger.error("[%s] manager invocation failed: %s", canonical_name, e)
+            logger.debug(
+                "[%s] manager invocation exception details",
+                canonical_name, exc_info=True,
+            )
+            raise
+        finally:
+            mam.unregister(record.invocation_id)
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
 
     @staticmethod
-    def _publish_invocation_started_event(
-        manager_name: str,
-        request_id: str | None,
-        invocation_id: str,
-        user_message,
-    ) -> None:
+    def _publish_invocation_started_event(record) -> None:
         """Fire a generic ``manager_invocation_started`` event on event_hub.
 
         ManagerInvoker doesn't know what consumes this — chat narrators,
         progress UIs, audit pipelines, etc. all subscribe at their own
-        layer. In environments with no subscriber, the publish is a
-        no-op. Never raises into the host invocation.
-
-        Includes the inbound message's ``scope_context.reply_to`` in the
-        event payload so listeners can route any chat-back to the
-        originating surface without consulting any other state.
+        layer. Includes the per-instance display_name and reply_to so
+        listeners can address and route without consulting any other
+        state. Never raises into the host invocation.
         """
         try:
-            from app.assistant.manager_runtime.active_workers import (
-                canonical_manager_name,
-            )
             from app.assistant.ServiceLocator.service_locator import DI
-            from app.assistant.utils.pydantic_classes import Message
-            reply_to = ManagerInvoker._extract_reply_to(user_message)
             DI.event_hub.publish(
                 Message(
                     sender="manager_invoker",
                     receiver=None,
                     event_topic="manager_invocation_started",
                     data={
-                        "manager_name": canonical_manager_name(manager_name),
-                        "manager_instance_name": manager_name,
-                        "request_id": request_id,
-                        "invocation_id": invocation_id,
-                        "reply_to": reply_to,
+                        "manager_name": record.manager_name,
+                        "manager_instance_name": record.manager_instance_name,
+                        "base_display_name": record.base_display_name,
+                        "display_name": record.display_name,
+                        "request_id": record.request_id,
+                        "invocation_id": record.invocation_id,
+                        "room_id": record.room_id,
+                        "reply_to": record.reply_to,
                     },
                 )
             )
@@ -106,7 +161,7 @@ class ManagerInvoker:
         ScopeContext is the canonical home — propagated through chained
         sub-managers via ``manager_interface.execute``. Falls back to
         ``message.metadata['reply_to']`` for inbound paths that haven't
-        adopted scope-based reply_to yet (transitional).
+        adopted scope-based reply_to yet.
         """
         try:
             scope = getattr(user_message, "scope_context", None)
@@ -127,67 +182,36 @@ class ManagerInvoker:
             return None
         return None
 
-    def _publish_invocation_status(self) -> None:
-        payload = self._build_invocation_status_payload()
-        status_path = status_dir() / "resource_manager_invocation_status.json"
-        write_json_file(status_path, payload)
-        resource_manager = self._resource_manager
-        if resource_manager is None:
-            from app.assistant.ServiceLocator.service_locator import DI  # local import — shim only
-            resource_manager = getattr(DI, "resource_manager", None)
-        if resource_manager:
-            resource_manager.update_resource("resource_manager_invocation_status", payload, persist=False)
+    @staticmethod
+    def _extract_room_id(user_message, reply_to: dict | None) -> str | None:
+        """Resolve the room_id this invocation is scoped to.
 
-    def _register_invocation(self, *, invocation_id: str, manager_name: str, request_id: str | None) -> None:
-        current = threading.current_thread()
-        with self._lock:
-            self._active_invocations[invocation_id] = {
-                "manager_name": manager_name,
-                "request_id": request_id,
-                "thread_name": str(current.name or ""),
-                "thread_ident": current.ident,
-                "started_at_utc": datetime.now(timezone.utc),
-            }
-        self._publish_invocation_status()
+        Source priority:
+          1. scope_context.room_id (canonical, propagates through chains)
+          2. reply_to.room_id (when scope is absent)
+          3. message.room_id top-level (set on direct inbounds)
 
-    def _unregister_invocation(self, *, invocation_id: str) -> None:
-        with self._lock:
-            self._active_invocations.pop(invocation_id, None)
-        self._publish_invocation_status()
-
-    def invoke(self, manager_instance, user_message: Message) -> ToolResult:
-        manager_name = str(getattr(manager_instance, "name", "manager") or "manager")
-        request_id = str(getattr(user_message, "request_id", None) or "").strip() or None
-        invocation_id = f"{manager_name}:{request_id or 'no_request_id'}:{threading.get_ident()}"
-        self._register_invocation(invocation_id=invocation_id, manager_name=manager_name, request_id=request_id)
-        # Stash invocation_id on the manager's blackboard so control nodes
-        # within the manager (e.g. steering-inbox pickup before each planner
-        # iteration) can identify themselves to the cross-invocation services.
+        Returns None for invocations with no room context (cron / batch /
+        test). Such invocations all share a global None namespace for
+        display-name assignment.
+        """
         try:
-            blackboard = getattr(manager_instance, "blackboard", None)
-            if blackboard is not None:
-                blackboard.update_state_value("_invocation_id", invocation_id)
+            scope = getattr(user_message, "scope_context", None)
+            if isinstance(scope, dict):
+                rid = scope.get("room_id")
+                if isinstance(rid, str) and rid.strip():
+                    return rid.strip()
+            elif scope is not None:
+                rid = getattr(scope, "room_id", None)
+                if isinstance(rid, str) and rid.strip():
+                    return rid.strip()
+            if isinstance(reply_to, dict):
+                rid = reply_to.get("room_id")
+                if isinstance(rid, str) and rid.strip():
+                    return rid.strip()
+            rid = getattr(user_message, "room_id", None)
+            if isinstance(rid, str) and rid.strip():
+                return rid.strip()
         except Exception:
-            logger.debug("Failed to stash invocation_id on blackboard", exc_info=True)
-
-        self._publish_invocation_started_event(
-            manager_name, request_id, invocation_id, user_message,
-        )
-        try:
-            normalized_message, immediate = self.preprocessor.preprocess(manager_name, user_message)
-            if isinstance(immediate, ToolResult):
-                return immediate
-            manager_cfg = getattr(manager_instance, "manager_config", None)
-            scoped_message = self.scope_adapter.apply(
-                manager_name=manager_name,
-                manager_config=manager_cfg if isinstance(manager_cfg, dict) else {},
-                message=normalized_message,
-            )
-            return manager_instance.request_handler(scoped_message)
-        except Exception as e:
-            logger.error("[%s] manager invocation failed: %s", manager_name, e)
-            logger.debug("[%s] manager invocation exception details", manager_name, exc_info=True)
-            raise
-        finally:
-            self._unregister_invocation(invocation_id=invocation_id)
-
+            return None
+        return None

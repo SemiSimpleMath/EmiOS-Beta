@@ -70,6 +70,10 @@ def initialize_system():
     ServiceLocator.register("chat_narrator", chat_narrator)
     from app.assistant.manager_runtime.mailbox import Mailbox
     ServiceLocator.register("mailbox", Mailbox())
+    from app.assistant.manager_runtime.mam_instance_manager import MAMInstanceManager
+    ServiceLocator.register("mam_instance_manager", MAMInstanceManager(
+        resource_manager=DI.resource_manager,
+    ))
     ServiceLocator.register("question_service", QuestionService())
 
     logger.info("Loading emi_result_handler...")

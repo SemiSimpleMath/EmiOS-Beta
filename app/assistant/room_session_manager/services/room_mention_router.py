@@ -64,16 +64,21 @@ class RoomMentionRouter:
         *,
         active_workers_provider,
         worker_resolver,
+        base_name_resolver,
         display_names_lister,
         mailbox,
     ) -> None:
         # Injected for testability. In production:
         #   active_workers_provider = list_active_workers
-        #   worker_resolver = find_active_invocation_by_display_name
+        #   worker_resolver = find_active_invocation_by_display_name (exact match)
+        #   base_name_resolver = find_active_invocations_by_base_display_name
         #   display_names_lister = list_active_display_names
         #   mailbox = DI.mailbox
+        # All resolver helpers accept an optional ``room_id`` kwarg so we
+        # only see invocations the sender's room is allowed to address.
         self._list_active = active_workers_provider
         self._resolve = worker_resolver
+        self._resolve_by_base = base_name_resolver
         self._list_display_names = display_names_lister
         self._mailbox = mailbox
 
@@ -105,27 +110,58 @@ class RoomMentionRouter:
         meta: Dict[str, Any],
     ) -> Optional[MentionResult]:
         """Dispatch one message. ``None`` means "no @mention, continue normal
-        pipeline."""
+        pipeline."
+
+        Resolution order (all scoped to the sender's ``room_id``):
+          1. Exact display_name match (``@webby_2`` → ``Webby_2``).
+          2. Base-name match: collect everything matching the base name.
+             - 0 active → "no active <Base> in this room"
+             - 1 active → use it (bare ``@webby`` is unambiguous)
+             - 2+ active → ambiguity error listing the explicit names
+        """
         parsed = self.extract_mention(body)
         if parsed is None:
             return None
         name, mention_body = parsed
 
-        # Resolve the display name. Unknown name → fall through to the agent
-        # pipeline so chat_gate can see a literal "@steve" without us hijacking.
-        worker = self._resolve(name)
-        if worker is None and not self._is_known_display_name(name):
-            return None  # not in our registry; let chat handle it
+        # 1) Exact match wins (e.g. ``@webby_2``). Scoped to the room.
+        worker = self._resolve(name, room_id=room_id)
+
+        # 2) Bare-name path: if no exact match, try to resolve by base
+        #    display name. If the requested name isn't in the registry at
+        #    all, fall through (so chat_gate can see ``@steve``).
+        if worker is None:
+            if not self._is_known_display_name(name):
+                return None
+            base_matches = self._resolve_by_base(name, room_id=room_id) or []
+            if len(base_matches) == 0:
+                worker = None  # no active worker — handled below
+            elif len(base_matches) == 1:
+                worker = base_matches[0]
+            else:
+                # Two or more — refuse to guess. Tell the user the
+                # explicit names so they can address one.
+                display = self._canonical_display(name)
+                names = ", ".join(sorted(m["display_name"] for m in base_matches))
+                text = (
+                    f"Multiple {display}s active in this room: {names}. "
+                    f"Address one specifically (e.g. @{names.split(', ')[1].lower()})."
+                )
+                return MentionResult(
+                    early_result=self._build_reply(text=text, meta=meta),
+                    continue_pipeline=False,
+                    meta=dict(meta),
+                )
 
         if worker is None:
-            # Known name (Quimby/Em/...) but nobody's running.
+            # Known name (Quimby/Em/...) but nobody's running in this room.
             display = self._canonical_display(name)
             others = [
-                n for n in (self._list_display_names() or [])
+                n for n in (self._list_display_names(room_id=room_id) or [])
                 if n.lower() != display.lower()
             ]
-            hint = f" (active right now: {', '.join(others)})" if others else ""
-            text = f"No active {display} right now — nothing to steer.{hint}"
+            hint = f" (active in this room: {', '.join(others)})" if others else ""
+            text = f"No active {display} in this room — nothing to steer.{hint}"
             return MentionResult(
                 early_result=self._build_reply(text=text, meta=meta),
                 continue_pipeline=False,
