@@ -598,19 +598,44 @@ class ToolResultHandler(ControlNode):
         if valid:
             return False
         # Non-conforming error responses from external/third-party tools are common
-        # (e.g. scrape_url returning data=null, one_shot_tool_runner returning non-dict).
-        # Surface the error content so the planner can see it and try a different
-        # approach, then return True to stop downstream checks from crashing.
+        # (e.g. scrape_url returning data=null when a URL is paywalled and
+        # the playwright fallback isn't installed; one_shot_tool_runner
+        # returning non-dict). The right behavior is RECOVERABLE — surface
+        # the error to the planner so it can try a different URL or
+        # continue with what it has. The previous implementation set
+        # ``blackboard.error = True`` which killed the entire manager
+        # loop on a single bad URL, producing user-facing messages like
+        # "the search process encountered an error and could not extract
+        # meaningful content from the sources."
+        #
+        # Normalize the malformed error into a conforming abort_tool
+        # shape (data: dict, recoverable) so downstream code paths see a
+        # valid error contract and the planner sees it as a single failed
+        # tool call (not a fatal manager state).
         logger.warning(
             "[%s] Tool error response does not conform to contract (%s); "
-            "treating as recoverable abort_tool error.",
-            self.name,
-            reason,
+            "normalizing to recoverable abort_tool for planner visibility.",
+            self.name, reason,
         )
         error_content = str(getattr(tool_result, "content", "") or "Tool returned a non-conforming error.")
-        self.blackboard.update_state_value("error", True)
-        self.blackboard.update_state_value("error_message", error_content)
-        return True
+        try:
+            tool_result.data = {
+                "error_code": "tool_error_contract_violation",
+                "abort_policy": "abort_tool",
+                "retryable": False,
+                "user_visible": False,
+                "details": {"original_reason": reason},
+            }
+        except Exception:
+            logger.debug(
+                "[%s] Failed to normalize tool_result.data — letting it flow as-is",
+                self.name, exc_info=True,
+            )
+        # Return False so the handler continues processing this result
+        # through the normal tool-return path. The planner sees the error
+        # content in its history and decides what to do next; the manager
+        # loop does NOT abort.
+        return False
 
     def _update_dynamic_tool_scope(
         self,
