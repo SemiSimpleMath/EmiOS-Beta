@@ -6,6 +6,7 @@ max_cycles: 80  # Prevent infinite loops
 role_bindings:
   delegator: kg_team::delegator
   tool_selector: shared::tool_selector
+  planner: kg_team::planner
 
 agents:
   - name: kg_team::delegator
