@@ -35,7 +35,7 @@ If you understand those five pieces, you understand EmiOS at the architectural l
 
 ```bash
 # One-time setup
-python setup.py            # creates .venv, installs requirements_alpha.txt
+python setup.py            # creates .venv, installs requirements.txt
 
 # Run the app
 emi.bat                    # Windows

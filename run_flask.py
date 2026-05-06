@@ -16,7 +16,7 @@ if sys.version_info < (3, 10) or sys.version_info >= (3, 12):
         f"for {_v.major}.{_v.minor}+).\n"
         f"   Install Python 3.11 from python.org and rebuild your venv:\n"
         f"     rmdir /s /q .venv  &&  py -3.11 -m venv .venv\n"
-        f"     .venv\\Scripts\\pip install -r requirements_alpha.txt\n",
+        f"     .venv\\Scripts\\pip install -r requirements.txt\n",
         file=sys.stderr,
     )
     sys.exit(1)

@@ -20,7 +20,7 @@ git config core.hooksPath scripts/git-hooks
 - **CRITICAL**: Always use `.venv\Scripts\python.exe` (Windows) or `.venv/bin/python` (Mac/Linux), never system Python. System Python is missing project dependencies.
 - **Entry point**: `run_flask.py` — starts Flask + SocketIO on `http://localhost:8000`
 - **Launch**: `emi.bat` (Windows) / `emi.command` (Mac) / `start.py` (auto-detects venv)
-- **First-time setup**: `setup.py` creates venv and installs `requirements_alpha.txt`
+- **First-time setup**: `setup.py` creates venv and installs `requirements.txt`
 
 ## Running Tests
 

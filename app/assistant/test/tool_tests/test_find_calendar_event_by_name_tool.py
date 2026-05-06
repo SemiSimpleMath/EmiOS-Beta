@@ -5,7 +5,7 @@ of calendar event search.
 NOTE on status: this tool is shipped DISABLED in the alpha package. A
 ``.disabled`` sentinel file in the tool's directory prevents the registry
 from loading it, because it imports sentence-transformers (HuggingFace)
-which is excluded from ``requirements_alpha.txt``. These tests auto-skip
+which is excluded from ``requirements.txt``. These tests auto-skip
 when the ``.disabled`` file is present so they don't break the fast test
 run; when someone flips to the full requirements and removes the sentinel,
 they'll run and validate correctness.

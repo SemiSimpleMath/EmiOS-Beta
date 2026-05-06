@@ -89,8 +89,8 @@ def install_dependencies():
     
     # Install requirements (critical)
     try:
-        print("\n   Installing packages from requirements_alpha.txt...")
-        subprocess.run([pip_cmd, "install", "-r", "requirements_alpha.txt"], check=True)
+        print("\n   Installing packages from requirements.txt...")
+        subprocess.run([pip_cmd, "install", "-r", "requirements.txt"], check=True)
         print("✅ All dependencies installed")
     except subprocess.CalledProcessError as e:
         print(f"❌ ERROR: Failed to install dependencies: {e}")
