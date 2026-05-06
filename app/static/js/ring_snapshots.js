@@ -152,6 +152,22 @@
 
     refreshBtn.addEventListener('click', loadSnapshots);
 
+    // Auto-refresh: handy for watching the 3-min sleep_camera_tick routine
+    // pile up frames in real time. Off by default; user opts in.
+    let autoRefreshTimer = null;
+    const autoRefreshToggle = document.getElementById('ring-snapshots-autorefresh-toggle');
+    if (autoRefreshToggle) {
+        autoRefreshToggle.addEventListener('change', function () {
+            if (autoRefreshTimer) {
+                clearInterval(autoRefreshTimer);
+                autoRefreshTimer = null;
+            }
+            if (autoRefreshToggle.checked) {
+                autoRefreshTimer = setInterval(loadSnapshots, 15000);
+            }
+        });
+    }
+
     // Importance filter slider — defined in template; wire if present.
     const filterSlider = document.getElementById('ring-snapshots-importance-filter');
     const filterLabel = document.getElementById('ring-snapshots-importance-label');
