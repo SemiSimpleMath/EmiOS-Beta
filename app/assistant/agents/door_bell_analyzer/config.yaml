@@ -1,0 +1,29 @@
+name: door_bell_analyzer
+class_name: DoorBellAnalyzer
+llm_params:
+  llm_provider: "openai"
+  # Vision-capable. Same model the shared::vision_image_describe agent uses.
+  engine: "gpt-4o"
+  model_tier: "powerful"
+  temperature: 0.2
+
+allowed_tools: []
+except_tools: []
+
+structured_output: AgentForm
+
+system_context_items: []
+
+user_context_items:
+  - date_time
+  - image
+  - camera_id
+  - captured_at_utc
+
+# Only handle frames from these Ring camera ids. Other cameras' frames
+# are silently ignored by this agent (their own analyzer handles them).
+camera_ids:
+  - "74818139"  # Front Door (doorbell)
+
+events:
+  - ring_snapshot_captured

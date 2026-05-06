@@ -1,0 +1,29 @@
+name: sleep_analyzer
+class_name: SleepAnalyzer
+llm_params:
+  llm_provider: "openai"
+  # Vision-capable. Same model the shared::vision_image_describe agent uses.
+  engine: "gpt-4o"
+  model_tier: "powerful"
+  temperature: 0.2
+
+allowed_tools: []
+except_tools: []
+
+structured_output: AgentForm
+
+system_context_items: []
+
+user_context_items:
+  - date_time
+  - image
+  - camera_id
+  - captured_at_utc
+
+# Only handle frames from the bed-facing camera.
+# Currently the Downstairs cam (158991560) has been repurposed for this.
+camera_ids:
+  - "158991560"  # Downstairs (re-aimed at bed)
+
+events:
+  - ring_snapshot_captured

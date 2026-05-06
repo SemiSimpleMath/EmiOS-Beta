@@ -891,6 +891,12 @@ async def _ring_get_snapshot(camera_id: str) -> Dict[str, Any]:
         fname = f"{ts}_{safe_id}.jpg"
         out_path = _ring_snapshots_dir() / fname
         out_path.write_bytes(bytes(snapshot_bytes))
+        _publish_ring_snapshot_captured(
+            snapshot_path=str(out_path),
+            filename=fname,
+            camera_id=str(camera_id),
+            captured_at_utc=ts,
+        )
         return {
             "camera_id": str(camera_id),
             "snapshot_path": str(out_path),
@@ -899,6 +905,32 @@ async def _ring_get_snapshot(camera_id: str) -> Dict[str, Any]:
         }
     finally:
         await auth.async_close()
+
+
+def _publish_ring_snapshot_captured(
+    *, snapshot_path: str, filename: str, camera_id: str, captured_at_utc: str
+) -> None:
+    """Fire the event the ring_analyzer agent listens to.
+
+    Defensive: import + publish are wrapped so a missing event_hub or agent
+    never breaks snapshot capture itself. Caption is best-effort, the
+    captured JPEG is the main deliverable.
+    """
+    try:
+        from app.assistant.ServiceLocator.service_locator import DI
+        from app.assistant.utils.pydantic_classes import Message
+        msg = Message(
+            event_topic="ring_snapshot_captured",
+            data={
+                "snapshot_path": snapshot_path,
+                "filename": filename,
+                "camera_id": camera_id,
+                "captured_at_utc": captured_at_utc,
+            },
+        )
+        DI.event_hub.publish(msg)
+    except Exception as e:
+        logger.warning("ring_snapshot_captured event publish failed: %s", e)
 
 
 async def _ring_get_recent_events(
