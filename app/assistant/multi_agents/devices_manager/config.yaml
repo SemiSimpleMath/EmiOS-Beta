@@ -54,7 +54,6 @@ tools:
     - lights_control
     - ring_camera_control
     - ask_user
-    - notify_user
   except_tools: []
 
 scope_contract:
@@ -64,7 +63,6 @@ scope_contract:
       - lights_control
       - ring_camera_control
       - ask_user
-      - notify_user
     blocked_tools:
       - install_tool
       - mcp::npm/playwright-mcp::browser_run_code

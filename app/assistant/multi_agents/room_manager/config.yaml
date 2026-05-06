@@ -52,7 +52,6 @@ tools:
     - web_manager
     - personal_admin_manager
     - ask_user
-    - notify_user
     - playwright_manager
     - kg_team_manager
     - ask_kg
@@ -86,7 +85,6 @@ scope_contract:
       - web_manager
       - personal_admin_manager
       - ask_user
-      - notify_user
       - playwright_manager
       - kg_team_manager
       - ask_kg

@@ -87,7 +87,6 @@ tool_visibility:
     - create_scheduler_event
     - create_repeating_scheduler_event
     - delete_scheduler_event
-    - notify_user
 
     # --- web_manager leaf tools (call the manager instead) ---
     - search_web

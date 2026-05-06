@@ -217,9 +217,8 @@ def _execute_tool(
         tool_data.setdefault("request_context", {})["room_id"] = room_id
 
     # Propagate the originating reply_to so user-facing tools (ask_user,
-    # create_dayflow_ticket, notify_user, TTS) can route replies back to
-    # the same transport. MultiAgentManager stashes this as
-    # ``inbound_reply_to`` on entry.
+    # create_dayflow_ticket, TTS) can route replies back to the same
+    # transport. MultiAgentManager stashes this as ``inbound_reply_to`` on entry.
     reply_to = blackboard.get_state_value("inbound_reply_to")
     if isinstance(reply_to, dict) and reply_to:
         tool_data.setdefault("request_context", {})["reply_to"] = reply_to

@@ -17,7 +17,6 @@ FRONT_DOOR = {
     "get_email",
     "get_todo_tasks",
     "search_web",
-    "notify_user",
 }
 
 
@@ -42,7 +41,7 @@ def _category(name: str) -> str:
         return "files"
     if name.endswith("_manager") or name in {"run_compiled_task", "run_job_spec", "run_routine", "one_shot_tool_runner"}:
         return "orchestration"
-    if name in {"ask_user", "notify_user", "update_user_preference"}:
+    if name in {"ask_user", "update_user_preference"}:
         return "user_interaction"
     if name in {"find_tool", "install_tool", "read_tool_result"}:
         return "tooling"
@@ -91,7 +90,7 @@ def _entities(name: str, category: str) -> list[str]:
         entities.update({"node", "edge", "graph"})
     if "text_file" in name:
         entities.add("file")
-    if name in {"ask_user", "notify_user", "update_user_preference"}:
+    if name in {"ask_user", "update_user_preference"}:
         entities.add("user")
     if category == "orchestration":
         entities.add("workflow")

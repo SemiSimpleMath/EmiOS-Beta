@@ -5,7 +5,7 @@ llm_params:
   engine: "gpt-5-mini"
   model_tier: "mini"
 
-allowed_tools: [get_todo_tasks, get_important_emails, ask_user, notify_user]
+allowed_tools: [get_todo_tasks, get_important_emails, ask_user]
 except_tools: []
 allowed_nodes: [return_control]
 

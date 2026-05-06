@@ -97,7 +97,6 @@ tools:
     - run_task
     - find_tool
     - ask_user
-    - notify_user
 
     # --- Exotic system-control tools owned by dayflow orchestrator ---
     - set_ui_mute

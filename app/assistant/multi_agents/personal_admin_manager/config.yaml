@@ -60,7 +60,6 @@ tool_visibility:
     - get_calendar_events
     - get_todo_tasks
     - ask_user
-    - notify_user
   use_narrower: false
 
 tools:
@@ -90,7 +89,6 @@ tools:
     - edit_google_doc
     - create_google_doc
     - ask_user
-    - notify_user
     - ask_kg
     - pod_fetch
     - pod_search
@@ -124,7 +122,6 @@ scope_contract:
       - edit_google_doc
       - create_google_doc
       - ask_user
-      - notify_user
       - ask_kg
       - pod_fetch
       - pod_search
