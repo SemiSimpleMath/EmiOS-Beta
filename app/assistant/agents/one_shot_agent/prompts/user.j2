@@ -125,32 +125,37 @@ One-shot tool playbook:
   - eco_enabled: bool
 
 13) lights_control
-- Use for: light power and brightness commands. Always targets ALL lights.
-- Required action:
-  - action: str MUST be exactly one of:
+- Use for: light power and brightness commands.
+- Required:
+  - command: str MUST be exactly one of:
     - set_light_power
     - set_light_brightness
+    - list_lights
 - Conditional fields:
   - state: str (required for set_light_power; "on" | "off")
   - brightness_pct: int (required for set_light_brightness; 0-100)
-- Never include room or light_id - omit both always.
+- Targeting (use the configured device alias when the user names a room):
+  - room: str — one of the configured device aliases listed in the lights_control
+    tool description. Omit room/light_id to target ALL lights.
 
 14) ring_camera_control
 - Use for: Ring camera snapshot/events/siren/light.
-- Required action:
-  - action: str MUST be one of:
+- Required:
+  - command: str MUST be one of:
     - list_cameras
     - get_snapshot
     - get_recent_events
     - set_siren
     - set_light
 - Conditional fields:
-  - camera_id: str (required for all except list_cameras)
+  - camera_id: str (required for all except list_cameras) — pass the configured
+    camera alias listed in the ring_camera_control tool description, NOT the raw
+    Ring numeric id (the bridge resolves alias → id).
   - lookback_minutes: int (required for get_recent_events)
   - enabled: bool (required for set_siren/set_light)
 
 Example output JSON:
 {
   "tool_name": "lights_control",
-  "arguments_json": "{\"action\":\"set_light_power\",\"state\":\"on\"}"
+  "arguments_json": "{\"command\":\"set_light_power\",\"state\":\"on\",\"room\":\"Kitchen lights\"}"
 }
