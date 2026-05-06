@@ -29,11 +29,11 @@
   ],
   "arguments_prompt": "{\"image_path\": \"...\", \"question\": \"Describe this image concisely.\"}",
   "metadata": {
-    "category": "vision",
-    "verbs": [
+    "domain": "vision",
+    "actions": [
       "operate"
     ],
-    "entities": [
+    "selectors": [
       "vision"
     ],
     "risk_level": "low",

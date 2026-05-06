@@ -41,11 +41,11 @@
   ],
   "arguments_prompt": "{\n  \"routine_id\": \"daily_insights_pipeline\",\n  \"target_date\": \"2026-02-09\"\n}",
   "metadata": {
-    "category": "orchestration",
-    "verbs": [
+    "domain": "orchestration",
+    "actions": [
       "run"
     ],
-    "entities": [
+    "selectors": [
       "workflow"
     ],
     "risk_level": "medium",

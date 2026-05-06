@@ -29,9 +29,19 @@
   ],
   "arguments_prompt": "Arguments for kg_query:\n- sql (required): one SELECT or WITH ... SELECT statement\n- max_rows (optional): default 200, max 5000",
   "metadata": {
-    "category": "knowledge_graph",
-    "verbs": ["read", "investigate"],
-    "entities": ["node", "edge", "proposal", "window", "card", "pod"],
+    "domain": "knowledge_graph",
+    "actions": [
+      "read",
+      "investigate"
+    ],
+    "selectors": [
+      "node",
+      "edge",
+      "proposal",
+      "window",
+      "card",
+      "pod"
+    ],
     "risk_level": "low",
     "side_effects": "read_only",
     "requires_auth": [],

@@ -23,9 +23,13 @@
   ],
   "arguments_prompt": "Arguments for pod_fetch tool:\n\n- pod_ids (required): list of pod_ids to open. Example: ['datapod:chat_cluster:abc123']",
   "metadata": {
-    "category": "pod_store",
-    "verbs": ["read"],
-    "entities": ["pod"],
+    "domain": "pod_store",
+    "actions": [
+      "read"
+    ],
+    "selectors": [
+      "pod"
+    ],
     "risk_level": "low",
     "side_effects": "read_only",
     "requires_auth": [],

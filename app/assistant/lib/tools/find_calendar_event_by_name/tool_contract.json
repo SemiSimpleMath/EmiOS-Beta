@@ -29,12 +29,18 @@
     }
   ],
   "metadata": {
-    "category": "calendar",
-    "verbs": ["read"],
-    "entities": ["calendar"],
+    "domain": "calendar",
+    "actions": [
+      "read"
+    ],
+    "selectors": [
+      "calendar"
+    ],
     "risk_level": "low",
     "side_effects": "read_only",
-    "requires_auth": ["google_oauth"],
+    "requires_auth": [
+      "google_oauth"
+    ],
     "requires_network": true,
     "cost_level": "low",
     "latency_class": "medium",

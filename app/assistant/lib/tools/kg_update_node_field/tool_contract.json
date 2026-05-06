@@ -2,23 +2,71 @@
   "name": "kg_update_node_field",
   "description": "Narrow per-field edit on a KG node. Allowed scalar fields: category, description, original_sentence, valid_during, start_date, end_date, start_date_prose, end_date_prose, start_date_confidence, end_date_confidence, importance, goal_status, semantic_label. Allowed list fields: aliases, hash_tags (use list_op = 'add' / 'remove' / 'set'). Atomic. Reversible via kg_revision_log. For label changes use kg_rename_label; for merging use kg_merge_nodes. Always pass a non-empty `reason`. Pass `dry_run: true` to preview.",
   "inputs": [
-    {"name": "node_id",   "type": "string",  "required": true,  "description": "Target node id."},
-    {"name": "field",     "type": "string",  "required": true,  "description": "Field name (see allowlist in description)."},
-    {"name": "value",     "type": "any",     "required": true,  "description": "New value. For list fields, may be a string or list."},
-    {"name": "list_op",   "type": "string",  "required": false, "description": "For aliases/hash_tags: add | remove | set. Default set."},
-    {"name": "reason",    "type": "string",  "required": true,  "description": "Why the edit is correct."},
-    {"name": "dry_run",   "type": "boolean", "required": false, "description": "Preview only; default false."},
-    {"name": "finding_id","type": "string",  "required": false, "description": "Source kg_maintenance_finding.id, if any."}
+    {
+      "name": "node_id",
+      "type": "string",
+      "required": true,
+      "description": "Target node id."
+    },
+    {
+      "name": "field",
+      "type": "string",
+      "required": true,
+      "description": "Field name (see allowlist in description)."
+    },
+    {
+      "name": "value",
+      "type": "any",
+      "required": true,
+      "description": "New value. For list fields, may be a string or list."
+    },
+    {
+      "name": "list_op",
+      "type": "string",
+      "required": false,
+      "description": "For aliases/hash_tags: add | remove | set. Default set."
+    },
+    {
+      "name": "reason",
+      "type": "string",
+      "required": true,
+      "description": "Why the edit is correct."
+    },
+    {
+      "name": "dry_run",
+      "type": "boolean",
+      "required": false,
+      "description": "Preview only; default false."
+    },
+    {
+      "name": "finding_id",
+      "type": "string",
+      "required": false,
+      "description": "Source kg_maintenance_finding.id, if any."
+    }
   ],
   "outputs": [
-    {"path": "content", "type": "text",   "description": "One-line summary of what happened."},
-    {"path": "data",    "type": "object", "description": "{ok, revision_log_id, field, old_value, new_value} on commit; {ok, dry_run, before, after} on dry_run."}
+    {
+      "path": "content",
+      "type": "text",
+      "description": "One-line summary of what happened."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "{ok, revision_log_id, field, old_value, new_value} on commit; {ok, dry_run, before, after} on dry_run."
+    }
   ],
   "arguments_prompt": "Arguments for kg_update_node_field:\n- node_id (required)\n- field (required): scalar (description, category, ...) or list (aliases, hash_tags)\n- value (required)\n- list_op (optional, list fields only): add | remove | set\n- reason (required)\n- dry_run (optional)\n- finding_id (optional)",
   "metadata": {
-    "category": "knowledge_graph",
-    "verbs": ["mutate", "update"],
-    "entities": ["node"],
+    "domain": "knowledge_graph",
+    "actions": [
+      "mutate",
+      "update"
+    ],
+    "selectors": [
+      "node"
+    ],
     "risk_level": "medium",
     "side_effects": "writes_kg",
     "requires_auth": [],

@@ -35,11 +35,11 @@
   ],
   "arguments_prompt": "{\"enabled\": true, \"actor\": \"system\"}",
   "metadata": {
-    "category": "vision",
-    "verbs": [
+    "domain": "vision",
+    "actions": [
       "update"
     ],
-    "entities": [
+    "selectors": [
       "vision"
     ],
     "risk_level": "medium",

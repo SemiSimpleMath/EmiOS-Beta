@@ -58,11 +58,11 @@
   ],
   "arguments_prompt": "{\"tool_name\": \"mcp::npm/server-google-maps::maps_distance_matrix\", \"install_source\": \"agent\", \"timeout_s\": 15.0}",
   "metadata": {
-    "category": "tooling",
-    "verbs": [
+    "domain": "tooling",
+    "actions": [
       "install"
     ],
-    "entities": [
+    "selectors": [
       "tooling"
     ],
     "risk_level": "high",

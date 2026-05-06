@@ -47,11 +47,11 @@
   ],
   "arguments_prompt": "The node_id to find edges for, plus optional filters like relationship type, text search, direction, and date range.",
   "metadata": {
-    "category": "knowledge_graph",
-    "verbs": [
+    "domain": "knowledge_graph",
+    "actions": [
       "operate"
     ],
-    "entities": [
+    "selectors": [
       "edge",
       "graph",
       "node"

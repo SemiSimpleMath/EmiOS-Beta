@@ -29,11 +29,11 @@
   ],
   "arguments_prompt": "Arguments:\n{\n  \"image_path\": \"uploads/temp/monitor_1_20260208_141000_ab12cd.png\",\n  \"question\": \"Describe this screen in 1-2 sentences.\"\n}",
   "metadata": {
-    "category": "vision",
-    "verbs": [
+    "domain": "vision",
+    "actions": [
       "operate"
     ],
-    "entities": [
+    "selectors": [
       "vision"
     ],
     "risk_level": "low",

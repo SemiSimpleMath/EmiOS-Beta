@@ -29,11 +29,11 @@
   ],
   "arguments_prompt": "Arguments to event_manager are:\n-task: instructions for creating the even, routine, reminder or doing any operations on them like deleting etc.\n-information: Optional extra information that maybe relevant to creating the event.",
   "metadata": {
-    "category": "orchestration",
-    "verbs": [
+    "domain": "orchestration",
+    "actions": [
       "orchestrate"
     ],
-    "entities": [
+    "selectors": [
       "workflow"
     ],
     "risk_level": "low",

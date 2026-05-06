@@ -42,11 +42,11 @@
   ],
   "arguments_prompt": "{\"file_path\": \"resources/dayflow_pipeline_outputs/resource_desktop_activity_recent.md\"}",
   "metadata": {
-    "category": "files",
-    "verbs": [
+    "domain": "files",
+    "actions": [
       "read"
     ],
-    "entities": [
+    "selectors": [
       "file"
     ],
     "risk_level": "low",

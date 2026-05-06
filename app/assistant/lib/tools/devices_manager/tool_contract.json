@@ -28,12 +28,12 @@
     }
   ],
   "metadata": {
-    "category": "orchestration",
-    "verbs": [
+    "domain": "orchestration",
+    "actions": [
       "orchestrate",
       "control"
     ],
-    "entities": [
+    "selectors": [
       "devices",
       "thermostat",
       "lights",

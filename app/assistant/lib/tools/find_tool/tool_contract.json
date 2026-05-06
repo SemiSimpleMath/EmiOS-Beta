@@ -41,11 +41,11 @@
   ],
   "arguments_prompt": "{\"query\": \"capture screenshot\", \"tool_kind\": \"all\", \"limit\": 5}",
   "metadata": {
-    "category": "tooling",
-    "verbs": [
+    "domain": "tooling",
+    "actions": [
       "search"
     ],
-    "entities": [
+    "selectors": [
       "tooling"
     ],
     "risk_level": "low",

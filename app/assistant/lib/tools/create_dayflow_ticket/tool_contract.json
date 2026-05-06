@@ -83,12 +83,12 @@
   ],
   "arguments_prompt": "{\n  \"ticket_kind\": \"decision\",\n  \"suggestion_type\": \"monitor_email\",\n  \"title\": \"Monitor Mark email today\",\n  \"message\": \"I can keep watch for replies from Mark and alert you.\",\n  \"action_type\": \"monitor_email\",\n  \"action_params\": {\n    \"participant_email\": \"contact@example.com\"\n  },\n  \"trigger_reason\": \"User asked to monitor this sender today\",\n  \"valid_hours\": 12,\n  \"speak_tts\": true\n}",
   "metadata": {
-    "category": "workflow",
-    "verbs": [
+    "domain": "workflow",
+    "actions": [
       "create",
       "propose"
     ],
-    "entities": [
+    "selectors": [
       "ticket",
       "user"
     ],

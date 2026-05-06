@@ -28,11 +28,15 @@
     }
   ],
   "metadata": {
-    "category": "system",
     "domain": "daily_summary",
-    "actions": ["save", "create", "update"],
-    "verbs": ["operate"],
-    "entities": ["daily_summary"],
+    "actions": [
+      "save",
+      "create",
+      "update"
+    ],
+    "selectors": [
+      "daily_summary"
+    ],
     "risk_level": "low",
     "side_effects": "write",
     "requires_auth": [],

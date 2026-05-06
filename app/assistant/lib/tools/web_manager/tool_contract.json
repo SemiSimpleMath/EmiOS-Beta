@@ -29,11 +29,11 @@
   ],
   "arguments_prompt": "Arguments to this tool are:\narguments: task\n\ntask: str\n\ntask should be very descriptive.  This is not a normal search engine.  It is a team of agents using various search\nmethods.  So more they know about the problem the better.  Do not change the meaning of the task!  Copy as much\nverbatim the suggested query as possible.  You may give a task that takes multiple queries to complete.",
   "metadata": {
-    "category": "web",
-    "verbs": [
+    "domain": "web",
+    "actions": [
       "orchestrate"
     ],
-    "entities": [
+    "selectors": [
       "web"
     ],
     "risk_level": "low",

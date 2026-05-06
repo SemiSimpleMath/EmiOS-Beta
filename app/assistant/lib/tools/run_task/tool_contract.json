@@ -64,12 +64,12 @@
   ],
   "arguments_prompt": "{\n  \"task_query\": \"compile ladder level 5\"\n}",
   "metadata": {
-    "category": "orchestration",
-    "verbs": [
+    "domain": "orchestration",
+    "actions": [
       "run",
       "resume"
     ],
-    "entities": [
+    "selectors": [
       "workflow"
     ],
     "risk_level": "medium",

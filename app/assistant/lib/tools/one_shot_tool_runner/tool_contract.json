@@ -29,11 +29,11 @@
   ],
   "arguments_prompt": "one_shot_tool_runner arguments:\ntask: the user request\ninformation: any extra context\nProvide the task and any additional information needed for the one_shot_tool_runner.",
   "metadata": {
-    "category": "orchestration",
-    "verbs": [
+    "domain": "orchestration",
+    "actions": [
       "operate"
     ],
-    "entities": [
+    "selectors": [
       "workflow"
     ],
     "risk_level": "low",

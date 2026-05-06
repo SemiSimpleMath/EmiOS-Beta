@@ -29,9 +29,18 @@
   ],
   "arguments_prompt": "EntertainmentManager arguments are\ntask: What entertainment research to perform and for what time horizon.\ninformation: All relevant context about the user's current state, preferences, and constraints.",
   "metadata": {
-    "category": "life_domain",
-    "verbs": ["research", "suggest", "recommend"],
-    "entities": ["entertainment", "leisure", "dining", "hobby"],
+    "domain": "life_domain",
+    "actions": [
+      "research",
+      "suggest",
+      "recommend"
+    ],
+    "selectors": [
+      "entertainment",
+      "leisure",
+      "dining",
+      "hobby"
+    ],
     "risk_level": "low",
     "side_effects": "read_only",
     "requires_auth": [],

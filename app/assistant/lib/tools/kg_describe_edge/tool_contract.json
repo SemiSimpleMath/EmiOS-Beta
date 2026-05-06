@@ -23,11 +23,11 @@
   ],
   "arguments_prompt": "The UUID of the edge to describe in detail.",
   "metadata": {
-    "category": "knowledge_graph",
-    "verbs": [
+    "domain": "knowledge_graph",
+    "actions": [
       "operate"
     ],
-    "entities": [
+    "selectors": [
       "edge",
       "graph",
       "node"

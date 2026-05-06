@@ -29,11 +29,11 @@
   ],
   "arguments_prompt": "fast_tool_manager arguments:\ntask: the user request\ninformation: any extra context\nProvide the task and any additional information needed for the fast_tool_manager.",
   "metadata": {
-    "category": "orchestration",
-    "verbs": [
+    "domain": "orchestration",
+    "actions": [
       "orchestrate"
     ],
-    "entities": [
+    "selectors": [
       "workflow"
     ],
     "risk_level": "low",

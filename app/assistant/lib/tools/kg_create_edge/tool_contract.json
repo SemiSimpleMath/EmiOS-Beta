@@ -53,11 +53,11 @@
   ],
   "arguments_prompt": "Arguments for kg_create_edge:\n\nsource_id (required): UUID of the source node\ntarget_id (required): UUID of the target node\nrelationship_type (required): Type of relationship (e.g., 'attended', 'works_for', 'located_at')\nattributes (optional): Additional key-value pairs for the relationship\nsentence (optional): Natural language description of the relationship\nconfidence (optional): Confidence score 0.0-1.0\nimportance (optional): Importance score 0.0-1.0\n\nExample:\n{\n    \"source_id\": \"abc-123-def-456\",\n    \"target_id\": \"xyz-789-uvw-012\",\n    \"relationship_type\": \"attended\",\n    \"sentence\": \"Jukka attended the wedding\"\n}",
   "metadata": {
-    "category": "knowledge_graph",
-    "verbs": [
+    "domain": "knowledge_graph",
+    "actions": [
       "operate"
     ],
-    "entities": [
+    "selectors": [
       "edge",
       "graph",
       "node"

@@ -35,11 +35,11 @@
   ],
   "arguments_prompt": "{\"file_path\": \"resources/dayflow_pipeline_outputs/resource_desktop_activity_recent.md\", \"content\": \"...\", \"ensure_newline\": true}",
   "metadata": {
-    "category": "files",
-    "verbs": [
+    "domain": "files",
+    "actions": [
       "write"
     ],
-    "entities": [
+    "selectors": [
       "file"
     ],
     "risk_level": "medium",

@@ -23,11 +23,11 @@
   ],
   "arguments_prompt": "set_ui_mute arguments:\naction: one of mute, unmute, toggle",
   "metadata": {
-    "category": "user_interaction",
-    "verbs": [
+    "domain": "user_interaction",
+    "actions": [
       "operate"
     ],
-    "entities": [
+    "selectors": [
       "ui_audio"
     ],
     "risk_level": "low",

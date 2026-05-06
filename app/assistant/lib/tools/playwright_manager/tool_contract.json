@@ -29,11 +29,11 @@
   ],
   "arguments_prompt": "- task: str\n- information: str",
   "metadata": {
-    "category": "web",
-    "verbs": [
+    "domain": "web",
+    "actions": [
       "orchestrate"
     ],
-    "entities": [
+    "selectors": [
       "web"
     ],
     "risk_level": "critical",

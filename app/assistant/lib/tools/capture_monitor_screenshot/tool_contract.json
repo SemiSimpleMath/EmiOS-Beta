@@ -23,11 +23,11 @@
   ],
   "arguments_prompt": "{\"monitor_index\": 2}",
   "metadata": {
-    "category": "vision",
-    "verbs": [
+    "domain": "vision",
+    "actions": [
       "operate"
     ],
-    "entities": [
+    "selectors": [
       "vision"
     ],
     "risk_level": "low",

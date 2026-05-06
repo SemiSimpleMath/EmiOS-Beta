@@ -35,9 +35,14 @@
   ],
   "arguments_prompt": "- **Purpose**: Call a registered agent with named inputs.\n- **Arguments**:\n  - `agent_name` (str, required): Agent to call.\n  - `task` (str, optional): Instruction for the agent.\n  - `inputs` (dict, optional): Named inputs (artifacts, facts) for the agent.\n\nagent_name: str\ntask: str\ninputs: dict",
   "metadata": {
-    "category": "orchestration",
-    "verbs": ["call", "invoke"],
-    "entities": ["agent"],
+    "domain": "orchestration",
+    "actions": [
+      "call",
+      "invoke"
+    ],
+    "selectors": [
+      "agent"
+    ],
     "risk_level": "low",
     "side_effects": "read_only",
     "requires_auth": [],

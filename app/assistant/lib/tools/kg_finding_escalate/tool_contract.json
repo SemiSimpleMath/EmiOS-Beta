@@ -2,21 +2,58 @@
   "name": "kg_finding_escalate",
   "description": "Promote a kg_maintenance_finding to user review. Sets status='approved' (the existing 'queued for human review' state) and writes a summary + suggested_action into execution_notes. Use when the diagnosis is clear but the right action requires human judgment (irreversible mutation, low confidence, irreversibility = irreversible). Always pass a non-empty `reason`.",
   "inputs": [
-    {"name": "finding_id",       "type": "string", "required": true,  "description": "kg_maintenance_finding.id to escalate."},
-    {"name": "summary",          "type": "string", "required": false, "description": "Short reviewer-facing summary of the situation."},
-    {"name": "suggested_action", "type": "string", "required": false, "description": "What the agent recommends; surfaced to the reviewer."},
-    {"name": "notes",            "type": "string", "required": false, "description": "Free-form notes."},
-    {"name": "reason",           "type": "string", "required": true,  "description": "Why escalation (vs auto-execute) is correct here."}
+    {
+      "name": "finding_id",
+      "type": "string",
+      "required": true,
+      "description": "kg_maintenance_finding.id to escalate."
+    },
+    {
+      "name": "summary",
+      "type": "string",
+      "required": false,
+      "description": "Short reviewer-facing summary of the situation."
+    },
+    {
+      "name": "suggested_action",
+      "type": "string",
+      "required": false,
+      "description": "What the agent recommends; surfaced to the reviewer."
+    },
+    {
+      "name": "notes",
+      "type": "string",
+      "required": false,
+      "description": "Free-form notes."
+    },
+    {
+      "name": "reason",
+      "type": "string",
+      "required": true,
+      "description": "Why escalation (vs auto-execute) is correct here."
+    }
   ],
   "outputs": [
-    {"path": "content", "type": "text",   "description": "One-line summary."},
-    {"path": "data",    "type": "object", "description": "{ok, revision_log_id, new_status='approved'}"}
+    {
+      "path": "content",
+      "type": "text",
+      "description": "One-line summary."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "{ok, revision_log_id, new_status='approved'}"
+    }
   ],
   "arguments_prompt": "Arguments for kg_finding_escalate:\n- finding_id (required)\n- summary (optional): reviewer-facing summary\n- suggested_action (optional): recommended fix\n- notes (optional)\n- reason (required): why escalate vs auto",
   "metadata": {
-    "category": "knowledge_graph",
-    "verbs": ["escalate"],
-    "entities": ["finding"],
+    "domain": "knowledge_graph",
+    "actions": [
+      "escalate"
+    ],
+    "selectors": [
+      "finding"
+    ],
     "risk_level": "low",
     "side_effects": "writes_kg",
     "requires_auth": [],

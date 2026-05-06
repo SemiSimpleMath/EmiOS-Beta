@@ -29,12 +29,12 @@
   ],
   "arguments_prompt": "Arguments to task_compile_manager are:\n- task: required task text to compile.\n- information: optional supporting context and constraints.",
   "metadata": {
-    "category": "orchestration",
-    "verbs": [
+    "domain": "orchestration",
+    "actions": [
       "compile",
       "create"
     ],
-    "entities": [
+    "selectors": [
       "task_spec",
       "workflow"
     ],

@@ -2,32 +2,124 @@
   "name": "kg_create_state_node",
   "description": "Create a new State (or Event) node + an edge from owner → state in one transaction. Both rows are written to kg_revision_log under one revision_log_id so the create is reversed by deleting the new edge + the new node. Use for residence-eras, job-eras, event participations, etc. that the extractor missed but the operator now wants modeled. Refuses node_type outside {State, Event}; for new Entity nodes go through the regular ingest path.",
   "inputs": [
-    {"name": "owner_node_id", "type": "string", "required": true, "description": "Existing entity that 'owns' this state (source of the new edge)."},
-    {"name": "predicate", "type": "string", "required": true, "description": "relationship_type for the owner→state edge, e.g. 'has_residence'."},
-    {"name": "label", "type": "string", "required": true, "description": "Label for the new node, e.g. 'Scottsdale, Arizona residence'."},
-    {"name": "node_type", "type": "string", "required": false, "description": "'State' (default) or 'Event'."},
-    {"name": "category", "type": "string", "required": false, "description": "e.g. 'residence', 'job', 'membership'."},
-    {"name": "description", "type": "string", "required": false, "description": "Description of the era / event."},
-    {"name": "original_sentence", "type": "string", "required": false, "description": "Source sentence if any."},
-    {"name": "start_date", "type": "string", "required": false, "description": "ISO date, e.g. '1990-01-01'."},
-    {"name": "end_date", "type": "string", "required": false, "description": "ISO date; omit for open-ended."},
-    {"name": "start_date_confidence", "type": "string", "required": false},
-    {"name": "end_date_confidence", "type": "string", "required": false},
-    {"name": "sentence", "type": "string", "required": false, "description": "Sentence on the owner→state edge."},
-    {"name": "attributes", "type": "object", "required": false, "description": "Extra structured attrs."},
-    {"name": "reason", "type": "string", "required": true, "description": "Why this state should exist. Into kg_revision_log."},
-    {"name": "dry_run", "type": "boolean", "required": false, "description": "Preview only; default false."},
-    {"name": "finding_id", "type": "string", "required": false, "description": "Source kg_maintenance_finding.id."}
+    {
+      "name": "owner_node_id",
+      "type": "string",
+      "required": true,
+      "description": "Existing entity that 'owns' this state (source of the new edge)."
+    },
+    {
+      "name": "predicate",
+      "type": "string",
+      "required": true,
+      "description": "relationship_type for the owner→state edge, e.g. 'has_residence'."
+    },
+    {
+      "name": "label",
+      "type": "string",
+      "required": true,
+      "description": "Label for the new node, e.g. 'Scottsdale, Arizona residence'."
+    },
+    {
+      "name": "node_type",
+      "type": "string",
+      "required": false,
+      "description": "'State' (default) or 'Event'."
+    },
+    {
+      "name": "category",
+      "type": "string",
+      "required": false,
+      "description": "e.g. 'residence', 'job', 'membership'."
+    },
+    {
+      "name": "description",
+      "type": "string",
+      "required": false,
+      "description": "Description of the era / event."
+    },
+    {
+      "name": "original_sentence",
+      "type": "string",
+      "required": false,
+      "description": "Source sentence if any."
+    },
+    {
+      "name": "start_date",
+      "type": "string",
+      "required": false,
+      "description": "ISO date, e.g. '1990-01-01'."
+    },
+    {
+      "name": "end_date",
+      "type": "string",
+      "required": false,
+      "description": "ISO date; omit for open-ended."
+    },
+    {
+      "name": "start_date_confidence",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "end_date_confidence",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "sentence",
+      "type": "string",
+      "required": false,
+      "description": "Sentence on the owner→state edge."
+    },
+    {
+      "name": "attributes",
+      "type": "object",
+      "required": false,
+      "description": "Extra structured attrs."
+    },
+    {
+      "name": "reason",
+      "type": "string",
+      "required": true,
+      "description": "Why this state should exist. Into kg_revision_log."
+    },
+    {
+      "name": "dry_run",
+      "type": "boolean",
+      "required": false,
+      "description": "Preview only; default false."
+    },
+    {
+      "name": "finding_id",
+      "type": "string",
+      "required": false,
+      "description": "Source kg_maintenance_finding.id."
+    }
   ],
   "outputs": [
-    {"path": "content", "type": "text", "description": "One-line summary of what was created (or would be)."},
-    {"path": "data", "type": "object", "description": "{ok, revision_log_id, new_node_id, new_edge_id} on commit; {ok, dry_run, before, after} on dry_run."}
+    {
+      "path": "content",
+      "type": "text",
+      "description": "One-line summary of what was created (or would be)."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "{ok, revision_log_id, new_node_id, new_edge_id} on commit; {ok, dry_run, before, after} on dry_run."
+    }
   ],
   "arguments_prompt": "Arguments for kg_create_state_node:\n- owner_node_id (required): the entity that owns the state\n- predicate (required): edge relationship_type, e.g. 'has_residence'\n- label (required): new node label\n- node_type (optional): 'State' (default) or 'Event'\n- category, description, original_sentence (optional)\n- start_date, end_date (optional, ISO dates)\n- start_date_confidence, end_date_confidence (optional)\n- sentence (optional): sentence on the owner→state edge\n- attributes (optional): extra JSON attrs\n- reason (required): why; goes into kg_revision_log\n- dry_run (optional): preview only\n- finding_id (optional): source finding id",
   "metadata": {
-    "category": "knowledge_graph",
-    "verbs": ["mutate", "create"],
-    "entities": ["node", "edge"],
+    "domain": "knowledge_graph",
+    "actions": [
+      "mutate",
+      "create"
+    ],
+    "selectors": [
+      "node",
+      "edge"
+    ],
     "risk_level": "medium",
     "side_effects": "writes_kg",
     "requires_auth": [],

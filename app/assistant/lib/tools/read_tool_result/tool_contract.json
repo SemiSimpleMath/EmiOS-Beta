@@ -41,11 +41,11 @@
   ],
   "arguments_prompt": "Provide arguments to load a stored tool result artifact.\n\nRules:\n- Prefer providing `field` to extract only what you need.\n- Keep `max_chars` reasonably small unless you have a strong reason.\n\nArguments schema:\n{{ user_context }}",
   "metadata": {
-    "category": "tooling",
-    "verbs": [
+    "domain": "tooling",
+    "actions": [
       "read"
     ],
-    "entities": [
+    "selectors": [
       "tooling"
     ],
     "risk_level": "low",

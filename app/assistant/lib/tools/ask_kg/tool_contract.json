@@ -29,11 +29,11 @@
   ],
   "arguments_prompt": "Arguments for ask_kg tool:\n\n- question (required): The question to answer\n- node (optional): Base node name/title (e.g. \"Jukka\" or \"Katy\"). Omit to search the whole graph — best for general questions about the user or their life.",
   "metadata": {
-    "category": "knowledge_graph",
-    "verbs": [
+    "domain": "knowledge_graph",
+    "actions": [
       "operate"
     ],
-    "entities": [
+    "selectors": [
       "edge",
       "graph",
       "node"

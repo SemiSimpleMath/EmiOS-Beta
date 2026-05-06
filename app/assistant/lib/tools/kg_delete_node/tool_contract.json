@@ -1,6 +1,6 @@
 {
   "name": "kg_delete_node",
-  "description": "kg_delete_node: Deletes a node and all its connected edges from the knowledge graph.\n\n**Purpose:** Permanently remove a node from the knowledge graph. This is a DESTRUCTIVE operation.\n\n**\u26a0\ufe0f SAFETY CHECKS:** This tool has built-in safety checks to prevent accidental deletion of important nodes:\n1. **Edge Count Check**: Nodes with >10 edges require confirmation\n2. **Protected Types**: Person and Entity nodes require confirmation (personal data)\n3. **High Importance**: Nodes with importance >0.8 require confirmation\n\n**Parameters:**\n- node_id (required): UUID of the node to delete\n- confirm (optional, default=false): Set to true to bypass safety checks\n\n**Returns:**\n- success: Whether the deletion succeeded\n- node_id: UUID of the deleted node\n- deleted_label: Label of the deleted node\n- deleted_type: Type of the deleted node\n- edges_deleted: Number of edges removed\n- message: Description of what happened\n\n**Safety Check Response:**\nIf safety checks fail, you'll receive:\n- requires_confirmation: true\n- edge_count: Number of connections\n- node_label: Name of the node\n- node_type: Type of the node\n- message: Explanation of why confirmation is needed\n\n**Example Usage:**\n\nSimple deletion (low-risk node):\n```\nkg_delete_node(\n    node_id=\"abc-123-def-456\"\n)\n```\n\nDelete with confirmation (bypasses safety checks):\n```\nkg_delete_node(\n    node_id=\"abc-123-def-456\",\n    confirm=true\n)\n```\n\n**Best Practices:**\n1. Always describe the node first to verify you're deleting the right one\n2. Check edge count before deletion\n3. For highly connected nodes, consider if edges should be redirected first\n4. Use confirm=true only after careful consideration\n5. **ALWAYS use ask_user tool before deleting important nodes**",
+  "description": "kg_delete_node: Deletes a node and all its connected edges from the knowledge graph.\n\n**Purpose:** Permanently remove a node from the knowledge graph. This is a DESTRUCTIVE operation.\n\n**⚠️ SAFETY CHECKS:** This tool has built-in safety checks to prevent accidental deletion of important nodes:\n1. **Edge Count Check**: Nodes with >10 edges require confirmation\n2. **Protected Types**: Person and Entity nodes require confirmation (personal data)\n3. **High Importance**: Nodes with importance >0.8 require confirmation\n\n**Parameters:**\n- node_id (required): UUID of the node to delete\n- confirm (optional, default=false): Set to true to bypass safety checks\n\n**Returns:**\n- success: Whether the deletion succeeded\n- node_id: UUID of the deleted node\n- deleted_label: Label of the deleted node\n- deleted_type: Type of the deleted node\n- edges_deleted: Number of edges removed\n- message: Description of what happened\n\n**Safety Check Response:**\nIf safety checks fail, you'll receive:\n- requires_confirmation: true\n- edge_count: Number of connections\n- node_label: Name of the node\n- node_type: Type of the node\n- message: Explanation of why confirmation is needed\n\n**Example Usage:**\n\nSimple deletion (low-risk node):\n```\nkg_delete_node(\n    node_id=\"abc-123-def-456\"\n)\n```\n\nDelete with confirmation (bypasses safety checks):\n```\nkg_delete_node(\n    node_id=\"abc-123-def-456\",\n    confirm=true\n)\n```\n\n**Best Practices:**\n1. Always describe the node first to verify you're deleting the right one\n2. Check edge count before deletion\n3. For highly connected nodes, consider if edges should be redirected first\n4. Use confirm=true only after careful consideration\n5. **ALWAYS use ask_user tool before deleting important nodes**",
   "inputs": [
     {
       "name": "node_id",
@@ -29,11 +29,11 @@
   ],
   "arguments_prompt": "Arguments for kg_delete_node:\n\nnode_id (required): The UUID of the node you want to delete\nconfirm (optional): Set to true to bypass safety checks\n\nExample (simple):\n{\n    \"node_id\": \"abc-123-def-456\"\n}\n\nExample (with confirmation):\n{\n    \"node_id\": \"abc-123-def-456\",\n    \"confirm\": true\n}",
   "metadata": {
-    "category": "knowledge_graph",
-    "verbs": [
+    "domain": "knowledge_graph",
+    "actions": [
       "operate"
     ],
-    "entities": [
+    "selectors": [
       "edge",
       "graph",
       "node"
