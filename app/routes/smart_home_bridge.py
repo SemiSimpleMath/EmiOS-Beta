@@ -762,8 +762,8 @@ def _ring_save_token(token: Dict[str, Any]) -> None:
     path.write_text(_json.dumps(token, indent=2, sort_keys=True), encoding="utf-8")
 
 
-async def _ring_load_ring() -> Any:
-    """Build and return a populated Ring instance, or raise with a clean error."""
+async def _ring_load_ring_and_auth() -> Any:
+    """Build a populated Ring instance + return (ring, auth) so the caller can close auth."""
     try:
         from ring_doorbell import Auth, Ring
     except ImportError as exc:
@@ -777,122 +777,155 @@ async def _ring_load_ring() -> Any:
     ring = Ring(auth)
     await ring.async_create_session()
     await ring.async_update_devices()
-    return ring
-
-
-def _ring_all_cameras(ring: Any) -> List[Any]:
-    """Return all camera-like devices: doorbells + stickup cams + floodlights."""
-    devices = ring.devices()
-    cams: List[Any] = []
-    for key in ("doorbots", "authorized_doorbots", "stickup_cams"):
-        cams.extend(devices.get(key, []) or [])
-    return cams
+    return ring, auth
 
 
 def _ring_find_camera(ring: Any, camera_id: str) -> Any:
     target = str(camera_id).strip()
     if not target:
         raise ValueError("camera_id is required.")
-    for cam in _ring_all_cameras(ring):
-        if str(getattr(cam, "id", "")) == target or str(getattr(cam, "device_id", "")) == target:
+    for cam in ring.devices().video_devices:
+        if str(cam.id) == target:
             return cam
     raise RuntimeError(f"No Ring camera found with id '{target}'.")
 
 
 def _ring_camera_summary(cam: Any) -> Dict[str, Any]:
     return {
-        "id": str(getattr(cam, "id", "")),
-        "device_id": str(getattr(cam, "device_id", "")),
+        "id": str(cam.id),
         "name": str(getattr(cam, "name", "") or ""),
         "kind": str(getattr(cam, "kind", "") or getattr(cam, "family", "") or ""),
         "model": str(getattr(cam, "model", "") or ""),
         "battery_life": getattr(cam, "battery_life", None),
-        "has_siren": bool(getattr(cam, "has_capability", lambda *_: False)("siren")),
-        "has_light": bool(getattr(cam, "has_capability", lambda *_: False)("light")),
+        "has_siren": bool(cam.has_capability("siren")),
+        "has_light": bool(cam.has_capability("light")),
     }
 
 
 async def _ring_list_cameras() -> Dict[str, Any]:
-    ring = await _ring_load_ring()
-    cams = _ring_all_cameras(ring)
-    return {"count": len(cams), "cameras": [_ring_camera_summary(c) for c in cams]}
+    ring, auth = await _ring_load_ring_and_auth()
+    try:
+        cams = list(ring.devices().video_devices)
+        return {"count": len(cams), "cameras": [_ring_camera_summary(c) for c in cams]}
+    finally:
+        await auth.async_close()
+
+
+async def _ring_capture_snapshot(ring: Any, cam_id: str, retries: int = 15, delay_s: float = 2.0) -> bytes:
+    """Capture a fresh snapshot, polling until Ring reports a new timestamp.
+
+    Replaces ring-doorbell's ``async_get_snapshot`` because that helper crashes
+    with IndexError when the timestamps list is empty (the library expects a
+    cached snapshot to exist and doesn't tolerate "not yet"). Battery cameras
+    in particular take 5-15s to wake up and produce a frame.
+    """
+    import asyncio as _asyncio
+    import time as _time
+    from ring_doorbell import const as _ring_const
+
+    payload = {"doorbot_ids": [int(cam_id)]}
+    # Trigger the refresh.
+    await ring.async_query(_ring_const.SNAPSHOT_TIMESTAMP_ENDPOINT, method="POST", json=payload)
+    request_time = _time.time()
+    for _ in range(retries):
+        await _asyncio.sleep(delay_s)
+        resp = await ring.async_query(_ring_const.SNAPSHOT_TIMESTAMP_ENDPOINT, method="POST", json=payload)
+        data = resp.json()
+        timestamps = data.get("timestamps") if isinstance(data, dict) else None
+        if not timestamps:
+            continue
+        ts_ms = timestamps[0].get("timestamp")
+        if ts_ms is None:
+            continue
+        if ts_ms / 1000.0 > request_time:
+            img_resp = await ring.async_query(_ring_const.SNAPSHOT_ENDPOINT.format(cam_id))
+            return img_resp.content
+    raise RuntimeError(
+        f"Camera {cam_id} did not produce a snapshot within {int(retries * delay_s)}s. "
+        "Camera may be offline, in deep sleep, or snapshot capture is disabled. "
+        "Trigger a motion event in the Ring app first to wake the camera, then retry."
+    )
 
 
 async def _ring_get_snapshot(camera_id: str) -> Dict[str, Any]:
     from datetime import datetime, timezone
-    ring = await _ring_load_ring()
-    cam = _ring_find_camera(ring, camera_id)
-    snapshot_bytes = await cam.async_get_snapshot()
-    if not isinstance(snapshot_bytes, (bytes, bytearray)) or not snapshot_bytes:
-        raise RuntimeError("Ring returned an empty snapshot.")
-    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    safe_id = "".join(c for c in str(camera_id) if c.isalnum() or c in "-_")[:32]
-    fname = f"{ts}_{safe_id}.jpg"
-    out_path = _ring_snapshots_dir() / fname
-    out_path.write_bytes(bytes(snapshot_bytes))
-    return {
-        "camera_id": str(camera_id),
-        "snapshot_path": str(out_path),
-        "size_bytes": len(snapshot_bytes),
-        "captured_at": ts,
-    }
+    ring, auth = await _ring_load_ring_and_auth()
+    try:
+        cam = _ring_find_camera(ring, camera_id)  # validates the id exists
+        snapshot_bytes = await _ring_capture_snapshot(ring, str(cam.id))
+        if not isinstance(snapshot_bytes, (bytes, bytearray)) or not snapshot_bytes:
+            raise RuntimeError("Ring returned an empty snapshot.")
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        safe_id = "".join(c for c in str(camera_id) if c.isalnum() or c in "-_")[:32]
+        fname = f"{ts}_{safe_id}.jpg"
+        out_path = _ring_snapshots_dir() / fname
+        out_path.write_bytes(bytes(snapshot_bytes))
+        return {
+            "camera_id": str(camera_id),
+            "snapshot_path": str(out_path),
+            "size_bytes": len(snapshot_bytes),
+            "captured_at": ts,
+        }
+    finally:
+        await auth.async_close()
 
 
 async def _ring_get_recent_events(
     camera_id: str, lookback_minutes: int
 ) -> Dict[str, Any]:
     from datetime import datetime, timedelta, timezone
-    ring = await _ring_load_ring()
-    cam = _ring_find_camera(ring, camera_id)
-    older_than = None  # async_history: paging cursor; not used for first page
-    history = await cam.async_history(limit=50, older_than=older_than)
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=int(lookback_minutes))
-    out: List[Dict[str, Any]] = []
-    for ev in history or []:
-        # ring-doorbell returns either dicts or objects depending on version.
-        created = ev.get("created_at") if isinstance(ev, dict) else getattr(ev, "created_at", None)
-        if created is None:
-            continue
-        if hasattr(created, "tzinfo") and created.tzinfo is None:
-            created = created.replace(tzinfo=timezone.utc)
-        if hasattr(created, "timestamp") and created < cutoff:
-            continue
-        out.append(
-            {
-                "id": str(ev.get("id") if isinstance(ev, dict) else getattr(ev, "id", "")),
-                "kind": str(ev.get("kind") if isinstance(ev, dict) else getattr(ev, "kind", "")),
-                "created_at": str(created),
-                "answered": bool(
-                    ev.get("answered") if isinstance(ev, dict) else getattr(ev, "answered", False)
-                ),
-            }
-        )
-    return {"camera_id": str(camera_id), "lookback_minutes": int(lookback_minutes), "count": len(out), "events": out}
+    ring, auth = await _ring_load_ring_and_auth()
+    try:
+        cam = _ring_find_camera(ring, camera_id)
+        history = await cam.async_history(limit=50)
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=int(lookback_minutes))
+        out: List[Dict[str, Any]] = []
+        for ev in history or []:
+            # ring-doorbell history items expose .created_at (datetime).
+            created = ev.get("created_at") if isinstance(ev, dict) else getattr(ev, "created_at", None)
+            if created is None:
+                continue
+            if hasattr(created, "tzinfo") and created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            if created < cutoff:
+                continue
+            out.append(
+                {
+                    "id": str(ev.get("id") if isinstance(ev, dict) else getattr(ev, "id", "")),
+                    "kind": str(ev.get("kind") if isinstance(ev, dict) else getattr(ev, "kind", "")),
+                    "created_at": str(created),
+                    "answered": bool(
+                        ev.get("answered") if isinstance(ev, dict) else getattr(ev, "answered", False)
+                    ),
+                }
+            )
+        return {"camera_id": str(camera_id), "lookback_minutes": int(lookback_minutes), "count": len(out), "events": out}
+    finally:
+        await auth.async_close()
 
 
 async def _ring_set_siren(camera_id: str, enabled: bool) -> Dict[str, Any]:
-    ring = await _ring_load_ring()
-    cam = _ring_find_camera(ring, camera_id)
-    if not getattr(cam, "has_capability", lambda *_: False)("siren"):
-        raise RuntimeError(f"Camera {camera_id} does not support siren.")
-    # ring-doorbell exposes either async_set_siren or siren property setter.
-    if hasattr(cam, "async_set_siren"):
+    ring, auth = await _ring_load_ring_and_auth()
+    try:
+        cam = _ring_find_camera(ring, camera_id)
+        if not cam.has_capability("siren"):
+            raise RuntimeError(f"Camera {camera_id} does not support siren.")
         await cam.async_set_siren(1 if enabled else 0)
-    else:
-        cam.siren = 1 if enabled else 0
-    return {"camera_id": str(camera_id), "siren": bool(enabled)}
+        return {"camera_id": str(camera_id), "siren": bool(enabled)}
+    finally:
+        await auth.async_close()
 
 
 async def _ring_set_light(camera_id: str, enabled: bool) -> Dict[str, Any]:
-    ring = await _ring_load_ring()
-    cam = _ring_find_camera(ring, camera_id)
-    if not getattr(cam, "has_capability", lambda *_: False)("light"):
-        raise RuntimeError(f"Camera {camera_id} does not support light.")
-    if hasattr(cam, "async_set_lights"):
+    ring, auth = await _ring_load_ring_and_auth()
+    try:
+        cam = _ring_find_camera(ring, camera_id)
+        if not cam.has_capability("light"):
+            raise RuntimeError(f"Camera {camera_id} does not support light.")
         await cam.async_set_lights("on" if enabled else "off")
-    else:
-        cam.lights = "on" if enabled else "off"
-    return {"camera_id": str(camera_id), "light": bool(enabled)}
+        return {"camera_id": str(camera_id), "light": bool(enabled)}
+    finally:
+        await auth.async_close()
 
 
 def _ring_dispatch(action: str, arguments: Dict[str, Any]) -> Dict[str, Any]:

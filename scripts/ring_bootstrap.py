@@ -88,6 +88,11 @@ async def _bootstrap() -> dict:
     # the token_updater captured.
     if isinstance(token, dict) and token:
         captured.update(token)
+    # Close the underlying aiohttp session so the script exits cleanly.
+    try:
+        await auth.async_close()
+    except Exception:
+        pass
     if not captured:
         sys.stderr.write(
             "Login appeared to succeed but no token was returned.\n"
