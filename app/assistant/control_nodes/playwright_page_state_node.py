@@ -214,7 +214,7 @@ async (page) => {
         return parsed
 
     def _detect_modal_state(self, server_entry: dict[str, Any]) -> dict[str, Any]:
-        js = """
+        js = r"""
 async (page) => {
   return await page.evaluate(() => {
     const norm = (v, maxLen = 120) => {
