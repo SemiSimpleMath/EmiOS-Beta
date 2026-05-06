@@ -87,7 +87,7 @@ def _resolve_integration_config(integration: str) -> Dict[str, Any]:
 def send_smart_home_command(
     *,
     integration: str,
-    action: str,
+    command: str,
     arguments: Dict[str, Any],
     request_id: str | None = None,
 ) -> Dict[str, Any]:
@@ -98,12 +98,12 @@ def send_smart_home_command(
 
     payload = {
         "integration": integration,
-        "action": str(action or "").strip(),
+        "command": str(command or "").strip(),
         "arguments": arguments if isinstance(arguments, dict) else {},
         "request_id": str(request_id or "").strip(),
     }
-    if not payload["action"]:
-        raise ValueError("action must be a non-empty string.")
+    if not payload["command"]:
+        raise ValueError("command must be a non-empty string.")
 
     headers = {
         "Authorization": f"Bearer {token}",
@@ -119,9 +119,9 @@ def send_smart_home_command(
         )
     except Exception as e:
         logger.error(
-            "Smart-home request failed (integration=%s action=%s endpoint=%s): %s",
+            "Smart-home request failed (integration=%s command=%s endpoint=%s): %s",
             integration,
-            action,
+            command,
             endpoint_url,
             e,
         )
@@ -132,7 +132,7 @@ def send_smart_home_command(
         body_preview = (response.text or "")[:600]
         raise RuntimeError(
             "Smart-home endpoint returned HTTP "
-            f"{response.status_code} for integration='{integration}' action='{action}'. "
+            f"{response.status_code} for integration='{integration}' command='{command}'. "
             f"Response: {body_preview}"
         )
 
@@ -140,9 +140,9 @@ def send_smart_home_command(
         data = response.json()
     except Exception as e:
         logger.error(
-            "Smart-home endpoint returned non-JSON response (integration=%s action=%s): %s",
+            "Smart-home endpoint returned non-JSON response (integration=%s command=%s): %s",
             integration,
-            action,
+            command,
             e,
         )
         logger.debug("smart-home response parse exception details", exc_info=True)
@@ -156,6 +156,6 @@ def send_smart_home_command(
     if data.get("ok") is False:
         error_msg = str(data.get("error") or "unknown endpoint error").strip() or "unknown endpoint error"
         raise RuntimeError(
-            f"Smart-home command failed for integration='{integration}' action='{action}': {error_msg}"
+            f"Smart-home command failed for integration='{integration}' command='{command}': {error_msg}"
         )
     return data

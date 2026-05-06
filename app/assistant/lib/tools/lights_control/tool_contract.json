@@ -3,7 +3,7 @@
   "description": "Read/control home lights through the lights gateway (Kasa/TP-Link supported).",
   "inputs": [
     {
-      "name": "action",
+      "name": "command",
       "type": "string",
       "required": true,
       "description": "MUST be exactly one of: list_lights, set_light_power, set_light_brightness, set_light_color, set_scene."

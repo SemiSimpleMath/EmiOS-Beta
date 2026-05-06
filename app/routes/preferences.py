@@ -693,9 +693,9 @@ def _run_smart_home_integration_action(*, integration_key: str, integration_labe
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             raise ValueError("Request body must be a JSON object.")
-        action = str(data.get("action") or "").strip().lower()
-        if not action:
-            raise ValueError("action must be provided.")
+        command = str(data.get("command") or "").strip().lower()
+        if not command:
+            raise ValueError("command must be provided.")
         arguments = data.get("arguments")
         if arguments is None:
             arguments = {}
@@ -706,13 +706,13 @@ def _run_smart_home_integration_action(*, integration_key: str, integration_labe
 
         response_data = send_smart_home_command(
             integration=integration_key,
-            action=action,
+            command=command,
             arguments=arguments,
             request_id=None,
         )
         return jsonify({"success": True, "data": response_data})
     except Exception as e:
-        logger.error("%s integration action failed: %s", integration_label, e)
+        logger.error("%s integration command failed: %s", integration_label, e)
         logger.debug("run_%s_integration_action exception details", integration_key, exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 400
 

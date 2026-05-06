@@ -454,24 +454,24 @@ def _nest_set_fan_mode(access_token: str, arguments: Dict[str, Any]) -> Dict[str
     return {"device_name": device_name, "command_result": result}
 
 
-def _nest_dispatch(action: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+def _nest_dispatch(command: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     creds = load_google_credentials(
         account_id=NEST_GOOGLE_ACCOUNT_ID,
         required_scopes=_NEST_REQUIRED_SCOPES,
     )
     access_token = creds.token
-    action_norm = str(action or "").strip().lower()
-    if action_norm == "get_status":
+    command_norm = str(command or "").strip().lower()
+    if command_norm == "get_status":
         return _nest_get_status(access_token, arguments)
-    if action_norm == "set_mode":
+    if command_norm == "set_mode":
         return _nest_set_mode(access_token, arguments)
-    if action_norm == "set_target_temperature":
+    if command_norm == "set_target_temperature":
         return _nest_set_target_temperature(access_token, arguments)
-    if action_norm == "set_eco_mode":
+    if command_norm == "set_eco_mode":
         return _nest_set_eco_mode(access_token, arguments)
-    if action_norm == "set_fan_mode":
+    if command_norm == "set_fan_mode":
         return _nest_set_fan_mode(access_token, arguments)
-    raise ValueError(f"Unsupported nest action '{action_norm}'.")
+    raise ValueError(f"Unsupported nest command '{command_norm}'.")
 
 
 def _extract_payload() -> Dict[str, Any]:
@@ -693,8 +693,8 @@ async def _kasa_set_light_brightness(
     return {"changed": changed, "brightness_pct": brightness_pct}
 
 
-def _lights_dispatch(action: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
-    action_norm = str(action or "").strip().lower()
+def _lights_dispatch(command: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    command_norm = str(command or "").strip().lower()
     cfg = _lights_cfg()
     hosts_override = _lights_hosts_override(arguments)
     hosts = hosts_override if hosts_override else cfg["hosts"]
@@ -702,11 +702,11 @@ def _lights_dispatch(action: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     light_id = str(arguments.get("light_id") or "").strip()
     room = str(arguments.get("room") or "").strip()
 
-    if action_norm == "list_lights":
+    if command_norm == "list_lights":
         return _run_async(_kasa_list_lights(hosts=hosts, timeout_seconds=timeout_seconds))
-    if action_norm == "discover_hosts":
+    if command_norm == "discover_hosts":
         return _run_async(_kasa_discover_hosts(timeout_seconds=timeout_seconds))
-    if action_norm == "set_light_power":
+    if command_norm == "set_light_power":
         state = str(arguments.get("state") or "").strip().lower()
         return _run_async(
             _kasa_set_light_power(
@@ -717,7 +717,7 @@ def _lights_dispatch(action: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
                 room=room,
             )
         )
-    if action_norm == "set_light_brightness":
+    if command_norm == "set_light_brightness":
         brightness_pct = _coerce_int(arguments.get("brightness_pct"), "brightness_pct")
         return _run_async(
             _kasa_set_light_brightness(
@@ -728,15 +728,15 @@ def _lights_dispatch(action: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
                 room=room,
             )
         )
-    if action_norm == "set_light_color":
+    if command_norm == "set_light_color":
         raise RuntimeError(
             "set_light_color is not supported for Kasa HS220 dimmer switches."
         )
-    if action_norm == "set_scene":
+    if command_norm == "set_scene":
         raise RuntimeError(
             "set_scene is not implemented for Kasa local control yet."
         )
-    raise ValueError(f"Unsupported lights action '{action_norm}'.")
+    raise ValueError(f"Unsupported lights command '{command_norm}'.")
 
 
 # ---------------------------------------------------------------------------
@@ -991,31 +991,31 @@ async def _ring_set_light(camera_id: str, enabled: bool) -> Dict[str, Any]:
         await auth.async_close()
 
 
-def _ring_dispatch(action: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
-    action_norm = str(action or "").strip().lower()
-    if action_norm == "list_cameras":
+def _ring_dispatch(command: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    command_norm = str(command or "").strip().lower()
+    if command_norm == "list_cameras":
         return _run_async(_ring_list_cameras())
-    if action_norm == "get_snapshot":
+    if command_norm == "get_snapshot":
         camera_id = str(arguments.get("camera_id") or "").strip()
         return _run_async(_ring_get_snapshot(camera_id))
-    if action_norm == "get_recent_events":
+    if command_norm == "get_recent_events":
         camera_id = str(arguments.get("camera_id") or "").strip()
         lookback_raw = arguments.get("lookback_minutes")
         lookback = _coerce_int(lookback_raw, "lookback_minutes") if lookback_raw is not None else 60
         return _run_async(_ring_get_recent_events(camera_id, lookback))
-    if action_norm == "set_siren":
+    if command_norm == "set_siren":
         camera_id = str(arguments.get("camera_id") or "").strip()
         enabled = arguments.get("enabled")
         if not isinstance(enabled, bool):
             raise ValueError("set_siren requires boolean 'enabled'.")
         return _run_async(_ring_set_siren(camera_id, enabled))
-    if action_norm == "set_light":
+    if command_norm == "set_light":
         camera_id = str(arguments.get("camera_id") or "").strip()
         enabled = arguments.get("enabled")
         if not isinstance(enabled, bool):
             raise ValueError("set_light requires boolean 'enabled'.")
         return _run_async(_ring_set_light(camera_id, enabled))
-    raise ValueError(f"Unsupported ring action '{action_norm}'.")
+    raise ValueError(f"Unsupported ring command '{command_norm}'.")
 
 
 @smart_home_bridge_bp.route("/api/smart-home/nest", methods=["POST"])
@@ -1023,14 +1023,14 @@ def smart_home_nest():
     try:
         _require_bridge_auth("nest")
         payload = _extract_payload()
-        action = str(payload.get("action") or "").strip()
+        command = str(payload.get("command") or "").strip()
         arguments = payload.get("arguments")
         if arguments is None:
             arguments = {}
         if not isinstance(arguments, dict):
             raise ValueError("arguments must be a JSON object when provided.")
-        result = _nest_dispatch(action, arguments)
-        return jsonify({"ok": True, "integration": "nest", "action": action, "result": result})
+        result = _nest_dispatch(command, arguments)
+        return jsonify({"ok": True, "integration": "nest", "command": command, "result": result})
     except Exception as e:
         logger.error("smart_home_nest failed: %s", e)
         logger.debug("smart_home_nest exception details", exc_info=True)
@@ -1042,14 +1042,14 @@ def smart_home_lights():
     try:
         _require_bridge_auth("lights")
         payload = _extract_payload()
-        action = str(payload.get("action") or "").strip()
+        command = str(payload.get("command") or "").strip()
         arguments = payload.get("arguments")
         if arguments is None:
             arguments = {}
         if not isinstance(arguments, dict):
             raise ValueError("arguments must be a JSON object when provided.")
-        result = _lights_dispatch(action, arguments)
-        return jsonify({"ok": True, "integration": "lights", "action": action, "result": result})
+        result = _lights_dispatch(command, arguments)
+        return jsonify({"ok": True, "integration": "lights", "command": command, "result": result})
     except Exception as e:
         logger.error("smart_home_lights failed: %s", e)
         logger.debug("smart_home_lights exception details", exc_info=True)
@@ -1061,14 +1061,14 @@ def smart_home_ring():
     try:
         _require_bridge_auth("ring")
         payload = _extract_payload()
-        action = str(payload.get("action") or "").strip()
+        command = str(payload.get("command") or "").strip()
         arguments = payload.get("arguments")
         if arguments is None:
             arguments = {}
         if not isinstance(arguments, dict):
             raise ValueError("arguments must be a JSON object when provided.")
-        result = _ring_dispatch(action, arguments)
-        return jsonify({"ok": True, "integration": "ring", "action": action, "result": result})
+        result = _ring_dispatch(command, arguments)
+        return jsonify({"ok": True, "integration": "ring", "command": command, "result": result})
     except Exception as e:
         logger.error("smart_home_ring failed: %s", e)
         logger.debug("smart_home_ring exception details", exc_info=True)

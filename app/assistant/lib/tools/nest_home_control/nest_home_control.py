@@ -127,7 +127,7 @@ class NestHomeControlTool(BaseTool):
                     read_args["device_id"] = arguments["device_id"]
                 response = send_smart_home_command(
                     integration="nest",
-                    action="get_status",
+                    command="get_status",
                     arguments=read_args,
                     request_id=tool_message.request_id,
                 )
@@ -143,15 +143,15 @@ class NestHomeControlTool(BaseTool):
 
             applied: List[str] = []
             responses: List[Dict[str, Any]] = []
-            for action, op_args in ops:
+            for op_command, op_args in ops:
                 response = send_smart_home_command(
                     integration="nest",
-                    action=action,
+                    command=op_command,
                     arguments=op_args,
                     request_id=tool_message.request_id,
                 )
-                applied.append(action)
-                responses.append({"action": action, "response": response})
+                applied.append(op_command)
+                responses.append({"command": op_command, "response": response})
 
             return ToolResult(
                 result_type="smart_home",

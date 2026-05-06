@@ -10,7 +10,7 @@ from app.assistant.utils.pydantic_classes import ToolMessage, ToolResult
 
 logger = get_logger(__name__)
 
-_ALLOWED_ACTIONS = {
+_ALLOWED_COMMANDS = {
     "list_cameras",
     "get_snapshot",
     "get_recent_events",
@@ -19,16 +19,16 @@ _ALLOWED_ACTIONS = {
 }
 
 
-def _validate_action_arguments(action: str, arguments: Dict[str, Any]) -> None:
-    if action in {"get_snapshot", "get_recent_events", "set_siren", "set_light"}:
+def _validate_command_arguments(command: str, arguments: Dict[str, Any]) -> None:
+    if command in {"get_snapshot", "get_recent_events", "set_siren", "set_light"}:
         camera_id = str(arguments.get("camera_id") or "").strip()
         if not camera_id:
-            raise ValueError(f"ring_camera_control.{action} requires non-empty camera_id.")
-    if action in {"set_siren", "set_light"}:
+            raise ValueError(f"ring_camera_control.{command} requires non-empty camera_id.")
+    if command in {"set_siren", "set_light"}:
         enabled = arguments.get("enabled")
         if not isinstance(enabled, bool):
-            raise ValueError(f"ring_camera_control.{action} requires boolean enabled.")
-    if action == "get_recent_events":
+            raise ValueError(f"ring_camera_control.{command} requires boolean enabled.")
+    if command == "get_recent_events":
         lookback_minutes = arguments.get("lookback_minutes")
         if lookback_minutes is not None:
             try:
@@ -49,22 +49,22 @@ class RingCameraControlTool(BaseTool):
         try:
             tool_data = tool_message.tool_data if isinstance(tool_message.tool_data, dict) else {}
             arguments = tool_data.get("arguments", {}) if isinstance(tool_data.get("arguments"), dict) else {}
-            action = str(arguments.get("action") or "").strip().lower()
-            if action not in _ALLOWED_ACTIONS:
+            command = str(arguments.get("command") or "").strip().lower()
+            if command not in _ALLOWED_COMMANDS:
                 raise ValueError(
-                    "ring_camera_control.action must be one of: " + ", ".join(sorted(_ALLOWED_ACTIONS))
+                    "ring_camera_control.command must be one of: " + ", ".join(sorted(_ALLOWED_COMMANDS))
                 )
-            _validate_action_arguments(action, arguments)
+            _validate_command_arguments(command, arguments)
 
             response_data = send_smart_home_command(
                 integration="ring",
-                action=action,
+                command=command,
                 arguments=arguments,
                 request_id=tool_message.request_id,
             )
             return ToolResult(
                 result_type="smart_home",
-                content=f"Ring camera action '{action}' executed successfully.",
+                content=f"Ring camera command '{command}' executed successfully.",
                 data=response_data,
             )
         except Exception as e:

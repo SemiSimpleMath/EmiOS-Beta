@@ -3,7 +3,7 @@
   "description": "Read and control Ring camera devices through the smart-home gateway.",
   "inputs": [
     {
-      "name": "action",
+      "name": "command",
       "type": "string",
       "required": true,
       "description": "One of: list_cameras, get_snapshot, get_recent_events, set_siren, set_light."
@@ -12,7 +12,7 @@
       "name": "camera_id",
       "type": "string",
       "required": false,
-      "description": "Required for all actions except list_cameras."
+      "description": "Required for all commands except list_cameras."
     },
     {
       "name": "lookback_minutes",

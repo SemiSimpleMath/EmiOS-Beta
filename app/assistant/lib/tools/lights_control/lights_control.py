@@ -10,7 +10,7 @@ from app.assistant.utils.pydantic_classes import ToolMessage, ToolResult
 
 logger = get_logger(__name__)
 
-_ALLOWED_ACTIONS = {
+_ALLOWED_COMMANDS = {
     "list_lights",
     "set_light_power",
     "set_light_brightness",
@@ -22,7 +22,7 @@ _ALLOWED_ACTIONS = {
 _ALL_SYNONYMS = frozenset({"all", "all lights", "everywhere", "whole house", "entire house"})
 
 
-def _validate_action_arguments(action: str, arguments: Dict[str, Any]) -> None:
+def _validate_command_arguments(command: str, arguments: Dict[str, Any]) -> None:
     room = arguments.get("room")
     if room is not None and not isinstance(room, str):
         raise ValueError(
@@ -36,11 +36,11 @@ def _validate_action_arguments(action: str, arguments: Dict[str, Any]) -> None:
     if light_id is not None and not isinstance(light_id, str):
         raise ValueError("lights_control.light_id must be a string when provided.")
 
-    if action == "set_light_power":
+    if command == "set_light_power":
         state = str(arguments.get("state") or "").strip().lower()
         if state not in {"on", "off"}:
             raise ValueError("lights_control.set_light_power requires state in: on|off.")
-    elif action == "set_light_brightness":
+    elif command == "set_light_brightness":
         if "brightness_pct" not in arguments:
             raise ValueError("lights_control.set_light_brightness requires brightness_pct.")
         try:
@@ -49,11 +49,11 @@ def _validate_action_arguments(action: str, arguments: Dict[str, Any]) -> None:
             raise ValueError("brightness_pct must be an integer.")
         if value < 0 or value > 100:
             raise ValueError("brightness_pct must be between 0 and 100.")
-    elif action == "set_light_color":
+    elif command == "set_light_color":
         color = str(arguments.get("color") or "").strip()
         if not color:
             raise ValueError("lights_control.set_light_color requires non-empty color.")
-    elif action == "set_scene":
+    elif command == "set_scene":
         scene_name = str(arguments.get("scene_name") or "").strip()
         if not scene_name:
             raise ValueError("lights_control.set_scene requires non-empty scene_name.")
@@ -69,22 +69,22 @@ class LightsControlTool(BaseTool):
         try:
             tool_data = tool_message.tool_data if isinstance(tool_message.tool_data, dict) else {}
             arguments = tool_data.get("arguments", {}) if isinstance(tool_data.get("arguments"), dict) else {}
-            action = str(arguments.get("action") or "").strip().lower()
-            if action not in _ALLOWED_ACTIONS:
+            command = str(arguments.get("command") or "").strip().lower()
+            if command not in _ALLOWED_COMMANDS:
                 raise ValueError(
-                    "lights_control.action must be one of: " + ", ".join(sorted(_ALLOWED_ACTIONS))
+                    "lights_control.command must be one of: " + ", ".join(sorted(_ALLOWED_COMMANDS))
                 )
-            _validate_action_arguments(action, arguments)
+            _validate_command_arguments(command, arguments)
 
             response_data = send_smart_home_command(
                 integration="lights",
-                action=action,
+                command=command,
                 arguments=arguments,
                 request_id=tool_message.request_id,
             )
             return ToolResult(
                 result_type="smart_home",
-                content=f"Lights action '{action}' executed successfully.",
+                content=f"Lights command '{command}' executed successfully.",
                 data=response_data,
             )
         except Exception as e:

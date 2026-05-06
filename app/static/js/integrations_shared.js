@@ -122,13 +122,13 @@ async function saveIntegrationConfig(integrationKey, payload) {
     if (!data.success) throw new Error(data.error || `Failed to save ${integrationKey} config.`);
 }
 
-async function runIntegrationAction(integrationKey, action, argumentsObj) {
+async function runIntegrationAction(integrationKey, command, argumentsObj) {
     const response = await fetch(`/api/integrations/${integrationKey}/action`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, arguments: argumentsObj || {} })
+        body: JSON.stringify({ command, arguments: argumentsObj || {} })
     });
     const data = await response.json();
-    if (!data.success) throw new Error(data.error || `${integrationKey} action failed: ${action}`);
+    if (!data.success) throw new Error(data.error || `${integrationKey} command failed: ${command}`);
     return data.data || {};
 }

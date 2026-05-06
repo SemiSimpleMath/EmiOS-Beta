@@ -1,9 +1,9 @@
 Use this tool to interact with Ring cameras.
 
 Required:
-- `action`: one of `list_cameras`, `get_snapshot`, `get_recent_events`, `set_siren`, `set_light`
+- `command`: one of `list_cameras`, `get_snapshot`, `get_recent_events`, `set_siren`, `set_light`
 
 Conditional fields:
-- `camera_id` for all actions except `list_cameras`
+- `camera_id` for all commands except `list_cameras`
 - `lookback_minutes` for `get_recent_events`
 - `enabled` for `set_siren` and `set_light`
