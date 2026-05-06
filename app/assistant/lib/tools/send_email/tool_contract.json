@@ -68,7 +68,7 @@
     "latency_class": "fast",
     "front_door": false,
     "room_visibility_default": "conditional",
-    "approval_required": false,
+    "approval_required": true,
     "planner_description": "Send an email (or SMS via email gateway)."
   }
 }
