@@ -382,14 +382,70 @@ def _ring_snapshots_dir():
     return repo_root / "data" / "ring_snapshots"
 
 
+def _read_ring_sidecar(jpg_path):
+    """Read the .txt sidecar next to a snapshot JPEG (if any).
+
+    Sidecar format written by DoorBellAnalyzer / SleepAnalyzer:
+        <caption or notes>
+        <blank>
+        key: value
+        key: value
+        ...
+
+    Returns a dict with at least ``caption`` (first non-empty line) plus
+    parsed key:value entries. Empty dict if the sidecar doesn't exist.
+    """
+    sidecar = jpg_path.with_suffix(".txt")
+    if not sidecar.exists():
+        return {}
+    try:
+        text = sidecar.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return {}
+    out = {}
+    lines = text.splitlines()
+    # First non-empty line is the caption / notes free text.
+    caption = ""
+    body_start = 0
+    for i, ln in enumerate(lines):
+        if ln.strip():
+            caption = ln.strip()
+            body_start = i + 1
+            break
+    if caption:
+        out["caption"] = caption
+    for ln in lines[body_start:]:
+        ln = ln.strip()
+        if not ln or ":" not in ln:
+            continue
+        k, _, v = ln.partition(":")
+        k = k.strip()
+        v = v.strip()
+        if not k:
+            continue
+        # Coerce a few well-known numerics.
+        if k == "importance":
+            try:
+                out[k] = int(v)
+            except ValueError:
+                out[k] = v
+        elif k in ("subject_in_bed", "is_significant"):
+            out[k] = v.lower() == "true"
+        else:
+            out[k] = v
+    return out
+
+
 @preferences_bp.route('/api/ring/snapshots', methods=['GET'])
 def list_ring_snapshots():
     """List all captured snapshots, newest first.
 
     Filename convention from smart_home_bridge._ring_get_snapshot:
         ``{YYYYMMDDTHHMMSSZ}_{safe_camera_id}.jpg``
-    Anything in the directory not matching is ignored — defensive against
-    files dropped in by hand or partial writes.
+
+    For each JPEG the matching ``.txt`` sidecar (when present) is parsed
+    and its fields surfaced — most importantly ``importance`` (0-10) so
+    the UI can flag worth-reviewing frames at a glance.
     """
     try:
         snap_dir = _ring_snapshots_dir()
@@ -410,13 +466,15 @@ def list_ring_snapshots():
                 mtime = p.stat().st_mtime
             except OSError:
                 continue
-            entries.append({
+            entry = {
                 "filename": p.name,
                 "camera_id": cam_part,
                 "captured_at_utc": ts_part,
                 "size_bytes": size,
                 "mtime": mtime,
-            })
+                "sidecar": _read_ring_sidecar(p),
+            }
+            entries.append(entry)
         entries.sort(key=lambda e: e["mtime"], reverse=True)
         return jsonify({"success": True, "snapshots": entries})
     except Exception as e:

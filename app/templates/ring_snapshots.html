@@ -18,6 +18,11 @@
 
         <div class="ring-snapshots-toolbar">
             <button type="button" id="ring-snapshots-refresh-btn"><i class="fas fa-sync-alt"></i> Refresh</button>
+            <label class="ring-snapshots-filter">
+                Min importance:
+                <input type="range" id="ring-snapshots-importance-filter" min="0" max="10" value="0" step="1">
+                <span id="ring-snapshots-importance-label">all</span>
+            </label>
             <span id="ring-snapshots-count" class="ring-snapshots-count"></span>
         </div>
 

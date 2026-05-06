@@ -54,6 +54,26 @@ For the COMPARISON between the previous and current frames:
    knocked-over object, position-change kind worth noting, etc. Empty
    string otherwise.
 
+7. **importance** — Integer 0-10 indicating "how worth reviewing is this
+   frame when scanning a whole night?" Use this scale:
+   - **0-2 (boring)**     dark, still, in bed, no awake indicators. Most
+                          frames during a normal night should land here.
+   - **3-5 (mild)**       minimal motion, slight position change, dim light
+                          flicker. Useful as context but not a highlight.
+   - **6-7 (notable)**    clear awake indicators (eyes open, phone on),
+                          moderate motion (rolled over decisively, sitting
+                          up briefly), light state change (lamp on/off).
+   - **8-10 (urgent)**    out of bed, intrusion, lights on at an odd hour,
+                          unfamiliar person/animal in frame, knocked-over
+                          object, anything that should jump out at a
+                          morning review.
+
+   Bias toward the LOWER end. If half the night scores 5+, the score is
+   useless. Reserve 6+ for genuinely notable frames.
+
+8. **importance_reason** — One short clause (3-10 words) explaining the
+   importance score when it is >= 3. Empty string when 0-2.
+
 Rules:
 - Don't invent details that aren't visible.
 - Don't describe what the subject is wearing or any intimate details —

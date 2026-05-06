@@ -50,3 +50,22 @@ class AgentForm(BaseModel):
             "change between frames, etc.). Empty string when nothing notable."
         ),
     )
+    importance: int = Field(
+        ...,
+        ge=0,
+        le=10,
+        description=(
+            "0-10 score indicating how worth-reviewing this frame is. "
+            "0-2 = boring (dark, still, in bed). "
+            "3-5 = mild interest (minor motion, slight position change). "
+            "6-7 = notable (clear awake indicators, moderate motion, light change). "
+            "8-10 = urgent (out of bed, intrusion, lights on at odd hour, anomaly)."
+        ),
+    )
+    importance_reason: str = Field(
+        default="",
+        description=(
+            "One short clause explaining the importance score when >= 3. "
+            "Empty when boring (importance 0-2)."
+        ),
+    )

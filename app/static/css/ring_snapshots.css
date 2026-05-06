@@ -46,12 +46,68 @@
     box-shadow: 0 6px 16px rgba(0,0,0,0.12);
 }
 
+.ring-snapshot-img-wrap {
+    position: relative;
+}
+
 .ring-snapshot-card img {
     width: 100%;
     height: 165px;
     object-fit: cover;
     display: block;
     background: #0f172a;
+}
+
+.ring-snapshot-importance {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    color: #fff;
+    border-radius: 11px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+    pointer-events: auto;
+    cursor: help;
+}
+.ring-snapshot-importance.imp-mild    { background: #ca8a04; }   /* yellow-ish 3-5 */
+.ring-snapshot-importance.imp-notable { background: #ea580c; }   /* orange  6-7 */
+.ring-snapshot-importance.imp-urgent  { background: #dc2626; }   /* red     8-10 */
+
+.ring-snapshot-card-caption {
+    color: #1f2937;
+    font-size: 12px;
+    line-height: 1.35;
+    margin-top: 4px;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    text-overflow: ellipsis;
+}
+
+.ring-snapshots-filter {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: #4b5563;
+    font-size: 13px;
+}
+.ring-snapshots-filter input[type="range"] {
+    width: 140px;
+    accent-color: #2563eb;
+}
+.ring-snapshots-filter span {
+    min-width: 30px;
+    color: #1f2937;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
 }
 
 .ring-snapshot-card-meta {

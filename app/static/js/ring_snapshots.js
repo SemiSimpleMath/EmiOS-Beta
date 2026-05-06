@@ -65,29 +65,70 @@
         if (ev.key === 'Escape' && lightbox.style.display !== 'none') closeLightbox();
     });
 
-    function renderSnapshots(snapshots) {
+    // Map importance 0-10 → bucket label + CSS class.
+    function importanceBucket(score) {
+        if (typeof score !== 'number' || score < 3) return null;        // boring; no badge
+        if (score < 6) return { label: score, cls: 'imp-mild' };       // 3-5 yellow
+        if (score < 8) return { label: score, cls: 'imp-notable' };    // 6-7 orange
+        return { label: score, cls: 'imp-urgent' };                    // 8-10 red
+    }
+
+    let allSnapshots = [];
+    let minImportance = 0;
+
+    function renderSnapshots() {
         grid.innerHTML = '';
-        if (!snapshots || snapshots.length === 0) {
+        const filtered = allSnapshots.filter(function (s) {
+            const sc = (s.sidecar && typeof s.sidecar.importance === 'number') ? s.sidecar.importance : 0;
+            return sc >= minImportance;
+        });
+        if (!filtered || filtered.length === 0) {
             empty.style.display = 'block';
-            countEl.textContent = '';
+            countEl.textContent = allSnapshots.length === 0
+                ? ''
+                : '0 of ' + allSnapshots.length + ' shown (filter: importance ≥ ' + minImportance + ')';
             return;
         }
         empty.style.display = 'none';
-        countEl.textContent = snapshots.length + ' snapshot' + (snapshots.length === 1 ? '' : 's');
+        countEl.textContent = filtered.length + ' of ' + allSnapshots.length
+            + ' snapshot' + (allSnapshots.length === 1 ? '' : 's')
+            + (minImportance > 0 ? ' (importance ≥ ' + minImportance + ')' : '');
         const frag = document.createDocumentFragment();
-        snapshots.forEach(function (snap) {
-            const captionText = formatTimestamp(snap.captured_at_utc) + ' · ' + (snap.camera_id || '');
+        filtered.forEach(function (snap) {
+            const sc = snap.sidecar || {};
+            const captionPrefix = formatTimestamp(snap.captured_at_utc) + ' · ' + (snap.camera_id || '');
+            const captionFull = sc.caption ? captionPrefix + '\n' + sc.caption : captionPrefix;
+            const bucket = importanceBucket(sc.importance);
+
             const card = document.createElement('div');
             card.className = 'ring-snapshot-card';
+
+            let badgeHtml = '';
+            if (bucket) {
+                const reason = sc.importance_reason || '';
+                badgeHtml = '<span class="ring-snapshot-importance ' + bucket.cls + '"'
+                    + ' title="' + escapeHtml('importance ' + bucket.label + (reason ? ' — ' + reason : ''))
+                    + '">' + bucket.label + '</span>';
+            }
+
+            const captionLine = sc.caption
+                ? '<div class="ring-snapshot-card-caption" title="' + escapeHtml(sc.caption) + '">'
+                  + escapeHtml(sc.caption) + '</div>'
+                : '';
+
             card.innerHTML =
-                '<img loading="lazy" src="/api/ring/snapshots/image/' + encodeURIComponent(snap.filename)
-              + '" alt="' + escapeHtml(captionText) + '">'
+                '<div class="ring-snapshot-img-wrap">'
+              + '<img loading="lazy" src="/api/ring/snapshots/image/' + encodeURIComponent(snap.filename)
+              + '" alt="' + escapeHtml(captionPrefix) + '">'
+              + badgeHtml
+              + '</div>'
               + '<div class="ring-snapshot-card-meta">'
               + '<div class="ring-snapshot-card-camera">' + escapeHtml(snap.camera_id || 'unknown') + '</div>'
               + '<div class="ring-snapshot-card-time">' + escapeHtml(formatTimestamp(snap.captured_at_utc)) + '</div>'
+              + captionLine
               + '<div class="ring-snapshot-card-size">' + escapeHtml(formatBytes(snap.size_bytes)) + '</div>'
               + '</div>';
-            card.addEventListener('click', function () { openLightbox(snap.filename, captionText); });
+            card.addEventListener('click', function () { openLightbox(snap.filename, captionFull); });
             frag.appendChild(card);
         });
         grid.appendChild(frag);
@@ -102,12 +143,29 @@
                 showError(data.error || 'Failed to load snapshots.');
                 return;
             }
-            renderSnapshots(data.snapshots || []);
+            allSnapshots = data.snapshots || [];
+            renderSnapshots();
         } catch (err) {
             showError('Failed to load snapshots: ' + (err.message || err));
         }
     }
 
     refreshBtn.addEventListener('click', loadSnapshots);
+
+    // Importance filter slider — defined in template; wire if present.
+    const filterSlider = document.getElementById('ring-snapshots-importance-filter');
+    const filterLabel = document.getElementById('ring-snapshots-importance-label');
+    if (filterSlider) {
+        filterSlider.addEventListener('input', function () {
+            minImportance = parseInt(filterSlider.value, 10) || 0;
+            if (filterLabel) {
+                filterLabel.textContent = minImportance === 0
+                    ? 'all'
+                    : '≥ ' + minImportance;
+            }
+            renderSnapshots();
+        });
+    }
+
     loadSnapshots();
 })();

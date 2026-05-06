@@ -83,11 +83,12 @@ class SleepAnalyzer(Agent):
 
             self._write_sidecar(sidecar, data, agent_input)
             logger.info(
-                "[%s] analyzed %s — in_bed=%s position=%s motion_vs_prev=%s",
+                "[%s] analyzed %s — in_bed=%s pos=%s motion=%s importance=%s",
                 self.name, jpeg.name,
                 data.get("subject_in_bed"),
                 data.get("position"),
                 data.get("motion_vs_previous"),
+                data.get("importance"),
             )
 
         except Exception as e:
@@ -162,6 +163,15 @@ class SleepAnalyzer(Agent):
         else:
             awake_str = str(awake_indicators).strip()
 
+        # Clamp importance to [0, 10] defensively in case the LLM returns
+        # something out of range or a non-int.
+        try:
+            importance = int(data.get("importance"))
+        except (TypeError, ValueError):
+            importance = 0
+        importance = max(0, min(10, importance))
+        importance_reason = str(data.get("importance_reason") or "").strip()
+
         lines = [
             notes if notes else "(no notes)",
             "",
@@ -175,5 +185,8 @@ class SleepAnalyzer(Agent):
             f"motion_vs_previous: {str(data.get('motion_vs_previous') or 'unclear').strip()}",
             f"light_state: {str(data.get('light_state') or 'unclear').strip()}",
             f"awake_indicators: {awake_str}",
+            f"importance: {importance}",
         ]
+        if importance_reason:
+            lines.append(f"importance_reason: {importance_reason}")
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
