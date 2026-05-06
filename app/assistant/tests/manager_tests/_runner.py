@@ -37,6 +37,7 @@ from app.assistant.utils.pydantic_classes import (
     Message,
     ScopeApprovalPolicy,
     ScopeContext,
+    ScopeResourcePolicy,
 )
 
 logger = get_logger(__name__)
@@ -92,6 +93,7 @@ def run_manager_test(
     owner_id: str = "jukka",
     surface: str = "test",
     authority_level: int = 100,
+    allowed_resources: list[str] | None = None,
     print_result: bool = True,
 ) -> object:
     """Bootstrap, create a manager, run one task, print + return the result.
@@ -104,6 +106,13 @@ def run_manager_test(
     ``send_email`` and ``create_calendar_event`` skip the ApprovalGateway
     in tests — gateway requires a live room session that this isolated
     runner can't provide. Lower it to test approval-flow behavior.
+
+    ``allowed_resources`` defaults to ``["all"]`` to mirror the production
+    fallback in room_scope_builder.py:77 (which uses ``["all"]`` when a
+    room policy doesn't specify). Without this, test prompts would
+    silently miss resource_user_email / resource_*_user_prefs / etc.,
+    diverging from real flows. Pass an explicit list to test scope-narrowed
+    behavior.
     """
     print(f"\n{'='*60}")
     print(f"Manager test: {manager_type}")
@@ -136,6 +145,9 @@ def run_manager_test(
             actor_id=actor_id,
             surface=surface,
             approval=ScopeApprovalPolicy(authority_level=authority_level),
+            resources=ScopeResourcePolicy(
+                allowed_global_resources=list(allowed_resources or ["all"]),
+            ),
         ),
         data={"visible_tools": visible_tools or []},
     )
@@ -172,12 +184,21 @@ def _parse_args() -> argparse.Namespace:
         help="ScopeContext.approval.authority_level. Default 100 (admin bypass — "
              "write-tools skip the ApprovalGateway). Lower to test approval flow.",
     )
+    parser.add_argument(
+        "--allowed-resources", default="all",
+        help="Comma-separated allowed_global_resources. Default 'all' to mirror "
+             "production room policy fallback. Pass specific resources to test "
+             "scope narrowing.",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = _parse_args()
     visible_tools = [t.strip() for t in (args.tools or "").split(",") if t.strip()]
+    allowed_resources = [r.strip() for r in (args.allowed_resources or "").split(",") if r.strip()]
+    if not allowed_resources:
+        allowed_resources = ["all"]
     run_manager_test(
         manager_type=args.manager,
         task=args.task,
@@ -187,6 +208,7 @@ def main() -> None:
         owner_id=args.owner_id,
         surface=args.surface,
         authority_level=args.authority_level,
+        allowed_resources=allowed_resources,
     )
 
 
