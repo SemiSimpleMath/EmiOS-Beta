@@ -370,6 +370,68 @@ def lights_settings_page():
     return render_template('lights_settings.html')
 
 
+@preferences_bp.route('/settings/integrations/ring/snapshots', methods=['GET'])
+def ring_snapshots_page():
+    """Browse JPEGs the Ring bridge has captured under data/ring_snapshots/."""
+    return render_template('ring_snapshots.html')
+
+
+def _ring_snapshots_dir():
+    """Return the absolute Path to data/ring_snapshots/, mirroring smart_home_bridge."""
+    repo_root = Path(__file__).resolve().parents[2]
+    return repo_root / "data" / "ring_snapshots"
+
+
+@preferences_bp.route('/api/ring/snapshots', methods=['GET'])
+def list_ring_snapshots():
+    """List all captured snapshots, newest first.
+
+    Filename convention from smart_home_bridge._ring_get_snapshot:
+        ``{YYYYMMDDTHHMMSSZ}_{safe_camera_id}.jpg``
+    Anything in the directory not matching is ignored — defensive against
+    files dropped in by hand or partial writes.
+    """
+    try:
+        snap_dir = _ring_snapshots_dir()
+        if not snap_dir.exists():
+            return jsonify({"success": True, "snapshots": []})
+        entries = []
+        for p in snap_dir.iterdir():
+            if not p.is_file() or p.suffix.lower() != ".jpg":
+                continue
+            stem = p.stem
+            if "_" not in stem:
+                continue
+            ts_part, _, cam_part = stem.partition("_")
+            if len(ts_part) != 16 or not ts_part.endswith("Z"):
+                continue
+            try:
+                size = p.stat().st_size
+                mtime = p.stat().st_mtime
+            except OSError:
+                continue
+            entries.append({
+                "filename": p.name,
+                "camera_id": cam_part,
+                "captured_at_utc": ts_part,
+                "size_bytes": size,
+                "mtime": mtime,
+            })
+        entries.sort(key=lambda e: e["mtime"], reverse=True)
+        return jsonify({"success": True, "snapshots": entries})
+    except Exception as e:
+        logger.error("list_ring_snapshots failed: %s", e)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@preferences_bp.route('/api/ring/snapshots/image/<path:filename>', methods=['GET'])
+def serve_ring_snapshot(filename):
+    """Serve one snapshot JPEG. send_from_directory enforces path-traversal safety."""
+    from flask import send_from_directory
+    snap_dir = _ring_snapshots_dir()
+    return send_from_directory(str(snap_dir), filename, mimetype="image/jpeg")
+
+
 @preferences_bp.route('/api/integrations/nest/config', methods=['GET'])
 def get_nest_integration_config():
     return _get_smart_home_integration_config(integration_key="nest", integration_label="Nest")
