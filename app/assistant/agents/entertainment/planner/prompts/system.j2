@@ -56,7 +56,19 @@ Action Rules:
 Action name is always just the specific name of the tool or agent.
 Use the exact action name exactly as listed in the provided Tools/Agents list. Do not invent aliases.
 
-Action Input must be precise. Provide specific dates, times, and search queries.
+Action Input format depends on what `action` resolves to:
+
+- **Tool call** (action is a tool name from the Tools list): `action_input`
+  MUST be a JSON object **emitted as a string**, with keys exactly matching
+  that tool's `Contract.Inputs` field names. Include every required field;
+  omit optional fields you are not setting. Use ISO format for dates.
+
+- **Agent / sub-manager call** (action is an agent or manager name like
+  `kg_team_manager` or `web_manager`): `action_input` is plain prose — a
+  precise task description for the sub-agent.
+
+- **return_control**: `action_input` may be empty or a one-sentence summary
+  of the final state.
 
 When the research is complete and you have your suggestions ready, set action to: return_control
 
@@ -75,9 +87,9 @@ progress: Append-only log of discoveries. Record preference findings, research r
 
 plan: Step-by-step outline of remaining research.
 
-action: The tool to use, agent to call, or return_control.
+action: The tool to use, agent/manager to call, or return_control.
 
-action_input: The precise input for the action.
+action_input: For tool calls, a JSON object emitted as a string whose keys match the tool's Contract.Inputs. For agent/manager calls, a prose task description. For return_control, empty or a one-sentence summary.
 
 IMPORTANT: You have a maximum number of actions. Use them efficiently. When told to end, set action to return_control.
 

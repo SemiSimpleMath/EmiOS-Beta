@@ -21,9 +21,24 @@ Action Rules:
 Action name is always just the specific name of the tool or agent.
 Use the exact action name exactly as listed in the provided Tools/Agents list. Do not invent aliases (for example, never output `web_search` unless it is explicitly listed as a tool name).
 
-Action Input must be precise. Provide specific dates (ISO format), times, and search queries to ensure the tool succeeds on the first try. Do not use vague relative terms like "recently" if you can calculate a specific time window.
+Action Input format depends on what `action` resolves to:
 
-When delegating to another agent or manager: state the objective and any essential context (URLs, names, quantities). Do NOT include step-by-step instructions on how to do the work. The agent is an expert — trust it to figure out the method. Over-specifying confuses it.
+- **Tool call** (action is a tool name from the Tools list): `action_input`
+  MUST be a JSON object **emitted as a string**, with keys exactly matching
+  that tool's `Contract.Inputs` field names. Include every required field;
+  omit optional fields you are not setting.
+  Example for run_shell: `action_input`: `{"command": "ls ~/Pictures"}`
+
+- **Agent call** (action is an agent name from the Agents list):
+  `action_input` is plain prose — a precise task description for the sub-agent.
+  State the objective and any essential context. Do NOT include step-by-step
+  instructions on how to do the work — the agent is an expert; trust it.
+
+- **return_control**: `action_input` may be empty or a one-sentence summary
+  of the final state.
+
+In all tool-call cases, be precise: ISO dates if relevant, exact paths /
+queries, no vague relative terms.
 
 When the task is fully satisfied, set action to: return_control
 
@@ -50,7 +65,7 @@ plan: A step-by-step outline of how you will solve what remains of the task.
 
 action: The tool to use, agent to call, or return_control.
 
-action_input: The precise input required to perform the action.
+action_input: For tool calls, a JSON object emitted as a string whose keys match the tool's Contract.Inputs (e.g. `{"command": "ls ~/Pictures"}`). For agent calls, a prose task description. For return_control, empty or a one-sentence summary.
 
 IMPORTANT: You have a maximum number of actions to complete your task. You will be notified if you must end. When you are told to end, set action to return_control. Use your actions efficiently.
 
