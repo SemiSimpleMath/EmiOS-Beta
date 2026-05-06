@@ -44,8 +44,10 @@ def _install_fast_path_counter() -> dict:
     Returns a dict the caller can read after request_handler returns:
         {"fast_path_hits": int, "args_agent_runs": int}
 
-    Implementation: hooks the same logger lines that fire in the live system.
-    Defensive — silently no-ops if the loggers aren't reachable.
+    Implementation: the project's ``get_logger`` sets ``propagate=False`` on
+    every named logger, so a root-logger handler sees nothing. We attach to
+    the specific module loggers we care about: Planner emits the fast-path
+    line, llm_client emits the args-agent MODEL_OUTPUT line.
     """
     counts = {"fast_path_hits": 0, "args_agent_runs": 0}
 
@@ -59,13 +61,20 @@ def _install_fast_path_counter() -> dict:
                 return
             if "tool_args fast path" in msg:
                 counts["fast_path_hits"] += 1
-            elif "shared::tool_arguments" in msg and "MODEL_OUTPUT" in msg:
+            elif "shared::tool_arguments" in msg and "MODEL_OUTPUT" in str(getattr(record, "levelname", "")):
+                counts["args_agent_runs"] += 1
+            elif "shared::tool_arguments" in msg and "LLM RESULT" in msg:
                 counts["args_agent_runs"] += 1
 
     handler = _Tally()
     handler.setLevel(_logging.DEBUG)
-    _logging.getLogger().addHandler(handler)
-    counts["_handler"] = handler  # caller can remove if they want
+    # The fast-path log line fires from the Planner module logger.
+    _logging.getLogger("app.assistant.agent_classes.Planner").addHandler(handler)
+    # The args-agent MODEL_OUTPUT line fires from the llm_client module logger.
+    _logging.getLogger("app.assistant.agent_runtime.services.llm_client").addHandler(handler)
+    # Belt & suspenders — Agent base class emits some MODEL_OUTPUT lines too.
+    _logging.getLogger("app.assistant.agent_classes.Agent").addHandler(handler)
+    counts["_handler"] = handler
     return counts
 
 

@@ -9,20 +9,19 @@ import sys
 from pathlib import Path
 
 # Repo on sys.path for direct invocation.
-_REPO = Path(__file__).resolve().parents[4]
+_REPO = Path(__file__).resolve().parents[5]
 if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
 from app.assistant.tests.manager_tests._runner import run_manager_test
 
 
-# Default smoke task — exercises send_email + the JSON-args fast path.
-DEFAULT_TASK = "Send a test email to Jukka."
-DEFAULT_INFO = (
-    "Recipient: Jukka Virtanen (semisimplemath@gmail.com). "
-    "Subject: Test Email. "
-    "Body: This is a test email from Emi to help with your tinkering."
-)
+# Default smoke task — read-only, exercises get_calendar_events + the
+# JSON-args fast path. Read-only so repeat runs don't spam mailboxes /
+# create test artifacts. send_email requires the approval gateway, which
+# needs an active room session not available in this test context.
+DEFAULT_TASK = "What calendar events does Jukka have today?"
+DEFAULT_INFO = ""
 
 
 def main():
