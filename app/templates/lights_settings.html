@@ -80,6 +80,20 @@
                 <pre id="lights_action_result" style="margin-top:12px;white-space:pre-wrap;background:#0f172a;color:#e2e8f0;padding:10px;border-radius:6px;max-height:320px;overflow:auto;"></pre>
             </div>
 
+            <div class="settings-section">
+                <h2><i class="fas fa-pen"></i> Tool Description (planner-facing)</h2>
+                <p class="step-description">
+                    This is the description planners see when deciding whether to call <code>lights_control</code>.
+                    Tightening it (e.g. listing rooms you actually have, capabilities your bulbs support) helps the
+                    planner pick the right action. Saved instantly; Flask restart needed before agents pick up the change.
+                </p>
+                <textarea id="lights_tool_description" style="width:100%;min-height:160px;padding:8px;font-family:monospace;font-size:13px;" placeholder="Loading..."></textarea>
+                <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
+                    <button type="button" id="lights_tool_description_save_btn" class="oauth-connect-btn"><i class="fas fa-save"></i> Save Description</button>
+                    <button type="button" id="lights_tool_description_refresh_btn" class="oauth-connect-btn"><i class="fas fa-sync-alt"></i> Reload from Disk</button>
+                </div>
+            </div>
+
             <div id="error-message" class="error-message" style="display: none;"></div>
             <div id="success-message" class="success-message" style="display: none;"></div>
         </form>

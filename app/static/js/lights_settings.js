@@ -1,7 +1,57 @@
 document.addEventListener("DOMContentLoaded", function () {
     bindLightsUiActions();
     loadLightsIntegrationUi();
+    bindLightsToolDescriptionActions();
+    loadLightsToolDescription();
 });
+
+async function loadLightsToolDescription() {
+    try {
+        const response = await fetch("/api/integrations/lights/tool-description");
+        const data = await response.json();
+        if (!data.success) {
+            throw new Error(data.error || "Failed to load tool description.");
+        }
+        const el = document.getElementById("lights_tool_description");
+        if (el) el.value = String(data.content || "");
+    } catch (error) {
+        console.error("Failed loading lights tool description:", error);
+        showError(`Failed loading lights tool description: ${String(error.message || error)}`);
+    }
+}
+
+async function saveLightsToolDescription() {
+    const el = document.getElementById("lights_tool_description");
+    const content = el ? el.value : "";
+    const response = await fetch("/api/integrations/lights/tool-description", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: content }),
+    });
+    const data = await response.json();
+    if (!data.success) {
+        throw new Error(data.error || "Failed to save tool description.");
+    }
+}
+
+function bindLightsToolDescriptionActions() {
+    bindOnce("lights_tool_description_save_btn", async () => {
+        try {
+            await saveLightsToolDescription();
+            showSuccess("Tool description saved. Restart Flask for agents to pick it up.");
+        } catch (error) {
+            showError(`Failed saving tool description: ${String(error.message || error)}`);
+        }
+    });
+    bindOnce("lights_tool_description_refresh_btn", async () => {
+        try {
+            await loadLightsToolDescription();
+            showSuccess("Tool description reloaded from disk.");
+        } catch (error) {
+            showError(`Failed reloading: ${String(error.message || error)}`);
+        }
+    });
+}
 
 async function loadLightsIntegrationUi() {
     try {

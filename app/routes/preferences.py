@@ -490,6 +490,43 @@ def serve_ring_snapshot(filename):
     return send_from_directory(str(snap_dir), filename, mimetype="image/jpeg")
 
 
+# --- lights_control tool description (editable from /settings/integrations/lights) ---
+
+def _lights_control_description_path():
+    """Absolute path to the lights_control tool's description prompt."""
+    repo_root = Path(__file__).resolve().parents[2]
+    return repo_root / "app" / "assistant" / "lib" / "tools" / "lights_control" / "prompts" / "lights_control_description.j2"
+
+
+@preferences_bp.route('/api/integrations/lights/tool-description', methods=['GET'])
+def get_lights_tool_description():
+    try:
+        path = _lights_control_description_path()
+        text = path.read_text(encoding="utf-8") if path.exists() else ""
+        return jsonify({"success": True, "content": text, "path": str(path)})
+    except Exception as e:
+        logger.error("get_lights_tool_description failed: %s", e)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@preferences_bp.route('/api/integrations/lights/tool-description', methods=['PUT'])
+def put_lights_tool_description():
+    try:
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            raise ValueError("Request body must be a JSON object.")
+        content = data.get("content")
+        if not isinstance(content, str):
+            raise ValueError("'content' must be a string.")
+        path = _lights_control_description_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        return jsonify({"success": True, "path": str(path)})
+    except Exception as e:
+        logger.error("put_lights_tool_description failed: %s", e)
+        return jsonify({"success": False, "error": str(e)}), 400
+
+
 @preferences_bp.route('/api/integrations/nest/config', methods=['GET'])
 def get_nest_integration_config():
     return _get_smart_home_integration_config(integration_key="nest", integration_label="Nest")
