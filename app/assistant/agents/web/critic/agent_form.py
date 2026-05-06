@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class AgentForm(BaseModel):
     """
-    Structured output for `shared::web_critic`.
+    Structured output for `web::critic`.
 
     Synchronous guardrail — does NOT execute tools. The flow controller
     routes to this agent through critic_pre_node and back through

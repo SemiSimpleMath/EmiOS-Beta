@@ -180,11 +180,11 @@ def _lazy_wiki_nightly_refresh(*, target_date=None, routine=None):
 wiki_nightly_refresh = _lazy_wiki_nightly_refresh
 
 
-def _lazy_importance_backfill(*, target_date=None, routine=None):
+def _lazy_kg_importance_rater(*, target_date=None, routine=None):
     """Periodic: rate any node/edge with NULL importance via the existing
-    batch raters. Cheap, idempotent, runs every ~30 min so newly-promoted
-    content is rated by the time the wiki refresh's importance pre-filter
-    runs against it. First run handles the historical NULL backlog.
+    batch raters (me::importance_rater + me::edge_importance_rater). Cheap,
+    idempotent, runs every ~30 min so newly-promoted content has scores by
+    the time the wiki refresh's importance pre-filter runs against it.
 
     Reads ``spec.batch_size_edges`` / ``spec.batch_size_nodes`` if you want
     to tune throughput per call.
@@ -203,7 +203,7 @@ def _lazy_importance_backfill(*, target_date=None, routine=None):
     }
 
 
-importance_backfill = _lazy_importance_backfill
+kg_importance_rater = _lazy_kg_importance_rater
 
 
 def _lazy_wiki_growth(*, target_date=None, routine=None):
@@ -312,7 +312,7 @@ ROUTINE_FUNCTION_REGISTRY = {
     "wiki_growth": wiki_growth,
     "kg_finding_backlog_drain": kg_finding_backlog_drain,
     "kg_date_gap_drain": kg_date_gap_drain,
-    "importance_backfill": importance_backfill,
+    "kg_importance_rater": kg_importance_rater,
     "sleep_camera_tick": sleep_camera_tick,
     "sleep_camera_tick_local": sleep_camera_tick_local,
 }

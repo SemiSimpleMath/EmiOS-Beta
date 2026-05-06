@@ -1,4 +1,4 @@
-name: web_critic
+name: web::critic
 class_name: PlaywrightAgent
 llm_params:
   llm_provider: "openai"

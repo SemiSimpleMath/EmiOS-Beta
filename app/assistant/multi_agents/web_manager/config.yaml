@@ -13,7 +13,7 @@ agents:
     class: Delegator
   - name: web::planner
     class: Planner
-  - name: web::web_critic
+  - name: web::critic
     class: PlaywrightAgent
   - name: web::web_summary
     class: Agent
@@ -29,12 +29,12 @@ control_nodes:
     class: CriticPreNode
     config:
       enabled: true
-      critic_agent: "web::web_critic"
+      critic_agent: "web::critic"
       continue_agent: "tool_caller"
   - name: critic_post_node
     class: CriticPostNode
     config:
-      critic_agent: "web::web_critic"
+      critic_agent: "web::critic"
   - name: summary_pre_node
     class: SummaryPreNode
     config:
@@ -88,7 +88,7 @@ flow_config:
   state_map:
     "web::delegator": "web::planner"
     "web::planner": "critic_pre_node"
-    "web::web_critic": "critic_post_node"
+    "web::critic": "critic_post_node"
     "tool_result_handler": "tool_return_router"
     "tool_return_router": "web::planner"
     "web::planner_return_control": "shared::final_answer_lite"

@@ -516,13 +516,13 @@
       "notes": "Nightly sweep over pending claim_proposals. Auto-promotes anything resolvable + conflict-free. Held proposals (conflicts, lock violations, placeholders) stay in the review queue. Manual trigger: POST /kg-proposals/run-promoter (dry-run) or ?commit=1."
     },
     {
-      "id": "importance_backfill",
+      "id": "kg_importance_rater",
       "enabled": true,
-      "name": "Importance backfill (rate unrated nodes + edges)",
+      "name": "KG importance rater (nodes + edges)",
       "aliases": [],
       "runner": "function",
       "spec": {
-        "function_name": "importance_backfill",
+        "function_name": "kg_importance_rater",
         "batch_size_edges": 50,
         "batch_size_nodes": 60
       },
@@ -530,7 +530,7 @@
         "type": "interval",
         "min_interval_seconds": 1800
       },
-      "notes": "Rates any node/edge with NULL importance via me::edge_importance_rater + me::importance_rater. Cheap, idempotent, runs every 30 min so the wiki refresh's importance pre-filter has scores by the time it runs. First run handles the historical NULL backlog (~3,810 NULL edges + any unrated nodes)."
+      "notes": "Rates any node/edge with NULL importance via me::edge_importance_rater + me::importance_rater. Cheap, idempotent, runs every 30 min so the wiki refresh's importance pre-filter has scores by the time it runs."
     },
     {
       "id": "wiki_nightly_refresh",

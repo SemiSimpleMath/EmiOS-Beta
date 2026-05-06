@@ -227,7 +227,7 @@ def _filter_changed_by_importance(
     """Drop ids whose node.importance is NULL or below threshold.
 
     NULL is treated as "below threshold" — unrated content shouldn't trigger
-    refresh until the periodic importance_backfill routine has rated it.
+    refresh until the periodic kg_importance_rater routine has rated it.
     """
     if not changed_ids:
         return []

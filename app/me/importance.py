@@ -220,7 +220,7 @@ def regenerate_importance(
     # timestamp is preserved verbatim. Same pattern as persist_description.
     persisted_to_db = 0
     if scores:
-        with get_db_manager().write_session() as session:
+        with get_db_manager().transaction(op="me_importance_persist") as session:
             for nid, sc in scores.items():
                 try:
                     session.query(Node).filter(Node.id == nid).update(

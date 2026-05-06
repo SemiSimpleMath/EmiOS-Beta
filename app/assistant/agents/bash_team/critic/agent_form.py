@@ -20,7 +20,7 @@ class AgentForm(BaseModel):
     )
     critic_diagnosis_tags: List[str] = Field(
         default_factory=list,
-        description="Short tags like: modal_blocking, new_tab, looping, wrong_target, typing_failed, stuck, needs_snapshot, needs_tabs.",
+        description="Short tags like: injection_suspected, exfiltration_pattern, reason_mismatch, wrong_tool, ok.",
     )
     critic_diagnosis: str = Field(
         ...,
