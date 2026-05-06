@@ -569,7 +569,16 @@ class ToolRegistry:
                 logger.error(f"Error rendering args.j2 for '{tool_name}': {e}")
                 args_text = ""
         contract = tool.get("tool_contract") if isinstance(tool.get("tool_contract"), dict) else None
-        display = self._format_description_with_contract(desc_text, contract, args_text)
+        # Smart-home tools: append the user's configured devices so the planner
+        # knows valid room/camera names without having to invent them. Devices
+        # live in configs/smart_home_tools.json under the integration key:
+        #   "lights":   {"devices": [{"alias": "Kitchen", "host": "192.168.1.51"}, ...]}
+        #   "ring":     {"devices": [{"alias": "Front Door", "camera_id": "74818139"}, ...]}
+        #   "nest":     {"devices": [{"alias": "Main", "device_id": "..."}, ...]}
+        # When the field is absent or empty, this falls through to the
+        # tool's normal description text — no behavior change for non-smart-home tools.
+        devices_block = self._smart_home_devices_block(tool_name)
+        display = self._format_description_with_contract(desc_text, contract, args_text, devices_block)
         return ToolDescription(
             display,
             tool_name=tool_name,
@@ -577,17 +586,75 @@ class ToolRegistry:
             contract=contract,
         )
 
+    def _smart_home_devices_block(self, tool_name: str) -> str:
+        """Return a planner-facing summary of configured devices for a smart-home tool.
+
+        Reads from configs/smart_home_tools.json. Empty string for non-smart-home
+        tools or when the integration has no devices configured (default).
+        """
+        # Map tool name → integration key in smart_home_tools.json.
+        _SH_TOOL_TO_INTEGRATION = {
+            "lights_control": "lights",
+            "ring_camera_control": "ring",
+            "nest_home_control": "nest",
+        }
+        integration = _SH_TOOL_TO_INTEGRATION.get(tool_name)
+        if integration is None:
+            return ""
+        try:
+            from app.assistant.utils.path_utils import get_configs_dir
+            import json
+            cfg_path = get_configs_dir() / "smart_home_tools.json"
+            if not cfg_path.exists():
+                return ""
+            payload = json.loads(cfg_path.read_text(encoding="utf-8"))
+            devices = (payload.get(integration) or {}).get("devices") or []
+            if not isinstance(devices, list) or not devices:
+                return ""
+            lines = []
+            for d in devices:
+                if not isinstance(d, dict):
+                    continue
+                alias = str(d.get("alias") or "").strip()
+                if not alias:
+                    continue
+                # Show alias + any non-empty notes for context.
+                notes = str(d.get("notes") or "").strip()
+                # Identifying info varies per integration; show whatever non-alias
+                # field is present so the user can sanity-check the listing.
+                ident_fields = [
+                    f"host={d.get('host')}" if d.get("host") else "",
+                    f"camera_id={d.get('camera_id')}" if d.get("camera_id") else "",
+                    f"device_id={d.get('device_id')}" if d.get("device_id") else "",
+                ]
+                ident = ", ".join([f for f in ident_fields if f])
+                trailer = " — ".join([t for t in [notes, ident] if t])
+                lines.append(f"  - {alias}" + (f" ({trailer})" if trailer else ""))
+            if not lines:
+                return ""
+            return "Configured devices (use these names exactly):\n" + "\n".join(lines)
+        except Exception as e:
+            logger.error("Failed to render smart-home devices for '%s': %s", tool_name, e)
+            return ""
+
     def _format_description_with_contract(
         self,
         desc_text: str,
         contract: dict[str, Any] | None,
         args_text: str = "",
+        devices_block: str = "",
     ) -> str:
         base = str(desc_text or "").strip() or "No description available."
         args_block = str(args_text or "").strip()
+        devices = str(devices_block or "").strip()
         if not isinstance(contract, dict):
+            tail = []
             if args_block:
-                return f"{base}\n\nArgument guidance:\n{args_block}"
+                tail.append("Argument guidance:\n" + args_block)
+            if devices:
+                tail.append(devices)
+            if tail:
+                return base + "\n\n" + "\n\n".join(tail)
             return base
         lines: list[str] = [base, "Contract:"]
         inputs = contract.get("inputs") if isinstance(contract.get("inputs"), list) else []
@@ -616,6 +683,8 @@ class ToolRegistry:
         if args_block:
             lines.append("Argument guidance:")
             lines.append(args_block)
+        if devices:
+            lines.append(devices)
         return "\n".join(lines).strip()
 
     def _format_compact_tool_card(
