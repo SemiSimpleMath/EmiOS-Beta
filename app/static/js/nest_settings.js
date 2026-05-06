@@ -9,6 +9,8 @@ document.addEventListener('DOMContentLoaded', async function() {
     await loadNestConfig();
     renderNestOAuthStatus();
     bindNestActions();
+    bindNestDevicesActions();
+    await loadNestDevices();
 });
 
 async function loadNestConfig() {
@@ -119,4 +121,125 @@ async function runNest(action, args) {
 function setResult(text) {
     const el = document.getElementById('nest_action_result');
     if (el) el.textContent = text;
+}
+
+// ---------------------------------------------------------------------------
+// Device Aliases — same pattern as ring/lights
+// ---------------------------------------------------------------------------
+
+function bindNestDevicesActions() {
+    const bind = (id, h) => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('click', h);
+    };
+    bind('nest_devices_discover_btn', discoverNestDevices);
+    bind('nest_devices_save_btn', saveNestDevices);
+    bind('nest_devices_reload_btn', loadNestDevices);
+}
+
+async function loadNestDevices() {
+    try {
+        const resp = await fetch('/api/integrations/nest/devices');
+        const data = await resp.json();
+        if (!data.success) throw new Error(data.error || 'load failed');
+        renderNestDevicesTable(data.devices || []);
+    } catch (e) {
+        showError(`Failed loading saved devices: ${e.message}`);
+    }
+}
+
+async function discoverNestDevices() {
+    try {
+        const result = await runIntegrationAction('nest', 'get_status', {});
+        // _nest_get_status (no device_id) returns {thermostats: [{name, type, mode, ...}]}
+        let therms = [];
+        if (Array.isArray(result?.thermostats)) therms = result.thermostats;
+        else if (Array.isArray(result?.result?.thermostats)) therms = result.result.thermostats;
+        if (!therms.length) {
+            showError('No thermostats returned from Nest.');
+            return;
+        }
+        // SDM "name" is a long URI like "enterprises/.../devices/AVPH...".
+        // Default alias = last URI segment ("AVPH..."), user typically renames.
+        const devices = therms.map(t => {
+            const fullName = String(t.name || '').trim();
+            const tail = fullName.split('/').filter(Boolean).pop() || fullName || 'Thermostat';
+            return {
+                alias: tail,
+                device_id: fullName,
+                notes: String(t.type || '').replace(/^sdm\.devices\.types\./, ''),
+            };
+        });
+        renderNestDevicesTable(devices);
+        showSuccess(`Discovered ${devices.length} thermostat(s). Edit aliases then click Save.`);
+    } catch (e) {
+        showError(`Discovery failed: ${e.message}`);
+    }
+}
+
+async function saveNestDevices() {
+    try {
+        const devices = readNestDevicesTable();
+        const resp = await fetch('/api/integrations/nest/devices', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ devices }),
+        });
+        const data = await resp.json();
+        if (!data.success) throw new Error(data.error || 'save failed');
+        renderNestDevicesTable(data.devices || []);
+        showSuccess(`Saved ${data.devices.length} device(s). Restart Flask for the planner to see them.`);
+    } catch (e) {
+        showError(`Save failed: ${e.message}`);
+    }
+}
+
+function renderNestDevicesTable(devices) {
+    const tbody = document.getElementById('nest_devices_tbody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    if (!devices.length) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = '<td colspan="4" style="padding:14px;color:#6b7280;font-style:italic;">No devices configured. Click "Discover from Nest" to auto-populate.</td>';
+        tbody.appendChild(tr);
+        return;
+    }
+    devices.forEach(d => tbody.appendChild(buildNestDeviceRow(d)));
+}
+
+function buildNestDeviceRow(device) {
+    const tr = document.createElement('tr');
+    tr.style.borderBottom = '1px solid #e5e7eb';
+    const aliasInput = `<input type="text" class="nest-device-alias" value="${escapeAttrN(device.alias || '')}" style="width:100%;padding:6px;">`;
+    const idInput = `<input type="text" class="nest-device-id" value="${escapeAttrN(device.device_id || '')}" style="width:100%;padding:6px;font-family:monospace;font-size:11px;">`;
+    const notesInput = `<input type="text" class="nest-device-notes" value="${escapeAttrN(device.notes || '')}" style="width:100%;padding:6px;font-size:12px;">`;
+    tr.innerHTML =
+        `<td style="padding:6px;">${aliasInput}</td>` +
+        `<td style="padding:6px;">${idInput}</td>` +
+        `<td style="padding:6px;">${notesInput}</td>` +
+        `<td style="padding:6px;text-align:center;"><button type="button" class="nest-device-remove" style="background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;border-radius:4px;padding:4px 8px;cursor:pointer;">×</button></td>`;
+    tr.querySelector('.nest-device-remove').addEventListener('click', () => tr.remove());
+    return tr;
+}
+
+function readNestDevicesTable() {
+    const rows = document.querySelectorAll('#nest_devices_tbody tr');
+    const out = [];
+    rows.forEach(tr => {
+        const alias = tr.querySelector('.nest-device-alias')?.value?.trim() || '';
+        const device_id = tr.querySelector('.nest-device-id')?.value?.trim() || '';
+        const notes = tr.querySelector('.nest-device-notes')?.value?.trim() || '';
+        if (alias && device_id) {
+            const d = { alias, device_id };
+            if (notes) d.notes = notes;
+            out.push(d);
+        }
+    });
+    return out;
+}
+
+function escapeAttrN(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }

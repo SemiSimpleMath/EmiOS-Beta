@@ -3,6 +3,8 @@ document.addEventListener("DOMContentLoaded", function () {
     loadLightsIntegrationUi();
     bindLightsToolDescriptionActions();
     loadLightsToolDescription();
+    bindLightsDevicesActions();
+    loadLightsDevices();
 });
 
 async function loadLightsToolDescription() {
@@ -263,4 +265,119 @@ function showSuccess(message) {
     setTimeout(() => {
         el.style.display = "none";
     }, 3000);
+}
+
+// ---------------------------------------------------------------------------
+// Device Aliases (Kasa) — same pattern as ring_settings.js
+// ---------------------------------------------------------------------------
+
+function bindLightsDevicesActions() {
+    const bind = (id, h) => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener("click", h);
+    };
+    bind("lights_devices_discover_btn", discoverLightsDevices);
+    bind("lights_devices_save_btn", saveLightsDevices);
+    bind("lights_devices_reload_btn", loadLightsDevices);
+}
+
+async function loadLightsDevices() {
+    try {
+        const resp = await fetch("/api/integrations/lights/devices");
+        const data = await resp.json();
+        if (!data.success) throw new Error(data.error || "load failed");
+        renderLightsDevicesTable(data.devices || []);
+    } catch (e) {
+        showError(`Failed loading saved devices: ${e.message}`);
+    }
+}
+
+async function discoverLightsDevices() {
+    try {
+        const result = await runLightsAction("list_lights", {});
+        // _kasa_list_lights returns {lights: [{alias, host, model, device_type, ...}]}
+        let lights = [];
+        if (Array.isArray(result?.lights)) lights = result.lights;
+        else if (Array.isArray(result?.result?.lights)) lights = result.result.lights;
+        if (!lights.length) {
+            showError("No Kasa devices found. Configure kasa_device_hosts above or wait for LAN discovery.");
+            return;
+        }
+        const devices = lights.map(d => ({
+            alias: String(d.alias || "").trim() || `Light ${d.host || ""}`,
+            host: String(d.host || "").trim(),
+            notes: [d.model, d.device_type].filter(Boolean).join(" / "),
+        }));
+        renderLightsDevicesTable(devices);
+        showSuccess(`Discovered ${devices.length} device(s). Edit aliases then click Save.`);
+    } catch (e) {
+        showError(`Discovery failed: ${e.message}`);
+    }
+}
+
+async function saveLightsDevices() {
+    try {
+        const devices = readLightsDevicesTable();
+        const resp = await fetch("/api/integrations/lights/devices", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ devices }),
+        });
+        const data = await resp.json();
+        if (!data.success) throw new Error(data.error || "save failed");
+        renderLightsDevicesTable(data.devices || []);
+        showSuccess(`Saved ${data.devices.length} device(s). Restart Flask for the planner to see them.`);
+    } catch (e) {
+        showError(`Save failed: ${e.message}`);
+    }
+}
+
+function renderLightsDevicesTable(devices) {
+    const tbody = document.getElementById("lights_devices_tbody");
+    if (!tbody) return;
+    tbody.innerHTML = "";
+    if (!devices.length) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = '<td colspan="4" style="padding:14px;color:#6b7280;font-style:italic;">No devices configured. Click "Discover from Kasa" to auto-populate.</td>';
+        tbody.appendChild(tr);
+        return;
+    }
+    devices.forEach(d => tbody.appendChild(buildLightsDeviceRow(d)));
+}
+
+function buildLightsDeviceRow(device) {
+    const tr = document.createElement("tr");
+    tr.style.borderBottom = "1px solid #e5e7eb";
+    const aliasInput = `<input type="text" class="lights-device-alias" value="${escapeAttrL(device.alias || '')}" style="width:100%;padding:6px;">`;
+    const hostInput = `<input type="text" class="lights-device-host" value="${escapeAttrL(device.host || '')}" style="width:100%;padding:6px;font-family:monospace;font-size:12px;">`;
+    const notesInput = `<input type="text" class="lights-device-notes" value="${escapeAttrL(device.notes || '')}" style="width:100%;padding:6px;font-size:12px;">`;
+    tr.innerHTML =
+        `<td style="padding:6px;">${aliasInput}</td>` +
+        `<td style="padding:6px;">${hostInput}</td>` +
+        `<td style="padding:6px;">${notesInput}</td>` +
+        `<td style="padding:6px;text-align:center;"><button type="button" class="lights-device-remove" style="background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;border-radius:4px;padding:4px 8px;cursor:pointer;">×</button></td>`;
+    tr.querySelector(".lights-device-remove").addEventListener("click", () => tr.remove());
+    return tr;
+}
+
+function readLightsDevicesTable() {
+    const rows = document.querySelectorAll("#lights_devices_tbody tr");
+    const out = [];
+    rows.forEach(tr => {
+        const alias = tr.querySelector(".lights-device-alias")?.value?.trim() || "";
+        const host = tr.querySelector(".lights-device-host")?.value?.trim() || "";
+        const notes = tr.querySelector(".lights-device-notes")?.value?.trim() || "";
+        if (alias && host) {
+            const d = { alias, host };
+            if (notes) d.notes = notes;
+            out.push(d);
+        }
+    });
+    return out;
+}
+
+function escapeAttrL(s) {
+    return String(s == null ? "" : s)
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }

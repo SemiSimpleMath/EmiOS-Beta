@@ -75,6 +75,32 @@
             </div>
         </div>
 
+        <div class="settings-section">
+            <h2><i class="fas fa-tags"></i> Device Aliases</h2>
+            <p class="step-description">
+                Friendly names the planner uses ("Main Floor", "Upstairs") when there are multiple thermostats.
+                Single-thermostat households can leave this empty — the bridge handles the default.
+                Click <strong>Discover from Nest</strong> to auto-populate, then edit aliases as you'd like.
+                Restart Flask after saving — tool descriptions are cached at registry load.
+            </p>
+            <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+                <button type="button" id="nest_devices_discover_btn" class="oauth-connect-btn"><i class="fas fa-magic"></i> Discover from Nest</button>
+                <button type="button" id="nest_devices_save_btn" class="oauth-connect-btn"><i class="fas fa-save"></i> Save Aliases</button>
+                <button type="button" id="nest_devices_reload_btn" class="oauth-connect-btn"><i class="fas fa-sync-alt"></i> Reload Saved</button>
+            </div>
+            <table id="nest_devices_table" style="width:100%;border-collapse:collapse;font-size:14px;">
+                <thead>
+                    <tr style="background:#f3f4f6;text-align:left;">
+                        <th style="padding:8px;border-bottom:1px solid #e5e7eb;">Alias</th>
+                        <th style="padding:8px;border-bottom:1px solid #e5e7eb;">Device ID (SDM)</th>
+                        <th style="padding:8px;border-bottom:1px solid #e5e7eb;">Notes</th>
+                        <th style="padding:8px;border-bottom:1px solid #e5e7eb;width:60px;"></th>
+                    </tr>
+                </thead>
+                <tbody id="nest_devices_tbody"></tbody>
+            </table>
+        </div>
+
         <div id="error-message" class="error-message" style="display: none;"></div>
         <div id="success-message" class="success-message" style="display: none;"></div>
     </div>
