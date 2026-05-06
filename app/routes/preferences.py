@@ -392,12 +392,22 @@ def _get_smart_home_integration_config(*, integration_key: str, integration_labe
         if not isinstance(integration_cfg, dict):
             raise ValueError(f"Missing '{integration_key}' config in smart_home_tools.json.")
         token_env_var = str(integration_cfg.get("token_env_var") or "").strip()
+        # Ring auth is file-based, not env-var-based — the OAuth token is a
+        # multi-key dict that ring-doorbell rotates on refresh, so it lives
+        # in data/ring_token.json (bootstrapped by scripts/ring_bootstrap.py).
+        # Other integrations (nest, lights) still use env vars.
+        if integration_key == "ring":
+            from pathlib import Path
+            repo_root = Path(__file__).resolve().parents[2]
+            token_is_set = (repo_root / "data" / "ring_token.json").exists()
+        else:
+            token_is_set = bool(token_env_var and str(os.environ.get(token_env_var) or "").strip())
         response = {
             "enabled": bool(integration_cfg.get("enabled", False)),
             "endpoint_url": str(integration_cfg.get("endpoint_url") or "").strip(),
             "token_env_var": token_env_var,
             "timeout_seconds": int(integration_cfg.get("timeout_seconds", 20)),
-            "token_is_set": bool(token_env_var and str(os.environ.get(token_env_var) or "").strip()),
+            "token_is_set": token_is_set,
         }
         if integration_key == "lights":
             hosts_raw = integration_cfg.get("kasa_device_hosts", [])
