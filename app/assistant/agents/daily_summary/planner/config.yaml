@@ -19,7 +19,6 @@ user_context_items:
   - recent_history
   - checklist
   - action_count
-  - tool_descriptions
 
 system_context_items:
   - tool_descriptions
