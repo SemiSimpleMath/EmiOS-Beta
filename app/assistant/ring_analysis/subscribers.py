@@ -243,36 +243,13 @@ def _resolve_paths(payload: Dict[str, Any]) -> tuple[Optional[Path], Optional[Pa
 
 
 def _run_agent(agent_name: str, agent_input: Dict[str, Any]) -> Dict[str, Any]:
-    """Create a fresh agent and run it once. Returns the LLM result as a dict."""
+    """Create a fresh agent and run it once. Returns the inner LLM dict.
+
+    Agent.action_handler returns ``ToolResult(data=llm_dict)``; the LLM
+    payload is always at ``.data``.
+    """
     agent = DI.agent_factory.create_agent(agent_name)
     if agent is None:
         raise RuntimeError(f"agent_factory.create_agent returned None for {agent_name!r}")
-    msg = Message(agent_input=agent_input)
-    result = agent.action_handler(msg)
-    return _result_dict(result)
-
-
-def _result_dict(result: Any) -> Dict[str, Any]:
-    """Coerce whatever Agent.action_handler returns into the inner LLM dict.
-
-    The base Agent.process_llm_result wraps the LLM output as
-    ``ToolResult(data=llm_dict)`` — model_dump() gives the WRAPPER
-    (`{result_type, content, data: {...}}`), not the inner dict, so
-    we look at ``.data`` BEFORE falling back to model_dump.
-    """
-    if isinstance(result, dict):
-        return result
-    # ToolResult / similar wrappers expose the real payload as .data
-    inner = getattr(result, "data", None)
-    if isinstance(inner, dict):
-        return inner
-    if hasattr(result, "model_dump"):
-        dumped = result.model_dump()
-        if isinstance(dumped, dict):
-            # If the dump itself is a wrapper with .data, peel one more layer.
-            if isinstance(dumped.get("data"), dict):
-                return dumped["data"]
-            return dumped
-    if hasattr(result, "dict"):
-        return result.dict()
-    return {}
+    result = agent.action_handler(Message(agent_input=agent_input))
+    return result.data if isinstance(getattr(result, "data", None), dict) else {}
