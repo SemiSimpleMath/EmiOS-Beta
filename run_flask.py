@@ -4,6 +4,23 @@ import sys
 import secrets
 from pathlib import Path
 
+# ── Python version guard (must run BEFORE any project import) ──────────────────
+# ChromaDB's chromadb_rust_bindings ships wheels for Python 3.10–3.13. On 3.14+
+# the import fails with an opaque "DLL load failed" and every memory/embeddings
+# code path breaks downstream. Catch it here with an actionable message.
+if sys.version_info < (3, 10) or sys.version_info >= (3, 14):
+    _v = sys.version_info
+    print(
+        f"\n❌ Python {_v.major}.{_v.minor} is not supported.\n"
+        f"   EmiAI needs Python 3.10–3.13 (ChromaDB does not yet ship wheels "
+        f"for {_v.major}.{_v.minor}+).\n"
+        f"   Install Python 3.12 from python.org and rebuild your venv:\n"
+        f"     rmdir /s /q .venv  &&  py -3.12 -m venv .venv\n"
+        f"     .venv\\Scripts\\pip install -r requirements_alpha.txt\n",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
 # Load environment variables from .env file FIRST (before any other imports)
 from dotenv import load_dotenv
 dotenv_path = Path(__file__).resolve().parent / '.env'

@@ -22,14 +22,20 @@ def print_step(step_num, total_steps, text):
     print(f"\n[{step_num}/{total_steps}] {text}")
 
 def check_python_version():
-    """Check if Python version is 3.10+"""
+    """Check if Python version is 3.10–3.13"""
     print_step(1, 8, "Checking Python version...")
-    
+
     version = sys.version_info
-    if version.major < 3 or (version.major == 3 and version.minor < 10):
-        print(f"❌ ERROR: Python 3.10+ required, you have {version.major}.{version.minor}")
+    if version < (3, 10):
+        print(f"❌ ERROR: Python 3.10–3.13 required, you have {version.major}.{version.minor}")
+        print("   Install Python 3.12 from python.org and rerun via:  py -3.12 setup.py")
         return False
-    
+    if version >= (3, 14):
+        print(f"❌ ERROR: Python {version.major}.{version.minor} is not yet supported.")
+        print("   ChromaDB (the embeddings backend) does not yet ship wheels for Python 3.14+.")
+        print("   Install Python 3.12 or 3.13 and rerun via:  py -3.12 setup.py")
+        return False
+
     print(f"✅ Python {version.major}.{version.minor}.{version.micro} detected")
     return True
 
