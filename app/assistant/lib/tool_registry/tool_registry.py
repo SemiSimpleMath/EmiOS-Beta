@@ -49,7 +49,7 @@ class ToolRegistry:
         Each subdirectory should be named after the tool and contain:
          - <tool_name>.py (with a get_tool_class() function)
          - tool_forms/ (containing a <tool_name>_form.py with a Pydantic model)
-         - prompts/ (with description.j2, args.j2 and select.j2)
+         - prompts/ (with <tool_name>_description.j2 and optionally <tool_name>_args.j2)
         """
         if tools_dir is None:
             tools_dir = get_tool_registry_dir()

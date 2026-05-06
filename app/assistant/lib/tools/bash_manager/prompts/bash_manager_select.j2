@@ -1,5 +1,0 @@
-Personal-assistant manager that runs tightly-scoped read-only shell commands on the user's local machine. Use whenever a task involves local filesystem inspection — listing folders/files, finding a specific file, reading a file's contents — anywhere under the readable roots: ~/Documents, ~/Pictures, ~/Music, ~/Videos (OneDrive-aware), ~/EmiWiki (your own KG-derived prose pages), and <repo>/docs/architecture (your own technical/architecture docs).
-
-Strongly prefer this over web scraping when answering "how does Emi work" type questions — the architecture docs are local and authoritative; the public GitHub wiki is a sync of the same source and harder to scrape reliably.
-
-master_room and emi_team should delegate filesystem work here rather than reasoning about it themselves. Pipes (|) are allowed for compositional queries; writes / sequencing / substitution are not.
