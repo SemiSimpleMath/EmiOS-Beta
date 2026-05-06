@@ -574,7 +574,10 @@
       "id": "sleep_camera_tick",
       "enabled": false,
       "name": "Sleep camera capture (every 3 min)",
-      "aliases": ["sleep camera", "bedroom camera"],
+      "aliases": [
+        "sleep camera",
+        "bedroom camera"
+      ],
       "runner": "function",
       "spec": {
         "function_name": "sleep_camera_tick",
@@ -585,6 +588,26 @@
         "min_interval_seconds": 180
       },
       "notes": "Captures one frame from the bed-facing Ring camera every ~3 minutes. The bridge fires ring_snapshot_captured; sleep_analyzer picks it up, finds the previous frame, and writes a structured .txt sidecar including motion-vs-previous. DISABLED by default — flip enabled=true at bedtime, false in the morning. Camera_id is the Downstairs cam (re-aimed at bed); change spec.camera_id if a different camera is repurposed."
+    },
+    {
+      "id": "sleep_camera_tick_local",
+      "enabled": false,
+      "name": "Sleep camera capture — LOCAL RTSP (every 3 min)",
+      "aliases": [
+        "tapo sleep camera",
+        "local sleep camera",
+        "rtsp sleep camera"
+      ],
+      "runner": "function",
+      "spec": {
+        "function_name": "sleep_camera_tick_local",
+        "camera_alias": "Bedroom"
+      },
+      "run_policy": {
+        "type": "interval",
+        "min_interval_seconds": 180
+      },
+      "notes": "Higher-res alternative to sleep_camera_tick — pulls a 1080p frame from a configured RTSP camera (Tapo / Wyze / Reolink) instead of Ring's 640×360 thumbnail. Requires the camera to be in configs/smart_home_tools.json under local_cameras.devices with kind=bedroom. The local_camera_snapshot tool fires the same ring_snapshot_captured event; sleep_analyzer picks up Tapo frames via the kind=bedroom filter. DISABLED by default — flip enabled=true at bedtime, false in the morning. To migrate from Ring, disable sleep_camera_tick and enable this one."
     }
   ]
 }

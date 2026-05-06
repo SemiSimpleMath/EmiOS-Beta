@@ -261,6 +261,47 @@ def sleep_camera_tick(*, target_date=None, routine=None):
         return {"status": "error", "error": str(e), "camera_id": camera_id}
 
 
+def sleep_camera_tick_local(*, target_date=None, routine=None):
+    """Capture one frame from a configured LAN RTSP camera (Tapo / Wyze /
+    Reolink etc.) for sleep monitoring. Parallel to ``sleep_camera_tick``
+    which uses the Ring bridge — switch to this one when a higher-res
+    local camera is in place.
+
+    The camera_alias comes from the routine spec (``spec.camera_alias``).
+    The local_camera_snapshot tool handles ffmpeg + event publishing; the
+    sleep_analyzer subscriber picks up the resulting frame via the new
+    ``kind: "bedroom"`` filter.
+    """
+    spec = (routine.spec if routine and isinstance(getattr(routine, "spec", None), dict) else {}) or {}
+    camera_alias = str(spec.get("camera_alias") or "").strip()
+    if not camera_alias:
+        logger.error("sleep_camera_tick_local: spec.camera_alias is required.")
+        return {"status": "error", "error": "missing camera_alias in routine spec"}
+    try:
+        from app.assistant.ServiceLocator.service_locator import DI
+        from app.assistant.utils.pydantic_classes import ToolMessage
+        cls = DI.tool_registry.get_tool_class("local_camera_snapshot")
+        if cls is None:
+            return {"status": "error", "error": "local_camera_snapshot tool not registered"}
+        msg = ToolMessage(
+            tool_name="local_camera_snapshot",
+            tool_data={"arguments": {"camera_alias": camera_alias}},
+        )
+        result = cls().execute(msg)
+        if getattr(result, "result_type", "") == "error":
+            return {"status": "error", "error": getattr(result, "content", "tool failed")}
+        data = getattr(result, "data", {}) or {}
+        return {
+            "status": "ok",
+            "snapshot_path": data.get("snapshot_path"),
+            "size_bytes": data.get("size_bytes"),
+            "camera_alias": camera_alias,
+        }
+    except Exception as e:
+        logger.warning("sleep_camera_tick_local: capture failed (alias %s): %s", camera_alias, e)
+        return {"status": "error", "error": str(e), "camera_alias": camera_alias}
+
+
 ROUTINE_FUNCTION_REGISTRY = {
     "dayflow_orchestrator_cadence_tick": dayflow_orchestrator_cadence_tick,
     "situation_audit": situation_audit,
@@ -273,4 +314,5 @@ ROUTINE_FUNCTION_REGISTRY = {
     "kg_date_gap_drain": kg_date_gap_drain,
     "importance_backfill": importance_backfill,
     "sleep_camera_tick": sleep_camera_tick,
+    "sleep_camera_tick_local": sleep_camera_tick_local,
 }
