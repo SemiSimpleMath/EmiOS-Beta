@@ -78,6 +78,10 @@ slack-sdk==3.37.0
 
 # Knowledge Graph / Embeddings (ONNX-based, no PyTorch)
 chromadb>=1.0.0
+# Pin onnxruntime explicitly. ChromaDB 1.5+ no longer always pulls it in
+# transitively (it became an optional dep in some resolution paths), and
+# without it the embedding model fails to load with an opaque error.
+onnxruntime>=1.16.0
 
 # NOTE: sentence-transformers / PyTorch are NOT required.
 # Embeddings use chromadb's built-in ONNX all-MiniLM-L6-v2 model.
