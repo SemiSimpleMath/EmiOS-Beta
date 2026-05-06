@@ -53,7 +53,12 @@ def _on_doorbell_frame(message: Message) -> None:
             "camera_id": DOORBELL_CAMERA_ID,
             "captured_at_utc": str(payload.get("captured_at_utc") or ""),
         }
-        data = _run_agent("door_bell_analyzer", agent_input)
+        agent = DI.agent_factory.create_agent("door_bell_analyzer")
+        result = agent.action_handler(Message(agent_input=agent_input))
+        data = getattr(result, "data", None)
+        if not isinstance(data, dict):
+            logger.warning("[door_bell_analyzer] no structured data for %s", jpeg.name)
+            return
         caption = str(data.get("caption") or "").strip()
         if not caption:
             logger.warning("[door_bell_analyzer] LLM returned no caption for %s", jpeg.name)
@@ -121,9 +126,11 @@ def _on_bedroom_frame(message: Message) -> None:
             "camera_id": BEDROOM_CAMERA_ID,
             "captured_at_utc": str(payload.get("captured_at_utc") or ""),
         }
-        data = _run_agent("sleep_analyzer", agent_input)
-        if not data:
-            logger.warning("[sleep_analyzer] LLM returned no analysis for %s", jpeg.name)
+        agent = DI.agent_factory.create_agent("sleep_analyzer")
+        result = agent.action_handler(Message(agent_input=agent_input))
+        data = getattr(result, "data", None)
+        if not isinstance(data, dict):
+            logger.warning("[sleep_analyzer] no structured data for %s", jpeg.name)
             return
 
         sidecar.write_text(_sleep_sidecar_text(data, agent_input), encoding="utf-8")
@@ -242,14 +249,3 @@ def _resolve_paths(payload: Dict[str, Any]) -> tuple[Optional[Path], Optional[Pa
     return jpeg, sidecar
 
 
-def _run_agent(agent_name: str, agent_input: Dict[str, Any]) -> Dict[str, Any]:
-    """Create a fresh agent and run it once. Returns the inner LLM dict.
-
-    Agent.action_handler returns ``ToolResult(data=llm_dict)``; the LLM
-    payload is always at ``.data``.
-    """
-    agent = DI.agent_factory.create_agent(agent_name)
-    if agent is None:
-        raise RuntimeError(f"agent_factory.create_agent returned None for {agent_name!r}")
-    result = agent.action_handler(Message(agent_input=agent_input))
-    return result.data if isinstance(getattr(result, "data", None), dict) else {}
