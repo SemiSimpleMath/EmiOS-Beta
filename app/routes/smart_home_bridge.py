@@ -126,6 +126,37 @@ def _integration_cfg(integration: str) -> Dict[str, Any]:
     return payload
 
 
+def _autoset_loopback_secrets() -> None:
+    """Auto-set per-integration bearer secrets when missing from env.
+
+    The token_env_var on each smart-home integration is a SHARED SECRET
+    used between this Flask process's UI/gateway and its own bridge
+    endpoint (pure loopback). It is NOT the third-party API key — those
+    live elsewhere (Ring: data/ring_token.json; Nest: Google OAuth;
+    Kasa: local LAN, no token). Auto-generating a random value when the
+    env var is absent removes a setup footgun without changing security:
+    if the user later exports a real value, that takes precedence and we
+    don't overwrite it.
+    """
+    import secrets as _secrets
+    try:
+        payload = _load_smart_home_config()
+    except Exception:
+        return  # don't crash module import if config is missing
+    for integration_key, integration_cfg in payload.items():
+        if not isinstance(integration_cfg, dict):
+            continue
+        env_var = str(integration_cfg.get("token_env_var") or "").strip()
+        if not env_var:
+            continue
+        if str(os.environ.get(env_var) or "").strip():
+            continue  # user already set this — respect it
+        os.environ[env_var] = _secrets.token_urlsafe(32)
+
+
+_autoset_loopback_secrets()
+
+
 def _require_bridge_auth(integration: str) -> None:
     cfg = _integration_cfg(integration)
     token_env_var = str(cfg.get("token_env_var") or "").strip()
