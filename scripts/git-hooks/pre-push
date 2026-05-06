@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
-# Hard-block pushes of release-v0.1 to anything that isn't EmiOS-Beta.
+# Hard-enforce the branching policy: only `main` may be pushed, and only to `origin` (EmiOS-Beta).
 #
-# Why: EmiOS-Alpha (the legacy private repo at github.com/.../EmiOS-Alpha) and
-# EmiOS-Beta (the public Beta release line) coexist as git remotes. Agents
-# repeatedly default to "origin" and push release-v0.1 to the wrong repo.
-# This hook makes the mistake fatal.
+# Why: agents repeatedly create stray branches (release-v0.1, feature/*, etc.)
+# and/or push to the wrong remote (alpha-legacy). This hook makes both mistakes fatal.
 #
 # Trigger: any pre-push event. Fails non-zero -> push aborts.
 #
@@ -19,46 +17,72 @@ set -eu
 remote_name="$1"
 remote_url="$2"
 
-# Read stdin into an array — we have to consume it before deciding so git's
-# pipe doesn't break, but we ALSO need to forward it to a real push if we
-# allow it (we don't — we only validate, then exit 0 to let git proceed).
+# Read stdin into a buffer — we have to consume it before deciding so git's
+# pipe doesn't break.
 refs="$(cat)"
 
-# Anything pushing release-v0.1 (as the remote ref) must target EmiOS-Beta.
-pushing_release_v01=0
+# ---------- Rule 1: every push must target `origin` (EmiOS-Beta). ----------
+case "$remote_name" in
+    origin)
+        case "$remote_url" in
+            *EmiOS-Beta*|*emios-beta*) : ;; # OK
+            *)
+                echo ""                                                                  >&2
+                echo "BLOCKED: 'origin' does not look like the EmiOS-Beta repo."         >&2
+                echo "  remote: $remote_name"                                            >&2
+                echo "  url:    $remote_url"                                             >&2
+                echo ""                                                                  >&2
+                echo "Reset origin to EmiOS-Beta:"                                       >&2
+                echo "  git remote set-url origin <EmiOS-Beta URL>"                      >&2
+                echo ""                                                                  >&2
+                exit 1
+                ;;
+        esac
+        ;;
+    *)
+        echo ""                                                                          >&2
+        echo "BLOCKED: pushes are only allowed to remote 'origin' (EmiOS-Beta)."         >&2
+        echo "You targeted '$remote_name' ($remote_url)."                                >&2
+        echo ""                                                                          >&2
+        echo "If you really need to push to another remote, do it deliberately by"       >&2
+        echo "editing scripts/git-hooks/pre-push — and update CLAUDE.md to match."       >&2
+        echo ""                                                                          >&2
+        exit 1
+        ;;
+esac
+
+# ---------- Rule 2: only branch `main` may be pushed. ----------
+# Allow deletes (local_sha all zeros) so we can clean up stray branches that
+# already exist on the remote.
 while read -r local_ref local_sha remote_ref remote_sha; do
     [ -z "${remote_ref:-}" ] && continue
-    # Allow deletes — local_sha is all zeros when the ref is being removed.
     case "$local_sha" in
-        0000000000000000000000000000000000000000) continue ;;
+        0000000000000000000000000000000000000000) continue ;;  # delete is fine
     esac
     case "$remote_ref" in
-        */release-v0.1)
-            pushing_release_v01=1
+        refs/heads/main) : ;;  # OK
+        refs/heads/*)
+            stray="${remote_ref#refs/heads/}"
+            echo ""                                                                      >&2
+            echo "BLOCKED: refusing to push branch '$stray' to '$remote_name'."          >&2
+            echo ""                                                                      >&2
+            echo "Policy: there is only one branch — 'main'. See CLAUDE.md."             >&2
+            echo "If you have work on '$stray', merge or rebase it into main and push"   >&2
+            echo "main instead. Then delete '$stray' locally:"                           >&2
+            echo "  git checkout main && git merge $stray && git branch -d $stray"       >&2
+            echo ""                                                                      >&2
+            exit 1
+            ;;
+        refs/tags/*) : ;;  # tag pushes are fine
+        *)
+            echo ""                                                                      >&2
+            echo "BLOCKED: unrecognized ref '$remote_ref' — push aborted for safety."    >&2
+            echo ""                                                                      >&2
+            exit 1
             ;;
     esac
 done <<EOF
 $refs
 EOF
-
-if [ "$pushing_release_v01" -eq 1 ]; then
-    case "$remote_url" in
-        *EmiOS-Beta*|*emios-beta*)
-            : # OK, target is the Beta repo
-            ;;
-        *)
-            echo ""                                                                         >&2
-            echo "BLOCKED: push of release-v0.1 to remote '$remote_name' ($remote_url)"     >&2
-            echo ""                                                                         >&2
-            echo "release-v0.1 is the public Beta line and must only be pushed to the"      >&2
-            echo "EmiOS-Beta remote. The remote you targeted does not look like Beta."      >&2
-            echo ""                                                                         >&2
-            echo "If you really mean to push elsewhere, edit scripts/git-hooks/pre-push"    >&2
-            echo "or push from a non-release-v0.1 branch."                                  >&2
-            echo ""                                                                         >&2
-            exit 1
-            ;;
-    esac
-fi
 
 exit 0

@@ -2,17 +2,24 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Git remotes — read this before any push
+## Branching policy — READ THIS FIRST
 
-- `origin` → **EmiOS-Beta** (public Beta release line). This is where `release-v0.1` and any future release-vX.Y branches belong. Plain `git push` from those branches goes here.
-- `alpha-legacy` → **EmiOS-Alpha** (legacy private Alpha repo). Do not push release branches here.
+**There is one branch: `main`.** Every commit goes on `main`. Every push goes from `main` to `origin` (EmiOS-Beta).
 
-A `pre-push` hook at `scripts/git-hooks/pre-push` hard-blocks pushes of `release-v0.1` to anything that isn't EmiOS-Beta. If you see it fire, you targeted the wrong remote — read the message, do not edit the hook to bypass it.
+- DO NOT create `release-vX.Y`, `feature/*`, `bugfix/*`, or any other branch — even temporarily.
+- DO NOT switch to a non-main branch to "stage" work. Commit on main.
+- Worktrees created by Agent tools (`worktree-agent-*`) are the only acceptable non-main branches; they're auto-managed and don't get pushed.
+- If you find yourself on a non-main branch and didn't deliberately create a worktree, switch back to main before doing anything else.
 
-To enable the hook on a fresh clone (it's not active by default — `core.hooksPath` is local config):
+Remotes:
+- `origin` → EmiOS-Beta (public Beta repo). `git push` from main goes here.
+- `alpha-legacy` → EmiOS-Alpha (legacy private repo). Do not push to it.
+
+A `pre-push` hook at `scripts/git-hooks/pre-push` enforces both rules: (1) only `main` may be pushed; (2) `main` only goes to `origin`. To enable on a fresh clone:
 ```bash
 git config core.hooksPath scripts/git-hooks
 ```
+If the hook fires, you targeted the wrong remote or are on the wrong branch — read the message, don't edit the hook to bypass it.
 
 ## Development Environment
 
