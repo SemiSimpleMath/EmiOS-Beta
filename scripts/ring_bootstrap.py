@@ -54,6 +54,8 @@ async def _bootstrap() -> dict:
         sys.stderr.write("Empty password — aborting.\n")
         sys.exit(1)
 
+    from ring_doorbell import Requires2FAError
+
     captured: dict = {}
 
     def _on_token(token: dict) -> None:
@@ -61,39 +63,34 @@ async def _bootstrap() -> dict:
 
     auth = Auth(USER_AGENT, token_updater=_on_token)
 
-    def _otp_prompt() -> str:
-        return input("Enter the 2FA code Ring just sent (SMS/email): ").strip()
-
-    # ring-doorbell's Auth.fetch_token() raises Requires2FAError on the first
-    # call, then accepts the OTP on the second call. The library API for this
-    # has shifted across versions — we try the modern shape first and fall
-    # back to the older one-shot signature if needed.
+    # Step 1: send credentials WITHOUT an OTP. If Ring requires 2FA, this is
+    # the call that causes Ring to send the SMS/email — and it raises
+    # Requires2FAError. Only after that should we prompt the user.
     try:
+        token = await auth.async_fetch_token(username, password)
+    except Requires2FAError:
+        print()
+        print("Ring sent a 2FA code via SMS or email. Check your phone/inbox.")
+        otp = input("Enter the 2FA code: ").strip()
+        if not otp:
+            sys.stderr.write("Empty 2FA code — aborting.\n")
+            sys.exit(1)
         try:
-            await auth.async_fetch_token(username, password, _otp_prompt())
-        except TypeError:
-            # Older API shape: fetch_token takes only (user, password) and
-            # raises Requires2FAError carrying a continuation.
-            from ring_doorbell.auth import Requires2FAError
-            try:
-                await auth.async_fetch_token(username, password)
-            except Requires2FAError:
-                otp = _otp_prompt()
-                await auth.async_fetch_token(username, password, otp)
+            token = await auth.async_fetch_token(username, password, otp)
+        except Exception as exc:
+            sys.stderr.write(f"\n2FA verification failed: {exc}\n")
+            sys.exit(1)
     except Exception as exc:
         sys.stderr.write(f"\nLogin failed: {exc}\n")
         sys.exit(1)
 
-    if not captured:
-        # Some library versions don't fire token_updater on initial fetch.
-        # Pull the token directly off the auth object.
-        token = getattr(auth, "_token", None) or getattr(auth, "token", None)
-        if isinstance(token, dict):
-            captured.update(token)
+    # Prefer the token returned directly by fetch_token; fall back to whatever
+    # the token_updater captured.
+    if isinstance(token, dict) and token:
+        captured.update(token)
     if not captured:
         sys.stderr.write(
-            "Login appeared to succeed but no token was returned. "
-            "Check the ring-doorbell version installed.\n"
+            "Login appeared to succeed but no token was returned.\n"
         )
         sys.exit(1)
     return captured
