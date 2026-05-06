@@ -490,6 +490,115 @@ def serve_ring_snapshot(filename):
     return send_from_directory(str(snap_dir), filename, mimetype="image/jpeg")
 
 
+# --- Smart-home device aliases (read/write the `devices` array per integration) ---
+
+_SH_INTEGRATION_ID_FIELDS = {
+    "lights": "host",
+    "ring": "camera_id",
+    "nest": "device_id",
+}
+
+
+def _smart_home_config_path():
+    return get_configs_dir() / "smart_home_tools.json"
+
+
+def _load_smart_home_devices(integration: str) -> list:
+    """Read the devices array for one integration. Returns [] if absent."""
+    path = _smart_home_config_path()
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.error("smart_home_tools.json is invalid JSON: %s", e)
+        return []
+    section = payload.get(integration) if isinstance(payload, dict) else None
+    if not isinstance(section, dict):
+        return []
+    devices = section.get("devices")
+    return devices if isinstance(devices, list) else []
+
+
+def _save_smart_home_devices(integration: str, devices: list) -> None:
+    """Atomically replace the devices array for one integration. Other
+    integrations' sections are preserved."""
+    path = _smart_home_config_path()
+    if not path.exists():
+        raise FileNotFoundError(f"{path} not found.")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("smart_home_tools.json must be a JSON object.")
+    section = payload.get(integration)
+    if not isinstance(section, dict):
+        raise ValueError(f"Integration '{integration}' missing in smart_home_tools.json.")
+    section["devices"] = devices
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def _validate_devices_payload(integration: str, devices) -> list:
+    if not isinstance(devices, list):
+        raise ValueError("devices must be a list.")
+    id_field = _SH_INTEGRATION_ID_FIELDS.get(integration)
+    if id_field is None:
+        raise ValueError(f"Unknown integration: {integration}")
+    out = []
+    seen_aliases = set()
+    for d in devices:
+        if not isinstance(d, dict):
+            raise ValueError("each device must be a JSON object.")
+        alias = str(d.get("alias") or "").strip()
+        if not alias:
+            raise ValueError("each device requires a non-empty 'alias'.")
+        if alias.lower() in seen_aliases:
+            raise ValueError(f"duplicate alias: {alias}")
+        seen_aliases.add(alias.lower())
+        raw_id = str(d.get(id_field) or "").strip()
+        if not raw_id:
+            raise ValueError(f"each device requires a non-empty '{id_field}'.")
+        cleaned = {"alias": alias, id_field: raw_id}
+        notes = str(d.get("notes") or "").strip()
+        if notes:
+            cleaned["notes"] = notes
+        out.append(cleaned)
+    return out
+
+
+@preferences_bp.route('/api/integrations/<integration>/devices', methods=['GET'])
+def get_smart_home_devices(integration):
+    if integration not in _SH_INTEGRATION_ID_FIELDS:
+        return jsonify({"success": False, "error": f"Unknown integration: {integration}"}), 400
+    try:
+        devices = _load_smart_home_devices(integration)
+        return jsonify({
+            "success": True,
+            "integration": integration,
+            "id_field": _SH_INTEGRATION_ID_FIELDS[integration],
+            "devices": devices,
+        })
+    except Exception as e:
+        logger.error("get_smart_home_devices(%s) failed: %s", integration, e)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@preferences_bp.route('/api/integrations/<integration>/devices', methods=['PUT'])
+def put_smart_home_devices(integration):
+    if integration not in _SH_INTEGRATION_ID_FIELDS:
+        return jsonify({"success": False, "error": f"Unknown integration: {integration}"}), 400
+    try:
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            raise ValueError("Request body must be a JSON object.")
+        cleaned = _validate_devices_payload(integration, body.get("devices"))
+        _save_smart_home_devices(integration, cleaned)
+        return jsonify({"success": True, "integration": integration, "devices": cleaned})
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception as e:
+        logger.error("put_smart_home_devices(%s) failed: %s", integration, e)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 # --- lights_control tool description (editable from /settings/integrations/lights) ---
 
 def _lights_control_description_path():
