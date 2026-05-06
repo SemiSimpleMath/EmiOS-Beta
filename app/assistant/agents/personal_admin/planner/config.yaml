@@ -52,7 +52,6 @@ user_context_items:
   - task
   - information
   - recent_history
-  - tool_descriptions
   - resource_user_email
   - entity_card
   - referenced_pods_block
