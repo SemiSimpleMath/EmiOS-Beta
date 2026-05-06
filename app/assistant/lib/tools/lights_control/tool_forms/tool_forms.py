@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 
 class lights_control_args(BaseModel):
-    action: Literal[
+    command: Literal[
         "list_lights",
         "set_light_power",
         "set_light_brightness",

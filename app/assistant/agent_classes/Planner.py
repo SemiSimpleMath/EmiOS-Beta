@@ -255,15 +255,30 @@ class Planner(Agent):
 
         # Fast path: if the planner already produced arguments that validate
         # against the tool's Pydantic form, skip the LLM args agent entirely.
-        # Falls back to the args agent on any validation failure.
-        if self._planner_arguments_satisfy_tool_form(target_name=tool, arguments=arguments):
+        # action_input is typed as `str` in every planner's agent_form; the
+        # value the planner emits when calling a tool should be valid JSON
+        # whose keys match the tool's input schema. We parse first, then
+        # validate. Any failure (non-JSON, wrong shape, type mismatch) falls
+        # through to the args agent unchanged.
+        parsed_arguments = arguments
+        if isinstance(arguments, str):
+            stripped = arguments.strip()
+            if stripped.startswith("{") and stripped.endswith("}"):
+                try:
+                    candidate = json.loads(stripped)
+                except (ValueError, TypeError):
+                    candidate = None
+                if isinstance(candidate, dict):
+                    parsed_arguments = candidate
+
+        if self._planner_arguments_satisfy_tool_form(target_name=tool, arguments=parsed_arguments):
             logger.info(
                 "[%s] tool_args fast path: planner args validated against tool form, skipping args agent",
                 self.name,
             )
             return {
                 "target_name": str(tool).strip(),
-                "arguments": arguments if isinstance(arguments, dict) else {},
+                "arguments": parsed_arguments if isinstance(parsed_arguments, dict) else {},
             }
 
         # Slow path: invoke the shared args agent to normalize / fill in.
