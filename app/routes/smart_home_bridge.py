@@ -157,6 +157,40 @@ def _autoset_loopback_secrets() -> None:
 _autoset_loopback_secrets()
 
 
+def _resolve_smart_home_alias(integration: str, value: Any, id_field: str) -> Any:
+    """Resolve a configured device alias to its raw identifier.
+
+    `value` is whatever the planner passed (alias or already-raw id).
+    Looks up `configs/smart_home_tools.json[integration].devices[*]` for a
+    record whose ``alias`` matches ``value``; if found, returns
+    ``record[id_field]`` (e.g. ``host`` for lights, ``camera_id`` for ring,
+    ``device_id`` for nest).
+
+    If no alias matches OR no devices are configured, returns ``value``
+    unchanged — preserves "raw id passed by planner" backward-compat.
+    Case-insensitive on alias.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return value
+    target = value.strip().lower()
+    try:
+        cfg = _integration_cfg(integration)
+        devices = cfg.get("devices") if isinstance(cfg.get("devices"), list) else []
+    except Exception:
+        return value
+    for d in devices:
+        if not isinstance(d, dict):
+            continue
+        alias = str(d.get("alias") or "").strip()
+        if not alias:
+            continue
+        if alias.lower() == target:
+            resolved = d.get(id_field)
+            if isinstance(resolved, str) and resolved.strip():
+                return resolved.strip()
+    return value
+
+
 def _require_bridge_auth(integration: str) -> None:
     cfg = _integration_cfg(integration)
     token_env_var = str(cfg.get("token_env_var") or "").strip()
@@ -461,6 +495,15 @@ def _nest_dispatch(command: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     )
     access_token = creds.token
     command_norm = str(command or "").strip().lower()
+
+    # Alias resolution: planner may pass device_id as a configured alias
+    # ("Main Floor") instead of the raw Nest device id. Resolve once up front.
+    if isinstance(arguments.get("device_id"), str) and arguments["device_id"].strip():
+        resolved = _resolve_smart_home_alias("nest", arguments["device_id"], "device_id")
+        if resolved != arguments["device_id"]:
+            arguments = dict(arguments)
+            arguments["device_id"] = resolved
+
     if command_norm == "get_status":
         return _nest_get_status(access_token, arguments)
     if command_norm == "set_mode":
@@ -701,6 +744,20 @@ def _lights_dispatch(command: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     timeout_seconds = cfg["timeout_seconds"]
     light_id = str(arguments.get("light_id") or "").strip()
     room = str(arguments.get("room") or "").strip()
+
+    # Alias resolution: if `room` matches a configured device alias, narrow
+    # hosts to just that alias's host. Falls through to today's substring
+    # matching (against discovered Kasa device names) when no alias matches.
+    if room and not hosts_override:
+        resolved_host = _resolve_smart_home_alias("lights", room, "host")
+        if resolved_host and resolved_host != room:
+            hosts = [resolved_host]
+            # Drop `room` so the downstream substring filter doesn't also
+            # try to match it against the device's Kasa-reported alias —
+            # we've already pinned to the right host.
+            arguments = dict(arguments)
+            arguments.pop("room", None)
+            room = ""
 
     if command_norm == "list_lights":
         return _run_async(_kasa_list_lights(hosts=hosts, timeout_seconds=timeout_seconds))
@@ -995,22 +1052,24 @@ def _ring_dispatch(command: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     command_norm = str(command or "").strip().lower()
     if command_norm == "list_cameras":
         return _run_async(_ring_list_cameras())
+
+    # Alias resolution: planner may pass camera_id as a configured alias
+    # ("Front Door") instead of the raw Ring id. Resolve once up front.
+    camera_id_raw = str(arguments.get("camera_id") or "").strip()
+    camera_id = _resolve_smart_home_alias("ring", camera_id_raw, "camera_id") if camera_id_raw else camera_id_raw
+
     if command_norm == "get_snapshot":
-        camera_id = str(arguments.get("camera_id") or "").strip()
         return _run_async(_ring_get_snapshot(camera_id))
     if command_norm == "get_recent_events":
-        camera_id = str(arguments.get("camera_id") or "").strip()
         lookback_raw = arguments.get("lookback_minutes")
         lookback = _coerce_int(lookback_raw, "lookback_minutes") if lookback_raw is not None else 60
         return _run_async(_ring_get_recent_events(camera_id, lookback))
     if command_norm == "set_siren":
-        camera_id = str(arguments.get("camera_id") or "").strip()
         enabled = arguments.get("enabled")
         if not isinstance(enabled, bool):
             raise ValueError("set_siren requires boolean 'enabled'.")
         return _run_async(_ring_set_siren(camera_id, enabled))
     if command_norm == "set_light":
-        camera_id = str(arguments.get("camera_id") or "").strip()
         enabled = arguments.get("enabled")
         if not isinstance(enabled, bool):
             raise ValueError("set_light requires boolean 'enabled'.")
