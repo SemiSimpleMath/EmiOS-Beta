@@ -93,7 +93,7 @@ scope_contract:
       # Sunset
       - kg_team_manager
 tool_visibility:
-  always_show: [personal_admin_manager, devices_manager, web_manager, playwright_manager, taxonomy_team_manager, bash_manager, find_tool, install_tool, ask_user, pod_search, pod_fetch, ask_kg]
+  always_show: [personal_admin_manager, devices_manager, web_manager, playwright_manager, bash_manager, find_tool, install_tool, ask_user, pod_search, pod_fetch, ask_kg]
   use_narrower: true
   hidden_tools:
     # --- personal_admin_manager leaf tools (call the manager instead) ---
@@ -159,14 +159,13 @@ tool_visibility:
     # that handles disambiguation, multi-hop, and missing-info gracefully
     # — emi_team's single KG Q&A surface. The deterministic primitives
     # (kg_find_node, kg_describe_node, kg_query, kg_find_edge,
-    # kg_describe_edge, taxonomy_path_finder) are leaf tools used by the
-    # internal kg_query_manager planner and don't surface here.
+    # kg_describe_edge) are leaf tools used by the internal
+    # kg_query_manager planner and don't surface here.
     - kg_find_node
     - kg_describe_node
     - kg_query
     - kg_find_edge
     - kg_describe_edge
-    - taxonomy_path_finder
 
     # --- KG mutators are blocked via scope_contract.tools.blocked_tools.
     # Hiding them here too keeps them out of the planner prompt.
@@ -189,13 +188,6 @@ tool_visibility:
     - kg_investigation_manager
     - kg_team_manager  # sunset
 
-    # --- taxonomy_team_manager leaf tools (call the manager instead) ---
-    - taxonomy_merge_categories
-    - taxonomy_rename_category
-    - taxonomy_move_category
-    - taxonomy_update_description
-    - taxonomy_create_category
-
     # --- Specialist sub-managers not needed at emi_team top-level ---
     - kg_query_manager
     - kg_explorer_manager
@@ -208,12 +200,9 @@ tool_visibility:
     - read_text_file
     - write_text_file
     - append_text_file
-    - write_task_outputs
-    - write_declared_task_outputs
     - read_tool_result
     - capture_and_describe_monitors
     - capture_monitor_screenshot
-    - move_foreground_window
     - set_screen_capture_enabled
     - set_ui_mute
     - link_children_to_parent

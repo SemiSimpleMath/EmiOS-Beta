@@ -109,7 +109,6 @@ def create_app(config_class="config.DevelopmentConfig"):
         daily_summary_route_bp,
         entity_cards_editor_bp,
         kg_visualizer_bp,
-        taxonomy_viewer_bp,
         google_oauth_bp,
         health_check_bp,
         debug_status_bp,
@@ -207,11 +206,9 @@ def create_app(config_class="config.DevelopmentConfig"):
     from app.routes.progress import progress_bp
     app.register_blueprint(progress_bp)
     
-    # KG/Taxonomy/Graph Visualizer routes
+    # KG/Graph Visualizer routes
     if kg_visualizer_bp is not None:
         app.register_blueprint(kg_visualizer_bp)
-    if taxonomy_viewer_bp is not None:
-        app.register_blueprint(taxonomy_viewer_bp)
 
     # /me — clean-room rewrite of the visualizer.
     from app.routes.me import me_bp

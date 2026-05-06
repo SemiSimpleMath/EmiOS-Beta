@@ -37,7 +37,7 @@ control_nodes:
     class: GracefulExitControlNode
 
 tools:
-  allowed_tools: [kg_find_node, kg_find_edge, kg_describe_node, kg_describe_edge, ask_kg, ask_user, kg_update_node, kg_create_node, kg_create_edge, kg_delete_node, kg_delete_edge, taxonomy_path_finder]
+  allowed_tools: [kg_find_node, kg_find_edge, kg_describe_node, kg_describe_edge, ask_kg, ask_user, kg_update_node, kg_create_node, kg_create_edge, kg_delete_node, kg_delete_edge]
   except_tools: []
 scope_contract:
   tools:
@@ -53,7 +53,6 @@ scope_contract:
       - kg_create_edge
       - kg_delete_node
       - kg_delete_edge
-      - taxonomy_path_finder
     blocked_tools:
       - install_tool
       - find_tool

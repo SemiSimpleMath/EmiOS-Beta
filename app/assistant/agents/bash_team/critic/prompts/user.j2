@@ -8,11 +8,6 @@ Information:
 {{ information }}
 {% endif %}
 
-Available tools:
-{% for tool_name, tool_description in tool_descriptions.items() %}
-- {{ tool_name }}: {{ tool_description }}
-{% endfor %}
-
 Available agents:
 {% for agent in allowed_nodes %}
 - {{ agent.name }}: {{ agent.description }}

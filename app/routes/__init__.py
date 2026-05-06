@@ -29,13 +29,11 @@ from .entity_card_maintenance import entity_card_maintenance_bp
 from .smart_home_bridge import smart_home_bridge_bp
 from .insights import insights_bp
 
-# KG/Taxonomy/Graph Visualizer routes
+# KG/Graph Visualizer routes
 try:
     from .kg_visualizer import kg_visualizer_bp
-    from .taxonomy_viewer import taxonomy_viewer_bp
 except ImportError as e:
     kg_visualizer_bp = None
-    taxonomy_viewer_bp = None
 
 # /me — the lens (clean-room rewrite of the visualizer).
 from .me import me_bp

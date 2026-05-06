@@ -1,0 +1,51 @@
+{
+  "name": "task_compile_manager",
+  "description": "Compile a natural-language task request into workflow IR (`task_ir_v1`). Use this when the user explicitly asks to compile/convert/create a task workflow or spec output, NOT when they want to execute a task immediately.",
+  "inputs": [
+    {
+      "name": "task",
+      "type": "string",
+      "required": true,
+      "description": "Task text to compile into workflow IR."
+    },
+    {
+      "name": "information",
+      "type": "string",
+      "required": true,
+      "description": "Optional supporting context and constraints."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload — compiled task spec / IR."
+    }
+  ],
+  "arguments_prompt": "Arguments to task_compile_manager are:\n- task: required task text to compile.\n- information: optional supporting context and constraints.",
+  "metadata": {
+    "category": "orchestration",
+    "verbs": [
+      "compile",
+      "create"
+    ],
+    "entities": [
+      "task_spec",
+      "workflow"
+    ],
+    "risk_level": "low",
+    "side_effects": "write",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "medium",
+    "latency_class": "slow",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

@@ -133,14 +133,6 @@ tool_visibility:
     - kg_create_edge
     - kg_delete_node
     - kg_delete_edge
-    - taxonomy_path_finder
-
-    # --- taxonomy_team_manager leaf tools (call the manager instead) ---
-    - taxonomy_merge_categories
-    - taxonomy_rename_category
-    - taxonomy_move_category
-    - taxonomy_update_description
-    - taxonomy_create_category
 
     # --- Specialist sub-managers not needed for entertainment ---
     - personal_admin_manager
@@ -156,12 +148,9 @@ tool_visibility:
     - read_text_file
     - write_text_file
     - append_text_file
-    - write_task_outputs
-    - write_declared_task_outputs
     - read_tool_result
     - capture_and_describe_monitors
     - capture_monitor_screenshot
-    - move_foreground_window
     - set_screen_capture_enabled
     - set_ui_mute
     - link_children_to_parent

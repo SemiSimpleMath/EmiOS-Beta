@@ -34,7 +34,7 @@ _MANAGER_CAPABILITIES = {
 _SKIP_TOOLS = frozenset({
     "find_tool", "install_tool", "run_task",
     "task_compile_manager", "create_dayflow_ticket", "one_shot_tool_runner",
-    "set_ui_mute", "set_screen_capture_enabled", "move_foreground_window",
+    "set_ui_mute", "set_screen_capture_enabled",
 })
 
 

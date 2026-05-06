@@ -1,16 +1,10 @@
 """
-Taxonomy Classification System
+Taxonomy data layer (read-only at runtime).
 
-This package contains all taxonomy-related functionality for the Knowledge Graph:
-- Database models (Taxonomy, NodeTaxonomyLink, review queues)
-- TaxonomyManager for database operations
-- TaxonomyOrchestrator for classification logic
-- Classification pipeline for batch processing
-- Web reviewer for human approval
-
-Usage:
-    from app.assistant.kg_core.taxonomy import TaxonomyManager, TaxonomyOrchestrator
-    from app.assistant.kg_core.taxonomy.models import Taxonomy, NodeTaxonomyLink
+The classification pipeline, the agentic editing surface, and the reviewer
+web app were archived on 2026-05-06 to _archived/taxonomy_2026_05_06/.
+What remains is the data layer: SQLAlchemy models + read accessors used by
+the live `taxonomy_paths` KG-query filter.
 """
 
 from .models import (
@@ -21,7 +15,6 @@ from .models import (
     NodeTaxonomyReviewQueue
 )
 from .manager import TaxonomyManager
-from .orchestrator import TaxonomyOrchestrator
 
 __all__ = [
     'Taxonomy',
@@ -30,6 +23,5 @@ __all__ = [
     'TaxonomySuggestions',
     'NodeTaxonomyReviewQueue',
     'TaxonomyManager',
-    'TaxonomyOrchestrator'
 ]
 

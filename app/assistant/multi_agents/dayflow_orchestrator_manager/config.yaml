@@ -101,7 +101,6 @@ tools:
     # --- Exotic system-control tools owned by dayflow orchestrator ---
     - set_ui_mute
     - set_screen_capture_enabled
-    - move_foreground_window
 
     # --- KG context lookup ---
     - ask_kg

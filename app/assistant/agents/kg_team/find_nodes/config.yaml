@@ -7,7 +7,7 @@ llm_params:
   temperature: .1
   
 
-allowed_tools: [taxonomy_path_finder]
+allowed_tools: []
 allowed_nodes: [return_control]
 
 user_context_items:

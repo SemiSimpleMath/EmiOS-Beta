@@ -37,7 +37,7 @@ def _category(name: str) -> str:
         return "todo"
     if "scheduler" in name or "event_tree" in name:
         return "scheduler"
-    if "text_file" in name or "write_task_outputs" in name:
+    if "text_file" in name:
         return "files"
     if name.endswith("_manager") or name in {"run_compiled_task", "run_job_spec", "run_routine", "one_shot_tool_runner"}:
         return "orchestration"

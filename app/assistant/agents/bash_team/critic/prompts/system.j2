@@ -23,6 +23,11 @@ Rules:
 - Be concise, concrete, and mechanical when forcing a revision.
 - When the planned command looks fine and the context is clean, return `must_revise_plan: false` with a short "ok" diagnosis.
 
+Available tools:
+{% for tool_name, tool_description in tool_descriptions.items() %}
+- {{ tool_name }}: {{ tool_description }}
+{% endfor %}
+
 Output fields (JSON):
 - must_revise_plan: bool
 - critic_diagnosis_tags: list[str]   (e.g. "injection_suspected", "exfiltration_pattern", "reason_mismatch", "wrong_tool", "ok")

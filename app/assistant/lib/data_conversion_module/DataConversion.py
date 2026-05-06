@@ -249,7 +249,6 @@ class DataConversionModule:
             "final_answer": DataConversionModule._convert_final_answer,
             "node_description": DataConversionModule._convert_node_description,
             "search_web": DataConversionModule._convert_search_web,
-            "taxonomy_paths": DataConversionModule._convert_taxonomy_paths,
             "web_page_coords": DataConversionModule._convert_web_page_coords,
             "web_spatial_snapshot": DataConversionModule._convert_web_spatial_snapshot,
             "web_visual_scout": DataConversionModule._convert_web_visual_scout,
@@ -1328,28 +1327,6 @@ class DataConversionModule:
             
             return {"node_description": "\n".join(minimal_lines)}
         return {}
-
-    @staticmethod
-    def _convert_taxonomy_paths(tool_result: ToolResult, level: str) -> Dict:
-        """
-        Convert taxonomy path finder results into a readable format.
-        The content is now just a list of paths directly.
-        """
-        try:
-            # Parse the JSON content (which is now just a list of paths)
-            import json
-            relevant_paths = json.loads(tool_result.content)
-            
-            result = {
-                "tool_type": "taxonomy_path_finder",
-                "relevant_paths": relevant_paths
-            }
-            
-            return result
-            
-        except Exception as e:
-            return {"error": f"Failed to parse taxonomy paths result: {str(e)}"}
-
 
 # ------------------------- Testing -------------------------
 if __name__ == "__main__":

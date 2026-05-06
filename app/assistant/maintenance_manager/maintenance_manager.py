@@ -303,54 +303,6 @@ class MaintenanceManager:
                 kg_utils.close_session()
             self.kg_processing_running = False
 
-    def run_taxonomy_processing(self):
-        """
-        Process unclassified nodes through the taxonomy pipeline.
-        This classifies nodes into the taxonomy hierarchy during idle time.
-        Runs in a separate thread to avoid blocking other maintenance tasks.
-        """
-        # Check if a taxonomy processing thread is already running
-        if getattr(self, 'taxonomy_processing_running', False):
-            logger.debug("⏸️ Taxonomy processing already running in background - skipping")
-            return
-
-        # Mark as running and spawn thread
-        self.taxonomy_processing_running = True
-        start_monitored_thread(
-            owner="maintenance_manager",
-            name="maintenance-taxonomy-processing",
-            target=self._taxonomy_processing_worker,
-            daemon=True,
-            kind="background_worker",
-            metadata={"component": "maintenance_manager", "worker": "taxonomy_processing"},
-        )
-        logger.info("🏷️ Started taxonomy processing in background thread")
-
-    def _taxonomy_processing_worker(self):
-        """Background worker for taxonomy processing"""
-        try:
-            logger.info("🏷️ Starting taxonomy processing...")
-
-            # Import the taxonomy pipeline function
-            from app.assistant.kg_core.taxonomy.taxonomy_pipeline import process_unclassified_nodes_batch
-
-            # Process a batch of unclassified nodes
-            # Using a smaller batch size for idle processing to avoid overwhelming the system
-            result = process_unclassified_nodes_batch(
-                batch_size=50,  # Smaller batch for idle processing
-                node_type=None  # Process all node types
-            )
-
-            if result.get('nodes_processed', 0) > 0:
-                logger.info(f"✅ Taxonomy processing completed: {result}")
-            else:
-                logger.info("📭 No unclassified nodes found for taxonomy processing")
-
-        except Exception as e:
-            logger.error(f"❌ Error in taxonomy processing: {e}")
-        finally:
-            self.taxonomy_processing_running = False
-
     def run_location_tracking(self):
         """
         Build/refresh the location timeline based on calendar events.
