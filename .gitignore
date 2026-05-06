@@ -203,6 +203,9 @@ data/playwright_profile/
 data/kg_projection/
 # EmiCode runtime state — Claude Code session_ids per room context.
 data/emi_code/
+# Ring camera credentials + snapshots — never commit these
+data/ring_token.json
+data/ring_snapshots/
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PERSONAL DATA — nothing below this line should ever be in a public repo

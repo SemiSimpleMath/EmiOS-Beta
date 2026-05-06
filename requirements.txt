@@ -98,3 +98,8 @@ python-frontmatter>=1.1.0
 # After installing the python lib, also run:
 #   .venv/Scripts/python.exe -m playwright install chromium
 playwright>=1.59.0
+
+# Ring camera integration. Used by app/routes/smart_home_bridge.py for the
+# /api/smart-home/ring endpoint. Auth is bootstrapped once via
+# scripts/ring_bootstrap.py — no plain API key, OAuth+2FA.
+ring-doorbell>=0.9.0

@@ -708,6 +708,220 @@ def _lights_dispatch(action: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     raise ValueError(f"Unsupported lights action '{action_norm}'.")
 
 
+# ---------------------------------------------------------------------------
+# Ring camera integration
+# ---------------------------------------------------------------------------
+#
+# Auth: Ring uses an OAuth-style flow with 2FA. There is no plain "API key."
+# We bootstrap once via scripts/ring_bootstrap.py (interactive: username +
+# password + SMS/email OTP) which writes a token JSON to data/ring_token.json.
+# Thereafter ring-doorbell refreshes the access token on its own; the
+# token_updater callback below persists the rotated token back to the file.
+
+_RING_TOKEN_FILENAME = "ring_token.json"
+_RING_SNAPSHOTS_DIRNAME = "ring_snapshots"
+_RING_USER_AGENT = "EmiOS/1.0"
+
+
+def _ring_data_dir() -> Any:
+    from pathlib import Path
+    # Mirrors path_utils convention: data/ at repo root.
+    repo_root = Path(__file__).resolve().parents[2]
+    return repo_root / "data"
+
+
+def _ring_token_path() -> Any:
+    return _ring_data_dir() / _RING_TOKEN_FILENAME
+
+
+def _ring_snapshots_dir() -> Any:
+    d = _ring_data_dir() / _RING_SNAPSHOTS_DIRNAME
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _ring_load_token() -> Dict[str, Any]:
+    import json as _json
+    path = _ring_token_path()
+    if not path.exists():
+        raise RuntimeError(
+            f"Ring token not found at {path}. Run "
+            "`.venv/Scripts/python.exe scripts/ring_bootstrap.py` to authenticate."
+        )
+    try:
+        return _json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise RuntimeError(f"Ring token at {path} is not valid JSON: {exc}") from exc
+
+
+def _ring_save_token(token: Dict[str, Any]) -> None:
+    """Persist a rotated token back to disk. Called by ring-doorbell on refresh."""
+    import json as _json
+    path = _ring_token_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_json.dumps(token, indent=2, sort_keys=True), encoding="utf-8")
+
+
+async def _ring_load_ring() -> Any:
+    """Build and return a populated Ring instance, or raise with a clean error."""
+    try:
+        from ring_doorbell import Auth, Ring
+    except ImportError as exc:
+        raise RuntimeError(
+            "ring-doorbell package is not installed. Run "
+            "`.venv/Scripts/pip install ring-doorbell` (or `pip install -r requirements.txt`)."
+        ) from exc
+
+    token = _ring_load_token()
+    auth = Auth(_RING_USER_AGENT, token=token, token_updater=_ring_save_token)
+    ring = Ring(auth)
+    await ring.async_create_session()
+    await ring.async_update_devices()
+    return ring
+
+
+def _ring_all_cameras(ring: Any) -> List[Any]:
+    """Return all camera-like devices: doorbells + stickup cams + floodlights."""
+    devices = ring.devices()
+    cams: List[Any] = []
+    for key in ("doorbots", "authorized_doorbots", "stickup_cams"):
+        cams.extend(devices.get(key, []) or [])
+    return cams
+
+
+def _ring_find_camera(ring: Any, camera_id: str) -> Any:
+    target = str(camera_id).strip()
+    if not target:
+        raise ValueError("camera_id is required.")
+    for cam in _ring_all_cameras(ring):
+        if str(getattr(cam, "id", "")) == target or str(getattr(cam, "device_id", "")) == target:
+            return cam
+    raise RuntimeError(f"No Ring camera found with id '{target}'.")
+
+
+def _ring_camera_summary(cam: Any) -> Dict[str, Any]:
+    return {
+        "id": str(getattr(cam, "id", "")),
+        "device_id": str(getattr(cam, "device_id", "")),
+        "name": str(getattr(cam, "name", "") or ""),
+        "kind": str(getattr(cam, "kind", "") or getattr(cam, "family", "") or ""),
+        "model": str(getattr(cam, "model", "") or ""),
+        "battery_life": getattr(cam, "battery_life", None),
+        "has_siren": bool(getattr(cam, "has_capability", lambda *_: False)("siren")),
+        "has_light": bool(getattr(cam, "has_capability", lambda *_: False)("light")),
+    }
+
+
+async def _ring_list_cameras() -> Dict[str, Any]:
+    ring = await _ring_load_ring()
+    cams = _ring_all_cameras(ring)
+    return {"count": len(cams), "cameras": [_ring_camera_summary(c) for c in cams]}
+
+
+async def _ring_get_snapshot(camera_id: str) -> Dict[str, Any]:
+    from datetime import datetime, timezone
+    ring = await _ring_load_ring()
+    cam = _ring_find_camera(ring, camera_id)
+    snapshot_bytes = await cam.async_get_snapshot()
+    if not isinstance(snapshot_bytes, (bytes, bytearray)) or not snapshot_bytes:
+        raise RuntimeError("Ring returned an empty snapshot.")
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    safe_id = "".join(c for c in str(camera_id) if c.isalnum() or c in "-_")[:32]
+    fname = f"{ts}_{safe_id}.jpg"
+    out_path = _ring_snapshots_dir() / fname
+    out_path.write_bytes(bytes(snapshot_bytes))
+    return {
+        "camera_id": str(camera_id),
+        "snapshot_path": str(out_path),
+        "size_bytes": len(snapshot_bytes),
+        "captured_at": ts,
+    }
+
+
+async def _ring_get_recent_events(
+    camera_id: str, lookback_minutes: int
+) -> Dict[str, Any]:
+    from datetime import datetime, timedelta, timezone
+    ring = await _ring_load_ring()
+    cam = _ring_find_camera(ring, camera_id)
+    older_than = None  # async_history: paging cursor; not used for first page
+    history = await cam.async_history(limit=50, older_than=older_than)
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=int(lookback_minutes))
+    out: List[Dict[str, Any]] = []
+    for ev in history or []:
+        # ring-doorbell returns either dicts or objects depending on version.
+        created = ev.get("created_at") if isinstance(ev, dict) else getattr(ev, "created_at", None)
+        if created is None:
+            continue
+        if hasattr(created, "tzinfo") and created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        if hasattr(created, "timestamp") and created < cutoff:
+            continue
+        out.append(
+            {
+                "id": str(ev.get("id") if isinstance(ev, dict) else getattr(ev, "id", "")),
+                "kind": str(ev.get("kind") if isinstance(ev, dict) else getattr(ev, "kind", "")),
+                "created_at": str(created),
+                "answered": bool(
+                    ev.get("answered") if isinstance(ev, dict) else getattr(ev, "answered", False)
+                ),
+            }
+        )
+    return {"camera_id": str(camera_id), "lookback_minutes": int(lookback_minutes), "count": len(out), "events": out}
+
+
+async def _ring_set_siren(camera_id: str, enabled: bool) -> Dict[str, Any]:
+    ring = await _ring_load_ring()
+    cam = _ring_find_camera(ring, camera_id)
+    if not getattr(cam, "has_capability", lambda *_: False)("siren"):
+        raise RuntimeError(f"Camera {camera_id} does not support siren.")
+    # ring-doorbell exposes either async_set_siren or siren property setter.
+    if hasattr(cam, "async_set_siren"):
+        await cam.async_set_siren(1 if enabled else 0)
+    else:
+        cam.siren = 1 if enabled else 0
+    return {"camera_id": str(camera_id), "siren": bool(enabled)}
+
+
+async def _ring_set_light(camera_id: str, enabled: bool) -> Dict[str, Any]:
+    ring = await _ring_load_ring()
+    cam = _ring_find_camera(ring, camera_id)
+    if not getattr(cam, "has_capability", lambda *_: False)("light"):
+        raise RuntimeError(f"Camera {camera_id} does not support light.")
+    if hasattr(cam, "async_set_lights"):
+        await cam.async_set_lights("on" if enabled else "off")
+    else:
+        cam.lights = "on" if enabled else "off"
+    return {"camera_id": str(camera_id), "light": bool(enabled)}
+
+
+def _ring_dispatch(action: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    action_norm = str(action or "").strip().lower()
+    if action_norm == "list_cameras":
+        return _run_async(_ring_list_cameras())
+    if action_norm == "get_snapshot":
+        camera_id = str(arguments.get("camera_id") or "").strip()
+        return _run_async(_ring_get_snapshot(camera_id))
+    if action_norm == "get_recent_events":
+        camera_id = str(arguments.get("camera_id") or "").strip()
+        lookback_raw = arguments.get("lookback_minutes")
+        lookback = _coerce_int(lookback_raw, "lookback_minutes") if lookback_raw is not None else 60
+        return _run_async(_ring_get_recent_events(camera_id, lookback))
+    if action_norm == "set_siren":
+        camera_id = str(arguments.get("camera_id") or "").strip()
+        enabled = arguments.get("enabled")
+        if not isinstance(enabled, bool):
+            raise ValueError("set_siren requires boolean 'enabled'.")
+        return _run_async(_ring_set_siren(camera_id, enabled))
+    if action_norm == "set_light":
+        camera_id = str(arguments.get("camera_id") or "").strip()
+        enabled = arguments.get("enabled")
+        if not isinstance(enabled, bool):
+            raise ValueError("set_light requires boolean 'enabled'.")
+        return _run_async(_ring_set_light(camera_id, enabled))
+    raise ValueError(f"Unsupported ring action '{action_norm}'.")
+
+
 @smart_home_bridge_bp.route("/api/smart-home/nest", methods=["POST"])
 def smart_home_nest():
     try:
@@ -750,7 +964,15 @@ def smart_home_lights():
 def smart_home_ring():
     try:
         _require_bridge_auth("ring")
-        raise RuntimeError("Ring bridge is not implemented yet inside Emi.")
+        payload = _extract_payload()
+        action = str(payload.get("action") or "").strip()
+        arguments = payload.get("arguments")
+        if arguments is None:
+            arguments = {}
+        if not isinstance(arguments, dict):
+            raise ValueError("arguments must be a JSON object when provided.")
+        result = _ring_dispatch(action, arguments)
+        return jsonify({"ok": True, "integration": "ring", "action": action, "result": result})
     except Exception as e:
         logger.error("smart_home_ring failed: %s", e)
         logger.debug("smart_home_ring exception details", exc_info=True)
