@@ -28,14 +28,28 @@ Agents:
 {% endif %}
 
 Action is the tool or agent name.
-Action Input is your best guess; a tool-arguments agent will refine it.
+
+Action Input format depends on what `action` resolves to:
+
+- **Tool call** (action is a tool name): `action_input` MUST be a JSON object
+  emitted as a string, with keys exactly matching the tool's `Contract.Inputs`
+  field names. Include every required field; omit optional fields you are
+  not setting.
+  Example for a tool with Inputs `query: string required, max_results: integer`:
+    `action_input`: `{"query": "Thomas Jefferson birthplace", "max_results": 5}`
+
+- **Agent call** (action is an agent name): `action_input` is plain prose —
+  a precise task description for the sub-agent.
+
+- **return_control**: `action_input` may be empty or a one-sentence summary
+  of the final state.
 
 ## Output fields
 - what_i_am_thinking: reasoning plus plan before actions
 - checklist: DONE / IN PROGRESS / ABANDONED
 - progress: append-only major milestones (usually blank)
-- action: tool or agent to call
-- action_input: input for that action
+- action: tool or agent to call, or return_control
+- action_input: For tool calls, a JSON object emitted as a string whose keys match the tool's Contract.Inputs. For agent calls, prose. For return_control, empty or one-sentence summary.
 
 When solved (or best possible), set action = return_control.
 
