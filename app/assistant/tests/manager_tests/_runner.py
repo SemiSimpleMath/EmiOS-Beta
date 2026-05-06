@@ -33,7 +33,11 @@ import app.assistant.tests.test_setup  # noqa: F401  — bootstraps DI
 
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.pydantic_classes import Message, ScopeContext
+from app.assistant.utils.pydantic_classes import (
+    Message,
+    ScopeApprovalPolicy,
+    ScopeContext,
+)
 
 logger = get_logger(__name__)
 
@@ -87,6 +91,7 @@ def run_manager_test(
     actor_id: str = "manager_test",
     owner_id: str = "jukka",
     surface: str = "test",
+    authority_level: int = 100,
     print_result: bool = True,
 ) -> object:
     """Bootstrap, create a manager, run one task, print + return the result.
@@ -94,6 +99,11 @@ def run_manager_test(
     Returns whatever ``manager.request_handler(message)`` returns (typically
     a ToolResult). Also prints fast-path hit count vs args-agent run count
     so a test can see at a glance whether the JSON-args path is firing.
+
+    ``authority_level`` defaults to 100 (admin bypass) so write-tools like
+    ``send_email`` and ``create_calendar_event`` skip the ApprovalGateway
+    in tests — gateway requires a live room session that this isolated
+    runner can't provide. Lower it to test approval-flow behavior.
     """
     print(f"\n{'='*60}")
     print(f"Manager test: {manager_type}")
@@ -125,6 +135,7 @@ def run_manager_test(
             owner_id=owner_id,
             actor_id=actor_id,
             surface=surface,
+            approval=ScopeApprovalPolicy(authority_level=authority_level),
         ),
         data={"visible_tools": visible_tools or []},
     )
@@ -156,6 +167,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--actor-id", default="manager_test")
     parser.add_argument("--owner-id", default="jukka")
     parser.add_argument("--surface", default="test")
+    parser.add_argument(
+        "--authority-level", type=int, default=100,
+        help="ScopeContext.approval.authority_level. Default 100 (admin bypass — "
+             "write-tools skip the ApprovalGateway). Lower to test approval flow.",
+    )
     return parser.parse_args()
 
 
@@ -170,6 +186,7 @@ def main() -> None:
         actor_id=args.actor_id,
         owner_id=args.owner_id,
         surface=args.surface,
+        authority_level=args.authority_level,
     )
 
 
