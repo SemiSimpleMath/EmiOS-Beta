@@ -170,6 +170,7 @@ def _find_previous_bedroom_frame(current: Path) -> Optional[Path]:
 
 
 def _sleep_sidecar_text(data: Dict[str, Any], ai: Dict[str, Any]) -> str:
+    description = str(data.get("description") or "").strip()
     notes = str(data.get("notes") or "").strip()
     awake = data.get("awake_indicators") or []
     awake_str = (
@@ -184,7 +185,12 @@ def _sleep_sidecar_text(data: Dict[str, Any], ai: Dict[str, Any]) -> str:
     importance_reason = str(data.get("importance_reason") or "").strip()
 
     lines = [
-        notes if notes else "(no notes)",
+        description if description else "(no description)",
+    ]
+    if notes:
+        lines.append("")
+        lines.append(f"notes: {notes}")
+    lines += [
         "",
         f"camera_id: {ai.get('camera_id', '')}",
         f"captured_at_utc: {ai.get('captured_at_utc', '')}",
@@ -195,6 +201,7 @@ def _sleep_sidecar_text(data: Dict[str, Any], ai: Dict[str, Any]) -> str:
         f"position: {str(data.get('position') or 'unclear').strip()}",
         f"motion_vs_previous: {str(data.get('motion_vs_previous') or 'unclear').strip()}",
         f"light_state: {str(data.get('light_state') or 'unclear').strip()}",
+        f"cpap_state: {str(data.get('cpap_state') or 'unclear').strip()}",
         f"awake_indicators: {awake_str}",
         f"importance: {importance}",
     ]

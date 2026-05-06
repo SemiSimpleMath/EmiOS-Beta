@@ -14,6 +14,13 @@ observations into a sleep-quality report.
 
 For the CURRENT frame:
 
+0. **description** — 1-3 sentences of plain prose describing what you see
+   in the CURRENT frame (subject, posture, room light, anything notable)
+   PLUS a one-clause comparison to the previous frame when available
+   (e.g. "unchanged from prior frame" or "rolled from side-left to supine").
+   Always required — never blank. This is the human-readable summary at
+   the top of the sidecar.
+
 1. **subject_in_bed** — Is a person visible in the bed?
    - True even if only a covered shape is visible.
    - False if the bed is empty, or the person is sitting up beside the bed,
@@ -29,6 +36,17 @@ For the CURRENT frame:
    - `unclear`     — covered, dark, ambiguous
 
 3. **light_state** — `dark`, `dim`, `lit`, `unclear`.
+
+3b. **cpap_state** — The user uses a CPAP machine for sleep apnea. In each
+   frame where a person is in bed, judge whether the CPAP mask is being
+   worn. The mask covers the nose and/or mouth and has a tube running off
+   to the side of the bed. Pick one:
+   - `worn`         mask + tubing visible on the face
+   - `off`          subject in bed but CPAP clearly not on (face uncovered,
+                    no mask visible) — IMPORTANT to flag, see importance below
+   - `not_visible`  subject too covered or face out of frame to tell
+   - `no_subject`   no person in bed (N/A)
+   - `unclear`      too dark / blurry to call
 
 4. **awake_indicators** — List of visible signs of wakefulness:
    - "eyes open"
@@ -56,20 +74,31 @@ For the COMPARISON between the previous and current frames:
 
 7. **importance** — Integer 0-10 indicating "how worth reviewing is this
    frame when scanning a whole night?" Use this scale:
-   - **0-2 (boring)**     dark, still, in bed, no awake indicators. Most
-                          frames during a normal night should land here.
+   - **0-2 (boring)**     dark, still, in bed, no awake indicators, CPAP
+                          worn. Most frames during a normal night should
+                          land here.
    - **3-5 (mild)**       minimal motion, slight position change, dim light
                           flicker. Useful as context but not a highlight.
    - **6-7 (notable)**    clear awake indicators (eyes open, phone on),
                           moderate motion (rolled over decisively, sitting
-                          up briefly), light state change (lamp on/off).
+                          up briefly), light state change (lamp on/off),
+                          OR `cpap_state == off` while subject is in bed,
+                          OR clear restless-sleep signals (frequent
+                          repositioning visible in this frame compared to
+                          the previous one).
    - **8-10 (urgent)**    out of bed, intrusion, lights on at an odd hour,
                           unfamiliar person/animal in frame, knocked-over
                           object, anything that should jump out at a
-                          morning review.
+                          morning review. Sustained `cpap_state == off`
+                          stays in 6-7 unless paired with another concern.
 
    Bias toward the LOWER end. If half the night scores 5+, the score is
    useless. Reserve 6+ for genuinely notable frames.
+
+   **Always call out in `description`**: CPAP off, restless sleep,
+   turning over / repositioning between frames. These are the user's
+   primary concerns — even a low-importance frame should mention them
+   in prose if visible.
 
 8. **importance_reason** — One short clause (3-10 words) explaining the
    importance score when it is >= 3. Empty string when 0-2.

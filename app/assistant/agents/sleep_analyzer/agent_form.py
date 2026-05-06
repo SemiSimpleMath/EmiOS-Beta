@@ -12,6 +12,16 @@ class AgentForm(BaseModel):
     sleep-quality reports.
     """
 
+    description: str = Field(
+        ...,
+        description=(
+            "1-3 sentence prose description of the CURRENT frame, including "
+            "what is visible (subject, posture, room light, anything notable) "
+            "AND a one-clause comparison to the previous frame when available "
+            "(e.g. 'unchanged from prior frame' or 'rolled from side-left to "
+            "supine'). Always required — never empty."
+        ),
+    )
     subject_in_bed: bool = Field(
         ...,
         description="True if a person is visibly in the bed (in the CURRENT frame).",
@@ -33,6 +43,18 @@ class AgentForm(BaseModel):
     light_state: str = Field(
         ...,
         description="Current frame: dark, dim, lit, unclear.",
+    )
+    cpap_state: str = Field(
+        ...,
+        description=(
+            "User's CPAP mask state in the CURRENT frame. One of: "
+            "worn (mask + tubing visible on face), "
+            "off (subject in bed but CPAP clearly not on — face uncovered, "
+            "no mask visible), "
+            "not_visible (subject too covered / face out of frame to tell), "
+            "no_subject (no person in bed — N/A), "
+            "unclear (too dark / blurry to call)."
+        ),
     )
     awake_indicators: List[str] = Field(
         default_factory=list,
