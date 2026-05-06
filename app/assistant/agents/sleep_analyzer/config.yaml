@@ -17,6 +17,8 @@ system_context_items: []
 user_context_items:
   - date_time
   - image
+  - previous_image
+  - has_previous
   - camera_id
   - captured_at_utc
 

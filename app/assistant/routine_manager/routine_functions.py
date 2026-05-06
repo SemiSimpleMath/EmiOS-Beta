@@ -229,6 +229,38 @@ def _lazy_wiki_growth(*, target_date=None, routine=None):
 wiki_growth = _lazy_wiki_growth
 
 
+def sleep_camera_tick(*, target_date=None, routine=None):
+    """Capture one frame from the bed-facing Ring camera.
+
+    The bridge fires ``ring_snapshot_captured`` after writing the JPEG; the
+    sleep_analyzer agent picks it up, finds the previous frame, and emits a
+    structured .txt sidecar including motion-vs-previous.
+
+    The camera id comes from the routine spec (``spec.camera_id``) so the
+    routine entry in configs/routines.json can be edited without touching
+    code if the user re-aims a different camera at the bed.
+    """
+    spec = (routine.spec if routine and isinstance(getattr(routine, "spec", None), dict) else {}) or {}
+    camera_id = str(spec.get("camera_id") or "").strip()
+    if not camera_id:
+        logger.error("sleep_camera_tick: spec.camera_id is required.")
+        return {"status": "error", "error": "missing camera_id in routine spec"}
+    try:
+        from app.routes import smart_home_bridge as bridge
+        result = bridge._ring_dispatch("get_snapshot", {"camera_id": camera_id})
+        return {
+            "status": "ok",
+            "snapshot_path": result.get("snapshot_path"),
+            "size_bytes": result.get("size_bytes"),
+        }
+    except Exception as e:
+        # Don't raise — that would surface as a routine failure that backs
+        # off subsequent runs. Sleep monitoring is best-effort, frame-by-
+        # frame; one missed capture shouldn't disable the whole loop.
+        logger.warning("sleep_camera_tick: capture failed (camera %s): %s", camera_id, e)
+        return {"status": "error", "error": str(e), "camera_id": camera_id}
+
+
 ROUTINE_FUNCTION_REGISTRY = {
     "dayflow_orchestrator_cadence_tick": dayflow_orchestrator_cadence_tick,
     "situation_audit": situation_audit,
@@ -240,4 +272,5 @@ ROUTINE_FUNCTION_REGISTRY = {
     "kg_finding_backlog_drain": kg_finding_backlog_drain,
     "kg_date_gap_drain": kg_date_gap_drain,
     "importance_backfill": importance_backfill,
+    "sleep_camera_tick": sleep_camera_tick,
 }

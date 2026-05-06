@@ -33,6 +33,12 @@ class SleepAnalyzer(Agent):
             return []
         return [str(c).strip() for c in raw if str(c).strip()]
 
+    # Maximum gap between current and previous frame for comparison to be
+    # meaningful. Beyond this, we treat the current frame as the first of a
+    # new sleep window and analyze it solo. Generous so a single missed tick
+    # doesn't disable comparison.
+    _MAX_PAIR_GAP_SECONDS = 10 * 60  # 10 minutes
+
     def ring_snapshot_captured_handler(self, message: Message):
         try:
             payload = self._extract_payload(message)
@@ -55,9 +61,15 @@ class SleepAnalyzer(Agent):
                 logger.info("[%s] analysis already exists for %s; skipping", self.name, jpeg.name)
                 return
 
+            previous_jpeg = self._find_previous_frame(jpeg, camera_id)
+            previous_label = previous_jpeg.name if previous_jpeg else "(none — first frame in window)"
+
             agent_input = {
                 "date_time": get_local_time_str(),
                 "image": str(jpeg),
+                "previous_image": str(previous_jpeg) if previous_jpeg else "",
+                "previous_image_label": previous_label,
+                "has_previous": bool(previous_jpeg),
                 "camera_id": camera_id,
                 "captured_at_utc": str(payload.get("captured_at_utc") or ""),
             }
@@ -71,16 +83,50 @@ class SleepAnalyzer(Agent):
 
             self._write_sidecar(sidecar, data, agent_input)
             logger.info(
-                "[%s] analyzed %s — in_bed=%s position=%s motion=%s",
+                "[%s] analyzed %s — in_bed=%s position=%s motion_vs_prev=%s",
                 self.name, jpeg.name,
                 data.get("subject_in_bed"),
                 data.get("position"),
-                data.get("motion_level"),
+                data.get("motion_vs_previous"),
             )
 
         except Exception as e:
             logger.error("[%s] handler crashed: %s", self.name, e)
             logger.debug("[%s] handler exception details", self.name, exc_info=True)
+
+    def _find_previous_frame(self, current: Path, camera_id: str) -> Path | None:
+        """Return the most recent JPEG for the same camera that's older than
+        ``current`` and within ``_MAX_PAIR_GAP_SECONDS``. Returns None if
+        no such frame exists (first frame of a window, or last one is too old).
+        """
+        try:
+            snap_dir = current.parent
+            current_mtime = current.stat().st_mtime
+            best: Path | None = None
+            best_mtime = -1.0
+            cam_suffix = f"_{camera_id}.jpg"
+            for p in snap_dir.iterdir():
+                if not p.is_file() or p == current:
+                    continue
+                if not p.name.endswith(cam_suffix):
+                    continue
+                try:
+                    m = p.stat().st_mtime
+                except OSError:
+                    continue
+                if m >= current_mtime:
+                    continue
+                if m > best_mtime:
+                    best_mtime = m
+                    best = p
+            if best is None:
+                return None
+            if (current_mtime - best_mtime) > self._MAX_PAIR_GAP_SECONDS:
+                return None
+            return best
+        except Exception as e:
+            logger.warning("[%s] previous-frame lookup failed: %s", self.name, e)
+            return None
 
     @staticmethod
     def _extract_payload(message: Message) -> Dict[str, Any]:
@@ -123,9 +169,10 @@ class SleepAnalyzer(Agent):
             f"captured_at_utc: {agent_input.get('captured_at_utc', '')}",
             f"analyzed_at_local: {agent_input.get('date_time', '')}",
             f"analyzer: sleep_analyzer",
+            f"previous_image: {agent_input.get('previous_image_label', '')}",
             f"subject_in_bed: {str(bool(data.get('subject_in_bed'))).lower()}",
             f"position: {str(data.get('position') or 'unclear').strip()}",
-            f"motion_level: {str(data.get('motion_level') or 'unclear').strip()}",
+            f"motion_vs_previous: {str(data.get('motion_vs_previous') or 'unclear').strip()}",
             f"light_state: {str(data.get('light_state') or 'unclear').strip()}",
             f"awake_indicators: {awake_str}",
         ]

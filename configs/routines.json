@@ -569,6 +569,22 @@
         "quiet_hours_ok": true
       },
       "notes": "Builds up to max_new_pages new prose pages each night for the highest-degree Entity nodes that don't yet have one. Runs after wiki_nightly_refresh (03:00). Pairs with refresh: refresh maintains existing pages, growth adds new ones. Tune max_new_pages to control daily LLM spend; raise temporarily if a one-off catch-up is needed."
+    },
+    {
+      "id": "sleep_camera_tick",
+      "enabled": false,
+      "name": "Sleep camera capture (every 3 min)",
+      "aliases": ["sleep camera", "bedroom camera"],
+      "runner": "function",
+      "spec": {
+        "function_name": "sleep_camera_tick",
+        "camera_id": "158991560"
+      },
+      "run_policy": {
+        "type": "interval",
+        "min_interval_seconds": 180
+      },
+      "notes": "Captures one frame from the bed-facing Ring camera every ~3 minutes. The bridge fires ring_snapshot_captured; sleep_analyzer picks it up, finds the previous frame, and writes a structured .txt sidecar including motion-vs-previous. DISABLED by default — flip enabled=true at bedtime, false in the morning. Camera_id is the Downstairs cam (re-aimed at bed); change spec.camera_id if a different camera is repurposed."
     }
   ]
 }

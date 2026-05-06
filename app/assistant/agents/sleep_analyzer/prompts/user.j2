@@ -3,5 +3,13 @@ Today is {{ date_time }}.
 Camera: {{ camera_id }} (bed-facing)
 Captured at (UTC): {{ captured_at_utc }}
 
-Frame to analyze:
+{% if has_previous %}
+Previous frame (~3 minutes ago):
+[emi_image: {{ previous_image }}]
+
+Current frame (NOW):
 [emi_image: {{ image }}]
+{% else %}
+Current frame (NOW). No previous frame available — set motion_vs_previous = "no_previous".
+[emi_image: {{ image }}]
+{% endif %}
