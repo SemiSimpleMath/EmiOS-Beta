@@ -1,5 +1,5 @@
 name: door_bell_analyzer
-class_name: DoorBellAnalyzer
+class_name: Agent
 llm_params:
   llm_provider: "openai"
   # Vision-capable. Same model the shared::vision_image_describe agent uses.
@@ -20,10 +20,6 @@ user_context_items:
   - camera_id
   - captured_at_utc
 
-# Only handle frames from these Ring camera ids. Other cameras' frames
-# are silently ignored by this agent (their own analyzer handles them).
-camera_ids:
-  - "74818139"  # Front Door (doorbell)
-
-events:
-  - ring_snapshot_captured
+# Note: this agent is invoked per-event by the subscriber in
+# app/assistant/ring_analysis/subscribers.py. It does NOT register an
+# event handler itself — keeps it a pure single-shot input→output agent.

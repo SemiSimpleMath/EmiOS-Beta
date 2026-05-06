@@ -85,13 +85,9 @@ def initialize_system():
     emi_reminder_handler = DI.agent_factory.create_agent('emi_reminder_handler', DI.global_blackboard)
     ServiceLocator.register('emi_reminder_handler', emi_reminder_handler)
 
-    logger.info("Loading door_bell_analyzer...")
-    door_bell_analyzer = DI.agent_factory.create_agent('door_bell_analyzer', DI.global_blackboard)
-    ServiceLocator.register('door_bell_analyzer', door_bell_analyzer)
-
-    logger.info("Loading sleep_analyzer...")
-    sleep_analyzer = DI.agent_factory.create_agent('sleep_analyzer', DI.global_blackboard)
-    ServiceLocator.register('sleep_analyzer', sleep_analyzer)
+    logger.info("Registering ring snapshot subscribers...")
+    from app.assistant.ring_analysis.subscribers import register_ring_subscribers
+    register_ring_subscribers()
 
     # Slack inbound is handled exclusively by the /slack/events webhook
     # (app/routes/slack_events.py). The legacy SlackInterface polling
