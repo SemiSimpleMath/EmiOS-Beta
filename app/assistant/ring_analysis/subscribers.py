@@ -41,7 +41,11 @@ def register_ring_subscribers() -> None:
 def _on_doorbell_frame(message: Message) -> None:
     try:
         payload = _payload(message)
-        if str(payload.get("camera_id") or "") != DOORBELL_CAMERA_ID:
+        # Match either the legacy Ring doorbell id OR any local-camera frame
+        # whose `kind` field is "doorbell".
+        camera_id = str(payload.get("camera_id") or "")
+        kind = str(payload.get("kind") or "").strip().lower()
+        if camera_id != DOORBELL_CAMERA_ID and kind != "doorbell":
             return
         jpeg, sidecar = _resolve_paths(payload)
         if jpeg is None or sidecar is None:
@@ -108,7 +112,14 @@ def _doorbell_sidecar_text(
 def _on_bedroom_frame(message: Message) -> None:
     try:
         payload = _payload(message)
-        if str(payload.get("camera_id") or "") != BEDROOM_CAMERA_ID:
+        # Match either:
+        #   (a) the legacy hardcoded Ring bedroom camera id, OR
+        #   (b) any local-camera snapshot whose `kind` field is "bedroom"
+        #       (Tapo / Wyze / Reolink etc. configured in
+        #        smart_home_tools.json[local_cameras])
+        camera_id = str(payload.get("camera_id") or "")
+        kind = str(payload.get("kind") or "").strip().lower()
+        if camera_id != BEDROOM_CAMERA_ID and kind != "bedroom":
             return
         jpeg, sidecar = _resolve_paths(payload)
         if jpeg is None or sidecar is None:

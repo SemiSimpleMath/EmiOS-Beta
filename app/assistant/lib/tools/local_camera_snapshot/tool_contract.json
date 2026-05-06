@@ -1,0 +1,39 @@
+{
+  "name": "local_camera_snapshot",
+  "description": "Capture a single high-resolution frame from any RTSP-capable LAN camera (Tapo, Wyze, Reolink, etc.). Reads the camera's RTSP URL from configs/smart_home_tools.json[local_cameras][devices] by alias. Frame is written to data/local_camera_snapshots/ and a snapshot-captured event fires for analyzer subscribers.",
+  "inputs": [
+    {
+      "name": "camera_alias",
+      "type": "string",
+      "required": true,
+      "description": "Configured device alias (case-insensitive) — e.g. 'Bedroom', 'Front Hall'. See the planner-facing description for the configured list."
+    },
+    {
+      "name": "timeout_seconds",
+      "type": "integer",
+      "required": false,
+      "description": "ffmpeg timeout for the RTSP pull. Default 15s."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable confirmation including byte size."
+    },
+    {
+      "path": "data.snapshot_path",
+      "type": "string",
+      "description": "Absolute filesystem path to the saved JPEG."
+    },
+    {
+      "path": "data.captured_at_utc",
+      "type": "string",
+      "description": "Capture timestamp in UTC (YYYYMMDDTHHMMSSZ)."
+    }
+  ],
+  "metadata": {
+    "side_effects": "filesystem_write",
+    "approval_required": false
+  }
+}

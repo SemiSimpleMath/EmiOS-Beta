@@ -597,6 +597,7 @@ class ToolRegistry:
             "lights_control": "lights",
             "ring_camera_control": "ring",
             "nest_home_control": "nest",
+            "local_camera_snapshot": "local_cameras",
         }
         integration = _SH_TOOL_TO_INTEGRATION.get(tool_name)
         if integration is None:
@@ -620,9 +621,12 @@ class ToolRegistry:
                     continue
                 # Show alias + any non-empty notes for context.
                 notes = str(d.get("notes") or "").strip()
+                kind = str(d.get("kind") or "").strip()
                 # Identifying info varies per integration; show whatever non-alias
                 # field is present so the user can sanity-check the listing.
+                # Note: rtsp_url is intentionally omitted (contains credentials).
                 ident_fields = [
+                    f"kind={kind}" if kind else "",
                     f"host={d.get('host')}" if d.get("host") else "",
                     f"camera_id={d.get('camera_id')}" if d.get("camera_id") else "",
                     f"device_id={d.get('device_id')}" if d.get("device_id") else "",
