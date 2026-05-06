@@ -49,5 +49,8 @@ system_context_items:
   - tool_descriptions
   - allowed_nodes
 
+skills:
+  - critic-handling
+
 
 

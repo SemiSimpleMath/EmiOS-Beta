@@ -35,3 +35,6 @@ system_context_items:
   - resource_current_location
   - has_spec_steps
 
+skills:
+  - critic-handling
+

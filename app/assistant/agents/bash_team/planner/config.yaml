@@ -40,4 +40,5 @@ system_context_items:
 # task mentions media kinds (image / picture / etc.).
 skills:
   - filesystem-layout
+  - critic-handling
 accept_auto_skills: true

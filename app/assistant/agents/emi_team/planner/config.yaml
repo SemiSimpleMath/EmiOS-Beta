@@ -30,6 +30,9 @@ system_context_items:
   - allowed_nodes
   - task
 
+skills:
+  - critic-handling
+
 # emi_team's role with pods is FINDING — search pod_store / KG for
 # pods matching what the user asked for, return pod_ids forward.
 # Acting on a found pod (attaching it to an email, etc.) belongs to
