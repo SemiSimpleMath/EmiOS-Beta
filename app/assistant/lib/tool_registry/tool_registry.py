@@ -556,8 +556,20 @@ class ToolRegistry:
             except Exception as e:
                 logger.error(f"Error rendering description for '{tool_name}': {e}")
                 desc_text = "Error rendering description."
+        # Pull args.j2 too — its per-field guidance (enum values, ranges,
+        # conditional dependencies, cross-field rules) is what the planner
+        # needs to produce valid JSON args directly. Optional; falls through
+        # gracefully if the tool has no args.j2.
+        args_template = tool["prompts"].get(f"{tool_name}_args")
+        args_text = ""
+        if args_template:
+            try:
+                args_text = args_template.render()
+            except Exception as e:
+                logger.error(f"Error rendering args.j2 for '{tool_name}': {e}")
+                args_text = ""
         contract = tool.get("tool_contract") if isinstance(tool.get("tool_contract"), dict) else None
-        display = self._format_description_with_contract(desc_text, contract)
+        display = self._format_description_with_contract(desc_text, contract, args_text)
         return ToolDescription(
             display,
             tool_name=tool_name,
@@ -565,9 +577,17 @@ class ToolRegistry:
             contract=contract,
         )
 
-    def _format_description_with_contract(self, desc_text: str, contract: dict[str, Any] | None) -> str:
+    def _format_description_with_contract(
+        self,
+        desc_text: str,
+        contract: dict[str, Any] | None,
+        args_text: str = "",
+    ) -> str:
         base = str(desc_text or "").strip() or "No description available."
+        args_block = str(args_text or "").strip()
         if not isinstance(contract, dict):
+            if args_block:
+                return f"{base}\n\nArgument guidance:\n{args_block}"
             return base
         lines: list[str] = [base, "Contract:"]
         inputs = contract.get("inputs") if isinstance(contract.get("inputs"), list) else []
@@ -593,6 +613,9 @@ class ToolRegistry:
                 if not path or not typ:
                     continue
                 lines.append(f"    - {path}: {typ}")
+        if args_block:
+            lines.append("Argument guidance:")
+            lines.append(args_block)
         return "\n".join(lines).strip()
 
     def _format_compact_tool_card(
