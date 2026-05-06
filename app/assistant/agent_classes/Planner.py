@@ -250,12 +250,27 @@ class Planner(Agent):
 
 
     def _generate_tool_args(self):
+        tool = self.blackboard.get_state_value("action")
+        arguments = self.blackboard.get_state_value("action_input")
+
+        # Fast path: if the planner already produced arguments that validate
+        # against the tool's Pydantic form, skip the LLM args agent entirely.
+        # Falls back to the args agent on any validation failure.
+        if self._planner_arguments_satisfy_tool_form(target_name=tool, arguments=arguments):
+            logger.info(
+                "[%s] tool_args fast path: planner args validated against tool form, skipping args agent",
+                self.name,
+            )
+            return {
+                "target_name": str(tool).strip(),
+                "arguments": arguments if isinstance(arguments, dict) else {},
+            }
+
+        # Slow path: invoke the shared args agent to normalize / fill in.
         if self.tool_arguments_agent is None:
             self.tool_arguments_agent = DI.agent_factory.create_agent("shared::tool_arguments")
         if self.tool_arguments_agent is None:
             raise RuntimeError(f"[{self.name}] Failed to instantiate required agent 'shared::tool_arguments'.")
-        tool = self.blackboard.get_state_value("action")
-        arguments = self.blackboard.get_state_value("action_input")
         agent_input = {"target_name": tool, "arguments": arguments}
         agent_msg = Message(agent_input=agent_input)
         arguments_result = self.tool_arguments_agent.action_handler(agent_msg)
@@ -291,21 +306,24 @@ class Planner(Agent):
 
     def _planner_tool_args_fast_path_enabled(self) -> bool:
         """
-        Feature-flag gate for future Planner -> ToolCaller fast path.
-        Not wired into execution flow yet.
+        Kill-switch for the Planner -> ToolCaller fast path.
+
+        On by default. Set blackboard ``planner_tool_args_fast_path_enabled``
+        to a falsy value to force the slow path (args agent always runs).
         """
-        raw = self.blackboard.get_state_value("planner_tool_args_fast_path_enabled", False)
+        raw = self.blackboard.get_state_value("planner_tool_args_fast_path_enabled", True)
         return bool(raw)
 
     def _planner_arguments_satisfy_tool_form(self, *, target_name, arguments) -> bool:
         """
-        Deterministic precheck for future ToolArguments bypass.
+        Deterministic precheck for the ToolArguments bypass.
 
-        Contract (future):
+        Contract:
         - target_name must resolve to a known tool.
-        - arguments must already satisfy the tool's form envelope.
+        - arguments must already satisfy the tool's Pydantic form envelope.
 
-        This helper is intentionally not used yet.
+        Returns True iff the planner's args can go straight to the tool
+        without an args-agent normalization pass.
         """
         if not self._planner_tool_args_fast_path_enabled():
             return False
