@@ -2,8 +2,8 @@ name: master_room::switchboard
 class_name: Agent
 llm_params:
   llm_provider: "openai"
-  engine: "gpt-5-mini"
-  model_tier: "mini"
+  engine: "gpt-5.4-nano"
+  model_tier: "nano"
 
 allowed_tools:
   - personal_admin_manager
