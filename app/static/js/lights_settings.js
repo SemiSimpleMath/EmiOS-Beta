@@ -196,7 +196,7 @@ async function saveLightsConfig() {
     }
 }
 
-async function runLightsAction(action, argumentsObj) {
+async function runLightsAction(command, argumentsObj) {
     const hostsFromUi = getHostsFromUi();
     const payloadArgs = {
         ...(argumentsObj || {}),
@@ -209,13 +209,13 @@ async function runLightsAction(action, argumentsObj) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-            action,
+            command,
             arguments: payloadArgs,
         }),
     });
     const data = await response.json();
     if (!data.success) {
-        throw new Error(data.error || `Lights action failed: ${action}`);
+        throw new Error(data.error || `Lights command failed: ${command}`);
     }
     return data.data || {};
 }
