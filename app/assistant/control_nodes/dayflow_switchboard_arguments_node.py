@@ -213,14 +213,19 @@ class DayflowSwitchboardArgumentsNode(ControlNode):
                 "action_type": action_name,
             })
 
-        # Stamp dispatched_at and move state to "dispatched" for every acted-on
-        # item. The room invocation owns the in-flight window; post_room_finalize
-        # will close the item when the tool returns.
+        # Stamp dispatched_at + dispatched_to and move state to "dispatched"
+        # for every acted-on item. The room invocation owns the in-flight
+        # window; post_room_finalize will close the item when the tool returns.
+        # dispatched_to records WHICH manager/tool handled the work so the
+        # strategic_planner can render a clear "I dispatched X to Y, Y
+        # returned: Z" frame instead of just dropping the result text into
+        # the task list.
         for acted_id in resolved_ids:
             source_meta = meta_by_id.get(acted_id, {})
             updates = {
                 "dispatched_at": now_utc.isoformat(),
                 "dispatched_at_local": created_local,
+                "dispatched_to": action_name,
             }
             write_dayflow_item(
                 acted_id,

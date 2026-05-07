@@ -50,6 +50,17 @@ No schedule available.
 ########## ROUTINE ##########
 {{ resource_dayflow_routine }}
 {% endif %}
+{%- if recent_dispatch_results %}
+
+########## RECENT DISPATCH RESULTS (read these first — managers you dispatched have come back with results) ##########
+{%- for r in recent_dispatch_results %}
+I dispatched **{{ r.task_id }}** to `{{ r.dispatched_to }}`{% if r.dispatched_to_display %} ({{ r.dispatched_to_display }}){% endif %} at {{ r.dispatched_at }}.
+**Task:** {{ r.summary }}
+**Manager returned:**
+{{ r.execution_result }}
+
+{% endfor %}
+{%- endif %}
 
 ########## NEW ARTIFACTS (triage admitted — review for planning) ##########
 {%- set all_artifacts = [] %}

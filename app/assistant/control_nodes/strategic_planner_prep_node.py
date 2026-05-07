@@ -61,6 +61,7 @@ def _build_plan_task_status(
                 execution_result = ""
         ticket_response = str(meta.get("ticket_response") or "").strip()
         dispatched_at = str(meta.get("dispatched_at_local") or meta.get("dispatched_at") or "").strip()
+        dispatched_to = str(meta.get("dispatched_to") or "").strip()
         task_entry: Dict[str, Any] = {
             "task_id": task_id,
             "summary": summary,
@@ -70,6 +71,19 @@ def _build_plan_task_status(
             task_entry["execution_result"] = execution_result
         if dispatched_at:
             task_entry["dispatched_at"] = dispatched_at
+        if dispatched_to:
+            task_entry["dispatched_to"] = dispatched_to
+            # Friendlier display name (Waffle / Webby / etc.) when the
+            # manager has one in its config; falls back to the raw
+            # manager_name so any gap is visible. Looked up at render time
+            # so prep doesn't depend on registry order.
+            try:
+                from app.assistant.chat_narrator.display_names import display_name_for
+                friendly = display_name_for(dispatched_to)
+                if friendly and friendly.lower() != dispatched_to.lower():
+                    task_entry["dispatched_to_display"] = friendly
+            except Exception:
+                pass
         if ticket_response:
             task_entry["ticket_response"] = ticket_response
         if state == "waiting":
@@ -176,6 +190,84 @@ def _write_watermark(now_utc: datetime) -> None:
         path.write_text(json.dumps({"last_run_utc": now_utc.isoformat()}), encoding="utf-8")
     except Exception as e:
         logger.warning("Failed to write planner watermark: %s", e)
+
+
+def _build_recent_dispatch_results(
+    all_items: List[Dict[str, Any]],
+    now_utc: datetime,
+    *,
+    max_age_hours: int = 6,
+    limit: int = 10,
+) -> List[Dict[str, Any]]:
+    """Surface recently-completed dispatches with their full manager result
+    text — the planner needs to literally see "I dispatched task X to
+    manager Y. Y returned: <full text>" so it can act on what came back
+    instead of treating result bits as ambient context.
+
+    A "recent dispatch result" is any item that:
+      - has both `dispatched_to` AND `execution_result` populated
+      - was dispatched within `max_age_hours`
+      - is in a terminal state (closed/waiting/watching) OR still
+        dispatched but already has a result attached
+
+    Returned dicts carry: task_id, summary, dispatched_to (raw manager
+    name), dispatched_to_display (Waffle / Webby / etc.), dispatched_at_local,
+    execution_result. Newest first, capped at `limit` so the prompt doesn't
+    bloat.
+    """
+    cutoff = now_utc - timedelta(hours=max_age_hours)
+    out: List[Dict[str, Any]] = []
+    seen_task_ids: set = set()
+
+    try:
+        from app.assistant.chat_narrator.display_names import display_name_for
+    except Exception:
+        display_name_for = lambda x: x  # type: ignore[assignment]
+
+    for item in all_items:
+        meta = get_meta(item)
+        dispatched_to = str(meta.get("dispatched_to") or "").strip()
+        execution_result = str(meta.get("execution_result") or "").strip()
+        if not dispatched_to or not execution_result:
+            continue
+
+        # Filter out the "ambient inbound chat" no-op result the cadence
+        # tick stamps when nothing meaningful happened.
+        lower_exec = execution_result.lower()
+        if "inbound ui chat message from system" in lower_exec and "cadence tick" in lower_exec:
+            continue
+
+        dispatched_at = parse_iso_utc(str(meta.get("dispatched_at") or ""))
+        if dispatched_at is None or dispatched_at < cutoff:
+            continue
+
+        task_id = str(
+            meta.get("short_id")
+            or meta.get("task_id")
+            or meta.get("item_id")
+            or item.get("id")
+            or ""
+        ).strip()
+        if task_id and task_id in seen_task_ids:
+            continue
+        if task_id:
+            seen_task_ids.add(task_id)
+
+        friendly = display_name_for(dispatched_to)
+        out.append({
+            "task_id": task_id,
+            "summary": str(meta.get("summary") or "").strip(),
+            "dispatched_to": dispatched_to,
+            "dispatched_to_display": (
+                friendly if friendly and friendly.lower() != dispatched_to.lower()
+                else ""
+            ),
+            "dispatched_at": str(meta.get("dispatched_at_local") or meta.get("dispatched_at") or "").strip(),
+            "execution_result": execution_result,
+        })
+
+    out.sort(key=lambda r: r.get("dispatched_at") or "", reverse=True)
+    return out[:limit]
 
 
 def _build_recent_changes(
@@ -315,6 +407,11 @@ class StrategicPlannerPrepNode(ControlNode):
         # Recent changes since last planner run.
         recent_changes = _build_recent_changes(all_items, watermark_utc, now_utc)
 
+        # Recent dispatch results — surface full manager output so the
+        # planner can act on what came back instead of just seeing it
+        # buried in the task list.
+        recent_dispatch_results = _build_recent_dispatch_results(all_items, now_utc)
+
         # Write to blackboard.
         self.blackboard.update_state_value("admitted_artifacts", admitted)
         self.blackboard.update_state_value("active_dayflow_items", active_items)
@@ -325,6 +422,7 @@ class StrategicPlannerPrepNode(ControlNode):
         self.blackboard.update_state_value("active_tickets", active_tickets)
         self.blackboard.update_state_value("recent_responded_tickets", responded_tickets)
         self.blackboard.update_state_value("recent_changes", recent_changes)
+        self.blackboard.update_state_value("recent_dispatch_results", recent_dispatch_results)
 
         # Watermark is written by PlannerPersistNode after planner output
         # is saved, so the planner's own changes don't appear as "recent".
