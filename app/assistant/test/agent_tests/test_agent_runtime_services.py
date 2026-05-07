@@ -7,7 +7,6 @@ from app.assistant.agent_runtime.services.flow_controller import FlowController
 from app.assistant.agent_runtime.services.llm_client import LLMClient
 from app.assistant.control_nodes.critic_pre_node import CriticPreNode
 from app.assistant.control_nodes.summary_pre_node import SummaryPreNode
-from app.assistant.control_nodes.maybe_summary_gate import MaybeSummaryGate
 from app.assistant.control_nodes.dag_executor_node import DagExecutorNode
 from app.assistant.control_nodes.manager_exit_node import ManagerExitNode
 from app.assistant.control_nodes.tool_approve_node import ToolApproveNode
@@ -403,52 +402,6 @@ def test_context_injector_prefers_injected_history_over_builder():
 
 
 
-
-
-def test_maybe_summary_gate_routes_to_summary_context_node():
-    bb = Blackboard()
-    bb.update_state_value("last_agent", "emi_team::planner")
-    bb.update_state_value("emi_team::planner_action_count", 4)
-    bb.update_state_value(
-        "manager_flow_config",
-        {
-            "gates": {
-                "summary": {
-                    "enabled": True,
-                    "planner_agent": "emi_team::planner",
-                    "tool_arguments_agent": "shared::tool_arguments",
-                    "summary_node": "summary_context_node",
-                    "summary_resume_target": "shared::tool_arguments",
-                    "next_if_skipped": "shared::tool_arguments",
-                    "summary_min_messages": 140,
-                    "summary_cadence_every_actions": 4,
-                    "summary_last_action_count_key": "emi_team_summary_last_action_count",
-                }
-            }
-        },
-    )
-    from app.assistant.utils.pipeline_state import set_pending_tool
-    set_pending_tool(
-        bb,
-        name="search_web",
-        calling_agent="emi_team::planner",
-        action_input={"query": "x"},
-        arguments=None,
-        kind="tool",
-    )
-    for i in range(150):
-        bb.add_msg(Message(data_type="agent_result", sender="x", content=f"m{i}"))
-
-    node = MaybeSummaryGate(
-        name="maybe_summary_gate",
-        blackboard=bb,
-        agent_registry=object(),
-        tool_registry=object(),
-    )
-    node.action_handler(Message(data_type="agent_activation", data={}))
-
-    assert bb.get_state_value("next_agent") == "summary_context_node"
-    assert get_resume_target(bb) == "shared::tool_arguments"
 
 
 def test_critic_pre_node_intercepts_planner_to_critic_and_builds_payload():
