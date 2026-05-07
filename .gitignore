@@ -378,3 +378,4 @@ emi_shared.css
 /scripts/unmerge_performance_hub.py
 /scripts/cleanup_collaboration_node.py
 /scripts/delete_grocery_stuff.py
+configs/smart_home_tools.json

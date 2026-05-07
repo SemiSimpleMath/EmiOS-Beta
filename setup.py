@@ -252,6 +252,40 @@ except Exception as e:
         traceback.print_exc()
         return False
 
+def instantiate_config_templates():
+    """Copy config templates from configs/templates/*.template.json to
+    configs/<name>.json on first install. Skips if the destination already
+    exists — never overwrites a populated user config.
+
+    This is how per-user config (smart_home_tools.json, etc.) stays out of
+    the public repo: the TEMPLATE is committed, the LIVE config is gitignored
+    and instantiated on first setup. Drop new templates into
+    `configs/templates/<name>.template.json` and they get materialized
+    automatically.
+    """
+    import shutil
+    templates_dir = Path("configs") / "templates"
+    if not templates_dir.is_dir():
+        return True  # nothing to instantiate
+
+    copied: list[str] = []
+    skipped: list[str] = []
+    for template in sorted(templates_dir.glob("*.template.json")):
+        dest_name = template.name.replace(".template.json", ".json")
+        dest = Path("configs") / dest_name
+        if dest.exists():
+            skipped.append(dest_name)
+            continue
+        shutil.copyfile(template, dest)
+        copied.append(dest_name)
+
+    if copied:
+        print(f"✅ Created {len(copied)} config(s) from template: {', '.join(copied)}")
+    if skipped:
+        print(f"   Skipped {len(skipped)} (already present): {', '.join(skipped)}")
+    return True
+
+
 def create_default_resources():
     """Create default resource files if they don't exist"""
     print_step(7, 8, "Checking resource files...")
@@ -451,6 +485,7 @@ def main():
         ("Checking credentials", check_credentials),
         ("Creating directories", create_directories),
         ("Initializing database", initialize_database),
+        ("Instantiating config templates", instantiate_config_templates),
         ("Checking resources", create_default_resources),
         ("Creating desktop shortcut", create_desktop_shortcut)
     ]
