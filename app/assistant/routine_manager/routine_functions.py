@@ -203,6 +203,24 @@ def _lazy_kg_goal_dormancy_sweep(*, target_date=None, routine=None):
 kg_goal_dormancy_sweep = _lazy_kg_goal_dormancy_sweep
 
 
+def _lazy_kg_goal_outcome_detect(*, target_date=None, routine=None):
+    """Daily: scan recent chat for explicit achievement / abandonment of
+    active Goal nodes. Closes the matching Goals as terminal (sets
+    end_date, attributes.goal_status='achieved'|'abandoned'). Conservative
+    — only acts on direct user statements; silent abandonment is
+    dormancy_sweep's job, not this one's.
+    """
+    spec = (routine.spec if routine and hasattr(routine, "spec") else {}) or {}
+    limit = int(spec.get("limit", 10))
+    from app.assistant.pipelines.context import PipelineContext
+    from app.assistant.pipelines.kg_maintenance_pipeline.step_goal_outcome_detect import run as run_outcome
+    ctx = PipelineContext.for_date(pipeline_id="kg_goal_outcome_detect")
+    return run_outcome(ctx, limit=limit)
+
+
+kg_goal_outcome_detect = _lazy_kg_goal_outcome_detect
+
+
 def _lazy_kg_finding_cluster_resolve(*, target_date=None, routine=None):
     """Daily: read pending kg_maintenance_findings, group by primary_node_id,
     and call kg_finding_cluster_resolver to verify whether each candidate
@@ -431,6 +449,7 @@ ROUTINE_FUNCTION_REGISTRY = {
     "kg_date_gap_drain": kg_date_gap_drain,
     "kg_state_decay": kg_state_decay,
     "kg_goal_dormancy_sweep": kg_goal_dormancy_sweep,
+    "kg_goal_outcome_detect": kg_goal_outcome_detect,
     "kg_finding_cluster_resolve": kg_finding_cluster_resolve,
     "kg_finding_executor_drain": kg_finding_executor_drain,
     "kg_state_date_drain": kg_state_date_drain,

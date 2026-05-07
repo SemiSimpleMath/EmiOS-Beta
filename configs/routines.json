@@ -609,6 +609,23 @@
       "notes": "Reads pending findings, groups by primary_node_id, calls kg_finding_cluster_resolver to verify which candidate clusters share ONE root question. Confirmed leads get synthesized root_question; siblings get superseded_by stamped (hidden from default UI). Resolving a lead cascades to its siblings. Runs after wiki_nightly_refresh (03:00) so wiki_contradiction findings of the same night are eligible for clustering."
     },
     {
+      "id": "kg_goal_outcome_detect",
+      "enabled": true,
+      "name": "KG goal outcome detector (achieved / abandoned)",
+      "aliases": ["goal outcomes", "detect achievements"],
+      "runner": "function",
+      "spec": {
+        "function_name": "kg_goal_outcome_detect",
+        "limit": 10
+      },
+      "run_policy": {
+        "type": "daily",
+        "time_local": "02:55",
+        "quiet_hours_ok": true
+      },
+      "notes": "Scans recent chat for explicit 'I did X' / 'I gave up X' statements about active Goal nodes. Closes matching Goals as terminal (achieved/abandoned) with end_date set. Conservative — only fires on direct user statements at confidence >= 0.7. Silent abandonment is goal_dormancy_sweep's job. Limit 10 Goals/day to keep LLM cost bounded."
+    },
+    {
       "id": "kg_goal_dormancy_sweep",
       "enabled": true,
       "name": "KG goal dormancy sweep",
