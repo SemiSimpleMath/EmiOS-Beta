@@ -26,9 +26,10 @@ class TaskCreateFinalRouterNode(ControlNode):
       - The compile callback emits task_compiled when done.
     """
 
-    # The spec writer agent that runs after the chat agent, just before this router.
-    # Accept either the old spec writer or the new spec router node.
-    _ACCEPTED_PRIOR_AGENTS = frozenset({"master_room::task_spec_writer", "task_spec_router_node", "task_spec::editor", "task_spec_edit_apply_node"})
+    # Agents allowed to immediately precede this router in the task-spec
+    # creation flow. The legacy `master_room::task_spec_writer` was removed
+    # when master_room's inline task_creation_mode was retired (2026-05-06).
+    _ACCEPTED_PRIOR_AGENTS = frozenset({"task_spec_router_node", "task_spec::editor", "task_spec_edit_apply_node"})
 
     # Emitted on turn 1 when the spec writer no-ops (user typed /task create with no description).
     # Forces the panel open immediately so the user knows where to look.
