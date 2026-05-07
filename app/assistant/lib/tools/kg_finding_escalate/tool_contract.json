@@ -55,7 +55,7 @@
       "finding"
     ],
     "risk_level": "low",
-    "side_effects": "writes_kg",
+    "side_effects": "write",
     "requires_auth": [],
     "requires_network": false,
     "cost_level": "low",

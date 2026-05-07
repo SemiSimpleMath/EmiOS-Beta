@@ -68,7 +68,7 @@
       "task_id"
     ],
     "risk_level": "medium",
-    "side_effects": "writes_data",
+    "side_effects": "write",
     "requires_auth": [
       "google"
     ],

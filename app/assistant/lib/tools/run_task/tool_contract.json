@@ -73,7 +73,7 @@
       "workflow"
     ],
     "risk_level": "medium",
-    "side_effects": "writes_data",
+    "side_effects": "write",
     "requires_auth": [],
     "requires_network": false,
     "cost_level": "medium",

@@ -40,7 +40,7 @@
       "filesystem"
     ],
     "risk_level": "high",
-    "side_effects": "executes_shell_command",
+    "side_effects": "external_action",
     "requires_auth": [],
     "requires_network": false,
     "cost_level": "low",
