@@ -38,7 +38,19 @@ from app.models.db_manager import get_db_manager
 logger = get_logger(__name__)
 
 
-CHAT_SOURCES = {"chat", "room_slack", "room_sms", "room_ui"}
+# Sources eligible for KG ingestion. The user-authored prose-resolution
+# source IS auto-ingested (the user typed it to answer a question — it's
+# trusted input, conceptually identical to a chat message).
+#   kg_maintenance_resolution — prose-resolution answers from the cluster
+#                               resolver UI; user-authored.
+# wiki_inference is NOT here — agent-inferred sentences route to the
+# wiki-review queue (kg_maintenance_finding type='wiki_inferred_edge')
+# for user approval before any ingestion. They will eventually flow
+# through a wiki-specific pipeline (TBD), not this chat path.
+CHAT_SOURCES = {
+    "chat", "room_slack", "room_sms", "room_ui",
+    "kg_maintenance_resolution",
+}
 CHAT_ROLES = {"user", "assistant"}
 ALLOWED_ROOMS = {"master_room"}
 

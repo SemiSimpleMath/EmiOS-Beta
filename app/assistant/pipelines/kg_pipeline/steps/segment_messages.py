@@ -41,8 +41,12 @@ SEGMENTER_VERSION = "kg_pipeline_v1"
 MIN_MESSAGES_TO_SEGMENT = 6   # gate: at least this many resolved-unsegmented before segmenting
 
 # Match the resolver's chat-eligibility filter so the "is this day fully
-# resolved?" check uses the same denominator.
-CHAT_SOURCES = {"chat", "room_slack", "room_sms", "room_ui"}
+# resolved?" check uses the same denominator. Keep this set in sync with
+# resolve_messages.CHAT_SOURCES.
+CHAT_SOURCES = {
+    "chat", "room_slack", "room_sms", "room_ui",
+    "kg_maintenance_resolution",
+}
 CHAT_ROLES = {"user", "assistant"}
 ALLOWED_ROOMS = {"master_room"}
 

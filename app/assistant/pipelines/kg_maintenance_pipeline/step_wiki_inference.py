@@ -5,35 +5,44 @@ Runs `wiki_connection_investigator` over recently-updated wiki pages.
 For each candidate subject:
   1. Read the rendered prose page.
   2. Pull the subject's KG neighborhood + a name-only list of known
-     entities (so the agent can resolve targets to existing ids without
-     needing to embed full descriptions for every node).
-  3. Call the agent — it returns a list of InferredConnection proposals.
-  4. Pipe each accepted connection through the standard claim_proposal
-     pipeline via proposal_writer.write_one_proposal_group. The promoter
-     applies the same gates as for chat-extracted facts (dedup,
-     time-frame, hub-overlap, LLM merger).
+     entities (so the agent can use canonical name spellings without
+     us streaming the entire KG for every call).
+  3. Call the agent — it returns a list of InferredSentence: synthetic
+     factual sentences the page implies but the KG doesn't yet have.
+  4. Write each accepted sentence as a kg_maintenance_finding with
+     finding_type='wiki_inferred_fact'. NO direct ingestion. The
+     maintenance UI surfaces these for user review; the user can fill
+     in dates and approve, at which point a wiki-aware ingestion path
+     (TBD — separate from the chat fact_extractor path) constructs the
+     proper claim_proposal.
+
+The agent is NOT trusted to write edges directly — only fact_extractor
+or a similar wiki-aware extractor can construct entity → state → entity
+correctly. The finding queue is the human-in-the-loop checkpoint
+between "agent inferred" and "graph mutated."
 
 Conservative defaults:
-  - LLM is mini, not nano (the inference chain demands real reasoning).
-  - Only proposals with `confidence >= MIN_CONFIDENCE` get written.
-  - Only proposals with `not_already_in_kg=True` get written (the agent's
-    own self-check; we trust it but ALSO verify by SQL before writing).
-  - Per-subject cap on connections to keep one bad page from flooding
-    the proposal queue.
-  - Per-run cap on subjects examined (LLM cost bound).
+  - Only sentences with `confidence >= MIN_CONFIDENCE` produce findings.
+  - Only sentences with `not_already_in_kg=True` produce findings.
+  - Per-subject cap on findings.
+  - Per-run cap on subjects examined.
 
-Idempotency: a `wiki_inference_run` row records which subjects were
-examined when, so repeated runs skip subjects whose page hasn't changed
-since their last examination.
+Idempotency: a `<entity>.wiki_inference.json` sidecar next to each
+prose page records `examined_at_epoch`. Re-runs skip the page until
+its mtime advances (i.e., wiki_nightly_refresh rewrote it).
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from app.assistant.ServiceLocator.service_locator import DI
+from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
+from app.assistant.kg_maintenance.store import upsert_finding
 from app.assistant.pipelines.context import PipelineContext
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import Message
@@ -43,16 +52,15 @@ logger = get_logger(__name__)
 
 
 MIN_CONFIDENCE = 0.6
-PER_SUBJECT_CONNECTION_CAP = 5
+PER_SUBJECT_SENTENCE_CAP = 5
 DEFAULT_SUBJECT_LIMIT = 10
+FINDING_TYPE = "wiki_inferred_fact"
 
 
 def run(ctx: PipelineContext, *, subject_limit: Optional[int] = None) -> dict:
-    """Returns counts: {"subjects_examined": int, "proposals_written": int,
-                         "proposals_rejected_low_confidence": int,
-                         "proposals_rejected_already_in_kg": int}."""
-    from app.assistant.kg.db.knowledge_graph_db_sqlite import Edge, Node
-
+    """Returns counts: {"subjects_examined": int, "sentences_emitted": int,
+                         "sentences_rejected_low_confidence": int,
+                         "sentences_rejected_already_in_kg": int}."""
     subject_limit = int(subject_limit or DEFAULT_SUBJECT_LIMIT)
 
     vault_path = _resolve_vault_path()
@@ -74,15 +82,13 @@ def run(ctx: PipelineContext, *, subject_limit: Optional[int] = None) -> dict:
     if agent is None:
         raise RuntimeError("Failed to create wiki_connection_investigator agent")
 
-    # Pre-fetch known entities once (~1k labels) so each LLM call gets a
-    # fixed-size names list rather than streaming the entire KG. This is
-    # the agent's resolution lookup — labels + ids only.
     known_entities = _fetch_known_entities()
 
     subjects_examined = 0
-    written = 0
+    emitted = 0
     skipped_low_conf = 0
     skipped_already_in_kg = 0
+    skipped_duplicate_finding = 0
 
     for subject in subjects:
         subjects_examined += 1
@@ -90,8 +96,6 @@ def run(ctx: PipelineContext, *, subject_limit: Optional[int] = None) -> dict:
         try:
             page_text = _read_prose_page(prose_dir, subject["label"])
             if not page_text or len(page_text) < 200:
-                # Even when we skip, mark the page examined so we don't
-                # keep re-touching tiny pages every night.
                 _write_examined_sidecar(page_path)
                 continue
             neighborhood = _format_subject_neighborhood(subject["id"])
@@ -111,40 +115,41 @@ def run(ctx: PipelineContext, *, subject_limit: Optional[int] = None) -> dict:
                     subject["label"], type(data).__name__,
                 )
                 continue
-            connections = list(data.get("connections") or [])
+            sentences = list(data.get("sentences") or [])
 
-            for c in connections[:PER_SUBJECT_CONNECTION_CAP]:
-                if not isinstance(c, dict):
+            for s in sentences[:PER_SUBJECT_SENTENCE_CAP]:
+                if not isinstance(s, dict):
                     continue
-                if float(c.get("confidence") or 0.0) < MIN_CONFIDENCE:
+                if float(s.get("confidence") or 0.0) < MIN_CONFIDENCE:
                     skipped_low_conf += 1
                     continue
-                if not c.get("not_already_in_kg"):
+                if not s.get("not_already_in_kg"):
                     skipped_already_in_kg += 1
                     continue
+                sentence_text = (s.get("sentence") or "").strip()
+                if not sentence_text:
+                    continue
 
-                # Verify-not-already-in-KG: the agent's flag is trust-but-verify.
-                # If a same-predicate edge already exists, skip even if the
-                # agent thought it didn't.
-                if _edge_exists(
-                    subject_id=subject["id"],
-                    target_id=c.get("target_node_id"),
-                    target_label=c.get("target_label"),
-                    predicate=c.get("predicate"),
+                # Dedup against any existing wiki_inferred_fact finding for
+                # this same subject + same canonical sentence. The standard
+                # upsert_finding dedup keys on (type, primary, secondary),
+                # which doesn't catch text-level dupes — we add an extra
+                # check here.
+                if _wiki_finding_already_exists(
+                    primary_node_id=subject["id"],
+                    sentence_text=sentence_text,
                 ):
-                    skipped_already_in_kg += 1
+                    skipped_duplicate_finding += 1
                     continue
 
-                ok = _write_proposal_for_inferred_connection(
+                if _write_wiki_inferred_finding(
+                    sentence_text=sentence_text,
                     subject=subject,
-                    connection=c,
+                    inference=s,
                     pipeline_run_id=ctx.run_id,
-                )
-                if ok:
-                    written += 1
+                ):
+                    emitted += 1
 
-            # Successful examination — record sidecar so we don't re-examine
-            # this page until it gets rewritten by the wiki refresh.
             _write_examined_sidecar(page_path)
 
         except Exception:
@@ -154,23 +159,25 @@ def run(ctx: PipelineContext, *, subject_limit: Optional[int] = None) -> dict:
             )
 
     logger.info(
-        "[wiki_inference] subjects=%d proposals_written=%d skipped_low_conf=%d skipped_already=%d",
-        subjects_examined, written, skipped_low_conf, skipped_already_in_kg,
+        "[wiki_inference] subjects=%d findings_written=%d skipped_low_conf=%d skipped_already=%d skipped_dup_finding=%d",
+        subjects_examined, emitted, skipped_low_conf, skipped_already_in_kg, skipped_duplicate_finding,
     )
     return {
         "subjects_examined": subjects_examined,
-        "proposals_written": written,
-        "proposals_rejected_low_confidence": skipped_low_conf,
-        "proposals_rejected_already_in_kg": skipped_already_in_kg,
+        "findings_written": emitted,
+        "skipped_low_confidence": skipped_low_conf,
+        "skipped_already_in_kg": skipped_already_in_kg,
+        "skipped_duplicate_finding": skipped_duplicate_finding,
     }
 
 
 def _empty_result() -> dict:
     return {
         "subjects_examined": 0,
-        "proposals_written": 0,
-        "proposals_rejected_low_confidence": 0,
-        "proposals_rejected_already_in_kg": 0,
+        "findings_written": 0,
+        "skipped_low_confidence": 0,
+        "skipped_already_in_kg": 0,
+        "skipped_duplicate_finding": 0,
     }
 
 
@@ -185,7 +192,6 @@ def _resolve_vault_path() -> Optional[Path]:
     override = os.environ.get("EMI_WIKI_DIR")
     if override:
         return Path(override)
-    # Fall back to the assistant_name-derived default.
     try:
         from app.assistant.utils.config_utils import get_assistant_name
         name = get_assistant_name() or "Emi"
@@ -195,7 +201,6 @@ def _resolve_vault_path() -> Optional[Path]:
 
 
 def _safe_filename(label: str) -> str:
-    """Mirror the wiki page writer's filesystem-safe label transform."""
     return label.replace("/", "_").replace("\\", "_")
 
 
@@ -216,7 +221,6 @@ def _write_examined_sidecar(page_path: Path) -> None:
 
 
 def _read_prose_page(prose_dir: Path, label: str) -> Optional[str]:
-    """Read the markdown for an entity, or None if the file doesn't exist."""
     p = prose_dir / f"{_safe_filename(label)}.md"
     if not p.exists():
         return None
@@ -228,14 +232,10 @@ def _read_prose_page(prose_dir: Path, label: str) -> Optional[str]:
 
 
 def _pick_subjects_to_examine(prose_dir: Path, *, limit: int) -> List[Dict[str, Any]]:
-    """Pick the N subjects whose prose page is freshest (newest mtime)
-    AND who haven't been examined since their last page write. The "haven't
-    been examined" check is encoded as a JSON sidecar at
-    `<entity>.wiki_inference.json` so we don't need a new DB table.
-    """
+    """Pick the N subjects whose prose page is freshest AND who haven't
+    been examined since their last page write (sidecar gate)."""
     from app.assistant.kg.db.knowledge_graph_db_sqlite import Node
 
-    # Gather candidate (label, mtime) from prose files.
     candidates: List[tuple[str, float]] = []
     try:
         for p in prose_dir.iterdir():
@@ -248,7 +248,6 @@ def _pick_subjects_to_examine(prose_dir: Path, *, limit: int) -> List[Dict[str, 
                 try:
                     last = json.loads(sidecar.read_text(encoding="utf-8")).get("examined_at_epoch", 0)
                     if last >= page_mtime:
-                        # Already examined since last page write
                         continue
                 except Exception:
                     pass
@@ -258,9 +257,8 @@ def _pick_subjects_to_examine(prose_dir: Path, *, limit: int) -> List[Dict[str, 
         return []
 
     candidates.sort(key=lambda t: t[1], reverse=True)
-    candidates = candidates[: limit * 3]  # over-fetch, then filter to known KG entities
+    candidates = candidates[: limit * 3]
 
-    # Resolve to KG node ids by label.
     if not candidates:
         return []
     labels = [c[0] for c in candidates]
@@ -290,10 +288,8 @@ def _pick_subjects_to_examine(prose_dir: Path, *, limit: int) -> List[Dict[str, 
 
 
 def _fetch_known_entities() -> List[Dict[str, str]]:
-    """One-row-per-node summary so the agent can resolve target labels to
-    ids without us streaming the whole graph. Sorted by importance desc
-    (so when the agent looks at the list, the most-relevant matches are
-    near the top)."""
+    """One-row-per-node summary so the agent can use canonical name
+    spellings. Sorted by importance desc."""
     from app.assistant.kg.db.knowledge_graph_db_sqlite import Node
 
     session = get_session()
@@ -314,17 +310,23 @@ def _fetch_known_entities() -> List[Dict[str, str]]:
 
 
 def _format_known_entities(rows: List[Dict[str, str]], *, exclude_id: str) -> str:
-    """Tabular block for the prompt. id | type | label."""
-    lines = ["id | type | label"]
+    """Tabular block for the prompt. type | label.
+
+    Note: id column dropped — the agent doesn't need ids in the new
+    sentence-emitting design. fact_extractor resolves names to ids on
+    its own pass. Removing ids saves prompt budget and removes a
+    hallucination surface."""
+    lines = ["type | label"]
     for r in rows:
         if r["id"] == exclude_id:
             continue
-        lines.append(f"{r['id'][:8]} | {r['node_type']:14} | {r['label']}")
+        lines.append(f"{r['node_type']:14} | {r['label']}")
     return "\n".join(lines[:1500])
 
 
 def _format_subject_neighborhood(node_id: str) -> str:
-    """Render the subject's existing edges so the agent can de-dup against them."""
+    """Render the subject's existing edges so the agent can de-dup
+    against them."""
     from app.assistant.kg.db.knowledge_graph_db_sqlite import Edge, Node
     from sqlalchemy.orm import aliased
 
@@ -358,184 +360,128 @@ def _format_subject_neighborhood(node_id: str) -> str:
     if out_rows:
         parts.append("Outgoing:")
         for rel, sentence, tid, tlabel, ttype in out_rows:
-            parts.append(f"  -[{rel}]-> {tlabel} ({ttype}) [id={str(tid)[:8]}]")
+            parts.append(f"  -[{rel}]-> {tlabel} ({ttype})")
     if in_rows:
         parts.append("Incoming:")
         for rel, sentence, sid, slabel, stype in in_rows:
-            parts.append(f"  <-[{rel}]- {slabel} ({stype}) [id={str(sid)[:8]}]")
+            parts.append(f"  <-[{rel}]- {slabel} ({stype})")
     return "\n".join(parts)
 
 
-def _resolve_target_id(maybe_id: str) -> tuple[Optional[str], Optional[str], Optional[str]]:
-    """Resolve an id-or-prefix to (full_id, label, node_type). Returns
-    (None, None, None) when not found OR when a prefix matches multiple
-    nodes (ambiguous — fail closed). The agent receives 8-char prefixes
-    in the prompt, so we accept either the full UUID or any unique
-    prefix (typically the first 8 chars)."""
-    from app.assistant.kg.db.knowledge_graph_db_sqlite import Node as NodeModel
+# ── finding write + dedup ──────────────────────────────────────────────
 
-    if not maybe_id:
-        return None, None, None
+
+_WS_RE = re.compile(r"\s+")
+
+
+def _canonical_sentence_hash(sentence_text: str) -> str:
+    """Hash for dedup: lowercased, whitespace-collapsed sentence. Two
+    inferences with identical canonical form produce the same hash
+    even if punctuation/casing differs."""
+    s = _WS_RE.sub(" ", (sentence_text or "")).strip().lower().rstrip(".")
+    return hashlib.sha1(s.encode("utf-8")).hexdigest()[:16]
+
+
+def _wiki_finding_already_exists(*, primary_node_id: str, sentence_text: str) -> bool:
+    """True if a wiki_inferred_fact finding with the same canonical
+    sentence hash already exists for this primary node, in any status.
+    The hash is stored in evidence_json['sentence_hash'] when the
+    finding is written.
+
+    Why all statuses (not just pending/approved): if the user already
+    rejected this fact ("not actually true / not interesting"), don't
+    keep re-surfacing it on every nightly run. Same goes for executed —
+    that fact is in the graph; don't propose it again."""
+    h = _canonical_sentence_hash(sentence_text)
     session = get_session()
     try:
-        # Try exact match first.
-        row = session.query(NodeModel.id, NodeModel.label, NodeModel.node_type).filter(
-            NodeModel.id == maybe_id
-        ).first()
-        if row is not None:
-            return str(row[0]), row[1], row[2]
-
-        # Prefix match — only accept when unique.
-        rows = session.query(NodeModel.id, NodeModel.label, NodeModel.node_type).filter(
-            NodeModel.id.like(f"{maybe_id}%")
-        ).limit(2).all()
-        if len(rows) == 1:
-            r = rows[0]
-            return str(r[0]), r[1], r[2]
-        return None, None, None
+        # SQLite JSON_EXTRACT works on the JSON column; portable enough
+        # within this codebase. Pythonic fallback if not.
+        from sqlalchemy import text as sql_text
+        try:
+            row = session.execute(
+                sql_text(
+                    "SELECT 1 FROM kg_maintenance_finding "
+                    "WHERE finding_type = :ft "
+                    "  AND primary_node_id = :pid "
+                    "  AND json_extract(evidence_json, '$.sentence_hash') = :h "
+                    "LIMIT 1"
+                ),
+                {"ft": FINDING_TYPE, "pid": primary_node_id, "h": h},
+            ).first()
+            return row is not None
+        except Exception:
+            # JSON-extract may not be available on every SQLite build;
+            # fall back to scanning python-side.
+            rows = (
+                session.query(KGMaintenanceFinding)
+                .filter(KGMaintenanceFinding.finding_type == FINDING_TYPE)
+                .filter(KGMaintenanceFinding.primary_node_id == primary_node_id)
+                .all()
+            )
+            for r in rows:
+                ev = r.evidence_json or {}
+                if isinstance(ev, dict) and ev.get("sentence_hash") == h:
+                    return True
+            return False
     finally:
         session.close()
 
 
-def _edge_exists(
+def _write_wiki_inferred_finding(
     *,
-    subject_id: str,
-    target_id: Optional[str],
-    target_label: Optional[str],
-    predicate: Optional[str],
-) -> bool:
-    """Verify-not-already check. Returns True if there's already a same-
-    predicate edge between subject and the target (resolved by id or label)."""
-    if not predicate:
-        return False
-    from app.assistant.kg.db.knowledge_graph_db_sqlite import Edge, Node
-
-    session = get_session()
-    try:
-        if target_id:
-            n = session.query(Edge).filter(
-                Edge.relationship_type == predicate,
-                ((Edge.source_id == subject_id) & (Edge.target_id == target_id))
-                | ((Edge.source_id == target_id) & (Edge.target_id == subject_id))
-            ).first()
-            return n is not None
-        if target_label:
-            target_rows = session.query(Node.id).filter(Node.label == target_label).all()
-            if not target_rows:
-                return False
-            target_ids = [str(r.id) for r in target_rows]
-            n = session.query(Edge).filter(
-                Edge.relationship_type == predicate,
-                ((Edge.source_id == subject_id) & (Edge.target_id.in_(target_ids)))
-                | ((Edge.source_id.in_(target_ids)) & (Edge.target_id == subject_id))
-            ).first()
-            return n is not None
-        return False
-    finally:
-        session.close()
-
-
-# ── Proposal write ─────────────────────────────────────────────────────
-
-
-def _write_proposal_for_inferred_connection(
-    *,
+    sentence_text: str,
     subject: Dict[str, Any],
-    connection: Dict[str, Any],
+    inference: Dict[str, Any],
     pipeline_run_id: Optional[str],
 ) -> bool:
-    """Push one InferredConnection through the standard proposal_writer.
+    """Write one wiki_inferred_fact finding. The maintenance UI surfaces
+    these to the user; the user reviews + fills any missing dates +
+    explicitly approves before any KG mutation. NEVER auto-applied.
 
-    Builds a minimal nodes/edges/anchor tuple matching the contract used
-    by the chat-side fact_extractor, so the same promoter logic applies.
     Returns True on success.
     """
-    from app.assistant.kg.proposal_writer import write_one_proposal_group
-
-    subject_temp = "wi_s"
-    target_temp = "wi_t"
-
-    nodes: List[Dict[str, Any]] = [
-        {
-            "temp_id": subject_temp,
-            "label": subject["label"],
-            "node_type": subject.get("node_type") or "Entity",
-            "kg_node_id": subject["id"],  # already-resolved
-        },
-    ]
-    if connection.get("target_node_id"):
-        # Look up the existing target's label/type. The agent sees 8-char
-        # id prefixes in known_entities (full UUIDs blow the prompt budget),
-        # so accept either the full id or any unique prefix; fall back to
-        # error only when the prefix is ambiguous (multi-match) or missing.
-        resolved_id, label, node_type = _resolve_target_id(connection["target_node_id"])
-        if resolved_id is None:
-            logger.warning(
-                "[wiki_inference] target_node_id %r does not resolve to a unique node; skipping proposal",
-                connection["target_node_id"],
-            )
-            return False
-        nodes.append({
-            "temp_id": target_temp,
-            "label": label or "(unknown)",
-            "node_type": node_type or "Entity",
-            "kg_node_id": resolved_id,
-        })
-    else:
-        nodes.append({
-            "temp_id": target_temp,
-            "label": connection.get("target_label") or "(unknown)",
-            "node_type": connection.get("target_node_type") or "Entity",
-        })
-
-    edges: List[Dict[str, Any]] = [{
-        "source_temp_id": subject_temp,
-        "target_temp_id": target_temp,
-        # proposal_writer reads `relationship_type` (or `label`) — not `predicate` —
-        # then runs it through normalize_predicate. Aligning with the established
-        # extractor-side contract instead of inventing a parallel name.
-        "relationship_type": connection.get("predicate") or "related_to",
-        "sentence": connection.get("sentence") or "",
-    }]
-
-    # Anchor doesn't have a real conversation behind it, so we synthesize
-    # one rooted in "wiki_inference" so the promoter's evidence row carries
-    # provenance back to this run.
-    anchor: Dict[str, Any] = {
-        "room_id": "wiki_inference",
-        "speaker_name": "wiki_connection_investigator",
-        "speaker_role": "system",
-        "unified_log_id": None,
-        "observed_at": datetime.now(timezone.utc),
-        "raw_text": (
-            f"Inferred from wiki page on {subject['label']}: "
-            f"{connection.get('inference_path') or ''} "
-            f"Quote: {connection.get('evidence_quote') or ''}"
-        )[:1000],
-    }
-
-    session = get_session()
+    confidence_val = inference.get("confidence")
     try:
-        proposal_id = write_one_proposal_group(
-            session,
-            nodes=nodes,
-            edges=edges,
-            anchor=anchor,
-            window_id=None,  # no chat window backs this proposal
-            extractor_agent_name="wiki_connection_investigator",
-            extraction_run_id=pipeline_run_id,
+        confidence = float(confidence_val) if confidence_val is not None else None
+    except (TypeError, ValueError):
+        confidence = None
+
+    evidence: Dict[str, Any] = {
+        "sentence": sentence_text,
+        "sentence_hash": _canonical_sentence_hash(sentence_text),
+        "evidence_quote": (inference.get("evidence_quote") or "")[:1000],
+        "inference_path": (inference.get("inference_path") or "")[:1000],
+        "agent_confidence": confidence,
+        "subject_label": subject.get("label"),
+        "subject_node_type": subject.get("node_type"),
+        # Suggested dates — user reviews + adjusts at approval time.
+        "suggested_start_date": inference.get("suggested_start_date") or None,
+        "suggested_end_date": inference.get("suggested_end_date") or None,
+        "suggested_start_date_prose": inference.get("suggested_start_date_prose") or None,
+        "suggested_end_date_prose": inference.get("suggested_end_date_prose") or None,
+    }
+    reason = (
+        f"Inferred from wiki page on {subject.get('label')!r}: {sentence_text} "
+        f"(conf={confidence})"
+    )[:1000]
+
+    try:
+        upsert_finding(
+            finding_type=FINDING_TYPE,
+            primary_node_id=subject["id"],
+            suggested_action="review",
+            reason=reason,
+            confidence=confidence,
+            priority="low",
+            agent_name="wiki_connection_investigator",
+            evidence=evidence,
+            pipeline_run_id=pipeline_run_id,
         )
-        if proposal_id is None:
-            session.rollback()
-            return False
-        session.commit()
         return True
     except Exception:
-        session.rollback()
         logger.error(
-            "[wiki_inference] write_one_proposal_group failed for subject=%s",
-            subject["label"], exc_info=True,
+            "[wiki_inference] finding write failed for subject=%s",
+            subject.get("label"), exc_info=True,
         )
         return False
-    finally:
-        session.close()

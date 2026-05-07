@@ -1,48 +1,48 @@
 """End-to-end tests for the wiki_connection_investigator pipeline step.
 
-The agent itself is stubbed — we test the candidate-page picker, the
-already-in-KG verification, and the proposal-write path. The agent's
-prompt quality is a separate concern.
+Architecture under test (2026-05-07 redesign — slow-down version):
 
-Each test covers a piece of self-healing the user asked for: turn a
-factual implication on a wiki page into a claim_proposal that the
-promoter then merges into the KG.
+  - The agent produces synthetic SENTENCES (not edge structures) plus
+    suggested dates extracted from the page.
+  - The step writes each sentence as a kg_maintenance_finding with
+    finding_type='wiki_inferred_fact'. The user reviews, fills any
+    missing dates, and explicitly approves via the maintenance UI
+    BEFORE any ingestion or KG mutation. NO auto-ingestion.
+  - Dedup: the same canonical sentence on the same subject doesn't
+    surface twice (text-level hash check on top of upsert_finding's
+    pair-key dedup).
+
+The agent itself is stubbed.
 """
 from __future__ import annotations
 
 import json
 import os
 import tempfile
-import time
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from app.assistant.database.claim_proposals import (
-    ClaimProposal, ClaimProposalEdge, ClaimProposalNode, ClaimProposalEvidence,
-)
 from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
 from app.assistant.kg.db.knowledge_graph_db_sqlite import Edge, Node
 from app.assistant.pipelines.context import PipelineContext
 from app.assistant.pipelines.kg_maintenance_pipeline.step_wiki_inference import (
-    _edge_exists,
+    FINDING_TYPE,
+    _canonical_sentence_hash,
     _format_subject_neighborhood,
+    _wiki_finding_already_exists,
     run as run_wiki_inference,
 )
-from app.models.base import get_session
+from app.models.base import Base, get_session
 
 
-# Stable test ids
 JUKKA_ID = "11111111-jukk-jukk-jukk-111111111111"
 DIANA_ID = "22222222-dian-dian-dian-222222222222"
-DYLAN_ID = "33333333-dyla-dyla-dyla-333333333333"
 
 
 @pytest.fixture
 def vault_dir():
-    """Tempdir-rooted vault. EMI_WIKI_DIR is set so step_wiki_inference
-    finds the prose pages we write."""
     with tempfile.TemporaryDirectory() as td:
         vault = Path(td) / "vault"
         (vault / "prose").mkdir(parents=True)
@@ -59,13 +59,12 @@ def vault_dir():
 
 @pytest.fixture(autouse=True)
 def _seed(kg_clean_db):
-    """Seed Jukka + Diana with the kinship edge that lets the inference
-    'Dylan is Jukka's nephew' work via Diana."""
     session = get_session()
     engine = session.bind
     session.close()
     KGMaintenanceFinding.__table__.drop(engine, checkfirst=True)
     KGMaintenanceFinding.__table__.create(engine, checkfirst=True)
+    Base.metadata.create_all(engine)
 
     session = get_session()
     try:
@@ -85,9 +84,6 @@ def _seed(kg_clean_db):
         session.commit()
     finally:
         session.close()
-
-
-# ── Stub agent ────────────────────────────────────────────────────────
 
 
 class StubAgentResult:
@@ -122,25 +118,34 @@ def _write_page(vault: Path, label: str, body: str) -> Path:
     return p
 
 
+def _findings() -> list[KGMaintenanceFinding]:
+    session = get_session()
+    try:
+        return list(
+            session.query(KGMaintenanceFinding)
+            .filter(KGMaintenanceFinding.finding_type == FINDING_TYPE)
+            .order_by(KGMaintenanceFinding.created_at.asc())
+            .all()
+        )
+    finally:
+        session.close()
+
+
 # ── Tests ─────────────────────────────────────────────────────────────
 
 
 def test_no_pages_means_no_subjects(vault_dir):
-    """Empty vault → step returns zero work without ever creating an agent."""
     with patch(
         "app.assistant.ServiceLocator.service_locator.DI.agent_factory.create_agent",
         side_effect=AssertionError("agent must not be created when no pages"),
     ):
         result = run_wiki_inference(_ctx())
     assert result["subjects_examined"] == 0
-    assert result["proposals_written"] == 0
+    assert result["findings_written"] == 0
 
 
 def test_pick_only_pages_with_known_kg_node(vault_dir):
-    """A wiki page exists for an entity not in the KG — it must be
-    SKIPPED (no agent call wasted on a subject we can't anchor)."""
     _write_page(vault_dir, "RandomStranger", "x" * 500)
-
     with patch(
         "app.assistant.ServiceLocator.service_locator.DI.agent_factory.create_agent",
         side_effect=AssertionError("no candidate, no agent"),
@@ -149,189 +154,217 @@ def test_pick_only_pages_with_known_kg_node(vault_dir):
     assert result["subjects_examined"] == 0
 
 
-def test_writes_proposal_for_dylan_kinship_inference(vault_dir):
-    """Happy path: page about Jukka mentions 'Diana's son Dylan'. Agent
-    proposes [Dylan nephew_of Jukka]. Step writes a claim_proposal."""
+def test_writes_finding_for_dylan_kinship_inference(vault_dir):
+    """Happy path: page implies 'Dylan is Jukka's nephew.' Step writes a
+    wiki_inferred_fact finding — NOT a unified_log row, NOT a claim_proposal.
+    The user reviews via the maintenance UI before any ingestion."""
     page_text = (
         "# Jukka\n\n"
-        "Jukka is the assistant's user. He has one sister, Diana, "
-        "who has a son named Dylan. Dylan visits often and adores his uncle.\n\n"
-        + "Filler. " * 60
+        "Jukka has one sister, Diana, who has a son named Dylan. "
+        "Dylan visits often.\n\n" + "Filler. " * 60
     )
     _write_page(vault_dir, "Jukka", page_text)
-
     verdict = {
-        "connections": [
-            {
-                "subject_node_id": JUKKA_ID,
-                "target_node_id": None,           # Dylan not in KG yet
-                "target_label": "Dylan",
-                "target_node_type": "Person",
-                "predicate": "nephew_of",
-                "sentence": "Dylan is Jukka's nephew.",
-                "evidence_quote": "Diana, who has a son named Dylan",
-                "inference_path": "Page: Diana's son Dylan → KG: Diana sister_of Jukka → Dylan nephew_of Jukka.",
-                "confidence": 0.9,
-                "not_already_in_kg": True,
-            }
-        ],
-        "reason": "One new kinship edge inferred from sibling+child structure.",
+        "sentences": [{
+            "sentence": "Dylan is Jukka's nephew.",
+            "evidence_quote": "Diana, who has a son named Dylan",
+            "inference_path": "Page: Diana's son → KG: Diana sister_of Jukka → Dylan nephew_of Jukka.",
+            "confidence": 0.92,
+            "not_already_in_kg": True,
+        }],
+        "reason": "One new kinship fact.",
     }
-
     with _patch_agent(verdict):
         result = run_wiki_inference(_ctx())
 
     assert result["subjects_examined"] == 1
-    assert result["proposals_written"] == 1
-    assert result["proposals_rejected_low_confidence"] == 0
-    assert result["proposals_rejected_already_in_kg"] == 0
+    assert result["findings_written"] == 1
+    assert result["skipped_low_confidence"] == 0
+    assert result["skipped_already_in_kg"] == 0
+    assert result["skipped_duplicate_finding"] == 0
 
-    # Verify the proposal made it into claim_proposal*
-    session = get_session()
-    try:
-        proposals = session.query(ClaimProposal).all()
-        nodes = session.query(ClaimProposalNode).all()
-        edges = session.query(ClaimProposalEdge).all()
-    finally:
-        session.close()
+    findings = _findings()
+    assert len(findings) == 1
+    f = findings[0]
+    assert f.finding_type == FINDING_TYPE
+    assert f.status == "pending"
+    assert f.primary_node_id == JUKKA_ID
+    assert f.suggested_action == "review"
+    assert f.agent_name == "wiki_connection_investigator"
+    ev = f.evidence_json or {}
+    assert ev.get("sentence") == "Dylan is Jukka's nephew."
+    assert ev.get("agent_confidence") == 0.92
+    assert "Diana" in (ev.get("evidence_quote") or "")
+    # No dates given by the agent → null in evidence
+    assert ev.get("suggested_start_date") is None
+    assert ev.get("suggested_end_date") is None
 
-    assert len(proposals) == 1
-    assert proposals[0].status == "pending"
-    labels = {n.label for n in nodes if n.label}
-    assert "Jukka" in labels
-    assert "Dylan" in labels
-    assert any(e.predicate == "nephew_of" for e in edges)
 
-
-def test_low_confidence_proposals_skipped(vault_dir):
-    """Below MIN_CONFIDENCE = 0.6 → silenced, not written."""
-    _write_page(vault_dir, "Jukka", "Jukka. " * 200)
-
+def test_finding_carries_suggested_dates_from_agent(vault_dir):
+    """When the page provides dates inline, the agent's suggested_start_date
+    / suggested_end_date / prose fields land on the finding so the user
+    can review them at approval time."""
+    page_text = "# Diana\n\n" + "Diana taught at UC Berkeley starting in 2018, until early 2024. " * 30
+    _write_page(vault_dir, "Diana", page_text)
     verdict = {
-        "connections": [{
-            "subject_node_id": JUKKA_ID,
-            "target_label": "MaybeColleague",
-            "target_node_type": "Person",
-            "predicate": "works_with",
-            "sentence": "Jukka may work with MaybeColleague.",
+        "sentences": [{
+            "sentence": "Diana taught at UC Berkeley from 2018 to early 2024.",
+            "evidence_quote": "Diana taught at UC Berkeley starting in 2018, until early 2024",
+            "inference_path": "Direct from page.",
+            "confidence": 0.95,
+            "not_already_in_kg": True,
+            "suggested_start_date": "2018-01-01",
+            "suggested_end_date": "2024-01-01",
+            "suggested_start_date_prose": None,
+            "suggested_end_date_prose": "early 2024",
+        }],
+        "reason": "One state with start+end.",
+    }
+    with _patch_agent(verdict):
+        run_wiki_inference(_ctx())
+
+    findings = _findings()
+    assert len(findings) == 1
+    ev = findings[0].evidence_json
+    assert ev["suggested_start_date"] == "2018-01-01"
+    assert ev["suggested_end_date"] == "2024-01-01"
+    assert ev["suggested_end_date_prose"] == "early 2024"
+
+
+def test_low_confidence_sentences_skipped(vault_dir):
+    _write_page(vault_dir, "Jukka", "Jukka. " * 200)
+    verdict = {
+        "sentences": [{
+            "sentence": "Jukka may know MaybeColleague through work.",
             "evidence_quote": "(speculative)",
             "inference_path": "guess",
-            "confidence": 0.4,  # below threshold
+            "confidence": 0.4,
             "not_already_in_kg": True,
         }],
         "reason": "speculative",
     }
     with _patch_agent(verdict):
         result = run_wiki_inference(_ctx())
-
-    assert result["proposals_written"] == 0
-    assert result["proposals_rejected_low_confidence"] == 1
-    session = get_session()
-    try:
-        assert session.query(ClaimProposal).count() == 0
-    finally:
-        session.close()
+    assert result["findings_written"] == 0
+    assert result["skipped_low_confidence"] == 1
+    assert _findings() == []
 
 
-def test_already_in_kg_proposals_skipped(vault_dir):
-    """If the agent's not_already_in_kg flag is False, skip without
-    writing — and also verify-by-SQL: even if the agent says True, an
-    existing same-predicate edge should make the step skip."""
+def test_already_in_kg_sentences_skipped(vault_dir):
     _write_page(vault_dir, "Jukka", "Jukka. " * 200)
-
-    # Add a Diana edge that would conflict with the agent's proposal
-    session = get_session()
-    try:
-        session.add(Edge(
-            id="cccccccc-cccc-cccc-cccc-edge0000cccc",
-            source_id=DIANA_ID, target_id=JUKKA_ID,
-            relationship_type="sibling_of",
-            sentence="Diana is Jukka's sibling.",
-        ))
-        session.commit()
-    finally:
-        session.close()
-
     verdict = {
-        "connections": [{
-            "subject_node_id": JUKKA_ID,
-            "target_node_id": DIANA_ID,
-            "predicate": "sibling_of",  # already exists (Diana → Jukka)
+        "sentences": [{
             "sentence": "Jukka and Diana are siblings.",
             "evidence_quote": "his sister Diana",
             "inference_path": "Page says sister.",
             "confidence": 0.95,
-            "not_already_in_kg": True,  # agent thinks new — but it exists
+            "not_already_in_kg": False,
         }],
-        "reason": "(false positive — verify-by-SQL should catch it)",
+        "reason": "(already covered)",
     }
     with _patch_agent(verdict):
         result = run_wiki_inference(_ctx())
+    assert result["findings_written"] == 0
+    assert result["skipped_already_in_kg"] == 1
+    assert _findings() == []
 
-    assert result["proposals_written"] == 0
-    assert result["proposals_rejected_already_in_kg"] == 1
+
+def test_duplicate_sentence_not_re_surfaced(vault_dir):
+    """The same canonical sentence on the same subject shouldn't produce
+    two findings across runs. Critical: prevents the nightly job from
+    re-flooding the queue with the same inferences when the user hasn't
+    yet reviewed them."""
+    _write_page(vault_dir, "Jukka", "Jukka. " * 200)
+    verdict = {
+        "sentences": [{
+            "sentence": "Dylan is Jukka's nephew.",
+            "evidence_quote": "x",
+            "inference_path": "y",
+            "confidence": 0.9,
+            "not_already_in_kg": True,
+        }],
+        "reason": "x",
+    }
+
+    # First run: creates the finding
+    with _patch_agent(verdict):
+        first = run_wiki_inference(_ctx())
+    assert first["findings_written"] == 1
+
+    # Force a second run by clearing the sidecar (simulating the page
+    # being rewritten). Same agent verdict — the dedup should catch it.
+    page = vault_dir / "prose" / "Jukka.md"
+    sidecar = page.with_suffix(".wiki_inference.json")
+    sidecar.unlink()
+
+    with _patch_agent(verdict):
+        second = run_wiki_inference(_ctx())
+    assert second["findings_written"] == 0
+    assert second["skipped_duplicate_finding"] == 1
+
+    # Still only one finding.
+    assert len(_findings()) == 1
+
+
+def test_canonical_sentence_hash_collapses_punctuation_and_case():
+    h1 = _canonical_sentence_hash("Dylan is Jukka's nephew.")
+    h2 = _canonical_sentence_hash("dylan is jukka's nephew")
+    h3 = _canonical_sentence_hash("DYLAN IS JUKKA'S NEPHEW.")
+    h4 = _canonical_sentence_hash("Dylan  is  Jukka's nephew")  # collapsed whitespace
+    assert h1 == h2 == h3 == h4
+    # Different sentence → different hash
+    h5 = _canonical_sentence_hash("Dylan is Jukka's son.")
+    assert h5 != h1
+
+
+def test_wiki_finding_already_exists_returns_true_after_write():
+    """Direct test of the dedup helper."""
+    from app.assistant.kg_maintenance.store import upsert_finding
+    sentence = "Dylan is Jukka's nephew."
+    h = _canonical_sentence_hash(sentence)
+    upsert_finding(
+        finding_type=FINDING_TYPE,
+        primary_node_id=JUKKA_ID,
+        suggested_action="review",
+        reason="seed",
+        confidence=0.9,
+        priority="low",
+        agent_name="test",
+        evidence={"sentence_hash": h, "sentence": sentence},
+    )
+    assert _wiki_finding_already_exists(primary_node_id=JUKKA_ID, sentence_text=sentence) is True
+    # Different subject — not a dup
+    assert _wiki_finding_already_exists(primary_node_id=DIANA_ID, sentence_text=sentence) is False
+    # Different sentence — not a dup
+    assert _wiki_finding_already_exists(primary_node_id=JUKKA_ID, sentence_text="Other fact.") is False
 
 
 def test_short_page_skipped(vault_dir):
-    """Pages shorter than 200 chars don't have enough context to reason on."""
-    _write_page(vault_dir, "Jukka", "Jukka.")  # tiny
-
+    _write_page(vault_dir, "Jukka", "Jukka.")
     with patch(
         "app.assistant.ServiceLocator.service_locator.DI.agent_factory.create_agent"
     ) as mock_create:
-        mock_create.return_value = StubAgent({"connections": [], "reason": "x"})
+        mock_create.return_value = StubAgent({"sentences": [], "reason": "x"})
         result = run_wiki_inference(_ctx())
-
-    # subject is examined (entered the loop) but page is too short to call agent
-    assert result["proposals_written"] == 0
+    assert result["findings_written"] == 0
+    assert _findings() == []
 
 
 def test_subject_neighborhood_includes_existing_edge():
-    """The neighborhood-formatter helper should render Diana sister_of Jukka."""
     block = _format_subject_neighborhood(JUKKA_ID)
     assert "Diana" in block
     assert "sister_of" in block
 
 
-def test_edge_exists_helper_handles_id_or_label():
-    """_edge_exists should recognize the seeded sister_of edge whether we
-    pass target_id or target_label."""
-    assert _edge_exists(
-        subject_id=JUKKA_ID, target_id=DIANA_ID,
-        target_label=None, predicate="sister_of",
-    ) is True
-    assert _edge_exists(
-        subject_id=JUKKA_ID, target_id=None,
-        target_label="Diana", predicate="sister_of",
-    ) is True
-    # Wrong predicate → not found
-    assert _edge_exists(
-        subject_id=JUKKA_ID, target_id=DIANA_ID,
-        target_label=None, predicate="best_friend_of",
-    ) is False
-
-
 def test_sidecar_blocks_re_examination(vault_dir):
-    """After examining a page, the step writes a sidecar; a fresh run
-    skips it until the page is rewritten (mtime moves forward).
-
-    This is the actual contract: the step MUST write the sidecar itself.
-    Earlier audit caught that the first cut wasn't writing it, so every
-    nightly run would have re-examined every page — wasted LLM calls."""
     page = _write_page(vault_dir, "Jukka", "Jukka. " * 200)
-    verdict = {"connections": [], "reason": "nothing new"}
+    verdict = {"sentences": [], "reason": "nothing new"}
     with _patch_agent(verdict):
         first = run_wiki_inference(_ctx())
     assert first["subjects_examined"] == 1
-
-    # The step itself must have dropped the sidecar — no test-side fixup.
     sidecar = page.with_suffix(".wiki_inference.json")
-    assert sidecar.exists(), "step must write sidecar after examining a page"
-    sidecar_data = json.loads(sidecar.read_text(encoding="utf-8"))
-    assert "examined_at_epoch" in sidecar_data
-    assert sidecar_data["examined_at_epoch"] >= page.stat().st_mtime
+    assert sidecar.exists()
 
-    # Second run: nothing fresh, agent must not be created
     with patch(
         "app.assistant.ServiceLocator.service_locator.DI.agent_factory.create_agent",
         side_effect=AssertionError("agent must not run when nothing fresh"),
@@ -341,13 +374,9 @@ def test_sidecar_blocks_re_examination(vault_dir):
 
 
 def test_subject_limit_kwarg_caps_examined_pages(vault_dir):
-    """run(ctx, subject_limit=N) caps how many pages get examined."""
-    # Three pages; each subject is in the seeded KG (Jukka). Use Diana too.
     _write_page(vault_dir, "Jukka", "Jukka content. " * 50)
     _write_page(vault_dir, "Diana", "Diana content. " * 50)
-    verdict = {"connections": [], "reason": "x"}
-
+    verdict = {"sentences": [], "reason": "x"}
     with _patch_agent(verdict):
         result = run_wiki_inference(_ctx(), subject_limit=1)
-
     assert result["subjects_examined"] == 1

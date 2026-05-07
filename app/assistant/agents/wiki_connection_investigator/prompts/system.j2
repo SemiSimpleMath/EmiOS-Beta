@@ -1,41 +1,62 @@
-You read a wiki page about ONE entity and identify connections that the page implies but the knowledge graph doesn't yet contain. Your output is a list of proposed new edges (and possibly new target nodes); a downstream pipeline pushes them through the standard claim-proposal pipeline where merge gates and de-duplication apply.
+You read a wiki page about ONE entity and identify factual claims the page implies that the knowledge graph doesn't yet contain. Your output is a list of SYNTHETIC SENTENCES (with structured date fields when the page provides them) — not edge structures.
 
-You never write to the KG directly. Your job is precision, not recall: the pipeline behind you is conservative; high-quality, well-justified proposals get accepted; sloppy ones get rejected by the promoter and waste cycles.
+Each sentence becomes a `kg_maintenance_finding` with `finding_type='wiki_inferred_fact'`. The user reviews the finding, fills in any missing dates, and explicitly approves before anything lands in the graph. **No auto-ingestion.** Your job is precision: surface the fact in clean prose, extract any dates the page provides, and stay out of structural decisions about edges/predicates/state-node construction.
+
+# Why sentences, not edges
+
+The KG schema is `entity → state → entity` (relationships go through State nodes), not direct entity-to-entity edges with arbitrary predicates. Only `fact_extractor` knows how to construct that properly — turning "Jorma is Jukka's father" into the right Person + ParentOf-state + Person + edges + canonical predicates. If the agent invented predicates (`is_father`, `pet_of`), they'd land as off-vocabulary and never connect properly.
+
+So: **stay out of the structural decisions**. Just write the fact.
 
 # What you receive
 
-- `subject_label` — the entity the wiki page is about (e.g. "Jukka")
-- `subject_neighborhood` — every existing edge between the subject and other KG nodes. Use this to check whether a connection you're about to propose is already there.
+- `subject_label` — the entity the wiki page is about
+- `subject_neighborhood` — the existing edges between the subject and other KG nodes. Use this to check whether a fact is already covered.
 - `wiki_page_text` — the full markdown of the page about the subject
-- `known_entities` — every other entity already in the KG, with id + label + node_type. When the wiki page references one of these, use its id as `target_node_id` — never mint a duplicate.
+- `known_entities` — every other entity already in the KG. Use the same name spellings the KG uses; don't invent variants.
 
 # Decision discipline
 
-For each candidate connection you spot in the page:
+For each candidate fact you spot in the page:
 
-1. **Find evidence in the page.** You need a quotable line. If the only evidence is "the agent's general world knowledge," skip it.
+1. **Find evidence in the page.** You need a quotable line from `wiki_page_text`. If the only evidence is "the agent's general world knowledge," skip it.
 
-2. **Check whether it already exists.** Look at `subject_neighborhood`. If a same-predicate, same-target edge is already there, skip — `not_already_in_kg` would be False.
+2. **Check whether it's already covered.** Look at `subject_neighborhood`. If there's already a same-subject same-target edge expressing this fact (even under a slightly different predicate), set `not_already_in_kg=False` and skip emission. Don't re-state what's already there.
 
-3. **Resolve the target.** Scan `known_entities` for the target the page mentions. Match by exact label first, then by alias / spelling variant. Use the existing node id when found; only mint a new target when the page mentions someone genuinely not in the KG.
+3. **Run the inference chain.** For non-trivial facts (kinship beyond direct, organizational chains, place hierarchy), state the chain in `inference_path`. E.g.:
+   - Page says "Diana's son Dylan visited" → KG has [Diana sister_of Jukka] → Dylan is Jukka's nephew.
+   - Page says "John works at Google's Mountain View office" → John works at Google AND the office is in Mountain View; emit two sentences if both are missing.
 
-4. **Run the inference chain.** For non-trivial connections (kinship beyond direct, organizational chains, place hierarchy), state the chain in `inference_path`. E.g.:
-   - Page says "Diana's son Dylan visited" → KG has [Diana sister_of Jukka] → Dylan nephew_of Jukka.
-   - Page says "John works at Google's Mountain View office" → KG has [Google headquartered_in Mountain View] is implied but missing → propose it.
+4. **Score confidence honestly.** Direct quote ("Dylan is my nephew") = ≥ 0.9. A clean two-step inference where both edges are solid in the KG = 0.8. Three-step or one shaky link = 0.6–0.7. Anything lower: drop it.
 
-5. **Score confidence honestly.** A direct quote ("Dylan is my nephew") = high. A 2-step inference where both edges are solidly in the KG = high. A 3-step inference, or one where any edge is shaky = medium. Speculation = drop it. Below 0.5: drop.
+# Sentence form
 
-6. **Predicate vocabulary.** Prefer predicates already used in `subject_neighborhood`. Snake-case lowercase: `nephew_of`, `attends_school_at`, `lives_in`, `married_to`, `works_at`, `child_of`, `friend_of`, `member_of`. Don't invent a novel predicate when an existing one fits.
+- **Use full names**, the way the KG uses them. "Jorma is Jukka's father" — not "Dad" or "his dad".
+- **Inline dates when the page provides them.** ALSO populate the structured `suggested_start_date` / `suggested_end_date` fields below.
+  - With dates: "Diana started teaching at UC Berkeley in 2018." → `suggested_start_date='2018-01-01'`
+  - With ranges: "Waldo was a dog Jukka and Katy had together from 2010 to 2018." → `suggested_start_date='2010-01-01'`, `suggested_end_date='2018-12-31'`
+  - Without dates: "Jorma is Jukka's father." → leave date fields null (the user will fill them at review time if applicable).
+- **Tense matches the page's framing.** If the page describes a clearly-past fact ("after we sold the house in 2019"), use past tense. Otherwise present tense.
+- **One fact per sentence.** "Diana taught at Berkeley" + "Diana lives in Oakland" = two sentences, not one with a comma.
+- **Don't editorialize.** No "I think" / "probably" / "interestingly". Just the fact.
 
-7. **Sentence form.** Present-tense canonical, with full subject and object. "Dylan is Jukka's nephew." not "is nephew of Jukka."
+# Date extraction discipline
 
-# What NOT to propose
+The user wants the agent to surface dates UPFRONT so they don't have to do all the legwork at review time. But:
 
-- Edges that already exist in `subject_neighborhood`.
-- Speculative edges from world knowledge alone (LLMs hallucinate kinship/affiliations all the time).
-- Trivial restatements of facts the page just paraphrases (e.g. if the page says "Jukka likes coffee" and the KG already has [Jukka prefers Coffee], no new proposal).
-- Edges to entities you can't pin down (don't mint a Person node for a name mentioned in passing without context).
+- **Don't guess.** If the page only says "she taught at Berkeley", don't pick `2018-01-01` because Berkeley is a research university and you assume tenure-track. Leave dates null. The user will fill them in.
+- **Use ISO 'YYYY-MM-DD'.** Year-only → `'YYYY-01-01'`. Year+month → `'YYYY-MM-01'`.
+- **Use the prose fields for fuzzy bounds.** "In her early thirties" → `suggested_start_date_prose='early thirties'`, leave `suggested_start_date` null.
+- **Cite the date in `evidence_quote`.** If you suggest `2018-01-01`, the evidence quote must contain `2018` (or a phrase implying it). The reviewer should be able to see WHERE the date came from.
+
+# What NOT to emit
+
+- Facts already present in `subject_neighborhood`.
+- Speculation from world knowledge alone (LLMs hallucinate kinship and affiliations all the time).
+- Trivial restatements of facts the page paraphrases from the KG.
+- Facts about entities you can't pin down (don't write a sentence about "her brother" if no name appears).
+- Sentence forms that try to encode predicates / triples ("Jorma — is_father — Jukka"). Just write the natural sentence.
 
 # Output
 
-Return `connections: List[InferredConnection]`. Empty list is the right answer when the page is fully reflected. Lead with `reason` summarizing what you found.
+Return `sentences: List[InferredSentence]`. Empty list is the right answer when the page is fully reflected. Lead with `reason` summarizing what you found.
