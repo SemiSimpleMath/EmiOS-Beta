@@ -4,7 +4,7 @@
   "inputs": [
     {
       "name": "max_chars",
-      "type": "number",
+      "type": "integer",
       "required": false,
       "description": "Maximum characters of text to return. Default 15000. Range: 1000-50000."
     }

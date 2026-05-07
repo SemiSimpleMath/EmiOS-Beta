@@ -18,13 +18,13 @@
       "name": "limit",
       "type": "integer",
       "required": false,
-      "description": "Maximum number of matches."
+      "description": "Maximum number of matches to return (up to 200)."
     },
     {
       "name": "include_descriptions",
       "type": "boolean",
       "required": false,
-      "description": "Deprecated. Descriptions are always included."
+      "description": "Deprecated. Descriptions are always included in find_tool results."
     }
   ],
   "outputs": [

@@ -5,19 +5,19 @@
     {
       "name": "owner_node_id",
       "type": "string",
-      "required": true,
+      "required": false,
       "description": "Existing entity that 'owns' this state (source of the new edge)."
     },
     {
       "name": "predicate",
       "type": "string",
-      "required": true,
+      "required": false,
       "description": "relationship_type for the owner→state edge, e.g. 'has_residence'."
     },
     {
       "name": "label",
       "type": "string",
-      "required": true,
+      "required": false,
       "description": "Label for the new node, e.g. 'Scottsdale, Arizona residence'."
     },
     {
@@ -36,13 +36,13 @@
       "name": "description",
       "type": "string",
       "required": false,
-      "description": "Description of the era / event."
+      "description": "Free-form description of the era / event."
     },
     {
       "name": "original_sentence",
       "type": "string",
       "required": false,
-      "description": "Source sentence if any."
+      "description": "The user-provided sentence this is derived from, if any."
     },
     {
       "name": "start_date",
@@ -54,35 +54,37 @@
       "name": "end_date",
       "type": "string",
       "required": false,
-      "description": "ISO date; omit for open-ended."
+      "description": "ISO date or datetime; omit for an open-ended era."
     },
     {
       "name": "start_date_confidence",
       "type": "string",
-      "required": false
+      "required": false,
+      "description": "e.g."
     },
     {
       "name": "end_date_confidence",
       "type": "string",
-      "required": false
+      "required": false,
+      "description": "As above for end_date."
     },
     {
       "name": "sentence",
       "type": "string",
       "required": false,
-      "description": "Sentence on the owner→state edge."
+      "description": "Sentence to attach to the ownerâstate edge."
     },
     {
       "name": "attributes",
       "type": "object",
       "required": false,
-      "description": "Extra structured attrs."
+      "description": "Extra structured attrs (JSON dict)."
     },
     {
       "name": "reason",
       "type": "string",
-      "required": true,
-      "description": "Why this state should exist. Into kg_revision_log."
+      "required": false,
+      "description": "Why this state should exist. Goes into kg_revision_log."
     },
     {
       "name": "dry_run",
@@ -94,7 +96,7 @@
       "name": "finding_id",
       "type": "string",
       "required": false,
-      "description": "Source kg_maintenance_finding.id."
+      "description": "Source kg_maintenance_finding.id, if any."
     }
   ],
   "outputs": [

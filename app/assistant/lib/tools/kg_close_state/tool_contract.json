@@ -5,14 +5,14 @@
     {
       "name": "node_id",
       "type": "string",
-      "required": true,
-      "description": "Existing State or Event node id."
+      "required": false,
+      "description": "Existing State or Event node id to close."
     },
     {
       "name": "end_date",
       "type": "string",
-      "required": true,
-      "description": "ISO date or datetime."
+      "required": false,
+      "description": "ISO date or datetime, e.g."
     },
     {
       "name": "end_date_confidence",
@@ -24,19 +24,19 @@
       "name": "end_date_prose",
       "type": "string",
       "required": false,
-      "description": "Free-form prose for the end-date."
+      "description": "Free-form prose for the end-date (e.g."
     },
     {
       "name": "force",
       "type": "boolean",
       "required": false,
-      "description": "Overwrite an existing end_date. Default false."
+      "description": "Set true to overwrite an existing end_date. The prior value is captured in kg_revision_log."
     },
     {
       "name": "reason",
       "type": "string",
-      "required": true,
-      "description": "Why the era ended. Into kg_revision_log."
+      "required": false,
+      "description": "Why the era ended. Goes into kg_revision_log."
     },
     {
       "name": "dry_run",
@@ -48,7 +48,7 @@
       "name": "finding_id",
       "type": "string",
       "required": false,
-      "description": "Source kg_maintenance_finding.id."
+      "description": "Source kg_maintenance_finding.id, if any."
     }
   ],
   "outputs": [

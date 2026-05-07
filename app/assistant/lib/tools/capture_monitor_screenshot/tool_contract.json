@@ -5,8 +5,8 @@
     {
       "name": "monitor_index",
       "type": "integer",
-      "required": true,
-      "description": "1-based monitor index."
+      "required": false,
+      "description": "1-based monitor index to capture."
     }
   ],
   "outputs": [

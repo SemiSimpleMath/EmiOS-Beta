@@ -4,7 +4,7 @@
   "inputs": [
     {
       "name": "image_path",
-      "type": "image_path",
+      "type": "string",
       "required": true,
       "description": "Path to image file."
     },

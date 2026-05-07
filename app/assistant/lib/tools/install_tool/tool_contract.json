@@ -6,37 +6,37 @@
       "name": "tool_name",
       "type": "string",
       "required": false,
-      "description": "Namespaced MCP tool (mcp::<server_id>::<tool_name>)."
+      "description": "Namespaced MCP tool, e.g. mcp::npm/server-google-maps::maps_distance_matrix."
     },
     {
       "name": "server_id",
       "type": "string",
       "required": false,
-      "description": "Trusted MCP server identifier."
+      "description": "Trusted MCP server_id, e.g. npm/server-google-maps."
     },
     {
       "name": "mcp_tool_name",
       "type": "string",
       "required": false,
-      "description": "MCP tool name under the server."
+      "description": "MCP tool name from the selected server, e.g. maps_distance_matrix."
     },
     {
       "name": "install_source",
       "type": "string",
       "required": false,
-      "description": "Install source metadata tag."
+      "description": "Install source tag for registry metadata."
     },
     {
       "name": "launch_id",
       "type": "string",
       "required": false,
-      "description": "Optional launch option id."
+      "description": "Optional launch option id from server entry."
     },
     {
       "name": "timeout_s",
       "type": "number",
       "required": false,
-      "description": "Refresh timeout when cache is missing."
+      "description": "Timeout in seconds for cache refresh launch when needed."
     }
   ],
   "outputs": [

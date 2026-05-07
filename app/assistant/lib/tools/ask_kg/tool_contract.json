@@ -6,12 +6,12 @@
       "name": "question",
       "type": "string",
       "required": true,
-      "description": "Question to answer using KG evidence"
+      "description": "Question to answer using node-local KG evidence"
     },
     {
       "name": "node",
       "type": "string",
-      "required": false,
+      "required": true,
       "description": "Base node name/title (e.g. 'Jukka', 'Katy'). Leave empty to search the whole graph."
     }
   ],

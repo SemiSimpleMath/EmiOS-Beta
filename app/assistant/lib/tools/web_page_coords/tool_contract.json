@@ -9,6 +9,12 @@
       "description": ""
     },
     {
+      "name": "full_page",
+      "type": "boolean",
+      "required": false,
+      "description": ""
+    },
+    {
       "name": "strict",
       "type": "boolean",
       "required": false,

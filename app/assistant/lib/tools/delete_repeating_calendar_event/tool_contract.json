@@ -6,7 +6,7 @@
       "name": "event_id",
       "type": "string",
       "required": true,
-      "description": "The Google Calendar event ID of the recurring series. Either the base series id or any single instance id works — both resolve to the same series."
+      "description": "The Google Calendar event ID of the recurring series. May be either the base series id or any single instance id â either resolves to the same series and every occurrence is deleted. Non-recurring events are rejected; use delete_calendar_event for those."
     },
     {
       "name": "cascade",

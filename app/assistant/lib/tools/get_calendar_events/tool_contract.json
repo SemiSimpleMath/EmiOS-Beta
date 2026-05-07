@@ -31,12 +31,6 @@
       "type": "boolean",
       "required": false,
       "description": ""
-    },
-    {
-      "name": "event_name_contains",
-      "type": "string",
-      "required": false,
-      "description": "Optional case-insensitive substring filter against the event title. Use this when the user asks for a specific event by name (e.g. 'Friday Night Meats', 'dentist appointment') rather than a general time-window scan. Applied post-fetch after the date range is pulled."
     }
   ],
   "outputs": [

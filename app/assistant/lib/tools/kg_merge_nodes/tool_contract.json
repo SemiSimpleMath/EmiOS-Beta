@@ -5,19 +5,19 @@
     {
       "name": "keep_id",
       "type": "string",
-      "required": true,
+      "required": false,
       "description": "Surviving node id (gains the alias + edges)."
     },
     {
       "name": "fold_id",
       "type": "string",
-      "required": true,
+      "required": false,
       "description": "Node to fold and delete."
     },
     {
       "name": "reason",
       "type": "string",
-      "required": true,
+      "required": false,
       "description": "Why this merge is correct. Goes into kg_revision_log."
     },
     {

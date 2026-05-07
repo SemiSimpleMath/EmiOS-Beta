@@ -5,14 +5,14 @@
     {
       "name": "ref",
       "type": "string",
-      "required": true,
-      "description": "Target ref id from browser_snapshot."
+      "required": false,
+      "description": "Target ref id from browser_snapshot (for example e10)."
     },
     {
       "name": "element",
       "type": "string",
       "required": false,
-      "description": "Optional element label/context."
+      "description": "Optional element label/context (e.g. the visible text or aria-label) to disambiguate the click target."
     }
   ],
   "outputs": [

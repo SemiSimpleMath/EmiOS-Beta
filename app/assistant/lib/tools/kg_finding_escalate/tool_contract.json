@@ -5,7 +5,7 @@
     {
       "name": "finding_id",
       "type": "string",
-      "required": true,
+      "required": false,
       "description": "kg_maintenance_finding.id to escalate."
     },
     {
@@ -29,7 +29,7 @@
     {
       "name": "reason",
       "type": "string",
-      "required": true,
+      "required": false,
       "description": "Why escalation (vs auto-execute) is correct here."
     }
   ],

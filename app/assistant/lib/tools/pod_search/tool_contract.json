@@ -33,6 +33,12 @@
       "description": "Fixed taxonomy. Valid values ONLY: food, entertainment, health, schedule, work. OR-match within the list. Example: ['food','health']. For people / topics / keywords, use `query` instead. Tags are populated for chat_cluster pods only — email pods have no tags."
     },
     {
+      "name": "scope",
+      "type": "string",
+      "required": false,
+      "description": "Exact scope_id filter (e.g. room_id"
+    },
+    {
       "name": "since",
       "type": "string",
       "required": false,

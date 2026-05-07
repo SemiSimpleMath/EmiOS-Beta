@@ -4,13 +4,13 @@
   "inputs": [
     {
       "name": "file_path",
-      "type": "path",
+      "type": "string",
       "required": true,
       "description": "Target file path."
     },
     {
       "name": "content",
-      "type": "text",
+      "type": "string",
       "required": true,
       "description": "Content to write."
     },

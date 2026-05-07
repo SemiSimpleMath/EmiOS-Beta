@@ -5,7 +5,7 @@
     {
       "name": "finding_id",
       "type": "string",
-      "required": true,
+      "required": false,
       "description": "kg_maintenance_finding.id to resolve."
     },
     {
@@ -23,7 +23,7 @@
     {
       "name": "reason",
       "type": "string",
-      "required": true,
+      "required": false,
       "description": "Why the finding is now resolved."
     }
   ],

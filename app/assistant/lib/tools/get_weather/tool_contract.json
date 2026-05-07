@@ -5,13 +5,13 @@
     {
       "name": "city",
       "type": "string",
-      "required": false,
+      "required": true,
       "description": "City name to look up. Defaults to user's current location."
     },
     {
       "name": "forecast_type",
       "type": "string",
-      "required": false,
+      "required": true,
       "description": "Type of forecast: 'current' (default) for current conditions, or 'five_day' for a 5-day forecast."
     }
   ],

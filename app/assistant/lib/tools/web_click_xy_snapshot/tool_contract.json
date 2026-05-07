@@ -5,14 +5,14 @@
     {
       "name": "x",
       "type": "number",
-      "required": true,
-      "description": "Viewport X coordinate."
+      "required": false,
+      "description": "X coordinate in viewport pixels."
     },
     {
       "name": "y",
       "type": "number",
-      "required": true,
-      "description": "Viewport Y coordinate."
+      "required": false,
+      "description": "Y coordinate in viewport pixels."
     }
   ],
   "outputs": [

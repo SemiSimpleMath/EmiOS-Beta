@@ -30,7 +30,7 @@
       "name": "capture_snapshot",
       "type": "boolean",
       "required": false,
-      "description": "If true, capture browser_snapshot after scrolling."
+      "description": "If true, capture browser_snapshot after scrolling and include it in result data."
     }
   ],
   "outputs": [

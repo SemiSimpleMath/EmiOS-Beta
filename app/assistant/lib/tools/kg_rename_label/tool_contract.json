@@ -5,19 +5,19 @@
     {
       "name": "node_id",
       "type": "string",
-      "required": true,
+      "required": false,
       "description": "Target node id."
     },
     {
       "name": "new_label",
       "type": "string",
-      "required": true,
+      "required": false,
       "description": "New canonical label."
     },
     {
       "name": "reason",
       "type": "string",
-      "required": true,
+      "required": false,
       "description": "Why the rename is correct. Goes into kg_revision_log."
     },
     {

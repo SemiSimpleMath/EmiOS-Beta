@@ -6,7 +6,7 @@
       "name": "enabled",
       "type": "boolean",
       "required": true,
-      "description": "True to enable, false to disable."
+      "description": "True to enable screen capture, False to disable it."
     },
     {
       "name": "actor",

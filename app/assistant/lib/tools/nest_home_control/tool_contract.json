@@ -3,6 +3,12 @@
   "description": "Read or set Jukka's Nest thermostat.\n\nRecipes:\n  - Set cooling to 75F:    {\"mode\": \"COOL\", \"target_temperature\": 75}\n  - Set heating to 68F:    {\"mode\": \"HEAT\", \"target_temperature\": 68}\n  - Just change setpoint:  {\"target_temperature\": 72}     (mode unchanged)\n  - Turn off:              {\"mode\": \"OFF\"}\n  - Read current state:    {}                                (no args)\n\nFields:\n  - `mode`: HEAT, COOL, or OFF (uppercase). Omit to leave unchanged.\n  - `target_temperature`: Fahrenheit number. Omit to leave unchanged.",
   "inputs": [
     {
+      "name": "device_id",
+      "type": "string",
+      "required": false,
+      "description": ""
+    },
+    {
       "name": "mode",
       "type": "string",
       "required": false,
@@ -13,6 +19,24 @@
       "type": "number",
       "required": false,
       "description": "Fahrenheit number, e.g. 75."
+    },
+    {
+      "name": "fan_mode",
+      "type": "string",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "eco_enabled",
+      "type": "boolean",
+      "required": false,
+      "description": ""
+    },
+    {
+      "name": "get_status",
+      "type": "boolean",
+      "required": false,
+      "description": ""
     }
   ],
   "outputs": [

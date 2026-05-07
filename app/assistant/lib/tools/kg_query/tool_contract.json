@@ -5,7 +5,7 @@
     {
       "name": "sql",
       "type": "string",
-      "required": true,
+      "required": false,
       "description": "One SELECT (or WITH ... SELECT) statement. PRAGMA table_info()/foreign_key_list() also allowed for schema discovery. No semicolon-chained statements."
     },
     {

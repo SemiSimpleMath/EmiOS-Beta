@@ -4,7 +4,7 @@
   "inputs": [
     {
       "name": "file_path",
-      "type": "path",
+      "type": "string",
       "required": true,
       "description": "Path to file."
     },

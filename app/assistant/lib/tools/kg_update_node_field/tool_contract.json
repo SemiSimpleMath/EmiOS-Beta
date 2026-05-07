@@ -5,19 +5,19 @@
     {
       "name": "node_id",
       "type": "string",
-      "required": true,
+      "required": false,
       "description": "Target node id."
     },
     {
       "name": "field",
       "type": "string",
-      "required": true,
+      "required": false,
       "description": "Field name (see allowlist in description)."
     },
     {
       "name": "value",
-      "type": "any",
-      "required": true,
+      "type": "object",
+      "required": false,
       "description": "New value. For list fields, may be a string or list."
     },
     {
@@ -29,7 +29,7 @@
     {
       "name": "reason",
       "type": "string",
-      "required": true,
+      "required": false,
       "description": "Why the edit is correct."
     },
     {
