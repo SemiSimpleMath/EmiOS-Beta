@@ -21,7 +21,7 @@ Conservative defaults:
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Tuple
 
 from app.assistant.kg_maintenance.store import upsert_finding
@@ -76,10 +76,13 @@ def run(ctx: PipelineContext) -> dict:
             # Decay anchor: prefer real start_date; else the "first_observed"
             # floor carried from the originating proposal's evidence (stored
             # in attributes); else fall back to created_at as last resort.
+            # All sources may arrive tz-aware (legacy data) or naive — coerce
+            # to naive UTC to match `now` and the rest of the comparisons.
             first_observed = _extract_first_observed(attributes)
-            reference_start = start_date or first_observed or created_at
+            reference_start = _to_naive_utc(start_date or first_observed or created_at)
             if reference_start is None:
                 continue  # nothing to anchor decay against
+            updated_at = _to_naive_utc(updated_at)
 
             # Locked nodes never auto-close.
             if locked_at is not None:
@@ -105,14 +108,22 @@ def run(ctx: PipelineContext) -> dict:
             if now < close_threshold:
                 continue
 
-            # Re-observed since expected end → keep alive. Prefer
-            # ``attributes.last_observed`` (set by the promoter on matched-
-            # existing); fall back to ``updated_at`` for legacy nodes that
-            # haven't been backfilled yet. ``updated_at`` alone is noisy —
-            # any maintenance write (pagerank, description) bumps it.
+            # Re-observed since expected end → keep alive. Use ONLY
+            # ``attributes.last_observed`` here. Earlier fallback to
+            # ``updated_at`` poisoned the filter — pagerank/description
+            # maintenance writes bump updated_at on every node every run, so
+            # 85% of nodes (those without last_observed) all looked
+            # "recently observed" no matter how stale the underlying state
+            # was. Result: 0 auto_decay closures despite 1,282+ candidates
+            # past their TTL.
+            #
+            # Without last_observed populated, we treat the node as "not
+            # re-observed since promotion" → close per TTL. The promoter's
+            # matched-existing path is responsible for stamping
+            # last_observed when the same fact gets reasserted; that's the
+            # only legitimate signal of re-observation.
             last_observed = _extract_last_observed(attributes)
-            activity_ts = last_observed or updated_at
-            if activity_ts and activity_ts >= expected_end:
+            if last_observed and last_observed >= expected_end:
                 skipped_recent_activity += 1
                 continue
 
@@ -174,6 +185,17 @@ def run(ctx: PipelineContext) -> dict:
     }
 
 
+def _to_naive_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """Coerce to naive UTC. The rest of this step uses naive UTC (matches
+    the SQLAlchemy DateTime columns which are tz-naive in this codebase).
+    Mixing aware + naive triggers TypeError on comparison."""
+    if dt is None:
+        return None
+    if dt.tzinfo is not None:
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
+
 def _extract_first_observed(attributes):
     """Pull the 'first_observed' timestamp from node attributes, if present.
 
@@ -197,8 +219,8 @@ def _extract_first_observed(attributes):
         return None
     try:
         if isinstance(val, str):
-            return datetime.fromisoformat(val.replace("Z", "+00:00"))
-        return val
+            return _to_naive_utc(datetime.fromisoformat(val.replace("Z", "+00:00")))
+        return _to_naive_utc(val)
     except Exception:
         return None
 
@@ -208,8 +230,10 @@ def _extract_last_observed(attributes) -> Optional[datetime]:
 
     Bumped by ``proposal_promoter._refresh_on_reobservation`` each time a
     new proposal matches this node. Decay uses it as the authoritative
-    "has this been re-observed recently?" signal in preference to the
-    noisier ``updated_at`` column.
+    "has this been re-observed recently?" signal — the noisier
+    ``updated_at`` column was tried as a fallback in an earlier version
+    but had to be removed (every pagerank/description maintenance write
+    bumped updated_at, masking real silence).
     """
     if not attributes:
         return None
@@ -227,8 +251,8 @@ def _extract_last_observed(attributes) -> Optional[datetime]:
         return None
     try:
         if isinstance(val, str):
-            return datetime.fromisoformat(val.replace("Z", "+00:00"))
-        return val
+            return _to_naive_utc(datetime.fromisoformat(val.replace("Z", "+00:00")))
+        return _to_naive_utc(val)
     except Exception:
         return None
 
