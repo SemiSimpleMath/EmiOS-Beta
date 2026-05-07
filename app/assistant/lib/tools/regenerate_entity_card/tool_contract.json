@@ -1,0 +1,45 @@
+{
+  "name": "regenerate_entity_card",
+  "description": "Force-regenerate the entity card for one entity from current KG state. Use after KG mutations that change facts the card was summarizing (e.g. you closed a State node, you renamed a node, you added a new fact about the entity) so the card reflects the latest graph. Card generation runs through generate_and_persist_card with force=true and the shared card_gen_slot lock — no risk of corrupting concurrent writers. Synchronous; takes ~5-15s while the LLM rewrites the card.",
+  "inputs": [
+    {
+      "name": "entity_label",
+      "type": "string",
+      "required": true,
+      "description": "Exact label of the entity (e.g. 'Annika', 'Jukka'). Must match an existing KG node."
+    },
+    {
+      "name": "reason",
+      "type": "string",
+      "required": false,
+      "description": "Why the regeneration is needed. E.g. 'art-lessons State closed by user prose'."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "One-line summary."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "{ok, entity_label, regenerated, summary, key_facts_count}."
+    }
+  ],
+  "arguments_prompt": "Arguments for regenerate_entity_card:\n- entity_label (required): the entity whose card needs refreshing\n- reason (optional): one-line context for the audit log",
+  "metadata": {
+    "domain": "knowledge_graph",
+    "actions": ["mutate", "regenerate"],
+    "selectors": ["entity_card"],
+    "risk_level": "low",
+    "side_effects": "write",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "medium",
+    "latency_class": "slow",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

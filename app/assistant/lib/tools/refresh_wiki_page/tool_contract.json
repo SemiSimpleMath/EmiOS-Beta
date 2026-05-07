@@ -1,0 +1,51 @@
+{
+  "name": "refresh_wiki_page",
+  "description": "Refresh one entity's wiki page from current KG state. Use after KG mutations that change the facts the page rendered (e.g. closed a State, added an Event, renamed a node). Wraps wiki_generator.growth.build_one_page; runs the consistency critic by default. Synchronous; takes ~10-30s while the LLM rewrites affected sections.",
+  "inputs": [
+    {
+      "name": "entity_label",
+      "type": "string",
+      "required": true,
+      "description": "Exact label of the entity (e.g. 'Annika'). Must match an existing wiki page or KG node eligible for one."
+    },
+    {
+      "name": "run_critic",
+      "type": "boolean",
+      "required": false,
+      "description": "Whether to run the wiki_consistency_critic after writing the page. Default true."
+    },
+    {
+      "name": "reason",
+      "type": "string",
+      "required": false,
+      "description": "Why the refresh is needed (audit context)."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "One-line summary."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "{ok, entity_label, prose_path, sections_changed, critic_ran, critic_findings_count}."
+    }
+  ],
+  "arguments_prompt": "Arguments for refresh_wiki_page:\n- entity_label (required): the entity whose page needs refreshing\n- run_critic (optional, default true): run the wiki consistency critic after\n- reason (optional)",
+  "metadata": {
+    "domain": "knowledge_graph",
+    "actions": ["mutate", "regenerate"],
+    "selectors": ["wiki_page"],
+    "risk_level": "low",
+    "side_effects": "write",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "medium",
+    "latency_class": "slow",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}
