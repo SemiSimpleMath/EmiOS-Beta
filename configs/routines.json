@@ -533,6 +533,40 @@
       "notes": "Rates any node/edge with NULL importance via me::edge_importance_rater + me::importance_rater. Cheap, idempotent, runs every 30 min so the wiki refresh's importance pre-filter has scores by the time it runs."
     },
     {
+      "id": "kg_state_date_drain",
+      "enabled": true,
+      "name": "KG state/event date investigator (drain)",
+      "aliases": ["state date drain", "fill dates"],
+      "runner": "function",
+      "spec": {
+        "function_name": "kg_state_date_drain",
+        "limit": 8
+      },
+      "run_policy": {
+        "type": "daily",
+        "time_local": "03:15",
+        "quiet_hours_ok": true
+      },
+      "notes": "Drains pending state_missing_dates findings through kg_investigation_manager with the specialized state-dates brief (dated neighbors, conversation-evidence window, sibling states). Investigator emits proposed_action.op='fill_dates' with confidence; high-confidence ones get auto-applied by kg_finding_executor_drain. Limit 8/day keeps LLM cost bounded — raise if the backlog (hundreds today) doesn't shrink fast enough."
+    },
+    {
+      "id": "kg_finding_executor_drain",
+      "enabled": true,
+      "name": "KG finding executor drain (apply or escalate)",
+      "aliases": ["execute findings", "apply findings"],
+      "runner": "function",
+      "spec": {
+        "function_name": "kg_finding_executor_drain",
+        "limit": 10
+      },
+      "run_policy": {
+        "type": "daily",
+        "time_local": "03:45",
+        "quiet_hours_ok": true
+      },
+      "notes": "Drains the oldest investigated findings through kg_mutation_manager — applies the proposed_action when the investigator's confidence is high enough, otherwise calls kg_finding_escalate which writes a user-facing question. Closes the self-healing loop: pending → investigated → executed (or → escalated for user prose-resolve). Runs after the cluster resolver (03:30) so leads aren't applied separately from siblings."
+    },
+    {
       "id": "kg_finding_cluster_resolve",
       "enabled": true,
       "name": "KG finding cluster resolver (distill redundant findings)",

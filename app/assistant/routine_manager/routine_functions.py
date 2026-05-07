@@ -203,6 +203,42 @@ def _lazy_kg_finding_cluster_resolve(*, target_date=None, routine=None):
 kg_finding_cluster_resolve = _lazy_kg_finding_cluster_resolve
 
 
+def _lazy_kg_finding_executor_drain(*, target_date=None, routine=None):
+    """Daily: pick the oldest INVESTIGATED findings and let kg_mutation_manager
+    apply or escalate. Closes the self-healing loop:
+       pending → investigated  (by kg_finding_backlog_drain)
+       investigated → executed (by THIS routine)
+       OR escalated to user via kg_finding_escalate / a follow-up question
+
+    Limit defaults to 10/day to keep LLM cost bounded; raise if backlog grows.
+    """
+    spec = (routine.spec if routine and hasattr(routine, "spec") else {}) or {}
+    limit = int(spec.get("limit", 10))
+    from app.assistant.kg_investigator.finding_executor import run_executable_findings
+    return run_executable_findings(limit=limit)
+
+
+kg_finding_executor_drain = _lazy_kg_finding_executor_drain
+
+
+def _lazy_kg_state_date_drain(*, target_date=None, routine=None):
+    """Daily: drain pending state_missing_dates findings through the
+    investigator. Each finding gets the specialized state_missing_dates
+    brief (dated neighbors, conversation-evidence window, sibling states),
+    and the investigator proposes fill_dates with confidence. Confident
+    proposals (>= 0.8) get applied automatically by the next
+    kg_finding_executor_drain run; lower-confidence ones surface as
+    user-facing questions.
+    """
+    spec = (routine.spec if routine and hasattr(routine, "spec") else {}) or {}
+    limit = int(spec.get("limit", 8))
+    from app.assistant.kg_investigator.finding_processor import run_pending_findings
+    return run_pending_findings(limit=limit, finding_types=["state_missing_dates"])
+
+
+kg_state_date_drain = _lazy_kg_state_date_drain
+
+
 def _lazy_wiki_nightly_refresh(*, target_date=None, routine=None):
     """Nightly: incrementally regenerate wiki pages whose KG neighborhood
     changed since the page was last generated. Optionally runs the
@@ -353,6 +389,8 @@ ROUTINE_FUNCTION_REGISTRY = {
     "kg_date_gap_drain": kg_date_gap_drain,
     "kg_state_decay": kg_state_decay,
     "kg_finding_cluster_resolve": kg_finding_cluster_resolve,
+    "kg_finding_executor_drain": kg_finding_executor_drain,
+    "kg_state_date_drain": kg_state_date_drain,
     "kg_importance_rater": kg_importance_rater,
     "sleep_camera_tick": sleep_camera_tick,
     "sleep_camera_tick_local": sleep_camera_tick_local,

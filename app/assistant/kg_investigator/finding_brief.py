@@ -249,6 +249,197 @@ def _brief_node_pair(
     return task_phrase, "\n".join(parts)
 
 
+def _fetch_dated_neighbors(session, node_id: str, *, limit: int = 20) -> List[Dict[str, Any]]:
+    """Pull connected nodes that DO have dates — these anchor temporal
+    inference for the missing-dates investigator. Returns a list of dicts
+    with the connected node's label, type, dates, and the relationship."""
+    if not node_id:
+        return []
+    rows = session.execute(
+        sql_text(
+            """
+            SELECT
+              n.id AS other_id,
+              n.label AS other_label,
+              n.node_type AS other_type,
+              n.start_date AS other_start,
+              n.end_date AS other_end,
+              n.start_date_prose AS other_start_prose,
+              n.end_date_prose AS other_end_prose,
+              e.relationship_type AS rel,
+              e.sentence AS sentence,
+              CASE WHEN e.source_id = :nid THEN 'out' ELSE 'in' END AS direction
+            FROM kg_edge_metadata e
+            JOIN kg_node_metadata n ON n.id = (CASE WHEN e.source_id = :nid THEN e.target_id ELSE e.source_id END)
+            WHERE (e.source_id = :nid OR e.target_id = :nid)
+              AND (n.start_date IS NOT NULL OR n.end_date IS NOT NULL
+                   OR n.start_date_prose IS NOT NULL OR n.end_date_prose IS NOT NULL)
+            ORDER BY COALESCE(n.start_date, n.end_date) DESC
+            LIMIT :lim
+            """
+        ),
+        {"nid": node_id, "lim": limit},
+    ).fetchall()
+    out = []
+    for r in rows:
+        m = r._mapping if hasattr(r, "_mapping") else dict(zip(
+            ["other_id", "other_label", "other_type", "other_start", "other_end",
+             "other_start_prose", "other_end_prose", "rel", "sentence", "direction"], r,
+        ))
+        out.append(dict(m))
+    return out
+
+
+def _fetch_evidence_messages(session, node_id: str, *, limit: int = 8) -> List[Dict[str, Any]]:
+    """Pull the original chat messages cited by this node's evidence rows.
+    Conversation timestamps are the strongest dating anchor for States/Events
+    that have no explicit dates: 'when did this become true?' often reduces to
+    'when was this first / most recently said?'.
+
+    Wrapped in try/except because some test DBs don't include the chat-side
+    tables (kg_node_evidence / kg_window_message). The brief degrades
+    gracefully — date investigation still works using dated neighbors alone.
+    """
+    if not node_id:
+        return []
+    try:
+        rows = session.execute(
+            sql_text(
+                """
+                SELECT
+                  MIN(u.timestamp) AS first_seen,
+                  MAX(u.timestamp) AS last_seen,
+                  COUNT(DISTINCT u.id) AS n_messages
+                FROM kg_node_evidence ev
+                LEFT JOIN unified_log_2026 u
+                  ON u.id IN (
+                    SELECT m.unified_log_id FROM kg_window_message m
+                    WHERE m.window_id = ev.window_id
+                  )
+                WHERE ev.node_id = :nid
+                """
+            ),
+            {"nid": node_id},
+        ).fetchall()
+    except Exception as e:
+        logger.debug("[date_brief] evidence-window lookup failed (likely missing tables): %s", e)
+        return []
+    if not rows:
+        return []
+    r = rows[0]
+    m = r._mapping if hasattr(r, "_mapping") else dict(zip(
+        ["first_seen", "last_seen", "n_messages"], r,
+    ))
+    return [dict(m)]
+
+
+def _brief_state_missing_dates(
+    session,
+    finding: KGMaintenanceFinding,
+) -> Tuple[str, str]:
+    """Specialized brief for state_missing_dates findings.
+
+    The investigator's job here is narrow and concrete: PROPOSE start_date
+    and/or end_date for the subject node, with confidence + evidence. We
+    pre-fetch:
+      - the node itself (with current empty/partial dates)
+      - dated neighbors (events the user attended, related states with
+        bounds, child entities born / created in known years)
+      - evidence-message timestamp range (first observation / last
+        observation in chat — useful "observed-during" anchor when no
+        external dating exists)
+      - sibling states for the same primary subject (e.g. for a Residence
+        with no start_date, prior Residence states give a "before X"
+        anchor; subsequent ones give an "after X" anchor)
+
+    The proposed_action contract the investigator should follow:
+      op: 'fill_dates'
+      args: { 'start_date': 'YYYY-MM-DD' or '', 'end_date': '...',
+              'start_date_prose': '...', 'end_date_prose': '...' }
+      confidence: 0.0-1.0 (auto-applied at >= 0.8 by the executor;
+                            below that, escalated to the user as a question)
+    """
+    primary = _fetch_node(session, finding.primary_node_id)
+    neigh = _fetch_neighborhood(session, finding.primary_node_id)
+    dated_neighbors = _fetch_dated_neighbors(session, finding.primary_node_id)
+    evidence_window = _fetch_evidence_messages(session, finding.primary_node_id)
+    ev = finding.evidence_json or {}
+
+    parts: List[str] = [
+        f"## Finding",
+        f"- finding_id: `{finding.id}`",
+        f"- finding_type: state_missing_dates",
+        f"- priority: {finding.priority}",
+        f"- agent reason: {finding.reason}",
+        "",
+    ]
+    if ev:
+        parts.append("## Detector context")
+        for k, v in ev.items():
+            if v in (None, "", []):
+                continue
+            sval = str(v)
+            parts.append(f"- {k}: {sval[:300]}{'…' if len(sval) > 300 else ''}")
+        parts.append("")
+    parts.append("## Subject node (the State/Event missing dates)")
+    parts.append(_format_node_block(primary.get("label") if primary else finding.primary_node_id[:8], primary))
+    parts.append("")
+
+    if dated_neighbors:
+        parts.append("## Dated neighbors (temporal anchors)")
+        parts.append("These connected nodes already have dates; use them to bracket the subject's validity window.")
+        for n in dated_neighbors[:15]:
+            anchor = []
+            if n.get("other_start"):
+                anchor.append(f"start={n['other_start']}")
+            if n.get("other_end"):
+                anchor.append(f"end={n['other_end']}")
+            if n.get("other_start_prose"):
+                anchor.append(f"start_prose={n['other_start_prose']!r}")
+            if n.get("other_end_prose"):
+                anchor.append(f"end_prose={n['other_end_prose']!r}")
+            parts.append(
+                f"- ({n['direction']}) [{n['rel']}] {n['other_label']!r} ({n['other_type']}): {' / '.join(anchor)}"
+            )
+        parts.append("")
+    else:
+        parts.append("## Dated neighbors")
+        parts.append("(none — no connected node has dates)")
+        parts.append("")
+
+    if evidence_window and evidence_window[0].get("first_seen"):
+        ew = evidence_window[0]
+        parts.append("## Conversation-evidence window")
+        parts.append(
+            f"This fact has been observed in chat between {ew['first_seen']} and "
+            f"{ew['last_seen']} ({ew.get('n_messages', '?')} messages cited)."
+        )
+        parts.append(
+            "Use this as a soft 'observed-during' anchor when no external dating exists. "
+            "Note: this is when we LEARNED about the fact, not when the fact became true. "
+            "For real-world events (births, weddings, jobs starting) prefer external "
+            "dating from neighbors."
+        )
+        parts.append("")
+
+    parts.append("## Subject's full neighborhood")
+    parts.append(_format_neighborhood_block(neigh))
+
+    task = (
+        "Find start_date and/or end_date for this State/Event by reasoning over the "
+        "dated neighbors, sibling states, and conversation evidence. Set "
+        "proposed_action.op='fill_dates' with args = {start_date, end_date, "
+        "start_date_prose, end_date_prose} (use ISO YYYY-MM-DD when you have a "
+        "specific date; use prose like 'around 2010' or 'late 2020s' when you "
+        "have only a fuzzy bound). Set confidence in [0,1]: >= 0.8 will be "
+        "auto-applied by the executor; below that the executor escalates to "
+        "the user as a clarifying question. If the data genuinely doesn't "
+        "answer, propose op='escalate_user' with a specific question for the "
+        "user (e.g. 'When did Annika start middle school?'). Never invent dates."
+    )
+    return task, "\n".join(parts)
+
+
 def _brief_single_node(
     session,
     finding: KGMaintenanceFinding,
@@ -304,6 +495,8 @@ def build_finding_brief(finding_id: str) -> Optional[Tuple[str, str]]:
 
         if ftype == "wiki_contradiction":
             return _brief_wiki_contradiction(session, finding)
+        if ftype == "state_missing_dates":
+            return _brief_state_missing_dates(session, finding)
         if ftype == "duplicate_node":
             return _brief_node_pair(
                 session, finding,
