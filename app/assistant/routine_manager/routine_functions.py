@@ -254,13 +254,7 @@ def _lazy_kg_wiki_inference(*, target_date=None, routine=None):
     from app.assistant.pipelines.context import PipelineContext
     from app.assistant.pipelines.kg_maintenance_pipeline.step_wiki_inference import run as run_wiki_inference
     ctx = PipelineContext.for_date(pipeline_id="kg_wiki_inference")
-    if hasattr(ctx, "spec"):
-        ctx.spec = {"subject_limit": limit}
-    else:
-        # PipelineContext is a dataclass with a spec attribute already on
-        # most builds, but if not, we still drive the limit through env-style.
-        pass
-    return run_wiki_inference(ctx)
+    return run_wiki_inference(ctx, subject_limit=limit)
 
 
 kg_wiki_inference = _lazy_kg_wiki_inference

@@ -47,14 +47,13 @@ PER_SUBJECT_CONNECTION_CAP = 5
 DEFAULT_SUBJECT_LIMIT = 10
 
 
-def run(ctx: PipelineContext) -> dict:
+def run(ctx: PipelineContext, *, subject_limit: Optional[int] = None) -> dict:
     """Returns counts: {"subjects_examined": int, "proposals_written": int,
                          "proposals_rejected_low_confidence": int,
                          "proposals_rejected_already_in_kg": int}."""
     from app.assistant.kg.db.knowledge_graph_db_sqlite import Edge, Node
 
-    spec_limit = (ctx.spec or {}).get("subject_limit") if hasattr(ctx, "spec") else None
-    subject_limit = int(spec_limit or DEFAULT_SUBJECT_LIMIT)
+    subject_limit = int(subject_limit or DEFAULT_SUBJECT_LIMIT)
 
     vault_path = _resolve_vault_path()
     if vault_path is None:
@@ -87,9 +86,13 @@ def run(ctx: PipelineContext) -> dict:
 
     for subject in subjects:
         subjects_examined += 1
+        page_path = prose_dir / f"{_safe_filename(subject['label'])}.md"
         try:
             page_text = _read_prose_page(prose_dir, subject["label"])
             if not page_text or len(page_text) < 200:
+                # Even when we skip, mark the page examined so we don't
+                # keep re-touching tiny pages every night.
+                _write_examined_sidecar(page_path)
                 continue
             neighborhood = _format_subject_neighborhood(subject["id"])
             agent_input = {
@@ -140,6 +143,10 @@ def run(ctx: PipelineContext) -> dict:
                 if ok:
                     written += 1
 
+            # Successful examination — record sidecar so we don't re-examine
+            # this page until it gets rewritten by the wiki refresh.
+            _write_examined_sidecar(page_path)
+
         except Exception:
             logger.error(
                 "[wiki_inference] subject %s crashed (continuing)",
@@ -187,10 +194,30 @@ def _resolve_vault_path() -> Optional[Path]:
     return Path.home() / f"{name}Wiki"
 
 
+def _safe_filename(label: str) -> str:
+    """Mirror the wiki page writer's filesystem-safe label transform."""
+    return label.replace("/", "_").replace("\\", "_")
+
+
+def _write_examined_sidecar(page_path: Path) -> None:
+    """Mark a page as examined so the next run skips it until the page
+    is rewritten (page mtime > sidecar.examined_at_epoch)."""
+    sidecar = page_path.with_suffix(".wiki_inference.json")
+    try:
+        sidecar.write_text(
+            json.dumps({
+                "examined_at_epoch": page_path.stat().st_mtime,
+                "examined_at_iso": datetime.now(timezone.utc).isoformat(),
+            }),
+            encoding="utf-8",
+        )
+    except Exception as e:
+        logger.warning("[wiki_inference] sidecar write failed for %s: %s", page_path, e)
+
+
 def _read_prose_page(prose_dir: Path, label: str) -> Optional[str]:
     """Read the markdown for an entity, or None if the file doesn't exist."""
-    safe_label = label.replace("/", "_").replace("\\", "_")
-    p = prose_dir / f"{safe_label}.md"
+    p = prose_dir / f"{_safe_filename(label)}.md"
     if not p.exists():
         return None
     try:

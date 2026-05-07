@@ -312,27 +312,42 @@ def test_edge_exists_helper_handles_id_or_label():
 
 
 def test_sidecar_blocks_re_examination(vault_dir):
-    """After examining a page, a sidecar marks it; a fresh run skips it
-    until the page is re-written (mtime moves forward)."""
-    _write_page(vault_dir, "Jukka", "Jukka. " * 200)
+    """After examining a page, the step writes a sidecar; a fresh run
+    skips it until the page is rewritten (mtime moves forward).
+
+    This is the actual contract: the step MUST write the sidecar itself.
+    Earlier audit caught that the first cut wasn't writing it, so every
+    nightly run would have re-examined every page — wasted LLM calls."""
+    page = _write_page(vault_dir, "Jukka", "Jukka. " * 200)
     verdict = {"connections": [], "reason": "nothing new"}
     with _patch_agent(verdict):
         first = run_wiki_inference(_ctx())
     assert first["subjects_examined"] == 1
 
-    # Drop a sidecar that the picker would normally write itself; we
-    # synthesize one to simulate a successful prior run.
-    page = vault_dir / "prose" / "Jukka.md"
+    # The step itself must have dropped the sidecar — no test-side fixup.
     sidecar = page.with_suffix(".wiki_inference.json")
-    sidecar.write_text(
-        json.dumps({"examined_at_epoch": page.stat().st_mtime + 1}),
-        encoding="utf-8",
-    )
+    assert sidecar.exists(), "step must write sidecar after examining a page"
+    sidecar_data = json.loads(sidecar.read_text(encoding="utf-8"))
+    assert "examined_at_epoch" in sidecar_data
+    assert sidecar_data["examined_at_epoch"] >= page.stat().st_mtime
 
-    # Second run: nothing new
+    # Second run: nothing fresh, agent must not be created
     with patch(
         "app.assistant.ServiceLocator.service_locator.DI.agent_factory.create_agent",
         side_effect=AssertionError("agent must not run when nothing fresh"),
     ):
         second = run_wiki_inference(_ctx())
     assert second["subjects_examined"] == 0
+
+
+def test_subject_limit_kwarg_caps_examined_pages(vault_dir):
+    """run(ctx, subject_limit=N) caps how many pages get examined."""
+    # Three pages; each subject is in the seeded KG (Jukka). Use Diana too.
+    _write_page(vault_dir, "Jukka", "Jukka content. " * 50)
+    _write_page(vault_dir, "Diana", "Diana content. " * 50)
+    verdict = {"connections": [], "reason": "x"}
+
+    with _patch_agent(verdict):
+        result = run_wiki_inference(_ctx(), subject_limit=1)
+
+    assert result["subjects_examined"] == 1
