@@ -164,6 +164,24 @@ def _lazy_kg_date_gap_drain(*, target_date=None, routine=None):
 kg_date_gap_drain = _lazy_kg_date_gap_drain
 
 
+def _lazy_kg_state_decay(*, target_date=None, routine=None):
+    """Nightly: auto-close State/Event nodes whose TTL has elapsed.
+
+    Runs the same `step_state_decay.run` from the weekly maintenance
+    pipeline, but on its own daily schedule. Cheap (no LLM), deterministic
+    (uses TTL from `attributes.ttl` set at promotion time + per-node
+    `last_observed`), and high-value: keeps the graph from accumulating
+    ghost-open states between weekly maintenance runs.
+    """
+    from app.assistant.pipelines.context import PipelineContext
+    from app.assistant.pipelines.kg_maintenance_pipeline.step_state_decay import run as run_state_decay
+    ctx = PipelineContext.for_date(pipeline_id="kg_state_decay")
+    return run_state_decay(ctx)
+
+
+kg_state_decay = _lazy_kg_state_decay
+
+
 def _lazy_wiki_nightly_refresh(*, target_date=None, routine=None):
     """Nightly: incrementally regenerate wiki pages whose KG neighborhood
     changed since the page was last generated. Optionally runs the
@@ -312,6 +330,7 @@ ROUTINE_FUNCTION_REGISTRY = {
     "wiki_growth": wiki_growth,
     "kg_finding_backlog_drain": kg_finding_backlog_drain,
     "kg_date_gap_drain": kg_date_gap_drain,
+    "kg_state_decay": kg_state_decay,
     "kg_importance_rater": kg_importance_rater,
     "sleep_camera_tick": sleep_camera_tick,
     "sleep_camera_tick_local": sleep_camera_tick_local,

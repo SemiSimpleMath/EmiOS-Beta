@@ -40,6 +40,20 @@ LOW_CONFIDENCE_FLOOR = 0.4
 # the system a cushion for late-arriving observations and conservative behavior.
 GRACE_DAYS = 3
 
+# Silence rule for finding emission: low-stakes closures don't deserve a
+# review row. The closure still happens (node.end_date is set); we just
+# don't write a finding the user has to dismiss. A closure is "noteworthy"
+# (and gets a finding) only if at least one of these is true:
+#   - duration_class in NOTEWORTHY_DURATION_CLASSES (medium/long/durable —
+#     real-life consequence: jobs ending, projects ending, residences ending)
+#   - confidence is shaky (< NOTEWORTHY_LOW_CONF_THRESHOLD) — TTL agent itself
+#     is uncertain, so a human glance is cheap insurance
+#   - node importance >= NOTEWORTHY_IMPORTANCE_FLOOR — important entity, even
+#     short-term states deserve a heads-up
+NOTEWORTHY_DURATION_CLASSES = {"medium_term", "long_term", "durable"}
+NOTEWORTHY_LOW_CONF_THRESHOLD = 0.6
+NOTEWORTHY_IMPORTANCE_FLOOR = 5
+
 
 def run(ctx: PipelineContext) -> dict:
     """Returns {"scanned": int, "closed": int, "findings": int, "skipped_low_confidence": int}."""
@@ -63,7 +77,7 @@ def run(ctx: PipelineContext) -> dict:
             session.query(
                 Node.id, Node.label, Node.node_type, Node.start_date,
                 Node.created_at, Node.updated_at, Node.attributes,
-                Node.locked_by_user_at,
+                Node.locked_by_user_at, Node.importance,
             )
             .filter(Node.node_type.in_(("State", "Event")))
             .filter(Node.end_date.is_(None))
@@ -71,7 +85,7 @@ def run(ctx: PipelineContext) -> dict:
         )
 
         for row in candidates:
-            nid, label, ntype, start_date, created_at, updated_at, attributes, locked_at = row
+            nid, label, ntype, start_date, created_at, updated_at, attributes, locked_at, importance = row
             scanned += 1
             # Decay anchor: prefer real start_date; else the "first_observed"
             # floor carried from the originating proposal's evidence (stored
@@ -127,10 +141,10 @@ def run(ctx: PipelineContext) -> dict:
                 skipped_recent_activity += 1
                 continue
 
-            to_close.append((str(nid), label or "", ntype or "", expected_end, ttl))
+            to_close.append((str(nid), label or "", ntype or "", expected_end, ttl, importance))
 
         # Apply closures atomically.
-        for nid, label, ntype, expected_end, ttl in to_close:
+        for nid, label, ntype, expected_end, ttl, _importance in to_close:
             node = session.query(Node).filter(Node.id == nid).first()
             if node is None:
                 continue
@@ -146,19 +160,35 @@ def run(ctx: PipelineContext) -> dict:
     finally:
         session.close()
 
-    # Write findings in a separate phase.
+    # Write findings in a separate phase — but only for noteworthy closures.
+    # Routine ephemeral/short_term closures of low-importance states are
+    # already-applied facts; queueing them as review rows is pure noise.
     findings_created = 0
-    for nid, label, ntype, expected_end, ttl in to_close:
+    findings_silenced = 0
+    for nid, label, ntype, expected_end, ttl, importance in to_close:
+        duration_class = ttl.get("duration_class") or ""
+        ttl_confidence = float(ttl.get("confidence") or 0.5)
+        node_importance = float(importance) if importance is not None else 0.0
+
+        is_noteworthy = (
+            duration_class in NOTEWORTHY_DURATION_CLASSES
+            or ttl_confidence < NOTEWORTHY_LOW_CONF_THRESHOLD
+            or node_importance >= NOTEWORTHY_IMPORTANCE_FLOOR
+        )
+        if not is_noteworthy:
+            findings_silenced += 1
+            continue
+
         _, created = upsert_finding(
             finding_type="state_auto_closed",
             primary_node_id=nid,
             suggested_action="review",
             reason=(
                 f"State {label!r} ({ntype}) auto-closed at {expected_end:%Y-%m-%d} — "
-                f"TTL class {ttl.get('duration_class')} ({ttl.get('estimated_duration_days')}d). "
+                f"TTL class {duration_class} ({ttl.get('estimated_duration_days')}d). "
                 f"Reason: {ttl.get('reasoning', '')[:200]}"
             ),
-            confidence=float(ttl.get("confidence") or 0.5),
+            confidence=ttl_confidence,
             priority="low",
             agent_name="state_decay",
             evidence={
@@ -166,6 +196,7 @@ def run(ctx: PipelineContext) -> dict:
                 "node_type": ntype,
                 "expected_end": expected_end.isoformat(),
                 "ttl": ttl,
+                "node_importance": node_importance,
             },
             pipeline_run_id=ctx.run_id,
         )
@@ -173,13 +204,15 @@ def run(ctx: PipelineContext) -> dict:
             findings_created += 1
 
     logger.info(
-        "[state_decay] scanned=%d closed=%d findings=%d skipped_low_conf=%d skipped_recent=%d",
-        scanned, len(to_close), findings_created, skipped_low_conf, skipped_recent_activity,
+        "[state_decay] scanned=%d closed=%d findings=%d silenced=%d skipped_low_conf=%d skipped_recent=%d",
+        scanned, len(to_close), findings_created, findings_silenced,
+        skipped_low_conf, skipped_recent_activity,
     )
     return {
         "scanned": scanned,
         "closed": len(to_close),
         "findings": findings_created,
+        "findings_silenced": findings_silenced,
         "skipped_low_confidence": skipped_low_conf,
         "skipped_recent_activity": skipped_recent_activity,
     }

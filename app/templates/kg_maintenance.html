@@ -170,9 +170,6 @@
     </select>
     <select id="filter-type" onchange="loadFindings()">
       <option value="">All types</option>
-      <option value="duplicate_node">Duplicate node</option>
-      <option value="orphan_node">Orphan node</option>
-      <option value="missing_description">Missing description</option>
     </select>
     <select id="filter-priority" onchange="loadFindings()">
       <option value="">All priorities</option>
@@ -247,11 +244,13 @@
 
       approvedCount = 0;
       const byType = data.by_type || {};
+      const observedTypes = [];
       for (const [type, statuses] of Object.entries(byType)) {
         const pending = statuses['pending'] || 0;
         const approved = statuses['approved'] || 0;
         approvedCount += approved;
         if (pending === 0 && approved === 0) continue;
+        observedTypes.push(type);
         const chip = document.createElement('div');
         chip.className = `chip type-chip type-${type}`;
         let countDisplay = pending > 0 ? pending : '';
@@ -260,6 +259,17 @@
         chip.addEventListener('click', () => filterType(type));
         row.appendChild(chip);
       }
+
+      // Repopulate the type dropdown from observed types so new finding
+      // types appear without code changes. Preserve current selection.
+      const typeSel = document.getElementById('filter-type');
+      const prev = typeSel.value;
+      const sortedTypes = observedTypes.slice().sort();
+      typeSel.innerHTML = '<option value="">All types</option>'
+        + sortedTypes.map(t =>
+            `<option value="${t}">${t.replace(/_/g,' ')}</option>`
+          ).join('');
+      if (prev && (prev === '' || sortedTypes.includes(prev))) typeSel.value = prev;
 
       const execBtn = document.getElementById('btn-execute-approved');
       if (approvedCount > 0) {

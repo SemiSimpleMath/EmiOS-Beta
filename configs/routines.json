@@ -533,6 +533,22 @@
       "notes": "Rates any node/edge with NULL importance via me::edge_importance_rater + me::importance_rater. Cheap, idempotent, runs every 30 min so the wiki refresh's importance pre-filter has scores by the time it runs."
     },
     {
+      "id": "kg_state_decay",
+      "enabled": true,
+      "name": "KG state decay (nightly auto-close)",
+      "aliases": [],
+      "runner": "function",
+      "spec": {
+        "function_name": "kg_state_decay"
+      },
+      "run_policy": {
+        "type": "daily",
+        "time_local": "02:45",
+        "quiet_hours_ok": true
+      },
+      "notes": "Auto-closes State/Event nodes whose TTL has elapsed (uses attributes.last_observed + attributes.ttl, GRACE_DAYS=3). Runs after proposal_promoter (02:30) so freshly-promoted nodes are in the candidate set, and before wiki_nightly_refresh (03:00) so closures flow into the wiki the same night. Nightly cadence so the graph doesn't accumulate ghost-open states between weekly maintenance runs."
+    },
+    {
       "id": "wiki_nightly_refresh",
       "enabled": true,
       "name": "Wiki nightly refresh",
