@@ -88,6 +88,28 @@
     .node-id { font-family: monospace; font-size: 10px; color: var(--muted); }
     .merge-arrow { color: var(--warn); font-weight: 700; margin: 0 6px; font-size: 14px; vertical-align: middle; }
 
+    /* node type badges — make Entity vs State vs Event vs Person etc.
+       visually distinct. State/Event merges are riskier (recurring-event
+       trap) so they get a warm color to flag caution; entities get a
+       neutral/cool color signaling "easier merge if labels match." */
+    .node-type-badge {
+      display: inline-block; padding: 1px 6px; margin-left: 4px;
+      border-radius: 3px; font-size: 9px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .04em;
+      vertical-align: middle;
+    }
+    .node-type-Entity       { background: #1e3a5f; color: #93c5fd; }
+    .node-type-Person       { background: #14532d; color: #86efac; }
+    .node-type-Place        { background: #312e81; color: #c4b5fd; }
+    .node-type-Organization { background: #064e3b; color: #6ee7b7; }
+    .node-type-Object       { background: #1f2937; color: #d1d5db; }
+    .node-type-Concept      { background: #3f3f46; color: #d4d4d8; }
+    .node-type-State        { background: #7c2d12; color: #fdba74; }
+    .node-type-Event        { background: #7f1d1d; color: #fca5a5; }
+    .node-type-Goal         { background: #581c87; color: #d8b4fe; }
+    .node-type-Property     { background: #134e4a; color: #5eead4; }
+    .node-type-unknown      { background: #374151; color: var(--muted); }
+
     /* reason cell */
     .reason { max-width: 420px; color: var(--muted); font-size: 13px; }
 
@@ -454,15 +476,29 @@
     </tr>`;
   }
 
+  function nodeTypeBadge(nodeType) {
+    if (!nodeType) {
+      return '<span class="node-type-badge node-type-unknown">?</span>';
+    }
+    // Sanitize the type to a known CSS class set; unknown types fall
+    // back to the neutral 'unknown' badge.
+    const known = new Set([
+      'Entity', 'Person', 'Place', 'Organization', 'Object',
+      'Concept', 'State', 'Event', 'Goal', 'Property',
+    ]);
+    const cls = known.has(nodeType) ? `node-type-${nodeType}` : 'node-type-unknown';
+    return `<span class="node-type-badge ${cls}">${esc(nodeType)}</span>`;
+  }
+
   function renderNodes(f) {
     const pLabel = f.primary_label || trunc(f.primary_node_id, 12);
     const pType  = f.primary_node_type || '';
     const pEdges = f.primary_edge_count != null ? f.primary_edge_count + ' edges' : '';
-    const pMeta  = [pType, pEdges].filter(Boolean).join(' · ');
 
     let html = `<div class="node-box">
       <span class="node-label">${esc(pLabel)}</span>
-      ${pMeta ? `<span class="node-meta">${esc(pMeta)}</span>` : ''}
+      ${nodeTypeBadge(pType)}
+      ${pEdges ? `<span class="node-meta">${esc(pEdges)}</span>` : ''}
       <span class="node-id">${trunc(f.primary_node_id, 12)}</span>
     </div>`;
 
@@ -470,12 +506,12 @@
       const sLabel = f.secondary_label || trunc(f.secondary_node_id, 12);
       const sType  = f.secondary_node_type || '';
       const sEdges = f.secondary_edge_count != null ? f.secondary_edge_count + ' edges' : '';
-      const sMeta  = [sType, sEdges].filter(Boolean).join(' · ');
 
       html += `<span class="merge-arrow">&harr;</span>`;
       html += `<div class="node-box">
         <span class="node-label">${esc(sLabel)}</span>
-        ${sMeta ? `<span class="node-meta">${esc(sMeta)}</span>` : ''}
+        ${nodeTypeBadge(sType)}
+        ${sEdges ? `<span class="node-meta">${esc(sEdges)}</span>` : ''}
         <span class="node-id">${trunc(f.secondary_node_id, 12)}</span>
       </div>`;
     }
@@ -677,13 +713,21 @@
         block.innerHTML = '<em style="color:var(--muted)">No siblings — cluster_size may be stale; reload.</em>';
         return;
       }
-      const html = sibs.map(s => `
-        <div class="sib">
-          <strong>${esc(s.finding_type.replace(/_/g,' '))}</strong>
-          ${s.secondary_label ? ' &harr; <em>' + esc(s.secondary_label) + '</em>' : ''}
-          <div style="color:var(--muted); margin-top:2px;">${esc(s.reason || '')}</div>
-        </div>
-      `).join('');
+      const html = sibs.map(s => {
+        const primaryStr = s.primary_label
+          ? `<strong>${esc(s.primary_label)}</strong> ${nodeTypeBadge(s.primary_node_type || '')}`
+          : '';
+        const secondaryStr = s.secondary_label
+          ? ` &harr; <strong>${esc(s.secondary_label)}</strong> ${nodeTypeBadge(s.secondary_node_type || '')}`
+          : '';
+        return `
+          <div class="sib">
+            <span class="badge badge-${s.finding_type}">${esc(s.finding_type.replace(/_/g,' '))}</span>
+            ${primaryStr}${secondaryStr}
+            <div style="color:var(--muted); margin-top:2px;">${esc(s.reason || '')}</div>
+          </div>
+        `;
+      }).join('');
       block.innerHTML = `<div style="font-size:11px; color:var(--muted); margin-bottom:6px;">${sibs.length} similar finding${sibs.length === 1 ? '' : 's'} clustered under this lead — resolving the lead cascades to all of these.</div>${html}`;
     } catch(e) {
       block.innerHTML = `<em style="color:var(--bad)">Error loading siblings: ${esc(e.message)}</em>`;
