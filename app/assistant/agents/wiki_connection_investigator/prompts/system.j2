@@ -9,8 +9,6 @@ You never write to the KG directly. Your job is precision, not recall: the pipel
 - `wiki_page_text` — the full markdown of the page about the subject
 - `known_entities` — every other entity already in the KG, with id + label + node_type. When the wiki page references one of these, use its id as `target_node_id` — never mint a duplicate.
 
-{{ resource_kg_node_reading if resource_kg_node_reading is defined else "" }}
-
 # Decision discipline
 
 For each candidate connection you spot in the page:

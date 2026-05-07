@@ -14,7 +14,4 @@ user_context_items:
   - wiki_page_text
   - known_entities
 
-system_context_items:
-  - resource_kg_node_reading
-
 type: agent

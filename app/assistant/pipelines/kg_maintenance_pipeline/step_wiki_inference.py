@@ -366,6 +366,37 @@ def _format_subject_neighborhood(node_id: str) -> str:
     return "\n".join(parts)
 
 
+def _resolve_target_id(maybe_id: str) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """Resolve an id-or-prefix to (full_id, label, node_type). Returns
+    (None, None, None) when not found OR when a prefix matches multiple
+    nodes (ambiguous — fail closed). The agent receives 8-char prefixes
+    in the prompt, so we accept either the full UUID or any unique
+    prefix (typically the first 8 chars)."""
+    from app.assistant.kg.db.knowledge_graph_db_sqlite import Node as NodeModel
+
+    if not maybe_id:
+        return None, None, None
+    session = get_session()
+    try:
+        # Try exact match first.
+        row = session.query(NodeModel.id, NodeModel.label, NodeModel.node_type).filter(
+            NodeModel.id == maybe_id
+        ).first()
+        if row is not None:
+            return str(row[0]), row[1], row[2]
+
+        # Prefix match — only accept when unique.
+        rows = session.query(NodeModel.id, NodeModel.label, NodeModel.node_type).filter(
+            NodeModel.id.like(f"{maybe_id}%")
+        ).limit(2).all()
+        if len(rows) == 1:
+            r = rows[0]
+            return str(r[0]), r[1], r[2]
+        return None, None, None
+    finally:
+        session.close()
+
+
 def _edge_exists(
     *,
     subject_id: str,
@@ -433,11 +464,22 @@ def _write_proposal_for_inferred_connection(
         },
     ]
     if connection.get("target_node_id"):
+        # Look up the existing target's label/type. The agent sees 8-char
+        # id prefixes in known_entities (full UUIDs blow the prompt budget),
+        # so accept either the full id or any unique prefix; fall back to
+        # error only when the prefix is ambiguous (multi-match) or missing.
+        resolved_id, label, node_type = _resolve_target_id(connection["target_node_id"])
+        if resolved_id is None:
+            logger.warning(
+                "[wiki_inference] target_node_id %r does not resolve to a unique node; skipping proposal",
+                connection["target_node_id"],
+            )
+            return False
         nodes.append({
             "temp_id": target_temp,
-            "label": "",  # filled by promoter from kg_node_id
-            "node_type": "Entity",
-            "kg_node_id": connection["target_node_id"],
+            "label": label or "(unknown)",
+            "node_type": node_type or "Entity",
+            "kg_node_id": resolved_id,
         })
     else:
         nodes.append({
