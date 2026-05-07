@@ -47,10 +47,37 @@ class ToolRegistry:
         """
         Initialize the registry by scanning the given tools directory.
         Each subdirectory should be named after the tool and contain:
-         - <tool_name>.py (with a get_tool_class() function)
-         - tool_forms/ (containing a <tool_name>_form.py with a Pydantic model)
-         - prompts/ (with <tool_name>_description.j2)
-         - tool_contract.json (with `arguments_prompt` for argument guidance)
+         - <tool_name>.py exposing `get_tool_class` — see patterns below
+         - tool_forms/tool_forms.py (with a `<tool_name>_args` Pydantic model
+           and `<tool_name>_arguments` wrapper)
+         - prompts/<tool_name>_description.j2
+         - tool_contract.json (`inputs[]` mirrors the Pydantic args fields;
+           `arguments_prompt` carries planner-facing argument guidance)
+
+        Three patterns coexist for `get_tool_class` (all valid):
+
+         1. **Self-class tool** — defines its own class subclassing `BaseTool`
+            and returns it. Class is CamelCase + `Tool` suffix
+            (e.g. `class AppendTextFileTool(BaseTool)`). Most tools.
+
+                def get_tool_class():
+                    return AppendTextFileTool
+
+         2. **Manager-as-tool** — wraps a multi-agent manager via
+            `ManagerInterface`. Class name matches the dir name in
+            snake_case (e.g. `class web_manager(BaseTool)`) so it lines up
+            with the manager id everywhere. Used by all `*_manager/` tool
+            dirs in this directory.
+
+         3. **Shared-core adapter** — `<tool_name>.py` is a 3-line module
+            that points `get_tool_class` at a shared core class via
+            `create_tool_loader`. Used when multiple tools delegate to one
+            core (e.g. `create_calendar_event`, `delete_calendar_event`,
+            and `update_calendar_event` all share `CalendarTool`).
+
+                from app.assistant.lib.core_tools.calendar_tool.calendar_tool import CalendarTool
+                from app.assistant.lib.tool_utils.shared_tool_loader import create_tool_loader
+                get_tool_class = create_tool_loader(CalendarTool)
         """
         if tools_dir is None:
             tools_dir = get_tool_registry_dir()
