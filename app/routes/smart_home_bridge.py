@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import hmac
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import requests
 from flask import Blueprint, jsonify, request
@@ -548,18 +548,60 @@ def _coerce_int(value: Any, field_name: str) -> int:
 
 
 def _lights_cfg() -> Dict[str, Any]:
+    """Read configured Kasa lights. Two source fields exist:
+
+      - lights.devices[]  — canonical, written by the lights settings UI.
+                            Each entry is {alias, host, notes}.
+      - lights.kasa_device_hosts — legacy flat host list. Kept for
+                            back-compat; new UI never writes here.
+
+    Hosts are unioned and deduped. The user-configured alias on
+    devices[] is propagated through `host_alias_map` so identity /
+    target-match prefer it over the device's hardware-reported alias.
+    """
     cfg = _integration_cfg("lights")
-    hosts_raw = cfg.get("kasa_device_hosts", [])
-    if hosts_raw is None:
-        hosts_raw = []
-    if not isinstance(hosts_raw, list):
+
+    # Canonical: lights.devices[].host (object array, written by UI)
+    devices_raw = cfg.get("devices") or []
+    if not isinstance(devices_raw, list):
+        raise ValueError("lights.devices must be a list.")
+    host_alias_map: Dict[str, str] = {}
+    hosts_from_devices: List[str] = []
+    for d in devices_raw:
+        if not isinstance(d, dict):
+            continue
+        host = str(d.get("host") or "").strip()
+        if not host:
+            continue
+        if host not in host_alias_map:
+            hosts_from_devices.append(host)
+            alias = str(d.get("alias") or "").strip()
+            if alias:
+                host_alias_map[host] = alias
+
+    # Back-compat: lights.kasa_device_hosts (flat string array)
+    legacy_raw = cfg.get("kasa_device_hosts", [])
+    if legacy_raw is None:
+        legacy_raw = []
+    if not isinstance(legacy_raw, list):
         raise ValueError("lights.kasa_device_hosts must be a list of host strings.")
-    hosts = [str(x).strip() for x in hosts_raw if isinstance(x, str) and str(x).strip()]
+    legacy_hosts = [str(x).strip() for x in legacy_raw if isinstance(x, str) and str(x).strip()]
+
+    # Union, preserving order: devices first (canonical), then legacy-only.
+    hosts = list(hosts_from_devices)
+    for h in legacy_hosts:
+        if h not in hosts:
+            hosts.append(h)
+
     timeout_raw = cfg.get("kasa_discovery_timeout_seconds", 4)
     timeout_seconds = _coerce_int(timeout_raw, "kasa_discovery_timeout_seconds")
     if timeout_seconds <= 0:
         raise ValueError("kasa_discovery_timeout_seconds must be > 0.")
-    return {"hosts": hosts, "timeout_seconds": timeout_seconds}
+    return {
+        "hosts": hosts,
+        "timeout_seconds": timeout_seconds,
+        "host_alias_map": host_alias_map,
+    }
 
 
 def _lights_hosts_override(arguments: Dict[str, Any]) -> List[str]:
@@ -576,16 +618,30 @@ def _lights_hosts_override(arguments: Dict[str, Any]) -> List[str]:
     return hosts
 
 
-def _kasa_identity(device: Any) -> Dict[str, Any]:
-    alias = str(getattr(device, "alias", "") or "").strip()
+def _kasa_identity(device: Any, host_alias_map: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+    """Build a result-dict for one Kasa device. When `host_alias_map`
+    contains an entry for this device's host, the user-configured alias
+    from `lights.devices[].alias` overrides the device's hardware-
+    reported alias (so when the planner says 'Living room light', it
+    matches what the user labeled in the UI even if the bulb's
+    internal Kasa-app alias is different)."""
+    hw_alias = str(getattr(device, "alias", "") or "").strip()
     host = str(getattr(device, "host", "") or "").strip()
     model = str(getattr(device, "model", "") or "").strip()
     dev_type = str(getattr(device, "device_type", "") or "").strip()
     brightness = getattr(device, "brightness", None)
     is_on = bool(getattr(device, "is_on", False))
+
+    user_alias = ""
+    if host_alias_map and host:
+        user_alias = (host_alias_map.get(host) or "").strip()
+    effective_alias = user_alias or hw_alias
+
     return {
-        "light_id": host or alias or model,
-        "alias": alias,
+        "light_id": host or effective_alias or model,
+        "alias": effective_alias,
+        "hw_alias": hw_alias,
+        "user_alias": user_alias,
         "host": host,
         "model": model,
         "device_type": dev_type,
@@ -594,21 +650,37 @@ def _kasa_identity(device: Any) -> Dict[str, Any]:
     }
 
 
-def _kasa_target_match(device: Any, *, light_id: str, room: str) -> bool:
-    identity = _kasa_identity(device)
+def _kasa_target_match(
+    device: Any,
+    *,
+    light_id: str,
+    room: str,
+    host_alias_map: Optional[Dict[str, str]] = None,
+) -> bool:
+    identity = _kasa_identity(device, host_alias_map=host_alias_map)
     if light_id:
         lid = light_id.strip().lower()
+        # Match against any of: composite light_id, user-alias,
+        # hw-alias, or host. User-alias is the one the planner usually
+        # produces from the lights tool description, so it's the
+        # primary success path.
         candidates = {
             str(identity.get("light_id") or "").strip().lower(),
             str(identity.get("alias") or "").strip().lower(),
+            str(identity.get("user_alias") or "").strip().lower(),
+            str(identity.get("hw_alias") or "").strip().lower(),
             str(identity.get("host") or "").strip().lower(),
         }
         if lid not in candidates:
             return False
     if room:
         room_norm = room.strip().lower()
-        alias_norm = str(identity.get("alias") or "").strip().lower()
-        if room_norm not in alias_norm:
+        # Look at BOTH user and hw alias for room-substring matching.
+        alias_haystack = " ".join([
+            str(identity.get("user_alias") or ""),
+            str(identity.get("hw_alias") or ""),
+        ]).lower()
+        if room_norm not in alias_haystack:
             return False
     return True
 
@@ -708,11 +780,16 @@ async def _kasa_scan_lan(timeout_seconds: int) -> List[Any]:
     return devices
 
 
-async def _kasa_list_lights(*, hosts: List[str], timeout_seconds: int) -> Dict[str, Any]:
+async def _kasa_list_lights(
+    *,
+    hosts: List[str],
+    timeout_seconds: int,
+    host_alias_map: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
     """List configured Kasa lights. Returns empty list when nothing's
     configured — that's a clean 'no lights' state, not an error."""
     devices = await _kasa_load_devices(hosts, timeout_seconds)
-    lights = [_kasa_identity(device) for device in devices]
+    lights = [_kasa_identity(device, host_alias_map=host_alias_map) for device in devices]
     return {"lights": lights}
 
 
@@ -735,6 +812,7 @@ async def _kasa_set_light_power(
     state: str,
     light_id: str,
     room: str,
+    host_alias_map: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     state_norm = str(state or "").strip().lower()
     if state_norm not in {"on", "off"}:
@@ -745,7 +823,10 @@ async def _kasa_set_light_power(
             "Settings → Smart home → Lights before issuing power commands."
         )
     devices = await _kasa_load_devices(hosts, timeout_seconds)
-    selected = [d for d in devices if _kasa_target_match(d, light_id=light_id, room=room)]
+    selected = [
+        d for d in devices
+        if _kasa_target_match(d, light_id=light_id, room=room, host_alias_map=host_alias_map)
+    ]
     if not selected:
         raise RuntimeError("No lights matched the requested selectors (light_id/room).")
 
@@ -756,7 +837,7 @@ async def _kasa_set_light_power(
         else:
             await device.turn_off()
         await device.update()
-        changed.append(_kasa_identity(device))
+        changed.append(_kasa_identity(device, host_alias_map=host_alias_map))
     return {"changed": changed, "state": state_norm}
 
 
@@ -767,24 +848,33 @@ async def _kasa_set_light_brightness(
     brightness_pct: int,
     light_id: str,
     room: str,
+    host_alias_map: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     if brightness_pct < 0 or brightness_pct > 100:
         raise ValueError("brightness_pct must be between 0 and 100.")
+    if not hosts:
+        raise RuntimeError(
+            "No Kasa lights are configured. Add light IPs in "
+            "Settings → Smart home → Lights before issuing brightness commands."
+        )
     devices = await _kasa_load_devices(hosts, timeout_seconds)
-    selected = [d for d in devices if _kasa_target_match(d, light_id=light_id, room=room)]
+    selected = [
+        d for d in devices
+        if _kasa_target_match(d, light_id=light_id, room=room, host_alias_map=host_alias_map)
+    ]
     if not selected:
         raise RuntimeError("No lights matched the requested selectors (light_id/room).")
 
     changed = []
     for device in selected:
         if not hasattr(device, "set_brightness"):
-            identity = _kasa_identity(device)
+            identity = _kasa_identity(device, host_alias_map=host_alias_map)
             raise RuntimeError(
                 f"Device '{identity.get('alias') or identity.get('host')}' does not support brightness control."
             )
         await device.set_brightness(brightness_pct)
         await device.update()
-        changed.append(_kasa_identity(device))
+        changed.append(_kasa_identity(device, host_alias_map=host_alias_map))
     return {"changed": changed, "brightness_pct": brightness_pct}
 
 
@@ -794,6 +884,7 @@ def _lights_dispatch(command: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     hosts_override = _lights_hosts_override(arguments)
     hosts = hosts_override if hosts_override else cfg["hosts"]
     timeout_seconds = cfg["timeout_seconds"]
+    host_alias_map = cfg.get("host_alias_map") or {}
     light_id = str(arguments.get("light_id") or "").strip()
     room = str(arguments.get("room") or "").strip()
 
@@ -812,8 +903,13 @@ def _lights_dispatch(command: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
             room = ""
 
     if command_norm == "list_lights":
-        return _run_async(_kasa_list_lights(hosts=hosts, timeout_seconds=timeout_seconds))
-    if command_norm == "discover_hosts":
+        return _run_async(_kasa_list_lights(
+            hosts=hosts, timeout_seconds=timeout_seconds,
+            host_alias_map=host_alias_map,
+        ))
+    if command_norm in ("discover_hosts", "scan_lan"):
+        # scan_lan is the canonical name (matches the helper). discover_hosts
+        # kept as alias for back-compat with any callers that already use it.
         return _run_async(_kasa_discover_hosts(timeout_seconds=timeout_seconds))
     if command_norm == "set_light_power":
         state = str(arguments.get("state") or "").strip().lower()
@@ -824,6 +920,7 @@ def _lights_dispatch(command: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
                 state=state,
                 light_id=light_id,
                 room=room,
+                host_alias_map=host_alias_map,
             )
         )
     if command_norm == "set_light_brightness":
@@ -835,6 +932,7 @@ def _lights_dispatch(command: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
                 brightness_pct=brightness_pct,
                 light_id=light_id,
                 room=room,
+                host_alias_map=host_alias_map,
             )
         )
     if command_norm == "set_light_color":

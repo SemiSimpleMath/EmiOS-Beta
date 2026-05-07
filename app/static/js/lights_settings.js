@@ -294,13 +294,18 @@ async function loadLightsDevices() {
 
 async function discoverLightsDevices() {
     try {
-        const result = await runLightsAction("list_lights", {});
-        // _kasa_list_lights returns {lights: [{alias, host, model, device_type, ...}]}
+        // scan_lan triggers the dedicated LAN-scan path (_kasa_scan_lan),
+        // the only place that's permitted to broadcast-discover. The
+        // list_lights / set_light_power runtime ops no longer fall back
+        // to LAN scan — they read configured devices only — so the
+        // discover button MUST use scan_lan, not list_lights.
+        const result = await runLightsAction("scan_lan", {});
+        // _kasa_discover_hosts returns {hosts, lights}.
         let lights = [];
         if (Array.isArray(result?.lights)) lights = result.lights;
         else if (Array.isArray(result?.result?.lights)) lights = result.result.lights;
         if (!lights.length) {
-            showError("No Kasa devices found. Configure kasa_device_hosts above or wait for LAN discovery.");
+            showError("No Kasa devices found on the LAN. Make sure your lights are powered on and reachable from this machine.");
             return;
         }
         const devices = lights.map(d => ({

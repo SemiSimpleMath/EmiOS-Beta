@@ -246,6 +246,12 @@ def _default_smart_home_config() -> dict:
             "endpoint_url": "http://127.0.0.1:8000/api/smart-home/lights",
             "token_env_var": "EMI_SMARTHOME_LIGHTS_TOKEN",
             "timeout_seconds": 20,
+            # Devices: [{alias, host, notes}]. Written by the lights
+            # settings UI; canonical source of truth for the Kasa bridge.
+            "devices": [],
+            # kasa_device_hosts is the legacy flat host array. New UIs
+            # should not write here; the bridge unions it with devices[]
+            # for back-compat.
             "kasa_device_hosts": [],
             "kasa_discovery_timeout_seconds": 4,
         },
@@ -254,6 +260,20 @@ def _default_smart_home_config() -> dict:
             "endpoint_url": "http://127.0.0.1:8000/api/smart-home/ring",
             "token_env_var": "EMI_SMARTHOME_RING_TOKEN",
             "timeout_seconds": 20,
+            "devices": [],
+        },
+        # Local RTSP cameras (Tapo, Wyze, Reolink, etc.). Each device
+        # entry: {alias, host, port, path, username, password_env_var,
+        # kind}. Distinct from `ring` because Ring cameras go through
+        # the Ring cloud API while local cameras stream directly via
+        # RTSP. Kept categorically separate so the lights bridge never
+        # mistakes a Tapo for a Kasa light, and the Ring routes never
+        # try to authenticate against Tapo creds.
+        "local_cameras": {
+            "enabled": False,
+            "endpoint_url": "http://127.0.0.1:8000/api/smart-home/local-cameras",
+            "timeout_seconds": 20,
+            "devices": [],
         },
     }
 
@@ -554,6 +574,13 @@ _SH_INTEGRATION_ID_FIELDS = {
     "lights": "host",
     "ring": "camera_id",
     "nest": "device_id",
+    # Tapo + other RTSP cameras live under local_cameras. id_field is
+    # `host` since they're addressed by IP. Camera-specific fields
+    # (port, path, username, password_env_var, kind) flow through the
+    # devices CRUD via the `notes` field for now; a dedicated Tapo
+    # settings page that exposes them as named columns is the natural
+    # next step.
+    "local_cameras": "host",
 }
 
 
