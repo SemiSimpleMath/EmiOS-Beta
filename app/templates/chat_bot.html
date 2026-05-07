@@ -181,6 +181,12 @@
             </a>
           </li>
           <li class="submenu-item">
+            <a href="/settings/integrations/ring" class="menu-btn">
+              <i class="fas fa-video"></i>
+              <span>Ring Cameras</span>
+            </a>
+          </li>
+          <li class="submenu-item">
             <a href="/settings/api-keys" class="menu-btn">
               <i class="fas fa-key"></i>
               <span>API Keys</span>
@@ -238,6 +244,12 @@
           <span>Dev Wiki on GitHub</span>
         </a>
       </li>
+      <li class="menu-item">
+        <a href="/emi-code" target="_blank" class="menu-btn">
+          <i class="fas fa-code"></i>
+          <span>EmiCode</span>
+        </a>
+      </li>
       <li class="menu-item menu-submenu">
         <button class="menu-btn submenu-toggle">
           <i class="fas fa-bug"></i>
@@ -289,60 +301,7 @@
   <!-- My Life Dropdown Menu (KG + Wiki + Entities) -->
   <div id="life-dropdown-menu" class="dropdown-menu dropdown-menu--right hidden">
     <ul class="menu-list">
-      <li class="menu-item">
-        <a href="/wiki/" target="_blank" class="menu-btn">
-          <i class="fas fa-book"></i>
-          <span>Wiki</span>
-        </a>
-      </li>
-      <li class="menu-item">
-        <a href="/kg-visualizer" target="_blank" class="menu-btn">
-          <i class="fas fa-project-diagram"></i>
-          <span>KG Visualizer</span>
-        </a>
-      </li>
-      <li class="menu-item">
-        <a href="/kg-interests" target="_blank" class="menu-btn">
-          <i class="fas fa-sliders-h"></i>
-          <span>KG Interests (what to track)</span>
-        </a>
-      </li>
-      <li class="menu-item">
-        <a href="/kg-proposals/" target="_blank" class="menu-btn">
-          <i class="fas fa-clipboard-list"></i>
-          <span>Shadow KG / Proposals</span>
-        </a>
-      </li>
-      <li class="menu-item">
-        <a href="/entity_cards" target="_blank" class="menu-btn">
-          <i class="fas fa-address-card"></i>
-          <span>Entity Cards</span>
-        </a>
-      </li>
-      <li class="menu-item">
-        <a href="/entity-cards-admin" target="_blank" class="menu-btn">
-          <i class="fas fa-sync-alt"></i>
-          <span>Entity Cards Admin (regen)</span>
-        </a>
-      </li>
-      <li class="menu-item">
-        <a href="/entity-card-maintenance" target="_blank" class="menu-btn">
-          <i class="fas fa-broom"></i>
-          <span>Entity Card Maintenance</span>
-        </a>
-      </li>
-      <li class="menu-item">
-        <a href="/kg-maintenance" target="_blank" class="menu-btn">
-          <i class="fas fa-stethoscope"></i>
-          <span>KG Maintenance</span>
-        </a>
-      </li>
-      <li class="menu-item">
-        <a href="/kg-dev" target="_blank" class="menu-btn">
-          <i class="fas fa-terminal"></i>
-          <span>KG Dev Console (chat with KG)</span>
-        </a>
-      </li>
+      {% include '_my_life_menu.html' %}
     </ul>
   </div>
 </header>
