@@ -54,7 +54,8 @@ logger = get_logger(__name__)
 MIN_CONFIDENCE = 0.6
 PER_SUBJECT_SENTENCE_CAP = 5
 DEFAULT_SUBJECT_LIMIT = 10
-FINDING_TYPE = "wiki_inferred_fact"
+FINDING_TYPE = "synthetic_fact_proposal"  # Generic — not wiki-specific
+PRODUCER = "wiki_connection_investigator"
 
 
 def run(ctx: PipelineContext, *, subject_limit: Optional[int] = None) -> dict:
@@ -448,6 +449,10 @@ def _write_wiki_inferred_finding(
         confidence = None
 
     evidence: Dict[str, Any] = {
+        # Producer identity — multiple agents can emit synthetic_fact_proposal
+        # findings (wiki investigator today; "find missing connections" or
+        # other graph-walkers tomorrow). The review UI groups by producer.
+        "producer": PRODUCER,
         "sentence": sentence_text,
         "sentence_hash": _canonical_sentence_hash(sentence_text),
         "evidence_quote": (inference.get("evidence_quote") or "")[:1000],
@@ -460,6 +465,15 @@ def _write_wiki_inferred_finding(
         "suggested_end_date": inference.get("suggested_end_date") or None,
         "suggested_start_date_prose": inference.get("suggested_start_date_prose") or None,
         "suggested_end_date_prose": inference.get("suggested_end_date_prose") or None,
+        # Review state machine (defaults — flipped by the review module
+        # when the user edits/approves/rejects):
+        #   review_status: 'pending_review' | 'edited' | 'approved' | 'rejected'
+        #   user_edited_sentence: filled in if user rewrote the sentence
+        #   user_dates: {start_date, end_date, start_date_prose, end_date_prose}
+        #   user_notes: free-text comments
+        #   extraction_result: structural decomposition once the wiki-aware
+        #     extractor runs (post-approve); shape TBD.
+        "review_status": "pending_review",
     }
     reason = (
         f"Inferred from wiki page on {subject.get('label')!r}: {sentence_text} "
