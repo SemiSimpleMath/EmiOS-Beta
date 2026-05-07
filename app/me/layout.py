@@ -100,18 +100,13 @@ def _vogel_place_cluster(
 ) -> Dict[str, Tuple[float, float]]:
     """Deterministic Vogel spiral placement for a single cluster.
 
-    Members are sorted by importance ASCENDING — least-important members
+    Members are sorted by importance DESCENDING — most-important members
     orbit closest to the anchor.
 
-    The reason (per user): you only see unimportant nodes by zooming
-    into their region. If unimportant nodes lived at the periphery,
-    zooming in toward the anchor would push them off-screen and they'd
-    never be reachable. Putting them close to the anchor means
-    zoom-into-anchor naturally brings them into view as their on-screen
-    claims shrink and stop colliding with the anchor.
-
-    Important nodes can sit far — priority-collision keeps them visible
-    at overview zoom regardless of their distance from the anchor.
+    The user's mental model: the focal anchor is what you're paying
+    attention to, and the most-important nearby nodes should be RIGHT
+    THERE around it at default zoom. Less-important nodes sit farther
+    out, discovered by zooming out to widen the visible radial band.
 
     Anchor sits at center.
     """
@@ -120,10 +115,10 @@ def _vogel_place_cluster(
     if not others:
         return positions
 
-    # Sort by importance ascending (low first → close orbit → in viewport
-    # when user zooms in to discover them). Ties broken by id for determinism.
+    # Sort by importance descending (high first → close orbit → in viewport
+    # at default zoom). Ties broken by id for determinism.
     others.sort(
-        key=lambda nid: (float(importance.get(nid, 5.0)), nid),
+        key=lambda nid: (-float(importance.get(nid, 5.0)), nid),
     )
 
     ax, ay = anchor_pos

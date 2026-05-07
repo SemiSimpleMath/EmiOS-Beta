@@ -133,25 +133,24 @@ def demo_graph():
         ranked = ranked[:n]
 
         # Concentric-rings layout: anchor at center, importance bins are
-        # rings around it. Less-important nodes orbit closer to the
-        # anchor (inner rings) — discoverable by zooming in. Important
-        # nodes orbit farther out — visible at overview zoom via
-        # priority-collision.
+        # rings around it. **More-important nodes orbit closer to the
+        # anchor** (inner rings) — visible at default zoom right around
+        # the focal point. Less-important nodes orbit farther out —
+        # discoverable by zooming OUT to widen the visible band.
         # Radial mapping non-linear so the dense low-importance bands
-        # get more area: r = R_OUTER × (imp/10)^EXPONENT where exponent
-        # < 1 expands the low-imp band.
+        # (which dominate the periphery now) still get adequate area.
         from collections import defaultdict
-        # Geometric-progression ring radii (validated in layout_sim.py):
-        # r_i = R_BASE × RING_RATIO^(imp - 1).
-        # Less important closer to anchor; each step out is 1.6× the
-        # previous, so when the comfortably-displayed ring (500px) moves
-        # to periphery (800px), the next inner ring reaches 500px.
+        # Geometric-progression ring radii: r_i = R_BASE × RING_RATIO^(10 - imp).
+        # Higher imp → smaller exponent → closer to anchor. Each step
+        # outward is 1.6× the previous, so when the comfortably-displayed
+        # ring (500px) drifts to periphery (800px) at higher zoom-out,
+        # the next outer ring reaches 500px.
         R_BASE = 300.0
         RING_RATIO = 1.6
         GOLDEN = math.pi * (3 - math.sqrt(5))
 
         def radius_for(imp: float) -> float:
-            return R_BASE * (RING_RATIO ** max(0.0, float(imp) - 1.0))
+            return R_BASE * (RING_RATIO ** max(0.0, 10.0 - float(imp)))
 
         # Bin by integer importance (10 bins: 0..10).
         by_band: Dict[int, List[str]] = defaultdict(list)
