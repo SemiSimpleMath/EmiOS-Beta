@@ -142,7 +142,7 @@ def run(ctx: PipelineContext) -> dict:
                 lead_id=lead_id,
                 sibling_ids=sibling_ids,
                 root_question=root_question,
-                agent_reason=str(data.get("reason") or "")[:500],
+                agent_reason=str(data.get("reason") or ""),
             )
             confirmed += 1
             superseded += n
@@ -204,10 +204,12 @@ def _serialize_cluster_for_llm(primary_node_id: str, chunk: list[dict]) -> str:
         lines.append(f"reason: {f.get('reason', '')}")
         evidence = f.get("evidence") or f.get("evidence_json")
         if evidence:
+            # Evidence is provenance + prompt input — never sliced.
+            # See feedback_no_slicing_anywhere.md.
             try:
-                ev_str = json.dumps(evidence, ensure_ascii=False, default=str)[:600]
+                ev_str = json.dumps(evidence, ensure_ascii=False, default=str)
             except Exception:
-                ev_str = str(evidence)[:600]
+                ev_str = str(evidence)
             lines.append(f"evidence: {ev_str}")
         lines.append("")
     return "\n".join(lines)

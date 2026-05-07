@@ -455,8 +455,10 @@ def _write_wiki_inferred_finding(
         "producer": PRODUCER,
         "sentence": sentence_text,
         "sentence_hash": _canonical_sentence_hash(sentence_text),
-        "evidence_quote": (inference.get("evidence_quote") or "")[:1000],
-        "inference_path": (inference.get("inference_path") or "")[:1000],
+        # Provenance fields stay verbatim per
+        # feedback_no_slicing_anywhere — never slice evidence/inference.
+        "evidence_quote": inference.get("evidence_quote") or "",
+        "inference_path": inference.get("inference_path") or "",
         "agent_confidence": confidence,
         "subject_label": subject.get("label"),
         "subject_node_type": subject.get("node_type"),
@@ -478,7 +480,7 @@ def _write_wiki_inferred_finding(
     reason = (
         f"Inferred from wiki page on {subject.get('label')!r}: {sentence_text} "
         f"(conf={confidence})"
-    )[:1000]
+    )
 
     try:
         upsert_finding(
