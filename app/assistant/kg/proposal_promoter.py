@@ -757,6 +757,22 @@ def _create_kg_node_from_proposal(
     if ttl is not None and proposal_node.node_type in RELATIONSHIP_LIKE_TYPES:
         attrs["ttl"] = ttl
 
+    # Goal lifecycle: every freshly-promoted Goal starts as `active`. The
+    # nightly goal_dormancy_sweep flips long-silent Goals to `dormant`
+    # (reversible — re-observation revives them); explicit
+    # achieved/abandoned outcomes come from the goal_outcome_detector.
+    # Goals never get a `ttl` (RELATIONSHIP_LIKE_TYPES excludes them) and
+    # state_decay never touches them — they're a different shape than
+    # State/Event facts about the world.
+    if proposal_node.node_type == "Goal":
+        attrs.setdefault("goal_status", "active")
+        # last_pursued_at is the recency signal the dormancy sweep reads
+        # and the lens / cards use to demote stale goals visually. On
+        # creation it's the same as first_observed.
+        if proposal_node.valid_from:
+            ts = proposal_node.valid_from
+            attrs["last_pursued_at"] = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
+
     sentence_for_node = (proposal_node.sentence or "") if hasattr(proposal_node, "sentence") else ""
     if proposal_node.node_type in {"State", "Event", "Goal"} and canonical_sentence:
         sentence_for_node = canonical_sentence
@@ -888,6 +904,18 @@ def _refresh_on_reobservation(node: Node, proposal: ClaimProposal) -> None:
             attrs["confidence"] = min(1.0, float(attrs["confidence"]) + 0.05)
         except (TypeError, ValueError):
             pass
+
+    # Goal lifecycle: any re-observation revives a dormant Goal back to
+    # active and bumps the recency signal the dormancy sweep reads.
+    # Achievement/abandonment closures (status in {"achieved", "abandoned"})
+    # are terminal — re-observation should NOT silently re-open them.
+    # If the user mentioned a closed Goal again, that's worth surfacing
+    # as a finding rather than auto-reopening.
+    if (node.node_type or "") == "Goal":
+        attrs["last_pursued_at"] = iso
+        cur_status = attrs.get("goal_status")
+        if cur_status not in ("achieved", "abandoned"):
+            attrs["goal_status"] = "active"
 
     from sqlalchemy import update as sql_update
     from sqlalchemy.orm import object_session
