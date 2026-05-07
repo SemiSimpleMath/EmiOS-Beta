@@ -21,9 +21,11 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
-from app.assistant.kg.db.knowledge_graph_db_sqlite import Node
+from sqlalchemy import or_
+
+from app.assistant.kg.db.knowledge_graph_db_sqlite import Edge, Node
 from app.assistant.utils.logging_config import get_logger
 from app.models.db_manager import get_db_manager
 
@@ -34,7 +36,10 @@ IMPORTANCE_PATH = (
 )
 
 DEFAULT_SCORE = 5.0
-BATCH_SIZE = 60  # ~50-60 nodes per LLM call. Bigger → cheaper but riskier.
+BATCH_SIZE = 10  # nodes per LLM call. Smaller after we started feeding edge
+                 # context — the bigger per-node prompt means we keep the
+                 # per-call payload manageable for the small rater model.
+EDGES_PER_NODE = 8  # cap on edges shown per node, sorted by edge importance desc.
 
 _CACHE: Optional[Dict[str, float]] = None
 
@@ -65,8 +70,10 @@ def invalidate() -> None:
     _CACHE = None
 
 
-def _build_node_block(node: Node) -> str:
-    """Compact text representation of one node for the rater prompt."""
+def _build_node_block(node: Node, edges: Optional[List[Dict[str, Any]]] = None) -> str:
+    """Compact text representation of one node for the rater prompt.
+    Includes top-N edges (sorted by edge importance) so the rater can see
+    the node's graph context, not just label + description."""
     parts: List[str] = [f"id={node.id}"]
     parts.append(f"label={node.label!r}")
     parts.append(f"type={node.node_type or '-'}")
@@ -77,7 +84,64 @@ def _build_node_block(node: Node) -> str:
         if len(desc) > 240:
             desc = desc[:237] + "..."
         parts.append(f"desc={desc!r}")
-    return " | ".join(parts)
+    aliases = node.aliases if isinstance(node.aliases, list) else []
+    if aliases:
+        parts.append(f"aliases={[str(a) for a in aliases[:5]]!r}")
+    head = " | ".join(parts)
+    if not edges:
+        return head
+    edge_lines = [f"  {e['direction']} {e['predicate']}: {e['other_label']}" for e in edges]
+    return head + "\n" + "\n".join(edge_lines)
+
+
+def _fetch_node_edges_batch(
+    session, node_ids: List[str], cap: int = EDGES_PER_NODE
+) -> Dict[str, List[Dict[str, Any]]]:
+    """For each node_id in `node_ids`, return up to `cap` edges sorted by
+    importance desc. Each edge dict: predicate, other_label, direction, importance.
+    One DB roundtrip for edges + one for missing labels."""
+    if not node_ids:
+        return {}
+    node_id_set = {str(nid) for nid in node_ids}
+    edges = session.query(Edge).filter(
+        or_(Edge.source_id.in_(node_ids), Edge.target_id.in_(node_ids))
+    ).all()
+    # Collect labels we need (other side of each edge, plus our own batch nodes
+    # in case a self-loop or batch-internal edge appears).
+    referenced_ids: set[str] = set()
+    for e in edges:
+        referenced_ids.add(str(e.source_id))
+        referenced_ids.add(str(e.target_id))
+    label_map: Dict[str, str] = {}
+    if referenced_ids:
+        for nid, label in session.query(Node.id, Node.label).filter(
+            Node.id.in_(list(referenced_ids))
+        ).all():
+            label_map[str(nid)] = label or ""
+    by_node: Dict[str, List[Dict[str, Any]]] = {nid: [] for nid in node_id_set}
+    for e in edges:
+        sid = str(e.source_id)
+        tid = str(e.target_id)
+        imp = float(e.importance) if e.importance is not None else 0.0
+        predicate = (e.relationship_type or "").strip() or "?"
+        if sid in node_id_set:
+            by_node[sid].append({
+                "predicate": predicate,
+                "other_label": label_map.get(tid, ""),
+                "direction": "→",
+                "importance": imp,
+            })
+        if tid in node_id_set and tid != sid:
+            by_node[tid].append({
+                "predicate": predicate,
+                "other_label": label_map.get(sid, ""),
+                "direction": "←",
+                "importance": imp,
+            })
+    for nid in by_node:
+        by_node[nid].sort(key=lambda r: -r["importance"])
+        by_node[nid] = by_node[nid][:cap]
+    return by_node
 
 
 def regenerate_importance(
@@ -135,7 +199,14 @@ def regenerate_importance(
 
     for i in range(0, len(all_nodes), batch_size):
         batch = all_nodes[i : i + batch_size]
-        batch_text = "\n".join(_build_node_block(n) for n in batch)
+        batch_ids = [str(n.id) for n in batch]
+        # Pre-fetch edges for this batch in one short read session, before the
+        # LLM call. Keeps DB sessions out of LLM-call lifetimes.
+        with get_db_manager().read_session() as session:
+            edges_by_node = _fetch_node_edges_batch(session, batch_ids, cap=EDGES_PER_NODE)
+        batch_text = "\n\n".join(
+            _build_node_block(n, edges_by_node.get(str(n.id), [])) for n in batch
+        )
         agent = DI.agent_factory.create_agent("me::importance_rater")
         if agent is None:
             logger.error("me importance: agent unavailable")
