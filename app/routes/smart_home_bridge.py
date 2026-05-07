@@ -623,6 +623,25 @@ def _run_async(coro):
 
 
 async def _kasa_load_devices(hosts: List[str], timeout_seconds: int) -> List[Any]:
+    """Load Kasa devices from an EXPLICIT host list. Never scans the LAN.
+
+    Architectural rule: Kasa lights are only ever the devices the user
+    explicitly configured AS Kasa lights (via the lights settings UI).
+    Runtime operations (list_lights, set_light_power, etc.) MUST NOT
+    fall back to LAN-wide discovery — that path picks up other TP-Link
+    devices on the network (Tapo cameras, plugs, etc.) and tries to
+    speak the Kasa protocol to them, which fails noisily and corrupts
+    the result. LAN scanning is a one-shot UI helper exposed via
+    `_kasa_scan_lan` for the settings page; it does NOT participate
+    in the runtime data path.
+
+    Empty hosts → returns []. The caller decides whether that's an
+    error (e.g. set_light_power with nothing configured) or a clean
+    "no lights" response (list_lights with nothing configured).
+    """
+    if not hosts:
+        return []
+
     try:
         from kasa import Discover
     except Exception as e:
@@ -633,68 +652,77 @@ async def _kasa_load_devices(hosts: List[str], timeout_seconds: int) -> List[Any
         )
 
     devices: List[Any] = []
-    if hosts:
-        for host in hosts:
-            try:
-                device = await Discover.discover_single(host, timeout=timeout_seconds)
-            except Exception as e:
-                logger.error("Kasa discover_single failed for host '%s': %s", host, e)
-                logger.debug("Kasa discover_single exception details", exc_info=True)
-                raise
-            if device is None:
-                raise RuntimeError(f"Kasa device not found at host '{host}'.")
-            await device.update()
-            devices.append(device)
-    else:
+    for host in hosts:
         try:
-            discovered = await Discover.discover(timeout=timeout_seconds)
+            device = await Discover.discover_single(host, timeout=timeout_seconds)
         except Exception as e:
-            logger.error("Kasa network discovery failed: %s", e)
-            logger.debug("Kasa network discovery exception details", exc_info=True)
+            logger.error("Kasa discover_single failed for host '%s': %s", host, e)
+            logger.debug("Kasa discover_single exception details", exc_info=True)
             raise
-        if not isinstance(discovered, dict):
-            raise RuntimeError("Kasa discovery returned invalid payload.")
-        # Per-device update() can fail for hosts that responded to the
-        # Kasa discovery probe but aren't actually Kasa devices —
-        # most commonly Tapo cameras on the same LAN, since TP-Link
-        # makes both lines and they share a low-level discovery path
-        # but diverge at the auth/protocol layer (Tapo cameras refuse
-        # the Kasa HTTPS-on-443 handshake → SSLV3_ALERT_HANDSHAKE_FAILURE).
-        # Catch + skip per-device so one bad neighbor doesn't break the
-        # whole lights query. The proper fix is to populate
-        # kasa_device_hosts explicitly so discovery is never used.
-        for host, device in discovered.items():
-            if device is None:
-                continue
-            try:
-                await device.update()
-            except Exception as e:
-                logger.warning(
-                    "Kasa discovery: skipping host %s — update() failed (%s). "
-                    "Likely a non-Kasa device that responded to the discovery "
-                    "probe (e.g. a Tapo camera). Configure kasa_device_hosts "
-                    "explicitly to suppress this.",
-                    host, e,
-                )
-                continue
-            devices.append(device)
+        if device is None:
+            raise RuntimeError(f"Kasa device not found at host '{host}'.")
+        await device.update()
+        devices.append(device)
+    return devices
 
-    if not devices:
+
+async def _kasa_scan_lan(timeout_seconds: int) -> List[Any]:
+    """One-shot LAN-wide Kasa discovery. Called ONLY from the settings
+    UI's discover endpoint, never from runtime data ops.
+
+    Skips per-device any host that responds to the Kasa discovery probe
+    but fails the protocol handshake (most commonly Tapo cameras —
+    TP-Link makes both lines, the discovery probes overlap, but the
+    auth/protocol layer diverges → SSL handshake failure).
+    """
+    try:
+        from kasa import Discover
+    except Exception as e:
+        logger.error("python-kasa import failed: %s", e)
         raise RuntimeError(
-            "No Kasa devices found. Configure kasa_device_hosts in smart_home_tools.json "
-            "or ensure devices are reachable on the local network."
+            "python-kasa dependency is missing. Install 'python-kasa' to use lights integration."
         )
+
+    try:
+        discovered = await Discover.discover(timeout=timeout_seconds)
+    except Exception as e:
+        logger.error("Kasa network discovery failed: %s", e)
+        logger.debug("Kasa network discovery exception details", exc_info=True)
+        raise
+    if not isinstance(discovered, dict):
+        raise RuntimeError("Kasa discovery returned invalid payload.")
+
+    devices: List[Any] = []
+    for host, device in discovered.items():
+        if device is None:
+            continue
+        try:
+            await device.update()
+        except Exception as e:
+            logger.info(
+                "Kasa LAN scan: skipping non-Kasa responder at %s — %s",
+                host, e,
+            )
+            continue
+        devices.append(device)
     return devices
 
 
 async def _kasa_list_lights(*, hosts: List[str], timeout_seconds: int) -> Dict[str, Any]:
+    """List configured Kasa lights. Returns empty list when nothing's
+    configured — that's a clean 'no lights' state, not an error."""
     devices = await _kasa_load_devices(hosts, timeout_seconds)
     lights = [_kasa_identity(device) for device in devices]
     return {"lights": lights}
 
 
 async def _kasa_discover_hosts(*, timeout_seconds: int) -> Dict[str, Any]:
-    devices = await _kasa_load_devices([], timeout_seconds)
+    """Settings-UI-only LAN scan. Returns Kasa devices found on the
+    local network so the UI can offer them as additions to the
+    explicit hosts list. Skips non-Kasa neighbors (Tapo cameras, etc.)
+    that respond to the discovery probe but fail the protocol
+    handshake."""
+    devices = await _kasa_scan_lan(timeout_seconds)
     lights = [_kasa_identity(device) for device in devices]
     hosts = [str(light.get("host") or "").strip() for light in lights if str(light.get("host") or "").strip()]
     return {"hosts": hosts, "lights": lights}
@@ -711,6 +739,11 @@ async def _kasa_set_light_power(
     state_norm = str(state or "").strip().lower()
     if state_norm not in {"on", "off"}:
         raise ValueError("set_light_power requires state in: on, off.")
+    if not hosts:
+        raise RuntimeError(
+            "No Kasa lights are configured. Add light IPs in "
+            "Settings → Smart home → Lights before issuing power commands."
+        )
     devices = await _kasa_load_devices(hosts, timeout_seconds)
     selected = [d for d in devices if _kasa_target_match(d, light_id=light_id, room=room)]
     if not selected:
