@@ -370,16 +370,48 @@ def lights_settings_page():
     return render_template('lights_settings.html')
 
 
+def _all_configured_camera_aliases() -> list:
+    """Read ring + local_cameras device aliases from smart_home_tools.json
+    so the snapshots page can render a chip-row of switchable cameras."""
+    path = _smart_home_config_path()
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    out = []
+    for integration in ("ring", "local_cameras"):
+        section = payload.get(integration) if isinstance(payload, dict) else None
+        if not isinstance(section, dict):
+            continue
+        for d in section.get("devices") or []:
+            if not isinstance(d, dict):
+                continue
+            alias = str(d.get("alias") or "").strip()
+            if alias:
+                out.append({"alias": alias, "integration": integration, "kind": str(d.get("kind") or "")})
+    return out
+
+
 @preferences_bp.route('/settings/integrations/ring/snapshots', methods=['GET'])
 def ring_snapshots_page():
     """Browse all camera JPEGs (Ring + local cameras), newest first."""
-    return render_template('ring_snapshots.html', camera_filter=None)
+    return render_template(
+        'ring_snapshots.html',
+        camera_filter=None,
+        configured_cameras=_all_configured_camera_aliases(),
+    )
 
 
 @preferences_bp.route('/cameras/<alias>', methods=['GET'])
 def camera_page(alias):
     """Per-camera snapshot view — same template, filtered by camera alias."""
-    return render_template('ring_snapshots.html', camera_filter=alias)
+    return render_template(
+        'ring_snapshots.html',
+        camera_filter=alias,
+        configured_cameras=_all_configured_camera_aliases(),
+    )
 
 
 def _camera_snapshot_dirs() -> list:

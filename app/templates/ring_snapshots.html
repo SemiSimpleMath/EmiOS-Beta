@@ -19,13 +19,30 @@
             {% if camera_filter %}
               <h1><i class="fas fa-camera"></i> {{ camera_filter }}</h1>
               <p>Snapshots from camera <strong>{{ camera_filter }}</strong> (newest first)</p>
-              <a href="/settings/integrations/ring/snapshots" class="back-link"><i class="fas fa-arrow-left"></i> All cameras</a>
             {% else %}
               <h1><i class="fas fa-images"></i> Camera Snapshots</h1>
               <p>Captured frames across all cameras (Ring + local), newest first</p>
-              <a href="/settings/integrations/ring" class="back-link"><i class="fas fa-arrow-left"></i> Back to Ring Cameras</a>
             {% endif %}
         </div>
+
+        {% if configured_cameras %}
+        <div class="ring-snapshots-camera-chips" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px; align-items:center;">
+          <span style="color:var(--muted, #888); margin-right:4px;">Switch:</span>
+          <a href="/settings/integrations/ring/snapshots"
+             style="padding:4px 12px; border-radius:14px; text-decoration:none; font-size:0.9em;
+                    {% if not camera_filter %}background:#0c4a6e; color:#bae6fd; font-weight:600;
+                    {% else %}background:#1f2937; color:#d1d5db;{% endif %}">All</a>
+          {% for cam in configured_cameras %}
+            <a href="/cameras/{{ cam.alias }}"
+               style="padding:4px 12px; border-radius:14px; text-decoration:none; font-size:0.9em;
+                      {% if camera_filter == cam.alias %}background:#0c4a6e; color:#bae6fd; font-weight:600;
+                      {% else %}background:#1f2937; color:#d1d5db;{% endif %}"
+               title="{{ cam.integration }}{% if cam.kind %} · {{ cam.kind }}{% endif %}">
+              {{ cam.alias }}
+            </a>
+          {% endfor %}
+        </div>
+        {% endif %}
 
         <div class="ring-snapshots-toolbar">
             <button type="button" id="ring-snapshots-refresh-btn"><i class="fas fa-sync-alt"></i> Refresh</button>
