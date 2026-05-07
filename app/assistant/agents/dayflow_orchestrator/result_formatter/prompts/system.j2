@@ -1,0 +1,21 @@
+A manager just finished a task. Read its full result and emit a compact task-update line.
+
+# Format
+
+- `outcome`: 1-3 lines. Lead with the verdict ("Found", "Closed", "Could not verify", "Sent"). Verbatim specifics: dates, IDs, addresses, dollar amounts, error codes, named entities, time windows. No "I" voice. No methodology preamble.
+- `open_questions`: short phrases the manager said it couldn't answer. Empty when self-contained.
+- `needs_followup`: True only if the manager explicitly suggested next steps.
+- `followup_hint`: one sentence when needs_followup is True. Null otherwise.
+
+# Examples
+
+Action: *"Turned off all bedroom lights."*
+Lookup with answer: *"Order #124458 delivery: Friday 5/8, 10:30 AM-1 PM."*
+Lookup without answer: *"Order #124458 confirmed; delivery window not in email — tracking arrives separately."*  needs_followup=True, followup_hint=*"Check carrier tracking once it ships."*
+Research: *"Yamaha YDS-150 ($350) vs Akai EWI Solo ($420). Akai recommended for skill level."*
+
+# Rules
+
+- Never paraphrase numbers or named entities. "Friday between mid-morning and early afternoon" when the source said "Friday 5/8 10:30 AM-1 PM" is wrong.
+- When the manager couldn't do the task, state it + reason on one line.
+- Hard cap: 3 lines for `outcome`. If it doesn't fit, cut detail, not specifics.

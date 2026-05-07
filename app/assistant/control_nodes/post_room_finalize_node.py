@@ -60,6 +60,101 @@ def _build_action_log_item_id(*, item_id: str, action_type: str, now_utc: dateti
     return f"action_log:{digest}"
 
 
+def _extract_full_result_text(action_result_event: Dict[str, Any]) -> str:
+    """Pull the FULL manager-result text out of an action_result_event.
+    Never truncates. Prefers final_answer_answer (the long structured
+    report), falls back to the rendered information field, then to a
+    JSON dump of the whole payload — but always emits the entire
+    available text so the formatter agent sees what the manager
+    actually produced.
+    """
+    if not isinstance(action_result_event, dict):
+        return ""
+    payload = action_result_event.get("result_payload")
+    if isinstance(payload, dict):
+        # final_answer_answer is the long markdown report — exactly
+        # what we want to hand the formatter for it to digest.
+        for key in ("final_answer_answer", "content"):
+            v = payload.get(key)
+            if isinstance(v, str) and v.strip():
+                return v
+        # No top-level markdown — include result_summary if present
+        # plus any structured fields, JSON-dumped (no truncation).
+        try:
+            import json as _json
+            return _json.dumps(payload, ensure_ascii=False, default=str, indent=2)
+        except Exception:
+            return str(payload)
+    info = action_result_event.get("information")
+    if isinstance(info, str) and info.strip():
+        return info
+    return str(action_result_event.get("action_type") or "")
+
+
+def _format_compact_outcome(*, task: str, action: str, full_result: str) -> str:
+    """Send the full manager-result text to dayflow_orchestrator::result_formatter
+    and return its compact 1-3 line outcome. Synchronous — adds 1-3s
+    latency to post_room_finalize_node but the result lands directly
+    on the task and propagates to the strategic_planner's next tick.
+
+    The agent receives the full untruncated full_result. NEVER slice
+    it before this call. See feedback_no_truncated_tool_results.md.
+
+    Failure modes:
+      - Agent unavailable / errors → fall back to a hedged stub like
+        "(formatter unavailable; see action_log)" so downstream consumers
+        don't get a 3KB blast.
+      - full_result is empty → return empty (caller handles).
+    """
+    if not full_result or not full_result.strip():
+        return ""
+
+    try:
+        from app.assistant.ServiceLocator.service_locator import DI
+        from app.assistant.utils.pydantic_classes import Message
+    except Exception as e:
+        logger.warning("[post_room_finalize] result_formatter dependencies unavailable: %s", e)
+        return "(formatter unavailable; see action_log)"
+
+    agent = DI.agent_factory.create_agent("dayflow_orchestrator::result_formatter")
+    if agent is None:
+        logger.warning("[post_room_finalize] dayflow_orchestrator::result_formatter not registered")
+        return "(formatter unavailable; see action_log)"
+
+    agent_input = {
+        "task": task or "",
+        "action": action or "",
+        "full_result": full_result,
+    }
+    try:
+        result = agent.action_handler(Message(agent_input=agent_input))
+    except Exception as e:
+        logger.error(
+            "[post_room_finalize] result_formatter agent crashed: %s", e,
+            exc_info=True,
+        )
+        return "(formatter errored; see action_log)"
+
+    data = getattr(result, "data", None)
+    if not isinstance(data, dict):
+        return "(formatter returned no data; see action_log)"
+
+    outcome = str(data.get("outcome") or "").strip()
+    open_qs = data.get("open_questions") or []
+    needs_followup = bool(data.get("needs_followup"))
+    followup_hint = str(data.get("followup_hint") or "").strip()
+
+    parts = [outcome] if outcome else ["(formatter returned no outcome)"]
+    if open_qs and isinstance(open_qs, list):
+        for q in open_qs[:3]:
+            qs = str(q or "").strip()
+            if qs:
+                parts.append(f"  ? {qs}")
+    if needs_followup and followup_hint:
+        parts.append(f"  → {followup_hint}")
+    return "\n".join(parts)
+
+
 class PostRoomFinalizeNode(ControlNode):
     """
     Deterministic post-room hook.
@@ -177,29 +272,27 @@ class PostRoomFinalizeNode(ControlNode):
         }
         dispatch_acted_ids.discard("")
 
-        # Build a compact result summary for stamping onto plan steps and
-        # the action log. Prefer the concise result_summary or tool content
-        # over the full final_answer elaboration.
+        # Build a compact task-update line by sending the FULL manager
+        # result to dayflow_orchestrator::result_formatter. NO TRUNCATION
+        # of the source — the formatter agent reads the whole thing and
+        # decides what's important. Char-slicing here would silently drop
+        # specifics (dates, IDs, addresses) at an arbitrary boundary.
+        # See feedback_no_truncated_tool_results.md.
+        #
+        # The full manager output stays on the action_result_event
+        # (result_payload) regardless, so any later agent that wants to
+        # drill into the raw report still has it.
         execution_result_summary = ""
         if action_taken:
             first_result = action_results[0] if action_results else {}
-            # Prefer result_summary (compact, from compact_final_answer form)
-            # then tool content, then information, then result_payload.
-            result_payload = first_result.get("result_payload")
-            raw_result = ""
-            if isinstance(result_payload, dict):
-                raw_result = str(
-                    result_payload.get("result_summary")
-                    or result_payload.get("final_answer_answer")
-                    or result_payload.get("content")
-                    or ""
-                ).strip()
-            if not raw_result:
-                raw_result = str(
-                    first_result.get("information")
-                    or first_result.get("action_type", "")
-                ).strip()
-            execution_result_summary = " ".join(raw_result.split())
+            full_result_text = _extract_full_result_text(first_result)
+            task_text = str(first_result.get("task") or "").strip()
+            action_type = str(first_result.get("action_type") or "").strip()
+            execution_result_summary = _format_compact_outcome(
+                task=task_text,
+                action=action_type,
+                full_result=full_result_text,
+            )
 
         if acted_on_ids and dispatch_acted_ids and set(acted_on_ids) != dispatch_acted_ids:
             raise ValueError(

@@ -43,27 +43,41 @@ class MasterRoomToolCaller(ControlNode):
         """Stamp execution result and close the dispatched dayflow_item the
         master_room arguments node created. Best-effort: never blocks the
         dispatch flow from returning normally.
+
+        Uses dayflow_orchestrator::result_formatter to compress the full
+        manager result into a 1-3 line task-update line. NO TRUNCATION
+        of the source — the formatter agent reads the full text and
+        decides what's important. See feedback_no_truncated_tool_results.md.
         """
         try:
             from datetime import datetime, timezone
             from app.assistant.dayflow_orchestrator.dayflow_item_writer import (
                 write_dayflow_item,
             )
+            from app.assistant.control_nodes.post_room_finalize_node import (
+                _extract_full_result_text,
+                _format_compact_outcome,
+            )
 
+            full_text = ""
             if isinstance(result_payload, dict):
-                result_summary = str(
-                    result_payload.get("final_answer_answer")
-                    or result_payload.get("content")
-                    or ""
-                ).strip()[:500]
+                full_text = _extract_full_result_text(
+                    {"result_payload": result_payload}
+                )
             else:
-                result_summary = str(result_payload or "").strip()[:500]
+                full_text = str(result_payload or "")
+
+            execution_result = _format_compact_outcome(
+                task="",
+                action="master_room_dispatch",
+                full_result=full_text,
+            ) or "Completed."
 
             write_dayflow_item(
                 item_id,
                 state="closed",
                 updates={
-                    "execution_result": result_summary or "Completed.",
+                    "execution_result": execution_result,
                     "executed_at": datetime.now(timezone.utc).isoformat(),
                 },
                 reason="master_room_dispatch_completed",

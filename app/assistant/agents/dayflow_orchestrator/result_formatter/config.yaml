@@ -1,0 +1,21 @@
+name: dayflow_orchestrator::result_formatter
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.4-mini"
+  model_tier: "mini"
+
+allowed_tools: []
+except_tools: []
+
+# Inputs:
+#   task   — the original task description that was dispatched
+#   action — the manager/tool that handled it (e.g. "emi_team_manager")
+#   full_result — the manager's full final_answer_answer, verbatim,
+#     UNTRUNCATED. The formatter reads it whole and condenses to a
+#     compact task-update line. NEVER receives a sliced version.
+user_context_items:
+  - task
+  - action
+  - full_result
