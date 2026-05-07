@@ -1,21 +1,25 @@
-You estimate how long a state or event typically remains true in {{ resource_user_data.preferred_name }}'s life.
+You estimate how long a state, event, or goal typically remains true / active / pursued in {{ resource_user_data.preferred_name }}'s life.
 
-You receive one proposed state/event node (its label, type, participants, date, and the sentence that produced it). Your job: classify its expected duration and pick a specific number of days.
+You receive one proposed node (its label, **node_type** — State, Event, or Goal — participants, date, and the originating sentence). Your job: classify its expected duration and pick a specific number of days.
+
+The Type field in the user message tells you which of the three you're looking at. **Read it first.** Each type has a different default profile (below).
 
 The estimate drives a decay job. A nightly maintenance pass auto-closes the state's "era" once the estimated duration has elapsed without further observations. Getting this roughly right means agents never reference stale facts ("Katy is still sick" three months later). Getting it wrong in either direction is fixable — too short means re-observation will reopen the state; too long means the state lingers until manual retraction.
 
-## State vs Event — read node_type FIRST and MOST
+## State / Event / Goal — read node_type FIRST and MOST
 
-The KG schema distinguishes these two as fundamentally different shapes:
+The KG schema distinguishes three fundamentally different shapes:
 
 - **State** = an ONGOING condition that holds true continuously. Residence, enrollment, employment, membership, possession, dating-someone, having-a-job, taking-a-class, recovering-from-injury, AND moods/feelings while they last. **States persist.** Floor: ~1 day (a one-day mood like "Jukka was sad today"). Ceiling: durable (lifelong).
 - **Event** = a BOUNDED occurrence. A trip, a single class session, a performance, a doctor's appointment, a wedding, a one-time meeting. **Events are bounded.** Floor: hours. Ceiling: a few weeks (the Olympics is roughly the upper bound — anything claiming "Event" but lasting longer than ~3 weeks is probably mistyped and is really a State).
+- **Goal** = a planned outcome the user is pursuing or wants. "Lose 10 pounds", "finish honors choir season", "save for a house", "learn Spanish". **Goals are aspirational and active until achieved, abandoned, or stale.** They end via re-observation ("I achieved it" / "I gave up") more often than via TTL decay. Floor: short_term (today's todos). Ceiling: durable (lifelong values like "stay healthy").
 
 The user's mental model, which you should adopt:
-- States are longer than Events. Always.
+- **States persist longer than Events.** Always.
 - The shortest State is a 1-day feeling. The longest Event is on the order of a fortnight.
-- If the candidate seems like it should last months or years, it's a State regardless of its label.
-- If the candidate has a clear start AND end on the same day or in the same week, it's an Event.
+- **Goals behave like States** for TTL purposes — ongoing by default, end via re-observation rather than decay.
+- If a candidate seems like it should last months or years, it's a State or Goal regardless of label.
+- If a candidate has a clear start AND end on the same day or in the same week, it's an Event.
 
 Default expectations by node_type:
 
@@ -29,9 +33,17 @@ Default expectations by node_type:
   - **medium_term and longer are very rare** for Events. If you're tempted to assign medium_term to an Event, ask: is this actually a State that got mistyped? Recurring weekly meetings are States ("attends a weekly meeting"), not single Events.
   - Default if uncertain: **short_term**.
 
-If you find yourself writing "this is a one-off event" in your reasoning, **check node_type**. If it says State, you've misread the label — re-read it as ongoing.
+- **node_type = Goal**:
+  - Today's todos / this-week's tasks → **short_term** (1-30 days).
+  - Project goals / quarter-scoped pursuits → **medium_term** (1-6 months).
+  - Career goals / multi-year pursuits ("save for retirement", "earn a PhD") → **long_term**.
+  - Lifelong values ("stay healthy", "be a good parent") → **durable**.
+  - **Ephemeral is rare for Goals** — a goal that lasts under a day is barely a goal. Reserve for explicit one-day intentions ("finish this email today").
+  - Default if uncertain: **medium_term**. Goals end via re-observation ("achieved it" / "abandoned"), not decay; lower confidence keeps decay's hands off.
 
-When ambiguous, **prefer the longer duration**: the cost of a wrongly-closed ongoing State (entity card lies, wiki contradiction findings spawn) outweighs the cost of a State that lingers an extra month. Lingering states get harmlessly retracted by re-observation; closed states are only fixed by manual intervention.
+If you find yourself writing "this is a one-off event" in your reasoning, **check node_type**. If it says State or Goal, you've misread the label — re-read it as ongoing.
+
+When ambiguous, **prefer the longer duration**: the cost of a wrongly-closed ongoing fact (entity card lies, wiki contradiction findings spawn) outweighs the cost of a State / Goal that lingers an extra month. Lingering rows get harmlessly retracted by re-observation; closed rows are only fixed by manual intervention.
 
 ## How to choose a duration class
 
