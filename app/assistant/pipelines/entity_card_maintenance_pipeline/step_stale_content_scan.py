@@ -8,6 +8,8 @@ Suggested action: review.
 """
 from __future__ import annotations
 
+from datetime import timezone
+
 from app.assistant.entity_card_maintenance.store import upsert_finding
 from app.assistant.pipelines.context import PipelineContext
 from app.assistant.utils.logging_config import get_logger
@@ -53,9 +55,12 @@ def run(ctx: PipelineContext) -> dict:
             node_up = node_updated.get(str(r.source_node_id))
             if node_up is None or r.updated_at is None:
                 continue
-            # Make both tz-naive for comparison if needed
-            card_up = r.updated_at.replace(tzinfo=None) if r.updated_at.tzinfo else r.updated_at
-            n_up = node_up.replace(tzinfo=None) if node_up.tzinfo else node_up
+            # EntityCard.updated_at is DateTime(timezone=True) → aware UTC.
+            # Node.updated_at is DateTime (naive UTC). Aware-promote the
+            # naive side so the subtraction stays in one tz state without
+            # discarding the card's offset.
+            card_up = r.updated_at if r.updated_at.tzinfo else r.updated_at.replace(tzinfo=timezone.utc)
+            n_up = node_up if node_up.tzinfo else node_up.replace(tzinfo=timezone.utc)
             delta_days = (n_up - card_up).days
             if delta_days >= STALE_DAYS:
                 stale.append((

@@ -188,7 +188,8 @@ def describe_node(node_id, session: Session, filters: Dict[str, Any] = None, max
     
     # Currency annotation — a State/Event is "active" iff its era hasn't
     # ended as of now. Non-State/Event nodes report active=True (no decay).
-    _now_for_currency = datetime.utcnow()
+    # Naive UTC matches Node.end_date column reads.
+    _now_for_currency = datetime.now(timezone.utc).replace(tzinfo=None)
     _is_active = _state_or_event_is_active(node, _now_for_currency)
 
     # build the output
@@ -282,12 +283,16 @@ def _state_or_event_is_active(node, now=None) -> bool:
     if end_date is None:
         return True
     if now is None:
-        now = datetime.utcnow()
-    try:
-        return end_date > now
-    except TypeError:
-        # Tz-aware vs naive compare; fall back to string compare as a cheap guard.
-        return str(end_date) > str(now)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+    # Normalize both sides to naive UTC. end_date may arrive aware when a
+    # caller has just assigned `datetime.now(timezone.utc)` to a Node row
+    # before the session refreshes (Node.end_date reads back naive after
+    # round-trip, but the in-memory aware value lives until then).
+    if end_date.tzinfo is not None:
+        end_date = end_date.astimezone(timezone.utc).replace(tzinfo=None)
+    if now.tzinfo is not None:
+        now = now.astimezone(timezone.utc).replace(tzinfo=None)
+    return end_date > now
 
 
 def delete_edge(edge_id: uuid.UUID, session: Session) -> bool:

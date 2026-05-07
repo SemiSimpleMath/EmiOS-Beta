@@ -23,6 +23,7 @@ from sqlalchemy.orm import relationship
 from datetime import datetime
 
 from app.models.base import Base
+from app.assistant.utils.time_utils import utc_now as _now_utc
 
 # SQLite version: Uses JSON fields, embeddings stored in ChromaDB
 
@@ -64,8 +65,8 @@ class Taxonomy(Base):
     # label_embedding moved to ChromaDB collection 'taxonomy_embeddings'
     
     # Metadata
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_now_utc, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_now_utc, onupdate=_now_utc, nullable=False)
     
     # Relationships
     parent = relationship('Taxonomy', remote_side=[id], backref='children')
@@ -195,8 +196,8 @@ class NodeTaxonomyLink(Base):
     confidence = Column(Float, default=1.0, nullable=False)
     source = Column(String(100), nullable=True)  # "explicit", "strong_context", "accumulated", "inferred", "manual"
     count = Column(Integer, default=1, nullable=False)  # How many times this classification has been made
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
-    last_seen = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=True)  # Most recent classification timestamp
+    created_at = Column(DateTime(timezone=True), default=_now_utc, nullable=False)
+    last_seen = Column(DateTime(timezone=True), default=_now_utc, nullable=True)  # Most recent classification timestamp
     
     # Relationships (using lazy string reference to avoid circular import)
     # The 'Node' relationship will be resolved when the Node model is imported
@@ -240,8 +241,8 @@ class TaxonomySuggestion(Base):
     
     # Tracking
     count = Column(Integer, default=1, nullable=False)  # Increments if seen again
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_now_utc, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_now_utc, onupdate=_now_utc, nullable=False)
     
     # Relationships
     parent_candidate = relationship('Taxonomy', backref='suggestions')
@@ -291,7 +292,7 @@ class TaxonomySuggestions(Base):
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
     
     # Tracking
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_now_utc, nullable=False)
     
     __table_args__ = {'extend_existing': True}
     
@@ -338,7 +339,7 @@ class NodeTaxonomyReviewQueue(Base):
     final_taxonomy_path = Column(Text, nullable=True)  # Human's final decision
     
     # Tracking
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_now_utc, nullable=False)
     
     __table_args__ = {'extend_existing': True}
     

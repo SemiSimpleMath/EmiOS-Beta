@@ -97,11 +97,10 @@ def write_text_file(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-from app.assistant.utils.time_utils import parse_iso_utc as parse_iso_utc  # noqa: F401 — re-export
+from app.assistant.utils.time_utils import (  # noqa: F401 — re-exports
+    parse_iso_utc as parse_iso_utc,
+    utc_now as utc_now,
+)
 
 
 def write_latest_pointer_json(

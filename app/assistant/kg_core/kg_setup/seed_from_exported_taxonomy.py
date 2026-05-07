@@ -8,7 +8,9 @@ Usage:
 
 import json
 import argparse
-from datetime import datetime
+from datetime import datetime, timezone
+
+from app.assistant.utils.time_utils import utc_now
 from app.models.base import get_session
 from app.assistant.kg_core.taxonomy.models import Taxonomy
 
@@ -57,7 +59,7 @@ def import_taxonomy_from_json(session, json_file_path):
                 description=node_data.get('description'),
                 parent_id=node_data.get('parent_id'),
                 usage_count=node_data.get('usage_count', 0),
-                last_seen=datetime.utcnow() if node_data.get('usage_count', 0) > 0 else None
+                last_seen=utc_now() if node_data.get('usage_count', 0) > 0 else None
             )
             
             session.add(taxonomy_node)

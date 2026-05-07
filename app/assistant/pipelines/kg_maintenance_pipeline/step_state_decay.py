@@ -27,6 +27,7 @@ from typing import List, Optional, Tuple
 from app.assistant.kg_maintenance.store import upsert_finding
 from app.assistant.pipelines.context import PipelineContext
 from app.assistant.utils.logging_config import get_logger
+from app.assistant.utils.time_utils import parse_iso_utc
 from app.models.base import get_session
 
 logger = get_logger(__name__)
@@ -59,7 +60,10 @@ def run(ctx: PipelineContext) -> dict:
     """Returns {"scanned": int, "closed": int, "findings": int, "skipped_low_confidence": int}."""
     from app.assistant.kg.db.knowledge_graph_db_sqlite import Node
 
-    now = datetime.utcnow()
+    # Naive UTC throughout this file — matches Node.start_date / end_date /
+    # updated_at which read back as naive. _to_naive_utc normalizes the lone
+    # aware column (created_at) so comparisons stay in one tz state.
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     scanned = 0
     to_close: List[Tuple[str, str, str, datetime, dict]] = []
     skipped_low_conf = 0
@@ -186,7 +190,7 @@ def run(ctx: PipelineContext) -> dict:
             reason=(
                 f"State {label!r} ({ntype}) auto-closed at {expected_end:%Y-%m-%d} — "
                 f"TTL class {duration_class} ({ttl.get('estimated_duration_days')}d). "
-                f"Reason: {ttl.get('reasoning', '')[:200]}"
+                f"Reason: {ttl.get('reasoning', '')}"
             ),
             confidence=ttl_confidence,
             priority="low",
@@ -252,7 +256,7 @@ def _extract_first_observed(attributes):
         return None
     try:
         if isinstance(val, str):
-            return _to_naive_utc(datetime.fromisoformat(val.replace("Z", "+00:00")))
+            return _to_naive_utc(parse_iso_utc(val))
         return _to_naive_utc(val)
     except Exception:
         return None
@@ -284,7 +288,7 @@ def _extract_last_observed(attributes) -> Optional[datetime]:
         return None
     try:
         if isinstance(val, str):
-            return _to_naive_utc(datetime.fromisoformat(val.replace("Z", "+00:00")))
+            return _to_naive_utc(parse_iso_utc(val))
         return _to_naive_utc(val)
     except Exception:
         return None

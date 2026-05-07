@@ -26,7 +26,9 @@ Dry-run by default — prints outcomes without writing.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
+
+from app.assistant.utils.time_utils import utc_now
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from sqlalchemy import func, or_
@@ -869,7 +871,7 @@ def _estimate_state_ttl(
         "estimated_duration_days": int(days) if isinstance(days, (int, float)) else None,
         "confidence": float(data.get("confidence") or 0.0),
         "reasoning": str(data.get("reasoning") or "")[:500],
-        "estimated_at": datetime.utcnow().isoformat(),
+        "estimated_at": utc_now().isoformat(),
     }
 
 

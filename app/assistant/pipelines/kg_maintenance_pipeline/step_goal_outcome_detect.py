@@ -41,6 +41,7 @@ from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.pipelines.context import PipelineContext
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import Message
+from app.assistant.utils.time_utils import parse_iso_utc
 from app.models.base import get_session
 
 logger = get_logger(__name__)
@@ -50,6 +51,9 @@ GOALS_PER_RUN = 10
 RECENCY_WINDOW_DAYS = 60
 EVIDENCE_PER_GOAL = 8
 MIN_CONFIDENCE = 0.7
+
+# Tz-aware sentinel — keeps recency comparisons aware-UTC throughout.
+_MIN = datetime.min.replace(tzinfo=timezone.utc)
 
 
 def run(ctx: PipelineContext, *, limit: Optional[int] = None) -> dict:
@@ -99,15 +103,17 @@ def run(ctx: PipelineContext, *, limit: Optional[int] = None) -> dict:
             "label": label or "",
             "sentence": sent or "",
             "created_at": created_at,
-            "last_pursued_at": _parse_ts(a.get("last_pursued_at")),
-            "last_observed": _parse_ts(a.get("last_observed")),
+            "last_pursued_at": parse_iso_utc(a.get("last_pursued_at")),
+            "last_observed": parse_iso_utc(a.get("last_observed")),
         })
 
     # Pick the K most-recently-touched (descending by max(last_pursued, last_observed)).
+    # All datetimes are aware UTC — Node.created_at is tz-aware, parse_iso_utc
+    # returns aware, and _MIN is aware so max()/min() never mix tz states.
     def _recency(g):
         return max(
-            g["last_pursued_at"] or g["created_at"] or datetime.min,
-            g["last_observed"] or g["created_at"] or datetime.min,
+            g["last_pursued_at"] or g["created_at"] or _MIN,
+            g["last_observed"] or g["created_at"] or _MIN,
         )
     active_goals.sort(key=_recency, reverse=True)
     batch = active_goals[:limit]
@@ -117,7 +123,7 @@ def run(ctx: PipelineContext, *, limit: Optional[int] = None) -> dict:
         return _empty_result()
 
     # Gather recent chat evidence per Goal.
-    cutoff = datetime.utcnow() - timedelta(days=RECENCY_WINDOW_DAYS)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=RECENCY_WINDOW_DAYS)
     enriched = [
         {**g, "evidence": _fetch_recent_evidence(g["label"], g["sentence"], cutoff)}
         for g in batch
@@ -197,8 +203,9 @@ def run(ctx: PipelineContext, *, limit: Optional[int] = None) -> dict:
             "goal_node_id": gid,
             "outcome": outcome,
             "confidence": conf,
-            "evidence_quote": (v.get("evidence_quote") or "")[:600],
-            "reasoning": (v.get("reasoning") or "")[:600],
+            # Provenance — never sliced. See feedback_no_slicing_anywhere.md.
+            "evidence_quote": v.get("evidence_quote") or "",
+            "reasoning": v.get("reasoning") or "",
             "label": by_id[gid]["label"],
         })
         if outcome == "completed":
@@ -274,7 +281,10 @@ def _fetch_recent_evidence(
             {
                 "timestamp": str(r[0]),
                 "speaker": r[2] or r[1],
-                "message": (r[3] or "")[:300],
+                # Chat body flows whole into the agent's prompt — see
+                # feedback_no_slicing_anywhere.md. Empirical p99=381,
+                # max=3665; the LLM handles the outliers.
+                "message": r[3] or "",
             }
             for r in rows
         ]
@@ -333,7 +343,8 @@ def _apply_outcomes(applies: List[Dict[str, Any]]) -> None:
             n.goal_status = entry["outcome"]
             n.end_date = now
             n.end_date_confidence = f"{entry['outcome']}_detected"
-            n.end_date_prose = entry["reasoning"][:200]
+            # KG provenance — never sliced. See feedback_no_slicing_anywhere.md.
+            n.end_date_prose = entry["reasoning"]
 
             session.execute(
                 sql_text(
@@ -355,7 +366,7 @@ def _apply_outcomes(applies: List[Dict[str, Any]]) -> None:
                     "reason": (
                         f"User-confirmed {entry['outcome']}: "
                         f"{entry['reasoning']} (conf {entry['confidence']})"
-                    )[:500],
+                    ),
                     "agent": "goal_outcome_detector",
                     "now": now,
                 },
@@ -365,15 +376,3 @@ def _apply_outcomes(applies: List[Dict[str, Any]]) -> None:
         session.close()
 
 
-def _parse_ts(value: Any) -> Optional[datetime]:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value if value.tzinfo is None else value.astimezone(timezone.utc).replace(tzinfo=None)
-    if isinstance(value, str):
-        try:
-            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
-            return dt if dt.tzinfo is None else dt.astimezone(timezone.utc).replace(tzinfo=None)
-        except Exception:
-            return None
-    return None

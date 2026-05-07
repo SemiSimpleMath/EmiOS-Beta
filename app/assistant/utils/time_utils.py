@@ -41,6 +41,17 @@ def _parse_iso_like(value: str) -> datetime:
     - Naive timestamps.
     - 'Z' suffix for UTC.
     - '24:00:00' (midnight of next day - common LLM output)
+
+    WARNING — lossy heuristic: trailing timezone *abbreviations*
+    ("PST", "PDT", "EST", etc.) are stripped before parsing. The
+    resulting datetime is naive and the abbreviation's offset is
+    lost — a downstream parse_iso_utc/parse_iso_local then assigns
+    UTC or local based on its own contract, which can silently
+    shift the value by hours. Acceptable for LLM output (where
+    abbreviations are inconsistent and the prompt usually pins a
+    canonical tz upstream); risky for any other input source. If
+    you need exact preservation, parse the offset explicitly
+    before calling here.
     """
     text = value.strip()
     # Normalize common LLM local-time strings like "YYYY-MM-DD HH:MM:SS PST"
@@ -133,17 +144,19 @@ def update_local_timezone(new_timezone: str) -> None:
     logger.info(f"Local timezone updated to {new_timezone}")
 
 
-def parse_time_string(value: Union[str, datetime]) -> datetime:
+def parse_iso_local(value: Union[str, datetime]) -> datetime:
     """
-    Parses a time input and returns a UTC-aware datetime.
+    Parses a time input and returns an aware UTC datetime, treating naive
+    input as **local** time (configured ``TIMEZONE``).
 
-    Matches original behavior:
-    - If str:
-        - Parse as ISO-like.
-        - If naive, assume local timezone, then convert to UTC.
-    - If datetime:
-        - If naive, assume local timezone, then convert to UTC.
-        - If aware, convert to UTC.
+    Use this for user/LLM-supplied datetimes where naive input means
+    "local wall-clock time." Use :func:`parse_iso_utc` instead when naive
+    input means "already UTC" (e.g., DB rows, internal storage).
+
+    - If str: parsed via :func:`_parse_iso_like`. If the result is naive,
+      local-tz is attached, then the value is converted to UTC.
+    - If datetime: aware → astimezone(UTC); naive → local-tz attached
+      then converted to UTC.
     """
     if isinstance(value, datetime):
         dt = value
@@ -156,6 +169,12 @@ def parse_time_string(value: Union[str, datetime]) -> datetime:
         dt = dt.replace(tzinfo=get_local_timezone())
 
     return dt.astimezone(timezone.utc)
+
+
+# Backwards-compat alias. Existing callers across ~8 files import the
+# legacy name; new code should reach for parse_iso_local for parallel
+# naming with parse_iso_utc.
+parse_time_string = parse_iso_local
 
 
 def convert_utc_object_to_local(data: Any) -> Any:
@@ -262,6 +281,36 @@ def parse_iso_utc_strict(value: Any, *, label: str = "timestamp") -> datetime:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def utc_now() -> datetime:
+    """
+    Returns current UTC time as an aware datetime.
+
+    Canonical replacement for ``datetime.now(timezone.utc)`` and the
+    deprecated ``datetime.utcnow()``. Use this everywhere a naive UTC or
+    aware UTC "now" is needed; pair with ``ensure_aware_utc`` when working
+    with datetimes from external sources.
+    """
+    return datetime.now(timezone.utc)
+
+
+def ensure_aware_utc(dt: datetime) -> datetime:
+    """
+    Return *dt* as an aware UTC datetime.
+
+    - Naive input is treated as already UTC (gets UTC tzinfo attached).
+    - Aware input in any tz is converted to UTC.
+
+    Use this when you have a datetime *object* (not a string) and need a
+    canonical aware-UTC value for storage, comparison, or arithmetic.
+    For string inputs, use ``parse_iso_utc``. The convention "naive == UTC"
+    matches how SQLite/SQLAlchemy DateTime columns round-trip in this
+    codebase: writes assume UTC, reads come back naive on non-tz columns.
+    """
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 def get_local_time() -> datetime:

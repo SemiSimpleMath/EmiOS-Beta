@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.time_utils import get_local_timezone
+from app.assistant.utils.time_utils import get_local_timezone, parse_iso_utc
 
 logger = get_logger(__name__)
 
@@ -40,9 +40,9 @@ def enrich_items_with_local_times(items: List[Dict[str, Any]], now_utc: datetime
             if not isinstance(raw, str) or not raw.strip():
                 continue
             try:
-                parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-                if parsed.tzinfo is None:
-                    parsed = parsed.replace(tzinfo=timezone.utc)
+                parsed = parse_iso_utc(raw)
+                if parsed is None:
+                    continue
                 local_dt = parsed.astimezone(local_tz)
                 meta[local_key] = local_dt.strftime("%Y-%m-%d %H:%M %Z")
                 delta_secs = int((parsed - now_utc).total_seconds())
@@ -68,11 +68,8 @@ def build_dayflow_blackboard_extras() -> Dict[str, Any]:
     dispatch_sweeper.list_active_dispatches(). This function emits only
     day_of_week.
     """
-    from zoneinfo import ZoneInfo
-
     now_utc = datetime.now(timezone.utc)
-    local_tz = ZoneInfo("America/Los_Angeles")
-    now_local = now_utc.astimezone(local_tz)
+    now_local = now_utc.astimezone(get_local_timezone())
 
     return {
         "day_of_week": now_local.strftime("%A"),

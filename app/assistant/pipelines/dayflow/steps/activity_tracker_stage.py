@@ -14,7 +14,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.time_utils import parse_iso_utc
+from app.assistant.utils.time_utils import parse_iso_utc, utc_to_local
 from app.assistant.pipelines.dayflow.step_types import BaseStep, StepContext, StepResult
 from app.assistant.pipelines.dayflow.utils.room_scope import resolve_room_scope
 from app.assistant.utils.chat_formatting import messages_to_chat_excerpts
@@ -336,11 +336,11 @@ class ActivityTrackerStep(BaseStep):
         if day_start:
             day_start_dt = parse_iso_utc(day_start)
             if day_start_dt:
-                day_local_str = day_start_dt.strftime("%Y-%m-%d")
+                day_local_str = utc_to_local(day_start_dt).strftime("%Y-%m-%d")
             else:
-                day_local_str = ctx.now_utc.strftime("%Y-%m-%d")
+                day_local_str = utc_to_local(ctx.now_utc).strftime("%Y-%m-%d")
         else:
-            day_local_str = ctx.now_utc.strftime("%Y-%m-%d")
+            day_local_str = utc_to_local(ctx.now_utc).strftime("%Y-%m-%d")
 
         recorder.reset_for_new_day(day_local_str)
         payload = recorder.build_output_payload(now_utc=ctx.now_utc)

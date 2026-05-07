@@ -13,8 +13,10 @@ audited typed-mutator pipeline (kg_dev_manager etc.) elsewhere.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+
+from app.assistant.utils.time_utils import to_rfc3339_z, utc_now
 
 from flask import Blueprint, jsonify, request
 
@@ -320,7 +322,7 @@ def demo_graph():
         "time_from": None,
         "time_to": None,
         "total_candidates": len(candidate_entity_ids),
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": to_rfc3339_z(utc_now()),
     })
 
 
@@ -384,7 +386,7 @@ def seed_graph():
         "time_from": result.time_from,
         "time_to": result.time_to,
         "total_candidates": result.total_candidates,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": to_rfc3339_z(utc_now()),
     })
 
 

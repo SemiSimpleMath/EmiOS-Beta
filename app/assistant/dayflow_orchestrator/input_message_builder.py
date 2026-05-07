@@ -9,7 +9,7 @@ from app.assistant.routine_manager.utils import write_json_file
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_configs_dir, get_resources_dir
 from app.assistant.utils.pydantic_classes import Message
-from app.assistant.utils.time_utils import get_local_time, parse_iso_utc_strict
+from app.assistant.utils.time_utils import get_local_time, parse_iso_utc_strict, utc_to_local
 
 logger = get_logger(__name__)
 
@@ -163,7 +163,9 @@ def _build_email_message(*, email_data: Dict[str, Any], now_utc: datetime) -> Me
         "source_type": "email",
         "event_type": "email_inbound",
         "created_at": email_timestamp.isoformat(),
-        "created_at_local": email_timestamp.astimezone().strftime("%I:%M %p"),
+        # utc_to_local respects TIMEZONE env var; bare .astimezone() would
+        # use the host tz, which can differ from the user's configured tz.
+        "created_at_local": utc_to_local(email_timestamp).strftime("%I:%M %p"),
         "summary": f"{sender}: {subject}",
         "importance": inferred_importance,
         "actionability": "actionable" if action_items else "context_only",
@@ -202,7 +204,6 @@ def _load_emails_from_event_repo(*, now_utc: datetime) -> List[Dict[str, Any]]:
     import json
 
     from app.assistant.event_repository.event_repository import EventRepositoryManager
-    from app.assistant.utils.time_utils import utc_to_local
 
     now_local = utc_to_local(now_utc)
     today_midnight_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)

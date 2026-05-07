@@ -3,8 +3,10 @@ KG Explorer Manager - Orchestrates relationship discovery and temporal reasoning
 """
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Union
+
+from app.assistant.utils.time_utils import to_rfc3339_z, utc_now
 
 from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
 from app.assistant.lib.core_tools.manager_interface.manager_interface import ManagerInterface
@@ -84,7 +86,7 @@ class kg_explorer_manager(BaseTool):
         
         return {
             'exploration_id': f"kg_exploration_{self.exploration_counter}",
-            'timestamp': datetime.now().isoformat(),
+            'timestamp': to_rfc3339_z(utc_now()),
             'task': arguments.get('task', ''),
             'information': arguments.get('information', ''),
             'node_id': arguments.get('node_id', ''),
@@ -131,7 +133,7 @@ class kg_explorer_manager(BaseTool):
         log_entry = {
             'event': 'kg_exploration_completed',
             'exploration_id': exploration_info['exploration_id'],
-            'timestamp': datetime.now().isoformat(),
+            'timestamp': to_rfc3339_z(utc_now()),
             'task': exploration_info['task'],
             'node_id': exploration_info['node_id'],
             'result_type': result.result_type if result else 'unknown',
@@ -158,7 +160,7 @@ class kg_explorer_manager(BaseTool):
         log_entry = {
             'event': 'kg_exploration_error',
             'exploration_id': exploration_info['exploration_id'],
-            'timestamp': datetime.now().isoformat(),
+            'timestamp': to_rfc3339_z(utc_now()),
             'task': exploration_info['task'],
             'node_id': exploration_info['node_id'],
             'error_message': error_message,

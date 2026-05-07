@@ -23,7 +23,7 @@ backlog). Set to None to backfill the entire history.
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy import or_
@@ -32,7 +32,9 @@ from app.assistant.database.db_handler import UnifiedLog2026
 from app.assistant.database.kg_pipeline_models import KGResolvedMessage
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import Message
-from app.assistant.utils.time_utils import get_local_timezone
+from app.assistant.utils.time_utils import (
+    get_local_timezone, parse_iso_utc_strict, utc_now, utc_to_local,
+)
 from app.models.db_manager import get_db_manager
 
 logger = get_logger(__name__)
@@ -77,11 +79,9 @@ class ResolveMessagesStep:
 
     @staticmethod
     def _local_date(ts: datetime) -> date:
-        tz = get_local_timezone()
-        if ts.tzinfo is None:
-            from datetime import timezone as _tz
-            ts = ts.replace(tzinfo=_tz.utc)
-        return ts.astimezone(tz).date()
+        # utc_to_local handles naive→UTC promotion before applying the
+        # configured local tz, so this works for both aware and naive UTC ts.
+        return utc_to_local(ts).date()
 
     def _eligible_filter(self, query):
         """Apply the chat-eligibility filter to a query on UnifiedLog2026."""
@@ -100,7 +100,6 @@ class ResolveMessagesStep:
     def _resolved_cutoff_utc(self) -> Optional[datetime]:
         """Return the effective UTC cutoff timestamp (the later of
         START_LOCAL_DATE-midnight and START_TIMESTAMP_UTC)."""
-        from datetime import timezone as _tz
         cutoffs: list[datetime] = []
         if self.START_LOCAL_DATE:
             tz = get_local_timezone()
@@ -109,12 +108,11 @@ class ResolveMessagesStep:
                 datetime.min.time(),
                 tzinfo=tz,
             )
-            cutoffs.append(start_local.astimezone(_tz.utc))
+            cutoffs.append(start_local.astimezone(timezone.utc))
         if self.START_TIMESTAMP_UTC:
-            ts = datetime.fromisoformat(self.START_TIMESTAMP_UTC)
-            if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=_tz.utc)
-            cutoffs.append(ts.astimezone(_tz.utc))
+            cutoffs.append(parse_iso_utc_strict(
+                self.START_TIMESTAMP_UTC, label="START_TIMESTAMP_UTC",
+            ))
         if not cutoffs:
             return None
         return max(cutoffs)
@@ -270,7 +268,7 @@ class ResolveMessagesStep:
                         resolved_text=resolved_text,
                         resolved_entities=None,
                         resolver_version=RESOLVER_VERSION,
-                        resolved_at=datetime.utcnow(),
+                        resolved_at=utc_now(),
                     )
                 )
                 written += 1

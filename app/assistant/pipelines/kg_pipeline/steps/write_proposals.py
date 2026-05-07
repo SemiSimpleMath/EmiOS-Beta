@@ -17,7 +17,9 @@ and this pipeline stay byte-identical in output.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
+
+from app.assistant.utils.time_utils import utc_now
 from typing import Any, Dict, List, Optional
 
 from app.assistant.database.claim_proposals import ClaimProposal, ClaimProposalEvidence
@@ -195,6 +197,10 @@ class WriteProposalsStep:
         anchor: Dict[str, Any], status_note: str,
     ) -> None:
         observed_at = anchor.get("observed_at")
+        # ClaimProposal.first/last_observed_at are DateTime(timezone=True) —
+        # write aware UTC, not naive. `datetime.utcnow()` would force naive,
+        # producing the same asymmetry that breaks downstream comparisons.
+        now_utc = utc_now()
         proposal_id = str(uuid.uuid4())
         session.add(ClaimProposal(
             id=proposal_id,
@@ -203,8 +209,8 @@ class WriteProposalsStep:
             confidence=0.0,
             representative_sentence=(status_note or "empty enrichment")[:500],
             observation_count=1,
-            first_observed_at=observed_at or datetime.utcnow(),
-            last_observed_at=observed_at or datetime.utcnow(),
+            first_observed_at=observed_at or now_utc,
+            last_observed_at=observed_at or now_utc,
         ))
         session.flush()  # parent before child for FK ordering
         session.add(ClaimProposalEvidence(

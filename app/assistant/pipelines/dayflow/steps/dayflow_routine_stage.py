@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 from app.assistant.utils.logging_config import get_logger
+from app.assistant.utils.time_utils import parse_iso_utc
 from app.assistant.pipelines.dayflow.step_types import BaseStep, StepContext, StepResult
 from app.assistant.pipelines.scope_policy import build_pipeline_scope_context
 
@@ -216,11 +217,9 @@ class DayFlowRoutineStep(BaseStep):
         ts = info.get("last_generated_at_utc") if isinstance(info, dict) else None
         if not ts:
             return None
-        try:
-            return datetime.fromisoformat(ts)
-        except Exception:
-            logger.debug("dayflow_routine: could not parse ISO timestamp: %r", ts, exc_info=True)
-            return None
+        # parse_iso_utc returns aware UTC for both Z-suffix and naive ISO,
+        # keeping the (ctx.now_utc - last) subtraction in one tz state.
+        return parse_iso_utc(ts)
 
     def should_run(self, ctx: StepContext) -> Tuple[bool, str]:
         boundary_date_local = self._boundary_date_local(ctx)

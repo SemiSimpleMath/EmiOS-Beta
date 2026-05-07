@@ -2,7 +2,9 @@ from flask_socketio import SocketIO, emit, join_room, leave_room
 from flask import request
 from app.assistant.kg.db.knowledge_graph_db_sqlite import Node, Edge
 from app.models.base import get_session
-from datetime import datetime
+from datetime import datetime, timezone
+
+from app.assistant.utils.time_utils import to_rfc3339_z, utc_now
 
 class GraphWebSocket:
     def __init__(self, socketio: SocketIO):
@@ -68,7 +70,7 @@ class GraphWebSocket:
                     emit('graph_data', {
                         'nodes': node_data,
                         'edges': edge_data,
-                        'timestamp': datetime.utcnow().isoformat()
+                        'timestamp': to_rfc3339_z(utc_now())
                     })
                 finally:
                     session.close()

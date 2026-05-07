@@ -53,6 +53,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.assistant.pipelines.context import PipelineContext
 from app.assistant.utils.logging_config import get_logger
+from app.assistant.utils.time_utils import parse_iso_utc
 from app.models.base import get_session
 
 logger = get_logger(__name__)
@@ -80,7 +81,10 @@ def run(ctx: PipelineContext) -> dict:
     skipped_recent_activity}."""
     from app.assistant.kg.db.knowledge_graph_db_sqlite import Node
 
-    now = datetime.utcnow()
+    # Naive UTC throughout this file — matches Node columns that read
+    # back naive. _to_naive_utc/`_parse_ts` normalize the rare aware
+    # column (created_at) so comparisons stay in one tz state.
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     candidates_examined = 0
     marked_dormant = 0
     skipped_durable = 0
@@ -276,10 +280,7 @@ def _parse_ts(value: Any) -> Optional[datetime]:
     if isinstance(value, datetime):
         return _to_naive_utc(value)
     if isinstance(value, str):
-        try:
-            return _to_naive_utc(datetime.fromisoformat(value.replace("Z", "+00:00")))
-        except Exception:
-            return None
+        return _to_naive_utc(parse_iso_utc(value))
     return None
 
 

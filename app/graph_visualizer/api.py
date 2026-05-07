@@ -2,8 +2,10 @@ import logging
 from flask import Blueprint, jsonify, request
 from app.assistant.kg.db.knowledge_graph_db_sqlite import Node, Edge, NODE_TYPES
 from app.models.base import get_session
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import distinct, func, or_
+
+from app.assistant.utils.time_utils import to_rfc3339_z, utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +113,7 @@ def get_graph_data():
         return jsonify({
             'nodes': node_data,
             'edges': edge_data,
-            'timestamp': datetime.utcnow().isoformat()
+            'timestamp': to_rfc3339_z(utc_now())
         })
     finally:
         session.close()
@@ -305,7 +307,7 @@ def update_node(node_id):
             if isinstance(raw_tags, list):
                 node.hash_tags = [str(t).strip() for t in raw_tags if str(t).strip()]
 
-        node.updated_at = datetime.utcnow()
+        node.updated_at = utc_now().replace(tzinfo=None)
         session.commit()
         
         return jsonify({
@@ -355,7 +357,7 @@ def get_hubs():
         degree_map = {r[0]: r[1] for r in rows}
 
         if not node_ids:
-            return jsonify({'nodes': [], 'edges': [], 'timestamp': datetime.utcnow().isoformat()})
+            return jsonify({'nodes': [], 'edges': [], 'timestamp': to_rfc3339_z(utc_now())})
 
         nodes = session.query(Node).filter(Node.id.in_(node_ids)).all()
         node_data = [_serialize_node(n, degree=int(degree_map.get(n.id, 0))) for n in nodes]
@@ -373,7 +375,7 @@ def get_hubs():
         return jsonify({
             'nodes': node_data,
             'edges': edge_data,
-            'timestamp': datetime.utcnow().isoformat()
+            'timestamp': to_rfc3339_z(utc_now())
         })
     finally:
         session.close()
@@ -453,7 +455,7 @@ def get_subgraph():
             'edges': edge_data,
             'focal_node_id': node_id,
             'depth': depth,
-            'timestamp': datetime.utcnow().isoformat()
+            'timestamp': to_rfc3339_z(utc_now())
         })
     finally:
         session.close()
@@ -522,7 +524,7 @@ def update_edge(edge_id):
         if 'importance' in data:
             edge.importance = data['importance']
         
-        edge.updated_at = datetime.utcnow()
+        edge.updated_at = utc_now().replace(tzinfo=None)
         session.commit()
         
         return jsonify({

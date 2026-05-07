@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Tuple
 
 from app.assistant.utils.pydantic_classes import ToolResult
 
-from app.assistant.utils.time_utils import utc_to_local, convert_utc_object_to_local
+from app.assistant.utils.time_utils import utc_to_local, convert_utc_object_to_local, parse_iso_utc
 
 from app.assistant.utils.logging_config import get_logger
 logger = get_logger(__name__)
@@ -882,10 +882,11 @@ class DataConversionModule:
             occurrence = event.get("occurrence") or event.get("event_payload", {}).get("occurrence")
 
             if occurrence:
-                try:
-                    occurrence_dt = datetime.fromisoformat(occurrence)
-                except ValueError:
-                    occurrence_dt = None
+                # parse_iso_utc returns aware UTC for both Z-suffix and naive
+                # ISO, so the < comparison at line ~891 stays in one tz state.
+                # Returns None on bad input — same downstream behavior as the
+                # ValueError catch below would have produced.
+                occurrence_dt = parse_iso_utc(occurrence)
 
                 if original_event_id not in grouped_events or \
                         (occurrence_dt and occurrence_dt < grouped_events[original_event_id]["occurrence_dt"]):

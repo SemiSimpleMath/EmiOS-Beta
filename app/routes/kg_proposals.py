@@ -10,7 +10,9 @@ POST /kg-proposals/<id>/reject       — retract a proposal
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
+
+from app.assistant.utils.time_utils import utc_now
 from typing import Any, Dict, List, Optional
 
 from flask import Blueprint, jsonify, render_template, request
@@ -296,7 +298,7 @@ def reject(proposal_id: str):
         if p is None:
             return jsonify({"ok": False, "error": "not found"}), 404
         p.status = "retracted"
-        p.retracted_at = datetime.utcnow()
+        p.retracted_at = utc_now()
         p.retraction_reason = reason or "rejected via UI"
         session.commit()
         return jsonify({"ok": True})

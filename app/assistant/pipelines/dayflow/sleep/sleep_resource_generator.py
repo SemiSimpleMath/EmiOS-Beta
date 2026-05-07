@@ -14,8 +14,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.time_utils import (
+    ensure_aware_utc as _ensure_utc,
     get_local_timezone,
     local_to_utc,
+    parse_iso_utc,
     utc_to_local,
 )
 from app.assistant.pipelines.dayflow.sleep.sleep_config import get_sleep_config, SleepConfig
@@ -23,12 +25,6 @@ from app.assistant.pipelines.dayflow.sleep.sleep_reconciliation import reconcile
 from app.assistant.afk_manager import afk_db
 
 logger = get_logger(__name__)
-
-
-def _ensure_utc(dt: datetime) -> datetime:
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
 
 
 def _combine_local(d: date, t: time) -> datetime:
@@ -89,8 +85,7 @@ def _filter_inferred_that_overlaps_user(
         return inferred
 
     def _parse(s: str) -> datetime:
-        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
-        return _ensure_utc(dt)
+        return parse_iso_utc(s)
 
     user_ranges: List[Tuple[datetime, datetime]] = []
     for u in user_sleep:
@@ -323,9 +318,9 @@ def compute_sleep_data(*, now_utc: datetime, now_local: datetime) -> Dict[str, A
             src = str(row.get("source") or "")
             if src not in ("user_chat", "manual"):
                 continue
-            st = datetime.fromisoformat(str(row.get("start")).replace("Z", "+00:00"))
+            st = parse_iso_utc(str(row.get("start")))
             en_val = row.get("end")
-            en = datetime.fromisoformat(str(en_val).replace("Z", "+00:00")) if en_val else None
+            en = parse_iso_utc(str(en_val)) if en_val else None
             clipped = _clip(st, en)
             if not clipped:
                 continue
@@ -350,9 +345,9 @@ def compute_sleep_data(*, now_utc: datetime, now_local: datetime) -> Dict[str, A
             st_val = row.get("start_time")
             if not st_val:
                 continue
-            st = datetime.fromisoformat(str(st_val).replace("Z", "+00:00"))
+            st = parse_iso_utc(str(st_val))
             en_val = row.get("end_time")
-            en = datetime.fromisoformat(str(en_val).replace("Z", "+00:00")) if en_val else None
+            en = parse_iso_utc(str(en_val)) if en_val else None
             clipped = _clip(st, en)
             if not clipped:
                 continue
@@ -431,8 +426,8 @@ def compute_sleep_data(*, now_utc: datetime, now_local: datetime) -> Dict[str, A
     if inference_end_utc > inference_start_utc:
         for seg in afk_intervals:
             try:
-                seg_start = _ensure_utc(datetime.fromisoformat(seg["start_utc"].replace("Z", "+00:00")))
-                seg_end = _ensure_utc(datetime.fromisoformat(seg["end_utc"].replace("Z", "+00:00")))
+                seg_start = parse_iso_utc(seg["start_utc"])
+                seg_end = parse_iso_utc(seg["end_utc"])
             except Exception as e:
                 logger.debug("Skipping AFK interval due to bad timestamp: %s", e, exc_info=True)
                 continue
@@ -516,8 +511,8 @@ def compute_sleep_data(*, now_utc: datetime, now_local: datetime) -> Dict[str, A
     sleep_periods_out: List[Dict[str, Any]] = []
     for p in reconciled.get("sleep_periods", []) or []:
         try:
-            st = _ensure_utc(datetime.fromisoformat(p["start"].replace("Z", "+00:00")))
-            en = _ensure_utc(datetime.fromisoformat(p["end"].replace("Z", "+00:00")))
+            st = parse_iso_utc(p["start"])
+            en = parse_iso_utc(p["end"])
             st_local = utc_to_local(st)
             en_local = utc_to_local(en)
 
@@ -549,20 +544,14 @@ def compute_sleep_data(*, now_utc: datetime, now_local: datetime) -> Dict[str, A
     night_start_utc: Optional[datetime] = None
     wake_time_local: Optional[datetime] = None
     if sleep_periods_out:
-        starts = [datetime.fromisoformat(x["start"]) for x in sleep_periods_out]
-        ends = [datetime.fromisoformat(x["end"]) for x in sleep_periods_out]
+        # parse_iso_utc returns aware UTC for both naive and offset-bearing
+        # ISO strings — sleep_periods_out stores naive UTC (line 527-528),
+        # so all values come back as aware UTC and min/max compare cleanly.
+        starts = [parse_iso_utc(x["start"]) for x in sleep_periods_out]
+        ends = [parse_iso_utc(x["end"]) for x in sleep_periods_out]
         if starts and ends:
-            earliest_utc = _ensure_utc(starts[0].replace(tzinfo=timezone.utc))
-            latest_utc = _ensure_utc(ends[0].replace(tzinfo=timezone.utc))
-            for sdt in starts[1:]:
-                dt_utc = _ensure_utc(sdt.replace(tzinfo=timezone.utc))
-                if dt_utc < earliest_utc:
-                    earliest_utc = dt_utc
-            for edt in ends[1:]:
-                dt_utc = _ensure_utc(edt.replace(tzinfo=timezone.utc))
-                if dt_utc > latest_utc:
-                    latest_utc = dt_utc
-
+            earliest_utc = min(starts)
+            latest_utc = max(ends)
             bedtime_previous_local = utc_to_local(earliest_utc)
             wake_time_local = utc_to_local(latest_utc)
             night_start_utc = earliest_utc

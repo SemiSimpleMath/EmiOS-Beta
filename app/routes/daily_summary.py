@@ -4,6 +4,7 @@ from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.multi_agent_manager_factory.MultiAgentManagerFactory import MultiAgentManagerFactory
 from app.assistant.manager_runtime.services.scope_adapter import build_system_scope_context
 from app.assistant.utils.pydantic_classes import Message
+from app.assistant.utils.time_utils import get_local_time
 from app.assistant.maintenance_manager.daily_summary_storage import DailySummaryStorage
 
 daily_summary_route_bp = Blueprint('daily_summary', __name__)
@@ -30,10 +31,7 @@ def daily_summary_page():
             return html_content
         else:
             # No summaries available at all - show informative message
-            from datetime import datetime
-            from zoneinfo import ZoneInfo
-            
-            now = datetime.now(ZoneInfo('America/Los_Angeles'))
+            now = get_local_time()
             no_data_message = {
                 'header': {
                     'date_str': now.strftime('%B %d, %Y'),

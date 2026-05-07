@@ -2,11 +2,12 @@
 Taxonomy Manager - Handles database operations for taxonomy classification.
 """
 from typing import List, Dict, Optional, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from app.assistant.kg_core.taxonomy.models import Taxonomy, NodeTaxonomyLink, TaxonomySuggestion
 from app.assistant.kg_core.kg_utils.knowledge_graph_utils import KnowledgeGraphUtils
 from app.assistant.utils.logging_config import get_logger
+from app.assistant.utils.time_utils import parse_iso_utc, utc_now
 logger = get_logger(__name__)
 
 
@@ -321,8 +322,6 @@ class TaxonomyManager:
         Returns:
             NodeTaxonomyLink object (created or updated)
         """
-        from datetime import datetime
-        
         # Check if link already exists
         existing = self.session.query(NodeTaxonomyLink).filter(
             NodeTaxonomyLink.node_id == node_id,
@@ -332,7 +331,7 @@ class TaxonomyManager:
         if existing:
             # Increment count and update last_seen
             existing.count += 1
-            existing.last_seen = datetime.utcnow()
+            existing.last_seen = utc_now()
             
             # Update confidence using weighted average (favor recent classifications)
             # Formula: new_conf = 0.7 * old_conf + 0.3 * new_conf (gives 30% weight to new data)
@@ -352,7 +351,7 @@ class TaxonomyManager:
             confidence=confidence,
             source=source,
             count=1,
-            last_seen=datetime.utcnow()
+            last_seen=utc_now()
         )
         
         self.session.add(link)
@@ -412,14 +411,12 @@ class TaxonomyManager:
         Returns:
             Dict with taxonomy info, or None if no classifications
         """
-        from datetime import datetime
-
         taxonomies = self.get_node_taxonomies(node_id, order_by="count")
         if not taxonomies:
             return None
         
         # Calculate weighted score for each taxonomy
-        now = datetime.utcnow()
+        now = utc_now()
         max_count = max(t['count'] for t in taxonomies)
         
         for tax in taxonomies:
@@ -431,7 +428,8 @@ class TaxonomyManager:
             
             # Recency score (1.0 for today, decays over 30 days)
             if tax['last_seen']:
-                last_seen = datetime.fromisoformat(tax['last_seen'])
+                # parse_iso_utc returns aware UTC matching aware `now` above.
+                last_seen = parse_iso_utc(tax['last_seen'])
                 days_ago = (now - last_seen).days
                 recency_score = max(0, 1.0 - (days_ago / 30.0))
             else:
@@ -545,7 +543,7 @@ class TaxonomyManager:
         if existing:
             # Increment count
             existing.count += 1
-            existing.updated_at = datetime.utcnow()
+            existing.updated_at = utc_now()
             logger.info(f"📊 Incremented suggestion count for '{suggested_type}': {existing.count} occurrences")
         else:
             # Create new suggestion

@@ -1,6 +1,6 @@
 import json
 from typing import Optional, List, Dict, Any
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from googleapiclient.discovery import build
 
@@ -17,7 +17,7 @@ SCOPES = ['https://www.googleapis.com/auth/calendar']
 
 ## Google needs everything to be in the local timezone at the time of creation.  Otherwise there are problems with DST
 
-from app.assistant.utils.time_utils import utc_to_local, get_local_timezone
+from app.assistant.utils.time_utils import utc_to_local, get_local_timezone, to_rfc3339_z, utc_now
 
 
 def convert_utc_to_local_event_times(event_dict, all_day=False):
@@ -240,10 +240,9 @@ def create_repeating_event(service, event_dict, calendarId='primary'):
     # Check for existing event with same dedupe_key
     try:
         # Search for events with this dedupe_key in the past 30 days and next 365 days
-        from datetime import timedelta
-        now = datetime.utcnow()
-        time_min = (now - timedelta(days=30)).isoformat() + 'Z'
-        time_max = (now + timedelta(days=365)).isoformat() + 'Z'
+        now = utc_now()
+        time_min = to_rfc3339_z(now - timedelta(days=30))
+        time_max = to_rfc3339_z(now + timedelta(days=365))
         
         existing_events = service.events().list(
             calendarId=calendarId,
@@ -385,7 +384,7 @@ def get_events(
             resolved_calendar_ids = ['primary']
 
         # Use current time as default start_str if not provided
-        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        now = utc_now().isoformat().replace("+00:00", "Z")
         start_str = start_str or now
 
         all_events = []
@@ -788,13 +787,13 @@ if __name__ == "__main__":
     # Additionally: Fetch all events for the current week
     try:
         # Calculate the start (Monday) and end (Sunday) of the current week in UTC.
-        now = datetime.now(timezone.utc).replace(tzinfo=datetime.timezone.utc)
-        start_of_week = now - datetime.timedelta(days=now.weekday())
+        now = utc_now()
+        start_of_week = now - timedelta(days=now.weekday())
         # End of week: Sunday 23:59:59
-        end_of_week = start_of_week + datetime.timedelta(days=6, hours=23, minutes=59, seconds=59)
+        end_of_week = start_of_week + timedelta(days=6, hours=23, minutes=59, seconds=59)
 
-        start_week_str = start_of_week.isoformat().replace('+00:00', 'Z')
-        end_week_str = end_of_week.isoformat().replace('+00:00', 'Z')
+        start_week_str = to_rfc3339_z(start_of_week)
+        end_week_str = to_rfc3339_z(end_of_week)
 
         logger.info("Fetching events for the current week (UTC)...")
         week_events = get_events(

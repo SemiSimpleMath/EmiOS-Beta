@@ -9,6 +9,7 @@ import json
 from datetime import datetime, time, timedelta, timezone
 
 from app.assistant.utils.logging_config import get_logger
+from app.assistant.utils.time_utils import get_local_time, to_rfc3339_z, utc_now, utc_to_local
 
 logger = get_logger(__name__)
 
@@ -114,14 +115,14 @@ def _auto_disable_at_0830_local_if_needed(control: dict) -> tuple[dict, bool]:
     try:
         if not bool(control.get("enabled", False)):
             return control, False
-        now_local = datetime.now().astimezone()
+        now_local = get_local_time()
         today = now_local.date().isoformat()
         if control.get("auto_disabled_date_local") == today:
             return control, False
         if now_local.time() >= time(8, 30):
             c = dict(control)
             c["enabled"] = False
-            c["disabled_at_utc"] = datetime.now(timezone.utc).isoformat()
+            c["disabled_at_utc"] = to_rfc3339_z(utc_now())
             c["disabled_by"] = "system"
             c["disabled_reason"] = "auto_off_08_30_local"
             c["auto_disabled_date_local"] = today
@@ -218,7 +219,7 @@ def api_set_screen_capture_control():
     reason = str(payload.get("reason") or "").strip() or None
 
     control = _load_control()
-    now_utc_iso = datetime.now(timezone.utc).isoformat()
+    now_utc_iso = to_rfc3339_z(utc_now())
 
     if desired:
         control["enabled"] = True
@@ -257,7 +258,7 @@ def api_chat_history():
         DI = current_app.DI
         blackboard = DI.global_blackboard
 
-        cutoff_utc = datetime.now(timezone.utc) - timedelta(hours=24)
+        cutoff_utc = utc_now() - timedelta(hours=24)
         messages = blackboard.get_recent_chat_since_utc(
             cutoff_utc=cutoff_utc,
             room_id="master_room",
@@ -274,7 +275,10 @@ def api_chat_history():
             history.append({
                 "role": role,
                 "content": content.strip(),
-                "timestamp": ts.isoformat() if ts else None,
+                # Local-time ISO for the UI; backend convention is convert
+                # at the boundary (frontend at app/static/js/Emi.js doesn't
+                # currently render this field, but the contract is local).
+                "timestamp": utc_to_local(ts).isoformat() if ts else None,
             })
 
         # Return only the last 30 messages to keep it lightweight

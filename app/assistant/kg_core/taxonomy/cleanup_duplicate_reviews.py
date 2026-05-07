@@ -15,7 +15,9 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 from app.models.base import get_session
 from app.assistant.kg_core.taxonomy.models import NodeTaxonomyReviewQueue
 from sqlalchemy import func
-from datetime import datetime
+from datetime import datetime, timezone
+
+from app.assistant.utils.time_utils import utc_now
 
 
 def cleanup_duplicate_reviews():
@@ -62,7 +64,7 @@ def cleanup_duplicate_reviews():
                     print(f"    ✅ Keeping review {review.id} (most recent)")
                 else:
                     review.status = 'superseded'
-                    review.reviewed_at = datetime.utcnow()
+                    review.reviewed_at = utc_now()
                     print(f"    ❌ Marking review {review.id} as superseded")
                     total_updated += 1
         

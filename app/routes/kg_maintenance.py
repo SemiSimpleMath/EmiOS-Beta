@@ -15,9 +15,11 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from flask import Blueprint, jsonify, render_template, request
+
+from app.assistant.utils.time_utils import to_rfc3339_z, utc_now
 
 from app.assistant.kg_maintenance.store import (
     execute_finding,
@@ -244,7 +246,9 @@ def api_fill_dates(finding_id):
         sets = ", ".join(f"{k} = :{k}" for k in fields)
         params = dict(fields)
         params["nid"] = node_id
-        params["now"] = datetime.utcnow().isoformat()
+        # Naive UTC ISO — kg_node_metadata.updated_at is declared `DateTime`
+        # (no timezone=True), so writes go in without offset.
+        params["now"] = utc_now().replace(tzinfo=None).isoformat()
         session.execute(
             sql_text(f"UPDATE kg_node_metadata SET {sets}, updated_at = :now WHERE id = :nid"),
             params,
@@ -272,7 +276,7 @@ def api_fill_dates(finding_id):
                     "reason": "manual fill via /kg-maintenance/date-gaps",
                     "fid": finding_id,
                     "agent": "ui:fill_dates",
-                    "now": datetime.utcnow().isoformat(),
+                    "now": utc_now().replace(tzinfo=None).isoformat(),
                 },
             )
         except Exception:
@@ -342,7 +346,7 @@ def api_resolve_with_prose(finding_id):
             "lead_id": finding.get("superseded_by"),
         }), 400
 
-    now = datetime.utcnow()
+    now = utc_now().replace(tzinfo=None)
 
     # 1) Persist prose onto the cluster block — happens first so even if the
     #    manager invocation fails, the user's input is preserved on the row.
@@ -549,7 +553,7 @@ def api_finding_operator_notes(finding_id):
     notes = str(data.get("notes") or "").strip()
     try:
         _persist_report_field(finding_id, "operator_notes", notes)
-        _persist_report_field(finding_id, "operator_notes_updated_at", datetime.utcnow().isoformat() + "Z")
+        _persist_report_field(finding_id, "operator_notes_updated_at", to_rfc3339_z(utc_now()))
         return jsonify({"ok": True, "notes": notes})
     except ValueError as e:
         return jsonify({"error": str(e)}), 404

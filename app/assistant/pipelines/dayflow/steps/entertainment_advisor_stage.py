@@ -20,6 +20,7 @@ from app.assistant.pipelines.dayflow.step_types import BaseStep, StepContext, St
 from app.assistant.pipelines.scope_policy import build_pipeline_scope_context
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_resources_dir as _get_resources_dir
+from app.assistant.utils.time_utils import utc_to_local
 
 logger = get_logger(__name__)
 
@@ -189,7 +190,10 @@ class EntertainmentAdvisorStep(BaseStep):
             if not title:
                 continue
 
-            date_seed = now_utc.strftime("%Y-%m-%d")
+            # Seed by LOCAL date — a suggestion at 11pm PT and the same
+            # suggestion at 9am PT next morning are different days for the
+            # user, but both fall in the next UTC date.
+            date_seed = utc_to_local(now_utc).strftime("%Y-%m-%d")
             item_id = f"ent:{hashlib.sha256(f'{title}|{date_seed}'.encode()).hexdigest()[:16]}"
 
             metadata: Dict[str, Any] = {
