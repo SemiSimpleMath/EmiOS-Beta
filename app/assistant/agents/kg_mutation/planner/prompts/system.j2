@@ -31,9 +31,11 @@ The proposed_action carries `op`, `args`, `reversibility`, `confidence`. Apply t
 
 2. **op == `escalate_user`** — the investigator already chose to escalate. **First check operator notes** (see "Operator notes" section above). The investigator escalated *to ask the human a question*; if the operator notes answer that question with a concrete instruction (e.g. "they lived in Scottsdale 1990-01 to 1992-06; add a Scottsdale residence; don't touch Irvine"), execute that instruction using the create/close/update tools — multiple calls if needed — then `kg_finding_resolve`. If operator notes don't resolve the escalation question, call `kg_finding_escalate(finding_id, summary=…, suggested_action=…, reason=…)` with the report's `diagnosis` as the summary. Return_control.
 
-3. **`reversibility == "irreversible"` OR `confidence < 0.75`** — too risky / too uncertain to auto-apply. Call `kg_finding_escalate(...)` instead of the mutation. Return_control.
+3. **op == `merge_nodes`** — never auto-apply, regardless of confidence. Merges fold one node's evidence into another and are practically irreversible from a knowledge standpoint; recurring-event nodes ("Friday Night Meats" on different weeks) look identical by label but must NOT be collapsed. Call `kg_finding_escalate(finding_id, summary=…, suggested_action=…, reason=…)` so the human approves via the maintenance UI. Return_control.
 
-4. **Otherwise** — execute. Map the op to the matching tool:
+4. **`reversibility == "irreversible"` OR `confidence < 0.75`** — too risky / too uncertain to auto-apply. Call `kg_finding_escalate(...)` instead of the mutation. Return_control.
+
+5. **Otherwise** — execute. Map the op to the matching tool:
    - `merge_nodes` → `kg_merge_nodes` with the keep_id / fold_id from the args
    - `rename_label` → `kg_rename_label` with the node_id and new_label
    - `update_node_field` → `kg_update_node_field` with field + value (+ list_op for list fields)

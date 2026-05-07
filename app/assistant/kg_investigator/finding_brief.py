@@ -333,6 +333,226 @@ def _fetch_evidence_messages(session, node_id: str, *, limit: int = 8) -> List[D
     return [dict(m)]
 
 
+def _fetch_node_chat_windows(session, node_id: str, *, limit: int = 4) -> List[Dict[str, Any]]:
+    """For each node, pull the top-N chat windows that produced it (via
+    kg_node_evidence) and the source messages inside those windows.
+    This is the rawest grounded context the investigator can have:
+    not summaries, not derived sentences — the actual conversation
+    that minted this node.
+
+    Critical for catching recurring-event traps. If two "Friday Night
+    Meats" nodes look identical by label but their windows are five
+    weeks apart with different attendees and different food, they're
+    distinct occurrences of a recurring event, not duplicates.
+
+    Returns a list of {window_id, observed_at, window_summary, transcript}
+    dicts, newest first. Empty list when the node has no evidence rows
+    or the chat tables aren't available (test envs).
+    """
+    if not node_id:
+        return []
+    out: List[Dict[str, Any]] = []
+
+    # Step 1: distinct window_ids for this node, newest first.
+    try:
+        rows = session.execute(
+            sql_text(
+                """
+                SELECT DISTINCT ev.window_id, MIN(ev.message_timestamp) AS first_seen,
+                       MAX(ev.message_timestamp) AS last_seen
+                FROM kg_node_evidence ev
+                WHERE ev.node_id = :nid AND ev.window_id IS NOT NULL
+                GROUP BY ev.window_id
+                ORDER BY last_seen DESC
+                LIMIT :lim
+                """
+            ),
+            {"nid": node_id, "lim": limit},
+        ).fetchall()
+    except Exception as e:
+        logger.debug(
+            "[finding_brief] node_evidence query failed (likely missing tables): %s", e,
+        )
+        return []
+
+    for r in rows:
+        m = r._mapping if hasattr(r, "_mapping") else dict(zip(
+            ["window_id", "first_seen", "last_seen"], r,
+        ))
+        wid = m.get("window_id")
+        if not wid:
+            continue
+
+        # Step 2: window summary, if the new pipeline made one.
+        summary = None
+        try:
+            srow = session.execute(
+                sql_text("SELECT summary FROM kg_window WHERE id = :wid"),
+                {"wid": wid},
+            ).fetchone()
+            if srow:
+                summary = srow[0]
+        except Exception:
+            pass
+
+        # Step 3: original messages — try the new pipeline's window_message
+        # table, fall back to legacy kg_chat_conversation_window_item.
+        transcript: List[str] = []
+        try:
+            mrows = session.execute(
+                sql_text(
+                    """
+                    SELECT u.timestamp, u.role, COALESCE(u.speaker_name, u.role) AS speaker,
+                           u.message
+                    FROM kg_window_message wm
+                    JOIN unified_log_2026 u ON u.id = wm.unified_log_id
+                    WHERE wm.window_id = :wid
+                    ORDER BY wm.item_order ASC
+                    LIMIT 25
+                    """
+                ),
+                {"wid": wid},
+            ).fetchall()
+            for ts, role, speaker, message in mrows:
+                msg = (str(message or "")).replace("\n", " ")[:240]
+                transcript.append(f"[{ts}] {speaker or role}: {msg}")
+        except Exception:
+            # Try legacy table.
+            try:
+                lrows = session.execute(
+                    sql_text(
+                        """
+                        SELECT unified_timestamp, role, speaker_name, text
+                        FROM kg_chat_conversation_window_item
+                        WHERE window_id = :wid
+                        ORDER BY item_order ASC
+                        LIMIT 25
+                        """
+                    ),
+                    {"wid": wid},
+                ).fetchall()
+                for ts, role, speaker, text in lrows:
+                    msg = (str(text or "")).replace("\n", " ")[:240]
+                    transcript.append(f"[{ts}] {speaker or role}: {msg}")
+            except Exception as e:
+                logger.debug("[finding_brief] window transcript fetch failed: %s", e)
+
+        out.append({
+            "window_id": str(wid),
+            "first_seen": m.get("first_seen"),
+            "last_seen": m.get("last_seen"),
+            "summary": summary,
+            "transcript": transcript,
+        })
+
+    return out
+
+
+def _format_chat_windows_block(windows: List[Dict[str, Any]], node_label: str) -> str:
+    """Pretty-print the chat-window prefetch for the investigator's brief."""
+    if not windows:
+        return f"(no chat-window evidence found for {node_label!r})"
+    parts = [f"Chat windows that produced {node_label!r} (newest first, {len(windows)} of them):"]
+    for w in windows:
+        parts.append(f"\n--- window {w['window_id'][:8]} ({w.get('first_seen')} → {w.get('last_seen')}) ---")
+        if w.get("summary"):
+            parts.append(f"Summary: {w['summary'][:300]}")
+        if w.get("transcript"):
+            parts.append("Transcript:")
+            for line in w["transcript"][:15]:
+                parts.append(f"  {line}")
+        else:
+            parts.append("(no transcript available)")
+    return "\n".join(parts)
+
+
+def _brief_duplicate_node(
+    session,
+    finding: KGMaintenanceFinding,
+) -> Tuple[str, str]:
+    """Specialized brief for duplicate_node findings.
+
+    Pre-fetches the chat windows that produced each candidate node
+    (kg_node_evidence → kg_window / kg_window_message → unified_log_2026)
+    so the investigator decides on rich grounded context, not just
+    label / neighborhood overlap. Critical for catching recurring-event
+    traps: two 'Friday Night Meats' nodes from chats five weeks apart
+    are distinct occurrences of a weekly event series, NOT duplicates,
+    no matter how similar their labels look.
+
+    Even when the labels are identical and the neighborhoods overlap
+    heavily, the LLM should still read both transcripts and certify
+    that this is a single real-world thing, not a repeating event /
+    state. We prefer false negatives (skipped merges that were valid)
+    over false positives (collapsing recurring events into one node).
+    """
+    primary = _fetch_node(session, finding.primary_node_id)
+    secondary = _fetch_node(session, finding.secondary_node_id) if finding.secondary_node_id else None
+    primary_neigh = _fetch_neighborhood(session, finding.primary_node_id)
+    secondary_neigh = (
+        _fetch_neighborhood(session, finding.secondary_node_id)
+        if finding.secondary_node_id else {"out": [], "in": []}
+    )
+    primary_windows = _fetch_node_chat_windows(session, finding.primary_node_id)
+    secondary_windows = (
+        _fetch_node_chat_windows(session, finding.secondary_node_id)
+        if finding.secondary_node_id else []
+    )
+
+    primary_label = (primary or {}).get("label") or "primary"
+    secondary_label = (secondary or {}).get("label") or "secondary"
+
+    parts: List[str] = [
+        "## Finding",
+        f"- finding_id: `{finding.id}`",
+        f"- finding_type: duplicate_node",
+        f"- priority: {finding.priority}",
+        f"- agent confidence: {finding.confidence}",
+        f"- agent reason: {finding.reason}",
+        "",
+        "## Primary node",
+        _format_node_block("primary", primary),
+        "Neighborhood:",
+        _format_neighborhood_block(primary_neigh),
+        "",
+        "## Secondary node",
+        _format_node_block("secondary", secondary),
+        "Neighborhood:",
+        _format_neighborhood_block(secondary_neigh),
+        "",
+        "## Chat-window evidence — PRIMARY",
+        _format_chat_windows_block(primary_windows, primary_label),
+        "",
+        "## Chat-window evidence — SECONDARY",
+        _format_chat_windows_block(secondary_windows, secondary_label),
+    ]
+
+    task = (
+        "Decide whether these two nodes refer to the SAME real-world thing or DISTINCT occurrences "
+        "of a recurring/repeated thing.\n\n"
+        "READ BOTH CHAT-WINDOW TRANSCRIPTS before deciding. The most expensive mistake here is "
+        "merging recurring events (Friday-night dinners over multiple weeks, weekly meetings, "
+        "monthly grocery trips, repeated visits to the same coffee shop) into a single node — "
+        "that destroys distinct evidence. The label being identical is NOT evidence of sameness; "
+        "two windows five weeks apart with different attendees and different specifics are "
+        "distinct occurrences, not duplicates.\n\n"
+        "Decision rules:\n"
+        " - SAME real-world thing: propose op='merge_nodes' with the surviving canonical id and "
+        "   args naming the loser. State explicitly in your diagnosis: 'I read both windows and "
+        "   they describe the same occurrence (cite specifics).'\n"
+        " - DISTINCT occurrences of a recurring pattern: propose op='no_action' and recommend "
+        "   the user explicitly mark them part of a series rather than merging.\n"
+        " - AMBIGUOUS / not enough evidence: propose op='escalate_user' with a sharp question "
+        "   the user can answer in one line. Better to ask than guess.\n\n"
+        "Run `kg_query` against `kg_node_evidence` and `unified_log_2026` if you need MORE "
+        "context than the pre-fetched windows. Run `pod_search` if you remember a related "
+        "conversation that might be in another room. Use the full read-only investigation toolkit. "
+        "When in doubt, escalate. We strongly prefer skipping a valid merge over collapsing "
+        "recurring events into one."
+    )
+    return task, "\n".join(parts)
+
+
 def _brief_state_missing_dates(
     session,
     finding: KGMaintenanceFinding,
@@ -498,16 +718,13 @@ def build_finding_brief(finding_id: str) -> Optional[Tuple[str, str]]:
         if ftype == "state_missing_dates":
             return _brief_state_missing_dates(session, finding)
         if ftype == "duplicate_node":
-            return _brief_node_pair(
-                session, finding,
-                finding_label="duplicate_node",
-                task_phrase=(
-                    "Investigate whether these two nodes refer to the same real-world thing. "
-                    "Look for: alias overlap, neighborhood overlap (shared participants), "
-                    "compatible or contradictory dates, label spelling variants. "
-                    "Recommend merge_nodes (with canonical winner) or no_action via proposed_action."
-                ),
-            )
+            # Specialized brief: pre-fetches chat-window transcripts for both
+            # candidates so the investigator catches recurring-event traps
+            # ("Friday Night Meats" five weeks apart is NOT a duplicate). The
+            # cost is a few more SQL reads; the upside is no deterministic
+            # merges of repeating things — the user prefers false negatives
+            # (skipped valid merges) over false positives (collapsed recurrences).
+            return _brief_duplicate_node(session, finding)
         if ftype == "duplicate_edge":
             return _brief_node_pair(
                 session, finding,
