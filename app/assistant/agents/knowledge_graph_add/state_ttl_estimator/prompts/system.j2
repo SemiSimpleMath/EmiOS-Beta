@@ -4,21 +4,34 @@ You receive one proposed state/event node (its label, type, participants, date, 
 
 The estimate drives a decay job. A nightly maintenance pass auto-closes the state's "era" once the estimated duration has elapsed without further observations. Getting this roughly right means agents never reference stale facts ("Katy is still sick" three months later). Getting it wrong in either direction is fixable — too short means re-observation will reopen the state; too long means the state lingers until manual retraction.
 
-## State vs Event — read node_type FIRST
+## State vs Event — read node_type FIRST and MOST
 
-The KG schema distinguishes:
+The KG schema distinguishes these two as fundamentally different shapes:
 
-- **State** = an ONGOING condition that holds true continuously. Residence, enrollment, employment, membership, possession, dating-someone, recovering-from-injury, having-a-job, taking-a-class. **A State, by definition, persists.**
-- **Event** = a BOUNDED occurrence with a beginning and end (often the same day). A trip, a single class session, a performance, a doctor's appointment, a wedding, a one-time meeting.
+- **State** = an ONGOING condition that holds true continuously. Residence, enrollment, employment, membership, possession, dating-someone, having-a-job, taking-a-class, recovering-from-injury, AND moods/feelings while they last. **States persist.** Floor: ~1 day (a one-day mood like "Jukka was sad today"). Ceiling: durable (lifelong).
+- **Event** = a BOUNDED occurrence. A trip, a single class session, a performance, a doctor's appointment, a wedding, a one-time meeting. **Events are bounded.** Floor: hours. Ceiling: a few weeks (the Olympics is roughly the upper bound — anything claiming "Event" but lasting longer than ~3 weeks is probably mistyped and is really a State).
+
+The user's mental model, which you should adopt:
+- States are longer than Events. Always.
+- The shortest State is a 1-day feeling. The longest Event is on the order of a fortnight.
+- If the candidate seems like it should last months or years, it's a State regardless of its label.
+- If the candidate has a clear start AND end on the same day or in the same week, it's an Event.
 
 Default expectations by node_type:
 
-- **node_type = State** → default to **short_term or longer** (≥ 2 days). The only Ephemeral States are transient feelings explicitly named as such ("tired tonight", "annoyed at the router", "excited about dinner"). A State whose label names membership / attendance / enrollment / participation / possession / residence / employment is **never ephemeral** even if the label is brief. "Class Participation", "Member of Club", "Lives in X", "Owns Y" all mean ongoing-by-default — re-read those as "person IS doing/having X" not "person did X once."
-- **node_type = Event** → ephemeral and short_term are common. A "Cabin trip", "Doctor visit", "Choir recital" is naturally bounded. Pick the duration of the event itself, not the recurring pattern around it.
+- **node_type = State**:
+  - Ephemeral (≤ 1 day) is reserved for **transient feelings** explicitly named as such. "Jukka was sad today", "tired tonight", "annoyed at the router". The label must read as a momentary feeling for ephemeral to apply.
+  - Membership / attendance / enrollment / participation / possession / residence / employment / hobby / dating / recovery → **at least short_term**, typically **medium_term to durable**. A State whose label says "Class Participation", "Member of Club", "Lives in X", "Owns Y" is **never ephemeral** even if the label is terse. Re-read it as "person IS doing/having X" not "person did X once."
+  - Default if uncertain: **medium_term**.
 
-If you find yourself writing "this is a one-off event" in your reasoning, **check node_type**. If it's State, you've misread the label.
+- **node_type = Event**:
+  - Ephemeral (≤ 1 day) and short_term (2-30 days) are typical. A "Cabin trip", "Doctor visit", "Choir recital", "Beetlejuice performance" is naturally bounded.
+  - **medium_term and longer are very rare** for Events. If you're tempted to assign medium_term to an Event, ask: is this actually a State that got mistyped? Recurring weekly meetings are States ("attends a weekly meeting"), not single Events.
+  - Default if uncertain: **short_term**.
 
-When ambiguous, **prefer the longer duration**: the cost of a wrongly-closed ongoing State (entity card lies, wiki contradiction findings spawn) outweighs the cost of a State that lingers an extra month.
+If you find yourself writing "this is a one-off event" in your reasoning, **check node_type**. If it says State, you've misread the label — re-read it as ongoing.
+
+When ambiguous, **prefer the longer duration**: the cost of a wrongly-closed ongoing State (entity card lies, wiki contradiction findings spawn) outweighs the cost of a State that lingers an extra month. Lingering states get harmlessly retracted by re-observation; closed states are only fixed by manual intervention.
 
 ## How to choose a duration class
 
