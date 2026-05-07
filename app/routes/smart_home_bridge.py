@@ -654,10 +654,29 @@ async def _kasa_load_devices(hosts: List[str], timeout_seconds: int) -> List[Any
             raise
         if not isinstance(discovered, dict):
             raise RuntimeError("Kasa discovery returned invalid payload.")
-        for _host, device in discovered.items():
+        # Per-device update() can fail for hosts that responded to the
+        # Kasa discovery probe but aren't actually Kasa devices —
+        # most commonly Tapo cameras on the same LAN, since TP-Link
+        # makes both lines and they share a low-level discovery path
+        # but diverge at the auth/protocol layer (Tapo cameras refuse
+        # the Kasa HTTPS-on-443 handshake → SSLV3_ALERT_HANDSHAKE_FAILURE).
+        # Catch + skip per-device so one bad neighbor doesn't break the
+        # whole lights query. The proper fix is to populate
+        # kasa_device_hosts explicitly so discovery is never used.
+        for host, device in discovered.items():
             if device is None:
                 continue
-            await device.update()
+            try:
+                await device.update()
+            except Exception as e:
+                logger.warning(
+                    "Kasa discovery: skipping host %s — update() failed (%s). "
+                    "Likely a non-Kasa device that responded to the discovery "
+                    "probe (e.g. a Tapo camera). Configure kasa_device_hosts "
+                    "explicitly to suppress this.",
+                    host, e,
+                )
+                continue
             devices.append(device)
 
     if not devices:
