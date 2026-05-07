@@ -137,7 +137,11 @@
     async function loadSnapshots() {
         hideError();
         try {
-            const resp = await fetch('/api/ring/snapshots', { cache: 'no-store' });
+            // Per-camera page sets window.__CAMERA_FILTER to the alias;
+            // top-level "all cameras" page leaves it empty.
+            const filter = (typeof window !== 'undefined' && window.__CAMERA_FILTER) ? String(window.__CAMERA_FILTER) : '';
+            const url = filter ? '/api/ring/snapshots?camera=' + encodeURIComponent(filter) : '/api/ring/snapshots';
+            const resp = await fetch(url, { cache: 'no-store' });
             const data = await resp.json();
             if (!data.success) {
                 showError(data.error || 'Failed to load snapshots.');
