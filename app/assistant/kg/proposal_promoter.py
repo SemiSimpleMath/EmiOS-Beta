@@ -757,18 +757,14 @@ def _create_kg_node_from_proposal(
     if ttl is not None and proposal_node.node_type in RELATIONSHIP_LIKE_TYPES:
         attrs["ttl"] = ttl
 
-    # Goal lifecycle: every freshly-promoted Goal starts as `active`. The
-    # nightly goal_dormancy_sweep flips long-silent Goals to `dormant`
-    # (reversible — re-observation revives them); explicit
-    # achieved/abandoned outcomes come from the goal_outcome_detector.
-    # Goals never get a `ttl` (RELATIONSHIP_LIKE_TYPES excludes them) and
-    # state_decay never touches them — they're a different shape than
-    # State/Event facts about the world.
+    # Goal lifecycle: stamp last_pursued_at on the attributes blob —
+    # the dormancy sweep + recency UI rendering read it. The
+    # `goal_status` first-class column on Node is the canonical
+    # status field (vocabulary: active | dormant | completed |
+    # abandoned). Default to 'active' on creation when meta_data_add
+    # didn't already assign a value (it usually does for explicit
+    # Goal-completion proposals from chat).
     if proposal_node.node_type == "Goal":
-        attrs.setdefault("goal_status", "active")
-        # last_pursued_at is the recency signal the dormancy sweep reads
-        # and the lens / cards use to demote stale goals visually. On
-        # creation it's the same as first_observed.
         if proposal_node.valid_from:
             ts = proposal_node.valid_from
             attrs["last_pursued_at"] = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
@@ -777,9 +773,20 @@ def _create_kg_node_from_proposal(
     if proposal_node.node_type in {"State", "Event", "Goal"} and canonical_sentence:
         sentence_for_node = canonical_sentence
 
+    # goal_status is a first-class column on Node — copy it through
+    # from the proposal's attributes (meta_data_add stamps it for Goal
+    # nodes). Default to 'active' on creation when not provided.
+    proposed_goal_status = (
+        attrs.pop("goal_status", None)
+        if isinstance(attrs, dict) else None
+    )
+    if proposal_node.node_type == "Goal" and not proposed_goal_status:
+        proposed_goal_status = "active"
+
     new = Node(
         label=proposal_node.label,
         node_type=proposal_node.node_type,
+        goal_status=proposed_goal_status,
         # Present-tense canonical for State/Event/Goal (via fact_canonicalizer);
         # raw extractor sentence for Entity/Concept/Property. Verbatim source
         # is preserved in evidence + window_id, not on the node.
@@ -907,15 +914,16 @@ def _refresh_on_reobservation(node: Node, proposal: ClaimProposal) -> None:
 
     # Goal lifecycle: any re-observation revives a dormant Goal back to
     # active and bumps the recency signal the dormancy sweep reads.
-    # Achievement/abandonment closures (status in {"achieved", "abandoned"})
-    # are terminal — re-observation should NOT silently re-open them.
-    # If the user mentioned a closed Goal again, that's worth surfacing
-    # as a finding rather than auto-reopening.
+    # Terminal closures (column goal_status in {"completed", "abandoned"})
+    # must NOT be silently reopened — surface as a finding instead.
+    # `goal_status` is the first-class column on Node; `last_pursued_at`
+    # lives on attributes since it's bookkeeping not status.
+    revive_to_active = False
     if (node.node_type or "") == "Goal":
         attrs["last_pursued_at"] = iso
-        cur_status = attrs.get("goal_status")
-        if cur_status not in ("achieved", "abandoned"):
-            attrs["goal_status"] = "active"
+        cur_status = (node.goal_status or "").lower()
+        if cur_status not in ("completed", "abandoned"):
+            revive_to_active = True
 
     from sqlalchemy import update as sql_update
     from sqlalchemy.orm import object_session
@@ -927,11 +935,16 @@ def _refresh_on_reobservation(node: Node, proposal: ClaimProposal) -> None:
         # This branch shouldn't fire in production — _refresh_on_reobservation
         # is only called from _evaluate_and_apply with a live session.
         node.attributes = attrs
+        if revive_to_active:
+            node.goal_status = "active"
         return
+    update_values = {"attributes": attrs, "updated_at": Node.updated_at}
+    if revive_to_active:
+        update_values["goal_status"] = "active"
     session.execute(
         sql_update(Node)
         .where(Node.id == node.id)
-        .values(attributes=attrs, updated_at=Node.updated_at)
+        .values(**update_values)
     )
     # Force ORM to reload attributes on next access so downstream callers
     # see the post-update value rather than the cached pre-update one.

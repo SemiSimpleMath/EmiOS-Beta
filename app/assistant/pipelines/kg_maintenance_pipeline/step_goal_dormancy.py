@@ -98,6 +98,7 @@ def run(ctx: PipelineContext) -> dict:
             session.query(
                 Node.id, Node.label, Node.node_type, Node.category,
                 Node.created_at, Node.attributes, Node.locked_by_user_at,
+                Node.goal_status,
             )
             .filter(Node.node_type == "Goal")
             .filter(Node.end_date.is_(None))
@@ -105,7 +106,7 @@ def run(ctx: PipelineContext) -> dict:
         )
 
         for row in candidates:
-            nid, label, ntype, category, created_at, attributes, locked_at = row
+            nid, label, ntype, category, created_at, attributes, locked_at, col_goal_status = row
             candidates_examined += 1
 
             attrs = attributes if isinstance(attributes, dict) else {}
@@ -119,11 +120,13 @@ def run(ctx: PipelineContext) -> dict:
             if locked_at is not None:
                 continue
 
-            cur_status = (attrs.get("goal_status") or "active").lower()
+            # goal_status lives on the first-class column. Empty/null
+            # string treated as 'active' (the canonical default).
+            cur_status = (col_goal_status or "active").lower()
             if cur_status == "dormant":
                 skipped_already_dormant += 1
                 continue
-            if cur_status in ("achieved", "abandoned"):
+            if cur_status in ("completed", "abandoned"):
                 # Terminal — shouldn't fire (end_date should also be set)
                 # but guard anyway.
                 skipped_terminal += 1
@@ -158,13 +161,14 @@ def run(ctx: PipelineContext) -> dict:
                 "attrs": attrs,
             })
 
-        # Apply transitions in one short write phase.
+        # Apply transitions in one short write phase. goal_status goes
+        # on the first-class column; dormant_since / dormant_reason are
+        # bookkeeping that lives on attributes.
         for entry in to_dormant:
             node = session.query(Node).filter(Node.id == entry["node_id"]).first()
             if node is None:
                 continue
             attrs = dict(entry["attrs"])
-            attrs["goal_status"] = "dormant"
             attrs["dormant_since"] = now.isoformat()
             attrs["dormant_reason"] = (
                 f"silent for {entry['silence_days']}d (threshold "
@@ -172,6 +176,7 @@ def run(ctx: PipelineContext) -> dict:
             )
             node.attributes = attrs
             flag_modified(node, "attributes")
+            node.goal_status = "dormant"
 
         session.commit()
         marked_dormant = len(to_dormant)
@@ -197,7 +202,7 @@ def run(ctx: PipelineContext) -> dict:
                         "op": "goal_set_dormant",
                         "args": json.dumps({"node_id": entry["node_id"]}),
                         "before": json.dumps({
-                            "goal_status": entry["attrs"].get("goal_status") or "active",
+                            "goal_status": "active",  # column was 'active' or null
                         }),
                         "after": json.dumps({
                             "goal_status": "dormant",

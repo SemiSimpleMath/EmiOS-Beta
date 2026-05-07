@@ -269,6 +269,11 @@ def demo_graph():
             if node is None:
                 continue
             x, y = positions[nid]
+            # goal_status is a first-class column on Node for Goal nodes
+            # (active / dormant / completed / abandoned). Surface it on
+            # the lens payload so the frontend can dim or hide non-active
+            # Goals.
+            goal_status = (node.goal_status if (node.node_type or "") == "Goal" else None)
             nodes_out.append({
                 "id": nid,
                 "label": node.label or "",
@@ -286,6 +291,7 @@ def demo_graph():
                 "aliases": list(node.aliases or []),
                 "start_date": None,
                 "end_date": None,
+                "goal_status": goal_status,
             })
 
         # Edges between visible nodes only (so the demo isn't cluttered).
@@ -393,6 +399,9 @@ def node_detail(node_id: str):
         in_count = session.query(Edge).filter(Edge.target_id == node_id).count()
         out_count = session.query(Edge).filter(Edge.source_id == node_id).count()
 
+        attrs = node.attributes if isinstance(node.attributes, dict) else {}
+        is_goal = (node.node_type or "") == "Goal"
+        # goal_status: first-class column. last_pursued_at: bookkeeping on attrs.
         return jsonify({
             "id": str(node.id),
             "label": node.label or "",
@@ -408,6 +417,9 @@ def node_detail(node_id: str):
             "edges_in": in_count,
             "edges_out": out_count,
             "wiki_url": _wiki_url_for(node),
+            # Goal lifecycle fields. None for non-Goal node types.
+            "goal_status": (node.goal_status if is_goal else None),
+            "last_pursued_at": (attrs.get("last_pursued_at") if is_goal else None),
         })
 
 

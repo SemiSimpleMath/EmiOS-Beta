@@ -11,12 +11,15 @@ class GoalOutcomeVerdict(BaseModel):
         description="Exact id of the Goal node being judged. Must match a candidate id.",
     )
 
-    outcome: Literal["achieved", "abandoned", "no_signal"] = Field(
+    outcome: Literal["completed", "abandoned", "no_signal"] = Field(
         description=(
-            "achieved: the user said the goal was completed / accomplished / "
-            "done. abandoned: the user said they're giving up / no longer "
-            "pursuing / not interested anymore. no_signal: nothing in the "
-            "chat evidence points clearly either way; leave the Goal alone."
+            "completed: the user said the goal was finished / accomplished / "
+            "done / achieved. abandoned: the user said they're giving up / "
+            "no longer pursuing / not interested anymore. no_signal: nothing "
+            "in the chat evidence points clearly either way; leave the Goal "
+            "alone. The vocabulary 'completed' aligns with the existing "
+            "goal_status column values; 'achieved' would be a synonym but "
+            "non-canonical."
         ),
     )
 

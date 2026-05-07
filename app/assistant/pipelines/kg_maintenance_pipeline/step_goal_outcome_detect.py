@@ -1,13 +1,17 @@
 """
 Step: goal_outcome_detect
 
-Watches recent chat for explicit "I achieved X" / "I gave up on X"
+Watches recent chat for explicit "I finished X" / "I gave up on X"
 statements about active Goal nodes, and closes those Goals as terminal
-(achieved or abandoned). Distinct from goal_dormancy_sweep:
+(completed or abandoned). Distinct from goal_dormancy_sweep:
 
   goal_dormancy_sweep — active → dormant (reversible, no end_date)
-  goal_outcome_detect — active|dormant → achieved|abandoned (terminal,
+  goal_outcome_detect — active|dormant → completed|abandoned (terminal,
                         end_date set, recorded in user's life narrative)
+
+Vocabulary note: 'completed' is the canonical column value (matches the
+existing meta_data_add agent's vocabulary {active, completed, abandoned}).
+Earlier draft used 'achieved' as a synonym; standardized on 'completed'.
 
 Conservative by design: when the chat evidence is ambiguous, the agent
 returns `no_signal` and the Goal stays in its current state. The
@@ -49,7 +53,7 @@ MIN_CONFIDENCE = 0.7
 
 
 def run(ctx: PipelineContext, *, limit: Optional[int] = None) -> dict:
-    """Returns counts: {goals_examined, achieved, abandoned, no_signal,
+    """Returns counts: {goals_examined, completed, abandoned, no_signal,
     skipped_low_confidence, skipped_no_evidence}."""
     from app.assistant.kg.db.knowledge_graph_db_sqlite import Node
 
@@ -70,11 +74,25 @@ def run(ctx: PipelineContext, *, limit: Optional[int] = None) -> dict:
         session.close()
 
     # Filter to active or dormant (skip terminals defensively).
+    # Need to refetch with goal_status column for filtering. Open a
+    # short read to grab the column too.
+    session = get_session()
+    try:
+        with_status = (
+            session.query(Node.id, Node.goal_status)
+            .filter(Node.node_type == "Goal")
+            .filter(Node.end_date.is_(None))
+            .all()
+        )
+        status_by_id = {str(nid): (gs or "active").lower() for nid, gs in with_status}
+    finally:
+        session.close()
+
     active_goals: List[Dict[str, Any]] = []
     for nid, label, sent, created_at, attrs in candidates:
         a = attrs if isinstance(attrs, dict) else {}
-        status = (a.get("goal_status") or "active").lower()
-        if status in ("achieved", "abandoned"):
+        status = status_by_id.get(str(nid), "active")
+        if status in ("completed", "abandoned"):
             continue
         active_goals.append({
             "id": str(nid),
@@ -115,7 +133,7 @@ def run(ctx: PipelineContext, *, limit: Optional[int] = None) -> dict:
         )
         return {
             "goals_examined": len(batch),
-            "achieved": 0, "abandoned": 0, "no_signal": 0,
+            "completed": 0, "abandoned": 0, "no_signal": 0,
             "skipped_low_confidence": 0,
             "skipped_no_evidence": skipped_no_evidence,
         }
@@ -133,7 +151,7 @@ def run(ctx: PipelineContext, *, limit: Optional[int] = None) -> dict:
         logger.error("[goal_outcome_detect] agent call failed: %s", e, exc_info=True)
         return {
             "goals_examined": len(has_evidence),
-            "achieved": 0, "abandoned": 0, "no_signal": 0,
+            "completed": 0, "abandoned": 0, "no_signal": 0,
             "skipped_low_confidence": 0,
             "skipped_no_evidence": skipped_no_evidence,
         }
@@ -142,7 +160,7 @@ def run(ctx: PipelineContext, *, limit: Optional[int] = None) -> dict:
         logger.warning("[goal_outcome_detect] non-dict from agent: %s", type(data).__name__)
         return {
             "goals_examined": len(has_evidence),
-            "achieved": 0, "abandoned": 0, "no_signal": 0,
+            "completed": 0, "abandoned": 0, "no_signal": 0,
             "skipped_low_confidence": 0,
             "skipped_no_evidence": skipped_no_evidence,
         }
@@ -150,7 +168,7 @@ def run(ctx: PipelineContext, *, limit: Optional[int] = None) -> dict:
     verdicts = list(data.get("verdicts") or [])
     by_id = {g["id"]: g for g in has_evidence}
 
-    achieved_count = 0
+    completed_count = 0
     abandoned_count = 0
     no_signal_count = 0
     skipped_low_conf = 0
@@ -173,7 +191,7 @@ def run(ctx: PipelineContext, *, limit: Optional[int] = None) -> dict:
         if conf < MIN_CONFIDENCE:
             skipped_low_conf += 1
             continue
-        if outcome not in ("achieved", "abandoned"):
+        if outcome not in ("completed", "abandoned"):
             continue
         to_apply.append({
             "goal_node_id": gid,
@@ -183,8 +201,8 @@ def run(ctx: PipelineContext, *, limit: Optional[int] = None) -> dict:
             "reasoning": (v.get("reasoning") or "")[:600],
             "label": by_id[gid]["label"],
         })
-        if outcome == "achieved":
-            achieved_count += 1
+        if outcome == "completed":
+            completed_count += 1
         else:
             abandoned_count += 1
 
@@ -193,14 +211,14 @@ def run(ctx: PipelineContext, *, limit: Optional[int] = None) -> dict:
         _apply_outcomes(to_apply)
 
     logger.info(
-        "[goal_outcome_detect] examined=%d achieved=%d abandoned=%d "
+        "[goal_outcome_detect] examined=%d completed=%d abandoned=%d "
         "no_signal=%d low_conf=%d no_evidence=%d",
-        len(has_evidence), achieved_count, abandoned_count, no_signal_count,
+        len(has_evidence), completed_count, abandoned_count, no_signal_count,
         skipped_low_conf, skipped_no_evidence,
     )
     return {
         "goals_examined": len(has_evidence),
-        "achieved": achieved_count,
+        "completed": completed_count,
         "abandoned": abandoned_count,
         "no_signal": no_signal_count,
         "skipped_low_confidence": skipped_low_conf,
@@ -210,7 +228,7 @@ def run(ctx: PipelineContext, *, limit: Optional[int] = None) -> dict:
 
 def _empty_result() -> dict:
     return {
-        "goals_examined": 0, "achieved": 0, "abandoned": 0,
+        "goals_examined": 0, "completed": 0, "abandoned": 0,
         "no_signal": 0, "skipped_low_confidence": 0, "skipped_no_evidence": 0,
     }
 
@@ -290,8 +308,10 @@ def _serialize_for_agent(goals: List[Dict[str, Any]]) -> str:
 
 
 def _apply_outcomes(applies: List[Dict[str, Any]]) -> None:
-    """Set goal_status + end_date on the target Goal nodes; write
-    kg_revision_log audit row per closure."""
+    """Set goal_status (column) + end_date on the target Goal nodes;
+    write kg_revision_log audit row per closure. Outcome bookkeeping
+    (completed_at / completed_evidence / abandoned_at / abandoned_evidence)
+    lives on attributes since it's per-event detail, not status."""
     from app.assistant.kg.db.knowledge_graph_db_sqlite import Node
 
     now = datetime.now(timezone.utc)
@@ -303,14 +323,14 @@ def _apply_outcomes(applies: List[Dict[str, Any]]) -> None:
                 continue
             attrs = dict(n.attributes or {}) if isinstance(n.attributes, dict) else {}
             before = {
-                "goal_status": attrs.get("goal_status") or "active",
+                "goal_status": n.goal_status or "active",
                 "end_date": str(n.end_date) if n.end_date else None,
             }
-            attrs["goal_status"] = entry["outcome"]
             attrs[f"{entry['outcome']}_at"] = now.isoformat()
             attrs[f"{entry['outcome']}_evidence"] = entry["evidence_quote"]
             n.attributes = attrs
             flag_modified(n, "attributes")
+            n.goal_status = entry["outcome"]
             n.end_date = now
             n.end_date_confidence = f"{entry['outcome']}_detected"
             n.end_date_prose = entry["reasoning"][:200]
