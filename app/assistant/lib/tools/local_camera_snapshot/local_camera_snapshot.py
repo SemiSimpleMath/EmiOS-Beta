@@ -5,20 +5,33 @@ with custom firmware, Reolink, etc.). Compared to Ring's snapshot endpoint
 (640×360 thumbnail, no subscription = no recordings) this gives full sensor
 resolution (typically 1080p) on demand with no cloud dependency.
 
-Configuration lives in ``configs/smart_home_tools.json`` under a new
-``local_cameras`` section:
+Configuration lives in ``configs/smart_home_tools.json`` under a
+``local_cameras`` section. **Keep the password out of the repo** — it
+goes in an env var, same pattern as ring/nest/lights:
 
     "local_cameras": {
         "enabled": true,
         "devices": [
             {
                 "alias": "Bedroom",
-                "rtsp_url": "rtsp://user:pass@192.168.1.50:554/stream1",
+                "host": "192.168.1.50",
+                "port": 554,
+                "path": "stream1",
+                "username": "emi",
+                "password_env_var": "EMI_TAPO_BEDROOM_PW",
                 "kind": "bedroom",
                 "notes": "Tapo C200 over the bed"
             }
         ]
     }
+
+Then set the env var in your shell:
+    Windows:   setx EMI_TAPO_BEDROOM_PW "<the rtsp password>"
+    Linux/Mac: export EMI_TAPO_BEDROOM_PW="<the rtsp password>"
+
+Legacy single-URL `rtsp_url` field is still accepted for tools where a
+URL without secrets is fine (or you're testing locally and willing to
+keep the password out of git via .gitignore on a per-machine config).
 
 The bridge for this tool is in-process (no HTTP round-trip) — ffmpeg pulls
 one frame from the RTSP URL directly. Frames land in
@@ -82,8 +95,55 @@ def _resolve_camera(alias: str) -> dict:
     raise ValueError(
         f"No local camera configured with alias {alias!r}. "
         "Add one in configs/smart_home_tools.json under local_cameras.devices "
-        "with fields: alias, rtsp_url, kind (optional), notes (optional)."
+        "with fields: alias, host, port, path, username, password_env_var, "
+        "kind (optional), notes (optional)."
     )
+
+
+def _build_rtsp_url(device: dict) -> str:
+    """Construct the RTSP URL from device fields. Two supported shapes:
+
+    1. **Legacy single-URL** (``rtsp_url`` present): used as-is. Don't put
+       this in a tracked config file if the URL embeds a password.
+    2. **Component fields** (preferred — keeps secrets out of the repo):
+         host:             "192.168.1.50"
+         port:             554        (optional, default 554)
+         path:             "stream1"  (optional, default "stream1")
+         username:         "emi"      (set in the camera's RTSP/Camera Account)
+         password_env_var: "EMI_TAPO_BEDROOM_PW"   (env var name, NOT the password)
+       The password is read from ``os.environ[password_env_var]`` at capture
+       time. Same pattern as ring/nest/lights ``token_env_var``.
+    """
+    import os
+    legacy = str(device.get("rtsp_url") or "").strip()
+    if legacy:
+        return legacy
+    host = str(device.get("host") or "").strip()
+    if not host:
+        raise ValueError(
+            "Device is missing both 'rtsp_url' and 'host'. "
+            "Provide one of: a full rtsp_url, or component fields (host, port, "
+            "path, username, password_env_var)."
+        )
+    port = int(device.get("port") or 554)
+    path = str(device.get("path") or "stream1").strip().lstrip("/")
+    username = str(device.get("username") or "").strip()
+    pw_env = str(device.get("password_env_var") or "").strip()
+    password = ""
+    if pw_env:
+        password = os.environ.get(pw_env, "")
+        if not password:
+            raise ValueError(
+                f"password_env_var={pw_env!r} is set in config but the env var "
+                "is empty. Set it in your shell / Windows env vars before running."
+            )
+    if username and password:
+        creds = f"{username}:{password}@"
+    elif username:
+        creds = f"{username}@"
+    else:
+        creds = ""
+    return f"rtsp://{creds}{host}:{port}/{path}"
 
 
 def _safe_filename_part(text: str) -> str:
@@ -175,9 +235,7 @@ class LocalCameraSnapshotTool(BaseTool):
                 raise ValueError("camera_alias is required.")
 
             device = _resolve_camera(alias)
-            rtsp_url = str(device.get("rtsp_url") or "").strip()
-            if not rtsp_url:
-                raise ValueError(f"Device {alias!r} is missing rtsp_url in config.")
+            rtsp_url = _build_rtsp_url(device)
             kind = str(device.get("kind") or "").strip()
 
             ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
