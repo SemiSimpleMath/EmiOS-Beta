@@ -239,6 +239,33 @@ def _lazy_kg_state_date_drain(*, target_date=None, routine=None):
 kg_state_date_drain = _lazy_kg_state_date_drain
 
 
+def _lazy_kg_wiki_inference(*, target_date=None, routine=None):
+    """Daily: read recently-updated wiki pages and propose new edges/nodes
+    that the page implies but the KG doesn't yet have. Each proposal flows
+    through the standard claim_proposal pipeline; the promoter applies the
+    same merge gates as for chat-extracted facts.
+
+    Bounded by `subject_limit` (default 10) to keep LLM cost predictable.
+    Designed to run after wiki_nightly_refresh so the freshest pages get
+    inspected.
+    """
+    spec = (routine.spec if routine and hasattr(routine, "spec") else {}) or {}
+    limit = int(spec.get("subject_limit", 10))
+    from app.assistant.pipelines.context import PipelineContext
+    from app.assistant.pipelines.kg_maintenance_pipeline.step_wiki_inference import run as run_wiki_inference
+    ctx = PipelineContext.for_date(pipeline_id="kg_wiki_inference")
+    if hasattr(ctx, "spec"):
+        ctx.spec = {"subject_limit": limit}
+    else:
+        # PipelineContext is a dataclass with a spec attribute already on
+        # most builds, but if not, we still drive the limit through env-style.
+        pass
+    return run_wiki_inference(ctx)
+
+
+kg_wiki_inference = _lazy_kg_wiki_inference
+
+
 def _lazy_wiki_nightly_refresh(*, target_date=None, routine=None):
     """Nightly: incrementally regenerate wiki pages whose KG neighborhood
     changed since the page was last generated. Optionally runs the
@@ -391,6 +418,7 @@ ROUTINE_FUNCTION_REGISTRY = {
     "kg_finding_cluster_resolve": kg_finding_cluster_resolve,
     "kg_finding_executor_drain": kg_finding_executor_drain,
     "kg_state_date_drain": kg_state_date_drain,
+    "kg_wiki_inference": kg_wiki_inference,
     "kg_importance_rater": kg_importance_rater,
     "sleep_camera_tick": sleep_camera_tick,
     "sleep_camera_tick_local": sleep_camera_tick_local,

@@ -1,0 +1,20 @@
+name: wiki_connection_investigator
+class_name: Agent
+llm_params:
+  engine: gpt-5.4-mini
+  model_tier: "mini"
+  timeout: 180
+  llm_provider: "openai"
+allowed_tools: []
+except_tools: []
+
+user_context_items:
+  - subject_label
+  - subject_neighborhood
+  - wiki_page_text
+  - known_entities
+
+system_context_items:
+  - resource_kg_node_reading
+
+type: agent
