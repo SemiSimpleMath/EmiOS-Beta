@@ -79,7 +79,9 @@ const FADE_BAND = 60;              // fade-in/out distance at each edge
 const BATCH_TRIGGER = 280;
 const BATCH_SIZE = 14;             // entities per batch (ring)
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));   // angular step
-// Wheel UP = zoom in = entities move OUTWARD = currentScroll grows.
+// Wheel DOWN = zoom out = entities slide outward = currentScroll grows.
+// Default state (scroll=0) shows highest-importance batch (batch 0); zooming
+// OUT advances batches into progressively less-important rings.
 const SCROLL_PER_PIXEL = 0.25;
 
 // ---------- Intersection mode (2+ seeds) ----------
@@ -554,8 +556,11 @@ export function GraphCanvas({
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      // Wheel UP (deltaY < 0) → entities slide outward → currentScroll grows.
-      const ds = -e.deltaY * SCROLL_PER_PIXEL;
+      // Wheel DOWN (deltaY > 0) → entities slide outward → currentScroll grows
+      // → batches advance from high-importance (default) to lower-importance.
+      // Spatial metaphor: default zoom = focused on most-important; zoom OUT
+      // (wheel down) widens the visible band into less-important content.
+      const ds = e.deltaY * SCROLL_PER_PIXEL;
       setCurrentScroll((s) => Math.max(0, s + ds));
     };
 
