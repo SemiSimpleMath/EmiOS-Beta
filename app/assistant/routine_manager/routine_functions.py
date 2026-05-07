@@ -182,6 +182,27 @@ def _lazy_kg_state_decay(*, target_date=None, routine=None):
 kg_state_decay = _lazy_kg_state_decay
 
 
+def _lazy_kg_finding_cluster_resolve(*, target_date=None, routine=None):
+    """Daily: read pending kg_maintenance_findings, group by primary_node_id,
+    and call kg_finding_cluster_resolver to verify whether each candidate
+    cluster shares ONE root question.
+
+    Confirmed clusters get a lead (with synthesized root_question stored on
+    its evidence_json.cluster) plus siblings stamped superseded_by=lead_id.
+    The maintenance UI hides supersededs by default — distilling N redundant
+    findings into 1 surfaced question. No auto-resolution; the lead still
+    goes through the normal review/execute path, but resolving it cascades
+    the verdict to its siblings.
+    """
+    from app.assistant.pipelines.context import PipelineContext
+    from app.assistant.pipelines.kg_maintenance_pipeline.step_cluster_resolve import run as run_cluster_resolve
+    ctx = PipelineContext.for_date(pipeline_id="kg_finding_cluster_resolve")
+    return run_cluster_resolve(ctx)
+
+
+kg_finding_cluster_resolve = _lazy_kg_finding_cluster_resolve
+
+
 def _lazy_wiki_nightly_refresh(*, target_date=None, routine=None):
     """Nightly: incrementally regenerate wiki pages whose KG neighborhood
     changed since the page was last generated. Optionally runs the
@@ -331,6 +352,7 @@ ROUTINE_FUNCTION_REGISTRY = {
     "kg_finding_backlog_drain": kg_finding_backlog_drain,
     "kg_date_gap_drain": kg_date_gap_drain,
     "kg_state_decay": kg_state_decay,
+    "kg_finding_cluster_resolve": kg_finding_cluster_resolve,
     "kg_importance_rater": kg_importance_rater,
     "sleep_camera_tick": sleep_camera_tick,
     "sleep_camera_tick_local": sleep_camera_tick_local,

@@ -92,6 +92,17 @@ class KGMaintenanceFinding(Base):
     # ── Pipeline provenance ───────────────────────────────────────────────────
     pipeline_run_id = Column(String, nullable=True, index=True)
 
+    # ── Cluster membership ───────────────────────────────────────────────────
+    # When a finding is part of a cluster (multiple findings that turn out to
+    # share one root question), the kg_finding_cluster_resolver agent picks
+    # one as the lead and stamps every other member's superseded_by with the
+    # lead's id. The maintenance UI hides superseded findings by default;
+    # the lead surfaces them via "+N similar" on expand. Cascade-resolution:
+    # when the lead's status changes, sweep flips siblings to match. Lead
+    # findings carry the synthesized root_question + sibling_ids in
+    # evidence_json.cluster.
+    superseded_by = Column(String, nullable=True, index=True)
+
     # ── Audit ─────────────────────────────────────────────────────────────────
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(

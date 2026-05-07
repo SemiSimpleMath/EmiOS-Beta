@@ -300,6 +300,153 @@ def api_fill_dates(finding_id):
     return jsonify({"ok": True, "node_id": node_id, "applied": fields})
 
 
+@kg_maintenance_bp.route("/api/finding/<finding_id>/resolve_with_prose", methods=["POST"])
+def api_resolve_with_prose(finding_id):
+    """Resolve a CLUSTER LEAD by writing one line of user prose.
+
+    Body: {"prose": "Annika stopped art lessons in March 2026 due to ..."}
+
+    The prose is the user's answer to the cluster's synthesized
+    root_question. This endpoint:
+
+      1. Persists the prose onto the lead's evidence_json.cluster
+         (user_prose_resolution + resolved_at).
+      2. Writes the prose as a user message into unified_log_2026 with
+         source='kg_maintenance_resolution' so fact_extractor and the
+         standard ingest path pick it up — the prose flows back into the
+         KG via the same pipeline that processes chat. This is what makes
+         "type one line, fix N findings" actually update the graph.
+      3. Marks the lead status='executed' with cascade=True, which
+         auto-flips every sibling (superseded_by=lead_id) to executed
+         too. One prose line resolves the whole cluster.
+
+    Returns {ok, lead_id, siblings_cascaded, ingest_message_id, lead}.
+    """
+    from sqlalchemy.orm.attributes import flag_modified
+    from app.assistant.database.db_handler import UnifiedLog2026
+    from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
+    from app.models.base import get_session as _get_session
+
+    data = request.get_json(force=True) or {}
+    prose = (data.get("prose") or "").strip()
+    if not prose:
+        return jsonify({"error": "prose is required and must be non-empty"}), 400
+
+    finding = get_finding(finding_id)
+    if finding is None:
+        return jsonify({"error": "Finding not found"}), 404
+    if finding.get("superseded_by"):
+        return jsonify({
+            "error": "This finding is a sibling, not a lead. Resolve via the lead.",
+            "lead_id": finding.get("superseded_by"),
+        }), 400
+
+    cluster_block = (finding.get("evidence_json") or {}).get("cluster") if isinstance(finding.get("evidence_json"), dict) else None
+
+    now = datetime.utcnow()
+
+    # 1) Stamp prose onto the lead's cluster block (or create one if this is
+    #    a single-finding "cluster" — also valid; lets the user prose-resolve
+    #    any finding even before the cluster pass has run).
+    session = _get_session()
+    try:
+        lead = session.query(KGMaintenanceFinding).filter_by(id=finding_id).first()
+        if lead is None:
+            return jsonify({"error": "Finding not found"}), 404
+        ev = lead.evidence_json or {}
+        if not isinstance(ev, dict):
+            ev = {"_legacy_evidence": ev}
+        cluster = ev.get("cluster")
+        if not isinstance(cluster, dict):
+            cluster = {"is_lead": True, "sibling_ids": []}
+        cluster["user_prose_resolution"] = prose
+        cluster["resolved_at"] = now.isoformat()
+        ev["cluster"] = cluster
+        lead.evidence_json = ev
+        flag_modified(lead, "evidence_json")
+        session.commit()
+    finally:
+        session.close()
+
+    # 2) Append to unified_log_2026 as a user message so the standard ingest
+    #    pipeline (fact_extractor, claim_proposals, proposal_promoter) processes
+    #    it. Source 'kg_maintenance_resolution' is a new sentinel — fact_extractor
+    #    treats it like any other user message; the source label lets us trace
+    #    the provenance back to which finding got resolved.
+    ingest_message_id = str(uuid.uuid4())
+    session = _get_session()
+    try:
+        session.add(UnifiedLog2026(
+            id=ingest_message_id,
+            timestamp=now,
+            role="user",
+            message=prose,
+            source="kg_maintenance_resolution",
+            processed=False,
+            speaker_id="user",
+            speaker_role="user",
+            metadata_json={
+                "kg_maintenance_finding_id": finding_id,
+                "cluster_root_question": (cluster_block or {}).get("root_question") if cluster_block else None,
+            },
+        ))
+        session.commit()
+    except Exception as e:
+        logger.error("[resolve_with_prose] unified_log write failed: %s", e, exc_info=True)
+        session.rollback()
+        return jsonify({"error": f"failed to write resolution to unified_log: {e}"}), 500
+    finally:
+        session.close()
+
+    # 3) Mark lead executed + cascade to siblings.
+    cascaded = set_status(
+        finding_id,
+        "executed",
+        executed_by="ui:resolve_with_prose",
+        execution_notes=f"Prose resolution (cascaded). Source unified_log id={ingest_message_id}.",
+        cascade_to_siblings=True,
+    )
+
+    return jsonify({
+        "ok": True,
+        "lead_id": finding_id,
+        "siblings_cascaded": cascaded,
+        "ingest_message_id": ingest_message_id,
+        "lead": get_finding(finding_id),
+    })
+
+
+@kg_maintenance_bp.route("/api/finding/<finding_id>/cluster_siblings", methods=["GET"])
+def api_cluster_siblings(finding_id):
+    """Return the lead + every finding superseded_by this lead, enriched
+    with node labels. Used by the maintenance UI to expand a cluster's
+    "+N similar" badge into the underlying findings.
+    """
+    from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
+    from app.models.base import get_session as _get_session
+    from app.assistant.kg_maintenance.store import _enrich_node_labels, _to_dict
+
+    lead = get_finding(finding_id)
+    if lead is None:
+        return jsonify({"error": "Finding not found"}), 404
+
+    session = _get_session()
+    try:
+        sibs = (
+            session.query(KGMaintenanceFinding)
+            .filter(KGMaintenanceFinding.superseded_by == finding_id)
+            .order_by(KGMaintenanceFinding.created_at.desc())
+            .all()
+        )
+        sib_dicts = [_to_dict(s) for s in sibs]
+        all_findings = [lead] + sib_dicts
+        _enrich_node_labels(all_findings, session)
+    finally:
+        session.close()
+
+    return jsonify({"lead": all_findings[0], "siblings": all_findings[1:]})
+
+
 @kg_maintenance_bp.route("/api/finding/<finding_id>/investigate", methods=["POST"])
 def api_investigate_finding(finding_id):
     """

@@ -117,8 +117,16 @@ def set_status(
     *,
     executed_by: Optional[str] = None,
     execution_notes: Optional[str] = None,
-) -> None:
-    """Update a finding's status, optionally recording execution metadata."""
+    cascade_to_siblings: bool = True,
+) -> int:
+    """Update a finding's status, optionally recording execution metadata.
+
+    If the finding is a cluster lead (other findings have superseded_by ==
+    this id) and ``cascade_to_siblings`` is True, every still-pending
+    sibling gets the same status — resolving the lead resolves the whole
+    cluster. Returns the number of siblings updated (0 if none / cascade
+    disabled / not a lead).
+    """
     session = get_session()
     try:
         finding = session.query(KGMaintenanceFinding).filter_by(id=finding_id).first()
@@ -130,7 +138,28 @@ def set_status(
             finding.executed_at = datetime.now(timezone.utc)
         if execution_notes:
             finding.execution_notes = execution_notes
+
+        cascaded = 0
+        if cascade_to_siblings:
+            sibs = (
+                session.query(KGMaintenanceFinding)
+                .filter(KGMaintenanceFinding.superseded_by == finding_id)
+                .filter(KGMaintenanceFinding.status == "pending")
+                .all()
+            )
+            now = datetime.now(timezone.utc)
+            for s in sibs:
+                s.status = status
+                s.executed_by = (executed_by or "cluster_cascade")
+                s.executed_at = now
+                s.execution_notes = (
+                    f"Cascaded from cluster lead {finding_id} (status={status}). "
+                    + (execution_notes or "")
+                )[:500]
+                cascaded += 1
+
         session.commit()
+        return cascaded
     except Exception:
         session.rollback()
         logger.debug("[KGMaintenanceStore] set_status failed id=%s", finding_id, exc_info=True)
@@ -201,6 +230,7 @@ def get_findings(
     finding_type: Optional[str] = None,
     priority: Optional[str] = None,
     exclude_types: Optional[list[str]] = None,
+    include_superseded: bool = False,
     limit: int = 200,
     offset: int = 0,
 ) -> list[dict]:
@@ -211,6 +241,12 @@ def get_findings(
     ``exclude_types`` removes findings of the listed finding_types from the
     result. Used by the main dashboard to hide background queues (date-gap
     questions, etc.) that have their own dedicated page.
+
+    ``include_superseded=False`` (default) hides cluster siblings — findings
+    whose ``superseded_by`` was stamped by the cluster_resolver agent. The
+    surviving leads carry ``cluster_size`` = sibling_count + 1 so the UI
+    can show "+N similar" badges. Set True to see every finding regardless
+    of cluster membership (e.g. on a per-cluster expand view).
     """
     session = get_session()
     try:
@@ -223,16 +259,50 @@ def get_findings(
             q = q.filter(KGMaintenanceFinding.priority == priority)
         if exclude_types:
             q = q.filter(~KGMaintenanceFinding.finding_type.in_(exclude_types))
+        if not include_superseded:
+            q = q.filter(KGMaintenanceFinding.superseded_by.is_(None))
         q = q.order_by(_priority_order_expr(), KGMaintenanceFinding.created_at.desc())
         rows = q.limit(limit).offset(offset).all()
         findings = [_to_dict(r) for r in rows]
         _enrich_node_labels(findings, session)
+        if not include_superseded:
+            _stamp_cluster_size(findings, session)
         return findings
     except Exception:
         logger.debug("[KGMaintenanceStore] get_findings failed", exc_info=True)
         raise
     finally:
         session.close()
+
+
+def _stamp_cluster_size(findings: list[dict], session) -> None:
+    """For each finding that's a cluster lead, count its pending siblings
+    and write ``cluster_size`` (= 1 + sibling count) onto the dict so the
+    UI can render "+N similar" badges in one render pass.
+    """
+    from sqlalchemy import func as sqlfunc
+
+    lead_ids = [f["id"] for f in findings if f.get("id")]
+    if not lead_ids:
+        return
+    rows = (
+        session.query(
+            KGMaintenanceFinding.superseded_by,
+            sqlfunc.count(KGMaintenanceFinding.id).label("cnt"),
+        )
+        .filter(KGMaintenanceFinding.superseded_by.in_(lead_ids))
+        .filter(KGMaintenanceFinding.status == "pending")
+        .group_by(KGMaintenanceFinding.superseded_by)
+        .all()
+    )
+    sibling_count = {row[0]: int(row[1]) for row in rows}
+    for f in findings:
+        n = sibling_count.get(f.get("id"), 0)
+        f["cluster_size"] = n + 1
+        if n > 0 and isinstance(f.get("evidence_json"), dict):
+            cluster = f["evidence_json"].get("cluster") or {}
+            if isinstance(cluster, dict):
+                f["cluster_root_question"] = cluster.get("root_question") or ""
 
 
 def get_finding(finding_id: str) -> Optional[dict]:
@@ -261,12 +331,16 @@ def get_summary_counts(exclude_types: Optional[Sequence[str]] = None) -> dict[st
     excluded = set(exclude_types or ())
     session = get_session()
     try:
+        # Count only LEADS — findings that have been clustered (superseded_by
+        # set) shouldn't inflate the headline number; the user resolves them
+        # via the lead.
         rows = (
             session.query(
                 KGMaintenanceFinding.finding_type,
                 KGMaintenanceFinding.status,
                 sqlfunc.count(KGMaintenanceFinding.id).label("cnt"),
             )
+            .filter(KGMaintenanceFinding.superseded_by.is_(None))
             .group_by(KGMaintenanceFinding.finding_type, KGMaintenanceFinding.status)
             .all()
         )
@@ -363,6 +437,7 @@ def _to_dict(finding: KGMaintenanceFinding) -> dict:
         "executed_at": finding.executed_at.isoformat() if finding.executed_at else None,
         "execution_notes": finding.execution_notes,
         "pipeline_run_id": finding.pipeline_run_id,
+        "superseded_by": finding.superseded_by,
         "created_at": finding.created_at.isoformat() if finding.created_at else None,
         "updated_at": finding.updated_at.isoformat() if finding.updated_at else None,
     }
