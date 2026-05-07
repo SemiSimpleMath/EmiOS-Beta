@@ -372,14 +372,31 @@ def lights_settings_page():
 
 @preferences_bp.route('/settings/integrations/ring/snapshots', methods=['GET'])
 def ring_snapshots_page():
-    """Browse JPEGs the Ring bridge has captured under data/ring_snapshots/."""
-    return render_template('ring_snapshots.html')
+    """Browse all camera JPEGs (Ring + local cameras), newest first."""
+    return render_template('ring_snapshots.html', camera_filter=None)
+
+
+@preferences_bp.route('/cameras/<alias>', methods=['GET'])
+def camera_page(alias):
+    """Per-camera snapshot view — same template, filtered by camera alias."""
+    return render_template('ring_snapshots.html', camera_filter=alias)
+
+
+def _camera_snapshot_dirs() -> list:
+    """Return the dirs the snapshot UI scans. Ring frames land in
+    data/ring_snapshots/; local_camera_snapshot frames land in
+    data/local_camera_snapshots/. The UI lists both."""
+    repo_root = Path(__file__).resolve().parents[2]
+    return [
+        repo_root / "data" / "ring_snapshots",
+        repo_root / "data" / "local_camera_snapshots",
+    ]
 
 
 def _ring_snapshots_dir():
-    """Return the absolute Path to data/ring_snapshots/, mirroring smart_home_bridge."""
-    repo_root = Path(__file__).resolve().parents[2]
-    return repo_root / "data" / "ring_snapshots"
+    """Legacy alias kept for callers that historically only wanted the Ring
+    bridge dir. New callers should use _camera_snapshot_dirs() to scan both."""
+    return _camera_snapshot_dirs()[0]
 
 
 def _read_ring_sidecar(jpg_path):
@@ -438,9 +455,11 @@ def _read_ring_sidecar(jpg_path):
 
 @preferences_bp.route('/api/ring/snapshots', methods=['GET'])
 def list_ring_snapshots():
-    """List all captured snapshots, newest first.
+    """List captured snapshots from BOTH Ring and local-camera storage,
+    newest first. Optional ``?camera=<alias>`` query param filters by
+    camera alias (case-insensitive).
 
-    Filename convention from smart_home_bridge._ring_get_snapshot:
+    Filename convention is the same in both folders:
         ``{YYYYMMDDTHHMMSSZ}_{safe_camera_id}.jpg``
 
     For each JPEG the matching ``.txt`` sidecar (when present) is parsed
@@ -448,33 +467,37 @@ def list_ring_snapshots():
     the UI can flag worth-reviewing frames at a glance.
     """
     try:
-        snap_dir = _ring_snapshots_dir()
-        if not snap_dir.exists():
-            return jsonify({"success": True, "snapshots": []})
+        camera_filter = (request.args.get("camera") or "").strip().lower()
         entries = []
-        for p in snap_dir.iterdir():
-            if not p.is_file() or p.suffix.lower() != ".jpg":
+        for snap_dir in _camera_snapshot_dirs():
+            if not snap_dir.exists():
                 continue
-            stem = p.stem
-            if "_" not in stem:
-                continue
-            ts_part, _, cam_part = stem.partition("_")
-            if len(ts_part) != 16 or not ts_part.endswith("Z"):
-                continue
-            try:
-                size = p.stat().st_size
-                mtime = p.stat().st_mtime
-            except OSError:
-                continue
-            entry = {
-                "filename": p.name,
-                "camera_id": cam_part,
-                "captured_at_utc": ts_part,
-                "size_bytes": size,
-                "mtime": mtime,
-                "sidecar": _read_ring_sidecar(p),
-            }
-            entries.append(entry)
+            for p in snap_dir.iterdir():
+                if not p.is_file() or p.suffix.lower() != ".jpg":
+                    continue
+                stem = p.stem
+                if "_" not in stem:
+                    continue
+                ts_part, _, cam_part = stem.partition("_")
+                if len(ts_part) != 16 or not ts_part.endswith("Z"):
+                    continue
+                if camera_filter and cam_part.lower() != camera_filter:
+                    continue
+                try:
+                    size = p.stat().st_size
+                    mtime = p.stat().st_mtime
+                except OSError:
+                    continue
+                entry = {
+                    "filename": p.name,
+                    "camera_id": cam_part,
+                    "captured_at_utc": ts_part,
+                    "size_bytes": size,
+                    "mtime": mtime,
+                    "source_dir": snap_dir.name,
+                    "sidecar": _read_ring_sidecar(p),
+                }
+                entries.append(entry)
         entries.sort(key=lambda e: e["mtime"], reverse=True)
         return jsonify({"success": True, "snapshots": entries})
     except Exception as e:
@@ -484,10 +507,13 @@ def list_ring_snapshots():
 
 @preferences_bp.route('/api/ring/snapshots/image/<path:filename>', methods=['GET'])
 def serve_ring_snapshot(filename):
-    """Serve one snapshot JPEG. send_from_directory enforces path-traversal safety."""
-    from flask import send_from_directory
-    snap_dir = _ring_snapshots_dir()
-    return send_from_directory(str(snap_dir), filename, mimetype="image/jpeg")
+    """Serve one snapshot JPEG. Searches both Ring and local-camera dirs;
+    send_from_directory enforces path-traversal safety per dir."""
+    from flask import send_from_directory, abort
+    for snap_dir in _camera_snapshot_dirs():
+        if (snap_dir / filename).exists():
+            return send_from_directory(str(snap_dir), filename, mimetype="image/jpeg")
+    abort(404)
 
 
 # --- Smart-home device aliases (read/write the `devices` array per integration) ---

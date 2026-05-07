@@ -591,7 +591,7 @@
     },
     {
       "id": "sleep_camera_tick_local",
-      "enabled": false,
+      "enabled": true,
       "name": "Sleep camera capture — LOCAL RTSP (every 3 min)",
       "aliases": [
         "tapo sleep camera",
@@ -601,7 +601,7 @@
       "runner": "function",
       "spec": {
         "function_name": "sleep_camera_tick_local",
-        "camera_alias": "Bedroom"
+        "camera_alias": "Emi1"
       },
       "run_policy": {
         "type": "interval",

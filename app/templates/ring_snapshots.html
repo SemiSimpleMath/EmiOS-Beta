@@ -3,17 +3,28 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ring Snapshots</title>
+    <title>{% if camera_filter %}{{ camera_filter }} Snapshots{% else %}Camera Snapshots{% endif %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/setup_wizard.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/ring_snapshots.css') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script>
+      // Server-rendered Jinja var → JS. Used by ring_snapshots.js to filter
+      // the API call. Empty string = all cameras; alias = one camera only.
+      window.__CAMERA_FILTER = {{ (camera_filter or '')|tojson }};
+    </script>
 </head>
 <body>
     <div class="setup-container">
         <div class="setup-header">
-            <h1><i class="fas fa-images"></i> Ring Snapshots</h1>
-            <p>Captured frames from your Ring cameras (newest first)</p>
-            <a href="/settings/integrations/ring" class="back-link"><i class="fas fa-arrow-left"></i> Back to Ring Cameras</a>
+            {% if camera_filter %}
+              <h1><i class="fas fa-camera"></i> {{ camera_filter }}</h1>
+              <p>Snapshots from camera <strong>{{ camera_filter }}</strong> (newest first)</p>
+              <a href="/settings/integrations/ring/snapshots" class="back-link"><i class="fas fa-arrow-left"></i> All cameras</a>
+            {% else %}
+              <h1><i class="fas fa-images"></i> Camera Snapshots</h1>
+              <p>Captured frames across all cameras (Ring + local), newest first</p>
+              <a href="/settings/integrations/ring" class="back-link"><i class="fas fa-arrow-left"></i> Back to Ring Cameras</a>
+            {% endif %}
         </div>
 
         <div class="ring-snapshots-toolbar">
