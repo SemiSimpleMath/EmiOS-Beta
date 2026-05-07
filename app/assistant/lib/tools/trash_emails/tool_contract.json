@@ -58,7 +58,7 @@
     ],
     "requires_network": true,
     "cost_level": "low",
-    "latency_class": "medium",
+    "latency_class": "moderate",
     "front_door": true,
     "room_visibility_default": "show",
     "approval_required": true,

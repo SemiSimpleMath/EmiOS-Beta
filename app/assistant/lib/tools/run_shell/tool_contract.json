@@ -47,6 +47,7 @@
     "latency_class": "fast",
     "front_door": false,
     "room_visibility_default": "conditional",
+    "approval_required": true,
     "approval_min_authority": 99
   }
 }

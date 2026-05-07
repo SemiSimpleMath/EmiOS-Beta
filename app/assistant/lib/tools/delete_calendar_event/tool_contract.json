@@ -47,6 +47,7 @@
     "latency_class": "fast",
     "front_door": false,
     "room_visibility_default": "hide",
+    "approval_required": true,
     "approval_min_authority": 95,
     "planner_description": "Delete a single calendar event or cancel one occurrence of a recurring series. For whole-series deletion use delete_repeating_calendar_event."
   }

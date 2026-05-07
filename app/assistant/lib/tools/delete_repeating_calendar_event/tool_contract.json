@@ -49,6 +49,7 @@
     "latency_class": "fast",
     "front_door": false,
     "room_visibility_default": "hide",
+    "approval_required": true,
     "approval_min_authority": 95,
     "planner_description": "Delete an entire recurring event series. Use only when the user explicitly wants to remove every occurrence; otherwise use delete_calendar_event."
   }

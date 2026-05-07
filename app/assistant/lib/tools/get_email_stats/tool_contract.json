@@ -1,6 +1,6 @@
 {
   "name": "get_email_stats",
-  "description": "Aggregate statistics for emails matching a Gmail query. Returns total count, first/last received timestamps, date span, average per day, unique sender breakdown with counts and percentages, unique thread count, and subject samples. Uses header-only fetches \u2014 no email body is downloaded. Use Gmail query syntax to filter by sender, date, label, etc.",
+  "description": "Aggregate statistics for emails matching a Gmail query. Returns total count, first/last received timestamps, date span, average per day, unique sender breakdown with counts and percentages, unique thread count, and subject samples. Uses header-only fetches — no email body is downloaded. Use Gmail query syntax to filter by sender, date, label, etc.",
   "inputs": [
     {
       "name": "query",
@@ -12,7 +12,7 @@
       "name": "max_results",
       "type": "integer",
       "required": false,
-      "description": "Max emails to count (default 5000, max 50000). Sender/date breakdowns are based on a sample of 500 most recent \u2014 the total count is always exact."
+      "description": "Max emails to count (default 5000, max 50000). Sender/date breakdowns are based on a sample of 500 most recent — the total count is always exact."
     },
     {
       "name": "group_by_sender",
@@ -90,7 +90,7 @@
       "description": "Up to 10 subject lines from matched emails."
     }
   ],
-  "arguments_prompt": "Arguments are:\nquery (required): Gmail query string. Examples:\n  - \"from:alice@example.com\" \u2014 all mail from Alice\n  - \"from:alice@example.com newer_than:90d\" \u2014 last 90 days from Alice\n  - \"from:alice@example.com after:1735689600\" \u2014 after unix timestamp\n  - \"label:inbox subject:invoice\" \u2014 inbox invoices\nmax_results: int, default 5000, max 50000. Controls how many IDs are counted. Sender/date breakdowns are always based on a 500-message sample; the total count is exact.\ngroup_by_sender: true/false (default true) \u2014 include sender breakdown.\ngroup_by_day: true/false (default false) \u2014 include daily count distribution.\ntop_senders_limit: int (default 10) \u2014 how many senders to return.",
+  "arguments_prompt": "Arguments are:\nquery (required): Gmail query string. Examples:\n  - \"from:alice@example.com\" — all mail from Alice\n  - \"from:alice@example.com newer_than:90d\" — last 90 days from Alice\n  - \"from:alice@example.com after:1735689600\" — after unix timestamp\n  - \"label:inbox subject:invoice\" — inbox invoices\nmax_results: int, default 5000, max 50000. Controls how many IDs are counted. Sender/date breakdowns are always based on a 500-message sample; the total count is exact.\ngroup_by_sender: true/false (default true) — include sender breakdown.\ngroup_by_day: true/false (default false) — include daily count distribution.\ntop_senders_limit: int (default 10) — how many senders to return.",
   "metadata": {
     "domain": "email",
     "actions": [
@@ -111,7 +111,7 @@
     ],
     "requires_network": true,
     "cost_level": "low",
-    "latency_class": "medium",
+    "latency_class": "moderate",
     "front_door": true,
     "room_visibility_default": "show",
     "approval_required": false,
