@@ -1,0 +1,28 @@
+name: kg_resolution::planner
+class_name: Planner
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.1"
+  model_tier: "smart"
+
+allowed_tools: all
+except_tools: []
+allowed_nodes: [return_control]
+entity_scan_keys: [incoming_message, task, information, recent_history]
+entity_card_level: 2
+
+user_context_items:
+  - date_time
+  - task
+  - information
+  - recent_history
+  - checklist
+  - progress_report
+  - action_count
+  - entity_card
+
+system_context_items:
+  - tool_descriptions
+  - allowed_nodes
+  - task
+  - resource_kg_node_reading

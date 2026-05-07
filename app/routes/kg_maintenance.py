@@ -304,27 +304,28 @@ def api_fill_dates(finding_id):
 def api_resolve_with_prose(finding_id):
     """Resolve a CLUSTER LEAD by writing one line of user prose.
 
-    Body: {"prose": "Annika stopped art lessons in March 2026 due to ..."}
+    Body: {"prose": "Annika stopped taking art lessons in November 2025."}
 
-    The prose is the user's answer to the cluster's synthesized
-    root_question. This endpoint:
+    Synchronous flow (the user is waiting on the response):
+      1. Persist the prose onto the lead's evidence_json.cluster.
+      2. Invoke kg_resolution_manager — a smart-tier reasoning manager
+         with full read+write KG authority, regen-tool access, and
+         finding-lifecycle tools. It investigates which nodes need to
+         change, applies surgical mutations, regenerates the affected
+         entity card and wiki page, and resolves every finding in the
+         cluster with kg_finding_resolve.
+      3. Cascade-close any siblings the manager didn't explicitly resolve
+         (belt-and-suspenders — the manager SHOULD resolve every finding
+         in the cluster but the cascade ensures the dashboard clears
+         even on partial completion).
 
-      1. Persists the prose onto the lead's evidence_json.cluster
-         (user_prose_resolution + resolved_at).
-      2. Writes the prose as a user message into unified_log_2026 with
-         source='kg_maintenance_resolution' so fact_extractor and the
-         standard ingest path pick it up — the prose flows back into the
-         KG via the same pipeline that processes chat. This is what makes
-         "type one line, fix N findings" actually update the graph.
-      3. Marks the lead status='executed' with cascade=True, which
-         auto-flips every sibling (superseded_by=lead_id) to executed
-         too. One prose line resolves the whole cluster.
-
-    Returns {ok, lead_id, siblings_cascaded, ingest_message_id, lead}.
+    Returns the manager's structured report alongside the cascade count.
+    Latency: 30-90s for typical resolutions (multiple LLM steps + regen
+    pipelines). The UI should show a loading state.
     """
     from sqlalchemy.orm.attributes import flag_modified
-    from app.assistant.database.db_handler import UnifiedLog2026
     from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
+    from app.assistant.kg_resolution.resolve_with_prose import resolve_cluster_with_prose
     from app.models.base import get_session as _get_session
 
     data = request.get_json(force=True) or {}
@@ -341,13 +342,10 @@ def api_resolve_with_prose(finding_id):
             "lead_id": finding.get("superseded_by"),
         }), 400
 
-    cluster_block = (finding.get("evidence_json") or {}).get("cluster") if isinstance(finding.get("evidence_json"), dict) else None
-
     now = datetime.utcnow()
 
-    # 1) Stamp prose onto the lead's cluster block (or create one if this is
-    #    a single-finding "cluster" — also valid; lets the user prose-resolve
-    #    any finding even before the cluster pass has run).
+    # 1) Persist prose onto the cluster block — happens first so even if the
+    #    manager invocation fails, the user's input is preserved on the row.
     session = _get_session()
     try:
         lead = session.query(KGMaintenanceFinding).filter_by(id=finding_id).first()
@@ -360,7 +358,7 @@ def api_resolve_with_prose(finding_id):
         if not isinstance(cluster, dict):
             cluster = {"is_lead": True, "sibling_ids": []}
         cluster["user_prose_resolution"] = prose
-        cluster["resolved_at"] = now.isoformat()
+        cluster["prose_submitted_at"] = now.isoformat()
         ev["cluster"] = cluster
         lead.evidence_json = ev
         flag_modified(lead, "evidence_json")
@@ -368,50 +366,41 @@ def api_resolve_with_prose(finding_id):
     finally:
         session.close()
 
-    # 2) Append to unified_log_2026 as a user message so the standard ingest
-    #    pipeline (fact_extractor, claim_proposals, proposal_promoter) processes
-    #    it. Source 'kg_maintenance_resolution' is a new sentinel — fact_extractor
-    #    treats it like any other user message; the source label lets us trace
-    #    the provenance back to which finding got resolved.
-    ingest_message_id = str(uuid.uuid4())
-    session = _get_session()
+    # 2) Invoke kg_resolution_manager synchronously. The manager owns the
+    #    real work: read state, mutate nodes, regenerate dependents,
+    #    resolve findings.
     try:
-        session.add(UnifiedLog2026(
-            id=ingest_message_id,
-            timestamp=now,
-            role="user",
-            message=prose,
-            source="kg_maintenance_resolution",
-            processed=False,
-            speaker_id="user",
-            speaker_role="user",
-            metadata_json={
-                "kg_maintenance_finding_id": finding_id,
-                "cluster_root_question": (cluster_block or {}).get("root_question") if cluster_block else None,
-            },
-        ))
-        session.commit()
+        manager_result = resolve_cluster_with_prose(
+            lead_finding_id=finding_id,
+            prose=prose,
+        )
     except Exception as e:
-        logger.error("[resolve_with_prose] unified_log write failed: %s", e, exc_info=True)
-        session.rollback()
-        return jsonify({"error": f"failed to write resolution to unified_log: {e}"}), 500
-    finally:
-        session.close()
+        logger.error("[resolve_with_prose] manager invocation crashed: %s", e, exc_info=True)
+        manager_result = {"status": "error", "error": str(e)}
 
-    # 3) Mark lead executed + cascade to siblings.
+    # 3) Belt-and-suspenders cascade: if the manager didn't explicitly
+    #    resolve every finding (status='partial' or 'error'), close the
+    #    siblings via the existing cascade so the dashboard clears.
+    #    'completed' status means the manager already called
+    #    kg_finding_resolve on every member; cascade is a no-op there.
     cascaded = set_status(
         finding_id,
         "executed",
         executed_by="ui:resolve_with_prose",
-        execution_notes=f"Prose resolution (cascaded). Source unified_log id={ingest_message_id}.",
+        execution_notes=(
+            f"Prose-resolution via kg_resolution_manager. "
+            f"Manager status: {manager_result.get('status')}."
+        ),
         cascade_to_siblings=True,
     )
 
     return jsonify({
         "ok": True,
         "lead_id": finding_id,
+        "manager_status": manager_result.get("status"),
+        "report": manager_result.get("report"),
+        "manager_error": manager_result.get("error"),
         "siblings_cascaded": cascaded,
-        "ingest_message_id": ingest_message_id,
         "lead": get_finding(finding_id),
     })
 

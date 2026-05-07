@@ -1,0 +1,147 @@
+name: kg_resolution_manager
+class_name: MultiAgentManager
+description: "Reasoning manager that resolves a cluster of kg_maintenance_findings from user prose. Has full read+write KG access, evidence/window read, entity-card regeneration, and wiki-page refresh. Plans iteratively: read state → make targeted mutations → regenerate dependents → resolve findings. Synchronous; intended to be invoked from the maintenance UI on prose-resolve."
+max_cycles: 60
+role_bindings:
+  delegator: emi_team::delegator
+  tool_selector: shared::tool_selector
+
+agents:
+  - name: emi_team::delegator
+    class: Delegator
+  - name: kg_resolution::planner
+    class: Planner
+  - name: emi_team::summary
+    class: Agent
+  - name: kg_resolution::final_answer
+    class: Agent
+
+control_nodes:
+  - name: tool_return_router
+    class: ToolReturnRouter
+  - name: summary_pre_node
+    class: SummaryPreNode
+    config:
+      enabled: true
+      summary_agent: "emi_team::summary"
+      resume_agent: "kg_resolution::planner"
+      planner_agent: "kg_resolution::planner"
+      cadence_every_actions: 4
+      min_messages: 20
+      trigger_on_large_result_chars: 4000
+      allow_summarize_latest_tool_result: false
+      protect_last_n_results: 3
+  - name: summary_post_node
+    class: SummaryPostNode
+    config:
+      summary_agent: "emi_team::summary"
+      resume_agent: "kg_resolution::planner"
+  - name: tool_caller
+    class: ToolCaller
+  - name: tool_result_handler
+    class: ToolResultHandler
+  - name: return_control
+    class: ReturnControlNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+  - name: graceful_exit_control_node
+    class: GracefulExitControlNode
+
+tool_visibility:
+  always_show:
+    - kg_query
+    - pod_search
+    - pod_fetch
+    - kg_close_state
+    - kg_create_state_node
+    - kg_update_node_field
+    - kg_rename_label
+    - kg_finding_resolve
+    - regenerate_entity_card
+    - refresh_wiki_page
+  use_narrower: false
+
+# Curated allowed_tools (per the project memory — never `all`):
+# READ:    kg_query, pod_search, pod_fetch
+# MUTATE:  kg_close_state, kg_create_state_node, kg_update_node_field,
+#          kg_rename_label, kg_create_edge, kg_delete_edge, kg_delete_node
+# REGEN:   regenerate_entity_card, refresh_wiki_page
+# LIFECYCLE: kg_finding_resolve, kg_finding_escalate
+# Explicitly NOT here: kg_merge_nodes (always escalates per the
+# 2026-05-07 mutation gate — recurring-event trap), kg_create_node /
+# kg_update_node (the more focused field-level tools cover what we need).
+tools:
+  allowed_tools:
+    - kg_query
+    - pod_search
+    - pod_fetch
+    - kg_close_state
+    - kg_create_state_node
+    - kg_update_node_field
+    - kg_rename_label
+    - kg_create_edge
+    - kg_delete_edge
+    - kg_delete_node
+    - kg_finding_resolve
+    - kg_finding_escalate
+    - regenerate_entity_card
+    - refresh_wiki_page
+  except_tools: []
+
+scope_contract:
+  tools:
+    allowed_tools:
+      - kg_query
+      - pod_search
+      - pod_fetch
+      - kg_close_state
+      - kg_create_state_node
+      - kg_update_node_field
+      - kg_rename_label
+      - kg_create_edge
+      - kg_delete_edge
+      - kg_delete_node
+      - kg_finding_resolve
+      - kg_finding_escalate
+      - regenerate_entity_card
+      - refresh_wiki_page
+    blocked_tools:
+      - install_tool
+      - mcp::npm/playwright-mcp::browser_run_code
+      - kg_merge_nodes
+    requires_approval_tools: []
+    allow_external_side_effects: false
+  writes:
+    write_kg: true
+    allow_fact_extraction: false
+
+flow_config:
+  strict_routing: true
+  tool_return:
+    tool_call_result_handler_node: "tool_result_handler"
+  summary:
+    enabled: true
+    source_agent: "tool_return_router"
+    summary_agent: "emi_team::summary"
+    resume_agent: "kg_resolution::planner"
+    planner_agent: "kg_resolution::planner"
+    cadence_every_actions: 4
+    action_count_state_key: "{planner_agent}_action_count"
+    min_messages: 20
+    trigger_on_large_result_chars: 4000
+    payload_key: "summary_payload"
+    payload_recent_history_messages: 80
+    allow_summarize_latest_tool_result: false
+    protect_last_n_results: 3
+  state_map:
+    "emi_team::delegator": "kg_resolution::planner"
+    "kg_resolution::planner": "tool_caller"
+    "tool_result_handler": "tool_return_router"
+    "tool_return_router": "summary_pre_node"
+    "summary_pre_node": "kg_resolution::planner"
+    "emi_team::summary": "summary_post_node"
+    "summary_post_node": "kg_resolution::planner"
+    "kg_resolution::planner_return_control": "kg_resolution::final_answer"
+    "kg_resolution::final_answer": "manager_exit_node"
+    "graceful_exit": "graceful_exit_control_node"
+    "graceful_exit_control_node": "kg_resolution::final_answer"
