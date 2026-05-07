@@ -158,13 +158,26 @@ def _on_bedroom_frame(message: Message) -> None:
 
 
 def _find_previous_bedroom_frame(current: Path) -> Optional[Path]:
-    """Return the most recent prior bedroom JPEG within the comparison window,
-    or None if the current frame is the first one in the window.
+    """Return the most recent prior frame from the SAME camera within the
+    comparison window, or None if the current frame is the first one in
+    the window.
+
+    Camera identity is derived from the current filename's `<ts>_<camera>.jpg`
+    suffix — works whether <camera> is the legacy Ring camera_id or a
+    local-camera alias like 'Emi1'. Previously hardcoded BEDROOM_CAMERA_ID
+    here, which broke pairing for any non-Ring camera.
     """
     try:
         snap_dir = current.parent
         current_mtime = current.stat().st_mtime
-        cam_suffix = f"_{BEDROOM_CAMERA_ID}.jpg"
+        # Parse the current file's camera identifier from its name.
+        stem = current.stem
+        if "_" not in stem:
+            return None
+        _, _, cam_part = stem.partition("_")
+        if not cam_part:
+            return None
+        cam_suffix = f"_{cam_part}.jpg"
         best: Optional[Path] = None
         best_mtime = -1.0
         for p in snap_dir.iterdir():
