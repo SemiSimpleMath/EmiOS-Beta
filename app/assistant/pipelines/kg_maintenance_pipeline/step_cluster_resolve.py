@@ -124,7 +124,7 @@ def run(ctx: PipelineContext) -> dict:
                 )
                 continue
             # Lead must be one of the chunk members; siblings must be a subset.
-            chunk_ids = {f["finding_id"] for f in chunk}
+            chunk_ids = {f["id"] for f in chunk}
             if lead_id not in chunk_ids:
                 logger.warning(
                     "[cluster_resolve] lead_finding_id %s not in candidate chunk; skipping",
@@ -195,7 +195,7 @@ def _serialize_cluster_for_llm(primary_node_id: str, chunk: list[dict]) -> str:
     ]
     for i, f in enumerate(chunk, 1):
         lines.append(f"--- finding {i} ---")
-        lines.append(f"finding_id: {f.get('finding_id') or f.get('id')}")
+        lines.append(f"finding_id: {f.get('id')}")
         lines.append(f"finding_type: {f.get('finding_type', '')}")
         sec_label = f.get("secondary_label") or ""
         sec_id = f.get("secondary_node_id") or ""
