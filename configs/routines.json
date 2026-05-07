@@ -536,7 +536,10 @@
       "id": "kg_state_date_drain",
       "enabled": true,
       "name": "KG state/event date investigator (drain)",
-      "aliases": ["state date drain", "fill dates"],
+      "aliases": [
+        "state date drain",
+        "fill dates"
+      ],
       "runner": "function",
       "spec": {
         "function_name": "kg_state_date_drain",
@@ -553,7 +556,10 @@
       "id": "kg_wiki_inference",
       "enabled": true,
       "name": "Wiki connection investigator (suggest new KG edges)",
-      "aliases": ["wiki inference", "wiki edges"],
+      "aliases": [
+        "wiki inference",
+        "wiki edges"
+      ],
       "runner": "function",
       "spec": {
         "function_name": "kg_wiki_inference",
@@ -570,7 +576,10 @@
       "id": "kg_finding_executor_drain",
       "enabled": true,
       "name": "KG finding executor drain (apply or escalate)",
-      "aliases": ["execute findings", "apply findings"],
+      "aliases": [
+        "execute findings",
+        "apply findings"
+      ],
       "runner": "function",
       "spec": {
         "function_name": "kg_finding_executor_drain",
@@ -598,6 +607,22 @@
         "quiet_hours_ok": true
       },
       "notes": "Reads pending findings, groups by primary_node_id, calls kg_finding_cluster_resolver to verify which candidate clusters share ONE root question. Confirmed leads get synthesized root_question; siblings get superseded_by stamped (hidden from default UI). Resolving a lead cascades to its siblings. Runs after wiki_nightly_refresh (03:00) so wiki_contradiction findings of the same night are eligible for clustering."
+    },
+    {
+      "id": "kg_goal_dormancy_sweep",
+      "enabled": true,
+      "name": "KG goal dormancy sweep",
+      "aliases": ["goal dormancy", "dormant goals"],
+      "runner": "function",
+      "spec": {
+        "function_name": "kg_goal_dormancy_sweep"
+      },
+      "run_policy": {
+        "type": "daily",
+        "time_local": "02:50",
+        "quiet_hours_ok": true
+      },
+      "notes": "Flips long-silent Goal nodes from active → dormant. Reversible — any re-observation in the promoter flips back to active. NEVER sets end_date (that's terminal achievement/abandonment, handled separately). Threshold = max(ttl.estimated_duration_days * 1.5, 30) days, capped at 730d. Default 90d when no TTL. Lifelong-value Goals (label/category contains 'lifelong', 'value', 'be a good', 'stay healthy', etc.) are skipped — only explicit closure can end those. Runs alongside state_decay (02:45) so card/wiki refreshes downstream see consistent goal_status."
     },
     {
       "id": "kg_state_decay",
@@ -674,7 +699,7 @@
     },
     {
       "id": "sleep_camera_tick_local",
-      "enabled": true,
+      "enabled": false,
       "name": "Sleep camera capture — LOCAL RTSP (every 3 min)",
       "aliases": [
         "tapo sleep camera",

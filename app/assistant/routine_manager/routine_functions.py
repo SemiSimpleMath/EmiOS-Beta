@@ -182,6 +182,27 @@ def _lazy_kg_state_decay(*, target_date=None, routine=None):
 kg_state_decay = _lazy_kg_state_decay
 
 
+def _lazy_kg_goal_dormancy_sweep(*, target_date=None, routine=None):
+    """Nightly: flip long-silent Goal nodes from `active` to `dormant`.
+
+    Distinct from state_decay (which auto-CLOSES State/Event nodes by
+    setting end_date) — goal_dormancy_sweep only mutates
+    attributes.goal_status. ANY re-observation in the promoter flips
+    dormant → active. Achievement/abandonment closures are a separate
+    terminal path handled by goal_outcome_detector.
+
+    Threshold per Goal: max(ttl.estimated_duration_days * 1.5, 30) days,
+    capped at 730. Default 90d when no TTL.
+    """
+    from app.assistant.pipelines.context import PipelineContext
+    from app.assistant.pipelines.kg_maintenance_pipeline.step_goal_dormancy import run as run_goal_dormancy
+    ctx = PipelineContext.for_date(pipeline_id="kg_goal_dormancy_sweep")
+    return run_goal_dormancy(ctx)
+
+
+kg_goal_dormancy_sweep = _lazy_kg_goal_dormancy_sweep
+
+
 def _lazy_kg_finding_cluster_resolve(*, target_date=None, routine=None):
     """Daily: read pending kg_maintenance_findings, group by primary_node_id,
     and call kg_finding_cluster_resolver to verify whether each candidate
@@ -409,6 +430,7 @@ ROUTINE_FUNCTION_REGISTRY = {
     "kg_finding_backlog_drain": kg_finding_backlog_drain,
     "kg_date_gap_drain": kg_date_gap_drain,
     "kg_state_decay": kg_state_decay,
+    "kg_goal_dormancy_sweep": kg_goal_dormancy_sweep,
     "kg_finding_cluster_resolve": kg_finding_cluster_resolve,
     "kg_finding_executor_drain": kg_finding_executor_drain,
     "kg_state_date_drain": kg_state_date_drain,
