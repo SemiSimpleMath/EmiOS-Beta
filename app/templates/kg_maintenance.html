@@ -115,6 +115,49 @@
     .exec-notes { font-size: 11px; color: var(--ok); margin-top: 4px; }
     .exec-notes.error { color: var(--bad); }
 
+    /* cluster lead distillation */
+    .cluster-badge {
+      display: inline-block; margin-left: 6px; padding: 1px 8px;
+      border-radius: 10px; background: #4c1d95; color: #ddd6fe;
+      font-size: 10px; font-weight: 700; letter-spacing: .04em;
+      cursor: pointer;
+    }
+    .cluster-badge:hover { background: #5b21b6; }
+    .cluster-question {
+      display: block; margin: 6px 0 4px 0;
+      font-size: 13px; color: var(--text); font-weight: 600;
+      border-left: 3px solid #8b5cf6; padding-left: 10px;
+    }
+    .cluster-question::before {
+      content: 'ROOT QUESTION'; display: block;
+      font-size: 9px; color: #a78bfa; letter-spacing: .08em;
+      font-weight: 700; margin-bottom: 2px;
+    }
+    .prose-resolver {
+      display: none; margin-top: 8px; padding: 10px;
+      background: var(--panel-soft); border-radius: 6px;
+      border: 1px solid var(--line);
+    }
+    .prose-resolver.open { display: block; }
+    .prose-resolver textarea {
+      width: 100%; min-height: 60px; box-sizing: border-box;
+      background: var(--bg); color: var(--text);
+      border: 1px solid var(--line); border-radius: 4px;
+      padding: 8px; font-family: inherit; font-size: 13px;
+    }
+    .prose-resolver textarea:focus { outline: 2px solid var(--info); }
+    .prose-resolver-actions { margin-top: 8px; display: flex; gap: 6px; }
+    .siblings-block {
+      display: none; margin-top: 8px; padding: 10px;
+      background: var(--bg); border-radius: 6px;
+      border-left: 3px solid #8b5cf6;
+    }
+    .siblings-block.open { display: block; }
+    .siblings-block .sib { padding: 6px 0; border-bottom: 1px dashed var(--line); font-size: 12px; }
+    .siblings-block .sib:last-child { border-bottom: none; }
+    .btn-prose { background: #8b5cf6; color: #fff; }
+    .btn-prose-cancel { background: #1e293b; color: var(--muted); }
+
     /* empty state */
     .empty { text-align: center; padding: 60px; color: var(--muted); font-size: 16px; }
 
@@ -359,17 +402,47 @@
       ? `<div class="exec-notes ${f.status === 'execute_error' ? 'error' : ''}">${esc(f.execution_notes)}</div>`
       : '';
 
+    // Cluster-lead distillation: when this row stands in for N similar
+    // findings, show a "+N similar" badge plus the synthesized root
+    // question, and offer a prose-resolution textarea that closes the
+    // whole cluster with one user line.
+    const clusterSize = f.cluster_size || 1;
+    const isLead = clusterSize > 1;
+    const rootQ = f.cluster_root_question || '';
+    const clusterBadge = isLead
+      ? `<span class="cluster-badge" onclick="toggleSiblings('${f.id}')" title="Cluster lead — click to expand the ${clusterSize - 1} similar findings">+${clusterSize - 1} similar</span>`
+      : '';
+    const rootQuestionHtml = (isLead && rootQ)
+      ? `<div class="cluster-question">${esc(rootQ)}</div>`
+      : '';
+    const proseBtn = (isLead && f.status === 'pending')
+      ? `<button class="btn btn-prose" onclick="openProseResolver('${f.id}')" title="Answer the root question in one line — resolves the whole cluster">Resolve with prose</button>`
+      : '';
+    const proseResolver = isLead
+      ? `<div id="prose-${f.id}" class="prose-resolver">
+          <textarea id="prose-text-${f.id}" placeholder="Type a single line of prose answering the root question. Will be sent through the standard ingest pipeline (fact_extractor → KG)..."></textarea>
+          <div class="prose-resolver-actions">
+            <button class="btn btn-primary" onclick="submitProseResolution('${f.id}')">Submit & cascade-close ${clusterSize} findings</button>
+            <button class="btn btn-prose-cancel" onclick="closeProseResolver('${f.id}')">Cancel</button>
+          </div>
+        </div>`
+      : '';
+    const siblingsBlock = isLead
+      ? `<div id="sibs-${f.id}" class="siblings-block"></div>`
+      : '';
+
     return `<tr id="row-${f.id}">
       <td class="cb-col"><input type="checkbox" class="row-cb" value="${f.id}" onchange="toggleRowCb(this)" ${canAct ? '' : 'disabled'}></td>
-      <td><span class="badge badge-${f.finding_type}">${f.finding_type.replace(/_/g,' ')}</span></td>
+      <td><span class="badge badge-${f.finding_type}">${f.finding_type.replace(/_/g,' ')}</span>${clusterBadge}</td>
       <td><span class="badge badge-${f.priority}">${f.priority}</span></td>
       <td><span class="badge badge-${f.status}">${f.status}</span></td>
       <td>${renderNodes(f)}</td>
       <td><code style="font-size:11px">${f.suggested_action}</code></td>
-      <td class="reason">${esc(f.reason || '')}${evidenceBtn} ${reportBtn}${execNotes}</td>
+      <td class="reason">${rootQuestionHtml}${esc(f.reason || '')}${evidenceBtn} ${reportBtn}${execNotes}${proseResolver}${siblingsBlock}</td>
       <td>${conf}</td>
       <td>
         <div class="action-btns">
+          ${proseBtn}
           ${canExec && labels.exec ? `<button class="btn btn-execute" onclick="confirmExecute('${f.id}')">${labels.exec}</button>` : ''}
           ${f.status === 'pending' ? `<button class="btn btn-investigate" onclick="investigateNow('${f.id}', this)" title="Run the LLM investigator on this finding now (replaces the next nightly drain slot for this id)">Investigate now</button>` : ''}
           ${f.status === 'pending' ? `<button class="btn btn-approve" onclick="singleAction('${f.id}','approve')">${labels.approve}</button>` : ''}
@@ -547,6 +620,73 @@
     if (sa) {
       sa.indeterminate = checked.length > 0 && checked.length < all.length;
       sa.checked = all.length > 0 && checked.length === all.length;
+    }
+  }
+
+  // -- Cluster lead: prose-resolution + sibling expand --
+  function openProseResolver(id) {
+    const el = document.getElementById('prose-' + id);
+    if (el) el.classList.add('open');
+    const ta = document.getElementById('prose-text-' + id);
+    if (ta) ta.focus();
+  }
+
+  function closeProseResolver(id) {
+    const el = document.getElementById('prose-' + id);
+    if (el) el.classList.remove('open');
+  }
+
+  async function submitProseResolution(id) {
+    const ta = document.getElementById('prose-text-' + id);
+    const prose = (ta && ta.value || '').trim();
+    if (!prose) {
+      showToast('Type one line of prose first.', true);
+      return;
+    }
+    try {
+      const res = await fetch(`/kg-maintenance/api/finding/${id}/resolve_with_prose`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prose })
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const result = await res.json();
+      showToast(`Resolved cluster: 1 lead + ${result.siblings_cascaded || 0} siblings closed. Prose queued for KG ingest.`);
+      loadFindings();
+      loadSummary();
+    } catch(e) {
+      showToast('Error: ' + e.message, true);
+    }
+  }
+
+  async function toggleSiblings(id) {
+    const block = document.getElementById('sibs-' + id);
+    if (!block) return;
+    if (block.classList.contains('open')) {
+      block.classList.remove('open');
+      return;
+    }
+    block.classList.add('open');
+    block.innerHTML = '<em style="color:var(--muted)">loading siblings…</em>';
+    try {
+      const res = await fetch(`/kg-maintenance/api/finding/${id}/cluster_siblings`);
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      const sibs = data.siblings || [];
+      if (!sibs.length) {
+        block.innerHTML = '<em style="color:var(--muted)">No siblings — cluster_size may be stale; reload.</em>';
+        return;
+      }
+      const html = sibs.map(s => `
+        <div class="sib">
+          <strong>${esc(s.finding_type.replace(/_/g,' '))}</strong>
+          ${s.secondary_label ? ' &harr; <em>' + esc(s.secondary_label) + '</em>' : ''}
+          <div style="color:var(--muted); margin-top:2px;">${esc(s.reason || '')}</div>
+        </div>
+      `).join('');
+      block.innerHTML = `<div style="font-size:11px; color:var(--muted); margin-bottom:6px;">${sibs.length} similar finding${sibs.length === 1 ? '' : 's'} clustered under this lead — resolving the lead cascades to all of these.</div>${html}`;
+    } catch(e) {
+      block.innerHTML = `<em style="color:var(--bad)">Error loading siblings: ${esc(e.message)}</em>`;
     }
   }
 
