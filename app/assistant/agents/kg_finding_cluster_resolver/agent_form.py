@@ -23,9 +23,12 @@ class AgentForm(BaseModel):
 
     is_same_root: bool = Field(
         description=(
-            "True iff all of the candidate findings would be resolved by "
-            "answering ONE underlying question. False if they're about "
-            "different real-world facts that just happen to share an anchor."
+            "True iff some SUBSET (size >= 2) of the candidate findings "
+            "would be resolved by answering ONE underlying question. The "
+            "subset doesn't have to include every candidate — list only "
+            "the findings that share the root in member_finding_ids; "
+            "non-matching ones stay independent. Return False only when "
+            "no subset of >= 2 findings share a root."
         ),
     )
 

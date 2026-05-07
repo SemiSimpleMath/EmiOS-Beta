@@ -12,7 +12,11 @@ A candidate cluster: a list of pending findings that all reference the same prim
 
 # Your judgment
 
-Ask: "If the user gave me ONE answer, would it resolve every finding in this cluster?"
+Ask: "Is there a SUBSET of these candidate findings (at least 2) that one user answer would resolve all of?"
+
+You don't need ALL candidate findings to share a root. If 7 of 8 are about the same underlying fact and the 8th is a different issue, the right answer is **is_same_root=True** with `member_finding_ids` listing the 7 that share, leaving the 8th to stay independent. The mechanical group-by-primary candidate set is permissive on purpose — your job is to confirm a real cluster INSIDE it.
+
+Only return is_same_root=False when there is NO subset of >= 2 findings that share a root question. (E.g. 8 unrelated issues that just happen to share an anchor entity.)
 
 Yes examples:
 - 8 wiki_contradiction findings all citing the same fact ("she takes art lessons") on the same person → root question is whether/when that fact stopped being true.

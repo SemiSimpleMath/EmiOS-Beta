@@ -222,6 +222,8 @@ def _apply_verdict(
 ) -> int:
     """Stamp superseded_by on siblings; write cluster block to lead's
     evidence_json. Returns count of siblings actually superseded."""
+    from sqlalchemy.orm.attributes import flag_modified
+
     from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
 
     session = get_session()
@@ -245,6 +247,10 @@ def _apply_verdict(
 
         # Annotate the lead with the cluster block. Merge into existing
         # evidence_json if present so producers' fields are preserved.
+        # SQLAlchemy doesn't track in-place dict mutations on JSON columns
+        # — without flag_modified, our reassignment looks like "same dict"
+        # and the update silently drops on commit. (Bug observed: 2 live
+        # leads ended up with cluster_size>1 but evidence_json.cluster={}.)
         existing = lead.evidence_json or {}
         if not isinstance(existing, dict):
             existing = {"_legacy_evidence": existing}
@@ -258,6 +264,7 @@ def _apply_verdict(
         }
         existing["cluster"] = cluster_block
         lead.evidence_json = existing
+        flag_modified(lead, "evidence_json")
 
         session.commit()
         return applied

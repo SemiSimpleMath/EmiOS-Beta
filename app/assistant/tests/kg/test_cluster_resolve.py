@@ -430,6 +430,49 @@ def test_no_candidates_means_no_agent_call():
     }
 
 
+def test_apply_verdict_persists_cluster_block_via_flag_modified():
+    """Regression for the SQLAlchemy-JSON gotcha: in-place dict mutation
+    of evidence_json doesn't dirty-track without flag_modified, so the
+    cluster block silently drops on commit while the scalar superseded_by
+    writes succeed. Symptom: cluster_size > 1 but evidence_json.cluster={}.
+    Caught on live data 2026-05-07 (Annika + Friday Night Meats leads
+    had empty cluster blocks).
+    """
+    _wipe_findings()
+    fid_a = _force_unique_finding(finding_type="wiki_contradiction", reason="r1")
+    fid_b = _force_unique_finding(finding_type="wiki_contradiction", reason="r2")
+    fid_c = _force_unique_finding(finding_type="wiki_contradiction", reason="r3")
+
+    verdict = {
+        "is_same_root": True,
+        "lead_finding_id": fid_a,
+        "member_finding_ids": [fid_a, fid_b, fid_c],
+        "root_question": "Did the thing happen?",
+        "reason": "all three say same",
+    }
+    ctx = PipelineContext.for_date(pipeline_id="test_cluster")
+    with _patch_agent(verdict):
+        run_cluster_resolve(ctx)
+
+    # Read FRESH from DB (not from session that wrote it) to verify the
+    # commit actually persisted the cluster block.
+    session = get_session()
+    try:
+        lead = session.query(KGMaintenanceFinding).filter_by(id=fid_a).first()
+        ev = lead.evidence_json
+    finally:
+        session.close()
+
+    assert isinstance(ev, dict), f"evidence_json should be dict, got {type(ev)}"
+    cluster = ev.get("cluster")
+    assert isinstance(cluster, dict), f"cluster block missing/empty: {cluster!r}"
+    assert cluster.get("is_lead") is True
+    assert cluster.get("root_question") == "Did the thing happen?"
+    assert sorted(cluster.get("sibling_ids") or []) == sorted([fid_b, fid_c])
+    assert cluster.get("verified_by") == "kg_finding_cluster_resolver"
+    assert "agent_reason" in cluster
+
+
 def test_clusters_across_finding_types_share_anchor():
     """A primary node with mixed finding types (e.g. duplicate_node +
     wiki_contradiction) is still a candidate — the anchor is the node,
