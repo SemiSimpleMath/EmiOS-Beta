@@ -70,14 +70,6 @@ def _description_from_prompt(tool_dir: Path) -> str:
     return text
 
 
-def _arguments_prompt(tool_dir: Path) -> str | None:
-    p = tool_dir / "prompts" / f"{tool_dir.name}_args.j2"
-    if not p.exists():
-        return None
-    text = p.read_text(encoding="utf-8").strip()
-    return text or None
-
-
 def _build_contract(tool_dir: Path) -> dict[str, Any]:
     tool_name = tool_dir.name
     args_model = _load_args_model(tool_dir)
@@ -113,9 +105,6 @@ def _build_contract(tool_dir: Path) -> dict[str, Any]:
             },
         ],
     }
-    ap = _arguments_prompt(tool_dir)
-    if isinstance(ap, str) and ap.strip():
-        contract["arguments_prompt"] = ap.strip()
     return contract
 
 

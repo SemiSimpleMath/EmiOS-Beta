@@ -39,6 +39,7 @@
       "description": "Smart-home gateway response payload."
     }
   ],
+  "arguments_prompt": "Use this tool to interact with Ring cameras.\n\nRequired:\n- `command`: one of `list_cameras`, `get_snapshot`, `get_recent_events`, `set_siren`, `set_light`\n\nConditional fields:\n- `camera_id` for all commands except `list_cameras`\n- `lookback_minutes` for `get_recent_events`\n- `enabled` for `set_siren` and `set_light`",
   "metadata": {
     "domain": "smart_home",
     "actions": [

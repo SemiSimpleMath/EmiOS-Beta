@@ -21,6 +21,7 @@
       "description": "{pod_id, kind, mime_type, sha256, stored_path, file_size_bytes, deduped: bool}."
     }
   ],
+  "arguments_prompt": "Mint a pod from a file on disk so it can be attached to outbound actions.\n\nField:\n  - `path` — absolute path to the file. `~/Pictures/foo.jpg` is fine.\n\nReturns `pod_id` you can pass to `send_email` as `pod_ids: [...]`.\n\nExample:\n  `{ \"path\": \"~/Pictures/IMG_1234.jpg\" }`",
   "metadata": {
     "domain": "filesystem",
     "actions": [

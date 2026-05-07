@@ -27,6 +27,7 @@
       "description": "Structured manager output."
     }
   ],
+  "arguments_prompt": "Arguments to devices_manager:\n- task: required description of the smart-home action(s) to perform.\n- information: optional supporting context (device IDs, constraints, safety preferences).",
   "metadata": {
     "domain": "orchestration",
     "actions": [

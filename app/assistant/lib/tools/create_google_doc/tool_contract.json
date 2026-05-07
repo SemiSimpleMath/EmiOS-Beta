@@ -42,6 +42,7 @@
       "description": "Whether initial_content was written into the document."
     }
   ],
+  "arguments_prompt": "",
   "metadata": {
     "domain": "doc",
     "actions": [
@@ -62,6 +63,5 @@
     "front_door": true,
     "room_visibility_default": "show",
     "approval_required": true
-  },
-  "arguments_prompt": ""
+  }
 }

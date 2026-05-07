@@ -49,7 +49,8 @@ class ToolRegistry:
         Each subdirectory should be named after the tool and contain:
          - <tool_name>.py (with a get_tool_class() function)
          - tool_forms/ (containing a <tool_name>_form.py with a Pydantic model)
-         - prompts/ (with <tool_name>_description.j2 and optionally <tool_name>_args.j2)
+         - prompts/ (with <tool_name>_description.j2)
+         - tool_contract.json (with `arguments_prompt` for argument guidance)
         """
         if tools_dir is None:
             tools_dir = get_tool_registry_dir()
@@ -337,15 +338,17 @@ class ToolRegistry:
             raise FileNotFoundError(f"Prompts directory not found in {tool_dir}.")
         env = Environment(loader=FileSystemLoader(str(prompts_dir)))
         prompts = {}
-        # Only load description and args prompts - select prompts are not used
-        for prompt in [f"{tool_name}_description.j2", f"{tool_name}_args.j2"]:
-            key = prompt.split(".")[0]
-            try:
-                template = env.get_template(prompt)
-                prompts[key] = template
-            except Exception as e:
-                logger.error(f"Failed to load prompt '{prompt}' for tool '{tool_dir.name}': {e}")
-                prompts[key] = None
+        # Only the description prompt is loaded as a Jinja template now.
+        # Argument guidance (formerly <name>_args.j2) lives in the JSON
+        # contract's `arguments_prompt` field; we serve that string directly.
+        prompt = f"{tool_name}_description.j2"
+        key = prompt.split(".")[0]
+        try:
+            template = env.get_template(prompt)
+            prompts[key] = template
+        except Exception as e:
+            logger.error(f"Failed to load prompt '{prompt}' for tool '{tool_dir.name}': {e}")
+            prompts[key] = None
         return prompts
 
     def load_tool_contract(self, tool_dir: Path, tool_name: str):
@@ -556,19 +559,16 @@ class ToolRegistry:
             except Exception as e:
                 logger.error(f"Error rendering description for '{tool_name}': {e}")
                 desc_text = "Error rendering description."
-        # Pull args.j2 too — its per-field guidance (enum values, ranges,
-        # conditional dependencies, cross-field rules) is what the planner
-        # needs to produce valid JSON args directly. Optional; falls through
-        # gracefully if the tool has no args.j2.
-        args_template = tool["prompts"].get(f"{tool_name}_args")
-        args_text = ""
-        if args_template:
-            try:
-                args_text = args_template.render()
-            except Exception as e:
-                logger.error(f"Error rendering args.j2 for '{tool_name}': {e}")
-                args_text = ""
+        # Pull arguments_prompt from the JSON contract — its per-field
+        # guidance (enum values, ranges, conditional dependencies, cross-field
+        # rules) is what the planner needs to produce valid JSON args
+        # directly. Optional; empty string when the contract doesn't set it.
         contract = tool.get("tool_contract") if isinstance(tool.get("tool_contract"), dict) else None
+        args_text = ""
+        if isinstance(contract, dict):
+            ap = contract.get("arguments_prompt")
+            if isinstance(ap, str):
+                args_text = ap
         # Smart-home tools: append the user's configured devices so the planner
         # knows valid room/camera names without having to invent them. Devices
         # live in configs/smart_home_tools.json under the integration key:
@@ -802,7 +802,9 @@ class ToolRegistry:
 
 
     def get_tool_arguments_prompt(self, tool_name: str, user_context: dict = None):
-        """Retrieve and render the tool arguments prompt."""
+        """Return the tool's argument-fill guidance string for the tool_args
+        agent or planner. Sourced from the JSON contract's `arguments_prompt`
+        field (formerly a Jinja-rendered <name>_args.j2 file)."""
         tool = self.registry.get(tool_name)
         if not tool:
             logger.debug(f"Tool '{tool_name}' not found in registry.")
@@ -821,34 +823,24 @@ class ToolRegistry:
                 f"{schema_str}"
             )
 
-        args_template = tool["prompts"].get(f"{tool_name}_args")
-        if args_template:
-            try:
-                return args_template.render(user_context or {})
-            except Exception as e:
-                logger.error(f"Error rendering arguments prompt for '{tool_name}': {e}")
-                return "Error rendering arguments prompt."
+        contract = tool.get("tool_contract") if isinstance(tool.get("tool_contract"), dict) else None
+        if isinstance(contract, dict):
+            ap = contract.get("arguments_prompt")
+            if isinstance(ap, str) and ap.strip():
+                return ap
         return "No arguments prompt available."
-
-    def get_tool_arguments_prompt_template(self, tool_name: str):
-        """Retrieve and render the tool arguments prompt."""
-        tool = self.registry.get(tool_name)
-        if not tool:
-            logger.debug(f"Tool '{tool_name}' not found in registry.")
-            return None
-
-        return tool["prompts"].get(f"{tool_name}_args")
 
 
     def get_tool_descriptions(self, allowed_tools: list) -> dict:
         """Retrieve descriptions only for allowed tools.
 
-        Uses the FULL description template (not the compact one). Each tool
-        already has two planner-facing files by design — `_description.j2`
-        for the planner / picker and `_args.j2` for tool_arguments. The
-        description template is meant to be shown verbatim. The compact
-        path is still available via get_tool_description_compact() when a
-        caller explicitly wants the one-line summary.
+        Uses the FULL description template (not the compact one). Argument
+        guidance for tool_arguments / planner is in the JSON contract's
+        `arguments_prompt` field, appended after the Contract block by
+        get_tool_description. The description template is meant to be
+        shown verbatim. The compact path is still available via
+        get_tool_description_compact() when a caller explicitly wants the
+        one-line summary.
         """
         return {tool: self.get_tool_description(tool) for tool in allowed_tools}
 

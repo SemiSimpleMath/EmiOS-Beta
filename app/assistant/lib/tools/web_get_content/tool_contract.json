@@ -36,6 +36,7 @@
       "description": "True if text was truncated to max_chars."
     }
   ],
+  "arguments_prompt": "Fill arguments for `web_get_content`.\n\nReturn ONLY a JSON object with:\n- max_chars (number, optional, default 15000)\n\nExample:\n{\"max_chars\": 15000}",
   "metadata": {
     "domain": "browser",
     "actions": [

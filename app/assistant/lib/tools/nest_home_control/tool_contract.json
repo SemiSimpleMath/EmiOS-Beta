@@ -27,6 +27,7 @@
       "description": "Smart-home gateway response payload."
     }
   ],
+  "arguments_prompt": "Read or set the Nest thermostat. Pass nothing to read current state.\n\nFields (all optional):\n  - `mode`               — `HEAT`, `COOL`, or `OFF`. Bare uppercase.\n  - `target_temperature` — Fahrenheit number (e.g. 75).\n\nExamples:\n  Change setpoint:           `{ \"target_temperature\": 75 }`\n  Switch to cooling at 72:   `{ \"mode\": \"COOL\", \"target_temperature\": 72 }`\n  Read current state:        `{}`",
   "metadata": {
     "domain": "smart_home",
     "actions": [
