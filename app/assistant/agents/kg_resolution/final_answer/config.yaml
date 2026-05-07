@@ -3,7 +3,7 @@ class_name: Agent
 action_required: false
 llm_params:
   llm_provider: "openai"
-  engine: "gpt-5.1"
+  engine: "gpt-5.5"
   model_tier: "smart"
 
 allowed_tools: []
