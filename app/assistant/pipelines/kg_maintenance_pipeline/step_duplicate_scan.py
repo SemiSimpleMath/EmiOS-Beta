@@ -174,12 +174,27 @@ def _build_candidate_pairs(
     """
     seen_pairs: set[tuple[str, str]] = set()
     candidates: list[tuple[str, str, str]] = []
+    cross_type_skipped = 0
 
     def _add_pair(a: str, b: str, tier: str) -> None:
+        nonlocal cross_type_skipped
         key = (min(a, b), max(a, b))
-        if key not in seen_pairs:
-            seen_pairs.add(key)
-            candidates.append((a, b, tier))
+        if key in seen_pairs:
+            return
+        # Cross-type duplicate proposals are nearly always wrong: an
+        # Entity (e.g. a recurring social-event entity with hundreds
+        # of edges) and an Event (one specific occurrence) share a
+        # label but are categorically distinct things. Merging them
+        # would corrupt the graph. Tier 2 already gates on same-type
+        # by construction; this catches the cross-type leaks from
+        # Tier 1 (alias overlap) and Tier 3 (embedding similarity).
+        type_a = (descriptors.get(a, {}).get("node_type") or "").strip()
+        type_b = (descriptors.get(b, {}).get("node_type") or "").strip()
+        if type_a and type_b and type_a != type_b:
+            cross_type_skipped += 1
+            return
+        seen_pairs.add(key)
+        candidates.append((a, b, tier))
 
     all_ids = list(descriptors.keys())
 
@@ -242,7 +257,10 @@ def _build_candidate_pairs(
         "[duplicate_scan] Tier 3 (embedding similarity): %d new pairs",
         len(candidates) - tier2_count,
     )
-    logger.info("[duplicate_scan] Total unique candidate pairs: %d", len(candidates))
+    logger.info(
+        "[duplicate_scan] Total unique candidate pairs: %d (cross_type_skipped=%d)",
+        len(candidates), cross_type_skipped,
+    )
 
     # Prioritize pairs involving the most-connected nodes
     def _pair_priority(pair: tuple[str, str, str]) -> float:
