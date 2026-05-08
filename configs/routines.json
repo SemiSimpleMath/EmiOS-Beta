@@ -6,8 +6,8 @@
   "routines": [
     {
       "id": "morning_briefing",
-      "enabled": true,
-      "_comment": "Example task-based routine. Provide your own tasks/morning_briefing/task_spec.md and flip enabled to use.",
+      "enabled": false,
+      "_comment": "Example task-based routine. Provide your own tasks/morning_briefing/task_spec.md, then toggle on via /routines admin UI (per-machine status, never commits to this file).",
       "name": "Morning Briefing",
       "aliases": [
         "morning briefing",

@@ -240,6 +240,15 @@ class RoutineManager:
 
     def _load_routines(self, config: Dict[str, Any]) -> list[RoutineConfig]:
         items = config.get("routines") or []
+        # Status-side overrides for the `enabled` flag. configs/routines.json
+        # is the **spec** (declarative schema: which routines exist, how
+        # they're wired, conservative shipped defaults). The status file
+        # is the **runtime state** (what the user actually has on right
+        # now, written by the /api/routines/<id>/toggle UI). Same K8s-shape
+        # spec/status separation: pulls don't clobber the user's local
+        # enables, and the user's commits to routines.json don't push
+        # personal flags into the public repo.
+        state_enabled = self._read_state_enabled_map()
         routines: list[RoutineConfig] = []
         for item in items:
             if not isinstance(item, dict):
@@ -256,10 +265,13 @@ class RoutineManager:
                 raise ValueError(f"Routine '{routine_id}' missing required field: runner")
             if runner not in ("task", "job", "tool", "function", "pipeline"):
                 raise ValueError(f"Routine '{routine_id}' has unsupported runner: {runner}")
+            # Effective enabled = status override if present, else spec default.
+            spec_default_enabled = bool(item.get("enabled", True))
+            effective_enabled = state_enabled.get(routine_id, spec_default_enabled)
             routines.append(
                 RoutineConfig(
                     routine_id=routine_id,
-                    enabled=bool(item.get("enabled", True)),
+                    enabled=bool(effective_enabled),
                     run_policy=run_policy,
                     afk_guard=afk_guard,
                     manual_toggle=manual_toggle,
@@ -272,6 +284,20 @@ class RoutineManager:
                 )
             )
         return routines
+
+    def _read_state_enabled_map(self) -> Dict[str, bool]:
+        """Return {routine_id: enabled} from the status file, for routines
+        the user has explicitly toggled. Routines not present in the map
+        fall back to the spec's default."""
+        with self._state_lock:
+            routines_state = (self._state or {}).get("routines") or {}
+        out: Dict[str, bool] = {}
+        if not isinstance(routines_state, dict):
+            return out
+        for rid, entry in routines_state.items():
+            if isinstance(entry, dict) and "enabled" in entry:
+                out[str(rid)] = bool(entry["enabled"])
+        return out
 
     # ---------------------------------------------------------------------
     # Manual toggle guard (for high-risk routines like screenshot capture)

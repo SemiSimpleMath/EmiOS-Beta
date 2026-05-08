@@ -68,6 +68,21 @@ def _load_state() -> Dict[str, Any]:
         return {"routines": {}}
 
 
+def _save_state(state: Dict[str, Any]) -> None:
+    """Atomic write of the runtime status file. Per-routine `enabled`
+    lives here (the K8s-shape "status" half of the spec/status split):
+    toggles are per-machine state, not declarative schema, so they
+    must not commit-flip configs/routines.json."""
+    p = _state_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    with tmp.open("w", encoding="utf-8", newline="\n") as f:
+        json.dump(state, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+        f.flush()
+    tmp.replace(p)
+
+
 def _find_routine(config: Dict[str, Any], routine_id: str) -> Optional[Dict[str, Any]]:
     for r in config.get("routines", []):
         if r.get("id") == routine_id:
@@ -105,10 +120,18 @@ def _enrich_routine(item: Dict[str, Any], state: Dict[str, Any]) -> Dict[str, An
     else:
         schedule_label = policy_type or "—"
 
+    # Effective enabled: status override wins over spec default.
+    # Same spec/status separation the routine_manager uses at scheduler time
+    # — keeps the UI honest about what's actually running on this machine.
+    if isinstance(state_entry, dict) and "enabled" in state_entry:
+        effective_enabled = bool(state_entry["enabled"])
+    else:
+        effective_enabled = bool(item.get("enabled", False))
+
     return {
         "id": rid,
         "name": item.get("name") or rid,
-        "enabled": bool(item.get("enabled", False)),
+        "enabled": effective_enabled,
         "runner": item.get("runner") or "—",
         "run_policy": rp,
         "policy_type": policy_type,
@@ -147,6 +170,14 @@ def routines_list():
 
 @routines_admin_bp.route("/api/routines/<routine_id>/toggle", methods=["POST"])
 def routines_toggle(routine_id: str):
+    """Toggle a routine's effective `enabled` flag. Writes to the status
+    file (resource_routine_status.json), NOT to the spec
+    (configs/routines.json) — same K8s-shape spec/status separation:
+    the schema is shared, the runtime state is per-machine. Lets users
+    pull schema updates from upstream without losing their toggle state,
+    and lets them commit schema improvements without pushing personal
+    on/off flags into the public repo.
+    """
     payload = request.get_json(silent=True) or {}
     desired = payload.get("enabled")
     with _CONFIG_LOCK:
@@ -154,10 +185,24 @@ def routines_toggle(routine_id: str):
         r = _find_routine(config, routine_id)
         if r is None:
             return jsonify({"ok": False, "error": f"routine not found: {routine_id}"}), 404
-        new_enabled = (not bool(r.get("enabled", False))) if desired is None else bool(desired)
-        r["enabled"] = new_enabled
-        _save_config(config)
-    logger.info("[routines_admin] %s enabled=%s", routine_id, new_enabled)
+
+        state = _load_state()
+        if not isinstance(state.get("routines"), dict):
+            state["routines"] = {}
+        existing = state["routines"].get(routine_id) or {}
+        if not isinstance(existing, dict):
+            existing = {}
+        # Current effective enabled = status override if set, else spec default.
+        current_enabled = (
+            bool(existing["enabled"])
+            if "enabled" in existing
+            else bool(r.get("enabled", False))
+        )
+        new_enabled = (not current_enabled) if desired is None else bool(desired)
+        existing["enabled"] = new_enabled
+        state["routines"][routine_id] = existing
+        _save_state(state)
+    logger.info("[routines_admin] %s enabled=%s (status override)", routine_id, new_enabled)
     return jsonify({"ok": True, "id": routine_id, "enabled": new_enabled})
 
 
