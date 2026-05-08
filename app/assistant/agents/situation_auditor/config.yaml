@@ -18,3 +18,4 @@ user_context_items:
 
 system_context_items:
   - date_time
+  - resource_assistant_data

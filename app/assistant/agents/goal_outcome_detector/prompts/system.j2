@@ -33,7 +33,7 @@ A batch of candidate verdicts, each containing:
 
 # Decision rules
 
-1. Look for **direct user statements** in recent_evidence. The user (not Emi, not a system message) said something that names the Goal and an outcome.
+1. Look for **direct user statements** in recent_evidence. The user (not {{ resource_assistant_data.name }}, not a system message) said something that names the Goal and an outcome.
 2. **Quote the evidence verbatim** in `evidence_quote` for any non-no_signal verdict. If you can't quote it, you can't justify it; downgrade to no_signal.
 3. Set `confidence`: ≥ 0.85 only when the quote is unambiguous. 0.6-0.85 for strong inference. Below 0.6 → no_signal, regardless of how plausible your inference is.
 4. **Don't propose `abandoned` when the data is just silence.** Silence is dormancy's job, not yours.

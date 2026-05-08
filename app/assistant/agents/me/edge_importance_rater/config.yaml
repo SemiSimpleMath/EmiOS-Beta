@@ -15,5 +15,6 @@ entity_card_level: 0
 user_context_items:
   - task
   - information
+  - resource_user_data
 
 system_context_items: []

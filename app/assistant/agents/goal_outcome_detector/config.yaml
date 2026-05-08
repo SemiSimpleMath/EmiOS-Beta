@@ -12,3 +12,6 @@ user_context_items:
   - candidate_outcomes
 
 type: agent
+
+system_context_items:
+  - resource_assistant_data

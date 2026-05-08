@@ -21,3 +21,4 @@ system_context_items:
   - room_identity
   - room_conversation
   - room_safety
+  - resource_assistant_data

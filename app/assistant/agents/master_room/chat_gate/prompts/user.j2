@@ -72,7 +72,7 @@ Entity context:
 {%- endfor %}
 {%- endif %}
 
-{%- set assistant_name = resource_assistant_data.name if resource_assistant_data else "Emi" %}
+{%- set assistant_name = resource_assistant_data.name if resource_assistant_data else "the assistant" %}
 
 ########## WHAT {{ assistant_name | upper }} HAS BEEN DOING (read-only context — do not act on) ##########
 {%- if resource_expected_calendar and resource_expected_calendar.expected_schedule %}
