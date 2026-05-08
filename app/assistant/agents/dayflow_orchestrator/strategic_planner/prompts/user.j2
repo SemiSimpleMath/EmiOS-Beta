@@ -61,6 +61,14 @@ I dispatched **{{ r.task_id }}** to `{{ r.dispatched_to }}`{% if r.dispatched_to
 
 {% endfor %}
 {%- endif %}
+{%- if recent_action_selector_actions %}
+
+########## RECENT NUDGES SENT (do not duplicate; give them air to land) ##########
+*The action_selector already pushed these to the user in the recent window. Don't generate a new task that would re-send the same intent — wait for response or for a real change in context.*
+{%- for a in recent_action_selector_actions[-15:] %}
+- [{{ a.time_local }}] {{ a.summary }}{% if a.plan_id %} (plan: {{ a.plan_id }}){% endif %}{% if a.task_id %} (task: {{ a.task_id }}){% endif %}
+{%- endfor %}
+{%- endif %}
 
 ########## NEW ARTIFACTS (triage admitted — review for planning) ##########
 {%- set all_artifacts = [] %}
