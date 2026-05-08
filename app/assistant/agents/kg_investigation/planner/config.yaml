@@ -12,7 +12,13 @@ allowed_tools:
 except_tools: []
 allowed_nodes: [return_control]
 entity_scan_keys: [incoming_message, task, information, recent_history]
-entity_card_level: 2
+# L0 = one-liner identity only (e.g. "Annika: oldest daughter of Jukka").
+# Avoids injecting the entity card's `key_facts` — those are often the
+# very claims under investigation, and including them would prime the
+# investigator with the disputed content. L0 gives just enough context
+# to disambiguate entity references; the investigator queries kg_query
+# for any fact-level information.
+entity_card_level: 0
 
 user_context_items:
   - date_time
