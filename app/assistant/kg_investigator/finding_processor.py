@@ -247,17 +247,28 @@ def _extract_report_from_audit(blackboard) -> Optional[Dict[str, Any]]:
         if sender.endswith("final_answer") and "kg_investigation" in sender:
             data = getattr(m, "data", None) or {}
             # Keep only the structured fields + the markdown rendering. Drop
-            # the standard envelope filler.
+            # the standard envelope filler. Field list reflects the
+            # post-2026-05-07 schema (recommendation prose + disposition
+            # routing); keeps `proposed_action` / `affected_records` in the
+            # whitelist for any in-flight legacy-shape reads but the new
+            # investigator no longer emits them.
             report = {
                 k: data.get(k)
                 for k in (
+                    # New (load-bearing for the executor + UI):
+                    "recommendation",
+                    "disposition",
+                    "user_question",
+                    "confidence",
+                    # Detail / dev-page rendering:
                     "diagnosis",
                     "evidence",
-                    "proposed_action",
-                    "affected_records",
                     "open_questions",
                     "final_answer_answer",
                     "result_summary",
+                    # Legacy fallback (kept so old in-flight rows roundtrip):
+                    "proposed_action",
+                    "affected_records",
                 )
                 if data.get(k) is not None
             }

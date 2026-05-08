@@ -77,6 +77,7 @@
       const userQuestion = r.user_question || '';
       const confidenceFloat = typeof r.confidence === 'number' ? r.confidence : (r.proposed_action || {}).confidence;
       const confidence = confidenceFloat != null ? (confidenceFloat * 100).toFixed(0) + '%' : '';
+      const operatorNotes = r.operator_notes || '';
       const evidenceList = Array.isArray(r.evidence) ? r.evidence : [];
       const openQuestions = Array.isArray(r.open_questions) ? r.open_questions : [];
       const primaryLabel = (f.primary_node && f.primary_node.label) || f.primary_node_id || '(no node)';
@@ -142,11 +143,19 @@
 
           ${recommendation || r.proposed_action ? `
           <div class="inv-recommendation">
-            <h4>Recommendation <span class="inv-rec-hint">(edit to refine; autosaves on blur)</span></h4>
+            <h4>Recommendation <span class="inv-rec-hint">(edit to refine; autosaves on blur — this is what the executor will run)</span></h4>
             <textarea id="rec-${esc(f.id)}" rows="6" class="inv-rec-textarea"
                       onblur="saveRecommendation('${esc(f.id)}')"
                       placeholder="What should happen and why...">${esc(recommendation)}</textarea>
             <span class="inv-save-status" id="save-status-${esc(f.id)}"></span>
+          </div>
+
+          <div class="inv-notes-block">
+            <h4>Your notes <span class="inv-rec-hint">(private context — not seen by the executor; autosaves on blur)</span></h4>
+            <textarea id="notes-${esc(f.id)}" rows="3" class="inv-notes-textarea"
+                      onblur="saveNotes('${esc(f.id)}')"
+                      placeholder="Your thoughts about this finding — won't be sent to the executor.">${esc(operatorNotes)}</textarea>
+            <span class="inv-save-status" id="notes-save-status-${esc(f.id)}"></span>
           </div>` : ''}
 
           ${legacyProposed}
@@ -204,6 +213,36 @@
         flashStatus(id, 'Saved.', false);
       } catch (e) {
         flashStatus(id, 'Save failed: ' + e.message, true);
+      }
+    };
+
+    // Notes: separate from recommendation — your private context. Stored
+    // on investigation_report_json.operator_notes; not consumed by the
+    // executor. Useful for "I'm watching this one" or "discussed with X
+    // on Y date — apply only after Z."
+    function notesValue(id) {
+      const ta = document.getElementById('notes-' + id);
+      return ta ? ta.value : '';
+    }
+    function flashNotesStatus(id, msg, isError) {
+      const el = document.getElementById('notes-save-status-' + id);
+      if (!el) return;
+      el.textContent = msg;
+      el.classList.toggle('is-error', !!isError);
+      setTimeout(() => { el.textContent = ''; el.classList.remove('is-error'); }, 3500);
+    }
+    window.saveNotes = async function saveNotes(id) {
+      const notes = notesValue(id);
+      try {
+        const res = await fetch(`/kg-maintenance/api/finding/${id}/operator_notes`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ notes }),
+        });
+        if (!res.ok) throw new Error((await res.json()).error || res.statusText);
+        flashNotesStatus(id, 'Notes saved.', false);
+      } catch (e) {
+        flashNotesStatus(id, 'Save failed: ' + e.message, true);
       }
     };
 
