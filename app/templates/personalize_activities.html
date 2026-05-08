@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Tracked Activities — Personalize Emi</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/personalize.css') }}">
+</head>
+<body>
+  <div class="pz-shell pz-shell--wide">
+    <header class="pz-header pz-header--sub">
+      <a class="pz-back" href="/personalize"><i class="fas fa-arrow-left"></i> Personalize</a>
+      <h1><i class="fas fa-clock"></i> Tracked Activities</h1>
+      <p class="pz-subtitle">
+        These set the <strong>base cadence</strong> for wellness reminders
+        (hydration, standing breaks, finger stretches, meals). An LLM agent
+        reviews them every minute and decides whether to actually fire — it
+        can shift earlier on context (just got back from a walk, fatigue
+        mention) or skip on context (you just said you had lunch). See the
+        judgement layer panel below for how that policy works today.
+      </p>
+    </header>
+
+    <!-- ── Editable base cadence ───────────────────────────────────── -->
+    <section class="pz-act-section">
+      <div class="pz-act-section__head">
+        <h2><i class="fas fa-table"></i> Base cadence (editable)</h2>
+        <span class="pz-dir-meta" id="pz-act-config-path">…</span>
+      </div>
+      <p class="pz-dir-hint">
+        Threshold = minutes between firings. Reset triggers shift the next
+        firing forward (the activity counts as "done" when one of these
+        happens). Atomic save — invalid configs are rejected before write.
+      </p>
+
+      <div id="pz-act-rows" class="pz-act-rows">
+        <div class="pz-loading">Loading…</div>
+      </div>
+
+      <div class="pz-dir-actions">
+        <button id="pz-act-save" class="pz-btn pz-btn--primary">
+          <i class="fas fa-save"></i> Save activities
+        </button>
+        <button id="pz-act-revert" class="pz-btn pz-btn--secondary" disabled>
+          <i class="fas fa-rotate-left"></i> Revert
+        </button>
+        <span id="pz-act-status" class="pz-dir-status"></span>
+      </div>
+    </section>
+
+    <!-- ── Read-only judgement layer ───────────────────────────────── -->
+    <section class="pz-act-section">
+      <div class="pz-act-section__head">
+        <h2><i class="fas fa-scale-balanced"></i> Judgement layer (read-only)</h2>
+        <span class="pz-dir-meta" id="pz-act-prompt-path">…</span>
+      </div>
+      <p class="pz-dir-hint">
+        An LLM agent (<code>dayflow_cron_tickets</code>) sits between your
+        thresholds and the user. Its policy today:
+      </p>
+
+      <ul class="pz-act-policy">
+        <li><strong>Default to no-op.</strong> "Doing nothing is the correct answer most of the time."</li>
+        <li><strong>Veto:</strong> never suggest an activity already in <em>active tickets</em>; never within 2h of a <em>recently dismissed</em> instance of the same type.</li>
+        <li><strong>Threshold integrity:</strong> normally won't fire before the threshold is met.</li>
+        <li><strong>Override</strong> (fire <em>earlier</em>): only when ALL true — high stakes, context evidence (just finished a walk, fatigue/pain mention, narrowing window), time-sensitive, and infrequent.</li>
+        <li><strong>Stale window:</strong> skip if &gt;60 min past the scheduled start ("don't remind about the 9 PM walk at 10:45 PM").</li>
+        <li><strong>One per minute:</strong> at most one suggestion per pulse.</li>
+      </ul>
+
+      <details class="pz-dir-base">
+        <summary>View raw agent prompt</summary>
+        <p class="pz-dir-hint">
+          This is the system prompt for the cron-tickets agent. Editing
+          requires the file directly today; a prompt editor is a future
+          tile.
+        </p>
+        <pre id="pz-act-prompt" class="pz-dir-preview pz-dir-preview--base">…</pre>
+      </details>
+    </section>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/personalize_activities.js') }}"></script>
+</body>
+</html>

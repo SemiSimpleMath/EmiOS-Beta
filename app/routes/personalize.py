@@ -276,6 +276,10 @@ _INSTR_DIR = "resources/instructions"
 _BASE_FILENAME = "resource_orchestrator_user_prefs.md"
 _PERSONAL_FILENAME = "resource_orchestrator_user_prefs_personal.md"
 
+# Tracked-activities config + the agent prompt that decides override/veto.
+_TRACKED_REL_PATH = "app/assistant/pipelines/dayflow/step_configs/config_tracked_activities.json"
+_AGENT_PROMPT_REL_PATH = "app/assistant/agents/dayflow_cron_tickets/prompts/system.j2"
+
 
 def _instr_paths() -> Dict[str, Path]:
     root = Path(get_repo_root())
@@ -387,4 +391,124 @@ def api_directives_post():
         })
     except Exception as e:
         logger.error("[personalize] directives write failed: %s", e, exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ── Tracked Activities (the cron+judgement page) ─────────────────────────────
+#
+# config_tracked_activities.json defines the BASE cadence per activity
+# (threshold minutes, reset triggers, init flags). The dayflow_cron_tickets
+# LLM agent reads this every minute, applies its veto/override/stale-window
+# policy from prompts/system.j2, and decides whether to actually fire.
+# This page exposes the JSON for editing and surfaces a read-only summary +
+# raw view of the agent prompt so the user knows what judgement layer sits
+# on top of their thresholds.
+
+
+def _tracked_path() -> Path:
+    return Path(get_repo_root()) / _TRACKED_REL_PATH
+
+
+def _agent_prompt_path() -> Path:
+    return Path(get_repo_root()) / _AGENT_PROMPT_REL_PATH
+
+
+@personalize_bp.route("/personalize/activities")
+def personalize_activities():
+    return render_template("personalize_activities.html")
+
+
+@personalize_bp.route("/api/personalize/activities", methods=["GET"])
+def api_activities_get():
+    """Return the parsed tracked-activities config plus the agent prompt
+    (as text) so the page can display the judgement layer's policy
+    inline."""
+    import json as _json
+    tp = _tracked_path()
+    ap = _agent_prompt_path()
+    try:
+        config = _json.loads(tp.read_text(encoding="utf-8")) if tp.exists() else {"version": 1, "activities": {}}
+        agent_prompt = ap.read_text(encoding="utf-8") if ap.exists() else ""
+    except Exception as e:
+        logger.error("[personalize] activities read failed: %s", e, exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+    return jsonify({
+        "success": True,
+        "config": config,
+        "config_path": _TRACKED_REL_PATH,
+        "agent_prompt": agent_prompt,
+        "agent_prompt_path": _AGENT_PROMPT_REL_PATH,
+    })
+
+
+@personalize_bp.route("/api/personalize/activities", methods=["POST"])
+def api_activities_post():
+    """Atomic write of the tracked-activities config. Body: {config: dict}.
+
+    Writes ONLY to the canonical file path; the path is hardcoded and
+    not derived from the request body. Validation:
+      - config must be a dict with "activities" (dict of activity defs)
+      - per-activity: display_name (str), field_name (str — must match key)
+      - threshold (dict with minutes:int, label:str) is optional but if
+        present must have those fields
+      - calendar_keywords / reset_triggers / etc. are optional but if
+        present must be lists
+    Anything that fails validation rejects the whole write — prevents a
+    half-valid config from breaking the activity_recorder.
+    """
+    import json as _json
+    body = request.get_json(silent=True) or {}
+    new_config = body.get("config")
+    if not isinstance(new_config, dict):
+        return jsonify({"success": False, "error": "body must contain 'config' dict"}), 400
+    activities = new_config.get("activities")
+    if not isinstance(activities, dict) or not activities:
+        return jsonify({"success": False, "error": "'activities' must be a non-empty dict"}), 400
+
+    # Per-activity validation. Reject the whole write on any error so we
+    # never write a partially-valid config.
+    for key, act in activities.items():
+        if not isinstance(act, dict):
+            return jsonify({"success": False, "error": f"activity '{key}' must be a dict"}), 400
+        for required in ("display_name", "field_name"):
+            if not isinstance(act.get(required), str) or not act[required].strip():
+                return jsonify({"success": False, "error": f"'{key}.{required}' must be a non-empty string"}), 400
+        if act.get("field_name") != key:
+            return jsonify({"success": False, "error": f"'{key}.field_name' must match the activity key"}), 400
+        threshold = act.get("threshold")
+        if threshold is not None:
+            if not isinstance(threshold, dict):
+                return jsonify({"success": False, "error": f"'{key}.threshold' must be a dict"}), 400
+            mins = threshold.get("minutes")
+            if not isinstance(mins, int) or mins < 1 or mins > 24 * 60:
+                return jsonify({"success": False, "error": f"'{key}.threshold.minutes' must be an int in [1, 1440]"}), 400
+        for list_field in ("calendar_keywords", "reset_triggers"):
+            if list_field in act and not isinstance(act[list_field], list):
+                return jsonify({"success": False, "error": f"'{key}.{list_field}' must be a list"}), 400
+
+    target = _tracked_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        fd, tmp_path = tempfile.mkstemp(dir=str(target.parent), suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                _json.dump(new_config, f, indent=2, ensure_ascii=False)
+                f.write("\n")
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, str(target))
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+
+        logger.info(
+            "[personalize] saved tracked-activities config (%d activities) to %s",
+            len(activities), target,
+        )
+        return jsonify({"success": True, "config": new_config, "config_path": _TRACKED_REL_PATH})
+    except Exception as e:
+        logger.error("[personalize] activities write failed: %s", e, exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
