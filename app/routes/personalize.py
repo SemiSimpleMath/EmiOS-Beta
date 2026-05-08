@@ -1,28 +1,33 @@
 """Personalization dashboard routes — gives the user direct visibility +
 control over the things that shape Emi's day-to-day behavior:
 
-- Beliefs (today): trending-up / challenged / recently-deprecated views
-  plus per-belief evidence drill-down so the user can see exactly what
-  signals are reaching the engine.
+- Beliefs: trending-up / challenged / recently-deprecated views plus
+  per-belief evidence drill-down.
+- Directives: edit resource_orchestrator_user_prefs_personal.md (the
+  gitignored personal overlay) with live-rendered preview of the final
+  concatenated prompt section the planner reads.
 
-Planned sibling pages (not yet built — placeholders in the menu):
-- Personalize directives (resource_orchestrator_user_prefs_personal.md
-  editor with live-rendered preview)
-- Cron reminders (one-click toggle / time-edit for cron_reminder routines
-  buried in configs/routines.json)
+Planned sibling page (not yet built — placeholder in the menu):
+- Reminder schedule (one-click toggle / retime / delete for
+  cron_reminder routines buried in configs/routines.json)
 
-Reads the live SQLite tables, not the exported JSON, because the JSON
-projection has no trend signal (just current state).
+Reads live SQLite for beliefs (the exported JSON has no trend signal).
+For directives, reads / writes the resource files directly and reloads
+the resource_manager cache so the next agent run sees the new content.
 """
 from __future__ import annotations
 
+import os
+import tempfile
 from datetime import timedelta
+from pathlib import Path
 from typing import Any, Dict, List
 
 from flask import Blueprint, jsonify, render_template, request
 from sqlalchemy import text as _sql
 
 from app.assistant.utils.logging_config import get_logger
+from app.assistant.utils.path_utils import get_repo_root
 from app.assistant.utils.time_utils import utc_now
 from app.models.base import get_session
 
@@ -256,3 +261,130 @@ def api_belief_evidence(belief_id: str):
         "belief": belief,
         "evidence": evidence,
     })
+
+
+# ── Directives editor ────────────────────────────────────────────────────────
+#
+# The strategic_planner's "Section 15. User standing directives" reads the
+# concatenation of resource_orchestrator_user_prefs.md (public template) and
+# resource_orchestrator_user_prefs_personal.md (gitignored overlay). Editing
+# the public file is risky — sanitization passes have wiped personal lines
+# off it before. The personal overlay is the safe edit surface; this editor
+# reads + writes it and shows a live preview of the final concatenation.
+
+_INSTR_DIR = "resources/instructions"
+_BASE_FILENAME = "resource_orchestrator_user_prefs.md"
+_PERSONAL_FILENAME = "resource_orchestrator_user_prefs_personal.md"
+
+
+def _instr_paths() -> Dict[str, Path]:
+    root = Path(get_repo_root())
+    return {
+        "base": root / _INSTR_DIR / _BASE_FILENAME,
+        "personal": root / _INSTR_DIR / _PERSONAL_FILENAME,
+    }
+
+
+def _render_combined(base_text: str, personal_text: str) -> str:
+    """Same shape as ResourceManager.load_all_from_directory's overlay
+    appender. Public template comes first; personal overlay appended
+    after a blank line so the LLM treats personal lines as later
+    instructions (later wins at LLM read time)."""
+    base = (base_text or "").rstrip()
+    personal = (personal_text or "").lstrip()
+    if not personal:
+        return base
+    return base + "\n\n" + personal
+
+
+@personalize_bp.route("/personalize/directives")
+def personalize_directives():
+    return render_template("personalize_directives.html")
+
+
+@personalize_bp.route("/api/personalize/directives", methods=["GET"])
+def api_directives_get():
+    """Return base (public) text + personal overlay text + the rendered
+    concatenation that actually reaches the planner prompt."""
+    paths = _instr_paths()
+    try:
+        base_text = paths["base"].read_text(encoding="utf-8") if paths["base"].exists() else ""
+        personal_text = paths["personal"].read_text(encoding="utf-8") if paths["personal"].exists() else ""
+    except Exception as e:
+        logger.error("[personalize] directives read failed: %s", e, exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+    return jsonify({
+        "success": True,
+        "base": {
+            "filename": _BASE_FILENAME,
+            "content": base_text,
+            "exists": paths["base"].exists(),
+        },
+        "personal": {
+            "filename": _PERSONAL_FILENAME,
+            "content": personal_text,
+            "exists": paths["personal"].exists(),
+        },
+        "combined": _render_combined(base_text, personal_text),
+    })
+
+
+@personalize_bp.route("/api/personalize/directives", methods=["POST"])
+def api_directives_post():
+    """Atomic write of the personal overlay file. Body: {content: str}.
+
+    Path is hardcoded — the editor only ever writes to the personal
+    overlay, never to the public template (which would be reverted by
+    the next public-repo cleanup pass). After writing, the
+    resource_manager picks up the change via mtime-based reload on the
+    next prompt build.
+    """
+    paths = _instr_paths()
+    try:
+        body = request.get_json(silent=True) or {}
+        content = body.get("content")
+        if not isinstance(content, str):
+            return jsonify({"success": False, "error": "content must be a string"}), 400
+
+        target = paths["personal"]
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        # Atomic write: tempfile in same dir → os.replace. A crash mid-write
+        # leaves the previous good file in place rather than a half-written
+        # personal overlay (which would corrupt the system prompt).
+        fd, tmp_path = tempfile.mkstemp(dir=str(target.parent), suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(content)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, str(target))
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+
+        logger.info(
+            "[personalize] saved personal directives overlay (%d chars) to %s",
+            len(content), target,
+        )
+
+        # Read back so client gets the canonical state plus the rendered
+        # combined preview.
+        base_text = paths["base"].read_text(encoding="utf-8") if paths["base"].exists() else ""
+        personal_text = target.read_text(encoding="utf-8")
+        return jsonify({
+            "success": True,
+            "personal": {
+                "filename": _PERSONAL_FILENAME,
+                "content": personal_text,
+                "exists": True,
+            },
+            "combined": _render_combined(base_text, personal_text),
+        })
+    except Exception as e:
+        logger.error("[personalize] directives write failed: %s", e, exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500

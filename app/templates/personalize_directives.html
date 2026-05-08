@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Personal Directives — Personalize Emi</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/personalize.css') }}">
+</head>
+<body>
+  <div class="pz-shell pz-shell--wide">
+    <header class="pz-header pz-header--sub">
+      <a class="pz-back" href="/personalize"><i class="fas fa-arrow-left"></i> Personalize</a>
+      <h1><i class="fas fa-clipboard-list"></i> Personal Directives</h1>
+      <p class="pz-subtitle">
+        Your standing instructions to the orchestrator — what to nudge, when
+        to defer, who to escalate to. Edits here go into your gitignored
+        <code>_personal.md</code> overlay; the public template stays untouched.
+        Changes take effect on the next prompt build (within a few seconds).
+      </p>
+    </header>
+
+    <div class="pz-dir-grid">
+      <!-- Edit pane -->
+      <section class="pz-dir-pane pz-dir-pane--edit">
+        <div class="pz-dir-pane__head">
+          <h2><i class="fas fa-pen-to-square"></i> Your overlay</h2>
+          <span class="pz-dir-meta" id="pz-dir-personal-meta">…</span>
+        </div>
+        <p class="pz-dir-hint">
+          Markdown. Appended <em>after</em> the public template at LLM read time —
+          so anything you write here overrides the template defaults. Gitignored;
+          stays local.
+        </p>
+        <textarea id="pz-dir-textarea" class="pz-dir-textarea" spellcheck="false" placeholder="# Personal directives
+
+## My specific nudge preferences
+- Always notify about context changes...
+"></textarea>
+        <div class="pz-dir-actions">
+          <button id="pz-dir-save" class="pz-btn pz-btn--primary">
+            <i class="fas fa-save"></i> Save overlay
+          </button>
+          <button id="pz-dir-revert" class="pz-btn pz-btn--secondary">
+            <i class="fas fa-rotate-left"></i> Revert
+          </button>
+          <span id="pz-dir-status" class="pz-dir-status"></span>
+        </div>
+      </section>
+
+      <!-- Preview + base reference pane -->
+      <section class="pz-dir-pane pz-dir-pane--preview">
+        <div class="pz-dir-pane__head">
+          <h2><i class="fas fa-eye"></i> What the planner reads</h2>
+          <span class="pz-dir-meta">final concatenation, public + your overlay</span>
+        </div>
+        <p class="pz-dir-hint">
+          This is exactly what gets injected into Section 15 of the strategic
+          planner's system prompt every run. Refreshed live as you save.
+        </p>
+        <pre id="pz-dir-preview" class="pz-dir-preview">…</pre>
+
+        <details class="pz-dir-base">
+          <summary>Show public template (read-only baseline)</summary>
+          <p class="pz-dir-hint">
+            This file is in the repo and gets reset by sanitization passes. Edit
+            your overlay above, not this — that's the lesson from the May 2026
+            regression.
+          </p>
+          <pre id="pz-dir-base" class="pz-dir-preview pz-dir-preview--base">…</pre>
+        </details>
+      </section>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/personalize_directives.js') }}"></script>
+</body>
+</html>
