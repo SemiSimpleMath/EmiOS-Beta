@@ -37,7 +37,7 @@ class PipelineStep:
 | Weekly Insights | `weekly_insights` | weekly Mon 00:10 | Cross-day pattern synthesis |
 | Belief Engine (x6) | `belief_engine_*` | daily 00:30-01:00 | Domain-specific belief updates + export |
 | KG Maintenance | `kg_maintenance_pipeline` | weekly Mon 02:00 | Orphan nodes, duplicates, suspect nodes |
-| Entity Card Maintenance | `entity_card_maintenance_pipeline` | weekly Tue 02:00 | Broken links, junk names, stale content |
+| Entity Card Maintenance | `entity_card_maintenance_pipeline` | daily 02:00 | Broken links, junk names, stale content |
 
 ### Scope Policy
 

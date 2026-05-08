@@ -174,7 +174,7 @@ UI flow: filter for suspicious cards, queue a regen run, poll status, refresh li
 
 ## Maintenance pipeline
 
-`app/assistant/pipelines/entity_card_maintenance_pipeline/pipeline.py`. Routine `entity_card_maintenance_pipeline`, weekly Tuesday 02:00 (`configs/routines.json:358-376`). All steps are pure SQL — no LLM calls. Each step is independent (one failure does not abort the others) and writes findings via `entity_card_maintenance.store.upsert_finding`, which dedupes pending findings on `(finding_type, entity_card_id)` (`store.py:31-88`).
+`app/assistant/pipelines/entity_card_maintenance_pipeline/pipeline.py`. Routine `entity_card_maintenance_pipeline`, daily 02:00 (flipped from weekly Tuesday → daily on 2026-05-07 so KG mutations get reflected in cards within ~24h instead of up to 7 days). All steps are pure SQL — no LLM calls. Each step is independent (one failure does not abort the others) and writes findings via `entity_card_maintenance.store.upsert_finding`, which dedupes pending findings on `(finding_type, entity_card_id)` (`store.py:31-88`).
 
 Scan order and contracts:
 
@@ -235,7 +235,7 @@ The shared-primitives plan in memory `project_kg_projection_shared_primitives` f
 | `app/assistant/pipelines/entity_cards/card_writer.py` | Single-LLM-call summarizer + persist |
 | `app/assistant/pipelines/entity_cards/contact_extractor.py` | Deterministic structured-contact extraction |
 | `app/assistant/pipelines/entity_cards/kg_entity_card_pipeline/kg_entity_card_pipeline.py` | Selection helpers + `store_entity_card_in_db` |
-| `app/assistant/pipelines/entity_card_maintenance_pipeline/` | Weekly maintenance pipeline (6 SQL scan steps) |
+| `app/assistant/pipelines/entity_card_maintenance_pipeline/` | Daily maintenance pipeline (6 SQL scan steps) |
 | `app/assistant/database/entity_card_maintenance_finding.py` | Findings table model |
 | `app/assistant/entity_card_maintenance/store.py` | Findings CRUD + `execute_approved_finding` |
 | `app/routes/entity_cards_editor.py` | `/entity_cards` editor + `/api/entity_cards/*` |
