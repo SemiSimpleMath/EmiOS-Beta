@@ -35,6 +35,7 @@ import app.assistant.tests.test_setup  # noqa: F401
 import app.assistant.kg.db.knowledge_graph_db_sqlite  # noqa: F401  Node, Edge
 import app.assistant.database.kg_chat_projection      # noqa: F401  KGNodeEvidence, KGEdgeEvidence
 import app.assistant.database.claim_proposals         # noqa: F401  ClaimProposal*
+import app.assistant.database.kg_node_verdict         # noqa: F401  KGNodeVerdict
 import app.assistant.database.db_handler              # noqa: F401  UnifiedLog2026 + others
 
 from app.models.base import Base, get_session
@@ -56,6 +57,7 @@ def kg_clean_db():
     from app.assistant.database.claim_proposals import (
         ClaimProposal, ClaimProposalEdge, ClaimProposalEvidence, ClaimProposalNode,
     )
+    from app.assistant.database.kg_node_verdict import KGNodeVerdict
     from app.assistant.kg.db.knowledge_graph_db_sqlite import Edge, Node
 
     session = get_session()
@@ -63,6 +65,7 @@ def kg_clean_db():
         for tbl in (
             KGNodeEvidence, KGEdgeEvidence,
             ClaimProposalEdge, ClaimProposalEvidence, ClaimProposalNode, ClaimProposal,
+            KGNodeVerdict,
             Edge, Node,
         ):
             session.query(tbl).delete()

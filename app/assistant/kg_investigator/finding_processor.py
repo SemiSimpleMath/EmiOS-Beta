@@ -325,15 +325,18 @@ def investigate_one(finding_id: str) -> Dict[str, Any]:
     if report.get("take_action") is False:
         from app.assistant.kg_maintenance.store import set_status
         from app.assistant.kg_maintenance.verdict_store import record_verdict
+
         memo = (report.get("verdict_memo") or "").strip()
         verdict_type = (report.get("verdict_type") or "").strip()
         verdict_node_ids = report.get("verdict_node_ids") or []
         if not isinstance(verdict_node_ids, list):
             verdict_node_ids = []
-        # Fall back to the finding's own subject node ids if the
-        # investigator didn't fill verdict_node_ids — keeps the verdict
-        # discoverable even for older agent runs.
-        if not verdict_node_ids:
+        # Fall back to the finding's own subject node ids ONLY when the
+        # investigator gave us a verdict_type + memo but forgot the ids.
+        # Don't synthesize verdicts when the investigator skipped the
+        # whole contract — that's an investigator bug we want surfaced,
+        # not papered over.
+        if not verdict_node_ids and verdict_type and memo:
             with get_db_manager().read_session() as session:
                 f = session.query(KGMaintenanceFinding).filter_by(id=finding_id).first()
                 if f is not None:
@@ -341,32 +344,73 @@ def investigate_one(finding_id: str) -> Dict[str, Any]:
                         nid for nid in (f.primary_node_id, f.secondary_node_id) if nid
                     ]
 
-        verdict_id = None
-        if verdict_type and memo and verdict_node_ids:
-            verdict_id = record_verdict(
-                verdict_type=verdict_type,
-                memo=memo,
-                node_ids=verdict_node_ids,
-                decided_by="agent:kg_investigation",
-                reasoning=report.get("recommendation"),
-                source_finding_id=finding_id,
-                confidence=report.get("confidence"),
+        if not (verdict_type and memo and verdict_node_ids):
+            # Investigator violated the take_action=False contract. Escalate
+            # rather than dismiss — silently dropping a finding with no
+            # verdict means future runs re-investigate the same question
+            # forever and we don't notice the broken contract.
+            logger.error(
+                "[finding_processor] take_action=False but contract violated "
+                "(verdict_type=%r memo=%r ids=%r) on finding %s — escalating",
+                verdict_type, memo, verdict_node_ids, finding_id,
             )
-        else:
-            logger.warning(
-                "[finding_processor] take_action=False but missing verdict_type/"
-                "memo/node_ids on finding %s — verdict not recorded",
+            set_status(
+                finding_id,
+                "escalated",
+                executed_by="agent:kg_investigation",
+                execution_notes=(
+                    "Investigator emitted take_action=False but missing one or "
+                    "more of verdict_type / verdict_memo / verdict_node_ids. "
+                    "No verdict recorded; finding escalated for human review."
+                ),
+            )
+            return {
+                "status": "escalated",
+                "finding_id": finding_id,
+                "reason": "take_action_false_contract_violation",
+            }
+
+        verdict_id = record_verdict(
+            verdict_type=verdict_type,
+            memo=memo,
+            node_ids=verdict_node_ids,
+            decided_by="agent:kg_investigation",
+            reasoning=report.get("recommendation"),
+            source_finding_id=finding_id,
+            confidence=report.get("confidence"),
+        )
+        if verdict_id is None:
+            # record_verdict returned None — input rejected (unknown
+            # verdict_type, etc.). Surface as escalation, not dismiss.
+            logger.error(
+                "[finding_processor] verdict write rejected on finding %s "
+                "— escalating instead of dismissing",
                 finding_id,
             )
+            set_status(
+                finding_id,
+                "escalated",
+                executed_by="agent:kg_investigation",
+                execution_notes=(
+                    f"Investigator emitted take_action=False with "
+                    f"verdict_type={verdict_type!r} but verdict_store "
+                    f"rejected the write. No verdict recorded; escalated."
+                ),
+            )
+            return {
+                "status": "escalated",
+                "finding_id": finding_id,
+                "reason": "verdict_write_rejected",
+            }
 
-        notes = f"Investigator verdict: no action needed. Memo: {memo}" if memo else "Investigator verdict: no action needed."
-        if verdict_id:
-            notes += f" (verdict_id={verdict_id})"
         set_status(
             finding_id,
             "dismissed",
             executed_by="agent:kg_investigation",
-            execution_notes=notes,
+            execution_notes=(
+                f"Investigator verdict: no action needed. "
+                f"Memo: {memo} (verdict_id={verdict_id})"
+            ),
         )
         return {
             "status": "dismissed",

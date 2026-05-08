@@ -590,7 +590,7 @@
         "time_local": "03:45",
         "quiet_hours_ok": true
       },
-      "notes": "Drains the oldest investigated findings through kg_mutation_manager — applies the proposed_action when the investigator's confidence is high enough, otherwise calls kg_finding_escalate which writes a user-facing question. Closes the self-healing loop: pending → investigated → executed (or → escalated for user prose-resolve). Runs after the cluster resolver (03:30) so leads aren't applied separately from siblings."
+      "notes": "Drains investigated findings whose 24h dev-page grace window has expired. Filters to disposition='auto_apply' (set by kg_investigation::final_answer when its confidence is high enough); 'needs_user_review' findings stay in the user queue. Hands each to kg_resolution_manager which reads the recommendation prose and applies the matching mutations from its full mutator suite (merge/delete/update/etc.). Closes the self-healing loop: pending → investigated → executed (mutations applied) | escalated (planner couldn't operationalize) | dismissed (take_action=False short-circuit, written by the investigator before this routine runs)."
     },
     {
       "id": "kg_finding_cluster_resolve",

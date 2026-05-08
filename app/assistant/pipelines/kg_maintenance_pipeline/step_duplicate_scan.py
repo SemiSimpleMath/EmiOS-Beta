@@ -172,7 +172,12 @@ def _build_candidate_pairs(
     Pairs are sorted by combined edge count (most connected first) so the
     most important nodes are reviewed within the per-run budget.
     """
-    from app.assistant.kg_maintenance.verdict_store import is_pair_marked_distinct
+    from app.assistant.kg_maintenance.verdict_store import load_distinct_pairs
+
+    # Bulk-fetch all active 'distinct' verdicts once, locally canonicalized
+    # by the store as (a, b) with a < b. Hot path: every Tier 1/2/3 pair
+    # checks membership in this set instead of opening a read session.
+    distinct_pairs = load_distinct_pairs()
 
     seen_pairs: set[tuple[str, str]] = set()
     candidates: list[tuple[str, str, str]] = []
@@ -199,7 +204,7 @@ def _build_candidate_pairs(
         # Prior-verdict short-circuit: if the investigator has already
         # decided these two are distinct, skip the LLM call. The
         # finding's verdict prose is durable; re-asking is waste.
-        if is_pair_marked_distinct(a, b):
+        if key in distinct_pairs:
             prior_verdict_skipped += 1
             return
         seen_pairs.add(key)

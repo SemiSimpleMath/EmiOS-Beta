@@ -43,9 +43,11 @@ VALID_VERDICT_TYPES = {
 def canonical_pair(node_id_a: str, node_id_b: Optional[str]) -> Tuple[str, Optional[str]]:
     """Return (a, b) in canonical order: a < b lexicographically.
 
-    Single-node verdicts (b is None or empty) pass through unchanged.
+    - Single-node verdicts (b is None or empty) pass through with b=None.
+    - Self-pair (a == b) collapses to single-node form (a, None) so
+      callers can't write a (X, X) pair-row that no lookup will hit.
     """
-    if not node_id_b:
+    if not node_id_b or node_id_a == node_id_b:
         return node_id_a, None
     if node_id_a <= node_id_b:
         return node_id_a, node_id_b
@@ -85,11 +87,30 @@ def record_verdict(
         logger.warning("[verdict_store] record_verdict skipped — empty memo")
         return None
 
+    # Closed vocabulary — any unknown type is a contract violation, not
+    # an extension point. The downstream filters (duplicate_scan,
+    # proposal_promoter) match on these strings; silently widening the
+    # set corrupts those filters.
     if verdict_type not in VALID_VERDICT_TYPES:
-        logger.warning(
-            "[verdict_store] unknown verdict_type %r — accepting anyway",
-            verdict_type,
+        logger.error(
+            "[verdict_store] unknown verdict_type %r — rejecting write. "
+            "Allowed: %s",
+            verdict_type, sorted(VALID_VERDICT_TYPES),
         )
+        return None
+
+    # The schema permits 1-3 ids. The store row holds at most a pair, so
+    # 3+ ids is a contract violation we should flag rather than silently
+    # truncate. Caller (finding_processor) is expected to canonicalize
+    # to (a) one single-node verdict, (b) one pair, or (c) split into
+    # multiple verdicts before calling.
+    if len(node_ids) > 2:
+        logger.error(
+            "[verdict_store] record_verdict refusing %d-id verdict; "
+            "schema row holds at most a pair. ids=%s",
+            len(node_ids), node_ids,
+        )
+        return None
 
     a = node_ids[0]
     b = node_ids[1] if len(node_ids) >= 2 else None
@@ -183,10 +204,34 @@ def get_verdicts_for_node(
 
 def is_pair_marked_distinct(node_id_a: str, node_id_b: str) -> bool:
     """Convenience predicate for the duplicate-scan filter and
-    proposal_promoter merge filter."""
+    proposal_promoter merge filter.
+
+    For batch use, prefer ``load_distinct_pairs()`` + local set membership
+    — calling this in a hot loop opens one read session per pair.
+    """
     return bool(
         get_verdicts_for_pair(node_id_a, node_id_b, verdict_type="distinct")
     )
+
+
+def load_distinct_pairs() -> set[Tuple[str, str]]:
+    """One-shot: fetch every active 'distinct' verdict's canonical pair.
+
+    Returns a set of ``(node_id_a, node_id_b)`` tuples in canonical order
+    so callers can do `(a, b) in distinct_pairs` after canonicalizing
+    locally. Used by duplicate_scan to filter hundreds of candidate
+    pairs against the verdict table without N round-trips.
+    """
+    with get_db_manager().read_session() as session:
+        rows = (
+            session.query(KGNodeVerdict.node_id_a, KGNodeVerdict.node_id_b)
+            .filter(KGNodeVerdict.verdict_type == "distinct")
+            .filter(KGNodeVerdict.superseded_at.is_(None))
+            .filter(KGNodeVerdict.node_id_b.isnot(None))
+            .all()
+        )
+    # Stored canonically (a < b), so no re-sort needed.
+    return {(a, b) for a, b in rows if a and b}
 
 
 def supersede_verdict(verdict_id: str, *, reason: str) -> bool:

@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class EvidenceItem(BaseModel):
@@ -175,3 +175,38 @@ class AgentForm(BaseModel):
     final_answer_task: Optional[str] = ""
     final_answer_what_was_done: Optional[str] = ""
     final_answer_interesting_info: Optional[str] = ""
+
+    @model_validator(mode="after")
+    def _enforce_conditional_contract(self):
+        """The verdict_*/disposition fields are conditionally required;
+        the type system can't express that, so we enforce here.
+
+        - take_action=False  → verdict_type / verdict_memo / verdict_node_ids
+                                 must all be set.
+        - take_action=True + needs_user_review → user_question must be set.
+
+        Raising at parse time means the manager_exit path never persists
+        a malformed report (better than discovering the breakage at the
+        finding_processor branch and silently escalating).
+        """
+        if self.take_action is False:
+            missing = [
+                name for name, val in (
+                    ("verdict_type", (self.verdict_type or "").strip()),
+                    ("verdict_memo", (self.verdict_memo or "").strip()),
+                    ("verdict_node_ids", self.verdict_node_ids),
+                )
+                if not val
+            ]
+            if missing:
+                raise ValueError(
+                    f"take_action=False requires {missing}; the verdict "
+                    f"is the durable record. Fill them or set take_action=True."
+                )
+        elif self.take_action is True:
+            if (self.disposition or "").strip() == "needs_user_review" and not (self.user_question or "").strip():
+                raise ValueError(
+                    "disposition='needs_user_review' requires user_question — "
+                    "the specific question the user must answer."
+                )
+        return self

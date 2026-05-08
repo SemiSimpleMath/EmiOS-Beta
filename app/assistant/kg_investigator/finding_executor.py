@@ -247,34 +247,48 @@ def execute_one(finding_id: str) -> Dict[str, Any]:
         and not regens
         and not outcome.get("findings_resolved")
     )
-    if no_op:
-        try:
-            from app.assistant.kg_maintenance.store import set_status
-            summary = outcome.get("result_summary") or outcome.get("summary") or ""
-            set_status(
-                finding_id, "escalated",
-                executed_by="ui:executor_no_op",
-                execution_notes=(
-                    f"Executor ran but applied no mutations — planner declined "
-                    f"to operationalize the recommendation (data may have "
-                    f"shifted, ids may be stale, or the case became ambiguous). "
-                    f"Manager said: {summary[:300]}"
-                ),
-            )
-            return {
-                "status": "escalated",
-                "finding_id": finding_id,
-                "outcome": outcome,
-                "result_summary": "Escalated — executor's planner declined to mutate. Re-investigate via /kg-dev.",
-                "terminal_status": "escalated",
-            }
-        except Exception as e:
-            logger.error("failed to escalate finding %s after no-op: %s", finding_id, e)
+    from app.assistant.kg_maintenance.store import set_status
 
+    if no_op:
+        summary = outcome.get("result_summary") or outcome.get("summary") or ""
+        set_status(
+            finding_id, "escalated",
+            executed_by="agent:kg_resolution_executor",
+            execution_notes=(
+                f"Executor ran but applied no mutations — planner declined "
+                f"to operationalize the recommendation (data may have "
+                f"shifted, ids may be stale, or the case became ambiguous). "
+                f"Manager said: {summary}"
+            ),
+        )
+        return {
+            "status": "escalated",
+            "finding_id": finding_id,
+            "outcome": outcome,
+            "result_summary": "Escalated — executor's planner declined to mutate. Re-investigate via /kg-dev.",
+            "terminal_status": "escalated",
+        }
+
+    # Positive close: executor applied mutations. Without this the finding
+    # stays in 'investigated' forever and the cron sweep re-picks it on
+    # every run. The executor's planner has no kg_finding_resolve tool, so
+    # the driver owns the close.
+    summary = outcome.get("result_summary") or outcome.get("summary") or ""
+    mutation_count = len(mutations)
+    regen_count = len(regens)
+    set_status(
+        finding_id, "executed",
+        executed_by="agent:kg_resolution_executor",
+        execution_notes=(
+            f"Executor applied {mutation_count} mutation(s), "
+            f"{regen_count} regeneration(s). Manager said: {summary}"
+        ),
+    )
     return {
-        "status": "ran",
+        "status": "executed",
         "finding_id": finding_id,
         "outcome": outcome,
+        "terminal_status": "executed",
     }
 
 

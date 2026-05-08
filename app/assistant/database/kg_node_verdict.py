@@ -18,9 +18,10 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import Column, DateTime, Float, Index, String, Text, func
+from sqlalchemy import Column, Float, Index, String, Text, UniqueConstraint
 
 from app.models.base import Base
+from app.assistant.utils.time_utils import AwareUtcDateTime, utc_now
 
 
 class KGNodeVerdict(Base):
@@ -55,15 +56,14 @@ class KGNodeVerdict(Base):
     # When non-null, this verdict has been overridden (e.g., by a later
     # investigation that concluded otherwise, or by a node deletion that
     # made the verdict moot). Filter on superseded_at IS NULL in lookups.
-    superseded_at = Column(DateTime(timezone=True), nullable=True)
+    superseded_at = Column(AwareUtcDateTime, nullable=True)
     superseded_reason = Column(Text, nullable=True)
 
     # ── Audit ─────────────────────────────────────────────────────────────────
-    created_at = Column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=func.now(),
-    )
+    # Python-side default: server_default=func.now() on SQLite returns a
+    # naive timestamp that bypasses AwareUtcDateTime's bind path, leaving
+    # writes mixed-tz on disk. utc_now() always returns aware UTC.
+    created_at = Column(AwareUtcDateTime, nullable=False, default=utc_now)
 
     __table_args__ = (
         Index("ix_kg_verdict_pair", "node_id_a", "node_id_b"),
