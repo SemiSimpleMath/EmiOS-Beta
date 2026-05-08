@@ -203,6 +203,12 @@ def run(ctx: PipelineContext) -> dict:
                 "node_importance": node_importance,
             },
             pipeline_run_id=ctx.run_id,
+            # Already-applied closure — the State's end_date is set, the
+            # action is in kg_revision_log. This row is a notification of
+            # a noteworthy closure for dashboard visibility, not a work
+            # item. Skip the investigator drain; status='executed' from
+            # the start.
+            initial_status="executed",
         )
         if created:
             findings_created += 1

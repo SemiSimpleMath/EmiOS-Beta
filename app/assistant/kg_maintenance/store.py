@@ -46,6 +46,7 @@ def upsert_finding(
     agent_name: Optional[str] = None,
     evidence: Optional[dict] = None,
     pipeline_run_id: Optional[str] = None,
+    initial_status: str = "pending",
 ) -> tuple[str, bool]:
     """
     Insert a new finding, or skip if a pending/approved one already exists for
@@ -84,7 +85,7 @@ def upsert_finding(
         session.add(KGMaintenanceFinding(
             id=finding_id,
             finding_type=finding_type,
-            status="pending",
+            status=initial_status,
             priority=priority,
             primary_node_id=primary_node_id,
             secondary_node_id=secondary_node_id,
