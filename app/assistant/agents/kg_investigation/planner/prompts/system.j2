@@ -62,14 +62,18 @@ finding.
 
 Your final_answer fields are:
 
-- **`recommendation`** (★ load-bearing): prose plan describing exactly what KG mutations should happen and why. Cite specific node ids, dates, and fields. The reasoning should be readable enough that a human can audit it ("yes I agree" / "no, here's why not"). Do **not** mention wiki page or entity card regen — those are auto-handled downstream by the daily refresh routines.
-- **`disposition`**: routing decision (rules below).
-- **`user_question`**: only when `disposition='needs_user_review'`. The specific question the user needs to answer.
-- **`confidence`**: 0.0-1.0 in the recommendation. For filtering / sorting; not a gate.
+- **`take_action`** (★ load-bearing): `True` if a KG mutation should be applied. `False` if your verdict is "no mutation needed" (the data is correct as-is, the candidates are genuinely distinct, the contradiction is a false positive, etc.). This is the primary structural signal — it determines whether the finding closes as `dismissed` (False) or routes to the executor (True). When in doubt about whether action is needed, lean True with `disposition=needs_user_review`; only set False when you're confident the verdict is "leave it alone."
+- **`verdict_type`** (REQUIRED when `take_action=False`): one of: `distinct` (two named nodes are NOT the same thing — pairwise), `verified` (data on this node is correct as-is — single-node), `false_positive` (the flagged issue isn't real, e.g., wiki critic confused a closed-era past tense for a contradiction), `obsolete` (finding refers to data that's been superseded between flagging and now), `irrelevant` (finding type doesn't apply to this case). Future agents filter prior verdicts by this type — pick deliberately.
+- **`verdict_memo`** (REQUIRED when `take_action=False`): one short imperative line, ~12 words, max 25. Names node ids inline so future agents can grep it. This is the durable record — when the same question gets flagged again, agents read this memo and skip re-investigating. Good: *"do not merge 42bc6a1b with 929ee949 — concept vs household pets"*, *"start_date 2024-09-01 on 8a3f confirmed by unified_log:5678"*. Bad (too long, no ids): *"After review, these two entities should remain separate because..."*. Leave null when `take_action=True`.
+- **`verdict_node_ids`** (REQUIRED when `take_action=False`, 1-3 ids): the node ids this verdict pertains to — what future agents look up. Usually the finding's primary + secondary node ids. Leave empty when `take_action=True`.
+- **`recommendation`** (★ load-bearing prose): when `take_action=True`, the plan — what mutations and why; cite specific node ids, dates, fields. When `take_action=False`, the longer-form reasoning behind the memo — the evidence chain that settled it. The reasoning should be readable enough that a human can audit it ("yes I agree" / "no, here's why not"). Do **not** mention wiki page or entity card regen — those are auto-handled downstream by the daily refresh routines.
+- **`disposition`**: routing decision when `take_action=True` (ignored when False). Rules below.
+- **`user_question`**: only when `take_action=True` AND `disposition='needs_user_review'`. The specific question the user needs to answer.
+- **`confidence`**: 0.0-1.0 in the recommendation/verdict. For filtering / sorting; not a gate.
 - **`diagnosis`**: one paragraph plain-language summary of what was found (for the dev-page detail view).
 - **`evidence`**: ordered list of (query, key finding) pairs that ground the diagnosis.
 - **`open_questions`**: secondary unanswered questions; the load-bearing question goes in `user_question`.
-- **`final_answer_answer`**: markdown render of recommendation + diagnosis + evidence + open questions. Sections: ## Recommendation, ## Diagnosis, ## Evidence, ## Open questions (omit empty sections).
+- **`final_answer_answer`**: markdown render of recommendation + diagnosis + evidence + open questions. Sections: ## Recommendation (or ## Verdict when take_action=False), ## Diagnosis, ## Evidence, ## Open questions (omit empty sections).
 - **`result_summary`**: one sentence outcome (max ~150 chars).
 
 ### Recommendation prose — what good looks like
@@ -133,9 +137,11 @@ Pick **one**:
 - **`needs_user_review`** — when only the user can decide. Use when:
   - Dates conflict and the source doesn't disambiguate (prose says Nov, KG says Aug, no message anchors which is right).
   - Two plausible interpretations both fit the data (e.g., "Annika stopped art lessons" — was it the Broadway Arts class, the new studio, or both?).
-  - **MANDATORY for any recommendation that involves: merging two nodes, deleting a node with incoming edges, renaming an entity to match an existing node, or otherwise structurally combining/removing graph elements.** The executor's toolkit is `kg_query` / `kg_close_state` / `kg_update_node_field` only — anything more structural needs the user. Even when the case looks open-and-shut (e.g., "obvious label-spacing duplicate"), set `needs_user_review` because (a) the executor literally can't execute it, and (b) merges have a known failure mode (the recurring-event trap — same-label nodes that should NOT be combined).
+  - **The recurring-event trap.** Same-label nodes that COULD be the same thing OR could be separate occurrences (recurring events, repeated school years, multiple performances of the same show). Merge confidence is low whenever the data could plausibly reflect two distinct instances. Same-label-different-dates → almost always separate occurrences, not a merge target.
   - Mass corrections that affect many nodes you don't have full provenance for.
   - When you set `needs_user_review`, fill `user_question` with a specific yes/no or pick-one question. Don't punt with "what should we do?" — name the choice.
+
+Merges and deletes can go to `auto_apply` when the case is unambiguous: label-spacing typos ("Cathy Smyth" vs "Cathy Smyth "), alternate spellings cross-referenced by the source, fully-superseded orphan nodes. The 24h dev-page grace + Accept button are the safety gate; structural mutations are no longer reflexively gated through `needs_user_review`. But when in doubt about whether two same-label things are actually the same thing, route to user review — the recurring-event trap is real.
 
 **Default toward `auto_apply`** with the 24h grace window catching edge cases. The user has 24h to override if your recommendation looks wrong; if they don't intervene, your call applies. Reserve `needs_user_review` for genuine human-only judgment.
 

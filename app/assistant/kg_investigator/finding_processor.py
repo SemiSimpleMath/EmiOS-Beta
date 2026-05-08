@@ -256,6 +256,10 @@ def _extract_report_from_audit(blackboard) -> Optional[Dict[str, Any]]:
                 k: data.get(k)
                 for k in (
                     # New (load-bearing for the executor + UI):
+                    "take_action",
+                    "verdict_type",
+                    "verdict_memo",
+                    "verdict_node_ids",
                     "recommendation",
                     "disposition",
                     "user_question",
@@ -313,6 +317,65 @@ def investigate_one(finding_id: str) -> Dict[str, Any]:
         return {"status": "no_report", "finding_id": finding_id}
 
     _persist_report(finding_id=finding_id, report=report)
+
+    # take_action=False short-circuits the executor path. The investigator
+    # has reached a verdict ("leave it alone"); flip directly to 'dismissed'
+    # so the finding doesn't sit for 24h and then no-op-escalate. The
+    # verdict is recorded in kg_node_verdict for future agents to consult.
+    if report.get("take_action") is False:
+        from app.assistant.kg_maintenance.store import set_status
+        from app.assistant.kg_maintenance.verdict_store import record_verdict
+        memo = (report.get("verdict_memo") or "").strip()
+        verdict_type = (report.get("verdict_type") or "").strip()
+        verdict_node_ids = report.get("verdict_node_ids") or []
+        if not isinstance(verdict_node_ids, list):
+            verdict_node_ids = []
+        # Fall back to the finding's own subject node ids if the
+        # investigator didn't fill verdict_node_ids — keeps the verdict
+        # discoverable even for older agent runs.
+        if not verdict_node_ids:
+            with get_db_manager().read_session() as session:
+                f = session.query(KGMaintenanceFinding).filter_by(id=finding_id).first()
+                if f is not None:
+                    verdict_node_ids = [
+                        nid for nid in (f.primary_node_id, f.secondary_node_id) if nid
+                    ]
+
+        verdict_id = None
+        if verdict_type and memo and verdict_node_ids:
+            verdict_id = record_verdict(
+                verdict_type=verdict_type,
+                memo=memo,
+                node_ids=verdict_node_ids,
+                decided_by="agent:kg_investigation",
+                reasoning=report.get("recommendation"),
+                source_finding_id=finding_id,
+                confidence=report.get("confidence"),
+            )
+        else:
+            logger.warning(
+                "[finding_processor] take_action=False but missing verdict_type/"
+                "memo/node_ids on finding %s — verdict not recorded",
+                finding_id,
+            )
+
+        notes = f"Investigator verdict: no action needed. Memo: {memo}" if memo else "Investigator verdict: no action needed."
+        if verdict_id:
+            notes += f" (verdict_id={verdict_id})"
+        set_status(
+            finding_id,
+            "dismissed",
+            executed_by="agent:kg_investigation",
+            execution_notes=notes,
+        )
+        return {
+            "status": "dismissed",
+            "finding_id": finding_id,
+            "verdict_id": verdict_id,
+            "verdict_type": verdict_type,
+            "verdict_memo": memo,
+            "summary": report.get("result_summary") or memo,
+        }
 
     summary = report.get("result_summary") or (report.get("diagnosis") or "")[:140]
     proposed = report.get("proposed_action") or {}

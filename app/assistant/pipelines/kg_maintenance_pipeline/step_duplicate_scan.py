@@ -172,12 +172,15 @@ def _build_candidate_pairs(
     Pairs are sorted by combined edge count (most connected first) so the
     most important nodes are reviewed within the per-run budget.
     """
+    from app.assistant.kg_maintenance.verdict_store import is_pair_marked_distinct
+
     seen_pairs: set[tuple[str, str]] = set()
     candidates: list[tuple[str, str, str]] = []
     cross_type_skipped = 0
+    prior_verdict_skipped = 0
 
     def _add_pair(a: str, b: str, tier: str) -> None:
-        nonlocal cross_type_skipped
+        nonlocal cross_type_skipped, prior_verdict_skipped
         key = (min(a, b), max(a, b))
         if key in seen_pairs:
             return
@@ -192,6 +195,12 @@ def _build_candidate_pairs(
         type_b = (descriptors.get(b, {}).get("node_type") or "").strip()
         if type_a and type_b and type_a != type_b:
             cross_type_skipped += 1
+            return
+        # Prior-verdict short-circuit: if the investigator has already
+        # decided these two are distinct, skip the LLM call. The
+        # finding's verdict prose is durable; re-asking is waste.
+        if is_pair_marked_distinct(a, b):
+            prior_verdict_skipped += 1
             return
         seen_pairs.add(key)
         candidates.append((a, b, tier))
@@ -258,8 +267,9 @@ def _build_candidate_pairs(
         len(candidates) - tier2_count,
     )
     logger.info(
-        "[duplicate_scan] Total unique candidate pairs: %d (cross_type_skipped=%d)",
-        len(candidates), cross_type_skipped,
+        "[duplicate_scan] Total unique candidate pairs: %d "
+        "(cross_type_skipped=%d, prior_verdict_skipped=%d)",
+        len(candidates), cross_type_skipped, prior_verdict_skipped,
     )
 
     # Prioritize pairs involving the most-connected nodes

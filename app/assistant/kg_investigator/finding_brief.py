@@ -114,6 +114,51 @@ def _format_node_block(label: str, node: Dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _format_prior_verdicts_block(node_ids: List[str]) -> str:
+    """Pull any existing kg_node_verdict rows touching these node ids and
+    format them as a bulleted block for the investigator's brief.
+
+    Future-self optimization: when the same question keeps getting flagged
+    (recurring duplicate-detection on the same pair, recurring date-gap
+    finding on the same node), the investigator should read the prior
+    verdict and either confirm + dismiss again, or explicitly supersede
+    it. Either way it stops re-deriving the same conclusion from scratch.
+
+    Returns empty string when no verdicts exist (caller should skip the
+    section entirely).
+    """
+    from app.assistant.kg_maintenance.verdict_store import get_verdicts_for_node
+
+    seen: set[str] = set()
+    rows = []
+    for nid in node_ids:
+        if not nid:
+            continue
+        for v in get_verdicts_for_node(nid, limit=10):
+            if v.id in seen:
+                continue
+            seen.add(v.id)
+            rows.append(v)
+    if not rows:
+        return ""
+
+    lines = ["## Prior verdicts on these nodes",
+             "_Investigators previously decided about these node ids — "
+             "consult before re-deriving. Confirm + dismiss if still "
+             "valid; supersede if your investigation changes the "
+             "verdict._", ""]
+    for v in rows[:8]:
+        when = v.created_at.isoformat()[:10] if v.created_at else "?"
+        lines.append(
+            f"- **{v.verdict_type}** ({when}, conf={v.confidence}): "
+            f"{v.memo}"
+        )
+        if v.source_finding_id:
+            lines.append(f"  source_finding: `{v.source_finding_id}`")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def _format_neighborhood_block(neigh: Dict[str, List[Dict[str, Any]]], *, max_lines: int = 20) -> str:
     out_edges = neigh.get("out", [])[:max_lines]
     in_edges = neigh.get("in", [])[:max_lines]
@@ -712,11 +757,25 @@ def build_finding_brief(finding_id: str) -> Optional[Tuple[str, str]]:
             return None
 
         ftype = (finding.finding_type or "").strip().lower()
+        # Pull prior verdicts touching this finding's subject nodes —
+        # appended to whichever per-type brief we build below so the
+        # investigator can confirm/supersede prior decisions instead of
+        # re-deriving them.
+        subject_ids = [
+            nid for nid in (finding.primary_node_id, finding.secondary_node_id) if nid
+        ]
+        prior_verdicts_block = _format_prior_verdicts_block(subject_ids)
 
         if ftype == "wiki_contradiction":
-            return _brief_wiki_contradiction(session, finding)
+            task, info = _brief_wiki_contradiction(session, finding)
+            if prior_verdicts_block:
+                info = f"{prior_verdicts_block}\n\n{info}"
+            return task, info
         if ftype == "state_missing_dates":
-            return _brief_state_missing_dates(session, finding)
+            task, info = _brief_state_missing_dates(session, finding)
+            if prior_verdicts_block:
+                info = f"{prior_verdicts_block}\n\n{info}"
+            return task, info
         if ftype == "duplicate_node":
             # Specialized brief: pre-fetches chat-window transcripts for both
             # candidates so the investigator catches recurring-event traps
@@ -724,9 +783,12 @@ def build_finding_brief(finding_id: str) -> Optional[Tuple[str, str]]:
             # cost is a few more SQL reads; the upside is no deterministic
             # merges of repeating things — the user prefers false negatives
             # (skipped valid merges) over false positives (collapsed recurrences).
-            return _brief_duplicate_node(session, finding)
+            task, info = _brief_duplicate_node(session, finding)
+            if prior_verdicts_block:
+                info = f"{prior_verdicts_block}\n\n{info}"
+            return task, info
         if ftype == "duplicate_edge":
-            return _brief_node_pair(
+            task, info = _brief_node_pair(
                 session, finding,
                 finding_label="duplicate_edge",
                 task_phrase=(
@@ -735,8 +797,11 @@ def build_finding_brief(finding_id: str) -> Optional[Tuple[str, str]]:
                     "Recommend delete_edge (specifying which) or no_action."
                 ),
             )
+            if prior_verdicts_block:
+                info = f"{prior_verdicts_block}\n\n{info}"
+            return task, info
         if ftype == "orphan_node":
-            return _brief_single_node(
+            task, info = _brief_single_node(
                 session, finding,
                 finding_label="orphan_node",
                 task_phrase=(
@@ -745,8 +810,11 @@ def build_finding_brief(finding_id: str) -> Optional[Tuple[str, str]]:
                     "(recommend escalate_user with a clear suggestion in args)."
                 ),
             )
+            if prior_verdicts_block:
+                info = f"{prior_verdicts_block}\n\n{info}"
+            return task, info
         if ftype == "missing_description":
-            return _brief_single_node(
+            task, info = _brief_single_node(
                 session, finding,
                 finding_label="missing_description",
                 task_phrase=(
@@ -755,8 +823,11 @@ def build_finding_brief(finding_id: str) -> Optional[Tuple[str, str]]:
                     "If the node is itself dubious, recommend escalate_user instead."
                 ),
             )
+            if prior_verdicts_block:
+                info = f"{prior_verdicts_block}\n\n{info}"
+            return task, info
         if ftype == "type_error":
-            return _brief_single_node(
+            task, info = _brief_single_node(
                 session, finding,
                 finding_label="type_error",
                 task_phrase=(
@@ -765,9 +836,12 @@ def build_finding_brief(finding_id: str) -> Optional[Tuple[str, str]]:
                     "with the correct node_type, or no_action if the finder was wrong."
                 ),
             )
+            if prior_verdicts_block:
+                info = f"{prior_verdicts_block}\n\n{info}"
+            return task, info
 
         # Unknown type: minimal brief.
-        return _brief_single_node(
+        task, info = _brief_single_node(
             session, finding,
             finding_label=ftype or "unknown",
             task_phrase=(
@@ -775,3 +849,6 @@ def build_finding_brief(finding_id: str) -> Optional[Tuple[str, str]]:
                 "concrete fix via proposed_action."
             ),
         )
+        if prior_verdicts_block:
+            info = f"{prior_verdicts_block}\n\n{info}"
+        return task, info

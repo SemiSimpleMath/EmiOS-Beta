@@ -33,6 +33,7 @@ def initialize_core_tables():
         ExtractedFact, SwitchboardState,
     )
     from app.assistant.database.processed_entity_log import ProcessedEntityLog  # noqa: F401
+    from app.assistant.database.kg_node_verdict import KGNodeVerdict  # noqa: F401
     from app.assistant.ticket_manager.ticket import Ticket  # noqa: F401
 
     engine = get_current_engine()

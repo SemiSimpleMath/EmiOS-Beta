@@ -27,33 +27,88 @@ class FinalAnswerDataItem(BaseModel):
 class AgentForm(BaseModel):
     """Investigation report shape.
 
-    The investigator produces a PROSE `recommendation` that describes what
-    KG mutations should happen and why. That prose is what the executor
-    (kg_resolution_manager) reads and acts on; it is also what the dev
-    page renders as the primary card content. The structured `evidence`
-    and `diagnosis` fields exist for the dev-page detail view and for
-    debugging — they don't drive execution.
+    The investigator produces a PROSE `recommendation` that describes
+    EITHER (a) what KG mutations should happen and why, OR (b) why no
+    mutation is needed. The `take_action` flag tells downstream which
+    case this is — it's the load-bearing structural signal.
 
-    Routing:
-    - disposition='auto_apply' → dev page, 24h grace timer, auto-applies
-      if not Accepted/Declined within window
-    - disposition='needs_user_review' → user queue, no timer; user must
-      respond. `user_question` is the specific question they need to
-      answer.
+    Routing (driven by take_action × disposition):
+    - take_action=False                    → finding closed as 'dismissed';
+                                             recommendation prose preserved
+                                             as a verdict for future agents.
+                                             disposition is ignored.
+    - take_action=True, auto_apply         → dev page, 24h grace timer,
+                                             executor runs after window.
+    - take_action=True, needs_user_review  → user queue, no timer; user must
+                                             respond before executor runs.
+                                             `user_question` is the specific
+                                             question they need to answer.
     """
 
     # ---- load-bearing ----
+    take_action: bool = Field(
+        description=(
+            "True when a KG mutation should be applied (the executor will "
+            "run the recommendation). False when the verdict is 'no "
+            "mutation needed' — e.g., the candidate findings are actually "
+            "distinct, the data is correct as-is, or the flagged "
+            "contradiction is a false positive. When False, the finding "
+            "closes as 'dismissed' and the verdict_memo + verdict_node_ids "
+            "are preserved for future agents."
+        ),
+    )
+    verdict_type: Optional[str] = Field(
+        default=None,
+        description=(
+            "REQUIRED when take_action=False. Categorical handle that "
+            "downstream agents filter on. Pick one: "
+            "'distinct' (two named nodes are NOT the same thing — pairwise), "
+            "'verified' (data on this node is correct as-is — single-node), "
+            "'false_positive' (the flagged issue isn't real), "
+            "'obsolete' (finding refers to data that's been superseded since "
+            "it was raised), "
+            "'irrelevant' (finding type doesn't apply to this case). "
+            "When take_action=True, leave null."
+        ),
+    )
+    verdict_memo: Optional[str] = Field(
+        default=None,
+        description=(
+            "REQUIRED when take_action=False. One short line (target ~12 "
+            "words, max 25). Imperative form, names node ids inline. "
+            "This is what future agents will read to skip re-investigating "
+            "the same question. Examples: "
+            "'do not merge 42bc6a1b with 929ee949 — concept vs household pets', "
+            "'start_date 2024-09-01 on 8a3f confirmed by unified_log:5678', "
+            "'state_missing_dates false positive on 4c91 — locked era'. "
+            "When take_action=True, leave null."
+        ),
+    )
+    verdict_node_ids: List[str] = Field(
+        default_factory=list,
+        description=(
+            "REQUIRED when take_action=False (1-3 ids). The node ids this "
+            "verdict pertains to. Future agents (duplicate-finder, "
+            "investigator, proposal_promoter) look up these ids to find "
+            "prior verdicts and skip already-decided cases. When "
+            "take_action=True, leave empty."
+        ),
+    )
     recommendation: str = Field(
         description=(
-            "Prose plan: what KG mutations should happen and why. Cite "
-            "specific node ids, dates, and fields. Each step's reasoning "
-            "should be readable enough that a human can audit it and "
-            "decide whether they agree. Do NOT mention wiki page or "
-            "entity card regen — those are auto-handled downstream."
+            "Prose. When take_action=True: the plan — what KG mutations "
+            "should happen and why; cite specific node ids, dates, and "
+            "fields. When take_action=False: the verdict — why no "
+            "mutation is needed; cite the evidence that settles it. "
+            "Either way the reasoning should be readable enough that a "
+            "human can audit it and decide whether they agree. Do NOT "
+            "mention wiki page or entity card regen — those are auto-"
+            "handled downstream."
         ),
     )
     disposition: str = Field(
         description=(
+            "Routing decision when take_action=True (ignored when False). "
             "'auto_apply' (most cases — recommendation is confident enough "
             "to run after a 24h grace window) OR 'needs_user_review' "
             "(genuine ambiguity — only the user can decide; e.g., dates "
