@@ -88,30 +88,12 @@
   <!-- Chat Widget -->
   <section class="widget widget--chat" aria-labelledby="chat-heading">
     <h2 id="chat-heading">Chat</h2>
-    <!-- Audio Elements -->
-    <audio
-            id="chat-bot-audio"
-            preload="auto"
-            style="display:none"
-    ></audio>
-
-    <audio id="notificationSound" src="{{ url_for('static', filename='sounds/youve-got-mail-sound.mp3') }}" preload="auto"></audio>
+    {% include '_chat_audio.html' %}
     <!-- Chat Area -->
     <div class="chat-area" role="log" aria-live="polite" id="chat-box">
       <!-- Existing Chat Messages will appear here -->
     </div>
-    <!-- Pending image attachment preview (paste/drag/drop) -->
-    <div id="pending-image-preview" class="pending-image-preview hidden" aria-live="polite">
-      <div class="pending-image-preview__inner">
-        <img id="pending-image-thumb" class="pending-image-thumb" alt="Pending image attachment preview" />
-        <div class="pending-image-preview__meta">
-          <div id="pending-image-name" class="pending-image-name"></div>
-          <button type="button" id="pending-image-remove" class="pending-image-remove" aria-label="Remove image attachment">
-            Remove
-          </button>
-        </div>
-      </div>
-    </div>
+    {% include '_chat_pending_image.html' %}
     <!-- Chat Form -->
     <form class="chat-form" aria-label="Send a message">
       <label for="chat-input" class="visually-hidden">Message input</label>

@@ -1,0 +1,5 @@
+{# Shared audio elements for the chat UI. Both layouts include this once
+   inside the chat section — JS reaches them via getElementById, so DOM
+   position is purely conventional. #}
+<audio id="chat-bot-audio" preload="auto" style="display:none"></audio>
+<audio id="notificationSound" src="{{ url_for('static', filename='sounds/youve-got-mail-sound.mp3') }}" preload="auto"></audio>

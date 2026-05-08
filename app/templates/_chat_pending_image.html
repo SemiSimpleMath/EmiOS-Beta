@@ -1,0 +1,13 @@
+{# Pending image attachment preview — shown above the composer when the
+   user pastes/drag-drops an image. attachments.js toggles `.hidden` and
+   wires the Remove button. Position this partial just above the chat
+   form in each layout. #}
+<div id="pending-image-preview" class="pending-image-preview hidden" aria-live="polite">
+  <div class="pending-image-preview__inner">
+    <img id="pending-image-thumb" class="pending-image-thumb" alt="Pending image attachment preview" />
+    <div class="pending-image-preview__meta">
+      <div id="pending-image-name" class="pending-image-name"></div>
+      <button type="button" id="pending-image-remove" class="pending-image-remove" aria-label="Remove image attachment">Remove</button>
+    </div>
+  </div>
+</div>
