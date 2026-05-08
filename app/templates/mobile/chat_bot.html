@@ -34,9 +34,7 @@
 </header>
 
 <main class="m-main" role="main">
-  <!-- Audio Elements -->
-  <audio id="chat-bot-audio" preload="auto" style="display:none"></audio>
-  <audio id="notificationSound" preload="auto"></audio>
+  {% include '_chat_audio.html' %}
 
   <!-- Chat -->
   <section class="m-chat" aria-label="Chat">
@@ -48,7 +46,7 @@
         <label for="chat-input" class="visually-hidden">Message input</label>
         <textarea
           id="chat-input"
-          placeholder="Message Emi"
+          placeholder="Message {{ assistant_name }}"
           autocomplete="off"
           aria-label="Message input"
           rows="1"
