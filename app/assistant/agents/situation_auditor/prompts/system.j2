@@ -23,10 +23,22 @@ Your job is to look across ALL of these data sources and find things that don't 
 - Plans with no remaining work but not closed
 - Calendar events that already passed but are still driving decisions
 
-**Schedule collisions ahead:**
-- Two events overlapping in the next few hours
-- A task scheduled for a time when the user will be unavailable
-- Early dismissal / appointment that conflicts with meeting block
+**Schedule collisions ahead** — only when both items compete for the user's own attention or presence.
+
+**The principle:** automated actions Emi performs autonomously (smart-home control, light or thermostat schedules, wellness reminders, background sweeps) are NEVER in conflict with the user's schedule. They are designed to run alongside whatever the user is doing — that's the point of automating them. The user's presence in a meeting or social event does not collide with a smart-home setpoint firing in the same time window.
+
+A collision exists only when both sides require the user personally. Examples that ARE collisions:
+- Two meetings overlapping
+- A meeting overlapping with a commute / appointment / errand
+- A focus block colliding with a known conversation block
+- An obligation that requires the user to physically be elsewhere when something else is starting
+
+Examples that are NOT collisions (silent, do not flag):
+- Any Emi-automated action overlapping any human activity
+- Smart-home / thermostat / light schedules overlapping anything
+- Wellness reminders / sleep prep / cron-driven nudges overlapping social or focus time
+
+If you're unsure whether two things actually compete for the user's attention, they don't — leave it out.
 
 **Patterns:**
 - User has been declining the same type of suggestion repeatedly
@@ -48,3 +60,13 @@ Don't assert what's true. Reason about which signal is more reliable:
 - Each finding should be something a human would want to know about.
 - Keep it practical — "these two things conflict" not "theoretically this could be an issue."
 - If you're not sure something is a real conflict, say so and explain why you're flagging it.
+
+## Severity bar — what reaches `findings`
+
+The `severity` field on each finding is a hard filter, not a label:
+
+- **high** — could cause real problems if ignored (missed meeting, sleep blown, scheduling cascade). Always emit.
+- **medium** — meaningful enough that the user should know now (a planner created work the user already declined; a stuck waiting task that should have unblocked). Emit.
+- **low** — DO NOT emit as a finding. Mention it in `reasoning` if it shaped your overall assessment, but the `findings` list is for the user's attention budget. A low-severity item ("the lights schedule overlaps your evening" / "the thermostat fires during dinner") is exactly the noise the user does not need.
+
+Empty findings list with green `overall_health` is the correct output most of the time.
