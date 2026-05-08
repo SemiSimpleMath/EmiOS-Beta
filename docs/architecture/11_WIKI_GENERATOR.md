@@ -299,4 +299,4 @@ If the writer ever regresses on a specific page, the diagnostic loop is:
 - Check `<vault>/section_outputs/<Entity>.json` — is the cached prose for one section the source of the issue?
 - For a single quoted sentence, `source_reconstruct.reconstruct_source_window(sentence=...)` returns the original chat window and the sibling edges from the same extraction.
 
-For deeper KG-level issues (a wrong claim that survives many regens, a duplicate node), the consistency critic's `wiki_contradiction` findings are the queue. See `13_KG_INVESTIGATION_MUTATION.md` for the downstream investigator and mutation flow.
+For deeper KG-level issues (a wrong claim that survives many regens, a duplicate node), the consistency critic's `wiki_contradiction` findings are the queue. See `22_KG_HEALTH_COMPONENTS.md` for the downstream investigator and executor flow, and `13_KG_MUTATOR_TOOLS.md` for the typed mutator tools.

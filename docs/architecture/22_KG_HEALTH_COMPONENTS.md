@@ -5,10 +5,10 @@ knowledge graph + its derivatives (wiki pages, entity cards). When a
 new finding shows up, this is the doc you want open.
 
 This is the **canonical** description of the self-healing loop as of
-2026-05-07. The older doc `13_KG_INVESTIGATION_MUTATION.md` predates
-the take_action / verdict redesign and the `kg_resolution_manager`
-consolidation; treat it as a historical artifact for tool-mechanics
-reference only (FK-cascade trap, revision log schema, cookbooks).
+2026-05-07. For the typed mutator tools that actually write to the KG
+(handler inventory, FK-cascade trap, `kg_revision_log` schema,
+cookbooks for adding new ops or producers) see
+`13_KG_MUTATOR_TOOLS.md`.
 
 ## The self-healing loop in one paragraph
 

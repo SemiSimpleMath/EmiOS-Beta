@@ -128,7 +128,7 @@ The last agent in a manager loop. Produces a human-readable answer plus a struct
 
 ### finding
 
-(KG maintenance) A row in `kg_maintenance_finding`. Statuses: pending → investigated → executed/approved/rejected. Subtypes: duplicate_node, suspect_node, orphan_node, duplicate_edge, missing_description, type_error, wiki_contradiction. See [13_KG_INVESTIGATION_MUTATION.md](architecture/13_KG_INVESTIGATION_MUTATION.md).
+(KG maintenance) A row in `kg_maintenance_finding`. Statuses: pending → investigated → executed/dismissed/escalated. Subtypes: duplicate_node, orphan_node, duplicate_edge, missing_description, state_missing_dates, state_auto_closed, wiki_contradiction, synthetic_fact_proposal. See [22_KG_HEALTH_COMPONENTS.md](architecture/22_KG_HEALTH_COMPONENTS.md).
 
 (Entity card maintenance) A row in `entity_card_maintenance_finding` (same lifecycle, different fields).
 
@@ -170,7 +170,7 @@ The chat → KG ingest pipeline. Bucket-per-stage architecture: `unified_log_202
 
 ### kg_revision_log
 
-Audit table for KG mutations. Every `kg_mutator_tool` commit writes a row with `before_json`/`after_json` snapshots so changes can be reverted. See [13_KG_INVESTIGATION_MUTATION.md](architecture/13_KG_INVESTIGATION_MUTATION.md).
+Audit table for KG mutations. Every `kg_mutator_tool` commit writes a row with `before_json`/`after_json` snapshots so changes can be reverted. See [13_KG_MUTATOR_TOOLS.md](architecture/13_KG_MUTATOR_TOOLS.md).
 
 ### Manager
 
