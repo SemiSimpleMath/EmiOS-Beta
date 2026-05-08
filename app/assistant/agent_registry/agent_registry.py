@@ -402,6 +402,14 @@ class AgentRegistry:
         for control_file in self.control_nodes_dir.glob("*.py"):
             if control_file.stem == "control_node" or control_file.name == "__init__.py":
                 continue  # Skip base class and init file
+            # Underscore-prefixed files are utility / helper modules co-located
+            # with control nodes (e.g. _switchboard_arguments_util.py,
+            # _tool_caller_util.py). They expose helpers consumed by control
+            # nodes; they don't define ControlNode subclasses themselves.
+            # Trying to load them as control nodes yields a noisy startup
+            # warning and a useless config entry.
+            if control_file.stem.startswith("_"):
+                continue
 
             control_name = control_file.stem  # Get filename without .py
             logger.info(f"📥 Loading control node: {control_name}")

@@ -3,9 +3,8 @@ class_name: Agent
 llm_params:
   llm_provider: "openai"
   # Vision-capable. Same model the shared::vision_image_describe agent uses.
-  engine: "gpt-4o"
+  engine: "gpt-5.4-mini"
   model_tier: "powerful"
-  temperature: 0.2
 
 allowed_tools: []
 except_tools: []
@@ -23,5 +22,4 @@ user_context_items:
   - captured_at_utc
 
 # Note: this agent is invoked per-event by the subscriber in
-# app/assistant/ring_analysis/subscribers.py. It does NOT register an
-# event handler itself — keeps it a pure single-shot input→output agent.
+# app/assistant/ring_analysis/subscribers.py.

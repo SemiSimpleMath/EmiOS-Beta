@@ -4,7 +4,6 @@ llm_params:
   llm_provider: "openai"
   engine: "gpt-5.4-mini"
   model_tier: "smart"
-  temperature: 0.3
 
 # Manager controls what tools are actually available via ToolRegistry filtering.
 allowed_tools: "all"
