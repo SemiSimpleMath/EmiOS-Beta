@@ -419,6 +419,14 @@ class ResourceManager:
                     continue
                 if file_path.name in skip_names:
                     continue
+                # Personal overlays (*_personal.md / *_personal.txt) are NOT
+                # standalone resources — they're appended onto their public
+                # base by the text-resource loader (see PHASE 3 below). The
+                # convention lets users keep personal preferences out of the
+                # public repo (gitignore *_personal.md) while still benefiting
+                # from a shared template as the baseline.
+                if file_path.stem.endswith("_personal"):
+                    continue
                 all_files.append(file_path)
             except Exception as e:
                 logger.error("Failed while scanning resource file candidate '%s': %s", file_path, e)
@@ -528,6 +536,33 @@ class ResourceManager:
 
                 content = self._read_file(file_path)
                 self._assert_concrete_resource(resource_id, content, file_path)
+
+                # Personal overlay: append `<stem>_personal<suffix>` if a
+                # sibling exists. Lets users keep personal preferences out
+                # of the public repo (gitignore *_personal.md) while
+                # preserving the public template as a safe baseline. The
+                # personal content goes AFTER the base — later instructions
+                # win at LLM read time, so personal directives override the
+                # template defaults without having to delete from the
+                # public file.
+                personal_path = file_path.with_name(
+                    f"{file_path.stem}_personal{file_path.suffix}"
+                )
+                if personal_path.exists() and personal_path.is_file():
+                    try:
+                        personal = self._read_file(personal_path)
+                        if isinstance(content, str) and isinstance(personal, str) and personal.strip():
+                            content = content.rstrip() + "\n\n" + personal.lstrip()
+                            logger.info(
+                                f"🔧 Applied personal overlay to '{resource_id}' "
+                                f"from {personal_path.name} (+{len(personal)} chars)"
+                            )
+                    except Exception as e:
+                        logger.warning(
+                            "Personal overlay for '%s' could not be applied: %s",
+                            resource_id, e,
+                        )
+                        logger.debug("personal overlay exception details", exc_info=True)
 
                 self._set_cached_resource(resource_id=resource_id, value=content, source_path=file_path)
                 with self._lock:
