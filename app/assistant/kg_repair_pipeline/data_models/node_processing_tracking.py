@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 import uuid
 
 from app.models.base import Base
+from app.assistant.utils.time_utils import AwareUtcDateTime
 
 # Helper to generate string UUIDs for SQLite
 def generate_uuid():
@@ -52,17 +53,17 @@ class NodeProcessingStatus(Base):
     error_details = Column(Text, nullable=True)  # Error message if implementation failed
     
     # Scheduling and timing
-    first_identified_at = Column(DateTime(timezone=True), nullable=False, default=datetime.now(timezone.utc))
-    last_offered_at = Column(DateTime(timezone=True), nullable=True)  # When last offered to user
-    next_review_at = Column(DateTime(timezone=True), nullable=True)  # When to offer again
-    resolved_at = Column(DateTime(timezone=True), nullable=True)  # When resolved
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.now(timezone.utc))
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    first_identified_at = Column(AwareUtcDateTime, nullable=False, default=datetime.now(timezone.utc))
+    last_offered_at = Column(AwareUtcDateTime, nullable=True)  # When last offered to user
+    next_review_at = Column(AwareUtcDateTime, nullable=True)  # When to offer again
+    resolved_at = Column(AwareUtcDateTime, nullable=True)  # When resolved
+    created_at = Column(AwareUtcDateTime, nullable=False, default=datetime.now(timezone.utc))
+    updated_at = Column(AwareUtcDateTime, nullable=False, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
     
     # Retry and attempt tracking
     attempt_count = Column(Integer, nullable=False, default=0)  # Number of times offered to user
     max_attempts = Column(Integer, nullable=True, default=3)  # Maximum attempts before giving up
-    last_attempt_at = Column(DateTime(timezone=True), nullable=True)  # When last attempted
+    last_attempt_at = Column(AwareUtcDateTime, nullable=True)  # When last attempted
     
     # Learning and quality
     is_false_positive = Column(Boolean, nullable=False, default=False)  # Was this a false positive?
@@ -104,8 +105,8 @@ class NodeProcessingBatch(Base):
     resolved_nodes = Column(Integer, nullable=False, default=0)
     
     # Timing
-    started_at = Column(DateTime(timezone=True), nullable=False, default=datetime.now(timezone.utc))
-    completed_at = Column(DateTime(timezone=True), nullable=True)
+    started_at = Column(AwareUtcDateTime, nullable=False, default=datetime.now(timezone.utc))
+    completed_at = Column(AwareUtcDateTime, nullable=True)
     duration_seconds = Column(Integer, nullable=True)
     
     # Status
@@ -117,8 +118,8 @@ class NodeProcessingBatch(Base):
     batch_config = Column(JSON, nullable=True)  # SQLite
     
     # Metadata
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.now(timezone.utc))
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    created_at = Column(AwareUtcDateTime, nullable=False, default=datetime.now(timezone.utc))
+    updated_at = Column(AwareUtcDateTime, nullable=False, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
 
 class NodeProcessingStatistics(Base):
     """
@@ -130,7 +131,7 @@ class NodeProcessingStatistics(Base):
     id = Column(Text, primary_key=True, default=generate_uuid)  # SQLite: UUID as TEXT
     
     # Time period
-    date = Column(DateTime(timezone=True), nullable=False, index=True)
+    date = Column(AwareUtcDateTime, nullable=False, index=True)
     period_type = Column(String, nullable=False)  # daily, weekly, monthly
     
     # Processing statistics
@@ -159,5 +160,5 @@ class NodeProcessingStatistics(Base):
     improvement_suggestions = Column(Text, nullable=True)
     
     # Metadata
-    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.now(timezone.utc))
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))
+    created_at = Column(AwareUtcDateTime, nullable=False, default=datetime.now(timezone.utc))
+    updated_at = Column(AwareUtcDateTime, nullable=False, default=datetime.now(timezone.utc), onupdate=datetime.now(timezone.utc))

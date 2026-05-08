@@ -10,6 +10,7 @@ from sqlalchemy import (
     Column, String, JSON, DateTime, Text, Integer, Boolean,
     UniqueConstraint, Index, func
 )
+from app.assistant.utils.time_utils import AwareUtcDateTime
 
 from app.models.base import Base
 
@@ -36,7 +37,7 @@ class DuplicateNodeTracking(Base):
     similar_nodes = Column(JSON, nullable=True)  # SQLite: List of similar node IDs and details
     
     # Analysis metadata
-    analysis_timestamp = Column(DateTime(timezone=True), nullable=False, default=func.now())
+    analysis_timestamp = Column(AwareUtcDateTime, nullable=False, default=func.now())
     batch_number = Column(Integer, nullable=True)  # Which batch this analysis came from
     agent_version = Column(String(50), nullable=True)  # Version of the duplicate detector agent
     

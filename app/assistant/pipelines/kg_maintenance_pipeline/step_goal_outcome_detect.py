@@ -108,8 +108,8 @@ def run(ctx: PipelineContext, *, limit: Optional[int] = None) -> dict:
         })
 
     # Pick the K most-recently-touched (descending by max(last_pursued, last_observed)).
-    # All datetimes are aware UTC — Node.created_at is tz-aware, parse_iso_utc
-    # returns aware, and _MIN is aware so max()/min() never mix tz states.
+    # All datetimes are aware UTC — Node.created_at is AwareUtcDateTime
+    # (coerces on read), parse_iso_utc returns aware, and _MIN is aware.
     def _recency(g):
         return max(
             g["last_pursued_at"] or g["created_at"] or _MIN,

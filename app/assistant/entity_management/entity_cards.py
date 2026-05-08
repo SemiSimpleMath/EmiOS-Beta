@@ -10,6 +10,7 @@ from sqlalchemy import (
     Column, String, DateTime, Text, Float, Boolean,
     UniqueConstraint, Index, func, Integer, ForeignKey, JSON
 )
+from app.assistant.utils.time_utils import AwareUtcDateTime
 from sqlalchemy.orm import relationship
 from sqlalchemy.types import TypeDecorator
 from app.assistant.utils.logging_config import get_logger
@@ -79,8 +80,8 @@ class EntityCard(Base):
     total_batches = Column(Integer, nullable=True)  # Total batches for the entity
     
     # Timestamps
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+    created_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now())
+    updated_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now(), onupdate=func.now())
     
     # Additional metadata stored as JSON
     # Canonical shape: dict. (Legacy shapes like list-of-pairs or JSON-string are coerced at read time.)
@@ -88,7 +89,7 @@ class EntityCard(Base):
     
     # Status tracking
     is_active = Column(Boolean, default=True, nullable=False)
-    last_used = Column(DateTime(timezone=True), nullable=True)  # When last used for prompt injection
+    last_used = Column(AwareUtcDateTime, nullable=True)  # When last used for prompt injection
     usage_count = Column(Integer, default=0, nullable=False)  # How many times used
     
     __table_args__ = (
@@ -143,7 +144,7 @@ class EntityCardUsage(Base):
     confidence_threshold = Column(Float, nullable=True)  # Confidence threshold used
     
     # Timestamps
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now())
     
     # Relationship
     entity_card = relationship("EntityCard", back_populates="usages")
@@ -174,7 +175,7 @@ class EntityCardIndex(Base):
     term_priority = Column(Float, default=1.0, nullable=False)  # Priority for matching
     
     # Timestamps
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now())
     
     # Relationship
     entity_card = relationship("EntityCard", back_populates="index_terms")
@@ -975,13 +976,13 @@ class EntityCardRunLog(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     
     # Run information
-    last_run_time = Column(DateTime(timezone=True), nullable=False)
+    last_run_time = Column(AwareUtcDateTime, nullable=False)
     nodes_processed = Column(Integer, nullable=False)
     nodes_updated = Column(Integer, nullable=False)  # How many entity cards were actually updated
     run_duration_seconds = Column(Float, nullable=True)
     
     # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(AwareUtcDateTime, server_default=func.now())
     
     __table_args__ = (
         Index('ix_entity_card_run_log_last_run_time', 'last_run_time'),
@@ -1055,11 +1056,11 @@ class DescriptionRunLog(Base):
     __tablename__ = 'description_run_log'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    last_run_time = Column(DateTime(timezone=True), nullable=False)
+    last_run_time = Column(AwareUtcDateTime, nullable=False)
     nodes_processed = Column(Integer, nullable=False)
     nodes_updated = Column(Integer, nullable=False)
     run_duration_seconds = Column(Float, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(AwareUtcDateTime, server_default=func.now())
     
     __table_args__ = (
         Index('ix_description_run_log_last_run_time', 'last_run_time'),

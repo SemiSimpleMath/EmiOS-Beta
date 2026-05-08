@@ -30,6 +30,7 @@ import uuid
 from sqlalchemy import Column, DateTime, Float, Index, JSON, String, Text, func
 
 from app.models.base import Base
+from app.assistant.utils.time_utils import AwareUtcDateTime
 
 
 class EntityCardMaintenanceFinding(Base):
@@ -55,7 +56,7 @@ class EntityCardMaintenanceFinding(Base):
 
     # ── Execution trace ───────────────────────────────────────────────────────
     executed_by      = Column(String(128), nullable=True)
-    executed_at      = Column(DateTime(timezone=True), nullable=True)
+    executed_at      = Column(AwareUtcDateTime, nullable=True)
     execution_notes  = Column(Text,        nullable=True)
 
     # ── Pipeline provenance ───────────────────────────────────────────────────
@@ -63,10 +64,10 @@ class EntityCardMaintenanceFinding(Base):
 
     # ── Audit ─────────────────────────────────────────────────────────────────
     created_at = Column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
+        AwareUtcDateTime, nullable=False, server_default=func.now()
     )
     updated_at = Column(
-        DateTime(timezone=True),
+        AwareUtcDateTime,
         nullable=False,
         server_default=func.now(),
         onupdate=func.now(),

@@ -4,6 +4,7 @@ Database model for processed entity log - stores resolved sentences from entity_
 
 from sqlalchemy import Column, String, Text, DateTime, Boolean, func, Index
 from app.models.base import Base
+from app.assistant.utils.time_utils import AwareUtcDateTime
 
 
 class ProcessedEntityLog(Base):
@@ -18,7 +19,7 @@ class ProcessedEntityLog(Base):
     
     # Link to original message from unified_log
     original_message_id = Column(String, nullable=False)  # ID from unified_log table
-    original_message_timestamp = Column(DateTime(timezone=True), nullable=False)
+    original_message_timestamp = Column(AwareUtcDateTime, nullable=False)
     role = Column(String, nullable=True)  # Role from original message (user, assistant, etc.)
     
     # Resolved sentence data
@@ -27,7 +28,7 @@ class ProcessedEntityLog(Base):
     reasoning = Column(Text, nullable=True)  # Agent's reasoning for resolution
     
     # Processing metadata
-    processing_timestamp = Column(DateTime(timezone=True), server_default=func.now())
+    processing_timestamp = Column(AwareUtcDateTime, server_default=func.now())
     agent_version = Column(String(50), nullable=True)  # Version of entity_resolver agent
     
     # Status tracking

@@ -14,6 +14,7 @@ import uuid
 from sqlalchemy import Column, DateTime, Index, String, Text, func
 
 from app.models.base import Base
+from app.assistant.utils.time_utils import AwareUtcDateTime
 
 
 class KGNodeEvidence(Base):
@@ -49,13 +50,13 @@ class KGNodeEvidence(Base):
     derived_sentence = Column(Text, nullable=True)  # agent-synthesised sentence
 
     # Temporal metadata
-    message_timestamp = Column(DateTime(timezone=True), nullable=True, index=True)
+    message_timestamp = Column(AwareUtcDateTime, nullable=True, index=True)
 
     # Pipeline context
     window_id = Column(String, nullable=True, index=True)
     merge_action = Column(String(32), nullable=False, default="created")  # created | confirmed | updated
 
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now())
 
     __table_args__ = (
         Index("ix_kg_node_evidence_node_ts", "node_id", "message_timestamp"),
@@ -88,13 +89,13 @@ class KGEdgeEvidence(Base):
     derived_sentence = Column(Text, nullable=True)  # agent-synthesised sentence for this edge
 
     # Temporal metadata
-    message_timestamp = Column(DateTime(timezone=True), nullable=True, index=True)
+    message_timestamp = Column(AwareUtcDateTime, nullable=True, index=True)
 
     # Pipeline context
     window_id = Column(String, nullable=True, index=True)
     merge_action = Column(String(32), nullable=False, default="created")  # created | confirmed | merged
 
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now())
 
     __table_args__ = (
         Index("ix_kg_edge_evidence_edge_ts", "edge_id", "message_timestamp"),

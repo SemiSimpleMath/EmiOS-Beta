@@ -42,6 +42,7 @@ from sqlalchemy import (
     Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, JSON,
     String, Text, func,
 )
+from app.assistant.utils.time_utils import AwareUtcDateTime
 
 from app.models.base import Base
 
@@ -108,8 +109,8 @@ class ClaimProposal(Base):
 
     # Observation aggregation (derived from claim_proposal_evidence).
     observation_count = Column(Integer, nullable=False, default=0)
-    first_observed_at = Column(DateTime(timezone=True), nullable=True, index=True)
-    last_observed_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    first_observed_at = Column(AwareUtcDateTime, nullable=True, index=True)
+    last_observed_at = Column(AwareUtcDateTime, nullable=True, index=True)
 
     # Derivation chains.
     # parent_proposal_id: enrichment created this proposal by refining another.
@@ -118,12 +119,12 @@ class ClaimProposal(Base):
     supersedes_proposal_id = Column(String, nullable=True, index=True)
 
     # Soft-delete: preserves the proposal row with a retraction marker.
-    retracted_at = Column(DateTime(timezone=True), nullable=True)
+    retracted_at = Column(AwareUtcDateTime, nullable=True)
     retraction_reason = Column(Text, nullable=True)
 
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now())
     updated_at = Column(
-        DateTime(timezone=True), nullable=False,
+        AwareUtcDateTime, nullable=False,
         server_default=func.now(), onupdate=func.now(),
     )
 
@@ -178,8 +179,8 @@ class ClaimProposalNode(Base):
     attributes_json = Column(JSON, nullable=True)
 
     # Bitemporal intake — when was this node's state true in the world.
-    valid_from = Column(DateTime(timezone=True), nullable=True)
-    valid_to = Column(DateTime(timezone=True), nullable=True)
+    valid_from = Column(AwareUtcDateTime, nullable=True)
+    valid_to = Column(AwareUtcDateTime, nullable=True)
     valid_from_prose = Column(Text, nullable=True)
     valid_to_prose = Column(Text, nullable=True)
     start_date_confidence = Column(String(32), nullable=True)
@@ -189,7 +190,7 @@ class ClaimProposalNode(Base):
     resolved_node_id = Column(String, nullable=True, index=True)
     resolution_action = Column(String(32), nullable=False, default="pending")
 
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now())
 
     __table_args__ = (
         Index("ix_claim_proposal_node_resolved", "resolved_node_id"),
@@ -228,7 +229,7 @@ class ClaimProposalEdge(Base):
     # Resolution output (filled during promotion phase 2).
     resolved_edge_id = Column(String, nullable=True, index=True)
 
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now())
 
     __table_args__ = (
         Index(
@@ -287,9 +288,9 @@ class ClaimProposalEvidence(Base):
     confidence_at_observation = Column(Float, nullable=True)
 
     # Bitemporal: when the source message was authored (valid time).
-    observed_at = Column(DateTime(timezone=True), nullable=True)
+    observed_at = Column(AwareUtcDateTime, nullable=True)
     # Transaction time: when the evidence row was persisted.
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now())
 
     __table_args__ = (
         Index("ix_claim_proposal_evidence_cohort", "extractor_model", "extractor_prompt_version"),

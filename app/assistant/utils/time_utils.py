@@ -313,6 +313,47 @@ def ensure_aware_utc(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
+# ---------------------------------------------------------------------------
+# AwareUtcDateTime — SQLAlchemy column type that always round-trips aware UTC
+# ---------------------------------------------------------------------------
+# SQLite + DateTime(timezone=True) is a known footgun: SQLite has no native
+# tz storage, so SQLAlchemy stores datetimes as ISO strings and the round-trip
+# is fragile. Rows written naively (the default in much of this codebase
+# pre-2026-05-07) read back NAIVE even though the column declares
+# timezone=True, which then crashes any aware-vs-naive comparison
+# downstream.
+#
+# This TypeDecorator wraps DateTime(timezone=True) and coerces both
+# directions: every bind sends aware UTC; every read returns aware UTC.
+# Naive inputs/outputs are assumed to already represent UTC.
+#
+# Replace `DateTime(timezone=True)` with `AwareUtcDateTime` in column
+# definitions and the bug class disappears at the boundary, no per-call-site
+# `ensure_aware_utc(...)` wrapping needed.
+from sqlalchemy.types import DateTime as _SADateTime, TypeDecorator as _TypeDecorator
+
+
+class AwareUtcDateTime(_TypeDecorator):
+    """SQLAlchemy column type that always round-trips aware-UTC datetimes."""
+
+    impl = _SADateTime(timezone=True)
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is None or not isinstance(value, datetime):
+            return value
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    def process_result_value(self, value, dialect):
+        if value is None or not isinstance(value, datetime):
+            return value
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+
 def get_local_time() -> datetime:
     """
     Returns current local time as aware datetime.

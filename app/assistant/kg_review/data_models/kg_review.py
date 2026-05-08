@@ -12,6 +12,7 @@ import uuid
 import enum
 
 from app.models.base import Base
+from app.assistant.utils.time_utils import AwareUtcDateTime
 
 # Helper to generate string UUIDs for SQLite
 def generate_uuid():
@@ -95,15 +96,15 @@ class KGReview(Base):
     user_notes = Column(Text, nullable=True)             # User's notes during review
     user_instructions = Column(Text, nullable=True)      # Instructions for kg_team
     reviewed_by = Column(String, nullable=True)          # Who reviewed it
-    reviewed_at = Column(DateTime(timezone=True), nullable=True)  # When reviewed
+    reviewed_at = Column(AwareUtcDateTime, nullable=True)  # When reviewed
     
     # Status and workflow
     status = Column(String, nullable=False, default='pending', index=True)
     priority = Column(String, nullable=False, default='medium', index=True)
     
     # Implementation tracking
-    implementation_started_at = Column(DateTime(timezone=True), nullable=True)
-    implementation_completed_at = Column(DateTime(timezone=True), nullable=True)
+    implementation_started_at = Column(AwareUtcDateTime, nullable=True)
+    implementation_completed_at = Column(AwareUtcDateTime, nullable=True)
     implementation_result = Column(Text, nullable=True)  # Result from kg_team
     implementation_error = Column(Text, nullable=True)   # Error if failed
     kg_team_session_id = Column(String, nullable=True)   # Link to kg_team execution
@@ -127,8 +128,8 @@ class KGReview(Base):
     is_urgent = Column(Boolean, default=False)           # Urgent flag
     
     # Timestamps
-    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(AwareUtcDateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(AwareUtcDateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     
     # Additional data
     tags = Column(JSON, nullable=True)                   # SQLite: Custom tags for filtering

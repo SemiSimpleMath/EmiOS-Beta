@@ -7,6 +7,7 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy import (
     Column, String, DateTime, Integer, Float, Index, func
 )
+from app.assistant.utils.time_utils import AwareUtcDateTime
 
 from app.models.base import Base, get_session, get_default_engine
 
@@ -19,11 +20,11 @@ class MaintenanceRunLog(Base):
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     task_name = Column(String(100), nullable=False)  # 'description_creation', 'entity_card_generation', etc.
-    last_run_time = Column(DateTime(timezone=True), nullable=False)
+    last_run_time = Column(AwareUtcDateTime, nullable=False)
     nodes_processed = Column(Integer, nullable=False)
     nodes_updated = Column(Integer, nullable=False)
     run_duration_seconds = Column(Float, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(AwareUtcDateTime, server_default=func.now())
     
     __table_args__ = (
         Index('ix_maintenance_run_log_task_name', 'task_name'),

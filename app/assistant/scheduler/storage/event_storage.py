@@ -9,6 +9,7 @@ from app.assistant.scheduler.pydantic_types.base_event_data import BaseEventData
 from sqlalchemy import Column, String, DateTime, Integer, JSON
 
 from app.assistant.utils.logging_config import get_logger
+from app.assistant.utils.time_utils import AwareUtcDateTime
 logger = get_logger(__name__)
 
 
@@ -18,8 +19,8 @@ class TimeEvent(db.Model):
     event_id = Column(String(255), primary_key=True)
     event_type = Column(String(50), nullable=False)
     interval = Column(Integer, nullable=True)
-    start_date = Column(DateTime(timezone=True), nullable=True)
-    end_date = Column(DateTime(timezone=True), nullable=True)
+    start_date = Column(AwareUtcDateTime, nullable=True)
+    end_date = Column(AwareUtcDateTime, nullable=True)
     jitter = Column(Integer, nullable=True)
     event_payload = Column(JSON, nullable=True)
 

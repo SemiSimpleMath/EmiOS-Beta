@@ -11,6 +11,7 @@ from app.models.base import Base, get_session
 from app.assistant.lib.google_auth import oauth_registry
 from app.assistant.lib.google_auth.oauth_crypto import decrypt_text, encrypt_text
 from app.assistant.utils.logging_config import get_logger
+from app.assistant.utils.time_utils import AwareUtcDateTime
 
 logger = get_logger(__name__)
 
@@ -25,10 +26,10 @@ class GoogleOAuthAccount(Base):
     granted_scopes_json = Column(Text, nullable=False, default="[]")
     credentials_encrypted = Column(Text, nullable=False)
     is_active = Column(Boolean, nullable=False, default=True, index=True)
-    created_at = Column(DateTime(timezone=True), nullable=False)
-    updated_at = Column(DateTime(timezone=True), nullable=False)
-    last_refreshed_at = Column(DateTime(timezone=True), nullable=True)
-    revoked_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(AwareUtcDateTime, nullable=False)
+    updated_at = Column(AwareUtcDateTime, nullable=False)
+    last_refreshed_at = Column(AwareUtcDateTime, nullable=True)
+    revoked_at = Column(AwareUtcDateTime, nullable=True)
 
 
 def _now_utc() -> datetime:

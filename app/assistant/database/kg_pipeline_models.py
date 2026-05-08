@@ -34,6 +34,7 @@ import uuid
 from sqlalchemy import JSON, Boolean, Column, DateTime, Index, Integer, String, Text, UniqueConstraint, func
 
 from app.models.base import Base
+from app.assistant.utils.time_utils import AwareUtcDateTime
 
 
 # ---------------------------------------------------------------------------
@@ -48,12 +49,12 @@ class KGResolvedMessage(Base):
     unified_log_id = Column(String, nullable=False, unique=True, index=True)
     # Denormalized for query convenience (avoids JOIN to unified_log_2026 for
     # cheap chronological scans by downstream stages).
-    unified_timestamp = Column(DateTime(timezone=True), nullable=False, index=True)
+    unified_timestamp = Column(AwareUtcDateTime, nullable=False, index=True)
 
     resolved_text = Column(Text, nullable=False)
     resolved_entities = Column(JSON, nullable=True)   # reserved
     resolver_version = Column(String(32), nullable=True)
-    resolved_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    resolved_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now())
 
 
 # ---------------------------------------------------------------------------
@@ -67,8 +68,8 @@ class KGWindow(Base):
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     start_unified_log_id = Column(String, nullable=False, index=True)   # FK to unified_log_2026.id
     end_unified_log_id = Column(String, nullable=False, index=True)     # FK to unified_log_2026.id
-    start_timestamp = Column(DateTime(timezone=True), nullable=False, index=True)
-    end_timestamp = Column(DateTime(timezone=True), nullable=False, index=True)
+    start_timestamp = Column(AwareUtcDateTime, nullable=False, index=True)
+    end_timestamp = Column(AwareUtcDateTime, nullable=False, index=True)
     message_count = Column(Integer, nullable=False)
 
     summary = Column(Text, nullable=True)                              # one-line topic summary
@@ -77,7 +78,7 @@ class KGWindow(Base):
     reason_for_boundary = Column(Text, nullable=True)                  # debug aid
 
     segmenter_version = Column(String(64), nullable=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now())
 
 
 class KGWindowMessage(Base):
@@ -107,7 +108,7 @@ class KGWindowExtraction(Base):
 
     extractor_version = Column(String(64), nullable=True)
     critic_version = Column(String(64), nullable=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now())
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +128,7 @@ class KGWindowEnrichment(Base):
     enriched_edges = Column(JSON, nullable=False)
 
     enricher_version = Column(String(64), nullable=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now())
 
     __table_args__ = (
         UniqueConstraint("window_extraction_id", "component_index", name="uq_enrichment_extraction_component"),

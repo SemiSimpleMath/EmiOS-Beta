@@ -9,6 +9,7 @@ This allows accurate sleep calculation by subtracting awake time from sleep time
 """
 from sqlalchemy import Column, Integer, String, DateTime, Float
 from app.models.base import Base
+from app.assistant.utils.time_utils import AwareUtcDateTime
 
 
 class WakeSegment(Base):
@@ -32,8 +33,8 @@ class WakeSegment(Base):
     __tablename__ = 'wake_segments'
     
     id = Column(Integer, primary_key=True)
-    start_time = Column(DateTime(timezone=True), nullable=False)
-    end_time = Column(DateTime(timezone=True), nullable=True)  # NULL if duration estimated
+    start_time = Column(AwareUtcDateTime, nullable=False)
+    end_time = Column(AwareUtcDateTime, nullable=True)  # NULL if duration estimated
     duration_minutes = Column(Float, nullable=False)
     source = Column(String, nullable=False)  # 'user_chat', 'manual', 'activity_tracker'
     notes = Column(String, nullable=True)  # 'bathroom', 'couldn't sleep', etc.

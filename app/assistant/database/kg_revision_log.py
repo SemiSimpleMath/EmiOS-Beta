@@ -41,6 +41,7 @@ import uuid
 from sqlalchemy import Column, DateTime, Index, Integer, JSON, String, Text, func
 
 from app.models.base import Base
+from app.assistant.utils.time_utils import AwareUtcDateTime
 
 
 class KGRevisionLog(Base):
@@ -73,10 +74,10 @@ class KGRevisionLog(Base):
     error_message = Column(Text, nullable=True)
 
     # Set when this revision has been undone.
-    reverted_at = Column(DateTime(timezone=True), nullable=True)
+    reverted_at = Column(AwareUtcDateTime, nullable=True)
     reverted_by = Column(String(128), nullable=True)
 
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now())
 
     __table_args__ = (
         Index("ix_kg_revision_log_finding", "finding_id"),

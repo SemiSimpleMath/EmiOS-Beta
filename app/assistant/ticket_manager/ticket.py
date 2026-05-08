@@ -13,6 +13,7 @@ from pathlib import Path
 from sqlalchemy import Column, String, DateTime, Text, Integer, Index, func, JSON
 
 from app.models.base import Base
+from app.assistant.utils.time_utils import AwareUtcDateTime
 
 
 _TICKET_CONFIG_CACHE = None
@@ -87,7 +88,7 @@ class Ticket(Base):
     
     # Claim tracking (for atomic cross-process claiming)
     claim_token = Column(String(36), nullable=True, index=True)
-    claimed_at = Column(DateTime(timezone=True), nullable=True)
+    claimed_at = Column(AwareUtcDateTime, nullable=True)
 
     # Content
     title = Column(String(500))
@@ -107,18 +108,18 @@ class Ticket(Base):
     user_response_parsed = Column(JSON)
 
     # Timestamps
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
-    proposed_at = Column(DateTime(timezone=True))
-    responded_at = Column(DateTime(timezone=True))
-    completed_at = Column(DateTime(timezone=True))
-    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+    created_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now(), index=True)
+    proposed_at = Column(AwareUtcDateTime)
+    responded_at = Column(AwareUtcDateTime)
+    completed_at = Column(AwareUtcDateTime)
+    updated_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now(), onupdate=func.now())
 
     # Validity window
-    valid_from = Column(DateTime(timezone=True))
-    valid_until = Column(DateTime(timezone=True), index=True)
+    valid_from = Column(AwareUtcDateTime)
+    valid_until = Column(AwareUtcDateTime, index=True)
 
     # Snooze handling
-    snooze_until = Column(DateTime(timezone=True), nullable=True, index=True)
+    snooze_until = Column(AwareUtcDateTime, nullable=True, index=True)
     snooze_count = Column(Integer, default=0)
 
     # Execution tracking
@@ -128,7 +129,7 @@ class Ticket(Base):
     # Auto-resolution
     stale_after_minutes = Column(Integer, nullable=True)
     resolution_strategy = Column(String(50), nullable=True)
-    auto_resolved_at = Column(DateTime(timezone=True), nullable=True)
+    auto_resolved_at = Column(AwareUtcDateTime, nullable=True)
     resolution_reason = Column(Text, nullable=True)
     assumed_status_effect = Column(JSON, nullable=True)
 

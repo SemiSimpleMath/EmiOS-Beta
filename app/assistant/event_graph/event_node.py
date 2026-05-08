@@ -17,9 +17,10 @@ Key Features:
 from enum import Enum
 from datetime import datetime, timezone
 from sqlalchemy import (
-    Column, String, DateTime, Text, Integer, Boolean, 
+    Column, String, DateTime, Text, Integer, Boolean,
     ForeignKey, Index, func, JSON
 )
+from app.assistant.utils.time_utils import AwareUtcDateTime
 from sqlalchemy.orm import relationship
 from app.models.base import Base
 
@@ -90,8 +91,8 @@ class EventNode(Base):
     
     # ===== Timing =====
     # Absolute times (denormalized from source, updated on cascade)
-    start_time = Column(DateTime(timezone=True))
-    end_time = Column(DateTime(timezone=True))
+    start_time = Column(AwareUtcDateTime)
+    end_time = Column(AwareUtcDateTime)
     
     # Relative timing for cascades
     offset_from_parent_minutes = Column(Integer, nullable=True)
@@ -115,12 +116,12 @@ class EventNode(Base):
     orphan_reason = Column(String(100), nullable=True)
     # 'deleted', 'access_denied', 'moved', 'not_found'
     
-    last_synced_at = Column(DateTime(timezone=True), nullable=True)
+    last_synced_at = Column(AwareUtcDateTime, nullable=True)
     # When we last verified this node against source systems
     
     # ===== Metadata =====
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+    created_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now())
+    updated_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now(), onupdate=func.now())
     created_by = Column(String(100))  # 'user', 'emi', 'auto_planner'
     
     # ===== Additional Data =====
@@ -209,7 +210,7 @@ class EventNodeSource(Base):
     is_primary = Column(Boolean, default=True)
     # If multiple sources, which is the primary/authoritative one
     
-    last_seen_at = Column(DateTime(timezone=True))
+    last_seen_at = Column(AwareUtcDateTime)
     # When we last verified this source exists
     
     sync_status = Column(String(50), default='synced')
@@ -218,8 +219,8 @@ class EventNodeSource(Base):
     sync_error = Column(Text, nullable=True)
     
     # ===== Metadata =====
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+    created_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now())
+    updated_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now(), onupdate=func.now())
     
     # ===== Indexes =====
     __table_args__ = (

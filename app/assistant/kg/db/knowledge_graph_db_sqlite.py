@@ -7,6 +7,7 @@ from sqlalchemy import (
     UniqueConstraint, Index, func
 )
 from sqlalchemy.orm import relationship
+from app.assistant.utils.time_utils import AwareUtcDateTime
 from app.models.base import Base
 
 # --- Message ID to Source Mapping Table ---
@@ -14,7 +15,7 @@ class MessageSourceMapping(Base):
     __tablename__ = 'message_source_mapping'
     message_id = Column(String, primary_key=True)
     source_table = Column(String, nullable=False)
-    created_at = Column(DateTime, nullable=False, default=func.now())
+    created_at = Column(AwareUtcDateTime, nullable=False, default=func.now())
     
     __table_args__ = (
         Index('ix_message_source_mapping_source_table', 'source_table'),
@@ -50,8 +51,8 @@ class Node(Base):
     original_sentence = Column(Text, nullable=True)
 
     # Timestamps
-    start_date = Column(DateTime, nullable=True)
-    end_date = Column(DateTime, nullable=True)
+    start_date = Column(AwareUtcDateTime, nullable=True)
+    end_date = Column(AwareUtcDateTime, nullable=True)
     start_date_confidence = Column(String, nullable=True)
     end_date_confidence = Column(String, nullable=True)
     # Natural-language descriptions for when exact dates aren't known but a
@@ -60,8 +61,8 @@ class Node(Base):
     # populated, neither has to be. A later pass can resolve prose to exact.
     start_date_prose = Column(Text, nullable=True)
     end_date_prose = Column(Text, nullable=True)
-    created_at = Column(DateTime, nullable=False, default=func.now())
-    updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
+    created_at = Column(AwareUtcDateTime, nullable=False, default=func.now())
+    updated_at = Column(AwareUtcDateTime, nullable=False, default=func.now(), onupdate=func.now())
     
     # Promoted fields
     valid_during = Column(Text, nullable=True)
@@ -83,7 +84,7 @@ class Node(Base):
     # automatic override by extraction/merging. Incoming proposals that
     # would contradict a locked node MUST be rejected as findings, never
     # silently applied. Only set by explicit user action (UI or bulk-seed).
-    locked_by_user_at = Column(DateTime, nullable=True, index=True)
+    locked_by_user_at = Column(AwareUtcDateTime, nullable=True, index=True)
 
     # Back-pointer to the claim_proposals row that promoted this node.
     # NULL for pre-proposal-era nodes and bulk-seeded axioms.
@@ -169,9 +170,9 @@ class Edge(Base):
     # Window-level provenance (2026-04-19 pivot).
     window_id = Column(String, nullable=True)
 
-    original_message_timestamp = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, nullable=False, default=func.now())
-    updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
+    original_message_timestamp = Column(AwareUtcDateTime, nullable=True)
+    created_at = Column(AwareUtcDateTime, nullable=False, default=func.now())
+    updated_at = Column(AwareUtcDateTime, nullable=False, default=func.now(), onupdate=func.now())
     
     # NOTE: Embeddings are stored in ChromaDB, not here
     
@@ -182,7 +183,7 @@ class Edge(Base):
 
     # Axiom layer — see Node.locked_by_user_at. Non-NULL means this edge is
     # user-locked and immune to automatic override.
-    locked_by_user_at = Column(DateTime, nullable=True, index=True)
+    locked_by_user_at = Column(AwareUtcDateTime, nullable=True, index=True)
 
     # Back-pointer to the claim_proposals row that promoted this edge.
     created_from_proposal_id = Column(String, nullable=True, index=True)
