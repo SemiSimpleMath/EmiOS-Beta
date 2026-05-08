@@ -555,8 +555,31 @@
       </div>`);
     }
 
-    // 3. Proposed action — key/value summary
-    if (report.proposed_action && typeof report.proposed_action === 'object') {
+    // 3a. Recommendation prose (new shape) + disposition badge + user_question
+    if (report.recommendation) {
+      const disposition = report.disposition || '';
+      const dispBadge = disposition === 'needs_user_review'
+        ? ' <span style="background:#7c2d12;color:#fed7aa;padding:2px 8px;border-radius:4px;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">needs your review</span>'
+        : disposition === 'auto_apply'
+          ? ' <span style="background:#14532d;color:#bbf7d0;padding:2px 8px;border-radius:4px;font-size:11px;text-transform:uppercase;letter-spacing:0.5px">auto-apply (24h grace)</span>'
+          : '';
+      const conf = typeof report.confidence === 'number'
+        ? ` <span style="color:var(--muted);font-size:11px">conf ${(report.confidence * 100).toFixed(0)}%</span>`
+        : '';
+      sections.push(`<div class="report-section">
+        <div class="report-heading">Recommendation${dispBadge}${conf}</div>
+        <div class="report-prose">${esc(report.recommendation)}</div>
+      </div>`);
+      if (report.user_question) {
+        sections.push(`<div class="report-section">
+          <div class="report-heading" style="color:#fed7aa">Question for you</div>
+          <div class="report-prose">${esc(report.user_question)}</div>
+        </div>`);
+      }
+    }
+
+    // 3b. Proposed action — legacy shape (pre-2026-05-07 findings only)
+    if (!report.recommendation && report.proposed_action && typeof report.proposed_action === 'object') {
       const pa = report.proposed_action;
       const rows = Object.entries(pa)
         .filter(([k, _]) => k !== 'affected_records' && k !== 'edge_ids' && k !== 'buckets')
@@ -568,7 +591,7 @@
         }).join('');
       if (rows) {
         sections.push(`<div class="report-section">
-          <div class="report-heading">Proposed action</div>
+          <div class="report-heading">Proposed action <span style="color:var(--muted);font-size:11px">(legacy schema)</span></div>
           <div class="report-kv">${rows}</div>
         </div>`);
       }

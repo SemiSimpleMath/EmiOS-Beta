@@ -83,6 +83,42 @@ two different studios."
 A bad recommendation is vague: *"Found a duplicate, recommend merging."*
 The reader can't audit that. Don't write that.
 
+## Special case: `synthetic_fact_proposal` findings
+
+These come from `wiki_connection_investigator` reading a wiki page and
+proposing a new KG fact. The finding's `evidence_json` carries the
+proposed sentence + suggested start/end dates + the producer agent.
+
+**Your investigation has one primary job: duplicate detection.**
+
+1. Read the proposed sentence + entity from `evidence_json`.
+2. `kg_query` for existing nodes/edges that already encode this fact.
+   Cast a wide net — same subject + similar predicate + overlapping
+   date window. The proposal_promoter's same-node detector wouldn't
+   have caught this (or it would be a node already), but a label-based
+   or sentence-similarity search may surface a close match.
+3. **If duplicate:** `disposition=auto_apply`,
+   `recommendation="Dismiss as duplicate of <node_id> (`<label>`).
+   The proposed fact 'X' already exists in the KG as <node_type>
+   from <start_date>. No new node needed."`
+4. **If NOT duplicate:** the proposed fact is genuinely new. The
+   right next step is the `synthetic_fact_review` promotion pipeline
+   (mints a new kg_node + kg_edge from the proposed sentence using
+   shared merge-decision logic). **That pipeline's promotion path
+   (`approved → extracted → promoted`) is currently TBD** — see
+   `app/assistant/synthetic_fact_review/`. For now: set
+   `disposition=needs_user_review`, `user_question="Confirmed not a
+   duplicate. Promote this proposed fact to a new KG node?
+   (Promotion pipeline TBD — manual review until it lands.)"`,
+   `recommendation` describes the proposed fact + verifies it's not
+   in the KG, and the user decides.
+
+The duplicate-check is the high-value half of this finding type — most
+synthetic_fact_proposals are duplicates the wiki page surfaces because
+the prose carries info the chat ingest already captured. Catching them
+saves the user from clicking through TBD promotions that aren't even
+needed.
+
 ## Disposition decision
 
 Pick **one**:
