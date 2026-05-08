@@ -57,99 +57,7 @@
   <!-- Left dropdown menu -->
   <div class="dropdown-menu hidden" id="dropdown-menu">
     <ul class="menu-list">
-      <li class="menu-item">
-        <label class="menu-btn menu-btn--toggle">
-          <i id="theme-icon" class="fas fa-sun"></i>
-          <span>Light/Dark Mode</span>
-          <input type="checkbox" id="theme-toggle" hidden>
-        </label>
-      </li>
-      <li class="menu-item">
-        <button id="menu-speak-toggle" class="menu-btn" data-active="false" aria-pressed="false">
-          <i class="fas fa-comment-dots"></i>
-          <span>Speak Mode: Off</span>
-        </button>
-      </li>
-      <li class="menu-item">
-        <button id="menu-quiet-mode-toggle" class="menu-btn" data-active="false" aria-pressed="false">
-          <i class="fas fa-moon"></i>
-          <span>Quiet Mode: Off</span>
-        </button>
-      </li>
-      <li class="menu-item">
-        <a href="/daily_summary" target="_blank" class="menu-btn">
-          <i class="fas fa-calendar-day"></i>
-          <span>Daily Summary</span>
-        </a>
-      </li>
-      <li class="menu-item">
-        <a href="/doc/editor" target="_blank" class="menu-btn">
-          <i class="fas fa-file-alt"></i>
-          <span>Document Editor</span>
-        </a>
-      </li>
-      <li class="menu-item">
-        <a href="/insights" target="_blank" class="menu-btn">
-          <i class="fas fa-brain"></i>
-          <span>Insights</span>
-        </a>
-      </li>
-      <li class="menu-item">
-        <a href="/personalize" target="_blank" class="menu-btn">
-          <i class="fas fa-sliders-h"></i>
-          <span>Personalize Emi</span>
-        </a>
-      </li>
-      <li class="menu-item">
-        <a href="/routines" target="_blank" class="menu-btn">
-          <i class="fas fa-clock"></i>
-          <span>Routines &amp; Schedule</span>
-        </a>
-      </li>
-      {% if music_enabled %}
-      <li class="menu-item">
-        <a href="/music" target="_blank" class="menu-btn">
-          <i class="fas fa-music"></i>
-          <span>Music</span>
-        </a>
-      </li>
-      {% endif %}
-      <li class="menu-item menu-submenu">
-        <button class="menu-btn submenu-toggle">
-          <i class="fas fa-cogs"></i>
-          <span>Settings</span>
-          <i class="fas fa-chevron-down submenu-arrow"></i>
-        </button>
-        <ul class="submenu">
-          <li class="submenu-item"><a href="/preferences/general" class="menu-btn"><i class="fas fa-user"></i><span>About You</span></a></li>
-          <li class="submenu-item"><a href="/settings/user-bio" class="menu-btn"><i class="fas fa-user-pen"></i><span>Your Bio</span></a></li>
-          <li class="submenu-item"><a href="/settings/assistant" class="menu-btn"><i class="fas fa-robot"></i><span>Assistant</span></a></li>
-          <li class="submenu-item"><a href="/settings/wellness" class="menu-btn"><i class="fas fa-heartbeat"></i><span>Wellness</span></a></li>
-          <li class="submenu-item"><a href="/settings/quiet-mode" class="menu-btn"><i class="fas fa-moon"></i><span>Quiet Mode</span></a></li>
-          <li class="submenu-item"><a href="/settings/important-resources" class="menu-btn"><i class="fas fa-file-pen"></i><span>Important Resources</span></a></li>
-        </ul>
-      </li>
-      <li class="menu-item menu-submenu">
-        <button class="menu-btn submenu-toggle">
-          <i class="fas fa-plug"></i>
-          <span>Integrations</span>
-          <i class="fas fa-chevron-down submenu-arrow"></i>
-        </button>
-        <ul class="submenu">
-          <li class="submenu-item"><a href="/settings/features" class="menu-btn"><i class="fas fa-toggle-on"></i><span>Features</span></a></li>
-          <li class="submenu-item"><a href="/settings/integrations" class="menu-btn"><i class="fas fa-plug"></i><span>Integrations</span></a></li>
-          <li class="submenu-item"><a href="/settings/integrations/google" class="menu-btn"><i class="fab fa-google"></i><span>Google OAuth</span></a></li>
-          <li class="submenu-item"><a href="/settings/integrations/ring" class="menu-btn"><i class="fas fa-video"></i><span>Ring Cameras</span></a></li>
-          <li class="submenu-item"><a href="/settings/api-keys" class="menu-btn"><i class="fas fa-key"></i><span>API Keys</span></a></li>
-          <li class="submenu-item"><a href="/agent-directives" class="menu-btn"><i class="fas fa-scroll"></i><span>Agent Directives</span></a></li>
-        </ul>
-      </li>
-      <li class="menu-item menu-item--danger">
-        <button id="menu-shutdown" class="menu-btn menu-btn--danger">
-          <i class="fas fa-power-off"></i>
-          <span>Shut Down EmiOS</span>
-        </button>
-      </li>
+      {% include '_top_bar_user_menu.html' %}
     </ul>
   </div>
 
@@ -157,57 +65,7 @@
   {% if dev_tools_enabled %}
   <div class="dropdown-menu dropdown-menu--right hidden" id="dev-dropdown-menu">
     <ul class="menu-list">
-      <li class="menu-item">
-        <button id="menu-screen-capture-toggle" type="button" class="menu-btn" data-active="false" aria-pressed="false">
-          <i class="fas fa-camera"></i>
-          <span>Screen Capture: Disarmed</span>
-        </button>
-      </li>
-      <li class="menu-item">
-        <button id="menu-verbose-log-toggle" class="menu-btn" data-active="false" aria-pressed="false">
-          <i class="fas fa-scroll"></i>
-          <span>Verbose Logs: Off</span>
-        </button>
-      </li>
-      <li class="menu-item">
-        <a href="/dev/subsystems" target="_blank" class="menu-btn">
-          <i class="fas fa-toggle-on"></i>
-          <span>Subsystem Controls</span>
-        </a>
-      </li>
-      <li class="menu-item">
-        <a href="/dev-wiki/" target="_blank" class="menu-btn">
-          <i class="fas fa-book-reader"></i>
-          <span>Dev Wiki (local)</span>
-        </a>
-      </li>
-      <li class="menu-item">
-        <a href="https://github.com/SemiSimpleMath/EmiOS-Beta/wiki" target="_blank" rel="noopener" class="menu-btn">
-          <i class="fab fa-github"></i>
-          <span>Dev Wiki on GitHub</span>
-        </a>
-      </li>
-      <li class="menu-item">
-        <a href="/emi-code" target="_blank" class="menu-btn">
-          <i class="fas fa-code"></i>
-          <span>EmiCode</span>
-        </a>
-      </li>
-      <li class="menu-item menu-submenu">
-        <button class="menu-btn submenu-toggle">
-          <i class="fas fa-bug"></i>
-          <span>Debug</span>
-          <i class="fas fa-chevron-down submenu-arrow"></i>
-        </button>
-        <ul class="submenu">
-          <li class="submenu-item"><a href="/debug/status" target="_blank" class="menu-btn"><i class="fas fa-heartbeat"></i><span>Day Flow Pipeline (JSON)</span></a></li>
-          <li class="submenu-item"><a href="/debug/runtime/concurrency" target="_blank" class="menu-btn"><i class="fas fa-network-wired"></i><span>Runtime Concurrency</span></a></li>
-          <li class="submenu-item"><a href="/debug/logging" target="_blank" class="menu-btn"><i class="fas fa-stream"></i><span>Logging Controls</span></a></li>
-          <li class="submenu-item"><a href="/debug/agent-prompts" target="_blank" class="menu-btn"><i class="fas fa-terminal"></i><span>Agent Prompt Debug</span></a></li>
-          <li class="submenu-item"><a href="/debug/agent-workbench" target="_blank" class="menu-btn"><i class="fas fa-flask"></i><span>Agent Workbench</span></a></li>
-          <li class="submenu-item"><a href="/progress" target="_blank" class="menu-btn"><i class="fas fa-route"></i><span>Agent Progress</span></a></li>
-        </ul>
-      </li>
+      {% include '_top_bar_dev_menu.html' %}
     </ul>
   </div>
   {% endif %}

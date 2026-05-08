@@ -33,11 +33,6 @@
     }
 
     function setupThemeListener(ctx) {
-        const oldThemeBtn = document.getElementById("theme-toggle");
-        if (oldThemeBtn) {
-            oldThemeBtn.addEventListener("click", toggleTheme);
-        }
-
         const menuThemeBtn = document.getElementById("menu-theme-toggle");
         if (menuThemeBtn) {
             menuThemeBtn.addEventListener("click", function () {

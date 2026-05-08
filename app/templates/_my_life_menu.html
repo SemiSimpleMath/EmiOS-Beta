@@ -3,11 +3,8 @@
    Both chat_bot.html (vertical) and chat_bot_desktop.html (horizontal)
    include this partial, so adding/removing a link only needs one edit.
 
-   This partial is link-only (no toggles or per-layout JS), so it's safe
-   to share across both templates. The User and Dev dropdowns have
-   layout-specific toggle elements (different IDs / different toggle
-   patterns) so they remain per-template — links inside them are kept
-   in sync manually.
+   See also _top_bar_user_menu.html and _top_bar_dev_menu.html for the
+   other two shared dropdowns.
 #}
 <li class="menu-item">
   <a href="/wiki/" target="_blank" class="menu-btn">

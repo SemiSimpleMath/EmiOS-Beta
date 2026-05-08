@@ -1,0 +1,58 @@
+{# Shared dev (right wrench) menu items.
+
+   Included by both chat_bot.html (vertical) and chat_bot_desktop.html
+   (horizontal). The {% if dev_tools_enabled %} guard belongs in the
+   PARENT template — it should wrap both the toggle BUTTON in the header
+   and the entire dropdown div, not individual items inside the menu.
+#}
+<li class="menu-item">
+  <button id="menu-screen-capture-toggle" type="button" class="menu-btn" data-active="false" aria-pressed="false">
+    <i class="fas fa-camera"></i>
+    <span>Screen Capture: Disarmed</span>
+  </button>
+</li>
+<li class="menu-item">
+  <button id="menu-verbose-log-toggle" class="menu-btn" data-active="false" aria-pressed="false">
+    <i class="fas fa-scroll"></i>
+    <span>Verbose Logs: Off</span>
+  </button>
+</li>
+<li class="menu-item">
+  <a href="/dev/subsystems" target="_blank" class="menu-btn">
+    <i class="fas fa-toggle-on"></i>
+    <span>Subsystem Controls</span>
+  </a>
+</li>
+<li class="menu-item">
+  <a href="/dev-wiki/" target="_blank" class="menu-btn">
+    <i class="fas fa-book-reader"></i>
+    <span>Dev Wiki (local)</span>
+  </a>
+</li>
+<li class="menu-item">
+  <a href="https://github.com/SemiSimpleMath/EmiOS-Beta/wiki" target="_blank" rel="noopener" class="menu-btn">
+    <i class="fab fa-github"></i>
+    <span>Dev Wiki on GitHub</span>
+  </a>
+</li>
+<li class="menu-item">
+  <a href="/emi-code" target="_blank" class="menu-btn">
+    <i class="fas fa-code"></i>
+    <span>EmiCode</span>
+  </a>
+</li>
+<li class="menu-item menu-submenu">
+  <button class="menu-btn submenu-toggle">
+    <i class="fas fa-bug"></i>
+    <span>Debug</span>
+    <i class="fas fa-chevron-down submenu-arrow"></i>
+  </button>
+  <ul class="submenu">
+    <li class="submenu-item"><a href="/debug/status" target="_blank" class="menu-btn"><i class="fas fa-heartbeat"></i><span>Day Flow Pipeline (JSON)</span></a></li>
+    <li class="submenu-item"><a href="/debug/runtime/concurrency" target="_blank" class="menu-btn"><i class="fas fa-network-wired"></i><span>Runtime Concurrency</span></a></li>
+    <li class="submenu-item"><a href="/debug/logging" target="_blank" class="menu-btn"><i class="fas fa-stream"></i><span>Logging Controls</span></a></li>
+    <li class="submenu-item"><a href="/debug/agent-prompts" target="_blank" class="menu-btn"><i class="fas fa-terminal"></i><span>Agent Prompt Debug</span></a></li>
+    <li class="submenu-item"><a href="/debug/agent-workbench" target="_blank" class="menu-btn"><i class="fas fa-flask"></i><span>Agent Workbench</span></a></li>
+    <li class="submenu-item"><a href="/progress" target="_blank" class="menu-btn"><i class="fas fa-route"></i><span>Agent Progress</span></a></li>
+  </ul>
+</li>
