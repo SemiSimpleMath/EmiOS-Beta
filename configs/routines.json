@@ -6,7 +6,7 @@
   "routines": [
     {
       "id": "morning_briefing",
-      "enabled": false,
+      "enabled": true,
       "_comment": "Example task-based routine. Provide your own tasks/morning_briefing/task_spec.md and flip enabled to use.",
       "name": "Morning Briefing",
       "aliases": [
@@ -612,7 +612,10 @@
       "id": "kg_goal_outcome_detect",
       "enabled": true,
       "name": "KG goal outcome detector (achieved / abandoned)",
-      "aliases": ["goal outcomes", "detect achievements"],
+      "aliases": [
+        "goal outcomes",
+        "detect achievements"
+      ],
       "runner": "function",
       "spec": {
         "function_name": "kg_goal_outcome_detect",
@@ -629,7 +632,10 @@
       "id": "kg_goal_dormancy_sweep",
       "enabled": true,
       "name": "KG goal dormancy sweep",
-      "aliases": ["goal dormancy", "dormant goals"],
+      "aliases": [
+        "goal dormancy",
+        "dormant goals"
+      ],
       "runner": "function",
       "spec": {
         "function_name": "kg_goal_dormancy_sweep"
