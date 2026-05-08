@@ -70,45 +70,66 @@
 
     function renderCard(f) {
       const r = f.investigation_report_json || {};
-      const proposed = r.proposed_action || {};
-      const op = proposed.op || '(unspecified)';
-      const args = proposed.args || '';
-      const reversibility = proposed.reversibility || '';
-      const confidence = proposed.confidence != null ? (proposed.confidence * 100).toFixed(0) + '%' : '';
-      const operatorNotes = r.operator_notes || '';
+      // New shape (post-2026-05-07): prose recommendation + disposition.
+      // Old shape (proposed_action): rendered as fallback for legacy findings.
+      const recommendation = r.recommendation || '';
+      const disposition = (r.disposition || '').trim();
+      const userQuestion = r.user_question || '';
+      const confidenceFloat = typeof r.confidence === 'number' ? r.confidence : (r.proposed_action || {}).confidence;
+      const confidence = confidenceFloat != null ? (confidenceFloat * 100).toFixed(0) + '%' : '';
       const evidenceList = Array.isArray(r.evidence) ? r.evidence : [];
-      const affected = Array.isArray(r.affected_records) ? r.affected_records : [];
       const openQuestions = Array.isArray(r.open_questions) ? r.open_questions : [];
       const primaryLabel = (f.primary_node && f.primary_node.label) || f.primary_node_id || '(no node)';
       const primaryNodeId = (f.primary_node && f.primary_node.id) || f.primary_node_id || '';
       const nodeLink = primaryNodeId ? `<a href="/kg/node/${esc(primaryNodeId)}" target="_blank">${esc(primaryLabel)}</a>` : esc(primaryLabel);
 
-      // Render evidence as a compact JSON list (it's typically already small).
       const evidenceHtml = evidenceList.length
         ? `<details class="inv-collapsible"><summary>Evidence (${evidenceList.length})</summary><pre class="inv-json">${esc(JSON.stringify(evidenceList, null, 2))}</pre></details>`
         : '';
 
-      const affectedHtml = affected.length
-        ? `<details class="inv-collapsible"><summary>Affected records (${affected.length})</summary><pre class="inv-json">${esc(JSON.stringify(affected, null, 2))}</pre></details>`
-        : '';
-
       const questionsHtml = openQuestions.length
-        ? `<div class="inv-questions"><h4>Open questions</h4><ul>${openQuestions.map(q => `<li>${esc(q)}</li>`).join('')}</ul></div>`
+        ? `<div class="inv-questions"><h4>Other open questions</h4><ul>${openQuestions.map(q => `<li>${esc(q)}</li>`).join('')}</ul></div>`
         : '';
 
-      const opLabel = op === 'no_action'
-        ? '<span class="inv-op inv-op-noop">no_action</span>'
-        : `<span class="inv-op">${esc(op)}</span>`;
+      const dispositionBadge = disposition === 'needs_user_review'
+        ? '<span class="inv-disposition inv-disposition-user">needs your review</span>'
+        : disposition === 'auto_apply'
+          ? '<span class="inv-disposition inv-disposition-auto">auto-apply (24h grace)</span>'
+          : '';
+
+      // Grace timer for auto_apply: countdown from investigated_at + 24h
+      let graceHtml = '';
+      if (disposition === 'auto_apply' && f.investigated_at) {
+        const inv = new Date(f.investigated_at).getTime();
+        const expires = inv + 24 * 60 * 60 * 1000;
+        const remaining = Math.max(0, expires - Date.now());
+        const hours = Math.floor(remaining / 3_600_000);
+        const minutes = Math.floor((remaining % 3_600_000) / 60_000);
+        graceHtml = remaining > 0
+          ? `<div class="inv-grace">⏳ Auto-applies in ${hours}h ${minutes}m unless you accept / decline.</div>`
+          : '<div class="inv-grace inv-grace-expired">⏰ Grace expired — pending next executor cron.</div>';
+      }
+
+      const userQHtml = userQuestion
+        ? `<div class="inv-user-question"><h4>Question for you</h4><p class="inv-prose">${esc(userQuestion)}</p></div>`
+        : '';
+
+      // Legacy fallback: render the old proposed_action if no recommendation exists.
+      const legacyProposed = (!recommendation && r.proposed_action)
+        ? `<div class="inv-proposed inv-legacy">
+             <h4>Proposed action (legacy schema): <code>${esc(r.proposed_action.op || '?')}</code></h4>
+             ${r.proposed_action.args ? `<div class="inv-prose">${esc(r.proposed_action.args)}</div>` : ''}
+           </div>`
+        : '';
 
       return `
-        <article class="inv-card" id="card-${esc(f.id)}">
+        <article class="inv-card" id="card-${esc(f.id)}" data-disposition="${esc(disposition)}">
           <header class="inv-card-head">
             <div class="inv-card-head-left">
               <span class="inv-type-badge inv-type-${esc(f.finding_type)}">${esc(f.finding_type.replace(/_/g, ' '))}</span>
               <span class="inv-priority inv-priority-${esc(f.priority)}">${esc(f.priority)}</span>
-              ${opLabel}
+              ${dispositionBadge}
               ${confidence ? `<span class="inv-confidence">conf ${confidence}</span>` : ''}
-              ${reversibility ? `<span class="inv-rev inv-rev-${esc(reversibility)}">${esc(reversibility)}</span>` : ''}
             </div>
             <div class="inv-card-head-right">
               <span class="inv-meta">${nodeLink}</span>
@@ -116,16 +137,21 @@
             </div>
           </header>
 
-          ${r.result_summary ? `<p class="inv-summary">${esc(r.result_summary)}</p>` : ''}
+          ${graceHtml}
+          ${userQHtml}
 
-          ${r.diagnosis ? `<details class="inv-collapsible" open><summary>Diagnosis</summary><div class="inv-prose">${esc(r.diagnosis)}</div></details>` : ''}
+          ${recommendation || r.proposed_action ? `
+          <div class="inv-recommendation">
+            <h4>Recommendation <span class="inv-rec-hint">(edit to refine; autosaves on blur)</span></h4>
+            <textarea id="rec-${esc(f.id)}" rows="6" class="inv-rec-textarea"
+                      onblur="saveRecommendation('${esc(f.id)}')"
+                      placeholder="What should happen and why...">${esc(recommendation)}</textarea>
+            <span class="inv-save-status" id="save-status-${esc(f.id)}"></span>
+          </div>` : ''}
 
-          <div class="inv-proposed">
-            <h4>Proposed action: <code>${esc(op)}</code></h4>
-            ${args ? `<div class="inv-prose">${esc(args)}</div>` : '<p class="inv-empty-inline">(no args)</p>'}
-          </div>
+          ${legacyProposed}
 
-          ${affectedHtml}
+          ${r.diagnosis ? `<details class="inv-collapsible"><summary>Diagnosis</summary><div class="inv-prose">${esc(r.diagnosis)}</div></details>` : ''}
           ${evidenceHtml}
           ${questionsHtml}
 
@@ -136,33 +162,23 @@
             <p class="inv-prose">${esc(f.reason || '(no reason recorded)')}</p>
           </div>
 
-          <div class="inv-notes-block">
-            <label for="notes-${esc(f.id)}">Operator notes</label>
-            <textarea id="notes-${esc(f.id)}" rows="3" placeholder="Your thoughts before accepting / dismissing…">${esc(operatorNotes)}</textarea>
-            <button type="button" class="inv-btn inv-btn-save-notes" onclick="saveNotes('${esc(f.id)}')">Save notes</button>
-            <span class="inv-save-status" id="save-status-${esc(f.id)}"></span>
-          </div>
-
           <div class="inv-actions">
-            <button type="button" class="inv-btn inv-btn-apply" onclick="applyFinding('${esc(f.id)}')"
-                    title="Hand off to kg_mutation_manager — planner applies the proposed_action via audit-wired tools, or escalates if irreversible / low confidence.">
-              ⚡ Apply via mutation_manager
-            </button>
             <button type="button" class="inv-btn inv-btn-accept" onclick="acceptFinding('${esc(f.id)}')"
-                    title="Mark as resolved without running a KG mutation. Use for op=no_action or when the diagnosis itself resolves the question.">
-              Accept (no mutation)
+                    title="Run the recommendation now via kg_resolution_manager — bypasses the 24h grace.">
+              ✓ Accept (run now)
             </button>
-            <button type="button" class="inv-btn inv-btn-dismiss" onclick="dismissFinding('${esc(f.id)}')">
-              Dismiss (close as rejected)
+            <button type="button" class="inv-btn inv-btn-dismiss" onclick="dismissFinding('${esc(f.id)}')"
+                    title="Mark as dismissed — no execution.">
+              ✗ Decline
             </button>
           </div>
         </article>
       `;
     }
 
-    function notesValue(id) {
-      const ta = document.getElementById('notes-' + id);
-      return ta ? ta.value.trim() : '';
+    function recommendationValue(id) {
+      const ta = document.getElementById('rec-' + id);
+      return ta ? ta.value : '';
     }
     function flashStatus(id, msg, isError) {
       const el = document.getElementById('save-status-' + id);
@@ -172,13 +188,17 @@
       setTimeout(() => { el.textContent = ''; el.classList.remove('is-error'); }, 3500);
     }
 
-    window.saveNotes = async function saveNotes(id) {
-      const notes = notesValue(id);
+    // Autosave on blur — the dev edits the recommendation prose, clicks
+    // away, change persists. The 24h grace timer keeps counting; the
+    // edited prose is what the executor will run on grace expiry (or
+    // immediate run via Accept).
+    window.saveRecommendation = async function saveRecommendation(id) {
+      const recommendation = recommendationValue(id);
       try {
-        const res = await fetch(`/kg-maintenance/api/finding/${id}/operator_notes`, {
+        const res = await fetch(`/kg-maintenance/api/finding/${id}/recommendation`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ notes }),
+          body: JSON.stringify({ recommendation }),
         });
         if (!res.ok) throw new Error((await res.json()).error || res.statusText);
         flashStatus(id, 'Saved.', false);
@@ -187,65 +207,55 @@
       }
     };
 
-    async function closeFinding(id, action, label) {
-      const notes = notesValue(id);
-      const confirmMsg = `${label} this finding?\n\n` + (notes ? `Notes: ${notes}\n\n` : '') + 'This is reversible only by editing the row in the DB.';
-      if (!confirm(confirmMsg)) return;
-      try {
-        const res = await fetch(`/kg-maintenance/api/finding/${id}/${action}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ notes }),
-        });
-        if (!res.ok) throw new Error((await res.json()).error || res.statusText);
-        const card = document.getElementById('card-' + id);
-        if (card) {
-          card.classList.add('is-closed');
-          card.querySelector('.inv-actions').innerHTML = `<span class="inv-closed-badge">${label}d</span>`;
-        }
-      } catch (e) {
-        alert(`${label} failed: ` + e.message);
-      }
-    }
-
-    window.acceptFinding = (id) => closeFinding(id, 'accept', 'Accept');
-    window.dismissFinding = (id) => closeFinding(id, 'dismiss', 'Dismiss');
-
-    window.applyFinding = async function applyFinding(id) {
-      const notes = notesValue(id);
+    // Accept = run via kg_resolution_manager NOW (bypasses the 24h grace).
+    // The current saved recommendation prose is what gets executed.
+    window.acceptFinding = async function acceptFinding(id) {
       const card = document.getElementById('card-' + id);
-      const proposed = card?.querySelector('.inv-proposed code')?.textContent || '(unknown op)';
-      const confirmMsg =
-        `Apply this finding via kg_mutation_manager?\n\n` +
-        `Planner will read the proposed_action (op=${proposed}) from the investigation report ` +
-        `and either apply the matching mutation tool, mark as no_action, or escalate.\n\n` +
-        (notes ? `Notes: ${notes}\n\n` : '') +
-        `The mutation is audit-logged in kg_revision_log. Continue?`;
-      if (!confirm(confirmMsg)) return;
+      if (!confirm('Run this recommendation now via kg_resolution_manager?\n\nThis applies the (possibly edited) prose to the KG. Reversible only via kg_revision_log.')) return;
       const actions = card?.querySelector('.inv-actions');
       const prevHtml = actions?.innerHTML;
-      if (actions) actions.innerHTML = '<span class="inv-applying">⚡ Applying via kg_mutation_manager… (5-30s)</span>';
+      if (actions) actions.innerHTML = '<span class="inv-applying">⚡ Running… (10-90s)</span>';
       try {
-        const res = await fetch(`/kg-maintenance/api/finding/${id}/apply`, {
+        const res = await fetch(`/kg-maintenance/api/finding/${id}/accept`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ notes }),
+          body: JSON.stringify({}),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || res.statusText);
         card.classList.add('is-closed');
-        const summary = data.result_summary || '(no summary)';
-        const term = data.terminal_status || 'unknown';
+        const summary = data.result_summary || data.outcome?.result_summary || '(no summary)';
+        const term = data.terminal_status || data.outcome?.outcome || 'ran';
         if (actions) {
           actions.innerHTML = `
             <div class="inv-applied-block">
-              <span class="inv-closed-badge inv-closed-applied">Applied → ${esc(term)}</span>
+              <span class="inv-closed-badge inv-closed-applied">${esc(term)}</span>
               <p class="inv-applied-summary">${esc(summary)}</p>
             </div>`;
         }
       } catch (e) {
         if (actions) actions.innerHTML = prevHtml || '';
-        alert('Apply failed: ' + e.message);
+        alert('Accept failed: ' + e.message);
+      }
+    };
+
+    // Decline = mark dismissed; no execution.
+    window.dismissFinding = async function dismissFinding(id) {
+      if (!confirm('Decline this finding?\n\nNo KG changes will be made; the finding is closed as dismissed.')) return;
+      try {
+        const res = await fetch(`/kg-maintenance/api/finding/${id}/dismiss`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        if (!res.ok) throw new Error((await res.json()).error || res.statusText);
+        const card = document.getElementById('card-' + id);
+        if (card) {
+          card.classList.add('is-closed');
+          card.querySelector('.inv-actions').innerHTML = '<span class="inv-closed-badge">Dismissed</span>';
+        }
+      } catch (e) {
+        alert('Decline failed: ' + e.message);
       }
     };
 

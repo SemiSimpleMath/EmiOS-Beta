@@ -562,30 +562,51 @@ def api_finding_operator_notes(finding_id):
         return jsonify({"error": str(e)}), 500
 
 
-@kg_maintenance_bp.route("/api/finding/<finding_id>/accept", methods=["POST"])
-def api_finding_accept(finding_id):
-    """Close an investigated finding as 'executed' without performing a KG
-    mutation — appropriate for proposed_action.op == 'no_action' where the
-    diagnosis itself resolves the question.
+@kg_maintenance_bp.route("/api/finding/<finding_id>/recommendation", methods=["POST"])
+def api_finding_recommendation(finding_id):
+    """Autosave-on-blur for the dev page. Updates
+    `investigation_report_json.recommendation` so the executor reads
+    the dev's edited prose at run time. The 24h grace timer keeps
+    counting; this just persists the edit.
 
-    Body (optional): { "notes": str }
+    Body: { "recommendation": str }
     """
     data = request.get_json(silent=True) or {}
-    notes = str(data.get("notes") or "").strip()
+    recommendation = data.get("recommendation")
+    if not isinstance(recommendation, str):
+        return jsonify({"error": "Body must include 'recommendation' (string)."}), 400
+    try:
+        finding = get_finding(finding_id)
+        if finding is None:
+            return jsonify({"error": "Finding not found"}), 404
+        if finding["status"] != "investigated":
+            return jsonify({"error": f"Cannot edit recommendation on a finding in status {finding['status']!r}"}), 409
+        _persist_report_field(finding_id, "recommendation", recommendation)
+        return jsonify({"ok": True, "id": finding_id})
+    except Exception as e:
+        logger.error("[kg_maintenance] recommendation autosave failed id=%s: %s", finding_id, e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@kg_maintenance_bp.route("/api/finding/<finding_id>/accept", methods=["POST"])
+def api_finding_accept(finding_id):
+    """Run the (possibly-edited) recommendation NOW via kg_resolution_manager.
+    Bypasses the 24h grace window; called by the Accept button on the dev page.
+
+    The terminal status is written by the resolution manager's own report
+    handling. Synchronous — blocks until the manager finishes (10-90s for
+    a typical run).
+    """
     try:
         finding = get_finding(finding_id)
         if finding is None:
             return jsonify({"error": "Finding not found"}), 404
         if finding["status"] != "investigated":
             return jsonify({"error": f"Cannot accept finding in status {finding['status']!r}"}), 409
-        if notes:
-            _persist_report_field(finding_id, "operator_notes", notes)
-        set_status(
-            finding_id, "executed",
-            executed_by="ui:investigated_review",
-            execution_notes=(notes or "Accepted from investigated-review page"),
-        )
-        return jsonify({"ok": True, "id": finding_id, "new_status": "executed"})
+
+        from app.assistant.kg_investigator.finding_executor import execute_one
+        result = execute_one(finding_id)
+        return jsonify(result)
     except Exception as e:
         logger.error("[kg_maintenance] accept failed id=%s: %s", finding_id, e, exc_info=True)
         return jsonify({"error": str(e)}), 500

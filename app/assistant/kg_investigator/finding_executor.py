@@ -1,23 +1,34 @@
 """Consumer for kg_maintenance_finding rows that already carry an
-investigation_report_json. Picks them up, hands the report to
-``kg_mutation_manager``, and lets the manager decide whether to apply
-the mutation or escalate.
+investigation_report_json. Picks up findings whose grace window has
+expired, hands the recommendation prose to ``kg_resolution_manager``,
+and lets the manager apply the mutation.
 
-execute_one(finding_id) — one finding by id (manual / one-shot use)
-run_executable_findings(limit=N) — bounded sweep for routine wiring
+Two entry points:
+- execute_one(finding_id): one finding by id (manual / Accept-button use)
+- run_executable_findings(limit=N): bounded sweep for routine wiring,
+  filters to disposition='auto_apply' AND past 24h grace.
 
 Idempotent: only operates on rows where
-  status = 'investigated' AND investigation_report_json IS NOT NULL.
-The manager updates status in-place via kg_finding_resolve /
-kg_finding_escalate, so a second run won't pick the same row up.
+  status = 'investigated'
+  AND investigation_report_json IS NOT NULL
+  AND disposition = 'auto_apply'
+  AND investigated_at < now - 24h  (for the routine path)
 
-Per-call cap (max_to_execute) bounds LLM cost when wiring this into
-a routine. The mutation manager caps its own internal loop too.
+The ``execute_one`` path bypasses the 24h gate (used when a dev clicks
+Accept on the dev page); the routine path enforces it (auto-apply
+catches up findings the dev didn't review).
+
+After the manager runs, status flips to 'executed' / 'escalated' /
+'dismissed' via the resolution manager's own report. A second sweep
+won't pick up the same row.
 """
 from __future__ import annotations
 
 import json as _json
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
+
+from sqlalchemy import and_
 
 from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
 from app.assistant.ServiceLocator.service_locator import DI
@@ -29,17 +40,20 @@ from app.assistant.utils.pydantic_classes import (
     ScopeResourcePolicy,
     ScopeWritePolicy,
 )
+from app.assistant.utils.time_utils import utc_now
 from app.models.db_manager import get_db_manager
 
+logger = get_logger(__name__)
 
-def _mutation_scope() -> ScopeContext:
-    """Scope context that authorizes the mutation manager to write to the KG.
+MANAGER_NAME = "kg_resolution_manager"
+GRACE_WINDOW_HOURS = 24
 
-    The system refuses to widen ``writes.write_kg`` from False to True via
-    the manager's scope_contract; the inbound Message has to already grant
-    the right. So the executor seeds a permissive scope here. The manager's
-    own scope_contract still narrows tools to the typed mutator allowlist.
-    """
+
+def _executor_scope() -> ScopeContext:
+    """Permissive scope so the resolution manager's scope_contract can
+    keep ``write_kg=True``. The manager's own scope_contract still
+    narrows tools to its curated allowlist (kg_query, kg_close_state,
+    kg_update_node_field — no regen tools, no merge)."""
     return ScopeContext(
         scope_id="scope::kg_investigator::finding_executor",
         owner_id="jukka",
@@ -51,102 +65,124 @@ def _mutation_scope() -> ScopeContext:
         writes=ScopeWritePolicy(write_kg=True, write_unified_log=True),
     )
 
-logger = get_logger(__name__)
-
-MANAGER_NAME = "kg_mutation_manager"
-
 
 def _claim_executable_finding_ids(*, limit: int) -> List[str]:
-    """Pick the oldest investigated rows that still need execution."""
+    """Pick the oldest auto-apply investigated rows whose 24h grace expired.
+
+    Filters:
+    - status='investigated' (investigator wrote a report)
+    - investigation_report_json non-null
+    - disposition='auto_apply' (not 'needs_user_review' — those wait for the user)
+    - investigated_at older than now - 24h (grace expired)
+    """
+    cutoff = utc_now() - timedelta(hours=GRACE_WINDOW_HOURS)
     with get_db_manager().read_session() as session:
         rows = (
-            session.query(KGMaintenanceFinding.id)
+            session.query(KGMaintenanceFinding.id, KGMaintenanceFinding.investigation_report_json)
             .filter(KGMaintenanceFinding.status == "investigated")
             .filter(KGMaintenanceFinding.investigation_report_json.isnot(None))
+            .filter(KGMaintenanceFinding.investigated_at < cutoff)
             .order_by(KGMaintenanceFinding.investigated_at.asc())
-            .limit(limit)
             .all()
         )
-        return [r[0] for r in rows]
+
+    # disposition lives inside the JSON blob — filter in Python.
+    out: List[str] = []
+    for fid, report_json in rows:
+        report = report_json
+        if isinstance(report, str):
+            try:
+                report = _json.loads(report)
+            except Exception:
+                continue
+        if not isinstance(report, dict):
+            continue
+        if (report.get("disposition") or "").strip() != "auto_apply":
+            continue
+        out.append(fid)
+        if len(out) >= limit:
+            break
+    return out
 
 
 def _build_brief(finding_id: str) -> Optional[Dict[str, Any]]:
-    """Produce (task, information) for the mutation manager.
+    """Build (task, information) for kg_resolution_manager.
 
-    The mutation planner needs the report's structured proposed_action
-    plus enough finding context (label, types, ids) to call the right
-    typed tool. Everything is passed as text on the Message so the
-    planner agent reads it like any other task.
+    The manager's planner takes prose and acts on it. The brief carries:
+    - the recommendation prose verbatim (load-bearing)
+    - the finding's id + type + ids for context
+    - the diagnosis + evidence so the planner can verify if it wants to
+
+    The task tells the planner: do exactly what the recommendation says,
+    don't reinvestigate from scratch.
     """
     with get_db_manager().read_session() as session:
         f = session.query(KGMaintenanceFinding).filter(KGMaintenanceFinding.id == finding_id).first()
         if f is None:
             return None
         report = f.investigation_report_json or {}
-        proposed_action = report.get("proposed_action") or {}
-
+        if isinstance(report, str):
+            try:
+                report = _json.loads(report)
+            except Exception:
+                return None
         primary_id = f.primary_node_id
         secondary_id = f.secondary_node_id
         edge_id = f.edge_id
+        finding_type = f.finding_type
+        priority = f.priority
 
-    op = (proposed_action.get("op") or "").strip()
-    confidence = proposed_action.get("confidence")
-    reversibility = proposed_action.get("reversibility") or "unknown"
-    args_text = proposed_action.get("args") or ""
+    recommendation = (report.get("recommendation") or "").strip()
+    if not recommendation:
+        return None
 
     diagnosis = (report.get("diagnosis") or "").strip()
     evidence = report.get("evidence") or []
-    open_questions = report.get("open_questions") or []
+    confidence = report.get("confidence")
 
     info_parts: List[str] = []
     info_parts.append(f"## Finding")
     info_parts.append(f"- finding_id: `{finding_id}`")
-    info_parts.append(f"- finding_type: {f.finding_type}")
-    info_parts.append(f"- priority: {f.priority}")
+    info_parts.append(f"- finding_type: {finding_type}")
+    info_parts.append(f"- priority: {priority}")
     info_parts.append(f"- primary_node_id: `{primary_id}`")
     if secondary_id:
         info_parts.append(f"- secondary_node_id: `{secondary_id}`")
     if edge_id:
         info_parts.append(f"- edge_id: `{edge_id}`")
+    info_parts.append(f"- investigator confidence: {confidence}")
     info_parts.append("")
 
-    info_parts.append(f"## Investigator's diagnosis")
-    info_parts.append(diagnosis or "(empty)")
+    info_parts.append("## Investigator's recommendation (the contract — execute this)")
+    info_parts.append(recommendation)
     info_parts.append("")
 
-    if evidence:
-        info_parts.append(f"## Evidence cited")
-        for e in evidence:
-            q = (e.get("query") if isinstance(e, dict) else "") or ""
-            ff = (e.get("finding") if isinstance(e, dict) else "") or ""
-            info_parts.append(f"- query: {q[:160]}")
-            info_parts.append(f"  -> {ff[:240]}")
+    if diagnosis:
+        info_parts.append("## Investigator's diagnosis (background)")
+        info_parts.append(diagnosis)
         info_parts.append("")
 
-    info_parts.append(f"## Proposed action (the contract)")
-    info_parts.append(f"- op: `{op or 'unknown'}`")
-    info_parts.append(f"- args: {args_text}")
-    info_parts.append(f"- reversibility: {reversibility}")
-    info_parts.append(f"- confidence: {confidence}")
-    info_parts.append("")
-
-    if open_questions:
-        info_parts.append(f"## Open questions (not blocking, surfaced for context)")
-        for q in open_questions:
-            info_parts.append(f"- {q}")
+    if evidence:
+        info_parts.append("## Evidence the investigator cited")
+        for e in evidence[:10]:
+            q = (e.get("query") if isinstance(e, dict) else "") or ""
+            ff = (e.get("finding") if isinstance(e, dict) else "") or ""
+            info_parts.append(f"- query: {q}")
+            info_parts.append(f"  -> {ff}")
         info_parts.append("")
 
     task = (
-        f"Apply the investigator's proposed_action for finding {finding_id}, "
-        f"or escalate to user review per your decision rules. The op is `{op or 'unknown'}` "
-        f"with reversibility={reversibility} confidence={confidence}. Do NOT improvise a "
-        f"different mutation than what the investigator proposed."
+        f"Apply the investigator's recommendation for finding {finding_id} verbatim. "
+        f"The recommendation prose above is the contract — do exactly what it says, "
+        f"citing the specific node ids it names. Do NOT reinvestigate from scratch; "
+        f"the investigator already did that. If the recommendation turns out to be "
+        f"wrong (data has shifted, ids don't exist), escalate rather than improvise."
     )
     return {"task": task, "information": "\n".join(info_parts)}
 
 
 def _extract_outcome_from_audit(blackboard) -> Optional[Dict[str, Any]]:
-    """Pull the structured outcome from the kg_mutation::final_answer audit message."""
+    """Pull the structured outcome from the kg_resolution::final_answer audit message."""
     try:
         msgs = blackboard.get_messages()
     except Exception as e:
@@ -154,33 +190,43 @@ def _extract_outcome_from_audit(blackboard) -> Optional[Dict[str, Any]]:
         return None
     for m in msgs:
         sender = str(getattr(m, "sender", "") or "")
-        if sender.endswith("final_answer") and "kg_mutation" in sender:
+        if sender.endswith("final_answer") and "kg_resolution" in sender:
             data = getattr(m, "data", None) or {}
             keep = (
-                "outcome", "op_applied", "revision_log_id", "finding_status",
-                "error_message", "final_answer_answer", "result_summary",
+                "summary", "completed", "mutations", "regenerations",
+                "findings_resolved", "open_questions",
+                "final_answer_answer", "result_summary",
             )
             return {k: data.get(k) for k in keep if data.get(k) is not None} or None
     return None
 
 
 def execute_one(finding_id: str) -> Dict[str, Any]:
-    """Execute a single investigated finding by id."""
+    """Execute a single investigated finding by id.
+
+    Used by:
+    - Accept button on the dev page (immediate run, bypasses 24h gate)
+    - run_executable_findings cron loop (which has already filtered for grace expiry)
+    """
     brief = _build_brief(finding_id)
     if brief is None:
-        return {"status": "not_found", "finding_id": finding_id}
+        return {"status": "not_found_or_no_recommendation", "finding_id": finding_id}
 
     mgr = DI.multi_agent_manager_factory.create_manager(MANAGER_NAME)
+    if mgr is None:
+        return {"status": "error", "finding_id": finding_id,
+                "error": f"manager {MANAGER_NAME} not registered"}
+
     msg = Message(
         task=brief["task"],
         information=brief["information"],
-        scope_context=_mutation_scope(),
+        scope_context=_executor_scope(),
     )
     try:
         DI.manager_invoker.invoke(mgr, msg)
     except Exception as e:
-        logger.error("mutation manager invocation failed for finding %s: %s", finding_id, e)
-        logger.debug("mutation manager exception details", exc_info=True)
+        logger.error("resolution manager invocation failed for finding %s: %s", finding_id, e)
+        logger.debug("resolution manager exception details", exc_info=True)
         return {"status": "error", "finding_id": finding_id, "error": str(e)}
 
     outcome = _extract_outcome_from_audit(mgr.blackboard) or {}
@@ -192,36 +238,31 @@ def execute_one(finding_id: str) -> Dict[str, Any]:
 
 
 def run_executable_findings(*, limit: int = 5) -> Dict[str, Any]:
-    """Pick up the oldest investigated findings and execute them sequentially."""
+    """Pick up auto-apply investigated findings whose 24h grace has expired
+    and execute them sequentially. Wired to the kg_finding_executor_drain
+    routine (03:45 daily)."""
     ids = _claim_executable_finding_ids(limit=limit)
     if not ids:
         return {"status": "no_executable_findings", "processed": 0, "results": []}
 
     results: List[Dict[str, Any]] = []
-    applied = escalated = no_action = errors = 0
+    ran = errors = 0
     for fid in ids:
         r = execute_one(fid)
         results.append(r)
-        outcome = (r.get("outcome") or {}).get("outcome")
-        if outcome == "applied":
-            applied += 1
-        elif outcome == "escalated":
-            escalated += 1
-        elif outcome == "no_action":
-            no_action += 1
+        if r.get("status") == "ran":
+            ran += 1
         else:
             errors += 1
 
     logger.info(
-        "[finding_executor] processed=%d applied=%d escalated=%d no_action=%d errors=%d",
-        len(ids), applied, escalated, no_action, errors,
+        "[finding_executor] processed=%d ran=%d errors=%d",
+        len(ids), ran, errors,
     )
     return {
         "status": "ok",
         "processed": len(ids),
-        "applied": applied,
-        "escalated": escalated,
-        "no_action": no_action,
+        "ran": ran,
         "errors": errors,
         "results": results,
     }

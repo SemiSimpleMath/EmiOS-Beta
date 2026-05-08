@@ -5,7 +5,10 @@ llm_params:
   engine: "gpt-5.1"
   model_tier: "smart"
 
-allowed_tools: all
+# Curated to kg_query only — see manager config rationale.
+# Read-only investigator; SQLite reaches everything via SQL.
+allowed_tools:
+  - kg_query
 except_tools: []
 allowed_nodes: [return_control]
 entity_scan_keys: [incoming_message, task, information, recent_history]
@@ -26,3 +29,10 @@ system_context_items:
   - allowed_nodes
   - task
   - resource_kg_node_reading
+
+# Same triage doctrine as kg_resolution::planner: three-bucket triage,
+# data-quality sanity check, stop-early convergence, provenance JOIN
+# walks. Auto-injected on contradiction-flavored task keywords too —
+# static-bind because investigation IS the conflict-triage job.
+skills:
+  - kg-conflict-triage

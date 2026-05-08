@@ -89,12 +89,14 @@ class KGMaintenancePipeline:
         _run_step("description_fill", lambda: (
             __import__("app.assistant.pipelines.kg_maintenance_pipeline.step_description_fill", fromlist=["run"]).run(ctx, max_nodes=description_max_nodes)
         ))
-        _run_step("state_decay", lambda: (
-            __import__("app.assistant.pipelines.kg_maintenance_pipeline.step_state_decay", fromlist=["run"]).run(ctx)
-        ))
+        # state_decay used to fire here as well, but it's owned by the daily
+        # `kg_state_decay` routine (02:45 every night) — running it again here
+        # on Monday would just close already-closed States. Dropped to avoid
+        # the double-fire.
         # Pagerank must run before this so connected-entity scores reflect
         # the most recent graph state. pagerank is step 4 above; this is
-        # step 6, so ordering is correct as long as 'pagerank' isn't skipped.
+        # step 5 now (after state_decay was removed), so ordering still
+        # holds as long as 'pagerank' isn't skipped.
         _run_step("missing_dates_scan", lambda: (
             __import__("app.assistant.pipelines.kg_maintenance_pipeline.step_missing_dates_scan", fromlist=["run"]).run(ctx)
         ))

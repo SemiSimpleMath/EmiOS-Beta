@@ -5,29 +5,20 @@ llm_params:
   engine: "gpt-5.5"
   model_tier: "smart"
 
-# Mirror kg_resolution_manager's curated suite (per
-# feedback_curated_allowed_tools — `all` makes the planner hallucinate
-# tool names and bloats the prompt with 100+ irrelevant descriptions).
-# READ:    kg_query, pod_search, pod_fetch
-# MUTATE:  kg_close_state, kg_create_state_node, kg_update_node_field,
-#          kg_rename_label, kg_create_edge, kg_delete_edge, kg_delete_node
-# REGEN:   regenerate_entity_card, refresh_wiki_page
-# LIFECYCLE: kg_finding_resolve, kg_finding_escalate
+# Curated to the 3 essentials. Wiki + entity card regen are out-of-band
+# (wiki: nightly bullet-text-diff refresh; cards: stale_content_scan +
+# planned generation-on-mutation, see TODO). The executor purely
+# mutates the KG; downstream derivatives auto-refresh.
+# Dropped: pod_search/pod_fetch (kg_query covers reads),
+# kg_create_state_node, kg_rename_label, kg_create_edge,
+# kg_delete_edge, kg_delete_node (rare; the executor escalates if the
+# recommendation needs them), kg_finding_resolve, kg_finding_escalate
+# (verdict carried in structured final-answer instead),
+# regenerate_entity_card, refresh_wiki_page (out-of-band).
 allowed_tools:
   - kg_query
-  - pod_search
-  - pod_fetch
   - kg_close_state
-  - kg_create_state_node
   - kg_update_node_field
-  - kg_rename_label
-  - kg_create_edge
-  - kg_delete_edge
-  - kg_delete_node
-  - kg_finding_resolve
-  - kg_finding_escalate
-  - regenerate_entity_card
-  - refresh_wiki_page
 except_tools: []
 allowed_nodes: [return_control]
 entity_scan_keys: [incoming_message, task, information, recent_history]
@@ -48,13 +39,9 @@ system_context_items:
   - allowed_nodes
   - task
   - resource_kg_node_reading
-  - resource_kg_principles
-  - resource_wiki_principles
-  - resource_entity_card_principles
 
-# Auto-injected via SkillInjector when task keywords match
-# (kg_maintenance_finding, contradiction, stale_content, etc.).
-# Static-bind anyway since this manager's whole purpose is conflict
-# triage — we always want the playbook.
+# kg-conflict-triage is the combined doctrine + playbook. Absorbs what
+# used to be 3 separate resource files (kg_principles, wiki_principles,
+# entity_card_principles) which had heavy duplication.
 skills:
   - kg-conflict-triage

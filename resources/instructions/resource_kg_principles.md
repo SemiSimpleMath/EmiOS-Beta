@@ -1,65 +1,47 @@
-## KG principles — schema invariants
+## KG principles
 
-Wiki pages and entity cards are PROJECTIONS of the KG. The KG is the
-single source of truth.
+KG is the source of truth. Wiki + entity cards are projections.
 
-### Node types
+**Node types.** Entity / Concept = timeless identity. State = ongoing
+era with validity window (`end_date IS NULL` ⇒ open). Event =
+point-in-time / bounded. Goal has `goal_status` column. Property is
+subject-scoped (never global).
 
-- **Entity** — identities (people, places, orgs). Timeless; usually no validity dates.
-- **State** — ongoing situations with a validity window ("lives in X", "works at Y"). Open era ⇒ `end_date IS NULL`.
-- **Event** — point-in-time or bounded occurrences ("got married", "performance"). May have only `start_date`.
-- **Goal** — intents. Has `goal_status` column (`active | dormant | completed | abandoned`).
-- **Concept** — abstract types ("dog", "marriage"); taxonomy anchors.
-- **Property** — subject-scoped attributes (DOB, phone). NEVER global — each anchored to one subject Entity.
+**Present-tense canonical.** `label` and `original_sentence` are
+present-tense BY FORM. Truth-as-of-now lives in `start_date` /
+`end_date`. End in past = historical. End null + start set = currently
+true. Both null = soft claim. Future start = planned.
 
-### Present-tense canonical (load-bearing)
+**Same-label rules.** Different dates, same person = sequential, both
+correct. Recurring same-label Events = separate occurrences (never
+merge — `kg_merge_nodes` always escalates per 2026-05-07 trap).
+Same-label Properties on different subjects = correctly separate.
 
-`label` and `original_sentence` are written present-tense by
-`fact_canonicalizer`. **Present tense is FORM, not a claim about NOW.**
-Truth-as-of-now lives in `start_date` / `end_date`:
+**Validity confidence.** `auto_decay` is a guess by `state_decay`,
+re-openable. `user_set` / `explicit` are authoritative. `*_prose`
+carries fuzzy form when exact dates unknown.
 
-- `end_date IS NULL` → era open, currently true.
-- `end_date` in the past → historical era, NOT current.
-- Both null → era unknown; soft claim.
-- `start_date` in future → planned, not active.
-
-### Validity confidence
-
-`*_confidence`: `explicit | user_set | auto_decay | completed_detected | abandoned_detected | (null)`.
-`auto_decay` is a guess by `state_decay`; re-openable if re-observed.
-
-`*_prose` carries natural-language form when exact dates aren't known
-(e.g. `start_date_prose: "around 2024"`). Either side may be populated.
-
-### Same-label rules
-
-- Two States, same person, non-overlapping windows = sequential, both correct.
-- Recurring same-label Events with different dates = separate occurrences. Never merge. (`kg_merge_nodes` is gated against this — escalate.)
-- Two same-label Property nodes for different subjects = correct (Property scoping).
-
-### Mutation reversibility
-
+**Mutation classes.**
 | Class | Tools |
 |---|---|
-| Reversible | `kg_close_state`, `kg_update_node_field`, `kg_create_state_node`, `kg_create_edge`, `kg_delete_edge`, `kg_finding_resolve`, `kg_finding_escalate` |
-| Reversible-with-care | `kg_rename_label` (when old label demonstrably wrong) |
-| Escalate | `kg_delete_node` (unless clear orphan), `kg_merge_nodes` (always) |
+| Reversible (auto-OK) | `kg_close_state`, `kg_update_node_field` (one field), `kg_finding_resolve`, `kg_finding_escalate` |
+| Reversible-with-care | `kg_rename_label` (when label demonstrably wrong) |
+| Escalate | `kg_delete_node`, `kg_merge_nodes` (always) |
 
-Every mutation passes a non-empty `reason` and `finding_id`. Vague reasons are a smell. Reads precede mutates.
+Every mutation passes `reason` + `finding_id`. `node.description` is a
+projection — write via `persist_description`, never directly.
 
-### node.description is a projection
+**Data quality red flags** (sanity-check the dates on every cited node):
+- `start_date > end_date` (inverted interval)
+- Future `start_date` on a past-tense `original_sentence`
+- `start_date` exactly equal to `created_at` (defaulted, not observed)
 
-Computed from edges + sentence. **Never write `description` directly** — use `persist_description` (preserves `updated_at`).
+If you find any of these, that's the real KG bug — promote to bucket 1.
 
-### Walking back to the original conversation window
-
-For mission-critical work — same-node merge verification, timeline
-reconstruction with narrow date precision, "is this an extractor
-misread?", near-irreversible mutations — read the verbatim source,
-not just the canonicalized fields.
+**Walking back to the source** (for same-node merges, narrow-precision
+timelines, suspected extractor misreads, or near-irreversible mutations):
 
 ```sql
--- Source message(s) that produced node X
 SELECT u.timestamp, u.role, u.speaker_name, u.message,
        e.raw_text, e.observed_at, e.extractor_agent_name
 FROM kg_node_evidence ne
@@ -69,23 +51,9 @@ WHERE ne.node_id = '<node_id>'
 ORDER BY u.timestamp ASC;
 ```
 
-`unified_log_2026.message` is verbatim chat. For emails
-(`source='email_inbound'`), the `message` column holds a summary;
-full body is in the email pod (`pod_search(kind='email')`).
+Skip for low-stakes triage.
 
-Trigger window-reading on:
-- "Same node?" merges (verify speakers were asserting the same fact)
-- Timeline calls hinging on prose-precision dates
-- Suspected extractor misread (X's State traces to a message about Y)
-- Near-irreversible mutations
-
-Skip for low-stakes triage; this step is for high-stakes only.
-
-### Investigator vs executor separation
-
-Investigators (wiki critic, state_ttl_estimator, cluster resolver,
-wiki connection investigator) propose findings; never mutate.
-The executor and `kg_resolution_manager` are the only paths from
-finding to mutation. Investigators get things wrong sometimes —
-your job includes deciding when a finding is the investigator
-misunderstanding the schema.
+**Investigators (wiki critic, state_ttl_estimator, cluster resolver,
+wiki connection investigator) propose findings; they don't mutate.**
+Your job includes deciding when a finding is the investigator
+misreading the schema rather than a real bug.

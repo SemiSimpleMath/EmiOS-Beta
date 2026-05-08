@@ -243,11 +243,18 @@ kg_finding_cluster_resolve = _lazy_kg_finding_cluster_resolve
 
 
 def _lazy_kg_finding_executor_drain(*, target_date=None, routine=None):
-    """Daily: pick the oldest INVESTIGATED findings and let kg_mutation_manager
-    apply or escalate. Closes the self-healing loop:
+    """Daily: pick the oldest INVESTIGATED findings whose 24h grace
+    window has expired and let kg_resolution_manager apply the
+    investigator's prose recommendation. Closes the self-healing loop:
        pending → investigated  (by kg_finding_backlog_drain)
-       investigated → executed (by THIS routine)
-       OR escalated to user via kg_finding_escalate / a follow-up question
+       investigated + auto_apply + 24h grace expired → executed/dismissed/escalated (by THIS routine)
+       investigated + needs_user_review → waits for user to respond on /kg-maintenance
+
+    Findings on the auto_apply track go through a 24h grace window
+    where a dev can edit / accept / decline via the dev page; if no
+    intervention happens, this routine auto-applies the recommendation.
+    The Accept button on the dev page calls execute_one() directly to
+    bypass the grace window for immediate run.
 
     Limit defaults to 10/day to keep LLM cost bounded; raise if backlog grows.
     """

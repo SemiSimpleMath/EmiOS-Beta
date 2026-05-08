@@ -302,11 +302,11 @@
         "pipeline_id": "entity_card_maintenance_pipeline"
       },
       "run_policy": {
-        "type": "weekly",
-        "day_of_week": "Tuesday",
-        "time_local": "02:00"
+        "type": "daily",
+        "time_local": "02:00",
+        "quiet_hours_ok": true
       },
-      "notes": "Weekly entity card quality scan: broken KG links, junk names, blank content, low confidence, stale content, no KG link. All findings written to entity_card_maintenance_finding for review at /entity-card-maintenance."
+      "notes": "Daily entity card quality scan: broken KG links, junk names, blank content, low confidence, stale content, no KG link. All findings written to entity_card_maintenance_finding. Flipped from weekly to daily 2026-05-07 so KG mutations get reflected in cards within ~24h instead of up to 7 days. (Until generation-on-mutation lands — see TODO 'cards should auto-regenerate like wiki does'.)"
     },
     {
       "id": "fetch_email",

@@ -13,12 +13,6 @@ Your task: {{ task }}
 
 {{ resource_kg_node_reading }}
 
-{{ resource_kg_principles }}
-
-{{ resource_wiki_principles }}
-
-{{ resource_entity_card_principles }}
-
 {{ skills["kg-conflict-triage"] }}
 
 ## What you've been given
@@ -37,13 +31,25 @@ investigate from the task itself.
 - {{ tool_name }}: {{ tool_description }}
 {% endfor %}
 
-You have full read AND write authority. The tools above carry their
-own arg contracts. Three things the conflict-triage skill assumes
-about tool usage:
+**`kg_query` is your only read tool. Heavily favor it.** SQLite holds
+everything — KG nodes, edges, claim proposals, evidence, conversation
+windows, the unified log. Use `kg_query` for:
 
-- `kg_query` is your investigation tool. Targeted SELECTs; walk the data.
-- `kg_close_state` is the most common mutation when prose says "X stopped" / "X ended".
-- `regenerate_entity_card` is single-slot — serialize, don't parallel-fire.
+- Node lookups, edge walks, validity-window reads.
+- Date sanity checks (read `start_date`, `end_date`, `created_at`).
+- Counts / aggregates / `LIKE` text search.
+- **Provenance walks** — JOIN `kg_node_evidence` →
+  `claim_proposal_evidence` → `unified_log_2026` to read the
+  verbatim source message that produced a node. SQL pattern in
+  `resource_kg_principles` ("Walking back to the source").
+
+If you wish you had `pod_search` or some other read tool — you don't.
+Do it via SQL or escalate. Targeted SELECTs (5-50 rows), not 1000-row
+dumps. The summarizer charges by the row.
+
+`kg_close_state` is the most common mutation when prose says "X
+stopped" / "X ended". `regenerate_entity_card` is single-slot —
+serialize, don't parallel-fire.
 
 ## Output fields
 

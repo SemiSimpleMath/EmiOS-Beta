@@ -50,29 +50,26 @@ control_nodes:
 tool_visibility:
   always_show:
     - kg_query
-    - pod_search
-    - pod_fetch
-    - ask_user
   use_narrower: false
 
+# Read-only investigator. SQLite holds everything the investigator needs
+# (KG nodes/edges, validity windows, provenance via kg_node_evidence →
+# claim_proposal_evidence → unified_log_2026 JOIN). Dropped:
+# - pod_search / pod_fetch: tangential to KG diagnosis; reachable via SQL.
+# - ask_user: cron runs overnight; blocking on a user prompt would hang.
 tools:
   allowed_tools:
     - kg_query
-    - pod_search
-    - pod_fetch
-    - ask_user
   except_tools: []
 
 scope_contract:
   tools:
     allowed_tools:
       - kg_query
-      - pod_search
-      - pod_fetch
-      - ask_user
     blocked_tools:
       - install_tool
       - mcp::npm/playwright-mcp::browser_run_code
+      - ask_user
       - kg_update_node
       - kg_create_node
       - kg_create_edge
