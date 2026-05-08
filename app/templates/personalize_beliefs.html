@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Beliefs Dashboard — Personalize Emi</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/personalize.css') }}">
+</head>
+<body>
+  <div class="pz-shell">
+    <header class="pz-header pz-header--sub">
+      <a class="pz-back" href="/personalize"><i class="fas fa-arrow-left"></i> Personalize</a>
+      <h1><i class="fas fa-lightbulb"></i> Beliefs Dashboard</h1>
+      <p class="pz-subtitle">
+        What the belief engine has learned from the last
+        <select id="pz-window-select" class="pz-inline-select">
+          <option value="7">7</option>
+          <option value="14" selected>14</option>
+          <option value="30">30</option>
+        </select>
+        days. Click any belief to see its evidence trail.
+      </p>
+    </header>
+
+    <main class="pz-bd">
+      <section class="pz-section">
+        <h2 class="pz-section__title">
+          <i class="fas fa-arrow-trend-up pz-icon--up"></i>
+          Trending up
+        </h2>
+        <p class="pz-section__hint">Beliefs with strong reinforcing signal — confirms
+          minus challenges &gt;= 3 in the window. These are gaining ground.</p>
+        <div id="pz-trending-up" class="pz-list">
+          <div class="pz-loading">Loading…</div>
+        </div>
+      </section>
+
+      <section class="pz-section">
+        <h2 class="pz-section__title">
+          <i class="fas fa-circle-exclamation pz-icon--warn"></i>
+          Recently challenged
+        </h2>
+        <p class="pz-section__hint">Active beliefs where the user pushed back at least
+          as often as confirmed in the window. The contestation path is dormant
+          today, so these are the cheapest sanity check on what to revisit.</p>
+        <div id="pz-challenged" class="pz-list">
+          <div class="pz-loading">Loading…</div>
+        </div>
+      </section>
+
+      <section class="pz-section">
+        <h2 class="pz-section__title">
+          <i class="fas fa-trash-can pz-icon--gone"></i>
+          Recently deprecated
+        </h2>
+        <p class="pz-section__hint">Beliefs the engine retired in the window — mostly
+          merges (absorbed into a surviving belief) or splits. The audit row
+          below each one carries the LLM's reasoning.</p>
+        <div id="pz-deprecated" class="pz-list">
+          <div class="pz-loading">Loading…</div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Evidence drill-down modal (populated on row click) -->
+    <div id="pz-modal" class="pz-modal pz-modal--hidden" role="dialog" aria-hidden="true">
+      <div class="pz-modal__backdrop" data-close="1"></div>
+      <div class="pz-modal__panel">
+        <button class="pz-modal__close" aria-label="Close" data-close="1">
+          <i class="fas fa-times"></i>
+        </button>
+        <div id="pz-modal__body">
+          <div class="pz-loading">Loading…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/personalize_beliefs.js') }}"></script>
+</body>
+</html>

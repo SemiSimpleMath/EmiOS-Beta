@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Personalize Emi</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/personalize.css') }}">
+</head>
+<body>
+  <div class="pz-shell">
+    <header class="pz-header">
+      <h1><i class="fas fa-sliders-h"></i> Personalize Emi</h1>
+      <p class="pz-subtitle">
+        Direct visibility + control over the things that shape Emi's day-to-day
+        behavior. Edit your directives, watch what beliefs the engine is tracking,
+        and tune your scheduled reminders.
+      </p>
+    </header>
+
+    <section class="pz-tiles">
+      <a class="pz-tile pz-tile--ready" href="/personalize/beliefs">
+        <i class="fas fa-lightbulb pz-tile__icon"></i>
+        <h2>Beliefs Dashboard</h2>
+        <p>What the belief engine learned from your interactions — what's gaining
+          ground, what's losing it, what's been retired. Click any belief to see
+          its evidence trail.</p>
+        <span class="pz-tile__cta">Open dashboard →</span>
+      </a>
+
+      <a class="pz-tile pz-tile--coming" href="#">
+        <i class="fas fa-clipboard-list pz-tile__icon"></i>
+        <h2>Personal Directives</h2>
+        <p>Your standing instructions to the orchestrator — when to nudge, when
+          to defer, who to escalate to. Edits to your <code>_personal.md</code>
+          overlay land here.</p>
+        <span class="pz-tile__cta pz-tile__cta--soon">Coming soon</span>
+      </a>
+
+      <a class="pz-tile pz-tile--coming" href="#">
+        <i class="fas fa-clock pz-tile__icon"></i>
+        <h2>Reminder Schedule</h2>
+        <p>Every cron-driven nudge that fires on your day (Morning coffee,
+          Hydration, Standing breaks, etc.) — toggle, retime, or remove the ones
+          you don't want.</p>
+        <span class="pz-tile__cta pz-tile__cta--soon">Coming soon</span>
+      </a>
+    </section>
+  </div>
+</body>
+</html>

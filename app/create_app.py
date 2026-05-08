@@ -132,6 +132,9 @@ def create_app(config_class="config.DevelopmentConfig"):
     
     # Import preferences route
     from .routes.preferences import preferences_bp
+
+    # Import personalize routes (beliefs dashboard + sibling pages)
+    from .routes.personalize import personalize_bp
     
     # Import graph visualizer API (only if chromadb available - disabled in alpha)
     try:
@@ -222,6 +225,7 @@ def create_app(config_class="config.DevelopmentConfig"):
     app.register_blueprint(user_settings_bp)
     app.register_blueprint(setup_bp)
     app.register_blueprint(preferences_bp)
+    app.register_blueprint(personalize_bp)
     from app.routes.subsystem_route import subsystem_route_bp
     app.register_blueprint(subsystem_route_bp)
 

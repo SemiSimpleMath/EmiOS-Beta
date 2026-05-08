@@ -1,0 +1,285 @@
+/* Personalize Emi — landing + sub-page styles.
+   Two scopes:
+     .pz-shell + .pz-tile* (landing tiles)
+     .pz-bd / .pz-section / .pz-list (beliefs dashboard)
+*/
+
+:root {
+  --pz-bg: #f7f7f4;
+  --pz-fg: #1f1f1d;
+  --pz-mute: #6b6b66;
+  --pz-rule: #e2e2dc;
+  --pz-card: #ffffff;
+  --pz-accent: #2c5e9e;
+  --pz-up: #2e7d4f;
+  --pz-warn: #c46518;
+  --pz-gone: #8d8d86;
+  --pz-soon: #b9b9b1;
+  --pz-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04);
+  --pz-radius: 10px;
+  --pz-mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  background: var(--pz-bg);
+  color: var(--pz-fg);
+  line-height: 1.45;
+}
+
+.pz-shell {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 32px 24px 64px;
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
+
+.pz-header h1 {
+  font-size: 1.7em;
+  margin: 0 0 8px;
+  font-weight: 600;
+}
+.pz-header h1 i { color: var(--pz-accent); margin-right: 8px; }
+.pz-subtitle {
+  color: var(--pz-mute);
+  margin: 0 0 28px;
+  max-width: 760px;
+}
+.pz-header--sub h1 { font-size: 1.5em; }
+.pz-back {
+  display: inline-block;
+  color: var(--pz-mute);
+  text-decoration: none;
+  font-size: 0.9em;
+  margin-bottom: 12px;
+}
+.pz-back:hover { color: var(--pz-accent); }
+
+.pz-inline-select {
+  font-size: 1em;
+  padding: 2px 6px;
+  border: 1px solid var(--pz-rule);
+  border-radius: 4px;
+  background: var(--pz-card);
+}
+
+/* ── Landing tiles ──────────────────────────────────────────────────────── */
+
+.pz-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 18px;
+  margin-top: 8px;
+}
+.pz-tile {
+  display: block;
+  background: var(--pz-card);
+  border: 1px solid var(--pz-rule);
+  border-radius: var(--pz-radius);
+  padding: 22px 20px 18px;
+  text-decoration: none;
+  color: inherit;
+  box-shadow: var(--pz-shadow);
+  transition: transform 0.08s ease, box-shadow 0.08s ease, border-color 0.08s ease;
+}
+.pz-tile:hover {
+  transform: translateY(-1px);
+  border-color: var(--pz-accent);
+}
+.pz-tile h2 { font-size: 1.05em; margin: 8px 0 6px; }
+.pz-tile p { color: var(--pz-mute); font-size: 0.92em; margin: 0 0 14px; }
+.pz-tile code {
+  font-family: var(--pz-mono);
+  font-size: 0.85em;
+  background: #ececea;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+.pz-tile__icon { font-size: 1.6em; color: var(--pz-accent); }
+.pz-tile__cta { font-size: 0.9em; color: var(--pz-accent); font-weight: 500; }
+.pz-tile__cta--soon { color: var(--pz-soon); }
+.pz-tile--coming { opacity: 0.7; cursor: not-allowed; }
+.pz-tile--coming:hover { transform: none; border-color: var(--pz-rule); }
+
+/* ── Belief dashboard sections ──────────────────────────────────────────── */
+
+.pz-bd { margin-top: 8px; }
+
+.pz-section {
+  background: var(--pz-card);
+  border: 1px solid var(--pz-rule);
+  border-radius: var(--pz-radius);
+  padding: 20px 20px 14px;
+  margin-bottom: 22px;
+  box-shadow: var(--pz-shadow);
+}
+.pz-section__title {
+  font-size: 1.1em;
+  font-weight: 600;
+  margin: 0 0 4px;
+  display: flex; align-items: center; gap: 8px;
+}
+.pz-section__hint {
+  color: var(--pz-mute);
+  font-size: 0.88em;
+  margin: 0 0 14px;
+}
+
+.pz-icon--up { color: var(--pz-up); }
+.pz-icon--warn { color: var(--pz-warn); }
+.pz-icon--gone { color: var(--pz-gone); }
+
+/* ── Belief rows ────────────────────────────────────────────────────────── */
+
+.pz-list { display: flex; flex-direction: column; gap: 10px; }
+.pz-loading {
+  color: var(--pz-mute);
+  font-size: 0.9em;
+  padding: 8px 0;
+}
+.pz-empty {
+  color: var(--pz-mute);
+  font-size: 0.9em;
+  padding: 8px 0;
+  font-style: italic;
+}
+
+.pz-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--pz-rule);
+  border-radius: 8px;
+  cursor: pointer;
+  background: #fafaf8;
+  align-items: start;
+}
+.pz-row:hover { background: #f0f0eb; }
+
+.pz-row__counts {
+  display: flex; flex-direction: column; gap: 2px;
+  font-family: var(--pz-mono);
+  font-size: 0.8em;
+  color: var(--pz-mute);
+  min-width: 60px;
+  white-space: nowrap;
+}
+.pz-row__counts .pz-c--up { color: var(--pz-up); }
+.pz-row__counts .pz-c--warn { color: var(--pz-warn); }
+
+.pz-row__body { min-width: 0; }
+.pz-row__statement {
+  font-size: 0.95em;
+  color: var(--pz-fg);
+  margin: 0 0 4px;
+  /* Allow wrapping; keep readable */
+  word-wrap: break-word;
+}
+.pz-row__meta {
+  font-size: 0.78em;
+  color: var(--pz-mute);
+  font-family: var(--pz-mono);
+}
+
+.pz-row__reason {
+  font-size: 0.82em;
+  color: var(--pz-mute);
+  margin-top: 4px;
+  font-style: italic;
+  border-left: 2px solid var(--pz-rule);
+  padding-left: 8px;
+}
+
+.pz-row__badges {
+  display: flex; flex-direction: column; gap: 4px; align-items: flex-end;
+  font-size: 0.72em;
+}
+.pz-badge {
+  font-family: var(--pz-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: #ececea;
+  color: var(--pz-mute);
+}
+.pz-badge--high { background: #d8efe1; color: #2e7d4f; }
+.pz-badge--medium { background: #fbecd6; color: #b35d12; }
+.pz-badge--low { background: #ececea; color: var(--pz-mute); }
+.pz-badge--chronic { background: #e0e9f5; color: var(--pz-accent); }
+.pz-badge--temporary { background: #f5e0e0; color: #b13c3c; }
+
+/* ── Modal (evidence drill-down) ────────────────────────────────────────── */
+
+.pz-modal {
+  position: fixed; inset: 0; z-index: 1000;
+  display: flex; align-items: center; justify-content: center;
+}
+.pz-modal--hidden { display: none; }
+.pz-modal__backdrop {
+  position: absolute; inset: 0;
+  background: rgba(0,0,0,0.4);
+}
+.pz-modal__panel {
+  position: relative;
+  background: var(--pz-card);
+  border-radius: var(--pz-radius);
+  width: min(720px, 92vw);
+  max-height: 86vh;
+  overflow: auto;
+  padding: 24px 22px 18px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+}
+.pz-modal__close {
+  position: absolute; top: 10px; right: 10px;
+  background: transparent; border: 0; cursor: pointer;
+  color: var(--pz-mute); font-size: 1.1em;
+  padding: 6px 10px;
+}
+.pz-modal__close:hover { color: var(--pz-fg); }
+
+.pz-belief-detail h3 {
+  font-size: 1.15em; margin: 0 0 6px;
+}
+.pz-belief-detail .pz-row__meta { font-size: 0.85em; }
+.pz-belief-detail .pz-detail-stmt {
+  font-size: 0.95em; margin: 8px 0 14px;
+  padding: 10px 12px; background: #fafaf8;
+  border-radius: 6px;
+  border-left: 3px solid var(--pz-accent);
+}
+
+.pz-evidence-list {
+  display: flex; flex-direction: column; gap: 8px;
+  margin-top: 10px;
+}
+.pz-ev {
+  border: 1px solid var(--pz-rule);
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: #fafaf8;
+  font-size: 0.88em;
+}
+.pz-ev__head {
+  display: flex; gap: 10px; align-items: center;
+  font-family: var(--pz-mono); font-size: 0.78em;
+  color: var(--pz-mute);
+}
+.pz-ev__signal {
+  text-transform: uppercase;
+  font-weight: 600;
+}
+.pz-ev__signal--confirms { color: var(--pz-up); }
+.pz-ev__signal--rejects, .pz-ev__signal--contradicts { color: var(--pz-warn); }
+.pz-ev__signal--qualifies { color: var(--pz-accent); }
+.pz-ev__summary { margin: 4px 0 2px; color: var(--pz-fg); }
+.pz-ev__raw {
+  margin: 4px 0 0; font-size: 0.85em; color: var(--pz-mute);
+  font-style: italic;
+  word-wrap: break-word;
+}
