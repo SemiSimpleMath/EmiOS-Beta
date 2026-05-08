@@ -1,0 +1,54 @@
+{# Shared <template> data shapes for the calendar / scheduler / todo / email
+   widgets. These are DOM contracts the corresponding *_widgets.js modules
+   read from when injecting items — keeping them in sync across layouts
+   prevents subtle widget bugs (missing field, wrong class).
+
+   Each template is keyed by id, so it can sit anywhere in the DOM. Both
+   chat_bot.html and chat_bot_desktop.html include this partial once,
+   somewhere inside <main>.
+#}
+<template id="calendar-item-template">
+  <li class="calendar__item">
+    <div class="calendar__item--minimal">
+      <span class="calendar__event-title"></span>
+      <span class="calendar__event-time"></span>
+    </div>
+    <div class="calendar__item--details hidden"></div>
+  </li>
+</template>
+
+<template id="scheduler-item-template">
+  <li class="scheduler__item">
+    <div class="scheduler__item--minimal" tabindex="0" role="button" aria-expanded="false" aria-controls="scheduler-details">
+      <span class="scheduler__task-title"></span>
+      <span class="scheduler__task-deadline"></span>
+    </div>
+    <div class="scheduler__item--details hidden" id="scheduler-details"></div>
+  </li>
+</template>
+
+<template id="todo-item-template">
+  <li class="todo-item">
+    <label class="todo-label">
+      <input type="checkbox">
+      <span class="todo-task"></span>
+    </label>
+    <div class="todo-meta">
+      <span class="todo-due"></span>
+      <span class="todo-notes"></span>
+    </div>
+  </li>
+</template>
+
+<template id="email-item-template">
+  <li class="email__item">
+    <div class="email__item--minimal">
+      <div class="email__meta">
+        <span class="email__sender">Unknown</span>
+        <span class="email__subject">No subject</span>
+      </div>
+      <span class="email__toggle-indicator">&#9660;</span>
+    </div>
+    <div class="email__item--details hidden"></div>
+  </li>
+</template>

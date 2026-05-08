@@ -100,12 +100,6 @@
           <button id="calendar-next-btn" aria-label="Next Day">&gt;</button>
         </div>
         <ul id="calendar-list" class="calendar-list"></ul>
-        <template id="calendar-item-template">
-          <li class="calendar__item">
-            <div class="calendar__item--minimal"><span class="calendar__event-title"></span><span class="calendar__event-time"></span></div>
-            <div class="calendar__item--details hidden"></div>
-          </li>
-        </template>
       </div>
     </div>
 
@@ -120,12 +114,6 @@
           <button id="scheduler-next-btn" aria-label="Next Day">&gt;</button>
         </div>
         <ul id="scheduler-list" class="scheduler-list"></ul>
-        <template id="scheduler-item-template">
-          <li class="scheduler__item">
-            <div class="scheduler__item--minimal" tabindex="0" role="button" aria-expanded="false"><span class="scheduler__task-title"></span><span class="scheduler__task-deadline"></span></div>
-            <div class="scheduler__item--details hidden"></div>
-          </li>
-        </template>
       </div>
     </div>
 
@@ -135,12 +123,6 @@
       </div>
       <div class="d-card__body">
         <ul id="todo-list" class="todo-list"></ul>
-        <template id="todo-item-template">
-          <li class="todo-item">
-            <label class="todo-label"><input type="checkbox"><span class="todo-task"></span></label>
-            <div class="todo-meta"><span class="todo-due"></span><span class="todo-notes"></span></div>
-          </li>
-        </template>
       </div>
     </div>
 
@@ -185,15 +167,6 @@
       </div>
       <div class="d-card__body">
         <ul id="email-list" class="email-list"></ul>
-        <template id="email-item-template">
-          <li class="email__item">
-            <div class="email__item--minimal">
-              <div class="email__meta"><span class="email__sender">Unknown</span><span class="email__subject">No subject</span></div>
-              <span class="email__toggle-indicator">&#9660;</span>
-            </div>
-            <div class="email__item--details hidden"></div>
-          </li>
-        </template>
       </div>
     </div>
 
@@ -211,58 +184,12 @@
 </div>
 <!-- Hidden feed target so JS widget loaders don't error -->
 <ul id="feed-list" style="display:none;"></ul>
+
+{% include '_chat_widget_templates.html' %}
 </main>
 
 <!-- JS -->
-<script src="https://code.jquery.com/jquery-3.6.0.min.js" crossorigin="anonymous"></script>
-<script src="https://cdn.socket.io/4.7.2/socket.io.min.js" crossorigin="anonymous"></script>
-<!-- Markdown rendering for chat bubbles -->
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
-<script>
-  // Move proactive popup into chat panel so it appears at top of chat
-  var _movePopup = setInterval(function() {
-    var popup = document.getElementById('proactive-popup');
-    var chat = document.querySelector('.d-chat');
-    if (popup && chat && popup.parentNode !== chat) {
-      chat.insertBefore(popup, chat.firstChild);
-    }
-  }, 500);
-
-  // iOS Safari audio unlock
-  if (/iP(hone|ad|od)/.test(navigator.userAgent)) {
-    var p = document.getElementById('chat-bot-audio');
-    var S = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=";
-    function _unlock() { p.src=S; p.play().then(function(){p.pause();p.src="";}).catch(function(){}); document.removeEventListener("touchend",_unlock,true); }
-    document.addEventListener("touchend",_unlock,true);
-  }
-
-</script>
-<script src="{{ url_for('static', filename='js/emi/chat_render.js') }}?v={{ static_v }}"></script>
-<script src="{{ url_for('static', filename='js/emi/audio.js') }}?v={{ static_v }}"></script>
-<script src="{{ url_for('static', filename='js/emi/attachments.js') }}?v={{ static_v }}"></script>
-<script src="{{ url_for('static', filename='js/emi/composer.js') }}?v={{ static_v }}"></script>
-<script src="{{ url_for('static', filename='js/emi/chat_mode.js') }}?v={{ static_v }}"></script>
-<script src="{{ url_for('static', filename='js/emi/request_sender.js') }}?v={{ static_v }}"></script>
-<script src="{{ url_for('static', filename='js/emi/recorder.js') }}?v={{ static_v }}"></script>
-<script src="{{ url_for('static', filename='js/emi/idle_manager.js') }}?v={{ static_v }}"></script>
-<script src="{{ url_for('static', filename='js/emi/menu_controls.js') }}?v={{ static_v }}"></script>
-<script src="{{ url_for('static', filename='js/emi/calendar_widgets.js') }}?v={{ static_v }}"></script>
-<script src="{{ url_for('static', filename='js/emi/scheduler_widgets.js') }}?v={{ static_v }}"></script>
-<script src="{{ url_for('static', filename='js/emi/ui_state.js') }}?v={{ static_v }}"></script>
-<script src="{{ url_for('static', filename='js/emi/todo_widgets.js') }}?v={{ static_v }}"></script>
-<script src="{{ url_for('static', filename='js/emi/email_widgets.js') }}?v={{ static_v }}"></script>
-<script src="{{ url_for('static', filename='js/emi/news_weather_widgets.js') }}?v={{ static_v }}"></script>
-<script src="{{ url_for('static', filename='js/emi/widget_contract.js') }}?v={{ static_v }}"></script>
-<script src="{{ url_for('static', filename='js/emi/widget_handlers.js') }}?v={{ static_v }}"></script>
-<script src="{{ url_for('static', filename='js/emi/socket_ingress.js') }}?v={{ static_v }}"></script>
-<script src="{{ url_for('static', filename='js/emi/task_create_panel.js') }}?v={{ static_v }}"></script>
-<script src="{{ url_for('static', filename='js/emi/doc_create_panel.js') }}?v={{ static_v }}"></script>
-<script src="{{ url_for('static', filename='js/emi/geoguessr_panel.js') }}?v={{ static_v }}"></script>
-<script src="{{ url_for('static', filename='js/emi/socket_heartbeat.js') }}?v={{ static_v }}"></script>
-<script src="{{ url_for('static', filename='js/Emi.js') }}?v={{ static_v }}"></script>
-<script src="{{ url_for('static', filename='js/weather.js') }}?v={{ static_v }}"></script>
-<script>window.EMI_ASSISTANT_NAME = {{ assistant_name | tojson }};</script>
-<script src="{{ url_for('static', filename='js/proactive_popup.js') }}?v={{ static_v }}"></script>
+{% set chat_container_selector = '.d-chat' %}
+{% include '_chat_scripts.html' %}
 </body>
 </html>

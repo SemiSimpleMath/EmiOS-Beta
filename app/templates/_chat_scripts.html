@@ -1,0 +1,62 @@
+{# Shared chat-UI JS bundle.
+
+   Both chat_bot.html (vertical) and chat_bot_desktop.html (horizontal)
+   load the same 25 modules in the same order. Adding/removing one only
+   needs an edit here.
+
+   The inline preamble runs the proactive-popup mover and the iOS audio
+   unlock. It uses {{ chat_container_selector }} so each layout can target
+   its own chat container — set this in the parent template before
+   {% include 'app/templates/_chat_scripts.html' %}:
+
+       chat_bot.html (vertical):  set chat_container_selector = '.widget--chat'
+       chat_bot_desktop.html:     set chat_container_selector = '.d-chat'
+#}
+<script src="https://code.jquery.com/jquery-3.6.0.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+<script>
+  // Move proactive popup into chat panel so it appears at top of chat.
+  var _movePopup = setInterval(function() {
+    var popup = document.getElementById('proactive-popup');
+    var chat = document.querySelector({{ chat_container_selector | default('.widget--chat') | tojson }});
+    if (popup && chat && popup.parentNode !== chat) {
+      chat.insertBefore(popup, chat.firstChild);
+    }
+  }, 500);
+
+  // iOS Safari audio unlock — pre-arm the chat-bot audio element on first touch.
+  if (/iP(hone|ad|od)/.test(navigator.userAgent)) {
+    var p = document.getElementById('chat-bot-audio');
+    var S = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=";
+    function _unlock() { p.src=S; p.play().then(function(){p.pause();p.src="";}).catch(function(){}); document.removeEventListener("touchend",_unlock,true); }
+    document.addEventListener("touchend",_unlock,true);
+  }
+</script>
+<script src="{{ url_for('static', filename='js/emi/chat_render.js') }}?v={{ static_v }}"></script>
+<script src="{{ url_for('static', filename='js/emi/audio.js') }}?v={{ static_v }}"></script>
+<script src="{{ url_for('static', filename='js/emi/attachments.js') }}?v={{ static_v }}"></script>
+<script src="{{ url_for('static', filename='js/emi/composer.js') }}?v={{ static_v }}"></script>
+<script src="{{ url_for('static', filename='js/emi/chat_mode.js') }}?v={{ static_v }}"></script>
+<script src="{{ url_for('static', filename='js/emi/request_sender.js') }}?v={{ static_v }}"></script>
+<script src="{{ url_for('static', filename='js/emi/recorder.js') }}?v={{ static_v }}"></script>
+<script src="{{ url_for('static', filename='js/emi/idle_manager.js') }}?v={{ static_v }}"></script>
+<script src="{{ url_for('static', filename='js/emi/menu_controls.js') }}?v={{ static_v }}"></script>
+<script src="{{ url_for('static', filename='js/emi/calendar_widgets.js') }}?v={{ static_v }}"></script>
+<script src="{{ url_for('static', filename='js/emi/scheduler_widgets.js') }}?v={{ static_v }}"></script>
+<script src="{{ url_for('static', filename='js/emi/ui_state.js') }}?v={{ static_v }}"></script>
+<script src="{{ url_for('static', filename='js/emi/todo_widgets.js') }}?v={{ static_v }}"></script>
+<script src="{{ url_for('static', filename='js/emi/email_widgets.js') }}?v={{ static_v }}"></script>
+<script src="{{ url_for('static', filename='js/emi/news_weather_widgets.js') }}?v={{ static_v }}"></script>
+<script src="{{ url_for('static', filename='js/emi/widget_contract.js') }}?v={{ static_v }}"></script>
+<script src="{{ url_for('static', filename='js/emi/widget_handlers.js') }}?v={{ static_v }}"></script>
+<script src="{{ url_for('static', filename='js/emi/socket_ingress.js') }}?v={{ static_v }}"></script>
+<script src="{{ url_for('static', filename='js/emi/task_create_panel.js') }}?v={{ static_v }}"></script>
+<script src="{{ url_for('static', filename='js/emi/doc_create_panel.js') }}?v={{ static_v }}"></script>
+<script src="{{ url_for('static', filename='js/emi/geoguessr_panel.js') }}?v={{ static_v }}"></script>
+<script src="{{ url_for('static', filename='js/emi/socket_heartbeat.js') }}?v={{ static_v }}"></script>
+<script src="{{ url_for('static', filename='js/Emi.js') }}?v={{ static_v }}"></script>
+<script src="{{ url_for('static', filename='js/weather.js') }}?v={{ static_v }}"></script>
+<script>window.EMI_ASSISTANT_NAME = {{ assistant_name | tojson }};</script>
+<script src="{{ url_for('static', filename='js/proactive_popup.js') }}?v={{ static_v }}"></script>
