@@ -17,7 +17,5 @@ user_context_items:
   - task
   - information
   - recent_history
-  - checklist
-  - progress_report
 
 system_context_items: []

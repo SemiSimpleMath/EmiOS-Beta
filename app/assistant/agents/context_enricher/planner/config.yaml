@@ -12,8 +12,8 @@ allowed_nodes: []
 entity_scan_keys: []
 
 user_context_items:
-  - date_time
   - task
   - information
 
-system_context_items: []
+system_context_items:
+  - date_time

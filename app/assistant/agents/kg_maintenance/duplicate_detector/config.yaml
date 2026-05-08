@@ -11,5 +11,4 @@ user_context_items:
 - analysis_context
 system_context_items:
 - resource_kg_node_reading
-- resource_kg_node_disambiguation
 type: agent

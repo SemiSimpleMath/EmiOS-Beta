@@ -20,8 +20,6 @@ agents:
     class: Agent
   - name: master_room::geoguessr_host
     class: Agent
-  - name: master_room::geoguessr_analyst
-    class: Agent
   - name: master_room::switchboard
     class: Agent
   - name: master_room::response_formatter

@@ -15,5 +15,4 @@ user_context_items:
   - end_date
   - valid_during
 system_context_items:
-  - resource_user_data
 type: agent

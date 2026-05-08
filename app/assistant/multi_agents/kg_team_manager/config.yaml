@@ -17,10 +17,6 @@ agents:
     class: Agent
   - name: shared::tool_arguments
     class: Agent
-  - name: shared::writer
-    class: Agent
-  - name: shared::mathematician
-    class: Agent
   - name: kg_team::find_nodes
     class: Planner
 

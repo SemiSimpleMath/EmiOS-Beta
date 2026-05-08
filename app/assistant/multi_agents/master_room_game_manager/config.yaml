@@ -11,8 +11,6 @@ agents:
     class: Delegator
   - name: master_room::geoguessr_host
     class: Agent
-  - name: master_room::geoguessr_analyst
-    class: Agent
 
 control_nodes:
   - name: geoguessr_router_node

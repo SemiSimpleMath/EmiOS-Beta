@@ -26,9 +26,9 @@ Use the latest tool result to decide your next query, or return_control if you h
 {% endif %}
 
 {% if action_count %}
-**Action Count:** {{ action_count }}/20 (You have {{ 20 - action_count }} actions remaining)
+**Action Count:** {{ action_count }}/40 (You have {{ 40 - action_count }} actions remaining)
 {% endif %}
 
-{% if action_count and action_count >= 20 %}
-CRITICAL: You have reached the 20-action limit. Set action to return_control immediately.
+{% if action_count and action_count >= 40 %}
+CRITICAL: You have reached the 40-action limit. Set action to return_control immediately.
 {% endif %}

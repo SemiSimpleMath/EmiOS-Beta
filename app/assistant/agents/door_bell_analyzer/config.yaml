@@ -1,5 +1,5 @@
 name: door_bell_analyzer
-class_name: Agent
+class_name: OneShotAgent
 llm_params:
   llm_provider: "openai"
   # Vision-capable. Same model the shared::vision_image_describe agent uses.

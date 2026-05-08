@@ -15,8 +15,6 @@ except_tools: []
 accept_auto_skills: true
 
 system_context_items:
-  - resource_assistant_data
-  - resource_current_location
 
 user_context_items:
   - date_time

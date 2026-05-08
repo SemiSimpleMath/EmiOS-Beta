@@ -14,7 +14,6 @@ user_context_items:
   - one_liner
   - tags
   - sections
-  - sections_text
   - pre_context
 
 system_context_items: []

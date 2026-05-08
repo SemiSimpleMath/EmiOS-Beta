@@ -22,5 +22,4 @@ user_context_items:
   - planned_tool_arguments
 
 system_context_items:
-  - task
   - tool_descriptions

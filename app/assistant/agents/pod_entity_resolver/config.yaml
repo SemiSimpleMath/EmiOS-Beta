@@ -16,7 +16,6 @@ entity_card_level: 1
 
 user_context_items:
   - sections
-  - sections_text
   - pre_context
   - entity_card
 system_context_items: []

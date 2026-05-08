@@ -1,7 +1,7 @@
 name: kg_dev_manager
 class_name: MultiAgentManager
 description: "Read-only KG investigation console. Single planner in a tool-call loop over kg_query / pod_search / pod_fetch. Mirrors the emi_team_manager flow with critic and summary disabled — no LLM cost for those — but keeps the control-node scaffolding (tool_return_router, critic_pre_node, summary_pre_node) intact for proper resume_target routing and free planner-output validation."
-max_cycles: 30
+max_cycles: 50
 
 role_bindings:
   delegator: shared::delegator

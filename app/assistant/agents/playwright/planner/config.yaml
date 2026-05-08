@@ -23,7 +23,6 @@ user_context_items:
   - task
   - information
   - playwright_scroll_state
-  - playwright_modal_map
   - playwright_latest_snapshot_summary
   - playwright_latest_snapshot_id
   - recent_history
@@ -31,7 +30,6 @@ user_context_items:
   - action_count
 
 system_context_items:
-  - resource_current_location
   - has_spec_steps
 
 skills:

@@ -34,14 +34,13 @@ user_context_items:
   - recent_history
   - checklist
   - progress_report
-  - action_count
   - entity_card
 
 system_context_items:
   - tool_descriptions
-  - allowed_nodes
   - task
   - resource_kg_node_reading
+  - action_count
 
 # kg-conflict-triage is the combined doctrine + playbook. Absorbs what
 # used to be 3 separate resource files (kg_principles, wiki_principles,

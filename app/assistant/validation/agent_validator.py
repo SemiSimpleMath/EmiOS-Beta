@@ -170,6 +170,12 @@ def _check_manager_configs(agent_names, registry):
                     if isinstance(node, str):
                         all_flow.add(node)
 
+        # Agents bound to manager roles (delegator / critic / summary etc.)
+        # are used at runtime even if they don't appear in state_map.
+        for val in (config.get("role_bindings") or {}).values():
+            if isinstance(val, str):
+                all_flow.add(val)
+
         unused = used_agents - all_flow
         if unused:
             logger.warning(f"{path.name}: declared agents not used in flow_config: {unused}")
