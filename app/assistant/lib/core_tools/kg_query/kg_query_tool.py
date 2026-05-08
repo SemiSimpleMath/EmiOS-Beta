@@ -9,10 +9,22 @@ Safety rails:
    regardless of statement content).
 2. Statement parser rejects anything that isn't ``SELECT`` or ``WITH ... SELECT``
    plus a small set of read-only PRAGMAs (``table_info``, ``index_list``,
-   ``foreign_key_list``).
+   ``index_info``, ``foreign_key_list``, ``table_list``).
 3. One statement per call (no semicolon-separated multi-statements).
-4. Row cap (max 5000) and per-call timeout (5s) keep accidental table scans
-   from hanging the agent loop.
+   Comment-stripping and statement-splitting are string-literal aware: a
+   ``;`` or ``--`` inside a quoted string does not get interpreted as
+   syntax.
+4. Row cap (default 200, max 5000) and per-call timeout (5s) keep accidental
+   table scans from hanging the agent loop.
+
+Result shape:
+- ``content`` is the rendered pipe-table for the LLM to read inline.
+- ``data.columns`` is the column-name list, in order.
+- ``data.rows`` is a list of lists (positional). Use this when consuming
+  rows programmatically — duplicate column names (``SELECT a.id, b.id ...``)
+  preserve both values, which a dict shape would silently collapse.
+- ``data.row_dicts`` is the convenience dict shape with collisions
+  resolved by suffixing (``id``, ``id_2``, …). Lossless but renames.
 """
 from __future__ import annotations
 
@@ -49,14 +61,107 @@ _ALLOWED_PRAGMAS = frozenset({
 })
 
 _PRAGMA_RE = re.compile(r"^\s*pragma\s+([a-z_]+)\s*\(", re.IGNORECASE)
-_COMMENT_BLOCK_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
-_COMMENT_LINE_RE = re.compile(r"--[^\n]*")
 
 
-def _strip_comments(sql: str) -> str:
-    sql = _COMMENT_BLOCK_RE.sub(" ", sql)
-    sql = _COMMENT_LINE_RE.sub(" ", sql)
-    return sql.strip()
+# ──────────────────────────────────────────────────────────────────────────
+# String-literal-aware SQL pre-processing
+# ──────────────────────────────────────────────────────────────────────────
+#
+# Naïve regex stripping (`/\*.*?\*/`, `--[^\n]*`, plain `.partition(";")`)
+# corrupts queries that contain `--`, `/*`, or `;` inside string literals
+# (e.g. `SELECT 'foo--bar'`). The walker below maintains state across:
+#
+#   - 'single-quoted'   strings, with '' escape
+#   - "double-quoted"   identifiers / strings, with "" escape
+#   - --line comments   (until newline)
+#   - /* block */       comments (until matching `*/`)
+#
+# It produces a cleaned SQL (with comments replaced by spaces) and the
+# index of the first unquoted `;` (or len(sql) if none).
+
+
+def _scan_sql(sql: str) -> Tuple[str, int]:
+    """Walk *sql* once, string-literal aware. Returns
+    ``(cleaned_sql, first_semicolon_index)``.
+
+    ``cleaned_sql`` has comments replaced with single spaces (preserves
+    column offsets isn't needed; spaces are fine for downstream string
+    ops). String contents are passed through verbatim.
+
+    ``first_semicolon_index`` is the position in *sql* (the original,
+    pre-clean) of the first unquoted, non-commented `;`, or ``len(sql)``
+    if none found.
+    """
+    out: List[str] = []
+    i = 0
+    n = len(sql)
+    first_semi = n  # default: no semicolon found
+    while i < n:
+        ch = sql[i]
+        nxt = sql[i + 1] if i + 1 < n else ""
+
+        # Single-quoted string: passes through, '' is literal '.
+        if ch == "'":
+            out.append(ch)
+            i += 1
+            while i < n:
+                c = sql[i]
+                out.append(c)
+                if c == "'":
+                    if i + 1 < n and sql[i + 1] == "'":
+                        out.append(sql[i + 1])
+                        i += 2
+                        continue
+                    i += 1
+                    break
+                i += 1
+            continue
+
+        # Double-quoted identifier/string: passes through, "" is literal ".
+        if ch == '"':
+            out.append(ch)
+            i += 1
+            while i < n:
+                c = sql[i]
+                out.append(c)
+                if c == '"':
+                    if i + 1 < n and sql[i + 1] == '"':
+                        out.append(sql[i + 1])
+                        i += 2
+                        continue
+                    i += 1
+                    break
+                i += 1
+            continue
+
+        # Line comment: replace with one space, advance past newline.
+        if ch == "-" and nxt == "-":
+            out.append(" ")
+            i += 2
+            while i < n and sql[i] != "\n":
+                i += 1
+            # leave the newline (if any) intact
+            continue
+
+        # Block comment: replace with one space, advance past `*/`.
+        if ch == "/" and nxt == "*":
+            out.append(" ")
+            i += 2
+            while i < n - 1 and not (sql[i] == "*" and sql[i + 1] == "/"):
+                i += 1
+            if i < n - 1:
+                i += 2  # skip the `*/`
+            else:
+                i = n
+            continue
+
+        # Unquoted, non-commented semicolon — record first occurrence.
+        if ch == ";" and first_semi == n:
+            first_semi = i
+
+        out.append(ch)
+        i += 1
+    return "".join(out), first_semi
 
 
 def _validate_sql(sql: str) -> None:
@@ -68,20 +173,28 @@ def _validate_sql(sql: str) -> None:
     if not sql or not sql.strip():
         raise ValueError("sql is empty")
 
-    cleaned = _strip_comments(sql)
-    if not cleaned:
+    cleaned, semi_idx = _scan_sql(sql)
+    if not cleaned.strip():
         raise ValueError("sql is empty after stripping comments")
 
-    # One statement only. A trailing semicolon is fine; anything after isn't.
-    body, _, tail = cleaned.partition(";")
+    # One statement only. The walker located the first unquoted `;`.
+    # Anything non-whitespace after it is a second statement.
+    body = cleaned[:semi_idx]
+    tail = cleaned[semi_idx + 1:] if semi_idx < len(cleaned) else ""
     if tail.strip():
-        raise ValueError("only one statement per call (no semicolon-chained statements)")
+        raise ValueError(
+            "only one statement per call (no semicolon-chained statements)"
+        )
 
-    head = body.lstrip().split(None, 1)[0].lower() if body.strip() else ""
+    head_token = body.lstrip().split(None, 1)
+    head = head_token[0].lower() if head_token else ""
+
     if head == "pragma":
         m = _PRAGMA_RE.match(body)
         if not m:
-            raise ValueError("PRAGMA must be in functional form, e.g. PRAGMA table_info('x')")
+            raise ValueError(
+                "PRAGMA must be in functional form, e.g. PRAGMA table_info('x')"
+            )
         name = m.group(1).lower()
         if name not in _ALLOWED_PRAGMAS:
             raise ValueError(
@@ -120,33 +233,61 @@ def _open_readonly() -> sqlite3.Connection:
     # blocks ATTACH and a few other surprising paths.
     try:
         conn.execute("PRAGMA query_only = ON")
-    except sqlite3.DatabaseError:
-        pass
+    except sqlite3.DatabaseError as e:
+        # Defense-in-depth only — mode=ro is the real guarantee. Log so
+        # the failure surfaces in the rare case it matters.
+        logger.debug("[kg_query] PRAGMA query_only failed (defense-in-depth): %s", e)
     return conn
 
 
-def _format_rows_as_table(columns: List[str], rows: List[Dict[str, Any]], max_cell: int = 200) -> str:
-    """Render rows as a compact pipe-table the LLM can read at a glance."""
+def _format_rows_as_table(columns: List[str], rows: List[List[Any]]) -> str:
+    """Render rows as a compact pipe-table the LLM can read at a glance.
+
+    Cells are stringified verbatim — no truncation. Per project policy
+    (feedback_no_truncation_tool_results.md) tool content fields must
+    not silently elide data. If a row is genuinely too large for a
+    single LLM read, that's a query-shape problem, not a renderer
+    problem.
+    """
     if not rows:
         return "(0 rows)"
 
     def _cell(v: Any) -> str:
         s = "" if v is None else str(v)
-        if len(s) > max_cell:
-            s = s[:max_cell] + "…"
+        # Pipes and newlines would break the markdown table layout; replace
+        # them with safe forms. This is structural, not truncation.
         return s.replace("|", "/").replace("\n", " ")
 
     header = " | ".join(columns)
     sep = " | ".join("---" for _ in columns)
-    body = "\n".join(" | ".join(_cell(r.get(c)) for c in columns) for r in rows)
+    body = "\n".join(" | ".join(_cell(v) for v in row) for row in rows)
     return f"{header}\n{sep}\n{body}"
 
 
-def _format_summary(row_count: int, truncated: bool, elapsed_ms: int) -> str:
+def _format_summary(row_count: int, truncated: bool, elapsed_ms: int, max_rows: int) -> str:
     parts = [f"{row_count} row(s)", f"{elapsed_ms} ms"]
     if truncated:
-        parts.append("TRUNCATED — increase max_rows to see more")
+        if max_rows >= ABSOLUTE_MAX_ROWS:
+            parts.append(
+                f"TRUNCATED at {max_rows} (absolute cap; refine the WHERE clause)"
+            )
+        else:
+            parts.append(
+                f"TRUNCATED at {max_rows} (raise max_rows up to {ABSOLUTE_MAX_ROWS})"
+            )
     return " · ".join(parts)
+
+
+def _unique_columns(columns: List[str]) -> List[str]:
+    """Suffix duplicate column names with _2, _3, ... so the dict shape
+    is lossless. Order-preserving."""
+    seen: Dict[str, int] = {}
+    out: List[str] = []
+    for c in columns:
+        n = seen.get(c, 0) + 1
+        seen[c] = n
+        out.append(c if n == 1 else f"{c}_{n}")
+    return out
 
 
 class KGQueryTool(BaseTool):
@@ -177,8 +318,7 @@ class KGQueryTool(BaseTool):
                 retryable=False,
             ))
         except Exception as e:
-            logger.error("KGQueryTool.execute failed: %s", e)
-            logger.debug("kg_query exception details", exc_info=True)
+            logger.exception("KGQueryTool.execute failed: %s", e)
             return self.publish_error(make_tool_error(
                 error_code="kg_query_failed",
                 message=str(e),
@@ -199,7 +339,15 @@ class KGQueryTool(BaseTool):
         _validate_sql(sql)
 
         raw_max = arguments.get("max_rows")
-        max_rows = int(raw_max) if raw_max is not None else DEFAULT_MAX_ROWS
+        if raw_max is None:
+            max_rows = DEFAULT_MAX_ROWS
+        else:
+            try:
+                max_rows = int(raw_max)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"max_rows must be an integer, got {raw_max!r}"
+                ) from exc
         if max_rows < 1:
             max_rows = 1
         if max_rows > ABSOLUTE_MAX_ROWS:
@@ -208,6 +356,7 @@ class KGQueryTool(BaseTool):
         # Fetch one extra row so we can detect truncation cleanly.
         fetch_limit = max_rows + 1
 
+        logger.debug("[kg_query] sql=%r max_rows=%d", sql, max_rows)
         t0 = time.monotonic()
         conn = _open_readonly()
         try:
@@ -217,16 +366,27 @@ class KGQueryTool(BaseTool):
         finally:
             try:
                 conn.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("[kg_query] connection close failed: %s", e)
         elapsed_ms = int((time.monotonic() - t0) * 1000)
 
         truncated = len(raw_rows) > max_rows
         if truncated:
             raw_rows = raw_rows[:max_rows]
 
-        rows: List[Dict[str, Any]] = [dict(r) for r in raw_rows]
-        summary = _format_summary(len(rows), truncated, elapsed_ms)
+        # Rows as positional lists — preserves duplicate column names
+        # (e.g. SELECT a.id, b.id FROM ...) which a dict shape would
+        # silently collapse.
+        rows: List[List[Any]] = [list(r) for r in raw_rows]
+
+        # Dict shape is also useful for downstream consumers; rename
+        # collisions so it's lossless.
+        unique_cols = _unique_columns(columns)
+        row_dicts: List[Dict[str, Any]] = [
+            dict(zip(unique_cols, row)) for row in rows
+        ]
+
+        summary = _format_summary(len(rows), truncated, elapsed_ms, max_rows)
         table = _format_rows_as_table(columns, rows)
 
         return self.publish_result(ToolResult(
@@ -234,7 +394,9 @@ class KGQueryTool(BaseTool):
             content=summary + "\n\n" + table,
             data={
                 "columns": columns,
+                "unique_columns": unique_cols,
                 "rows": rows,
+                "row_dicts": row_dicts,
                 "row_count": len(rows),
                 "truncated": truncated,
                 "elapsed_ms": elapsed_ms,
