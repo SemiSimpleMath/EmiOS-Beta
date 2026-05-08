@@ -537,10 +537,15 @@ class DailyContextGeneratorStep(BaseStep):
         Daily-context policy:
         - recent window is configured in stage config (hours)
         - default chat filters apply (no commands, no injections, no summaries)
+        - message content is the entity-resolved form when available
+          (`kg_resolved_message.resolved_text`); falls back to raw text
+          for messages the resolver hasn't reached yet
         - return excerpt dicts for prompt consumption
         """
         try:
             from app.assistant.ServiceLocator.service_locator import DI
+            from app.assistant.database.kg_pipeline_models import KGResolvedMessage
+            from app.models.db_manager import get_db_manager
 
             cutoff_utc = datetime.now(timezone.utc) - timedelta(hours=int(hours))
             scope = resolve_room_scope(pipeline_config=ctx.pipeline_config, step_config=ctx.step_config)
@@ -550,8 +555,27 @@ class DailyContextGeneratorStep(BaseStep):
                 room_id=scope["room_id"],
                 room_surface=scope["room_surface"],
                 shared_room_ids=scope.get("shared_chat_room_ids", []),
-            )
-            return messages_to_chat_excerpts(msgs, consumer_room_id=scope["room_id"])
+            ) or []
+
+            msg_ids = [m.id for m in msgs if getattr(m, "id", None)]
+            resolved_by_id: dict[str, str] = {}
+            if msg_ids:
+                with get_db_manager().read_session() as session:
+                    rows = session.query(
+                        KGResolvedMessage.unified_log_id,
+                        KGResolvedMessage.resolved_text,
+                    ).filter(
+                        KGResolvedMessage.unified_log_id.in_(msg_ids)
+                    ).all()
+                    resolved_by_id = {uid: txt for uid, txt in rows if txt}
+
+            annotated = [
+                m.model_copy(update={"content": resolved_by_id[m.id]})
+                if getattr(m, "id", None) in resolved_by_id
+                else m
+                for m in msgs
+            ]
+            return messages_to_chat_excerpts(annotated, consumer_room_id=scope["room_id"])
         except Exception:
             return []
 

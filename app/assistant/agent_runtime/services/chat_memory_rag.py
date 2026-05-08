@@ -6,6 +6,13 @@ context relevant to the current message.
 Two operations:
 1. index_recent_summaries() — batch-embed recent chat summaries into ChromaDB
 2. recall(query, top_k) — semantic search for relevant past conversations
+
+User messages are indexed as their entity-resolved form (read from
+`kg_resolved_message.resolved_text`), not the raw text. Messages that
+have not been entity-resolved are invisible to RAG by design — coverage
+of `kg_resolved_message` is itself the "worth retrieving" filter.
+Summaries are LLM-written prose with entities already inlined and are
+indexed as-is.
 """
 from __future__ import annotations
 
@@ -18,7 +25,7 @@ from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-_COLLECTION_NAME = "chat_memory"
+_COLLECTION_NAME = "chat_memory_v2"  # v2: user messages indexed from kg_resolved_message.resolved_text
 _SUMMARY_LOOKBACK_DAYS = 90   # Summaries are compact and carry biographical context.
 _USER_MSG_LOOKBACK_DAYS = 14  # Raw user messages are noisy — keep recent only.
 _DEFAULT_TOP_K = 8
@@ -62,38 +69,52 @@ def index_recent_summaries(
     *,
     room_id: str = "master_room",
 ) -> int:
-    """Load recent chat summaries and user messages from DB and embed into ChromaDB.
+    """Load recent chat summaries and entity-resolved user messages and embed into ChromaDB.
 
     Summaries (history_summary) are indexed over a longer window (90 days)
     because they're compact and carry biographical context.
-    Raw user messages are indexed over a shorter window (14 days).
+    User messages are indexed over a shorter window (14 days), reading
+    `resolved_text` via JOIN on `kg_resolved_message` — un-resolved
+    messages are skipped (coverage of that table IS the "worth indexing"
+    filter).
 
     Returns count of documents indexed.
     """
     from sqlalchemy import select
     from app.models.base import get_session
     from app.assistant.database.db_handler import UnifiedLog2026
+    from app.assistant.database.kg_pipeline_models import KGResolvedMessage
 
-    # Use the wider window for the query — we'll filter per-type below.
-    cutoff = datetime.now(timezone.utc) - timedelta(days=_SUMMARY_LOOKBACK_DAYS)
+    summary_cutoff = datetime.now(timezone.utc) - timedelta(days=_SUMMARY_LOOKBACK_DAYS)
+    user_msg_cutoff = datetime.now(timezone.utc) - timedelta(days=_USER_MSG_LOOKBACK_DAYS)
+
     session = get_session()
     try:
-        rows = session.execute(
+        summary_rows = session.execute(
             select(UnifiedLog2026)
             .where(UnifiedLog2026.room_id == room_id)
-            .where(UnifiedLog2026.timestamp >= cutoff)
-            .where(UnifiedLog2026.source.in_(["room_summary::" + room_id, "room_ui"]))
+            .where(UnifiedLog2026.timestamp >= summary_cutoff)
+            .where(UnifiedLog2026.source == "room_summary::" + room_id)
             .order_by(UnifiedLog2026.timestamp.asc())
         ).scalars().all()
+
+        user_msg_rows = session.execute(
+            select(UnifiedLog2026, KGResolvedMessage.resolved_text)
+            .join(KGResolvedMessage, UnifiedLog2026.id == KGResolvedMessage.unified_log_id)
+            .where(UnifiedLog2026.room_id == room_id)
+            .where(UnifiedLog2026.timestamp >= user_msg_cutoff)
+            .where(UnifiedLog2026.role == "user")
+            .where(UnifiedLog2026.source == "room_ui")
+            .order_by(UnifiedLog2026.timestamp.asc())
+        ).all()
     finally:
         session.close()
 
-    # Filter to summaries and user messages worth indexing.
     documents: List[str] = []
     ids: List[str] = []
     metadatas: List[Dict[str, Any]] = []
 
-    for row in rows:
+    for row in summary_rows:
         msg = str(row.message or "").strip()
         if not msg or len(msg) < 10:
             continue
@@ -107,38 +128,39 @@ def index_recent_summaries(
             except (json.JSONDecodeError, TypeError):
                 meta = {}
 
-        sdt = meta.get("sub_data_type", [])
-        role = str(row.role or "").strip().lower()
-        is_summary = "history_summary" in sdt
-        is_user_msg = role == "user" and row.source == "room_ui"
-
-        # User messages have a shorter lookback than summaries.
-        if is_user_msg and row.timestamp:
-            user_msg_cutoff = datetime.now(timezone.utc) - timedelta(days=_USER_MSG_LOOKBACK_DAYS)
-            ts = row.timestamp
-            if hasattr(ts, 'tzinfo') and ts.tzinfo is None:
-                ts = ts.replace(tzinfo=timezone.utc)
-            if ts < user_msg_cutoff:
-                continue
-
-        # Index summaries (compressed multi-message context) and user messages.
-        if not is_summary and not is_user_msg:
+        if "history_summary" not in meta.get("sub_data_type", []):
             continue
 
         ts_str = row.timestamp.isoformat() if row.timestamp else ""
         doc_id = _stable_id(msg, ts_str)
-
-        # Skip if already indexed.
         if doc_id in ids:
             continue
 
-        doc_type = "summary" if is_summary else "user_message"
         documents.append(msg)
         ids.append(doc_id)
         metadatas.append({
             "timestamp": ts_str,
-            "type": doc_type,
-            "role": role,
+            "type": "summary",
+            "role": str(row.role or "").strip().lower(),
+            "room_id": room_id,
+        })
+
+    for row, resolved_text in user_msg_rows:
+        text = (resolved_text or "").strip()
+        if not text or len(text) < 10:
+            continue
+
+        ts_str = row.timestamp.isoformat() if row.timestamp else ""
+        doc_id = _stable_id(text, ts_str)
+        if doc_id in ids:
+            continue
+
+        documents.append(text)
+        ids.append(doc_id)
+        metadatas.append({
+            "timestamp": ts_str,
+            "type": "user_message",
+            "role": "user",
             "room_id": room_id,
         })
 
