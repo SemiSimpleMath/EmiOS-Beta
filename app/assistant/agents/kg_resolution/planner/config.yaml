@@ -5,20 +5,23 @@ llm_params:
   engine: "gpt-5.5"
   model_tier: "smart"
 
-# Curated to the 3 essentials. Wiki + entity card regen are out-of-band
-# (wiki: nightly bullet-text-diff refresh; cards: stale_content_scan +
-# planned generation-on-mutation, see TODO). The executor purely
-# mutates the KG; downstream derivatives auto-refresh.
-# Dropped: pod_search/pod_fetch (kg_query covers reads),
-# kg_create_state_node, kg_rename_label, kg_create_edge,
-# kg_delete_edge, kg_delete_node (rare; the executor escalates if the
-# recommendation needs them), kg_finding_resolve, kg_finding_escalate
-# (verdict carried in structured final-answer instead),
-# regenerate_entity_card, refresh_wiki_page (out-of-band).
+# Full mutator suite. Safety rails live in the workflow, not in
+# tool exclusion: investigator's disposition decision routes to dev
+# page (24h grace) or user queue, and the dev-page Accept button is
+# the explicit human approval before mutations land. The executor's
+# name is "executor" — it should be able to execute.
+# kg_query for reads. Wiki + entity card regen stay out-of-band
+# (wiki: nightly bullet-text-diff; cards: stale_content_scan daily).
 allowed_tools:
   - kg_query
   - kg_close_state
+  - kg_create_state_node
   - kg_update_node_field
+  - kg_rename_label
+  - kg_create_edge
+  - kg_delete_edge
+  - kg_delete_node
+  - kg_merge_nodes
 except_tools: []
 allowed_nodes: [return_control]
 entity_scan_keys: [incoming_message, task, information, recent_history]

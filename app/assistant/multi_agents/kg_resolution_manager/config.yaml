@@ -50,29 +50,6 @@ control_nodes:
 tool_visibility:
   always_show:
     - kg_query
-    - pod_search
-    - pod_fetch
-    - kg_close_state
-    - kg_create_state_node
-    - kg_update_node_field
-    - kg_rename_label
-    - kg_finding_resolve
-  use_narrower: false
-
-# Curated allowed_tools (per the project memory — never `all`):
-# READ:    kg_query, pod_search, pod_fetch
-# MUTATE:  kg_close_state, kg_create_state_node, kg_update_node_field,
-#          kg_rename_label, kg_create_edge, kg_delete_edge, kg_delete_node
-# REGEN:   regenerate_entity_card, refresh_wiki_page
-# LIFECYCLE: kg_finding_resolve, kg_finding_escalate
-# Explicitly NOT here: kg_merge_nodes (always escalates per the
-# 2026-05-07 mutation gate — recurring-event trap), kg_create_node /
-# kg_update_node (the more focused field-level tools cover what we need).
-tools:
-  allowed_tools:
-    - kg_query
-    - pod_search
-    - pod_fetch
     - kg_close_state
     - kg_create_state_node
     - kg_update_node_field
@@ -80,16 +57,33 @@ tools:
     - kg_create_edge
     - kg_delete_edge
     - kg_delete_node
-    - kg_finding_resolve
-    - kg_finding_escalate
+    - kg_merge_nodes
+  use_narrower: false
+
+# Full mutator suite. The executor's job is to execute the
+# investigator's prose recommendation — denying it tools just produces
+# the no-op-then-escalate failure mode (see commit 910717c6 for the
+# school-merge case). Safety lives in the workflow: dev page 24h grace
+# + Accept review before mutations land. The recurring-event-trap
+# protection is now "human reads the recommendation prose and approves
+# it" rather than tool exclusion.
+tools:
+  allowed_tools:
+    - kg_query
+    - kg_close_state
+    - kg_create_state_node
+    - kg_update_node_field
+    - kg_rename_label
+    - kg_create_edge
+    - kg_delete_edge
+    - kg_delete_node
+    - kg_merge_nodes
   except_tools: []
 
 scope_contract:
   tools:
     allowed_tools:
       - kg_query
-      - pod_search
-      - pod_fetch
       - kg_close_state
       - kg_create_state_node
       - kg_update_node_field
@@ -97,14 +91,10 @@ scope_contract:
       - kg_create_edge
       - kg_delete_edge
       - kg_delete_node
-      - kg_finding_resolve
-      - kg_finding_escalate
-      - regenerate_entity_card
-      - refresh_wiki_page
+      - kg_merge_nodes
     blocked_tools:
       - install_tool
       - mcp::npm/playwright-mcp::browser_run_code
-      - kg_merge_nodes
     requires_approval_tools: []
     allow_external_side_effects: false
   writes:

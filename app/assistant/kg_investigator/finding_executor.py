@@ -51,9 +51,10 @@ GRACE_WINDOW_HOURS = 24
 
 def _executor_scope() -> ScopeContext:
     """Permissive scope so the resolution manager's scope_contract can
-    keep ``write_kg=True``. The manager's own scope_contract still
-    narrows tools to its curated allowlist (kg_query, kg_close_state,
-    kg_update_node_field — no regen tools, no merge)."""
+    keep ``write_kg=True``. The manager's own scope_contract narrows
+    tools to its curated mutator allowlist (full read + mutate suite
+    including merge/delete; safety lives in the dev-page 24h grace +
+    Accept review, not in tool exclusion)."""
     return ScopeContext(
         scope_id="scope::kg_investigator::finding_executor",
         owner_id="jukka",
@@ -232,10 +233,13 @@ def execute_one(finding_id: str) -> Dict[str, Any]:
     outcome = _extract_outcome_from_audit(mgr.blackboard) or {}
 
     # Detect "ran but couldn't actually do anything" — manager returned
-    # without any mutations or regenerations recorded. Common cause:
-    # recommendation describes a merge/delete the executor's toolkit
-    # doesn't include. Flip to escalated so the finding doesn't sit in
-    # 'investigated' forever.
+    # without any mutations or regenerations recorded. The executor has
+    # the full mutator suite, so the cause now is recommendation prose
+    # the planner couldn't safely operationalize (ambiguous ids, data
+    # shifted between investigation and execution, or the planner
+    # decided the recommendation no longer applies). Escalate so the
+    # finding doesn't sit in 'investigated' forever; user can re-run
+    # via /kg-dev with fresh context.
     mutations = outcome.get("mutations") or []
     regens = outcome.get("regenerations") or []
     no_op = (
@@ -251,16 +255,17 @@ def execute_one(finding_id: str) -> Dict[str, Any]:
                 finding_id, "escalated",
                 executed_by="ui:executor_no_op",
                 execution_notes=(
-                    f"Executor ran but applied no mutations — recommendation "
-                    f"likely needs tools the executor doesn't have (merge / "
-                    f"delete). Manager said: {summary[:300]}"
+                    f"Executor ran but applied no mutations — planner declined "
+                    f"to operationalize the recommendation (data may have "
+                    f"shifted, ids may be stale, or the case became ambiguous). "
+                    f"Manager said: {summary[:300]}"
                 ),
             )
             return {
                 "status": "escalated",
                 "finding_id": finding_id,
                 "outcome": outcome,
-                "result_summary": "Escalated — executor couldn't apply (likely merge/delete recommendation; needs user judgment via /kg-dev).",
+                "result_summary": "Escalated — executor's planner declined to mutate. Re-investigate via /kg-dev.",
                 "terminal_status": "escalated",
             }
         except Exception as e:

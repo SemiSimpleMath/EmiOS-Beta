@@ -53,16 +53,26 @@ re-openable. `user_set` / `explicit` are authoritative. `*_prose`
 carries fuzzy form when exact dates unknown.
 
 **Same-label rules.** Different dates, same person = sequential, both
-correct. Recurring same-label Events = separate occurrences (never
-merge — `kg_merge_nodes` is gated, always escalates per the
-2026-05-07 trap). Same-label Properties on different subjects =
-correctly separate.
+correct. Recurring same-label Events = separate occurrences — do NOT
+merge them just because labels match (the recurring-event trap).
+Same-label Properties on different subjects = correctly separate.
+The executor has `kg_merge_nodes`; merges happen on confident
+duplicates (label-spacing, alternate spellings) but the human-in-
+the-loop dev page review is the gate against the recurring-event
+trap, not tool exclusion.
 
-**Mutation classes.**
-| Class | Tools |
+**Available mutator tools (executor's full toolkit).** Use the most
+specific one that fits the recommendation:
+
+| Tool | Use for |
 |---|---|
-| Reversible (auto-OK) | `kg_close_state`, `kg_update_node_field`, `kg_finding_resolve`, `kg_finding_escalate` |
-| Escalate | merge, delete, rename, create-state, create/delete-edge |
+| `kg_close_state` | Setting `end_date` on a State or Event |
+| `kg_update_node_field` | Surgical edit to one field (date, label, prose) |
+| `kg_create_state_node` | Adding a new era under an entity |
+| `kg_create_edge`, `kg_delete_edge` | Connecting / removing relationships |
+| `kg_rename_label` | When the current label is demonstrably wrong |
+| `kg_merge_nodes` | Combining duplicates (label-spacing typos, alternate spellings) — pair with re-pointing edges via update before merging |
+| `kg_delete_node` | Removing orphans / fully-superseded nodes |
 
 Every mutation passes `reason` + `finding_id`.
 
