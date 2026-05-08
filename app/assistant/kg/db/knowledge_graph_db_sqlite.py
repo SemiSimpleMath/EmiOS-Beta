@@ -7,7 +7,7 @@ from sqlalchemy import (
     UniqueConstraint, Index, func
 )
 from sqlalchemy.orm import relationship
-from app.assistant.utils.time_utils import AwareUtcDateTime
+from app.assistant.utils.time_utils import AwareUtcDateTime, utc_now
 from app.models.base import Base
 
 # --- Message ID to Source Mapping Table ---
@@ -15,7 +15,7 @@ class MessageSourceMapping(Base):
     __tablename__ = 'message_source_mapping'
     message_id = Column(String, primary_key=True)
     source_table = Column(String, nullable=False)
-    created_at = Column(AwareUtcDateTime, nullable=False, default=func.now())
+    created_at = Column(AwareUtcDateTime, nullable=False, default=utc_now)
     
     __table_args__ = (
         Index('ix_message_source_mapping_source_table', 'source_table'),
@@ -61,8 +61,8 @@ class Node(Base):
     # populated, neither has to be. A later pass can resolve prose to exact.
     start_date_prose = Column(Text, nullable=True)
     end_date_prose = Column(Text, nullable=True)
-    created_at = Column(AwareUtcDateTime, nullable=False, default=func.now())
-    updated_at = Column(AwareUtcDateTime, nullable=False, default=func.now(), onupdate=func.now())
+    created_at = Column(AwareUtcDateTime, nullable=False, default=utc_now)
+    updated_at = Column(AwareUtcDateTime, nullable=False, default=utc_now, onupdate=utc_now)
     
     # Promoted fields
     valid_during = Column(Text, nullable=True)
@@ -171,8 +171,8 @@ class Edge(Base):
     window_id = Column(String, nullable=True)
 
     original_message_timestamp = Column(AwareUtcDateTime, nullable=True)
-    created_at = Column(AwareUtcDateTime, nullable=False, default=func.now())
-    updated_at = Column(AwareUtcDateTime, nullable=False, default=func.now(), onupdate=func.now())
+    created_at = Column(AwareUtcDateTime, nullable=False, default=utc_now)
+    updated_at = Column(AwareUtcDateTime, nullable=False, default=utc_now, onupdate=utc_now)
     
     # NOTE: Embeddings are stored in ChromaDB, not here
     

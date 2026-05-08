@@ -45,7 +45,7 @@ import uuid
 from sqlalchemy import Column, DateTime, Float, Index, JSON, String, Text, func
 
 from app.models.base import Base
-from app.assistant.utils.time_utils import AwareUtcDateTime
+from app.assistant.utils.time_utils import AwareUtcDateTime, utc_now
 
 
 class KGMaintenanceFinding(Base):
@@ -105,12 +105,12 @@ class KGMaintenanceFinding(Base):
     superseded_by = Column(String, nullable=True, index=True)
 
     # ── Audit ─────────────────────────────────────────────────────────────────
-    created_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now())
+    created_at = Column(AwareUtcDateTime, nullable=False, default=utc_now)
     updated_at = Column(
         AwareUtcDateTime,
         nullable=False,
-        server_default=func.now(),
-        onupdate=func.now(),
+        default=utc_now,
+        onupdate=utc_now,
     )
 
     __table_args__ = (

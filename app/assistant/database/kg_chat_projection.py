@@ -14,7 +14,7 @@ import uuid
 from sqlalchemy import Column, DateTime, Index, String, Text, func
 
 from app.models.base import Base
-from app.assistant.utils.time_utils import AwareUtcDateTime
+from app.assistant.utils.time_utils import AwareUtcDateTime, utc_now
 
 
 class KGNodeEvidence(Base):
@@ -56,7 +56,7 @@ class KGNodeEvidence(Base):
     window_id = Column(String, nullable=True, index=True)
     merge_action = Column(String(32), nullable=False, default="created")  # created | confirmed | updated
 
-    created_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now())
+    created_at = Column(AwareUtcDateTime, nullable=False, default=utc_now)
 
     __table_args__ = (
         Index("ix_kg_node_evidence_node_ts", "node_id", "message_timestamp"),
@@ -95,7 +95,7 @@ class KGEdgeEvidence(Base):
     window_id = Column(String, nullable=True, index=True)
     merge_action = Column(String(32), nullable=False, default="created")  # created | confirmed | merged
 
-    created_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now())
+    created_at = Column(AwareUtcDateTime, nullable=False, default=utc_now)
 
     __table_args__ = (
         Index("ix_kg_edge_evidence_edge_ts", "edge_id", "message_timestamp"),

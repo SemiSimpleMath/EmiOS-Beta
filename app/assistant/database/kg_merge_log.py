@@ -30,7 +30,7 @@ import uuid
 from sqlalchemy import Column, DateTime, Index, JSON, String, Text, func
 
 from app.models.base import Base
-from app.assistant.utils.time_utils import AwareUtcDateTime
+from app.assistant.utils.time_utils import AwareUtcDateTime, utc_now
 
 
 class KGMergeLog(Base):
@@ -55,7 +55,7 @@ class KGMergeLog(Base):
 
     # ── Audit ─────────────────────────────────────────────────────────────────
     merged_at = Column(
-        AwareUtcDateTime, nullable=False, server_default=func.now()
+        AwareUtcDateTime, nullable=False, default=utc_now
     )
     undone_at = Column(AwareUtcDateTime, nullable=True)
     undone_by = Column(String(128), nullable=True)

@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from sqlalchemy import (
     Column, String, DateTime, Integer, Float, Boolean, Text, Index, func
 )
-from app.assistant.utils.time_utils import AwareUtcDateTime
+from app.assistant.utils.time_utils import AwareUtcDateTime, utc_now
 
 from app.models.base import Base, get_session
 
@@ -26,7 +26,7 @@ class NodeAnalysisTracking(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     node_id = Column(Text, nullable=False)  # SQLite: UUID as TEXT
     node_label = Column(String(255), nullable=False)  # For easy querying
-    analysis_timestamp = Column(AwareUtcDateTime, nullable=False, default=func.now())
+    analysis_timestamp = Column(AwareUtcDateTime, nullable=False, default=utc_now)
     
     # Analysis results
     is_suspect = Column(Boolean, nullable=False)  # Whether the node was flagged as suspect
@@ -46,8 +46,8 @@ class NodeAnalysisTracking(Base):
     agent_version = Column(String(100), nullable=True)  # Version of cleanup agent used
     
     # Timestamps
-    created_at = Column(AwareUtcDateTime, server_default=func.now())
-    updated_at = Column(AwareUtcDateTime, server_default=func.now(), onupdate=func.now())
+    created_at = Column(AwareUtcDateTime, default=utc_now)
+    updated_at = Column(AwareUtcDateTime, default=utc_now, onupdate=utc_now)
     
     __table_args__ = (
         Index('ix_node_analysis_tracking_node_id', 'node_id'),

@@ -4,7 +4,7 @@ Database model for processed entity log - stores resolved sentences from entity_
 
 from sqlalchemy import Column, String, Text, DateTime, Boolean, func, Index
 from app.models.base import Base
-from app.assistant.utils.time_utils import AwareUtcDateTime
+from app.assistant.utils.time_utils import AwareUtcDateTime, utc_now
 
 
 class ProcessedEntityLog(Base):
@@ -28,7 +28,7 @@ class ProcessedEntityLog(Base):
     reasoning = Column(Text, nullable=True)  # Agent's reasoning for resolution
     
     # Processing metadata
-    processing_timestamp = Column(AwareUtcDateTime, server_default=func.now())
+    processing_timestamp = Column(AwareUtcDateTime, default=utc_now)
     agent_version = Column(String(50), nullable=True)  # Version of entity_resolver agent
     
     # Status tracking

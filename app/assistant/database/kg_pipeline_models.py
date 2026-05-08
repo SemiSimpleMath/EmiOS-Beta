@@ -34,7 +34,7 @@ import uuid
 from sqlalchemy import JSON, Boolean, Column, DateTime, Index, Integer, String, Text, UniqueConstraint, func
 
 from app.models.base import Base
-from app.assistant.utils.time_utils import AwareUtcDateTime
+from app.assistant.utils.time_utils import AwareUtcDateTime, utc_now
 
 
 # ---------------------------------------------------------------------------
@@ -54,7 +54,7 @@ class KGResolvedMessage(Base):
     resolved_text = Column(Text, nullable=False)
     resolved_entities = Column(JSON, nullable=True)   # reserved
     resolver_version = Column(String(32), nullable=True)
-    resolved_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now())
+    resolved_at = Column(AwareUtcDateTime, nullable=False, default=utc_now)
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +78,7 @@ class KGWindow(Base):
     reason_for_boundary = Column(Text, nullable=True)                  # debug aid
 
     segmenter_version = Column(String(64), nullable=True)
-    created_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now())
+    created_at = Column(AwareUtcDateTime, nullable=False, default=utc_now)
 
 
 class KGWindowMessage(Base):
@@ -108,7 +108,7 @@ class KGWindowExtraction(Base):
 
     extractor_version = Column(String(64), nullable=True)
     critic_version = Column(String(64), nullable=True)
-    created_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now())
+    created_at = Column(AwareUtcDateTime, nullable=False, default=utc_now)
 
 
 # ---------------------------------------------------------------------------
@@ -128,7 +128,7 @@ class KGWindowEnrichment(Base):
     enriched_edges = Column(JSON, nullable=False)
 
     enricher_version = Column(String(64), nullable=True)
-    created_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now())
+    created_at = Column(AwareUtcDateTime, nullable=False, default=utc_now)
 
     __table_args__ = (
         UniqueConstraint("window_extraction_id", "component_index", name="uq_enrichment_extraction_component"),

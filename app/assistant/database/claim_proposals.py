@@ -42,7 +42,7 @@ from sqlalchemy import (
     Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, JSON,
     String, Text, func,
 )
-from app.assistant.utils.time_utils import AwareUtcDateTime
+from app.assistant.utils.time_utils import AwareUtcDateTime, utc_now
 
 from app.models.base import Base
 
@@ -122,10 +122,10 @@ class ClaimProposal(Base):
     retracted_at = Column(AwareUtcDateTime, nullable=True)
     retraction_reason = Column(Text, nullable=True)
 
-    created_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now())
+    created_at = Column(AwareUtcDateTime, nullable=False, default=utc_now)
     updated_at = Column(
         AwareUtcDateTime, nullable=False,
-        server_default=func.now(), onupdate=func.now(),
+        default=utc_now, onupdate=utc_now,
     )
 
     __table_args__ = (
@@ -190,7 +190,7 @@ class ClaimProposalNode(Base):
     resolved_node_id = Column(String, nullable=True, index=True)
     resolution_action = Column(String(32), nullable=False, default="pending")
 
-    created_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now())
+    created_at = Column(AwareUtcDateTime, nullable=False, default=utc_now)
 
     __table_args__ = (
         Index("ix_claim_proposal_node_resolved", "resolved_node_id"),
@@ -229,7 +229,7 @@ class ClaimProposalEdge(Base):
     # Resolution output (filled during promotion phase 2).
     resolved_edge_id = Column(String, nullable=True, index=True)
 
-    created_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now())
+    created_at = Column(AwareUtcDateTime, nullable=False, default=utc_now)
 
     __table_args__ = (
         Index(
@@ -290,7 +290,7 @@ class ClaimProposalEvidence(Base):
     # Bitemporal: when the source message was authored (valid time).
     observed_at = Column(AwareUtcDateTime, nullable=True)
     # Transaction time: when the evidence row was persisted.
-    created_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now())
+    created_at = Column(AwareUtcDateTime, nullable=False, default=utc_now)
 
     __table_args__ = (
         Index("ix_claim_proposal_evidence_cohort", "extractor_model", "extractor_prompt_version"),

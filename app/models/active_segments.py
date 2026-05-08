@@ -4,7 +4,7 @@ SQLAlchemy models for AFK and Active tracking.
 from sqlalchemy import Column, Integer, String, Float, DateTime, Text, Index, Boolean
 from sqlalchemy.sql import func
 from app.models.base import Base
-from app.assistant.utils.time_utils import AwareUtcDateTime
+from app.assistant.utils.time_utils import AwareUtcDateTime, utc_now
 
 
 class ActiveSegment(Base):
@@ -18,7 +18,7 @@ class ActiveSegment(Base):
     end_time = Column(AwareUtcDateTime, nullable=False, index=True)
     duration_minutes = Column(Float, nullable=False)
     is_provisional = Column(Boolean, nullable=False, default=False)
-    created_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now())
+    created_at = Column(AwareUtcDateTime, nullable=False, default=utc_now)
 
     __table_args__ = (
         Index("idx_active_segment_start", "start_time"),

@@ -13,7 +13,7 @@ from pathlib import Path
 from sqlalchemy import Column, String, DateTime, Text, Integer, Index, func, JSON
 
 from app.models.base import Base
-from app.assistant.utils.time_utils import AwareUtcDateTime
+from app.assistant.utils.time_utils import AwareUtcDateTime, utc_now
 
 
 _TICKET_CONFIG_CACHE = None
@@ -108,11 +108,11 @@ class Ticket(Base):
     user_response_parsed = Column(JSON)
 
     # Timestamps
-    created_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now(), index=True)
+    created_at = Column(AwareUtcDateTime, nullable=False, default=utc_now, index=True)
     proposed_at = Column(AwareUtcDateTime)
     responded_at = Column(AwareUtcDateTime)
     completed_at = Column(AwareUtcDateTime)
-    updated_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+    updated_at = Column(AwareUtcDateTime, nullable=False, default=utc_now, onupdate=utc_now)
 
     # Validity window
     valid_from = Column(AwareUtcDateTime)

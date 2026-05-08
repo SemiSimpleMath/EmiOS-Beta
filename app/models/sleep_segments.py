@@ -4,7 +4,7 @@ SQLAlchemy models for sleep tracking.
 from sqlalchemy import Column, Integer, String, Float, DateTime, Text, Index
 from sqlalchemy.sql import func
 from app.models.base import Base
-from app.assistant.utils.time_utils import AwareUtcDateTime
+from app.assistant.utils.time_utils import AwareUtcDateTime, utc_now
 
 
 class SleepSegment(Base):
@@ -19,7 +19,7 @@ class SleepSegment(Base):
     duration_minutes = Column(Float, nullable=True)
     source = Column(String(50), nullable=False)
     raw_mention = Column(Text, nullable=True)
-    created_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now())
+    created_at = Column(AwareUtcDateTime, nullable=False, default=utc_now)
 
     __table_args__ = (
         Index("idx_sleep_start", "start_time"),

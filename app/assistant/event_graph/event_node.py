@@ -20,7 +20,7 @@ from sqlalchemy import (
     Column, String, DateTime, Text, Integer, Boolean,
     ForeignKey, Index, func, JSON
 )
-from app.assistant.utils.time_utils import AwareUtcDateTime
+from app.assistant.utils.time_utils import AwareUtcDateTime, utc_now
 from sqlalchemy.orm import relationship
 from app.models.base import Base
 
@@ -120,8 +120,8 @@ class EventNode(Base):
     # When we last verified this node against source systems
     
     # ===== Metadata =====
-    created_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now())
-    updated_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+    created_at = Column(AwareUtcDateTime, nullable=False, default=utc_now)
+    updated_at = Column(AwareUtcDateTime, nullable=False, default=utc_now, onupdate=utc_now)
     created_by = Column(String(100))  # 'user', 'emi', 'auto_planner'
     
     # ===== Additional Data =====
@@ -219,8 +219,8 @@ class EventNodeSource(Base):
     sync_error = Column(Text, nullable=True)
     
     # ===== Metadata =====
-    created_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now())
-    updated_at = Column(AwareUtcDateTime, nullable=False, server_default=func.now(), onupdate=func.now())
+    created_at = Column(AwareUtcDateTime, nullable=False, default=utc_now)
+    updated_at = Column(AwareUtcDateTime, nullable=False, default=utc_now, onupdate=utc_now)
     
     # ===== Indexes =====
     __table_args__ = (
