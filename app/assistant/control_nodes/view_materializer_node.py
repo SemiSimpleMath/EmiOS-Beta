@@ -354,4 +354,18 @@ class ViewMaterializerNode(ControlNode):
             len(useful_recent_context),
             stale_dropped,
         )
+
+        # Empty-list short-circuit. action_selector is an LLM agent — if
+        # actionable_items is empty there's nothing for it to choose, and
+        # firing it just produces a no-op verdict at full token cost. The
+        # guard previously lived in wait_interrupt_promoter_node, which
+        # was deleted on 2026-05-04 (commit 72cea7a1); the dispatch
+        # filter moved here but this short-circuit didn't.
+        if not actionable_items:
+            logger.info(
+                "[%s] no actionable items — skipping action_selector.",
+                self.name,
+            )
+            self.blackboard.update_state_value("next_agent", "post_room_finalize_node")
+
         self.blackboard.update_state_value("last_agent", self.name)

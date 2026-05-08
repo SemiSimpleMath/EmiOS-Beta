@@ -26,6 +26,10 @@ BEDROOM_CAMERA_ID = "158991560"     # Downstairs cam re-aimed at bed
 # Comparison window for sleep_analyzer's "previous frame" lookup.
 _MAX_PAIR_GAP_SECONDS = 10 * 60
 
+# Importance score that flags a frame as an emergency. Per the
+# sleep_analyzer system prompt: 10 = "Distress, fire, any emergency."
+_EMERGENCY_IMPORTANCE = 10
+
 
 def register_ring_subscribers() -> None:
     """Wire camera-snapshot subscribers onto event_hub. Call once at startup."""
@@ -153,8 +157,114 @@ def _on_bedroom_frame(message: Message) -> None:
             data.get("motion_vs_previous"),
             data.get("importance"),
         )
+
+        # int(float(...)) handles both "10" and "10.0" / 10.0; bare int()
+        # raises ValueError on "10.0" and would silently drop a real
+        # emergency.
+        raw_imp = data.get("importance")
+        try:
+            importance_int = int(float(raw_imp)) if raw_imp not in (None, "") else 0
+        except (TypeError, ValueError):
+            importance_int = 0
+        if importance_int >= _EMERGENCY_IMPORTANCE:
+            _trigger_bedroom_emergency_alarm(
+                jpeg=jpeg, sidecar=sidecar,
+                data=data, agent_input=agent_input,
+                importance=importance_int,
+            )
     except Exception as e:
         logger.error("[sleep_analyzer] subscriber crashed: %s", e, exc_info=True)
+
+
+def _trigger_bedroom_emergency_alarm(
+    *,
+    jpeg: Path,
+    sidecar: Path,
+    data: Dict[str, Any],
+    agent_input: Dict[str, Any],
+    importance: int,
+) -> None:
+    """Sleep analyzer flagged an importance-10 frame (distress / fire /
+    emergency per its scale). Sound an alarm.
+
+    Three actions, all best-effort and independent — any one failing
+    must NOT swallow the others:
+
+    1. CRITICAL log line — visible in tail/grep, even with no other
+       infrastructure.
+    2. Companion `.EMERGENCY.txt` sidecar — a frame-adjacent marker
+       that stands out among normal sleep sidecars when grepping the
+       snapshot directory.
+    3. ``bedroom_emergency_detected`` event_hub publish — anything else
+       (SMS, smart-home siren, push notification) subscribes here. Keeps
+       the subscriber-vs-actuator separation clean.
+    """
+    description = str(data.get("description") or "").strip() or "(no description)"
+    importance_reason = str(data.get("importance_reason") or "").strip()
+    notes = str(data.get("notes") or "").strip()
+
+    logger.critical(
+        "[BEDROOM-EMERGENCY] [sleep_analyzer] importance=%s frame=%s "
+        "reason=%r description=%r",
+        importance, jpeg.name, importance_reason, description,
+    )
+
+    try:
+        emergency_path = jpeg.with_name(jpeg.stem + ".EMERGENCY.txt")
+        emergency_lines = [
+            "🚨 BEDROOM EMERGENCY 🚨",
+            "",
+            f"importance: {importance}",
+            f"reason: {importance_reason or '(not given)'}",
+            f"description: {description}",
+        ]
+        if notes:
+            emergency_lines.append(f"notes: {notes}")
+        emergency_lines += [
+            "",
+            f"frame: {jpeg.name}",
+            f"sidecar: {sidecar.name}",
+            f"camera_id: {agent_input.get('camera_id', '')}",
+            f"captured_at_utc: {agent_input.get('captured_at_utc', '')}",
+            f"detected_at_local: {agent_input.get('date_time', '')}",
+        ]
+        emergency_path.write_text("\n".join(emergency_lines) + "\n", encoding="utf-8")
+    except Exception as e:
+        logger.error(
+            "[sleep_analyzer] failed to write EMERGENCY sidecar for %s: %s",
+            jpeg.name, e, exc_info=True,
+        )
+
+    try:
+        DI.event_hub.publish(
+            Message(
+                data_type="event",
+                sender="sleep_analyzer",
+                receiver=None,
+                event_topic="bedroom_emergency_detected",
+                content=description,
+                data={
+                    "importance": importance,
+                    "importance_reason": importance_reason,
+                    "description": description,
+                    "notes": notes,
+                    "frame": str(jpeg),
+                    "sidecar": str(sidecar),
+                    "camera_id": agent_input.get("camera_id"),
+                    "captured_at_utc": agent_input.get("captured_at_utc"),
+                    "detected_at_local": agent_input.get("date_time"),
+                    "subject_in_bed": data.get("subject_in_bed"),
+                    "position": data.get("position"),
+                    "light_state": data.get("light_state"),
+                    "cpap_state": data.get("cpap_state"),
+                },
+            )
+        )
+    except Exception as e:
+        logger.error(
+            "[sleep_analyzer] failed to publish bedroom_emergency_detected event: %s",
+            e, exc_info=True,
+        )
 
 
 def _find_previous_bedroom_frame(current: Path) -> Optional[Path]:
