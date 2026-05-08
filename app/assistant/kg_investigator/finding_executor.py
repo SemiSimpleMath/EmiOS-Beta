@@ -230,6 +230,42 @@ def execute_one(finding_id: str) -> Dict[str, Any]:
         return {"status": "error", "finding_id": finding_id, "error": str(e)}
 
     outcome = _extract_outcome_from_audit(mgr.blackboard) or {}
+
+    # Detect "ran but couldn't actually do anything" — manager returned
+    # without any mutations or regenerations recorded. Common cause:
+    # recommendation describes a merge/delete the executor's toolkit
+    # doesn't include. Flip to escalated so the finding doesn't sit in
+    # 'investigated' forever.
+    mutations = outcome.get("mutations") or []
+    regens = outcome.get("regenerations") or []
+    no_op = (
+        not mutations
+        and not regens
+        and not outcome.get("findings_resolved")
+    )
+    if no_op:
+        try:
+            from app.assistant.kg_maintenance.store import set_status
+            summary = outcome.get("result_summary") or outcome.get("summary") or ""
+            set_status(
+                finding_id, "escalated",
+                executed_by="ui:executor_no_op",
+                execution_notes=(
+                    f"Executor ran but applied no mutations — recommendation "
+                    f"likely needs tools the executor doesn't have (merge / "
+                    f"delete). Manager said: {summary[:300]}"
+                ),
+            )
+            return {
+                "status": "escalated",
+                "finding_id": finding_id,
+                "outcome": outcome,
+                "result_summary": "Escalated — executor couldn't apply (likely merge/delete recommendation; needs user judgment via /kg-dev).",
+                "terminal_status": "escalated",
+            }
+        except Exception as e:
+            logger.error("failed to escalate finding %s after no-op: %s", finding_id, e)
+
     return {
         "status": "ran",
         "finding_id": finding_id,

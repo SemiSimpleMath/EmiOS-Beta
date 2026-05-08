@@ -133,7 +133,7 @@ Pick **one**:
 - **`needs_user_review`** — when only the user can decide. Use when:
   - Dates conflict and the source doesn't disambiguate (prose says Nov, KG says Aug, no message anchors which is right).
   - Two plausible interpretations both fit the data (e.g., "Annika stopped art lessons" — was it the Broadway Arts class, the new studio, or both?).
-  - The fix needs a banned mutation (merge of recurring-event-shaped nodes; delete on a connected node) and you can't see a simpler workaround.
+  - **MANDATORY for any recommendation that involves: merging two nodes, deleting a node with incoming edges, renaming an entity to match an existing node, or otherwise structurally combining/removing graph elements.** The executor's toolkit is `kg_query` / `kg_close_state` / `kg_update_node_field` only — anything more structural needs the user. Even when the case looks open-and-shut (e.g., "obvious label-spacing duplicate"), set `needs_user_review` because (a) the executor literally can't execute it, and (b) merges have a known failure mode (the recurring-event trap — same-label nodes that should NOT be combined).
   - Mass corrections that affect many nodes you don't have full provenance for.
   - When you set `needs_user_review`, fill `user_question` with a specific yes/no or pick-one question. Don't punt with "what should we do?" — name the choice.
 
