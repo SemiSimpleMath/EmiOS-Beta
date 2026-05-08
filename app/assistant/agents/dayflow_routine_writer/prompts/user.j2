@@ -4,6 +4,11 @@
 ########## DAILY CONTEXT ##########
 {{ daily_context }}
 
+{% if tail_anchors_block %}
+########## TAIL ANCHORS (later today, do NOT expand into blocks) ##########
+{{ tail_anchors_block }}
+{% endif %}
+
 ########## USER BELIEFS & PATTERNS ##########
 **Beliefs for {{ day_of_week }}:**
 {{ beliefs_block }}

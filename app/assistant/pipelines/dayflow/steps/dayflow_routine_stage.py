@@ -2,10 +2,17 @@
 DayFlow Routine Stage
 
 Generates resource_dayflow_routine.md — a living, belief-enriched, context-aware
-daily routine document. Runs hourly throughout the day.
+routine document covering a SHORT FORWARD WINDOW (current schedule item +
+next two upcoming items, with a 2h/6h floor/cap). Runs hourly throughout
+the day; each regen advances the window with the clock.
 
 - Reads resource_user_beliefs.json (belief engine export)
+- Reads resource_expected_calendar.json and windows it to "current + next 2"
+  so the doc doesn't re-emit detailed late-night blocks at 9am
 - Feeds daily_context_generator output so the agent knows what has already happened
+- Emits one-line tail anchors (e.g. "Later today: 16:30 work end · 21:00 dog
+  walk · 22:30 CPAP") so downstream agents stay aware of upcoming pivots
+  without paying token cost for detailed prose
 - Generates from scratch each run (no previous version fed in)
 - Feeds weekly insights flags for cross-day pattern awareness
 - Writes resource_dayflow_routine.md (injected into all agents)
@@ -15,7 +22,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -54,31 +61,167 @@ def _write_text_atomic(path: Path, text: str) -> None:
         raise
 
 
-def _format_daily_context(ctx_data: Optional[Dict[str, Any]]) -> str:
-    if not ctx_data:
-        return "(no daily context available yet)"
+_WINDOW_MIN_HOURS = 2
+_WINDOW_MAX_HOURS = 6
+_WINDOW_DEFAULT_ITEM_COUNT = 3  # current item + next 2
+_BACKDROP_MIN_HOURS = 4  # items longer than this are treated as backdrops
+
+
+def _is_backdrop(item: dict) -> bool:
+    """Long umbrella blocks like 'Work Hours' (7.5h) are *backdrops*, not
+    actionable events. They're useful context (the writer should know
+    the user is on the clock) but they shouldn't eat window slots that
+    belong to specific upcoming items inside them."""
+    start = parse_iso_utc(item.get("start_utc"))
+    end = parse_iso_utc(item.get("end_utc"))
+    if start is None or end is None:
+        return False
+    return (end - start) >= timedelta(hours=_BACKDROP_MIN_HOURS)
+
+
+def _window_schedule(
+    expected: list,
+    now_utc: datetime,
+) -> Tuple[list, list, list]:
+    """Split *expected* into (window_items, tail_items, active_backdrops).
+
+    Long umbrella blocks (duration ≥ 4h) are partitioned off as
+    *backdrops*. They surface separately in the daily-context block so
+    the writer knows e.g. the user is inside Work Hours, but they don't
+    consume window slots.
+
+    Window over the **specific** items only:
+      - First ``_WINDOW_DEFAULT_ITEM_COUNT`` items still ahead of now
+        (``end_utc > now_utc``), sorted by ``start_utc``.
+      - Floor: extend until the window reaches ``_WINDOW_MIN_HOURS``
+        past now (or we run out of items).
+      - Cap: trim while the window stretches past ``_WINDOW_MAX_HOURS``
+        AND we still have >1 item.
+
+    Active backdrops = backdrop items currently happening
+    (start ≤ now < end). Past or future-only backdrops are dropped on
+    the floor — past backdrops don't belong here (milestone tracker
+    owns "what already happened"), and a future backdrop that starts
+    in 6h is just noise for the next-few-hours doc.
+
+    Items missing parseable ``end_utc`` / ``start_utc`` are dropped
+    entirely — nothing the writer can act on.
+    """
+    backdrops: list = []
+    specific_upcoming: list = []
+    for item in expected:
+        if not isinstance(item, dict):
+            continue
+        start_utc = parse_iso_utc(item.get("start_utc"))
+        end_utc = parse_iso_utc(item.get("end_utc"))
+        if end_utc is None or start_utc is None or end_utc <= now_utc:
+            continue
+        if _is_backdrop(item):
+            # Only keep currently-active backdrops; future ones are tail.
+            if start_utc <= now_utc:
+                backdrops.append(item)
+            continue
+        specific_upcoming.append(item)
+
+    specific_upcoming.sort(key=lambda x: parse_iso_utc(x.get("start_utc")) or now_utc)
+
+    if not specific_upcoming:
+        return [], [], backdrops
+
+    take = min(_WINDOW_DEFAULT_ITEM_COUNT, len(specific_upcoming))
+
+    def _window_end(items: list) -> datetime:
+        ends = [parse_iso_utc(x.get("end_utc")) for x in items]
+        ends = [e for e in ends if e is not None]
+        return max(ends) if ends else now_utc
+
+    # Floor: extend until window reaches min hours past now.
+    min_floor = now_utc + timedelta(hours=_WINDOW_MIN_HOURS)
+    while take < len(specific_upcoming) and _window_end(specific_upcoming[:take]) < min_floor:
+        take += 1
+
+    # Cap: trim while >max hours past now AND we still have >1 item.
+    max_ceiling = now_utc + timedelta(hours=_WINDOW_MAX_HOURS)
+    while take > 1 and _window_end(specific_upcoming[:take]) > max_ceiling:
+        take -= 1
+
+    return specific_upcoming[:take], specific_upcoming[take:], backdrops
+
+
+def _format_tail_anchors(tail: list) -> str:
+    """One-line preview of items past the window so the writer can keep
+    them in mind without producing detailed blocks for them."""
+    if not tail:
+        return ""
     parts = []
+    for item in tail:
+        title = (item.get("title") or "").strip()
+        start = (item.get("start_local") or "").strip()
+        if not title and not start:
+            continue
+        if start and title:
+            parts.append(f"{start} {title}")
+        else:
+            parts.append(title or start)
+    if not parts:
+        return ""
+    return "Later today: " + " · ".join(parts)
+
+
+def _format_daily_context(
+    ctx_data: Optional[Dict[str, Any]],
+    *,
+    now_utc: datetime,
+) -> Tuple[str, str]:
+    """Returns (daily_context_block, tail_anchors_block).
+
+    The schedule is windowed to "current item + next 2" so the writer
+    only produces detailed blocks for what's actually proximate.
+    Past-the-window items are returned as a separate compact line.
+    """
+    if not ctx_data:
+        return "(no daily context available yet)", ""
+    parts: list[str] = []
+    tail_anchors_block = ""
+
     day_theme = ctx_data.get("day_theme", "")
     if day_theme:
         parts.append(f"Day theme: {day_theme}")
+
     expected = ctx_data.get("expected_schedule") or []
     if isinstance(expected, list) and expected:
-        sched_lines = ["Expected schedule:"]
-        for item in expected:
-            if not isinstance(item, dict):
-                continue
-            title = item.get("title", "")
-            start = item.get("start_local", "")
-            end = item.get("end_local", "")
-            status = item.get("status", "")
-            time_range = f"{start} - {end}" if end else start
-            sched_lines.append(f"  {title} {time_range} ({status})")
-        parts.append("\n".join(sched_lines))
+        window_items, tail_items, active_backdrops = _window_schedule(expected, now_utc)
+
+        if active_backdrops:
+            backdrop_lines = ["Active backdrop (ongoing umbrella blocks — context, not window items):"]
+            for item in active_backdrops:
+                title = item.get("title", "")
+                start = item.get("start_local", "")
+                end = item.get("end_local", "")
+                time_range = f"{start} - {end}" if end else start
+                backdrop_lines.append(f"  {title} {time_range}")
+            parts.append("\n".join(backdrop_lines))
+
+        if window_items:
+            sched_lines = ["Expected schedule (current window — write blocks for these):"]
+            for item in window_items:
+                title = item.get("title", "")
+                start = item.get("start_local", "")
+                end = item.get("end_local", "")
+                status = item.get("status", "")
+                time_range = f"{start} - {end}" if end else start
+                sched_lines.append(f"  {title} {time_range} ({status})")
+            parts.append("\n".join(sched_lines))
+        else:
+            parts.append("Expected schedule: (no specific upcoming items)")
+        tail_anchors_block = _format_tail_anchors(tail_items)
     elif isinstance(expected, str) and expected.strip():
         parts.append(f"Expected schedule:\n{expected}")
+
     current_status = ctx_data.get("current_status", "")
     if current_status:
         parts.append(f"Current status: {current_status}")
+
     milestones = ctx_data.get("milestones") or []
     if milestones:
         lines = ["Milestones (what has already happened):"]
@@ -86,7 +229,9 @@ def _format_daily_context(ctx_data: Optional[Dict[str, Any]]) -> str:
             flag = " [ongoing]" if m.get("ongoing") else ""
             lines.append(f"  {m.get('time', '?')} — {m.get('description', '')}{flag}")
         parts.append("\n".join(lines))
-    return "\n\n".join(parts) if parts else "(daily context empty)"
+
+    daily_context_block = "\n\n".join(parts) if parts else "(daily context empty)"
+    return daily_context_block, tail_anchors_block
 
 
 _DOMAIN_ORDER = ["routine", "health", "food", "general", "work"]
@@ -260,13 +405,16 @@ class DayFlowRoutineStep(BaseStep):
         day_of_week = ctx.now_local.strftime("%A")
 
         daily_ctx_data = self._read_daily_context(ctx)
-        daily_context_block = _format_daily_context(daily_ctx_data)
+        daily_context_block, tail_anchors_block = _format_daily_context(
+            daily_ctx_data, now_utc=ctx.now_utc,
+        )
         beliefs_block = _format_beliefs(day_of_week)
         weekly_insights_block = _format_weekly_insights()
         md, change_summary = self._call_agent(
             boundary_date_local=boundary_date_local,
             day_of_week=day_of_week,
             daily_context_block=daily_context_block,
+            tail_anchors_block=tail_anchors_block,
             beliefs_block=beliefs_block,
             weekly_insights_block=weekly_insights_block,
             ctx=ctx,
@@ -325,6 +473,7 @@ class DayFlowRoutineStep(BaseStep):
         boundary_date_local: str,
         day_of_week: str,
         daily_context_block: str,
+        tail_anchors_block: str,
         beliefs_block: str,
         weekly_insights_block: str,
         ctx: StepContext,
@@ -349,6 +498,7 @@ class DayFlowRoutineStep(BaseStep):
                     "day_of_week": day_of_week,
                     "boundary_date_local": boundary_date_local,
                     "daily_context": daily_context_block,
+                    "tail_anchors_block": tail_anchors_block,
                     "beliefs_block": beliefs_block,
                     "weekly_insights_block": weekly_insights_block,
                     "previous_routine_doc": "",
