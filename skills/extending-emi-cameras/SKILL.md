@@ -98,8 +98,10 @@ ring_snapshot_captured event
 1. **Add the camera registry entry** in `configs/cameras.json`.
 2. **Create the analyzer agent** if you don't have one already (see
    `extending-emi-agents`). Sample vision-analyzer agents:
-   `app/assistant/agents/door_bell_analyzer/`,
-   `app/assistant/agents/sleep_analyzer/`.
+   `app/assistant/agents/scene_analyzer/` (generic, takes per-camera
+   `analyzer_skills`),
+   `app/assistant/agents/sleep_analyzer/` (specialized clinical schema
+   for bed-facing cameras).
 3. **For Ring cameras**: also add to
    `configs/smart_home_tools.json` under `ring.devices`.
 4. **For local RTSP cameras**: add to `configs/smart_home_tools.json`

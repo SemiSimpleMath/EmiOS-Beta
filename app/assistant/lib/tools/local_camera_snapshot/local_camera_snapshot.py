@@ -36,7 +36,7 @@ keep the password out of git via .gitignore on a per-machine config).
 The bridge for this tool is in-process (no HTTP round-trip) — ffmpeg pulls
 one frame from the RTSP URL directly. Frames land in
 ``data/local_camera_snapshots/`` and a ``ring_snapshot_captured`` event fires
-so the existing analyzer subscribers (sleep_analyzer / door_bell_analyzer)
+so the existing analyzer subscribers (sleep_analyzer / scene_analyzer)
 pick the frame up automatically. The event payload includes ``kind`` so
 subscribers can filter by camera role rather than by raw alias.
 """
@@ -197,7 +197,7 @@ def _publish_snapshot_event(
     captured_at_utc: str,
 ) -> None:
     """Fire the same event ring_analysis subscribers listen to so sleep_analyzer
-    / door_bell_analyzer / etc. pick this frame up without any rewiring.
+    / scene_analyzer / etc. pick this frame up without any rewiring.
     Adds a ``kind`` field (e.g. "bedroom", "doorbell") so subscribers can
     filter on role rather than hardcoded camera ids.
     """

@@ -198,6 +198,13 @@ def _build_agent_input(
         previous.name if previous else "(none — first frame in window)"
     )
     agent_input["has_previous"] = bool(previous)
+
+    # Per-camera skills, threaded into the analyzer via the skill-input
+    # contract: AgentInputApplier writes this to blackboard, resolve_skills
+    # picks it up, the analyzer's system.j2 renders it as {{ skills }}.
+    skills = camera.get("analyzer_skills") or []
+    if isinstance(skills, list) and skills:
+        agent_input["skills_input"] = list(skills)
     return agent_input
 
 

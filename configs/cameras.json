@@ -1,5 +1,5 @@
 {
-  "_doc": "Camera registry. Each camera declares: storage location, which analyzer agent runs on its frames, the trigger source, and a pod policy (when an analyzed frame turns into a pod). The camera_dispatcher reads this on startup and routes incoming snapshot events accordingly.",
+  "_doc": "Camera registry. Each camera declares: storage location, which analyzer agent runs on its frames, optional analyzer_skills (per-camera knowledge passed into the analyzer's prompt via the skill-input contract), the trigger source, and a pod policy (when an analyzed frame turns into a pod). The camera_dispatcher reads this on startup and routes incoming snapshot events accordingly.",
   "_canonical_example": "Append a new entry to 'cameras' as a starting point for a new camera. See skills/extending-emi-cameras/SKILL.md for the field reference.",
   "cameras": [
     {
@@ -7,7 +7,8 @@
       "name": "Front Door",
       "alias": "Front Door",
       "storage_folder": "data/cameras/front_door",
-      "analyzer": "door_bell_analyzer",
+      "analyzer": "scene_analyzer",
+      "analyzer_skills": ["front-door-watch"],
       "trigger": {
         "type": "external_event",
         "event_topic": "ring_snapshot_captured",
@@ -25,8 +26,30 @@
     },
     {
       "id": "158991560",
-      "name": "Bedroom",
+      "name": "Downstairs",
       "alias": "Downstairs",
+      "storage_folder": "data/cameras/downstairs",
+      "analyzer": "scene_analyzer",
+      "analyzer_skills": ["downstairs-night-watch"],
+      "trigger": {
+        "type": "external_event",
+        "event_topic": "ring_snapshot_captured",
+        "match_kind": "downstairs"
+      },
+      "post_handlers": [],
+      "pod_policy": {
+        "conditions": [
+          { "field": "importance", "min": 7 }
+        ],
+        "source_kind": "ring_downstairs_notable",
+        "one_liner_field": "significance_reason",
+        "body_field": "caption"
+      }
+    },
+    {
+      "id": "Emi1",
+      "name": "Bedroom (Tapo)",
+      "alias": "Emi1",
       "storage_folder": "data/cameras/bedroom",
       "analyzer": "sleep_analyzer",
       "trigger": {

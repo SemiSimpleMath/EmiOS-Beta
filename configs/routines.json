@@ -42,7 +42,7 @@
         "backoff_max_seconds": 1800,
         "then": "disable_with_ticket"
       },
-      "notes": "Polls Ring recent-events for the Front Door camera (id 74818139) every 60s — always active (security). On any new motion/ding event since the watermark, captures one fresh snapshot → publishes ring_snapshot_captured → camera_dispatch runs door_bell_analyzer. Watermark in data/ring_motion_watermark.json keyed by camera_id."
+      "notes": "Polls Ring recent-events for the Front Door camera (id 74818139) every 60s — always active (security). On any new motion/ding event since the watermark, captures one fresh snapshot → publishes ring_snapshot_captured → camera_dispatch runs scene_analyzer with the front-door-watch skill. Watermark in data/ring_motion_watermark.json keyed by camera_id."
     },
     {
       "id": "downstairs_motion_poll",

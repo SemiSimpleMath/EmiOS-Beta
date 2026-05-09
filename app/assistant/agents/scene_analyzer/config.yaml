@@ -1,0 +1,21 @@
+name: scene_analyzer
+class_name: OneShotAgent
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-4o"
+  model_tier: "powerful"
+  temperature: 0.2
+
+allowed_tools: []
+except_tools: []
+
+structured_output: AgentForm
+
+system_context_items: []
+
+user_context_items:
+  - date_time
+  - image
+  - camera_id
+  - captured_at_utc
+  - skills_input
