@@ -97,6 +97,12 @@ class RoutineConfig:
     #   backoff_max_seconds : 3600 (cap for exponential backoff)
     #   then                : "disable_with_ticket"  (or "log_only")
     on_error: Dict[str, Any] = field(default_factory=dict)
+    # Soft watchdog. When set, a refresh tick that finds this routine's
+    # active thread running for >= max_run_seconds logs a warning and
+    # surfaces a dayflow_notify ticket. Python threads can't be killed
+    # safely from outside, so the routine keeps running — but you'll
+    # know it's stuck and can restart the process. None or <= 0 disables.
+    max_run_seconds: Optional[int] = None
 
 
 class RoutineManager:
@@ -125,6 +131,10 @@ class RoutineManager:
         # same id during the process lifetime (event_hub doesn't expose
         # an idempotent re-register, and dupes would cause double-fires).
         self._wired_event_routine_ids: set[str] = set()
+        # Watchdog: run_ids we've already alerted on for exceeding
+        # max_run_seconds. Cleared when the run finishes so a future
+        # stuck run produces a fresh alert.
+        self._watchdog_alerted_run_ids: set[str] = set()
         self._state: Dict[str, Any] = {}
         self._last_capacity_alert_by_key: Dict[str, datetime] = {}
         self._last_runtime_status: Dict[str, Any] = {}
@@ -160,6 +170,10 @@ class RoutineManager:
 
         self._load_state(config)
         now_utc = utc_now()
+        # Watchdog: alert on any active thread that's exceeded its
+        # routine.max_run_seconds. Cheap dict walk; no-op when no
+        # routine has the field set.
+        self._check_watchdogs(routines, now_utc)
         now_local = utc_to_local(now_utc)
         max_workers = int(config.get("max_workers") or 2)
         self._emit_capacity_threshold_alert_if_needed(
@@ -349,6 +363,23 @@ class RoutineManager:
             else:
                 trigger = {"type": "time", "policy": run_policy}
 
+            # max_run_seconds (watchdog timeout). None = disabled.
+            raw_max_run = item.get("max_run_seconds")
+            if raw_max_run is not None:
+                try:
+                    parsed_max_run = int(raw_max_run)
+                except (TypeError, ValueError):
+                    raise ValueError(
+                        f"Routine '{routine_id}' has invalid max_run_seconds: {raw_max_run!r}"
+                    )
+                if parsed_max_run <= 0:
+                    raise ValueError(
+                        f"Routine '{routine_id}' max_run_seconds must be positive, got {parsed_max_run}"
+                    )
+                max_run_seconds: Optional[int] = parsed_max_run
+            else:
+                max_run_seconds = None
+
             # on_error parsing + defaults.
             raw_on_error = item.get("on_error") if isinstance(item.get("on_error"), dict) else {}
             on_error = {
@@ -378,6 +409,7 @@ class RoutineManager:
                     notes=str(item.get("notes") or "") or None,
                     trigger=trigger,
                     on_error=on_error,
+                    max_run_seconds=max_run_seconds,
                 )
             )
         return routines
@@ -676,6 +708,86 @@ class RoutineManager:
         return True, "afk ok"
 
     # ---------------------------------------------------------------------
+    # Watchdog (per-trigger timeout)
+    # ---------------------------------------------------------------------
+
+    def _check_watchdogs(self, routines: list[RoutineConfig], now_utc: datetime) -> None:
+        """Walk active threads; alert on any whose elapsed exceeds the
+        routine's max_run_seconds. Soft watchdog only — Python can't
+        kill threads safely from outside, so we surface the alert and
+        the in-flight check naturally prevents re-entrance until the
+        thread does complete (or the process restarts).
+
+        Cheap to call every refresh tick: a single dict walk over
+        currently-running threads.
+        """
+        routines_by_id = {r.routine_id: r for r in routines}
+        with self._lock:
+            active = list(self._active_thread_started_utc.items())
+        for rid, started_utc in active:
+            routine = routines_by_id.get(rid)
+            if routine is None or not routine.max_run_seconds:
+                continue
+            try:
+                started = started_utc
+                if started.tzinfo is None:
+                    started = started.replace(tzinfo=timezone.utc)
+                elapsed = (now_utc - started).total_seconds()
+            except Exception:
+                continue
+            if elapsed < routine.max_run_seconds:
+                continue
+            with self._state_lock:
+                entry = self._get_state_entry(rid)
+            run_id = entry.last_run_id or "?"
+            if run_id in self._watchdog_alerted_run_ids:
+                continue
+            self._watchdog_alerted_run_ids.add(run_id)
+            self._alert_watchdog_breach(routine, elapsed, run_id)
+
+    def _alert_watchdog_breach(
+        self, routine: RoutineConfig, elapsed_seconds: float, run_id: str,
+    ) -> None:
+        max_s = routine.max_run_seconds or 0
+        msg = (
+            f"Routine '{routine.routine_id}' (run_id={run_id}) has been running for "
+            f"{int(elapsed_seconds)}s, exceeding max_run_seconds={max_s}. "
+            "Python can't safely kill the thread; restart the process to clear it."
+        )
+        logger.error("[routine_manager:watchdog] %s", msg)
+        decision_log.record(
+            routine_id=routine.routine_id, event="watchdog_breach",
+            run_id=run_id, duration_s=elapsed_seconds,
+            extra={"max_run_seconds": max_s},
+        )
+        try:
+            from app.assistant.ServiceLocator.service_locator import DI
+            tm = getattr(DI, "ticket_manager", None)
+            if tm is not None:
+                ticket = tm.create_ticket(
+                    ticket_type="dayflow_notify",
+                    suggestion_type="routine_watchdog_breach",
+                    title=f"Routine stuck: {routine.name or routine.routine_id}",
+                    message=msg,
+                    action_type="none",
+                    trigger_context={
+                        "routine_id": routine.routine_id,
+                        "run_id": run_id,
+                        "elapsed_seconds": int(elapsed_seconds),
+                        "max_run_seconds": max_s,
+                    },
+                    trigger_reason="routine_watchdog_breach",
+                    valid_hours=24,
+                )
+                if ticket is not None and hasattr(tm, "mark_proposed"):
+                    tm.mark_proposed(ticket.ticket_id)
+        except Exception as e:
+            logger.error(
+                "[routine_manager:watchdog] failed to surface ticket for %s: %s",
+                routine.routine_id, e, exc_info=True,
+            )
+
+    # ---------------------------------------------------------------------
     # Auto-disable on repeated failures
     # ---------------------------------------------------------------------
 
@@ -927,6 +1039,16 @@ class RoutineManager:
                     self._running.discard(routine.routine_id)
                     self._active_threads.pop(routine.routine_id, None)
                     self._active_thread_started_utc.pop(routine.routine_id, None)
+                # Clear watchdog-alerted run_id so a future stuck run
+                # produces a fresh alert. Look up the run_id we just
+                # finished (state was just written by _execute_routine).
+                try:
+                    with self._state_lock:
+                        finished_run_id = self._get_state_entry(routine.routine_id).last_run_id
+                    if finished_run_id:
+                        self._watchdog_alerted_run_ids.discard(finished_run_id)
+                except Exception:
+                    pass
                 try:
                     self._publish_runtime_status(config=self._load_config())
                 except Exception as e:
