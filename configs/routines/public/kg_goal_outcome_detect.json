@@ -16,5 +16,5 @@
     "time_local": "02:55",
     "quiet_hours_ok": true
   },
-  "notes": "Scans recent chat for explicit 'I did X' / 'I gave up X' statements about active Goal nodes. Closes matching Goals as terminal (achieved/abandoned) with end_date set. Conservative \u00e2\u20ac\u201d only fires on direct user statements at confidence >= 0.7. Silent abandonment is goal_dormancy_sweep's job. Limit 10 Goals/day to keep LLM cost bounded."
+  "notes": "Scans recent chat for explicit 'I did X' / 'I gave up X' statements about active Goal nodes. Closes matching Goals as terminal (achieved/abandoned) with end_date set. Conservative — only fires on direct user statements at confidence >= 0.7. Silent abandonment is goal_dormancy_sweep's job. Limit 10 Goals/day to keep LLM cost bounded."
 }

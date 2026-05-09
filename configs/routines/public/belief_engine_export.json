@@ -1,7 +1,7 @@
 {
   "id": "belief_engine_export",
   "enabled": false,
-  "name": "Belief engine \u00e2\u20ac\u201d manual re-export",
+  "name": "Belief engine — manual re-export",
   "aliases": [
     "belief export",
     "beliefs export",
@@ -15,5 +15,5 @@
     "type": "daily",
     "time_local": "01:00"
   },
-  "notes": "DISABLED for scheduled execution \u00e2\u20ac\u201d belief_engine now exports inline at the end of its run. Pipeline registration kept so an operator can /run-routine belief_engine_export for a manual re-export. Content-guarded \u00e2\u20ac\u201d file only rewrites if beliefs changed."
+  "notes": "DISABLED for scheduled execution — belief_engine now exports inline at the end of its run. Pipeline registration kept so an operator can /run-routine belief_engine_export for a manual re-export. Content-guarded — file only rewrites if beliefs changed."
 }

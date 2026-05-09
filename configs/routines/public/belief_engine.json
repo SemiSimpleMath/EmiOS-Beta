@@ -1,7 +1,7 @@
 {
   "id": "belief_engine",
   "enabled": true,
-  "name": "Belief engine \u00e2\u20ac\u201d all enabled domains",
+  "name": "Belief engine — all enabled domains",
   "aliases": [
     "belief engine",
     "beliefs",
@@ -15,5 +15,5 @@
     "type": "daily",
     "time_local": "00:30"
   },
-  "notes": "Loops over every domain marked enabled in configs/belief_domains.yaml and updates that domain's beliefs from the last 14 days of daily insights + ticket signals. Adding / disabling a domain is a YAML edit, not a code change. Domain failures are logged but don't abort the rest. After all domains succeed, the adapter exports active beliefs to resource_user_beliefs.json inline \u00e2\u20ac\u201d atomic with the run, no fixed-time race against a slow upstream."
+  "notes": "Loops over every domain marked enabled in configs/belief_domains.yaml and updates that domain's beliefs from the last 14 days of daily insights + ticket signals. Adding / disabling a domain is a YAML edit, not a code change. Domain failures are logged but don't abort the rest. After all domains succeed, the adapter exports active beliefs to resource_user_beliefs.json inline — atomic with the run, no fixed-time race against a slow upstream."
 }
