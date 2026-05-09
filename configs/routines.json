@@ -22,12 +22,13 @@
       "notes": "Handles every ring_snapshot_captured event. Routes by camera_id to the per-camera analyzer + storage + pod policy declared in configs/cameras.json. Replaces the bespoke register_camera_dispatcher() startup hook with a declarative event-triggered routine."
     },
     {
-      "id": "ring_motion_poll",
+      "id": "front_door_motion_poll",
       "enabled": true,
-      "name": "Ring motion poll → snapshot",
+      "name": "Front Door motion poll → snapshot",
       "runner": "function",
       "spec": {
-        "function_name": "ring_motion_poll",
+        "function_name": "ring_camera_motion_poll",
+        "camera_id": "74818139",
         "lookback_minutes": 5
       },
       "run_policy": {
@@ -41,7 +42,32 @@
         "backoff_max_seconds": 1800,
         "then": "disable_with_ticket"
       },
-      "notes": "Polls Ring's recent-events history per camera every 60s. For each new motion/ding event since the watermark, calls the snapshot bridge → publishes ring_snapshot_captured → camera_dispatch runs the analyzer and mints a pod. Watermark in data/ring_motion_watermark.json. First poll on a cold start does NOT replay history; it just sets the watermark."
+      "notes": "Polls Ring recent-events for the Front Door camera (id 74818139) every 60s — always active (security). On any new motion/ding event since the watermark, captures one fresh snapshot → publishes ring_snapshot_captured → camera_dispatch runs door_bell_analyzer. Watermark in data/ring_motion_watermark.json keyed by camera_id."
+    },
+    {
+      "id": "downstairs_motion_poll",
+      "enabled": true,
+      "name": "Downstairs motion poll → snapshot",
+      "runner": "function",
+      "spec": {
+        "function_name": "ring_camera_motion_poll",
+        "camera_id": "158991560",
+        "lookback_minutes": 5
+      },
+      "trigger": {
+        "type": "time",
+        "policy": { "type": "interval", "min_interval_seconds": 180 },
+        "active_window": { "from": "00:00", "to": "06:00", "local": true }
+      },
+      "run_policy": {},
+      "max_run_seconds": 60,
+      "on_error": {
+        "max_failures": 6,
+        "backoff_base_seconds": 60,
+        "backoff_max_seconds": 1800,
+        "then": "disable_with_ticket"
+      },
+      "notes": "Polls Ring recent-events for the Downstairs camera (id 158991560) every 3 min, only inside the device's active window of 00:00-06:00 local. Outside that window the camera is dormant. On any new event captures one fresh snapshot → camera_dispatch runs sleep_analyzer."
     },
     {
       "id": "morning_briefing",
