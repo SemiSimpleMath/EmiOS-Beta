@@ -1,0 +1,47 @@
+{
+  "_doc": "Camera registry. Each camera declares: storage location, which analyzer agent runs on its frames, the trigger source, and a pod policy (when an analyzed frame turns into a pod). The camera_dispatcher reads this on startup and routes incoming snapshot events accordingly.",
+  "cameras": [
+    {
+      "id": "74818139",
+      "name": "Front Door",
+      "alias": "Front Door",
+      "storage_folder": "data/cameras/front_door",
+      "analyzer": "door_bell_analyzer",
+      "trigger": {
+        "type": "external_event",
+        "event_topic": "ring_snapshot_captured",
+        "match_kind": "doorbell"
+      },
+      "post_handlers": [],
+      "pod_policy": {
+        "conditions": [
+          { "field": "is_significant", "equals": true }
+        ],
+        "source_kind": "ring_doorbell_significant",
+        "one_liner_field": "caption",
+        "body_field": "caption"
+      }
+    },
+    {
+      "id": "158991560",
+      "name": "Bedroom",
+      "alias": "Downstairs",
+      "storage_folder": "data/cameras/bedroom",
+      "analyzer": "sleep_analyzer",
+      "trigger": {
+        "type": "external_event",
+        "event_topic": "ring_snapshot_captured",
+        "match_kind": "bedroom"
+      },
+      "post_handlers": ["bedroom_emergency_alarm"],
+      "pod_policy": {
+        "conditions": [
+          { "field": "importance", "min": 7 }
+        ],
+        "source_kind": "ring_bedroom_notable",
+        "one_liner_field": "importance_reason",
+        "body_field": "description"
+      }
+    }
+  ]
+}
