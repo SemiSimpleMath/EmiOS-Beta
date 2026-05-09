@@ -10,7 +10,7 @@ This page is the only one you need to read.
 
 You need:
 
-- [ ] **Python 3.10 or newer.** (Run `python --version` to check. Mac: usually built-in. Windows: install from python.org and tick "Add to PATH" in the installer.)
+- [ ] **Python 3.10 or 3.11.** Python 3.12+ is not supported — ChromaDB does not ship wheels for it. (Run `python --version` to check. Mac: usually built-in but often older; `brew install python@3.11` works. Windows: install Python 3.11 from python.org and tick "Add to PATH".)
 - [ ] **About 1 GB of disk space.** Mostly the `.venv` (~700 MB) plus a small embedding-model cache and the (initially tiny) databases that grow as you use it.
 - [ ] **An API key** for at least one of these:
   - OpenAI (`OPENAI_API_KEY`) — easiest, most tested

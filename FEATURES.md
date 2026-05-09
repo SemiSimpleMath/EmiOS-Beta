@@ -209,7 +209,7 @@ Agents within a manager share state through a scoped blackboard — a structured
 
 ## Built for Tinkerers
 
-- Python 3.10+ — easy to read, modify, extend
+- Python 3.10 or 3.11 — easy to read, modify, extend (3.12+ unsupported: ChromaDB wheels)
 - Flask + SQLite + ChromaDB — simple stack, no Docker required
 - Jinja2 prompt templates — edit agent behavior without touching Python
 - YAML agent configs — add new agents by creating a directory

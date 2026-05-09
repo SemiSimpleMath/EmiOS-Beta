@@ -6,7 +6,7 @@ This README covers install only. For the first-week walkthrough, troubleshooting
 
 ## Prerequisites
 
-- **Python 3.10 or newer.** Check with `python --version` (or `python3 --version` on Linux/Mac).
+- **Python 3.10 or 3.11.** Python 3.12+ is not supported (ChromaDB does not ship wheels for it). Check with `python --version` (or `python3 --version` on Linux/Mac).
 - **About 1 GB of disk space** (mostly the `.venv` and a small embedding-model cache).
 - **One LLM API key** — at least one of:
   - `OPENAI_API_KEY` — easiest, most tested
@@ -20,7 +20,7 @@ Optional integrations (Google Calendar/Gmail, Twilio SMS, Slack, Telegram, OpenW
 
 ### Windows
 
-1. Install Python 3.10+ from [python.org](https://www.python.org/downloads/). Tick **"Add Python to PATH"** during install.
+1. Install Python 3.11 from [python.org](https://www.python.org/downloads/) (3.10 also works; 3.12+ does not — see Prerequisites). Tick **"Add Python to PATH"** during install.
 2. If pip complains about Visual C++ build tools, install **Microsoft C++ Build Tools** from Microsoft's site (free), restart, retry.
 3. Clone and set up:
    ```cmd
@@ -36,7 +36,7 @@ Optional integrations (Google Calendar/Gmail, Twilio SMS, Slack, Telegram, OpenW
 
 ### macOS
 
-1. Python 3.10+ usually ships with macOS. If you need a newer version, install via [python.org](https://www.python.org/downloads/) or `brew install python@3.12`.
+1. macOS often ships an older Python; install Python 3.11 via [python.org](https://www.python.org/downloads/) or `brew install python@3.11`. (3.12+ is not supported — see Prerequisites.)
 2. On Apple Silicon (M1/M2/M3), if pip complains about Xcode tools:
    ```bash
    xcode-select --install
