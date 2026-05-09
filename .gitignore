@@ -383,3 +383,14 @@ emi_shared.css
 /scripts/cleanup_collaboration_node.py
 /scripts/delete_grocery_stuff.py
 configs/smart_home_tools.json
+
+# ── User-specific runtime data and configs ───────────────────────────────────
+# Wellness activities the user tracks (meal/hydration/etc) — personal choice.
+app/assistant/pipelines/dayflow/step_configs/config_tracked_activities.json
+# Lens layout + per-node importance ratings — personal KG-derived.
+data/me_layout.json
+data/me_node_importance.json
+# KG interest resource — live file is personal; .example is tracked.
+resources/user/resource_kg_interests.json
+# Throwaway test output from allowlist runs.
+tasks/allowlist_test_output.txt
