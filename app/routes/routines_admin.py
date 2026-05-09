@@ -244,6 +244,46 @@ def _validate_policy_patch(rp_existing: Dict[str, Any], patch: Dict[str, Any]) -
     return None
 
 
+@routines_admin_bp.route("/api/routines/decisions", methods=["GET"])
+def routines_decisions_recent():
+    """Recent routine decisions across all routines (newest first).
+
+    Query params:
+      routine_id : optional, filter to one routine
+      limit      : default 100, capped at 500
+      days_back  : default 2, capped at 14
+    """
+    from app.assistant.routine_manager import decision_log
+    routine_id = (request.args.get("routine_id") or "").strip() or None
+    try:
+        limit = max(1, min(500, int(request.args.get("limit") or 100)))
+    except ValueError:
+        limit = 100
+    try:
+        days_back = max(1, min(14, int(request.args.get("days_back") or 2)))
+    except ValueError:
+        days_back = 2
+    rows = decision_log.read_recent(routine_id=routine_id, limit=limit, days_back=days_back)
+    return jsonify({"decisions": rows, "count": len(rows)})
+
+
+@routines_admin_bp.route("/api/routines/<routine_id>/decisions", methods=["GET"])
+def routines_decisions_for(routine_id: str):
+    """Recent decisions for one routine. Convenience wrapper over the
+    /api/routines/decisions?routine_id=X form."""
+    from app.assistant.routine_manager import decision_log
+    try:
+        limit = max(1, min(500, int(request.args.get("limit") or 50)))
+    except ValueError:
+        limit = 50
+    try:
+        days_back = max(1, min(14, int(request.args.get("days_back") or 7)))
+    except ValueError:
+        days_back = 7
+    rows = decision_log.read_recent(routine_id=routine_id, limit=limit, days_back=days_back)
+    return jsonify({"routine_id": routine_id, "decisions": rows, "count": len(rows)})
+
+
 @routines_admin_bp.route("/api/routines/<routine_id>/policy", methods=["POST"])
 def routines_policy_patch(routine_id: str):
     patch = request.get_json(silent=True) or {}

@@ -23,6 +23,7 @@ from app.assistant.routine_manager.windows import (
     is_in_window,
     resolve_window,
 )
+from app.assistant.routine_manager import decision_log
 from app.assistant.routine_manager.runners import (
     JobRoutineRunner,
     PipelineRoutineRunner,
@@ -203,6 +204,10 @@ class RoutineManager:
             should_run, reason = self._should_run(routine, now_utc, now_local)
             if not should_run:
                 logger.info("Routine skipped: %s (%s)", routine.routine_id, reason)
+                # Audit only "interesting" skips (afk, backoff, capacity,
+                # etc.) — boring-noop reasons (interval not ready, etc.)
+                # would flood the daily decision file at refresh-tick rate.
+                decision_log.record_skip_if_interesting(routine.routine_id, reason)
                 continue
             logger.info(
                 "%s ROUTINE READY %s id=%s reason=%s",
@@ -751,6 +756,9 @@ class RoutineManager:
             "[routine_manager] AUTO-DISABLED routine %s in status file. reason=%s",
             routine_id, reason,
         )
+        decision_log.record(
+            routine_id=routine_id, event="auto_disabled", reason=reason,
+        )
 
     def _surface_auto_disable_ticket(
         self,
@@ -1020,6 +1028,10 @@ class RoutineManager:
         started_at_utc = utc_now()
         started_at_utc_iso = started_at_utc.isoformat()
         started_at_local = utc_to_local(started_at_utc)
+        decision_log.record(
+            routine_id=routine.routine_id, event="fired", run_id=run_id,
+            extra={"runner": routine.runner},
+        )
         logger.info(
             "%s ROUTINE STARTING %s id=%s run_id=%s runner=%s local_start=%s",
             self._BANNER_LINE,
@@ -1089,6 +1101,10 @@ class RoutineManager:
                 ),
             )
             if succeeded:
+                decision_log.record(
+                    routine_id=routine.routine_id, event="succeeded",
+                    run_id=run_id, duration_s=duration_s,
+                )
                 logger.info(
                     "%s ROUTINE FINISHED %s id=%s run_id=%s status=success duration_s=%.2f",
                     self._BANNER_LINE,
@@ -1098,6 +1114,10 @@ class RoutineManager:
                     duration_s,
                 )
             else:
+                decision_log.record(
+                    routine_id=routine.routine_id, event="failed",
+                    run_id=run_id, duration_s=duration_s, error=error,
+                )
                 logger.error(
                     "%s ROUTINE FINISHED %s id=%s run_id=%s status=error duration_s=%.2f error=%s",
                     self._BANNER_LINE,
