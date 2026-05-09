@@ -85,10 +85,22 @@ def initialize_system():
     emi_reminder_handler = DI.agent_factory.create_agent('emi_reminder_handler', DI.global_blackboard)
     ServiceLocator.register('emi_reminder_handler', emi_reminder_handler)
 
-    # Camera dispatch is now wired declaratively as the camera_dispatch
-    # routine in configs/routines.json (trigger.type=event,
-    # topic=ring_snapshot_captured). The routine_manager subscribes at
-    # routine-load time. No bootstrap call needed here.
+    # Camera dispatch is wired declaratively as the camera_dispatch routine
+    # in configs/routines.json (trigger.type=event, topic=ring_snapshot_captured).
+    # Subscriptions happen inside RoutineManager.refresh(), but the
+    # background-task scheduler doesn't run that for the first ~45s after
+    # boot. Without an explicit refresh here the very first ring_snapshot_captured
+    # event published in that window has no subscribers and silently drops.
+    # A one-shot refresh at bootstrap closes that gap for every event-triggered
+    # routine, not just camera_dispatch.
+    try:
+        from app.assistant.utils.subsystem_flags import is_subsystem_enabled
+        if is_subsystem_enabled("routine_manager"):
+            from app.assistant.routine_manager import get_routine_manager
+            get_routine_manager().refresh()
+            logger.info("RoutineManager initial refresh complete; event triggers wired.")
+    except Exception as e:
+        logger.warning("Initial RoutineManager refresh failed: %s", e)
 
     # Slack inbound is handled exclusively by the /slack/events webhook
     # (app/routes/slack_events.py). The legacy SlackInterface polling

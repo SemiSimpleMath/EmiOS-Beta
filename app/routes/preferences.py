@@ -525,11 +525,45 @@ def _read_ring_sidecar(jpg_path):
     return out
 
 
+def _resolve_camera_filter_to_match_set(camera_filter: str) -> set:
+    """Expand a camera filter string into the set of cam_part values it matches.
+
+    Filenames embed the camera_id (e.g. `74818139`), but the per-camera URL
+    arrives as a friendly alias (`Front Door`) or kind tag (`bedroom`).
+    This walks the ring + local_cameras alias maps so filtering by either
+    alias OR raw id OR kind all resolve to the right set of frames.
+    """
+    if not camera_filter:
+        return set()
+    target = camera_filter.strip().lower()
+    out = {target}  # raw id always matches itself
+    try:
+        from app.routes.smart_home_bridge import _integration_cfg
+        for integration, id_field in (("ring", "camera_id"), ("local_cameras", "host")):
+            cfg = _integration_cfg(integration) or {}
+            for d in cfg.get("devices", []) or []:
+                if not isinstance(d, dict):
+                    continue
+                alias = str(d.get("alias") or "").strip().lower()
+                kind = str(d.get("kind") or "").strip().lower()
+                raw_id = str(d.get(id_field) or "").strip().lower()
+                if target in (alias, kind, raw_id):
+                    if raw_id:
+                        out.add(raw_id)
+                    if alias:
+                        out.add(alias)
+    except Exception:
+        pass
+    return out
+
+
 @preferences_bp.route('/api/ring/snapshots', methods=['GET'])
 def list_ring_snapshots():
     """List captured snapshots from BOTH Ring and local-camera storage,
-    newest first. Optional ``?camera=<alias>`` query param filters by
-    camera alias (case-insensitive).
+    newest first. Optional ``?camera=<alias|camera_id|kind>`` query param
+    filters; the value is resolved against the configured device alias
+    map so a URL like /cameras/Front%20Door matches frames whose filename
+    embeds camera_id 74818139.
 
     Filename convention is the same in both folders:
         ``{YYYYMMDDTHHMMSSZ}_{safe_camera_id}.jpg``
@@ -540,6 +574,7 @@ def list_ring_snapshots():
     """
     try:
         camera_filter = (request.args.get("camera") or "").strip().lower()
+        match_set = _resolve_camera_filter_to_match_set(camera_filter)
         entries = []
         for snap_dir in _camera_snapshot_dirs():
             if not snap_dir.exists():
@@ -553,7 +588,7 @@ def list_ring_snapshots():
                 ts_part, _, cam_part = stem.partition("_")
                 if len(ts_part) != 16 or not ts_part.endswith("Z"):
                     continue
-                if camera_filter and cam_part.lower() != camera_filter:
+                if match_set and cam_part.lower() not in match_set:
                     continue
                 try:
                     size = p.stat().st_size
