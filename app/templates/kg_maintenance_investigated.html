@@ -154,10 +154,10 @@
           </div>
 
           <div class="inv-notes-block">
-            <h4>Your notes <span class="inv-rec-hint">(private context — not seen by the executor; autosaves on blur)</span></h4>
+            <h4>Your directions to the executor <span class="inv-rec-hint">(appended to the brief and override the recommendation where they conflict; autosaves on blur)</span></h4>
             <textarea id="notes-${esc(f.id)}" rows="3" class="inv-notes-textarea"
                       onblur="saveNotes('${esc(f.id)}')"
-                      placeholder="Your thoughts about this finding — won't be sent to the executor.">${esc(operatorNotes)}</textarea>
+                      placeholder="Facts the investigator didn't have, corrections, constraints — the executor sees this verbatim and trusts it over its own analysis where they conflict.">${esc(operatorNotes)}</textarea>
             <span class="inv-save-status" id="notes-save-status-${esc(f.id)}"></span>
           </div>` : ''}
 

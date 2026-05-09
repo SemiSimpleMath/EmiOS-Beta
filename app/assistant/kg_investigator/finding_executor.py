@@ -141,7 +141,24 @@ def _build_brief(finding_id: str) -> Optional[Dict[str, Any]]:
     evidence = report.get("evidence") or []
     confidence = report.get("confidence")
 
+    operator_notes = (report.get("operator_notes") or "").strip()
+
     info_parts: List[str] = []
+
+    # Top-of-brief banner so the planner can't miss that the operator
+    # has supplied amendments. The full operator block appears at the
+    # bottom (most recent, after all investigator material) for the
+    # recency anchor; this is the reminder up front.
+    if operator_notes:
+        info_parts.append("⚠️ **OPERATOR HAS AMENDED THIS FINDING.** The user wrote standing")
+        info_parts.append("directions below (see `## OPERATOR DIRECTIONS` at the bottom).")
+        info_parts.append("Operator directions are AUTHORITATIVE: they SUPERSEDE the")
+        info_parts.append("investigator's recommendation, diagnosis, and any conclusions you'd")
+        info_parts.append("draw from the evidence. The user knows facts the investigator did not.")
+        info_parts.append("Read the operator block FIRST, then treat the investigator material")
+        info_parts.append("below as background context only — never as the contract.")
+        info_parts.append("")
+
     info_parts.append(f"## Finding")
     info_parts.append(f"- finding_id: `{finding_id}`")
     info_parts.append(f"- finding_type: {finding_type}")
@@ -154,7 +171,12 @@ def _build_brief(finding_id: str) -> Optional[Dict[str, Any]]:
     info_parts.append(f"- investigator confidence: {confidence}")
     info_parts.append("")
 
-    info_parts.append("## Investigator's recommendation (the contract — execute this)")
+    rec_header = (
+        "## Investigator's recommendation (baseline — operator directions below override)"
+        if operator_notes
+        else "## Investigator's recommendation (the contract — execute this)"
+    )
+    info_parts.append(rec_header)
     info_parts.append(recommendation)
     info_parts.append("")
 
@@ -172,13 +194,45 @@ def _build_brief(finding_id: str) -> Optional[Dict[str, Any]]:
             info_parts.append(f"  -> {ff}")
         info_parts.append("")
 
-    task = (
-        f"Apply the investigator's recommendation for finding {finding_id} verbatim. "
-        f"The recommendation prose above is the contract — do exactly what it says, "
-        f"citing the specific node ids it names. Do NOT reinvestigate from scratch; "
-        f"the investigator already did that. If the recommendation turns out to be "
-        f"wrong (data has shifted, ids don't exist), escalate rather than improvise."
-    )
+    if operator_notes:
+        info_parts.append("=" * 60)
+        info_parts.append("## OPERATOR DIRECTIONS — AUTHORITATIVE, SUPERSEDES EVERYTHING ABOVE")
+        info_parts.append("=" * 60)
+        info_parts.append("")
+        info_parts.append("The user wrote the following directions on the dev review page.")
+        info_parts.append("These are the LATEST and HIGHEST-AUTHORITY input on this finding.")
+        info_parts.append("Where they conflict with the investigator's recommendation, diagnosis,")
+        info_parts.append("or evidence, the operator wins — they have access to facts and")
+        info_parts.append("context the investigator did not. Treat the operator's claims as")
+        info_parts.append("ground truth and execute against them, even if it means ignoring")
+        info_parts.append("the recommendation entirely or applying a different mutation.")
+        info_parts.append("")
+        info_parts.append(operator_notes)
+        info_parts.append("")
+        info_parts.append("=" * 60)
+        info_parts.append("")
+
+    if operator_notes:
+        task = (
+            f"Apply this finding ({finding_id}) per the OPERATOR DIRECTIONS block at the "
+            f"bottom of the information. The operator's directions SUPERSEDE the "
+            f"investigator's recommendation, diagnosis, and any conclusions you'd draw from "
+            f"the evidence. The investigator's material is background context only — the "
+            f"operator has the authoritative word on what should happen and any facts the "
+            f"investigator missed. Execute the operator's intent, citing specific node ids. "
+            f"Do NOT reinvestigate from scratch and do NOT default back to the investigator's "
+            f"recommendation when the operator's directions point a different way. If even "
+            f"the operator's directions cannot be operationalized (ids don't exist, data "
+            f"has shifted), escalate rather than improvise."
+        )
+    else:
+        task = (
+            f"Apply the investigator's recommendation for finding {finding_id} verbatim. "
+            f"The recommendation prose above is the contract — do exactly what it says, "
+            f"citing the specific node ids it names. Do NOT reinvestigate from scratch; "
+            f"the investigator already did that. If the recommendation turns out to be "
+            f"wrong (data has shifted, ids don't exist), escalate rather than improvise."
+        )
     return {"task": task, "information": "\n".join(info_parts)}
 
 
