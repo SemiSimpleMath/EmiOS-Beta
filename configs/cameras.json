@@ -1,5 +1,6 @@
 {
   "_doc": "Camera registry. Each camera declares: storage location, which analyzer agent runs on its frames, the trigger source, and a pod policy (when an analyzed frame turns into a pod). The camera_dispatcher reads this on startup and routes incoming snapshot events accordingly.",
+  "_canonical_example": "Append a new entry to 'cameras' as a starting point for a new camera. See skills/extending-emi-cameras/SKILL.md for the field reference.",
   "cameras": [
     {
       "id": "74818139",

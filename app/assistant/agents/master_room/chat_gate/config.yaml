@@ -1,3 +1,5 @@
+# Canonical example: copy this directory as a starting point for a new agent.
+# See skills/extending-emi-agents/SKILL.md for the field reference.
 name: master_room::chat_gate
 class_name: Agent
 action_required: false

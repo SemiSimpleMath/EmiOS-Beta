@@ -1,4 +1,5 @@
 {
+  "_canonical_example": "Copy this directory as a starting point for a new tool. See skills/extending-emi-tools/SKILL.md for the contract reference.",
   "name": "send_email",
   "description": "Send an email. Required: `to` + `body`; `subject` is optional. Can also reach a phone via the SMS-via-email gateway. To attach files, pass `pod_ids` (see that field). Do not use email to talk to the user directly unless explicitly instructed.",
   "inputs": [

@@ -1,4 +1,5 @@
 {
+  "_canonical_example": "Append a new entry to 'routines' as a starting point for a new routine. See skills/extending-emi-routines/SKILL.md for trigger types, policies, active windows, on_error backoff, and watchdog config. The 'camera_dispatch' entry is a canonical event-triggered routine; 'kg_pipeline' is a canonical time+window entry; 'sleep_camera_tick' is a canonical interval+window entry.",
   "schema_version": 3,
   "enabled": true,
   "max_workers": 20,

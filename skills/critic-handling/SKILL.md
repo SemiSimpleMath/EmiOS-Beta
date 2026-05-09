@@ -6,6 +6,7 @@ metadata:
   author: jukka
   version: "1.0"
   applies_when: "planner has a critic wired (critic_post_node in the manager flow)"
+  canonical_example: "Copy this SKILL.md shape as a starting point for a new skill. See skills/extending-emi-skills/SKILL.md for the frontmatter reference."
 ---
 
 ## Critic

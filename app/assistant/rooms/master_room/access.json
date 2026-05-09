@@ -1,4 +1,5 @@
 {
+  "_canonical_example": "Copy this room directory as a starting point for a new room. See skills/extending-emi-rooms/SKILL.md for the file shape and required companion files (identity.json, etc.).",
   "allowed_global_resources": [
     "all"
   ],

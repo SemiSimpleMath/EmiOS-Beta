@@ -1,3 +1,5 @@
+# Canonical example: copy this directory as a starting point for a new manager.
+# See skills/extending-emi-managers/SKILL.md for the field reference.
 name: emi_team_manager
 class_name: MultiAgentManager
 description: "An extremely capable manager general work horse, if you give this thing tools it can do anything."
