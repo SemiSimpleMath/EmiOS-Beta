@@ -67,6 +67,13 @@ class RoutineConfig:
     name: Optional[str] = None
     aliases: List[str] = field(default_factory=list)
     notes: Optional[str] = None
+    # Generalized trigger spec. Supersedes run_policy long-term but
+    # backward-compatible: an entry with run_policy and no `trigger`
+    # is treated as `{"type": "time", "policy": <run_policy>}`.
+    # Currently supported types:
+    #   {"type": "time", "policy": <run_policy dict>}
+    #   {"type": "event", "topic": "<event_hub topic>"}
+    trigger: Dict[str, Any] = field(default_factory=dict)
 
 
 class RoutineManager:
@@ -90,6 +97,11 @@ class RoutineManager:
         self._running: set[str] = set()
         self._active_threads: Dict[str, threading.Thread] = {}
         self._active_thread_started_utc: Dict[str, datetime] = {}
+        # Routines whose event subscriptions have been registered with
+        # event_hub. Keyed by routine_id; we never re-subscribe for the
+        # same id during the process lifetime (event_hub doesn't expose
+        # an idempotent re-register, and dupes would cause double-fires).
+        self._wired_event_routine_ids: set[str] = set()
         self._state: Dict[str, Any] = {}
         self._last_capacity_alert_by_key: Dict[str, datetime] = {}
         self._last_runtime_status: Dict[str, Any] = {}
@@ -118,6 +130,11 @@ class RoutineManager:
             logger.info("No routines configured; skipping refresh tick.")
             return
 
+        # Wire event-triggered routines exactly once per process. Idempotent:
+        # subsequent refresh ticks don't re-subscribe, but newly added
+        # event routines (after a config reload) get picked up here.
+        self._wire_event_triggers(routines)
+
         self._load_state(config)
         now_utc = utc_now()
         now_local = utc_to_local(now_utc)
@@ -131,6 +148,11 @@ class RoutineManager:
         for routine in routines:
             if not routine.enabled:
                 logger.info("Routine skipped: %s (disabled)", routine.routine_id)
+                continue
+            # Event-triggered routines fire on event_hub publish, not on the
+            # polling refresh tick. Skip them here so _should_run isn't called
+            # against them and they don't fight the time-policy machinery.
+            if str((routine.trigger or {}).get("type") or "").lower() == "event":
                 continue
             cap_reached = False
             active_workers = 0
@@ -268,6 +290,29 @@ class RoutineManager:
             # Effective enabled = status override if present, else spec default.
             spec_default_enabled = bool(item.get("enabled", True))
             effective_enabled = state_enabled.get(routine_id, spec_default_enabled)
+
+            # Trigger derivation. Explicit `trigger` wins; otherwise the legacy
+            # `run_policy` shape is wrapped as an implicit time trigger.
+            explicit_trigger = item.get("trigger")
+            if isinstance(explicit_trigger, dict) and explicit_trigger:
+                trigger = dict(explicit_trigger)
+                ttype = str(trigger.get("type") or "").strip().lower()
+                if ttype not in ("time", "event"):
+                    raise ValueError(
+                        f"Routine '{routine_id}' has unsupported trigger type: {ttype!r} "
+                        f"(supported: 'time', 'event')"
+                    )
+                trigger["type"] = ttype
+                if ttype == "event" and not str(trigger.get("topic") or "").strip():
+                    raise ValueError(
+                        f"Routine '{routine_id}' uses trigger.type=event but is missing 'topic'"
+                    )
+                if ttype == "time" and "policy" not in trigger:
+                    # Allow the explicit form to omit `policy` and inherit run_policy.
+                    trigger["policy"] = run_policy
+            else:
+                trigger = {"type": "time", "policy": run_policy}
+
             routines.append(
                 RoutineConfig(
                     routine_id=routine_id,
@@ -281,6 +326,7 @@ class RoutineManager:
                     name=str(item.get("name") or "").strip() or None,
                     aliases=[str(a).strip() for a in (item.get("aliases") or []) if str(a).strip()],
                     notes=str(item.get("notes") or "") or None,
+                    trigger=trigger,
                 )
             )
         return routines
@@ -554,6 +600,110 @@ class RoutineManager:
             return False, "afk check failed (skip)"
 
         return True, "afk ok"
+
+    # ---------------------------------------------------------------------
+    # Event triggers
+    # ---------------------------------------------------------------------
+
+    def _wire_event_triggers(self, routines: list[RoutineConfig]) -> None:
+        """Subscribe every event-triggered routine to its event_hub topic.
+
+        Idempotent per routine_id for the lifetime of the process: each
+        routine is subscribed at most once even if `refresh()` runs many
+        times. The handler closure re-reads `routine.enabled` at fire time
+        (via `_resolve_current_routine`), so toggling a routine on/off via
+        the admin UI takes effect on the next event fire — no resubscribe
+        needed.
+
+        Subscribes regardless of `enabled` state at startup; the handler
+        short-circuits when disabled. Subscription is cheap and avoids
+        the "toggled on but never wired" edge case.
+        """
+        try:
+            from app.assistant.ServiceLocator.service_locator import DI
+            event_hub = getattr(DI, "event_hub", None)
+        except Exception:
+            event_hub = None
+
+        if event_hub is None:
+            return
+
+        for routine in routines:
+            trigger = routine.trigger or {}
+            if str(trigger.get("type") or "").lower() != "event":
+                continue
+            if routine.routine_id in self._wired_event_routine_ids:
+                continue
+            topic = str(trigger.get("topic") or "").strip()
+            if not topic:
+                continue
+            try:
+                rid = routine.routine_id
+                event_hub.register_event(topic, lambda msg, _rid=rid: self._on_event_fire(_rid, msg))
+                self._wired_event_routine_ids.add(rid)
+                logger.info(
+                    "[routine_manager] wired event trigger: routine=%s topic=%s",
+                    rid, topic,
+                )
+            except Exception as e:
+                logger.error(
+                    "[routine_manager] failed to wire event trigger for routine=%s topic=%s: %s",
+                    routine.routine_id, topic, e, exc_info=True,
+                )
+
+    def _on_event_fire(self, routine_id: str, _message: Any) -> None:
+        """Handler invoked by event_hub when a subscribed event publishes.
+
+        Re-reads the current routine from config so toggles take effect
+        without restart. Honors the same concurrency caps and AFK guard
+        as time-triggered routines.
+        """
+        try:
+            routine = self._resolve_current_routine(routine_id)
+            if routine is None:
+                return  # routine removed from config since wiring; ignore
+            if not routine.enabled:
+                logger.debug(
+                    "[routine_manager] event fired for disabled routine %s; skipping",
+                    routine_id,
+                )
+                return
+
+            # Concurrency: same in-flight + worker-cap rules as time-polling.
+            with self._lock:
+                if routine_id in self._running:
+                    logger.info(
+                        "Routine skipped (event): %s (already running)", routine_id,
+                    )
+                    return
+
+            ok, reason = self._check_afk_guard(routine)
+            if not ok:
+                logger.info(
+                    "Routine skipped (event): %s (afk: %s)", routine_id, reason,
+                )
+                return
+
+            logger.info("Routine triggered by event: %s", routine_id)
+            self._run_in_thread(routine)
+        except Exception as e:
+            logger.error(
+                "[routine_manager] event handler crashed for routine=%s: %s",
+                routine_id, e, exc_info=True,
+            )
+
+    def _resolve_current_routine(self, routine_id: str) -> Optional[RoutineConfig]:
+        """Re-load and return the named routine's current config, or None."""
+        try:
+            config = self._load_config()
+            for r in self._load_routines(config):
+                if r.routine_id == routine_id:
+                    return r
+        except Exception as e:
+            logger.warning(
+                "[routine_manager] failed to resolve routine %s: %s", routine_id, e,
+            )
+        return None
 
     # ---------------------------------------------------------------------
     # Execution
