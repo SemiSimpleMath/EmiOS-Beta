@@ -42,6 +42,7 @@ from typing import Optional
 
 from app.assistant.kg.db.knowledge_graph_db import Node, get_session
 from app.assistant.pod_store.contracts import Pod
+from app.assistant.pod_store import pod_kind_registry
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -50,30 +51,14 @@ logger = get_logger(__name__)
 _LABEL_MAX = 200          # kg_node_metadata.label is TEXT but keep readable
 _ORIGINAL_SENTENCE_MAX = 400
 
-# Pod kinds that ARE mirrored as KG nodes — strict allow list.
-# Anything not in this set is silently skipped (still lives in pod_store and
-# is reachable via pod_search; just doesn't get a kg_node_metadata row).
+# Both decision sets used to be hardcoded frozensets in this module.
+# As of the pod-kind registry refactor they live in
+# configs/pod_kinds.json and get loaded via pod_kind_registry. Adding
+# a new auto-mirroring kind is now a config edit; same opt-in default
+# (unknown kinds do not mirror — fail closed).
 #
-# Allow list, not deny list, so that adding a new pod kind never auto-flows
-# into the KG by default — opt-in is required. Email is excluded by design
-# because email content is noisy / sensitive / token-heavy; we'd want a real
-# attribution / extraction policy decision before letting it back in.
-_KG_MIRROR_ALLOWED_KINDS = frozenset({"chat_cluster", "image"})
-
-# Pod source_kind values that ALWAYS admit to the KG, regardless of pod kind.
-# The principle: when the user introduces a pod into chat — by attaching a file,
-# pasting an image, or asking Emi to mint one from disk — the pod is part of the
-# conversation and must be KG-addressable so any extracted relationships ("here
-# is my advisor", "this is my contract") can edge into it.
-#
-# Email-sourced pods (source_kind="email_attachment" or similar) intentionally
-# do NOT trigger this admit-on-source rule — they go through the normal allow
-# list and are excluded by default.
-_KG_MIRROR_CHAT_INTRODUCED_SOURCES = frozenset({
-    "chat_attachment",   # user uploaded/pasted file in master_room chat
-    "manual_mint",       # bash_team minted from disk on user's request
-    "manual_upload",     # generic user-initiated upload
-})
+# - kinds[<name>].auto_mirror_to_kg: bool   replaces _KG_MIRROR_ALLOWED_KINDS
+# - chat_introduced_source_kinds: list      replaces _KG_MIRROR_CHAT_INTRODUCED_SOURCES
 
 
 def _truncate(s: Optional[str], max_len: int) -> Optional[str]:
@@ -118,8 +103,8 @@ def ensure_pod_node(pod: Pod, *, force: bool = False) -> str:
     # Everything else is silently skipped — automated/inbound sources
     # (email arrival, scheduled scans, etc.) do not get auto-mirrored.
     source_kind = ((pod.metadata or {}).get("source_kind") or "").strip()
-    chat_introduced = source_kind in _KG_MIRROR_CHAT_INTRODUCED_SOURCES
-    kind_allowed = (pod.kind or "").strip() in _KG_MIRROR_ALLOWED_KINDS
+    chat_introduced = source_kind in pod_kind_registry.chat_introduced_source_kinds()
+    kind_allowed = pod_kind_registry.auto_mirrors_to_kg(pod.kind or "")
 
     if not (force or chat_introduced or kind_allowed):
         logger.debug(

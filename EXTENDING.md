@@ -19,7 +19,8 @@ triggers so it auto-loads when relevant.
 | Routine | [`extending-emi-routines`](skills/extending-emi-routines/SKILL.md) | append to `configs/routines.json` (+ optional handler in `app/assistant/routine_handlers/`) |
 | Skill | [`extending-emi-skills`](skills/extending-emi-skills/SKILL.md) | `skills/<name>/SKILL.md` |
 | Camera | [`extending-emi-cameras`](skills/extending-emi-cameras/SKILL.md) | append to `configs/cameras.json` (+ analyzer agent) |
-| Room | [`extending-emi-rooms`](skills/extending-emi-rooms/SKILL.md) | `app/assistant/rooms/<id>/{access.json, identity.json, ...}` |
+| Room | [`extending-emi-rooms`](skills/extending-emi-rooms/SKILL.md) | `app/assistant/rooms/<id>/ROOM.md` (one file, frontmatter + body) |
+| Pod kind | [`extending-emi-pod-kinds`](skills/extending-emi-pod-kinds/SKILL.md) | append to `configs/pod_kinds.json` |
 
 ## When you ask Claude Code (or any agent) to extend Emi
 
@@ -67,8 +68,6 @@ will run daily at 06:00 in the morning window."
 
 ## Things you can't yet drop-in extend
 
-- **Pod kinds** still require touching ingest paths + classifier.
-  The cameras-style registry treatment is on the roadmap.
 - **Event subscribers outside the routine system** — most should just
   become event-triggered routines (see `extending-emi-routines`),
   but the older `register_*_subscribers()` pattern still works for

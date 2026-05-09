@@ -1,0 +1,42 @@
+{
+  "_doc": "Pod kinds registry. Each pod 'kind' field used in the codebase has an entry here describing what it is, whether it auto-mirrors to the KG, and how its body gets populated. Adding a new kind is a config edit; the kg_mirror dispatcher reads this on every pod write.",
+  "_canonical_example": "Append a new entry to 'kinds' as a starting point for a new pod kind. See skills/extending-emi-pod-kinds/SKILL.md for the field reference.",
+
+  "kinds": {
+    "image": {
+      "description": "Image artifact (PNG/JPEG/etc). Stored content-addressed under data/images/<sha>.<ext>. Body is populated by the vision-extraction pass (caption + OCR).",
+      "auto_mirror_to_kg": true,
+      "body_extraction": "vision_pass",
+      "default_for_agents": []
+    },
+
+    "email": {
+      "description": "Inbound email. one_liner=subject, body=email body verbatim. Source refs back to the event_repository row.",
+      "auto_mirror_to_kg": false,
+      "body_extraction": "verbatim",
+      "default_for_agents": [],
+      "_doc_excluded_from_kg": "Email content is noisy, sensitive, and token-heavy. Excluded by design until an attribution/extraction policy lands."
+    },
+
+    "chat_cluster": {
+      "description": "Resolved chat segment from pod_classifier with entity-anchored sections. Body is the resolved markdown sections.",
+      "auto_mirror_to_kg": true,
+      "body_extraction": "verbatim",
+      "default_for_agents": []
+    },
+
+    "service_loop": {
+      "description": "Internal pod_classifier service-loop placeholder. Not user-facing content; emitted to keep the pipeline running when there's nothing to classify.",
+      "auto_mirror_to_kg": false,
+      "body_extraction": "none",
+      "default_for_agents": []
+    }
+  },
+
+  "chat_introduced_source_kinds": [
+    "chat_attachment",
+    "manual_mint",
+    "manual_upload"
+  ],
+  "_doc_chat_introduced": "Pod source_kind values that ALWAYS auto-mirror to the KG regardless of the pod's kind. The principle: when the user introduces a pod into chat (uploaded a file, pasted an image, asked Emi to mint one from disk), the pod is part of the conversation and must be KG-addressable so extracted relationships can edge into it. Email-sourced pods intentionally do NOT trigger this — they go through the normal allow list."
+}
