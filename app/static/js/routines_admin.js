@@ -127,23 +127,6 @@
           ev.addEventListener("click", () => openEdit(e));
           row.appendChild(ev);
         });
-      // also surface quiet_hours items at hour 0 only as a marker
-      if (h === 0) {
-        state.routines
-          .filter((r) => r.policy_type === "quiet_hours")
-          .forEach((e) => {
-            const ev = document.createElement("div");
-            ev.className = "tl-event quiet" + (e.enabled ? "" : " disabled");
-            ev.innerHTML =
-              `<span class="tl-event-time">quiet</span>` +
-              `<span class="tl-event-name">${e.name}</span>` +
-              `<span class="tl-event-runner">${e.runner}</span>`;
-            ev.title = "Fires inside the configured quiet-hours window for feature: " +
-              ((e.run_policy && e.run_policy.feature) || "?");
-            ev.addEventListener("click", () => openEdit(e));
-            row.appendChild(ev);
-          });
-      }
       root.appendChild(label);
       root.appendChild(row);
     }

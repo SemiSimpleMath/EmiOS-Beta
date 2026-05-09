@@ -115,8 +115,6 @@ def _enrich_routine(item: Dict[str, Any], state: Dict[str, Any]) -> Dict[str, An
         schedule_label = f"{rp.get('day_of_week', '?')} {rp.get('time_local', '??:??')}"
     elif policy_type == "interval":
         schedule_label = f"every {_format_interval(int(rp.get('min_interval_seconds') or 0))}"
-    elif policy_type == "quiet_hours":
-        schedule_label = f"quiet hours ({rp.get('feature', '?')})"
     else:
         schedule_label = policy_type or "—"
 

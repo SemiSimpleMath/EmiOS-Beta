@@ -563,25 +563,6 @@ class RoutineManager:
                 return False, "not yet time"
             return True, "weekly schedule"
 
-        if policy_type == "quiet_hours":
-            feature = str(routine.run_policy.get("feature") or "").strip()
-            if not feature:
-                return False, "missing quiet_hours feature"
-            # Already succeeded today (local date)?
-            today = now_local.date()
-            if entry.last_status == "success" and last_finished:
-                last_local = utc_to_local(last_finished)
-                if last_local.date() == today:
-                    return False, "already succeeded today"
-            # Run only while inside the configured quiet window for this feature.
-            try:
-                from app.assistant.user_settings_manager.user_settings import get_settings_manager
-                if get_settings_manager().is_quiet_mode_active(feature):
-                    return True, "quiet hours active"
-            except Exception:
-                pass
-            return False, "outside quiet hours window"
-
         min_interval = int(routine.run_policy.get("min_interval_seconds") or 0)
         if min_interval <= 0:
             return True, "interval disabled"

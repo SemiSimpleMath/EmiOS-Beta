@@ -109,11 +109,13 @@
       "spec": {
         "pipeline_id": "kg_pipeline"
       },
-      "run_policy": {
-        "type": "quiet_hours",
-        "feature": "kg"
+      "trigger": {
+        "type": "time",
+        "policy": { "type": "daily", "time_local": "23:00" },
+        "active_window": "kg_active"
       },
-      "notes": "Ingests chat messages into the knowledge graph (2026-04-25 refactor — bucket-per-stage architecture). Runs once per day during the KG quiet hours window configured in Settings → Quiet Mode."
+      "run_policy": {},
+      "notes": "Ingests chat messages into the knowledge graph (2026-04-25 refactor — bucket-per-stage architecture). Runs once per day at 23:00 inside the kg_active window (configs/windows.json). Tune the window itself, not the time_local — the window is the active period; time_local just says 'fire at the start of it.'"
     },
     {
       "id": "entity_cards_pipeline",

@@ -32,6 +32,12 @@
       "to": "20:00",
       "local": true,
       "_doc": "General awake hours. Default for things that should NOT fire while you sleep."
+    },
+    "kg_active": {
+      "from": "23:00",
+      "to": "02:00",
+      "local": true,
+      "_doc": "When the KG batch ingestion runs. Late-night, after wiki refresh, before sleep camera tick. Tune in this file rather than Settings → Quiet Mode."
     }
   }
 }
