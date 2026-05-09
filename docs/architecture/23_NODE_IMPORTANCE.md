@@ -157,9 +157,9 @@ anywhere**:
 
 ### Multiplicative chain (transitivity along edges) — PLANNED
 
-Importance flows. If the user's friend Alice scores 8 from the user's
-perspective, and Alice's father Bob scores 9 from Alice's perspective,
-then Bob's importance to the user is approximately:
+Importance flows along edges. If the user's friend Alice scores 8 from
+the user's perspective, and Alice's father Bob scores 9 from Alice's
+perspective, then Bob's importance to the user via this chain is:
 
 ```
 imp(Bob from user)  ≈  imp(Alice from user) × imp(Bob from Alice) / 10
@@ -167,20 +167,55 @@ imp(Bob from user)  ≈  imp(Alice from user) × imp(Bob from Alice) / 10
 ```
 
 The `/ 10` keeps the result on the same 0–10 scale (both factors are
-0–10). This is an approximation, useful when:
-- the chain is short (one or two hops)
-- relationships along the chain are aligned in sign / role
-- only one path between the endpoints matters
+0–10).
 
-It loses information when:
-- the chain has nodes that *change* importance (a friend's hated
-  coworker is not `10 × negative/10`; sign and context are lost)
-- multiple paths exist between the endpoints (the product of one path
-  ignores the others)
-- the chain is long enough that edge-weight noise compounds
+**This is the lens-aware importance mechanism.** The architecture has
+one persisted "lens" for entities — the user's lens, computed by
+`me::importance_rater`. But the edge rater scores **every edge from
+the source node's perspective**, not the user's. That means the
+chain composition gives you importance under any other lens for free,
+without storing per-(node × lens) importance columns.
 
-Use case: cheap "how important is X to me?" queries where X isn't
-directly connected to the user but a short relationship path exists.
+Canonical example — the friend's summer house:
+
+| Lens | Score | Interpretation |
+|---|---|---|
+| User direct rating (entity) | ~2 | A place the user has never been; low engagement |
+| Friend Alice's lens (via edges) | ~8 | Alice's vacation home — central to her summers |
+| User's lens via chain through Alice | `imp(Alice, user) × imp(summer_house, Alice) / 10` ≈ `9 × 8 / 10 = 7.2` | "Important to the user **in the context of Alice**" |
+
+All three numbers are correct simultaneously for different uses:
+- Ranking what the user cares about globally → use the direct rating
+- Ranking what to surface during a conversation about Alice → use the
+  chain through Alice
+- Generating Alice's wiki page → use Alice's lens (the edges
+  originating from Alice)
+
+This is why we don't need per-(node × lens) importance columns. The
+edge rater's "from source's perspective" framing already encodes every
+node's importance under every other node's lens; chain composition
+recovers it on demand.
+
+Where the chain breaks down:
+- **Sign / role changes along the chain.** A friend's hated coworker
+  is not `imp(friend) × imp(coworker, friend) / 10` because the
+  edge "Alice hates Bob" has high *salience* but the relationship
+  changes sign. The current edge rater doesn't carry sign — it rates
+  raw importance to the source. Chain results have to be read as
+  "this node has high gravity in your network via this path," not
+  "you would like this node."
+- **Multiple paths.** The product of one chain ignores the others. A
+  family member with strong direct AND through-spouse paths to the
+  user should accumulate both. PageRank handles this correctly; the
+  chain doesn't.
+- **Long chains.** Edge-weight noise compounds multiplicatively.
+  Past two or three hops, the chain produces nearly-uniform scores
+  that say more about chain length than relationships.
+
+Use cases: cheap "how important is X to me?" queries where X is one
+or two hops away and the relationship sign is unambiguous (family of
+friends, employer of mentor). For longer or branchier paths, fall
+back to personalized PageRank.
 
 ### Personalized PageRank (multi-path propagation) — POTENTIALLY ALREADY DONE
 
