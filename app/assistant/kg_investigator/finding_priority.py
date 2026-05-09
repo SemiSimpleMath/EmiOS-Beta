@@ -5,15 +5,17 @@ which N should I work on now?" FIFO-by-date treats Jukka and Katy's
 wedding the same as Seija buying a backpack. Importance ordering says:
 work on the wedding first, the backpack last.
 
-The score: max kg_node_metadata.importance across the finding's primary
-node and its one-hop neighbors. That way a State node (low-importance
-on its own scale) connecting two high-importance Entities inherits the
-right priority, and a State touching only minor entities/concepts ranks
-low.
+The score: kg_node_metadata.importance of the primary node when set
+(the rater already derives this from edge importance — a State between
+Jukka and Katy with `is_married` edges weighted 10.0 lands at ~0.95;
+a State touching only minor things lands much lower). When the rater
+hasn't run on a node yet (importance=None), fall back to
+MAX(edge.importance) across the edges connecting to it — the same
+signal, computed on the fly.
 
-This is a runtime sort, not a stored column — no schema change. ~1ms
-per finding even with the join, called only at drain time on the small
-candidate set.
+This is a runtime sort, not a stored column — no schema change.
+~1ms per finding even with the join, called only at drain time on the
+small candidate set.
 """
 from __future__ import annotations
 
@@ -28,14 +30,19 @@ logger = get_logger(__name__)
 
 
 def importance_score(primary_node_id: str) -> float:
-    """Return the max importance across the primary node + its one-hop
-    neighbors. Returns 0.0 when the node is missing or has no
-    importance set.
+    """Return the primary node's importance score for ranking findings.
 
-    A finding is "important" if it touches important things — a State
-    between Jukka and Katy is important because Jukka and Katy are
-    important entities, even though the State node itself sits on a
-    different importance scale.
+    Primary signal: kg_node_metadata.importance, which the rater derives
+    from edge importance. A State between two highly-connected entities
+    (e.g. Jukka and Katy via is_married edge_imp=10.0) scores ~0.95;
+    a Seija-likes-hiking State scores ~0.66.
+
+    Fallback when importance is NULL (rater hasn't visited this node):
+    max(edge.importance)/10 across edges connecting to it — same signal
+    as the rater's input, divided by 10 so it lands on the same 0-1
+    scale as stored state.importance for fair comparison.
+
+    Returns 0.0 only when the node has no importance and no edges.
     """
     if not primary_node_id:
         return 0.0
@@ -43,26 +50,28 @@ def importance_score(primary_node_id: str) -> float:
         with get_db_manager().read_session() as session:
             row = session.execute(
                 sql_text(
+                    "SELECT importance FROM kg_node_metadata WHERE id = :nid"
+                ),
+                {"nid": primary_node_id},
+            ).fetchone()
+            if row and row[0] is not None:
+                return float(row[0])
+
+            # Fallback: max edge importance touching this node, scaled
+            # to 0-1 to match state.importance.
+            row = session.execute(
+                sql_text(
                     """
-                    SELECT MAX(imp) FROM (
-                      SELECT importance AS imp
-                      FROM kg_node_metadata
-                      WHERE id = :nid
-                      UNION ALL
-                      SELECT n.importance
-                      FROM kg_edge_metadata e
-                      JOIN kg_node_metadata n
-                        ON n.id = (CASE WHEN e.source_id = :nid
-                                        THEN e.target_id ELSE e.source_id END)
-                      WHERE e.source_id = :nid OR e.target_id = :nid
-                    )
+                    SELECT MAX(importance)
+                    FROM kg_edge_metadata
+                    WHERE source_id = :nid OR target_id = :nid
                     """
                 ),
                 {"nid": primary_node_id},
             ).fetchone()
-        if not row or row[0] is None:
-            return 0.0
-        return float(row[0])
+            if row and row[0] is not None:
+                return float(row[0]) / 10.0
+        return 0.0
     except Exception as e:
         logger.warning("[finding_priority] importance lookup failed for %s: %s", primary_node_id, e)
         return 0.0
@@ -71,14 +80,13 @@ def importance_score(primary_node_id: str) -> float:
 def order_by_importance(
     candidate_ids_with_dates: Iterable[Tuple[str, str, object]],
 ) -> List[str]:
-    """Sort (finding_id, primary_node_id, date_anchor) tuples by max
+    """Sort (finding_id, primary_node_id, date_anchor) tuples by
     importance DESC, with the date_anchor as tie-breaker (oldest first).
     Returns a flat list of finding_ids in the new order.
     """
     scored = []
     for fid, pnid, date_anchor in candidate_ids_with_dates:
         scored.append((importance_score(pnid), date_anchor, fid))
-    # Sort: importance DESC, then date ASC (oldest first within an
-    # importance tier). Negate importance for ascending sort.
+    # Sort: importance DESC, then date ASC (oldest first within a tier).
     scored.sort(key=lambda x: (-x[0], x[1] or 0))
     return [fid for _, _, fid in scored]
