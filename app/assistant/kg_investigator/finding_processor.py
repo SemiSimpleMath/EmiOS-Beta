@@ -223,16 +223,26 @@ def apply_one(finding_id: str) -> Dict[str, Any]:
 
 
 def _claim_pending_finding_ids(*, limit: int, finding_types: Optional[List[str]] = None) -> List[str]:
-    """Pick up to `limit` oldest pending findings, optionally filtered to specific types."""
+    """Pick up to `limit` pending findings, ordered by max importance of
+    touched nodes (high first), date as tie-breaker. Optionally filtered
+    to specific finding types."""
+    from app.assistant.kg_investigator.finding_priority import order_by_importance
+
     with get_db_manager().read_session() as session:
         q = (
-            session.query(KGMaintenanceFinding.id)
+            session.query(
+                KGMaintenanceFinding.id,
+                KGMaintenanceFinding.primary_node_id,
+                KGMaintenanceFinding.created_at,
+            )
             .filter(KGMaintenanceFinding.status == "pending")
         )
         if finding_types:
             q = q.filter(KGMaintenanceFinding.finding_type.in_(finding_types))
-        rows = q.order_by(KGMaintenanceFinding.created_at.asc()).limit(limit).all()
-        return [r[0] for r in rows]
+        rows = q.all()
+
+    candidates = [(r[0], r[1], r[2]) for r in rows]
+    return order_by_importance(candidates)[:limit]
 
 
 def _extract_report_from_audit(blackboard) -> Optional[Dict[str, Any]]:

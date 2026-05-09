@@ -68,28 +68,39 @@ def _executor_scope() -> ScopeContext:
 
 
 def _claim_executable_finding_ids(*, limit: int) -> List[str]:
-    """Pick the oldest auto-apply investigated rows whose 24h grace expired.
+    """Pick auto-apply investigated rows whose 24h grace expired,
+    ordered by max importance of the touched nodes (high first).
 
     Filters:
     - status='investigated' (investigator wrote a report)
     - investigation_report_json non-null
     - disposition='auto_apply' (not 'needs_user_review' — those wait for the user)
     - investigated_at older than now - 24h (grace expired)
+
+    Wedding-vs-backpack ordering: a finding's importance is the max
+    importance across its primary node and one-hop neighbors. Date is
+    the tie-breaker (oldest first within an importance tier).
     """
+    from app.assistant.kg_investigator.finding_priority import order_by_importance
+
     cutoff = utc_now() - timedelta(hours=GRACE_WINDOW_HOURS)
     with get_db_manager().read_session() as session:
         rows = (
-            session.query(KGMaintenanceFinding.id, KGMaintenanceFinding.investigation_report_json)
+            session.query(
+                KGMaintenanceFinding.id,
+                KGMaintenanceFinding.investigation_report_json,
+                KGMaintenanceFinding.primary_node_id,
+                KGMaintenanceFinding.investigated_at,
+            )
             .filter(KGMaintenanceFinding.status == "investigated")
             .filter(KGMaintenanceFinding.investigation_report_json.isnot(None))
             .filter(KGMaintenanceFinding.investigated_at < cutoff)
-            .order_by(KGMaintenanceFinding.investigated_at.asc())
             .all()
         )
 
     # disposition lives inside the JSON blob — filter in Python.
-    out: List[str] = []
-    for fid, report_json in rows:
+    eligible: List[tuple] = []  # (fid, primary_node_id, investigated_at)
+    for fid, report_json, primary_node_id, investigated_at in rows:
         report = report_json
         if isinstance(report, str):
             try:
@@ -100,10 +111,12 @@ def _claim_executable_finding_ids(*, limit: int) -> List[str]:
             continue
         if (report.get("disposition") or "").strip() != "auto_apply":
             continue
-        out.append(fid)
-        if len(out) >= limit:
-            break
-    return out
+        eligible.append((fid, primary_node_id, investigated_at))
+
+    # Sort by max importance of touched nodes (high first), date as
+    # tie-breaker (oldest first), then take the top `limit`.
+    ordered_ids = order_by_importance(eligible)
+    return ordered_ids[:limit]
 
 
 def _build_brief(finding_id: str) -> Optional[Dict[str, Any]]:
