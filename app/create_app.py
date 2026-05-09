@@ -45,6 +45,17 @@ def create_app(config_class="config.DevelopmentConfig"):
     def _inject_static_version():
         return {"static_v": _static_version}
 
+    # Make assistant_name available to every template without each route
+    # having to remember to pass it. Templates can reference {{ assistant_name }}
+    # and it always resolves — see skills/emi-ui-templating/SKILL.md.
+    @app.context_processor
+    def _inject_assistant_name():
+        try:
+            from app.assistant.utils.assistant_name import get_assistant_name
+            return {"assistant_name": get_assistant_name()}
+        except Exception:
+            return {"assistant_name": "Emi"}
+
     # No login required for this version
     # ping_interval/ping_timeout: even in threading mode these narrow the
     # window where Cloudflare-tunnel-style silent drops go undetected. The
@@ -228,9 +239,6 @@ def create_app(config_class="config.DevelopmentConfig"):
     app.register_blueprint(personalize_bp)
     from app.routes.subsystem_route import subsystem_route_bp
     app.register_blueprint(subsystem_route_bp)
-
-    from app.routes.agent_directives import agent_directives_bp
-    app.register_blueprint(agent_directives_bp)
 
     # Apply saved logging controls after services are initialized (console threshold + per-logger overrides)
     try:

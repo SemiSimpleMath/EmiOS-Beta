@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block title %}Agent Progress - Emi{% endblock %}
+{% block title %}Agent Progress - {{ assistant_name }}{% endblock %}
 
 {% block optional_css %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/progress.css') }}">

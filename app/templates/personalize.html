@@ -2,16 +2,16 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Personalize Emi</title>
+  <title>Personalize {{ assistant_name }}</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/personalize.css') }}">
 </head>
 <body>
   <div class="pz-shell">
     <header class="pz-header">
-      <h1><i class="fas fa-sliders-h"></i> Personalize Emi</h1>
+      <h1><i class="fas fa-sliders-h"></i> Personalize {{ assistant_name }}</h1>
       <p class="pz-subtitle">
-        Direct visibility + control over the things that shape Emi's day-to-day
+        Direct visibility + control over the things that shape {{ assistant_name }}'s day-to-day
         behavior. Edit your directives, watch what beliefs the engine is tracking,
         and tune your scheduled reminders.
       </p>

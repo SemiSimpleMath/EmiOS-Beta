@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Local Cameras (Tapo / RTSP)</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/setup_wizard.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .lc-card { background:#1e1e2e; border:1px solid #333; border-radius:8px; padding:14px 16px; margin-bottom:10px; }
+        .lc-name { font-size:1.05em; font-weight:600; margin-bottom:6px; }
+        .lc-meta { color:#888; font-size:0.88em; line-height:1.6; }
+        .lc-meta code { background:#2a2a3a; padding:1px 5px; border-radius:3px; }
+        .lc-actions { margin-top:10px; }
+        .lc-actions a { color:#7c9af7; margin-right:14px; }
+        .lc-empty { color:#888; padding:14px; }
+        .hint-box { background:#2a2a3a; border:1px solid #444; border-radius:6px; padding:12px 14px; font-size:0.9em; color:#aaa; }
+        .hint-box code { background:#333; padding:1px 4px; border-radius:3px; }
+    </style>
+</head>
+<body>
+    <div class="setup-container">
+        <div class="setup-header">
+            <h1><i class="fas fa-camera"></i> Local Cameras (Tapo / RTSP)</h1>
+            <p>LAN-attached cameras pulled directly via RTSP. Higher resolution than Ring's cloud snapshots, no cloud dependency.</p>
+            <a href="/settings/integrations" class="back-link"><i class="fas fa-arrow-left"></i> Back to Integrations</a>
+            <a href="/settings/integrations/ring/snapshots" class="back-link"><i class="fas fa-images"></i> View All Snapshots</a>
+        </div>
+
+        <div class="settings-section">
+            <h2><i class="fas fa-list"></i> Configured cameras</h2>
+            {% if cameras %}
+                {% for cam in cameras %}
+                <div class="lc-card">
+                    <div class="lc-name">{{ cam.alias }}{% if cam.kind %} <span style="color:#888;font-weight:400;">({{ cam.kind }})</span>{% endif %}</div>
+                    <div class="lc-meta">
+                        host: <code>{{ cam.host }}{% if cam.port %}:{{ cam.port }}{% endif %}</code>{% if cam.path %} · path: <code>{{ cam.path }}</code>{% endif %}<br>
+                        username: <code>{{ cam.username or "(none)" }}</code> · password env: <code>{{ cam.password_env_var or "(none)" }}</code>
+                        {% if cam.notes %}<br>notes: {{ cam.notes }}{% endif %}
+                    </div>
+                    <div class="lc-actions">
+                        <a href="/cameras/{{ cam.alias }}"><i class="fas fa-images"></i> Snapshots</a>
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="lc-empty">No local cameras configured yet.</div>
+            {% endif %}
+        </div>
+
+        <div class="settings-section">
+            <h2><i class="fas fa-cog"></i> How to add or edit</h2>
+            <div class="hint-box">
+                Local cameras are configured in <code>configs/smart_home_tools.json</code> under the
+                <code>local_cameras.devices</code> array. Each entry needs <code>alias</code>,
+                <code>host</code>, <code>port</code>, <code>path</code>, <code>username</code>, and
+                <code>password_env_var</code> (the env var name that holds the actual RTSP password —
+                <strong>never put the password in the JSON file</strong>). Set the env var in your
+                shell profile, then restart Flask. The <code>local_camera_snapshot</code> tool can
+                then pull frames into the analyzer pipeline.
+                <br><br>
+                For the kinds-driven dispatcher (which analyzer runs, where frames are stored, when a
+                pod gets minted), see <code>configs/cameras.json</code>.
+            </div>
+        </div>
+    </div>
+</body>
+</html>

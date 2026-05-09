@@ -384,6 +384,30 @@ def ring_settings_page():
     return render_template('ring_settings.html')
 
 
+@preferences_bp.route('/settings/integrations/local-cameras', methods=['GET'])
+def local_cameras_settings_page():
+    """Render Local Cameras (Tapo / RTSP) settings — read-only listing.
+
+    Pulls the local_cameras.devices entries straight from
+    configs/smart_home_tools.json so the page reflects whatever is
+    actually configured. Editing still happens in the JSON file (and
+    secrets in env vars) until a UI editor is built.
+    """
+    path = _smart_home_config_path()
+    cameras = []
+    if path.exists():
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            section = payload.get("local_cameras") if isinstance(payload, dict) else None
+            if isinstance(section, dict):
+                for d in section.get("devices") or []:
+                    if isinstance(d, dict) and d.get("alias"):
+                        cameras.append(d)
+        except Exception as e:
+            logger.warning("local_cameras_settings_page: config read failed: %s", e)
+    return render_template('local_cameras_settings.html', cameras=cameras)
+
+
 @preferences_bp.route('/settings/lights', methods=['GET'])
 def lights_settings_page():
     """Render dedicated smart lights settings page."""
@@ -998,8 +1022,9 @@ def important_resources_page():
 # the API only reads/writes these specific paths, never an arbitrary file
 # from a request param.
 _EDITABLE_SKILL_PATHS = {
-    "email":   "resources/instructions/resource_email_user_prefs.md",
-    "dayflow": "resources/instructions/resource_orchestrator_user_prefs_personal.md",
+    "email":          "resources/instructions/resource_email_user_prefs.md",
+    "dayflow":        "resources/instructions/resource_orchestrator_user_prefs_personal.md",
+    "personal-admin": "resources/instructions/resource_personal_admin_user_prefs.md",
 }
 
 
@@ -1034,6 +1059,12 @@ def skills_email_page():
 def skills_dayflow_page():
     """Dedicated editor for the dayflow-orchestrator skill."""
     return render_template('skills_dayflow.html')
+
+
+@preferences_bp.route('/skills/personal-admin', methods=['GET'])
+def skills_personal_admin_page():
+    """Dedicated editor for the personal-admin planner skill."""
+    return render_template('skills_personal_admin.html')
 
 
 @preferences_bp.route('/api/skills', methods=['GET'])

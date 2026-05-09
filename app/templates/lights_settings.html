@@ -11,7 +11,7 @@
     <div class="setup-container">
         <div class="setup-header">
             <h1>Kasa Lights</h1>
-            <p>Configure and control TP-Link Kasa dimmers directly from Emi</p>
+            <p>Configure and control TP-Link Kasa dimmers directly from {{ assistant_name }}</p>
             <a href="/settings/integrations" class="back-link"><i class="fas fa-arrow-left"></i> Back to Integrations</a>
         </div>
 
@@ -51,7 +51,7 @@
                 <div style="margin-top:10px;">
                     <label for="lights_kasa_hosts"><strong>Kasa device hosts (one IP per line)</strong></label>
                     <textarea id="lights_kasa_hosts" style="width:100%;min-height:100px;padding:8px;" placeholder="192.168.1.51&#10;192.168.1.52"></textarea>
-                    <small>If empty, Emi can discover lights on LAN with the button below.</small>
+                    <small>If empty, {{ assistant_name }} can discover lights on LAN with the button below.</small>
                 </div>
 
                 <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
