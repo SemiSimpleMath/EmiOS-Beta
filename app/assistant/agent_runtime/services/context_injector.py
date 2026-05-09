@@ -477,17 +477,47 @@ class ContextInjector:
                 logger.warning(
                     "[%s] accept_auto_skills=true but DI.skill_injector unavailable", agent.name,
                 )
-                return resolved
-            task = str(agent.blackboard.get_state_value("task", "") or "")
-            incoming = str(agent.blackboard.get_state_value("incoming_message", "") or "")
-            for name in injector.matching_skill_names(task=task, incoming_message=incoming):
+            else:
+                task = str(agent.blackboard.get_state_value("task", "") or "")
+                incoming = str(agent.blackboard.get_state_value("incoming_message", "") or "")
+                for name in injector.matching_skill_names(task=task, incoming_message=incoming):
+                    if name in resolved:
+                        continue
+                    skill = registry.get(name)
+                    if skill is None:
+                        continue
+                    resolved[name] = skill.body
+                    logger.debug("[%s] auto-injected skill=%s", agent.name, name)
+
+        # 3. Caller-supplied skills (per-invocation, via agent_input["skills_input"]).
+        #    Spec-compliant: a flat list of skill names. No transitive close,
+        #    no requires-graph — the Anthropic Agent Skills spec doesn't
+        #    declare skill dependencies in frontmatter. Composition happens
+        #    via SKILL.md bodies referencing bundled files or other skills by
+        #    name; the caller is responsible for passing the full set of
+        #    skills it wants delivered.
+        requested = agent.blackboard.get_state_value("skills_input", []) or []
+        if not isinstance(requested, list):
+            logger.warning(
+                "[%s] skills_input must be a list of skill names; got %s",
+                agent.name, type(requested).__name__,
+            )
+        else:
+            for name in requested:
+                if not isinstance(name, str) or not name.strip():
+                    continue
+                name = name.strip()
                 if name in resolved:
                     continue
                 skill = registry.get(name)
                 if skill is None:
+                    logger.warning(
+                        "[%s] requested skill %r not registered — dropped",
+                        agent.name, name,
+                    )
                     continue
                 resolved[name] = skill.body
-                logger.debug("[%s] auto-injected skill=%s", agent.name, name)
+                logger.debug("[%s] caller-supplied skill=%s", agent.name, name)
         return resolved
 
     def generate_injections_block(self, agent, prompt_injections, message=None, entity_injection_keys: set[str] | None = None):
