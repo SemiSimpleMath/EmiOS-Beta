@@ -9,7 +9,7 @@ class as the Friday Night Meats delete incident.
 """
 import app.assistant.tests.test_setup  # noqa: F401
 
-from app.assistant.test.tool_tests._helpers import build_calendar_tool
+from app.assistant.tests.tool_tests._helpers import build_calendar_tool
 
 
 def _install_edit_event_spy(monkeypatch):

@@ -106,6 +106,7 @@ tmp_*.py
 tmp_*.json
 
 # ── Personal scratch / debug / one-off artifacts at repo root ────────────────
+/scratch/
 /scratch_*
 /kg_churn_review.md
 /test_*.py

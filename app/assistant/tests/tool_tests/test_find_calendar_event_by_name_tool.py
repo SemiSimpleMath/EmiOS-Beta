@@ -54,7 +54,7 @@ def _build_tool(monkeypatch):
     auth / DB / event hub) and install the same no-op doubles that the
     other calendar tool tests use.
     """
-    from app.assistant.test.tool_tests._helpers import install_calendar_tool_test_doubles
+    from app.assistant.tests.tool_tests._helpers import install_calendar_tool_test_doubles
     from app.assistant.lib.tools.find_calendar_event_by_name.find_calendar_event_by_name import (
         FindCalendarEventByName,
     )

@@ -8,7 +8,7 @@ occurrence of a recurring series. If someone reintroduces auto-escalation
 """
 import app.assistant.tests.test_setup  # noqa: F401
 
-from app.assistant.test.tool_tests._helpers import (
+from app.assistant.tests.tool_tests._helpers import (
     build_calendar_tool,
     make_tool_message,
 )

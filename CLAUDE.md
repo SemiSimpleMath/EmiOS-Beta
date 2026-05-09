@@ -31,15 +31,18 @@ If the hook fires, you targeted the wrong remote or are on the wrong branch — 
 
 ## Running Tests
 
+All tests live under `app/assistant/tests/` (plural). The old singular `test/` dir
+was consolidated 2026-05-08 — do not create new tests under `app/assistant/test/`.
+Subsystem subdirs: `agent_tests/`, `tool_tests/`, `dayflow/`, `kg/`, `manager_tests/`,
+`non_agent_tests/`, `chat_narrator/`, etc. Throwaway probes go in `/scratch/`
+(gitignored), never in a tests dir.
+
 ```bash
-# Unit tests (pytest)
-.venv\Scripts\python.exe -m pytest app/assistant/test/agent_tests/
+# Unit tests (pytest) — entire subsystem
+.venv\Scripts\python.exe -m pytest app/assistant/tests/agent_tests/
 
 # Single test file
-.venv\Scripts\python.exe -m pytest app/assistant/test/agent_tests/test_foo.py
-
-# Standalone smoke/integration scripts (not pytest — run directly)
-.venv\Scripts\python.exe app/assistant/test/tmp_smoke_kg_convergence.py
+.venv\Scripts\python.exe -m pytest app/assistant/tests/agent_tests/test_foo.py
 
 # Manager integration tests (real KG + LLMs)
 .venv\Scripts\python.exe app/assistant/tests/manager_tests/emi_team/emi_team_test.py

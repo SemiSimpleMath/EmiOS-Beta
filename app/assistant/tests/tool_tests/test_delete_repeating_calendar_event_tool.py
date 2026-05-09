@@ -7,7 +7,7 @@ the caller passed an instance id or the base id directly.
 """
 import app.assistant.tests.test_setup  # noqa: F401
 
-from app.assistant.test.tool_tests._helpers import build_calendar_tool
+from app.assistant.tests.tool_tests._helpers import build_calendar_tool
 
 
 def test_delete_series_by_base_id_deletes_base_id(monkeypatch):

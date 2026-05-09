@@ -24,7 +24,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 import app.assistant.tests.test_setup  # noqa: F401
-from app.assistant.test.tool_tests._helpers import make_tool_message
+from app.assistant.tests.tool_tests._helpers import make_tool_message
 
 
 # ----------------------------------------------------------------------

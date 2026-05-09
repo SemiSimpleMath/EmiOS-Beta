@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import app.assistant.tests.test_setup  # noqa: F401
 
-from app.assistant.test.tool_tests._helpers import make_tool_message
+from app.assistant.tests.tool_tests._helpers import make_tool_message
 
 
 class _RecordingGmailClient:
