@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import threading
 import time as _time_mod
 import uuid
@@ -56,6 +57,17 @@ class RoutineRunState:
     last_status: Optional[str] = None
     last_error: Optional[str] = None
     run_count: int = 0
+    # Phase 3: failure tracking. Reset to 0 on success; incremented on
+    # error. When it hits the routine's on_error.max_failures threshold,
+    # the routine is auto-disabled in the status file and surfaced as
+    # a ticket (see _record_failure / _maybe_auto_disable_after_failure).
+    consecutive_failures: int = 0
+    # When set, _should_run gates until this UTC moment passes. Computed
+    # from on_error.backoff after each failure so retries don't hammer.
+    next_attempt_after_utc: Optional[str] = None
+    # Sticky reason text for why the routine is currently auto-disabled.
+    # Cleared when the user re-enables via the admin UI.
+    auto_disabled_reason: Optional[str] = None
 
 
 @dataclass
@@ -78,6 +90,12 @@ class RoutineConfig:
     #   {"type": "time", "policy": <run_policy dict>}
     #   {"type": "event", "topic": "<event_hub topic>"}
     trigger: Dict[str, Any] = field(default_factory=dict)
+    # Failure-handling policy. Defaults applied at parse time when omitted:
+    #   max_failures        : 3   (consecutive errors before auto-disable)
+    #   backoff_base_seconds: 60  (first retry waits this long)
+    #   backoff_max_seconds : 3600 (cap for exponential backoff)
+    #   then                : "disable_with_ticket"  (or "log_only")
+    on_error: Dict[str, Any] = field(default_factory=dict)
 
 
 class RoutineManager:
@@ -326,6 +344,20 @@ class RoutineManager:
             else:
                 trigger = {"type": "time", "policy": run_policy}
 
+            # on_error parsing + defaults.
+            raw_on_error = item.get("on_error") if isinstance(item.get("on_error"), dict) else {}
+            on_error = {
+                "max_failures": int(raw_on_error.get("max_failures", 3)),
+                "backoff_base_seconds": int(raw_on_error.get("backoff_base_seconds", 60)),
+                "backoff_max_seconds": int(raw_on_error.get("backoff_max_seconds", 3600)),
+                "then": str(raw_on_error.get("then", "disable_with_ticket")).strip().lower(),
+            }
+            if on_error["then"] not in ("disable_with_ticket", "log_only"):
+                raise ValueError(
+                    f"Routine '{routine_id}' on_error.then must be 'disable_with_ticket' or 'log_only', "
+                    f"got {on_error['then']!r}"
+                )
+
             routines.append(
                 RoutineConfig(
                     routine_id=routine_id,
@@ -340,6 +372,7 @@ class RoutineManager:
                     aliases=[str(a).strip() for a in (item.get("aliases") or []) if str(a).strip()],
                     notes=str(item.get("notes") or "") or None,
                     trigger=trigger,
+                    on_error=on_error,
                 )
             )
         return routines
@@ -453,6 +486,9 @@ class RoutineManager:
             last_status=data.get("last_status"),
             last_error=data.get("last_error"),
             run_count=int(data.get("run_count") or 0),
+            consecutive_failures=int(data.get("consecutive_failures") or 0),
+            next_attempt_after_utc=data.get("next_attempt_after_utc"),
+            auto_disabled_reason=data.get("auto_disabled_reason"),
         )
 
     def _update_state_entry(self, routine_id: str, entry: RoutineRunState) -> None:
@@ -460,7 +496,23 @@ class RoutineManager:
         if not isinstance(routines, dict):
             routines = {}
             self._state["routines"] = routines
+        # Preserve any fields the admin route owns (e.g. `enabled`) that
+        # this scheduler doesn't model. Re-merge them on top of the run-state
+        # fields we own.
+        existing = routines.get(routine_id)
+        preserved: Dict[str, Any] = {}
+        if isinstance(existing, dict):
+            for k, v in existing.items():
+                if k not in {
+                    "last_run_utc", "last_run_id", "last_started_utc",
+                    "last_finished_utc", "last_duration_s", "last_target_date",
+                    "last_runner", "last_status", "last_error", "run_count",
+                    "consecutive_failures", "next_attempt_after_utc",
+                    "auto_disabled_reason",
+                }:
+                    preserved[k] = v
         routines[routine_id] = {
+            **preserved,
             "last_run_utc": entry.last_run_utc,
             "last_run_id": entry.last_run_id,
             "last_started_utc": entry.last_started_utc,
@@ -471,6 +523,9 @@ class RoutineManager:
             "last_status": entry.last_status,
             "last_error": entry.last_error,
             "run_count": entry.run_count,
+            "consecutive_failures": entry.consecutive_failures,
+            "next_attempt_after_utc": entry.next_attempt_after_utc,
+            "auto_disabled_reason": entry.auto_disabled_reason,
         }
 
     def _should_run(
@@ -496,6 +551,14 @@ class RoutineManager:
         with self._state_lock:
             entry = self._get_state_entry(routine.routine_id)
         last_finished = parse_iso_utc(entry.last_finished_utc) or parse_iso_utc(entry.last_run_utc)
+
+        # Backoff gate. After a failure, we set next_attempt_after_utc;
+        # _should_run blocks new attempts until the wait window passes.
+        if entry.next_attempt_after_utc:
+            wait_until = parse_iso_utc(entry.next_attempt_after_utc)
+            if wait_until and now_utc < wait_until:
+                remaining = int((wait_until - now_utc).total_seconds())
+                return False, f"backoff after failure ({remaining}s remaining, attempt {entry.consecutive_failures + 1})"
 
         # Active window gate (composes with any time policy below).
         # Resolved at load time, but resolve again here so a hot-edit of
@@ -606,6 +669,138 @@ class RoutineManager:
             return False, "afk check failed (skip)"
 
         return True, "afk ok"
+
+    # ---------------------------------------------------------------------
+    # Auto-disable on repeated failures
+    # ---------------------------------------------------------------------
+
+    def _maybe_auto_disable_after_failure(
+        self,
+        routine: RoutineConfig,
+        entry: RoutineRunState,
+        last_error: Optional[str],
+    ) -> None:
+        """If the routine just hit on_error.max_failures, disable it in
+        the status file and surface a ticket. log_only mode skips both
+        but still logs (the next attempt is still backed off).
+        """
+        on_error = routine.on_error or {}
+        max_failures = int(on_error.get("max_failures", 3))
+        action = str(on_error.get("then", "disable_with_ticket")).lower()
+
+        if entry.consecutive_failures < max_failures:
+            return
+        if action == "log_only":
+            logger.warning(
+                "[routine_manager] %s reached %d consecutive failures (on_error=log_only); "
+                "leaving enabled, backoff still applies",
+                routine.routine_id, entry.consecutive_failures,
+            )
+            return
+
+        reason = (
+            f"Auto-disabled after {entry.consecutive_failures} consecutive failures. "
+            f"Last error: {last_error or '(no error message)'}"
+        )
+        try:
+            self._disable_routine_in_status(routine.routine_id, reason=reason)
+        except Exception as e:
+            logger.error(
+                "[routine_manager] failed to write auto-disable to status for %s: %s",
+                routine.routine_id, e, exc_info=True,
+            )
+        try:
+            self._surface_auto_disable_ticket(routine, entry, last_error)
+        except Exception as e:
+            logger.error(
+                "[routine_manager] failed to surface auto-disable ticket for %s: %s",
+                routine.routine_id, e, exc_info=True,
+            )
+
+    def _disable_routine_in_status(self, routine_id: str, *, reason: str) -> None:
+        """Flip enabled=false in resource_routine_status.json. Same file
+        the admin UI writes, so re-enabling later via /routines clears
+        this just like any user toggle would.
+        """
+        from app.assistant.utils.path_utils import get_resources_dir
+        path = Path(get_resources_dir()) / "resource_routine_status.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with self._state_lock:
+            data: Dict[str, Any] = {}
+            if path.exists():
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                except Exception:
+                    data = {}
+            routines = data.setdefault("routines", {})
+            if not isinstance(routines, dict):
+                routines = {}
+                data["routines"] = routines
+            entry = routines.get(routine_id) if isinstance(routines.get(routine_id), dict) else {}
+            entry["enabled"] = False
+            entry["auto_disabled_reason"] = reason
+            entry["auto_disabled_at_utc"] = utc_now().isoformat()
+            routines[routine_id] = entry
+            tmp = path.with_suffix(path.suffix + ".tmp")
+            with tmp.open("w", encoding="utf-8", newline="\n") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+                f.write("\n")
+                f.flush()
+            tmp.replace(path)
+        logger.warning(
+            "[routine_manager] AUTO-DISABLED routine %s in status file. reason=%s",
+            routine_id, reason,
+        )
+
+    def _surface_auto_disable_ticket(
+        self,
+        routine: RoutineConfig,
+        entry: RoutineRunState,
+        last_error: Optional[str],
+    ) -> None:
+        """Create a dayflow_notify ticket so the user sees the disable
+        without having to grep logs."""
+        try:
+            from app.assistant.ServiceLocator.service_locator import DI
+            tm = getattr(DI, "ticket_manager", None)
+        except Exception:
+            tm = None
+        if tm is None:
+            logger.warning(
+                "[routine_manager] ticket_manager not available; skipping auto-disable ticket for %s",
+                routine.routine_id,
+            )
+            return
+
+        title = f"Routine auto-disabled: {routine.name or routine.routine_id}"
+        message = (
+            f"Routine '{routine.routine_id}' failed "
+            f"{entry.consecutive_failures} times in a row and has been disabled. "
+            f"Last error: {last_error or '(no error message)'}"
+        )
+        try:
+            ticket = tm.create_ticket(
+                ticket_type="dayflow_notify",
+                suggestion_type="routine_auto_disabled",
+                title=title,
+                message=message,
+                action_type="none",
+                action_params=None,
+                trigger_context={
+                    "routine_id": routine.routine_id,
+                    "consecutive_failures": entry.consecutive_failures,
+                    "last_error": last_error,
+                },
+                trigger_reason="routine_auto_disable",
+                valid_hours=168,  # a week — user will see it
+            )
+            if ticket is not None and hasattr(tm, "mark_proposed"):
+                tm.mark_proposed(ticket.ticket_id)
+        except Exception as e:
+            logger.error(
+                "[routine_manager] create_ticket failed for routine=%s: %s",
+                routine.routine_id, e, exc_info=True,
+            )
 
     # ---------------------------------------------------------------------
     # Event triggers
@@ -879,7 +1074,7 @@ class RoutineManager:
             duration_s = round((finished_at_utc - started_at_utc).total_seconds(), 2)
             succeeded = status == "success"
 
-            self._mutate_state_entry_atomic(
+            updated_entry = self._mutate_state_entry_atomic(
                 config,
                 routine.routine_id,
                 lambda entry: _set_finished_state(
@@ -889,6 +1084,8 @@ class RoutineManager:
                     status=status,
                     error=error,
                     increment_run_count=succeeded,
+                    on_error=routine.on_error,
+                    finished_at_utc=finished_at_utc,
                 ),
             )
             if succeeded:
@@ -910,6 +1107,10 @@ class RoutineManager:
                     duration_s,
                     error,
                 )
+                # Hit the auto-disable threshold? Flip enabled=false in the
+                # status file and surface a ticket. log_only mode skips
+                # the disable + ticket but still logs.
+                self._maybe_auto_disable_after_failure(routine, updated_entry, error)
 
     def _capacity_alert_cooldown_seconds(self, config: Dict[str, Any]) -> int:
         value = int(config.get("capacity_alert_cooldown_seconds") or self._DEFAULT_ALERT_COOLDOWN_SECONDS)
@@ -1089,6 +1290,8 @@ def _set_finished_state(
     status: str,
     error: Optional[str],
     increment_run_count: bool,
+    on_error: Optional[Dict[str, Any]] = None,
+    finished_at_utc: Optional[datetime] = None,
 ) -> None:
     entry.last_finished_utc = finished_at_utc_iso
     entry.last_run_utc = finished_at_utc_iso
@@ -1097,6 +1300,21 @@ def _set_finished_state(
     entry.last_error = error if status != "success" else None
     if increment_run_count:
         entry.run_count += 1
+
+    # Failure tracking + backoff. Success resets the streak; failure
+    # increments and schedules the next attempt.
+    if status == "success":
+        entry.consecutive_failures = 0
+        entry.next_attempt_after_utc = None
+    else:
+        entry.consecutive_failures += 1
+        if on_error and finished_at_utc is not None:
+            base = max(1, int(on_error.get("backoff_base_seconds") or 60))
+            ceiling = max(base, int(on_error.get("backoff_max_seconds") or 3600))
+            # Exponential: base * 2^(n-1), capped.
+            wait_s = min(ceiling, base * (2 ** max(0, entry.consecutive_failures - 1)))
+            from datetime import timedelta as _td
+            entry.next_attempt_after_utc = (finished_at_utc + _td(seconds=wait_s)).isoformat()
 
 _routine_manager: Optional[RoutineManager] = None
 
