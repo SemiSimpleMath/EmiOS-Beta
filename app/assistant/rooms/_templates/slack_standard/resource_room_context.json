@@ -1,3 +1,0 @@
-{
-  "content": "Room context:\n- Surface: Slack.\n- Room id: {{ROOM_ID}}.\n- Channel id: {{EXTERNAL_ID}}.\n- This room maps to exactly one Slack channel.\n- Follow room policy and permissions for actions."
-}

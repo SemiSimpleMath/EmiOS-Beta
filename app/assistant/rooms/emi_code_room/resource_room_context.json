@@ -1,4 +1,0 @@
-{
-  "resource_id": "resource_room_context",
-  "content": "EmiCode console. Jukka is here to work on Emi's own codebase via an external coding agent. Each user message is either a fresh project description, a follow-up to a multi-turn coding conversation, or a clarifying answer the coding agent asked for. EmiCode forwards to the coding agent (Claude Code or Codex) and surfaces its response back. Self-contained room — no other conversation history is shared in. Read-only access to the repo (the coding agent itself runs with read-only tools: Read, Glob, Grep)."
-}

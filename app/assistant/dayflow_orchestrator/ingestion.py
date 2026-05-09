@@ -64,21 +64,12 @@ def _get_day_start_utc(now_utc: datetime) -> datetime:
 
 def _load_chat_entitled_rooms() -> list[str]:
     """Read chat-ingestion room entitlements from dayflow access config."""
-    access_path = (
-        Path(__file__).resolve().parent.parent
-        / "rooms"
-        / DAYFLOW_ORCHESTRATOR_ROOM_ID
-        / "access.json"
-    )
-    if not access_path.exists():
-        raise FileNotFoundError(
-            f"_load_chat_entitled_rooms: required file not found: {access_path}"
-        )
-    data = json.loads(access_path.read_text(encoding="utf-8"))
+    from app.assistant.rooms.room_resource_loader import load_room_access
+    data = load_room_access(DAYFLOW_ORCHESTRATOR_ROOM_ID)
     ids = data.get("chat_ingestion_entitled_rooms")
     if ids is None:
         raise ValueError(
-            "_load_chat_entitled_rooms: 'chat_ingestion_entitled_rooms' is required in access.json."
+            "_load_chat_entitled_rooms: 'chat_ingestion_entitled_rooms' is required in the dayflow_orchestrator room's access block."
         )
     if not isinstance(ids, list):
         raise ValueError(
@@ -132,15 +123,11 @@ def _load_dayflow_pod_kinds_filter() -> list[Dict[str, Any]]:
     Each entry is a dict with at least a 'kind' field; an optional
     'source_kind' narrows further. Empty list means no pod ingestion.
     """
-    access_path = (
-        Path(__file__).resolve().parent.parent
-        / "rooms"
-        / DAYFLOW_ORCHESTRATOR_ROOM_ID
-        / "access.json"
-    )
-    if not access_path.exists():
+    from app.assistant.rooms.room_resource_loader import load_room_access
+    try:
+        data = load_room_access(DAYFLOW_ORCHESTRATOR_ROOM_ID)
+    except FileNotFoundError:
         return []
-    data = json.loads(access_path.read_text(encoding="utf-8"))
     raw = data.get("ingestion_pod_kinds")
     if raw is None:
         return []  # absent = pod ingestion off

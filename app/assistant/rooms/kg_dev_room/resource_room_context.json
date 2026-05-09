@@ -1,4 +1,0 @@
-{
-  "resource_id": "resource_room_context",
-  "content": "KG dev console. The user is asking diagnostic questions about the knowledge graph and pipeline state. This is a self-contained room — no other conversation history is shared in. Read-only access to the live emi.db."
-}

@@ -13,16 +13,8 @@ from app.assistant.utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 _SAFE_ROOM_ID_RE = re.compile(r"^[A-Za-z0-9._:/-]+$")
-_TEMPLATE_FILES = (
-    "resource_identity.json",
-    "resource_room_context.json",
-    "resource_conversation.json",
-    "resource_safety.json",
-    "resource_participant_facts.json",
-    "policy.json",
-    "permissions.json",
-    "access.json",
-)
+# Single-file room contract — see app/assistant/rooms/ROOM_CONTRACT.md.
+_TEMPLATE_FILES = ("ROOM.md",)
 _TELEGRAM_TEMPLATE_DIR = Path(__file__).resolve().parent / "_templates" / "telegram_standard"
 _SLACK_TEMPLATE_DIR = Path(__file__).resolve().parent / "_templates" / "slack_standard"
 
