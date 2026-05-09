@@ -38,8 +38,9 @@ def main():
         print(f"ERROR: run_flask.py not found at {run_flask}")
         sys.exit(1)
 
+    port = (os.environ.get("EMI_PORT") or "8000").strip() or "8000"
     print(f"Starting EmiAI...")
-    print(f"Open http://localhost:8000 in your browser.\n")
+    print(f"Open http://localhost:{port} in your browser.\n")
     os.chdir(ROOT)
     result = subprocess.run([venv_python, str(run_flask)])
     sys.exit(result.returncode)

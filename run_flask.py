@@ -75,21 +75,104 @@ def _enforce_project_venv() -> None:
 
 _enforce_project_venv()
 
-from app.create_app import create_app
 
-# Startup summary (no credentials printed)
-_provider = os.environ.get('DEFAULT_LLM_PROVIDER', 'not set')
-print(f"EmiAi starting  |  provider={_provider}  |  timezone={os.environ.get('TIMEZONE', 'not set')}")
+def _resolve_port() -> int:
+    """Resolve the listen port from EMI_PORT env var (default 8000).
 
-app, socketio = create_app()
-app.secret_key = os.environ['FLASK_SECRET_KEY']
+    Validates range; exits with a clear message on bad input rather than
+    raising deep inside Werkzeug.
+    """
+    raw = (os.environ.get('EMI_PORT') or '').strip()
+    if not raw:
+        return 8000
+    try:
+        port = int(raw)
+    except ValueError:
+        print(f"\n❌ EMI_PORT={raw!r} is not an integer.\n", file=sys.stderr)
+        sys.exit(1)
+    if not (1 <= port <= 65535):
+        print(f"\n❌ EMI_PORT={port} is out of range (1-65535).\n", file=sys.stderr)
+        sys.exit(1)
+    return port
+
+
+def _port_is_already_serving(port: int) -> bool:
+    """Probe-by-connect: True iff something on this machine accepts on
+    127.0.0.1:port.
+
+    We can't rely on bind() alone — Windows lets two processes both bind
+    0.0.0.0:8000 with SO_REUSEADDR, which is exactly the duplicate-Flask
+    pathology we're guarding against. Connecting catches both the
+    own-process and SO_REUSEADDR cases: if anything is serving HTTP
+    here, the connect succeeds.
+    """
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(0.5)
+    try:
+        s.connect(("127.0.0.1", port))
+        return True
+    except (ConnectionRefusedError, socket.timeout):
+        return False
+    except OSError:
+        # Any other socket error — treat as "free" so we don't refuse to
+        # start because of an unrelated networking quirk.
+        return False
+    finally:
+        try:
+            s.close()
+        except Exception:
+            pass
+
+
+def _refuse_duplicate_start(port: int) -> None:
+    if not _port_is_already_serving(port):
+        return
+    is_windows = sys.platform == "win32"
+    find_pid_cmd = (
+        f'netstat -ano | findstr :{port}' if is_windows
+        else f'lsof -i :{port}'
+    )
+    kill_cmd = (
+        'taskkill /PID <pid> /F' if is_windows
+        else 'kill <pid>'
+    )
+    print(
+        f"\n❌ Port {port} is already in use — another EmiOS instance is likely\n"
+        f"   running. Refusing to start a second one (would double up routines,\n"
+        f"   race the Ring watermark file, and contend on the SQLite DB).\n\n"
+        f"   To find and stop the existing process:\n"
+        f"     {find_pid_cmd}\n"
+        f"     {kill_cmd}\n\n"
+        f"   Or run on a different port:\n"
+        f"     set EMI_PORT=8001    (Windows)\n"
+        f"     export EMI_PORT=8001 (Mac/Linux)\n",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 
 
 if __name__ == '__main__':
+    _port = _resolve_port()
+    _refuse_duplicate_start(_port)
+
+    from app.create_app import create_app
+
+    # Startup summary (no credentials printed)
+    _provider = os.environ.get('DEFAULT_LLM_PROVIDER', 'not set')
+    print(
+        f"EmiAi starting  |  provider={_provider}  |  "
+        f"timezone={os.environ.get('TIMEZONE', 'not set')}  |  "
+        f"port={_port}"
+    )
+
+    app, socketio = create_app()
+    app.secret_key = os.environ['FLASK_SECRET_KEY']
+
     socketio.run(
         app,
         host='0.0.0.0',
-        port=8000,
+        port=_port,
         debug=False,
         use_reloader=False,
         allow_unsafe_werkzeug=True
