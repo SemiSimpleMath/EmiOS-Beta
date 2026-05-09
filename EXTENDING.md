@@ -21,6 +21,7 @@ triggers so it auto-loads when relevant.
 | Camera | [`extending-emi-cameras`](skills/extending-emi-cameras/SKILL.md) | append to `configs/cameras.json` (+ analyzer agent) |
 | Room | [`extending-emi-rooms`](skills/extending-emi-rooms/SKILL.md) | `app/assistant/rooms/<id>/ROOM.md` (one file, frontmatter + body) |
 | Pod kind | [`extending-emi-pod-kinds`](skills/extending-emi-pod-kinds/SKILL.md) | append to `configs/pod_kinds.json` |
+| Resource (static markdown) | [`extending-emi-resources`](skills/extending-emi-resources/SKILL.md) | `resources/instructions/resource_<name>.md` |
 
 ## When you ask Claude Code (or any agent) to extend Emi
 
@@ -71,10 +72,12 @@ will run daily at 06:00 in the morning window."
 - **Event subscribers outside the routine system** — most should just
   become event-triggered routines (see `extending-emi-routines`),
   but the older `register_*_subscribers()` pattern still works for
-  edge cases.
-- **Context-injector resource resolvers** — adding a brand new
-  `{{ resource_my_thing }}` key requires editing the context injector.
-  Reuse existing resource patterns where possible.
+  stateful services (e.g. `dayflow_scheduler` with internal debounce
+  + mutex state).
+- **Computed / pipeline-output resources** — `{{ resource_X }}` keys
+  populated by background pipelines or scheduled compute. Static
+  markdown resources ARE drop-in (see `extending-emi-resources`);
+  it's just the dynamically-computed kinds that need code.
 
 ## See also
 
