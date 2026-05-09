@@ -465,3 +465,23 @@ ROUTINE_FUNCTION_REGISTRY = {
     "sleep_camera_tick": sleep_camera_tick,
     "sleep_camera_tick_local": sleep_camera_tick_local,
 }
+
+# Filesystem-discovered handlers from app/assistant/routine_handlers/.
+# Drop a new file there decorated with @routine_handler() and it gets
+# picked up here without editing this registry. Hand-registered entries
+# above win on name collision (legacy wins; auto-discovered drops with
+# a warning) so the migration path is "stop registering manually, the
+# auto-loader keeps things working."
+try:
+    from app.assistant.routine_handlers import discover_handlers as _discover_handlers
+    for _name, _fn in _discover_handlers().items():
+        if _name in ROUTINE_FUNCTION_REGISTRY:
+            logger.warning(
+                "[routine_functions] auto-discovered handler %r collides with manual registration; "
+                "keeping manual",
+                _name,
+            )
+            continue
+        ROUTINE_FUNCTION_REGISTRY[_name] = _fn
+except Exception as _e:
+    logger.warning("[routine_functions] handler auto-discovery failed: %s", _e)
