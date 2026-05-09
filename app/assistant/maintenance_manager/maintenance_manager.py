@@ -114,7 +114,7 @@ class MaintenanceManager:
         Check if a feature is currently in quiet hours based on user settings.
         
         Args:
-            feature: Feature name (e.g., 'kg', 'taxonomy', 'email')
+            feature: Feature name (e.g., 'email', 'calendar', 'tasks')
             
         Returns:
             True if the feature should be disabled due to quiet hours.
