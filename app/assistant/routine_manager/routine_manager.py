@@ -680,7 +680,9 @@ class RoutineManager:
 
         skip_when_afk = bool(guard.get("skip_when_afk", False))
         skip_when_potential = bool(guard.get("skip_when_potentially_afk", False))
-        if not (skip_when_afk or skip_when_potential):
+        require_afk = bool(guard.get("require_afk", False))
+        require_potential = bool(guard.get("require_potentially_afk", False))
+        if not (skip_when_afk or skip_when_potential or require_afk or require_potential):
             return True, "afk_guard disabled"
 
         try:
@@ -696,10 +698,21 @@ class RoutineManager:
             if not isinstance(activity, dict) or not activity:
                 # Fail closed for unknown AFK status.
                 return False, "afk status unknown"
-            if skip_when_potential and activity.get("is_potentially_afk", False):
+            is_afk = bool(activity.get("is_afk", False))
+            is_potential = bool(activity.get("is_potentially_afk", False))
+            # skip-when checks: refuse if user is (potentially) AFK.
+            if skip_when_potential and is_potential:
                 return False, "user potentially afk"
-            if skip_when_afk and activity.get("is_afk", False):
+            if skip_when_afk and is_afk:
                 return False, "user afk"
+            # require-when checks: refuse if user is NOT (potentially) AFK.
+            # Useful for routines that are only meaningful while the user is
+            # away — e.g. sleep-monitoring cameras that should run only when
+            # the user is in bed (proxied by AFK).
+            if require_afk and not is_afk:
+                return False, "require_afk: user is active"
+            if require_potential and not (is_afk or is_potential):
+                return False, "require_potentially_afk: user is active"
         except Exception as e:
             logger.warning("RoutineManager AFK check failed: %s", e)
             # Fail closed: if AFK check errors, skip the routine rather than run blind.
