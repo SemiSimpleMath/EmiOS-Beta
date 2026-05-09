@@ -394,3 +394,5 @@ data/me_node_importance.json
 resources/user/resource_kg_interests.json
 # Throwaway test output from allowlist runs.
 tasks/allowlist_test_output.txt
+# Personal install-for-friends snippet (email-pasteable copy of the README/BETA install).
+/INSTALL_FOR_FRIENDS.md
