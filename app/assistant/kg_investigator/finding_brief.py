@@ -691,45 +691,16 @@ def _brief_state_missing_dates(
     parts.append(_format_neighborhood_block(neigh))
 
     task = (
-        "Find start_date and/or end_date for this State/Event by reasoning over "
-        "the dated neighbors, sibling states, conversation evidence, AND any "
-        "datable facts you can dig up about people/places/events the prose "
-        "references. The pre-fetched 'Dated neighbors' list above is a "
-        "starting point, not the whole picture — it walks one hop and only "
-        "surfaces nodes that already have date fields populated. You have "
-        "kg_query: use it.\n\n"
-
-        "Active investigation patterns you are EXPECTED to apply:\n"
-        "- Prose mentions a person's age ('when Katy was 13', 'Annika as a "
-        "  baby'): kg_query for that person's entity node and any State nodes "
-        "  describing their birth. Person's birth + age → year range. "
-        "  Example: prose 'when Katy was 13 or 14' + Katy.birth='1990-04-15' → "
-        "  start_date_prose='around 2003-2004'.\n"
-        "- Prose anchors to a known event ('after the wedding', 'before "
-        "  graduation'): kg_query for that event's date.\n"
-        "- Prose references an institution/era ('while at UC Berkeley', "
-        "  'during the Seyfarth job'): kg_query for that entity's start/end.\n"
-        "- A sibling State on the same subject already has dates: bracket the "
-        "  subject's window (a Residence with no start_date but a prior "
-        "  Residence ended 2018 → start no earlier than 2018).\n\n"
-
-        "Combining known facts (X's age + X's birth date → year range) is "
-        "REASONING, not speculation. Do it. The 'Never invent dates' rule "
-        "means don't fabricate dates from thin air — it does NOT mean refuse "
-        "to derive a range from facts the KG actually holds.\n\n"
-
-        "Set proposed_action.op='fill_dates' with args = {start_date, "
-        "end_date, start_date_prose, end_date_prose}. Use ISO YYYY-MM-DD when "
-        "you have a specific date; use prose like 'around 2003-2004' or 'late "
-        "2020s' when you have only a fuzzy bound (a derived range from age + "
-        "birth IS a fuzzy bound — that's the right tool). Set confidence in "
-        "[0,1]: >= 0.8 will be auto-applied; below that the executor "
-        "escalates to the user as a clarifying question.\n\n"
-
-        "Only propose op='escalate_user' AFTER you've actually tried the "
-        "patterns above and the KG genuinely doesn't carry the anchor you "
-        "need. 'Dated neighbors didn't include it' is NOT the end of the "
-        "investigation — go query for it."
+        "Find start_date and/or end_date for this State/Event by reasoning over the "
+        "dated neighbors, sibling states, and conversation evidence. Set "
+        "proposed_action.op='fill_dates' with args = {start_date, end_date, "
+        "start_date_prose, end_date_prose} (use ISO YYYY-MM-DD when you have a "
+        "specific date; use prose like 'around 2010' or 'late 2020s' when you "
+        "have only a fuzzy bound). Set confidence in [0,1]: >= 0.8 will be "
+        "auto-applied by the executor; below that the executor escalates to "
+        "the user as a clarifying question. If the data genuinely doesn't "
+        "answer, propose op='escalate_user' with a specific question for the "
+        "user (e.g. 'When did Annika start middle school?'). Never invent dates."
     )
     return task, "\n".join(parts)
 
