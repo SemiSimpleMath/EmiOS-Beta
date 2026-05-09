@@ -71,6 +71,41 @@
     else if (state.activeTab === "interval") renderIntervalGrid();
     else if (state.activeTab === "weekly") renderWeeklyGrid();
     else if (state.activeTab === "all") renderAllTable();
+    else if (state.activeTab === "decisions") renderDecisions();
+  }
+
+  function badgeWindow(name) {
+    if (!name) return "";
+    return `<span class="rt-badge window">window: ${name}</span>`;
+  }
+  function badgeTrigger(type, topic) {
+    if (type === "event") return `<span class="rt-badge event">event: ${topic || "?"}</span>`;
+    return "";
+  }
+  function badgeWatchdog(maxRunSec) {
+    if (!maxRunSec) return "";
+    const label = maxRunSec >= 60 ? Math.round(maxRunSec / 60) + "m" : maxRunSec + "s";
+    return `<span class="rt-badge watchdog">timeout: ${label}</span>`;
+  }
+  function badgeOnError(onError) {
+    if (!onError) return "";
+    const max = onError.max_failures || 3;
+    const then = onError.then || "disable_with_ticket";
+    const tag = then === "log_only" ? "log" : "auto-disable";
+    return `<span class="rt-badge onerror">${tag} after ${max}</span>`;
+  }
+  function badgeFailureStreak(consecutive) {
+    if (!consecutive || consecutive === 0) return "";
+    return `<span class="rt-badge fail-streak">${consecutive} consecutive failures</span>`;
+  }
+  function autoDisableBanner(routine) {
+    if (!routine.auto_disabled_reason) return "";
+    return `<div class="rt-auto-disabled">Auto-disabled · ${escape(routine.auto_disabled_reason)}</div>`;
+  }
+  function escape(s) {
+    return String(s || "").replace(/[&<>"]/g, (c) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;",
+    }[c]));
   }
 
   function renderHeader() {
@@ -196,24 +231,41 @@
   function renderAllTable() {
     const tb = $("#all-table tbody");
     tb.innerHTML = "";
+    // Auto-disabled routines first (most attention-worthy), then enabled,
+    // then plain disabled — alphabetical inside each group.
     const sorted = [...state.routines].sort((a, b) => {
+      const aDis = !!a.auto_disabled_reason;
+      const bDis = !!b.auto_disabled_reason;
+      if (aDis !== bDis) return aDis ? -1 : 1;
       if (a.enabled !== b.enabled) return a.enabled ? -1 : 1;
       return a.name.localeCompare(b.name);
     });
     sorted.forEach((r) => {
       const tr = document.createElement("tr");
       if (!r.enabled) tr.classList.add("disabled");
+      if (r.auto_disabled_reason) tr.classList.add("auto-disabled");
+
+      const triggerBadge = badgeTrigger(r.trigger_type, r.trigger_event_topic);
+      const windowBadge  = badgeWindow(r.active_window);
+      const watchBadge   = badgeWatchdog(r.max_run_seconds);
+      const onErrBadge   = badgeOnError(r.on_error);
+      const failBadge    = badgeFailureStreak(r.consecutive_failures);
+      const banner       = autoDisableBanner(r);
+
       tr.innerHTML =
         `<td><span class="pill ${r.enabled ? "on" : "off"}">${r.enabled ? "ON" : "OFF"}</span></td>` +
-        `<td>${r.name}<div class="field-note">${r.id}</div></td>` +
-        `<td>${r.runner}</td>` +
-        `<td>${r.schedule_label}</td>` +
+        `<td>${escape(r.name)}<div class="field-note">${escape(r.id)}</div>${banner}</td>` +
+        `<td>${escape(r.runner)}<div class="rt-badges">${triggerBadge}</div></td>` +
+        `<td>${escape(r.schedule_label)}</td>` +
+        `<td>${windowBadge || "—"}</td>` +
+        `<td><div class="rt-badges">${watchBadge}${onErrBadge}${failBadge}</div></td>` +
         `<td>${relTime(r.last_finished_utc)}</td>` +
         `<td><span class="pill ${statusPillClass(r.last_status)}">${r.last_status || "—"}</span></td>` +
         `<td>${r.run_count || 0}</td>` +
         `<td><div class="btn-row">` +
           `<button class="btn" data-act="edit" data-id="${r.id}">Edit</button>` +
           `<button class="btn" data-act="run" data-id="${r.id}">Run now</button>` +
+          `<button class="btn" data-act="decisions" data-id="${r.id}">Decisions</button>` +
           `<button class="btn ${r.enabled ? "danger" : "primary"}" data-act="toggle" data-id="${r.id}">` +
           `${r.enabled ? "Disable" : "Enable"}</button>` +
         `</div></td>`;
@@ -222,6 +274,44 @@
     tb.querySelectorAll("button").forEach((b) =>
       b.addEventListener("click", (e) => onActionClick(e.currentTarget))
     );
+  }
+
+  // ---- Recent decisions tab ----
+  async function renderDecisions() {
+    const tb = $("#decisions-table tbody");
+    tb.innerHTML = `<tr><td colspan="6" class="hint">Loading…</td></tr>`;
+    const filterEl = $("#decisions-filter");
+    const filter = (filterEl && filterEl.value || "").trim();
+    let url = "/api/routines/decisions?limit=200&days_back=3";
+    if (filter) url += "&routine_id=" + encodeURIComponent(filter);
+    try {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const data = await r.json();
+      const rows = data.decisions || [];
+      tb.innerHTML = "";
+      if (!rows.length) {
+        tb.innerHTML = `<tr><td colspan="6" class="hint">No decisions in the last 3 days.</td></tr>`;
+        return;
+      }
+      rows.forEach((d) => {
+        const tr = document.createElement("tr");
+        tr.classList.add("decision-" + (d.event || "unknown"));
+        const reasonOrErr = d.error
+          ? `<span class="decision-error">${escape(d.error)}</span>`
+          : escape(d.reason || "");
+        tr.innerHTML =
+          `<td>${fmtDateTime(d.ts)}</td>` +
+          `<td>${escape(d.routine_id || "—")}</td>` +
+          `<td><span class="pill decision ${d.event || ""}">${escape(d.event || "—")}</span></td>` +
+          `<td>${reasonOrErr}</td>` +
+          `<td>${d.duration_s != null ? d.duration_s + "s" : "—"}</td>` +
+          `<td><code>${escape(d.run_id || "")}</code></td>`;
+        tb.appendChild(tr);
+      });
+    } catch (e) {
+      tb.innerHTML = `<tr><td colspan="6" class="bad">Failed: ${escape(e.message)}</td></tr>`;
+    }
   }
 
   function findRoutine(id) {
@@ -236,6 +326,12 @@
     if (act === "edit") openEdit(routine);
     else if (act === "run") doRunNow(routine);
     else if (act === "toggle") doToggle(routine);
+    else if (act === "decisions") {
+      // Switch to the decisions tab pre-filtered to this routine.
+      const filterEl = $("#decisions-filter");
+      if (filterEl) filterEl.value = routine.id;
+      switchTab("decisions");
+    }
   }
 
   async function doToggle(routine) {
@@ -374,17 +470,27 @@
     }
   }
 
+  function switchTab(name) {
+    $$(".tab").forEach((x) => x.classList.toggle("active", x.getAttribute("data-tab") === name));
+    state.activeTab = name;
+    $$(".tab-panel").forEach((p) => p.classList.add("hidden"));
+    const panel = $("#panel-" + name);
+    if (panel) panel.classList.remove("hidden");
+    render();
+  }
+
   function bindTabs() {
     $$(".tab").forEach((t) =>
-      t.addEventListener("click", () => {
-        $$(".tab").forEach((x) => x.classList.remove("active"));
-        t.classList.add("active");
-        state.activeTab = t.getAttribute("data-tab");
-        $$(".tab-panel").forEach((p) => p.classList.add("hidden"));
-        $("#panel-" + state.activeTab).classList.remove("hidden");
-        render();
-      })
+      t.addEventListener("click", () => switchTab(t.getAttribute("data-tab")))
     );
+    const filterEl = $("#decisions-filter");
+    if (filterEl) {
+      filterEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") renderDecisions();
+      });
+    }
+    const refreshEl = $("#decisions-refresh");
+    if (refreshEl) refreshEl.addEventListener("click", () => renderDecisions());
   }
 
   function bindModal() {

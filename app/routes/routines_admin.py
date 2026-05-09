@@ -108,13 +108,34 @@ def _enrich_routine(item: Dict[str, Any], state: Dict[str, Any]) -> Dict[str, An
     state_entry = (state.get("routines") or {}).get(rid) or {}
     rp = item.get("run_policy") or {}
     policy_type = (rp.get("type") or "").strip().lower()
-    schedule_label = ""
-    if policy_type == "daily":
-        schedule_label = f"daily at {rp.get('time_local', '??:??')}"
+
+    # Resolve the trigger shape (legacy run_policy → implicit time trigger).
+    raw_trigger = item.get("trigger") if isinstance(item.get("trigger"), dict) else None
+    if raw_trigger:
+        trigger_type = str(raw_trigger.get("type") or "time").lower()
+        trigger_event_topic = str(raw_trigger.get("topic") or "").strip() or None
+        trigger_active_window = raw_trigger.get("active_window")
+        # Time policy may live under trigger.policy when explicit form is used.
+        if trigger_type == "time" and isinstance(raw_trigger.get("policy"), dict):
+            policy_for_label = raw_trigger.get("policy") or {}
+            policy_type = (policy_for_label.get("type") or policy_type or "").lower()
+            rp_for_label = policy_for_label
+        else:
+            rp_for_label = rp
+    else:
+        trigger_type = "time"
+        trigger_event_topic = None
+        trigger_active_window = None
+        rp_for_label = rp
+
+    if trigger_type == "event":
+        schedule_label = f"on event: {trigger_event_topic or '?'}"
+    elif policy_type == "daily":
+        schedule_label = f"daily at {rp_for_label.get('time_local', '??:??')}"
     elif policy_type == "weekly":
-        schedule_label = f"{rp.get('day_of_week', '?')} {rp.get('time_local', '??:??')}"
+        schedule_label = f"{rp_for_label.get('day_of_week', '?')} {rp_for_label.get('time_local', '??:??')}"
     elif policy_type == "interval":
-        schedule_label = f"every {_format_interval(int(rp.get('min_interval_seconds') or 0))}"
+        schedule_label = f"every {_format_interval(int(rp_for_label.get('min_interval_seconds') or 0))}"
     else:
         schedule_label = policy_type or "—"
 
@@ -126,12 +147,14 @@ def _enrich_routine(item: Dict[str, Any], state: Dict[str, Any]) -> Dict[str, An
     else:
         effective_enabled = bool(item.get("enabled", False))
 
+    on_error = item.get("on_error") if isinstance(item.get("on_error"), dict) else {}
+
     return {
         "id": rid,
         "name": item.get("name") or rid,
         "enabled": effective_enabled,
         "runner": item.get("runner") or "—",
-        "run_policy": rp,
+        "run_policy": rp_for_label,
         "policy_type": policy_type,
         "schedule_label": schedule_label,
         "notes": item.get("notes") or "",
@@ -144,6 +167,19 @@ def _enrich_routine(item: Dict[str, Any], state: Dict[str, Any]) -> Dict[str, An
         "last_error": state_entry.get("last_error"),
         "last_duration_s": state_entry.get("last_duration_s"),
         "run_count": state_entry.get("run_count", 0),
+        # Phase 1/2 trigger fields
+        "trigger_type": trigger_type,
+        "trigger_event_topic": trigger_event_topic,
+        "active_window": trigger_active_window if isinstance(trigger_active_window, str)
+            else ("inline" if isinstance(trigger_active_window, dict) else None),
+        # Phase 3 failure tracking
+        "consecutive_failures": int(state_entry.get("consecutive_failures") or 0),
+        "next_attempt_after_utc": state_entry.get("next_attempt_after_utc"),
+        "auto_disabled_reason": state_entry.get("auto_disabled_reason"),
+        "auto_disabled_at_utc": state_entry.get("auto_disabled_at_utc"),
+        "on_error": on_error or None,
+        # Phase 6 watchdog
+        "max_run_seconds": item.get("max_run_seconds"),
     }
 
 

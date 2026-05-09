@@ -25,6 +25,7 @@
       <button class="tab" data-tab="interval">Interval (continuous)</button>
       <button class="tab" data-tab="weekly">Weekly</button>
       <button class="tab" data-tab="all">All routines</button>
+      <button class="tab" data-tab="decisions">Recent decisions</button>
     </nav>
 
     <section class="tab-panel" id="panel-schedule">
@@ -43,7 +44,7 @@
     </section>
 
     <section class="tab-panel hidden" id="panel-all">
-      <div class="hint">Every configured routine, enabled or not.</div>
+      <div class="hint">Every configured routine, enabled or not. Auto-disabled routines surface in red at the top.</div>
       <table class="all-table" id="all-table">
         <thead>
           <tr>
@@ -51,10 +52,35 @@
             <th>Name</th>
             <th>Runner</th>
             <th>Schedule</th>
+            <th>Window</th>
+            <th>Guards</th>
             <th>Last run</th>
             <th>Status</th>
             <th>Runs</th>
             <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section class="tab-panel hidden" id="panel-decisions">
+      <div class="hint">
+        Recent routine activity, newest first. Boring "no-op tick" reasons (interval not reached, not yet time, etc.) are filtered out — only fires, outcomes, interesting blocks, and watchdog/auto-disable events appear here.
+      </div>
+      <div class="decisions-controls">
+        <label>Filter to routine: <input id="decisions-filter" placeholder="(all)"></label>
+        <button class="btn" id="decisions-refresh">Refresh</button>
+      </div>
+      <table class="all-table" id="decisions-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Routine</th>
+            <th>Event</th>
+            <th>Reason / error</th>
+            <th>Duration</th>
+            <th>Run id</th>
           </tr>
         </thead>
         <tbody></tbody>
