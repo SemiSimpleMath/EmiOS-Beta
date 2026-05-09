@@ -1,7 +1,7 @@
 {# Settings menu (left hamburger).
 
-   Reorganized into four conceptual sections per the menu reorg notes:
-     - UI            : appearance + sensory toggles
+   Three conceptual sections (the UI quick-toggles section now lives in
+   the gear dropdown — see _top_bar_quick_settings_menu.html):
      - How Emi acts  : behavior / personality / skills / instructions
      - How Emi runs  : operational / scheduling / dev-adjacent toggles
      - Integrations  : third-party hookups + secrets
@@ -11,30 +11,9 @@
    reserved for the Integrations cluster where the items are
    service-specific configuration pages.
 
-   IDs of the toggle buttons are canonical to menu_controls.js
-   (menu-theme-toggle, menu-speak-mode, menu-quiet-mode). Don't add
-   layout-specific suffixes.
+   Email + dayflow editors are featured pages on /skills, not separate
+   menu entries — the Skills page links to them directly.
 #}
-
-<li class="menu-section-label">UI</li>
-<li class="menu-item">
-  <button id="menu-theme-toggle" class="menu-btn">
-    <i class="fas fa-sun"></i>
-    <span>Light/Dark Mode</span>
-  </button>
-</li>
-<li class="menu-item">
-  <button id="menu-speak-mode" class="menu-btn" aria-pressed="false">
-    <i class="fas fa-microphone"></i>
-    <span>Speak Mode: Off</span>
-  </button>
-</li>
-<li class="menu-item">
-  <button id="menu-quiet-mode" class="menu-btn" aria-pressed="false">
-    <i class="fas fa-moon"></i>
-    <span>Quiet Mode: Off</span>
-  </button>
-</li>
 
 <li class="menu-section-label">How {{ assistant_name }} acts</li>
 <li class="menu-item">
@@ -47,18 +26,6 @@
   <a href="/skills" target="_blank" class="menu-btn">
     <i class="fas fa-graduation-cap"></i>
     <span>Skills</span>
-  </a>
-</li>
-<li class="menu-item">
-  <a href="/skills/email" target="_blank" class="menu-btn">
-    <i class="fas fa-envelope"></i>
-    <span>Email instructions</span>
-  </a>
-</li>
-<li class="menu-item">
-  <a href="/skills/dayflow" target="_blank" class="menu-btn">
-    <i class="fas fa-calendar-day"></i>
-    <span>Dayflow instructions</span>
   </a>
 </li>
 <li class="menu-item menu-submenu">
@@ -89,30 +56,18 @@
     <span>Features</span>
   </a>
 </li>
+<li class="menu-item">
+  <a href="/settings/api-keys" target="_blank" class="menu-btn">
+    <i class="fas fa-key"></i>
+    <span>API Keys</span>
+  </a>
+</li>
 
 <li class="menu-section-label">Integrations</li>
 <li class="menu-item">
   <a href="/settings/integrations" target="_blank" class="menu-btn">
     <i class="fas fa-plug"></i>
     <span>Integrations hub</span>
-  </a>
-</li>
-<li class="menu-item">
-  <a href="/settings/integrations/google" target="_blank" class="menu-btn">
-    <i class="fab fa-google"></i>
-    <span>Google OAuth</span>
-  </a>
-</li>
-<li class="menu-item">
-  <a href="/settings/integrations/ring" target="_blank" class="menu-btn">
-    <i class="fas fa-video"></i>
-    <span>Ring Cameras</span>
-  </a>
-</li>
-<li class="menu-item">
-  <a href="/settings/api-keys" target="_blank" class="menu-btn">
-    <i class="fas fa-key"></i>
-    <span>API Keys</span>
   </a>
 </li>
 

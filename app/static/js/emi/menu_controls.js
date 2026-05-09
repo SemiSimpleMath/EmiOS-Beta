@@ -52,6 +52,8 @@
         const lifeDropdownMenu = document.getElementById("life-dropdown-menu");
         const dashToggleBtn = document.getElementById("dash-menu-toggle-btn");
         const dashDropdownMenu = document.getElementById("dash-dropdown-menu");
+        const quickToggleBtn = document.getElementById("quick-settings-toggle-btn");
+        const quickDropdownMenu = document.getElementById("quick-settings-dropdown");
 
         if (!menuToggleBtn || !dropdownMenu) {
             fns.logWarn("Menu elements not found");
@@ -63,7 +65,7 @@
             target.classList.toggle("hidden");
             otherList.forEach((d) => { if (d) d.classList.add("hidden"); });
         }
-        const allDropdowns = [dropdownMenu, devDropdownMenu, lifeDropdownMenu, dashDropdownMenu];
+        const allDropdowns = [dropdownMenu, devDropdownMenu, lifeDropdownMenu, dashDropdownMenu, quickDropdownMenu];
 
         menuToggleBtn.addEventListener("click", function (e) {
             e.stopPropagation();
@@ -91,6 +93,13 @@
             });
         }
 
+        if (quickToggleBtn && quickDropdownMenu) {
+            quickToggleBtn.addEventListener("click", function (e) {
+                e.stopPropagation();
+                openOnly(quickDropdownMenu, allDropdowns.filter((d) => d !== quickDropdownMenu));
+            });
+        }
+
         document.addEventListener("click", function (e) {
             if (!dropdownMenu.contains(e.target) && e.target !== menuToggleBtn) {
                 dropdownMenu.classList.add("hidden");
@@ -103,6 +112,9 @@
             }
             if (dashDropdownMenu && !dashDropdownMenu.contains(e.target) && e.target !== dashToggleBtn) {
                 dashDropdownMenu.classList.add("hidden");
+            }
+            if (quickDropdownMenu && !quickDropdownMenu.contains(e.target) && e.target !== quickToggleBtn) {
+                quickDropdownMenu.classList.add("hidden");
             }
         });
 

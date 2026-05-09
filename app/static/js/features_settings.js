@@ -1,5 +1,5 @@
 // Features Settings
-const features = ['email', 'calendar', 'tasks', 'scheduler', 'weather', 'news', 'daily_summary', 'kg', 'taxonomy', 'entity_cards'];
+const features = ['email', 'calendar', 'tasks', 'scheduler', 'weather', 'news', 'kg', 'entity_cards'];
 
 document.addEventListener('DOMContentLoaded', function() {
     loadFeatureSettings();

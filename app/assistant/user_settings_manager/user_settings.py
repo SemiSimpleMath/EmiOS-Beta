@@ -82,9 +82,7 @@ class UserSettingsManager:
                 "enable_weather": True,
                 "enable_news": True,
                 "enable_scheduler": True,
-                "enable_daily_summary": True,
                 "enable_kg": True,
-                "enable_taxonomy": False,
                 "enable_entity_cards": True,
                 "enable_speak_mode": False
             },
@@ -94,7 +92,6 @@ class UserSettingsManager:
                 "default_tts_provider": "elevenlabs",
                 "default_stt_provider": "deepgram",
                 "auto_inject_entities": True,
-                "taxonomy_confidence_threshold": 0.7,
                 "entity_card_confidence_threshold": 0.5
             },
             "api_settings": {
@@ -165,16 +162,6 @@ class UserSettingsManager:
                         "end": "07:00"
                     },
                     "kg": {
-                        "enabled": False,
-                        "start": "23:00",
-                        "end": "07:00"
-                    },
-                    "daily_summary": {
-                        "enabled": False,
-                        "start": "23:00",
-                        "end": "07:00"
-                    },
-                    "taxonomy": {
                         "enabled": False,
                         "start": "23:00",
                         "end": "07:00"
@@ -456,23 +443,11 @@ class UserSettingsManager:
                 'requires_features': [],
                 'description': 'Scheduler events (no API key required)'
             },
-            'daily_summary': {
-                'requires_api_keys': ['openai'],
-                'requires_oauth': ['google'],
-                'requires_features': [],
-                'description': 'Daily summary requires Google OAuth (email, calendar, tasks) and OpenAI API'
-            },
             'kg': {
                 'requires_api_keys': ['openai'],
                 'requires_oauth': [],
                 'requires_features': [],
                 'description': 'Knowledge graph requires OpenAI API for processing'
-            },
-            'taxonomy': {
-                'requires_api_keys': ['openai'],
-                'requires_oauth': [],
-                'requires_features': [],
-                'description': 'Taxonomy requires OpenAI API for classification'
             },
             'entity_cards': {
                 'requires_api_keys': ['openai'],
@@ -592,16 +567,11 @@ class UserSettingsManager:
         
         # Check if critical API keys are set
         if not self.get_api_key('openai'):
-            warnings.append("OpenAI API key is not set. KG, Taxonomy, and Entity Cards will not work.")
-        
+            warnings.append("OpenAI API key is not set. KG and Entity Cards will not work.")
+
         if not self.has_google_oauth_credentials():
             warnings.append("Google OAuth credentials are not set. Email, Calendar, and Tasks will not work.")
-        
-        # Check confidence thresholds
-        taxonomy_threshold = self.get('preferences.taxonomy_confidence_threshold', 0.7)
-        if not 0 <= taxonomy_threshold <= 1:
-            errors.append("Taxonomy confidence threshold must be between 0 and 1")
-        
+
         entity_threshold = self.get('preferences.entity_card_confidence_threshold', 0.5)
         if not 0 <= entity_threshold <= 1:
             errors.append("Entity card confidence threshold must be between 0 and 1")

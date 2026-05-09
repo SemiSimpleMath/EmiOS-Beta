@@ -38,11 +38,10 @@
   </div>
 
   <div class="d-header__controls">
-    <span id="mute-btn-container" role="button" tabindex="0" aria-label="Toggle site mute"
-          style="cursor:pointer;">
-      <i class="fas fa-volume-down" id="mute-icon"></i>
-      <i class="fas fa-volume-mute hidden" id="unmute-icon"></i>
-    </span>
+    <!-- Quick Settings (gear) — light/dark, speak mode, quiet mode -->
+    <button id="quick-settings-toggle-btn" class="menu-toggle-btn" aria-label="Quick settings" title="Quick settings">
+      <i class="fas fa-cog"></i>
+    </button>
     <!-- Dashboards Menu Button -->
     <button id="dash-menu-toggle-btn" class="menu-toggle-btn dash-menu-toggle-btn" aria-label="Toggle Dashboards Menu" title="Dashboards">
       <i class="fas fa-th-large"></i>
@@ -62,6 +61,13 @@
   <div class="dropdown-menu hidden" id="dropdown-menu">
     <ul class="menu-list">
       {% include '_top_bar_user_menu.html' %}
+    </ul>
+  </div>
+
+  <!-- Quick Settings Dropdown Menu -->
+  <div id="quick-settings-dropdown" class="dropdown-menu dropdown-menu--right hidden">
+    <ul class="menu-list">
+      {% include '_top_bar_quick_settings_menu.html' %}
     </ul>
   </div>
 

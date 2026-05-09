@@ -7,14 +7,22 @@
 /* ---- Utilities ---- */
 .hidden { display: none !important; }
 
-/* ---- Dropdown Menus ---- */
+/* ---- Dropdown Menus ----
+   Background is mixed with white so it lifts off same-tone widget panels
+   in dark mode without going glaringly bright. Accent stripe on the
+   leading edge + heavier shadow give a visible "floating" feel against
+   the page. color-mix is supported in every modern browser the rest of
+   the app already targets. */
 .dropdown-menu {
   position: fixed;
   left: 0;
   width: 280px;
-  background-color: var(--widget-background);
-  border-right: 1px solid var(--border-color);
-  box-shadow: 4px 0 12px rgba(0, 0, 0, 0.2);
+  background-color: color-mix(in srgb, var(--widget-background) 88%, white 12%);
+  border: 1px solid color-mix(in srgb, var(--border-color) 60%, var(--accent-color) 40%);
+  border-right: 4px solid var(--accent-color);
+  box-shadow:
+    8px 0 28px rgba(0, 0, 0, 0.55),
+    0 2px 6px rgba(0, 0, 0, 0.35);
   z-index: 99;
   overflow-y: auto;
   transform: translateX(-100%);
@@ -25,9 +33,29 @@
 .dropdown-menu--right {
   left: auto;
   right: 0;
+  border-right: 1px solid color-mix(in srgb, var(--border-color) 60%, var(--accent-color) 40%);
+  border-left: 4px solid var(--accent-color);
+  box-shadow:
+    -8px 0 28px rgba(0, 0, 0, 0.55),
+    0 2px 6px rgba(0, 0, 0, 0.35);
   transform: translateX(100%);
 }
 .dropdown-menu--right:not(.hidden) { transform: translateX(0); }
+
+/* Light theme: shadow needs less alpha (the white background can't go
+   "darker than white"), and the elevated tint should darken instead of
+   lighten so the panel actually contrasts with the white page. */
+[data-theme="light"] .dropdown-menu {
+  background-color: color-mix(in srgb, var(--widget-background) 92%, black 8%);
+  box-shadow:
+    8px 0 24px rgba(0, 0, 0, 0.18),
+    0 2px 6px rgba(0, 0, 0, 0.12);
+}
+[data-theme="light"] .dropdown-menu--right {
+  box-shadow:
+    -8px 0 24px rgba(0, 0, 0, 0.18),
+    0 2px 6px rgba(0, 0, 0, 0.12);
+}
 
 .menu-list { list-style: none; padding: 0; margin: 0; }
 .menu-item { border-bottom: 1px solid var(--border-color); }

@@ -27,9 +27,14 @@
     >{{ assistant_name }}</span>
   </h1>
 
-  <div id="mute-btn-container" class="m-mute" role="button" tabindex="0" aria-label="Toggle site mute">
-    <i class="fas fa-volume-down" id="mute-icon"></i>
-    <i class="fas fa-volume-mute hidden" id="unmute-icon"></i>
+  <button id="quick-settings-toggle-btn" class="m-mute" aria-label="Quick settings" title="Quick settings">
+    <i class="fas fa-cog"></i>
+  </button>
+
+  <div id="quick-settings-dropdown" class="dropdown-menu dropdown-menu--right hidden">
+    <ul class="menu-list">
+      {% include '_top_bar_quick_settings_menu.html' %}
+    </ul>
   </div>
 </header>
 

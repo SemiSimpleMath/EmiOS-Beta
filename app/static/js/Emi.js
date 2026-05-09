@@ -376,16 +376,14 @@ function setSiteMute(isMuted) {
 }
 
 function setupSiteMuteToggle() {
+    // The site-mute speaker icon was retired when light/dark + speak +
+    // quiet moved into the gear dropdown. Speak Mode is now the user-
+    // facing audio control. Leaving this no-op so callers don't have to
+    // be guarded; site mute defaults to false.
     const btn = document.getElementById('mute-btn-container');
-    if (!btn) {
-        console.error("Audio button container with ID 'mute-btn-container' not found.");
-        return;
-    }
-    if (btn.dataset.boundMute === "true") return;
+    if (!btn || btn.dataset.boundMute === "true") return;
     btn.dataset.boundMute = "true";
-    btn.addEventListener('click', () => {
-        setSiteMute(!mute);
-    });
+    btn.addEventListener('click', () => { setSiteMute(!mute); });
 }
 
 function setupTtsTitleToggle() {

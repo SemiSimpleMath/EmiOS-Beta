@@ -40,12 +40,10 @@
   <!-- Chat Mode Indicator -->
   <div id="mode-indicator" class="mode-indicator"></div>
   
-  <div id="mute-btn-container">
-    <!-- Mute Icon -->
-    <i class="fas fa-volume-down" id="mute-icon"></i>
-    <!-- Unmute Icon -->
-    <i class="fas fa-volume-mute hidden" id="unmute-icon"></i>
-  </div>
+  <!-- Quick Settings (gear) — light/dark, speak mode, quiet mode -->
+  <button id="quick-settings-toggle-btn" class="menu-toggle-btn" aria-label="Quick settings" title="Quick settings">
+    <i class="fas fa-cog"></i>
+  </button>
 
   <!-- Dashboards Menu Button -->
   <button id="dash-menu-toggle-btn" class="menu-toggle-btn dash-menu-toggle-btn" aria-label="Toggle Dashboards Menu" title="Dashboards">
@@ -68,6 +66,13 @@
   <div id="dropdown-menu" class="dropdown-menu hidden">
     <ul class="menu-list">
       {% include '_top_bar_user_menu.html' %}
+    </ul>
+  </div>
+
+  <!-- Quick Settings Dropdown Menu -->
+  <div id="quick-settings-dropdown" class="dropdown-menu dropdown-menu--right hidden">
+    <ul class="menu-list">
+      {% include '_top_bar_quick_settings_menu.html' %}
     </ul>
   </div>
 
