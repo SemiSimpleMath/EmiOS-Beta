@@ -30,6 +30,11 @@ _MAX_PAIR_GAP_SECONDS = 10 * 60
 # sleep_analyzer system prompt: 10 = "Distress, fire, any emergency."
 _EMERGENCY_IMPORTANCE = 10
 
+# Lower threshold: frames worth surfacing to dayflow as image pods,
+# even if they're not full emergencies. The dayflow planner decides
+# whether to create a ticket / nudge from there.
+_NOTABLE_BEDROOM_IMPORTANCE = 7
+
 
 def register_ring_subscribers() -> None:
     """Wire camera-snapshot subscribers onto event_hub. Call once at startup."""
@@ -83,10 +88,18 @@ def _on_doorbell_frame(message: Message) -> None:
             jpeg.name, is_significant,
         )
         if is_significant:
-            # TODO: mint a pod from this snapshot — kind=image, body=caption.
-            logger.info(
-                "[door_bell_analyzer] SIGNIFICANT (pod creation deferred): %s — %s",
-                jpeg.name, significance_reason or "(no reason given)",
+            _mint_camera_pod(
+                jpeg=jpeg,
+                source_kind="ring_doorbell_significant",
+                one_liner=caption[:140],
+                body=caption,
+                analyzer="door_bell_analyzer",
+                camera_id=DOORBELL_CAMERA_ID,
+                captured_at_utc=str(payload.get("captured_at_utc") or ""),
+                extra_metadata={
+                    "is_significant": True,
+                    "significance_reason": significance_reason,
+                },
             )
     except Exception as e:
         logger.error("[door_bell_analyzer] subscriber crashed: %s", e, exc_info=True)
@@ -166,6 +179,32 @@ def _on_bedroom_frame(message: Message) -> None:
             importance_int = int(float(raw_imp)) if raw_imp not in (None, "") else 0
         except (TypeError, ValueError):
             importance_int = 0
+
+        # Mint a pod for any notable frame (importance >= 7). Dayflow
+        # ingests pods of this kind when its allowlist permits.
+        # Idempotent: re-minting the same JPEG returns the existing pod.
+        if importance_int >= _NOTABLE_BEDROOM_IMPORTANCE:
+            description = str(data.get("description") or "").strip()
+            importance_reason = str(data.get("importance_reason") or "").strip()
+            _mint_camera_pod(
+                jpeg=jpeg,
+                source_kind="ring_bedroom_notable",
+                one_liner=(importance_reason or description)[:140] or f"bedroom frame importance={importance_int}",
+                body=description or importance_reason or "",
+                analyzer="sleep_analyzer",
+                camera_id=str(agent_input.get("camera_id") or BEDROOM_CAMERA_ID),
+                captured_at_utc=str(agent_input.get("captured_at_utc") or ""),
+                extra_metadata={
+                    "importance": importance_int,
+                    "importance_reason": importance_reason,
+                    "subject_in_bed": data.get("subject_in_bed"),
+                    "position": data.get("position"),
+                    "light_state": data.get("light_state"),
+                    "cpap_state": data.get("cpap_state"),
+                    "is_emergency": importance_int >= _EMERGENCY_IMPORTANCE,
+                },
+            )
+
         if importance_int >= _EMERGENCY_IMPORTANCE:
             _trigger_bedroom_emergency_alarm(
                 jpeg=jpeg, sidecar=sidecar,
@@ -362,6 +401,79 @@ def _payload(message: Message) -> Dict[str, Any]:
             return v
     ai = getattr(message, "agent_input", None)
     return ai if isinstance(ai, dict) else {}
+
+
+def _mint_camera_pod(
+    *,
+    jpeg: Path,
+    source_kind: str,
+    one_liner: str,
+    body: str,
+    analyzer: str,
+    camera_id: str,
+    captured_at_utc: str,
+    extra_metadata: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Mint an image pod from a camera frame and inline the analyzer's
+    caption/description as the body.
+
+    Idempotent: re-minting the same JPEG returns the existing pod and
+    we update body/one_liner only if the existing pod's body is empty.
+
+    Best-effort: a failure here logs an error but does NOT raise — the
+    sidecar/log line above is the durable record of the analysis. Pod
+    minting is an additional projection, not the source of truth.
+    """
+    try:
+        from datetime import datetime as _dt, timezone as _tz
+        from app.assistant.pod_store.image_ingest import ingest_image_file
+        from app.assistant.pod_store.pod_store import PodStore
+
+        occurred_at = None
+        if captured_at_utc:
+            try:
+                occurred_at = _dt.fromisoformat(captured_at_utc.replace("Z", "+00:00"))
+                if occurred_at.tzinfo is None:
+                    occurred_at = occurred_at.replace(tzinfo=_tz.utc)
+            except ValueError:
+                occurred_at = None
+
+        store = PodStore()
+        meta_extra: Dict[str, Any] = {
+            "camera_id": camera_id,
+            "captured_at_utc": captured_at_utc,
+            "analyzer": analyzer,
+        }
+        if extra_metadata:
+            meta_extra.update(extra_metadata)
+
+        pod = ingest_image_file(
+            src_path=jpeg,
+            source_kind=source_kind,
+            pod_store=store,
+            metadata_extra=meta_extra,
+            occurred_at_utc=occurred_at,
+        )
+
+        # ingest_image_file leaves body empty for the vision-extraction
+        # pass to fill in. The analyzer already produced a caption, so
+        # backfill it now. Don't overwrite a body that's already populated.
+        if not (pod.body or "").strip() and (body or "").strip():
+            pod.body = body.strip()
+            pod.one_liner = one_liner.strip() or pod.one_liner
+            if isinstance(pod.metadata, dict):
+                pod.metadata["vision_extraction_status"] = "done"
+            store.put(pod)
+
+        logger.info(
+            "[%s] minted pod %s source_kind=%s",
+            analyzer, pod.pod_id, source_kind,
+        )
+    except Exception as e:
+        logger.error(
+            "[%s] pod minting failed for %s: %s",
+            analyzer, jpeg.name, e, exc_info=True,
+        )
 
 
 def _resolve_paths(payload: Dict[str, Any]) -> tuple[Optional[Path], Optional[Path]]:
