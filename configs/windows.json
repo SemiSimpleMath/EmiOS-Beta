@@ -1,0 +1,37 @@
+{
+  "_doc": "Named active windows. Routines reference these by name in their trigger.active_window field. Inline windows are also supported when a window is one-off.",
+
+  "windows": {
+    "sleep": {
+      "from": "22:00",
+      "to": "08:00",
+      "local": true,
+      "_doc": "Overnight window. Bed-facing camera + light dim + nest cooldown all run inside this."
+    },
+    "work_hours": {
+      "from": "09:00",
+      "to": "17:00",
+      "local": true,
+      "weekdays_only": true,
+      "_doc": "Standard weekday work block. Email checks, focus reminders, posture nudges live here."
+    },
+    "morning": {
+      "from": "06:00",
+      "to": "10:00",
+      "local": true,
+      "_doc": "Morning briefing / coffee nudge / overnight news roundup window."
+    },
+    "evening": {
+      "from": "18:00",
+      "to": "22:00",
+      "local": true,
+      "_doc": "Family time, dinner, wind-down."
+    },
+    "daytime": {
+      "from": "08:00",
+      "to": "20:00",
+      "local": true,
+      "_doc": "General awake hours. Default for things that should NOT fire while you sleep."
+    }
+  }
+}

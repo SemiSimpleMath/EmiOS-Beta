@@ -18,6 +18,10 @@ from app.assistant.routine_manager.utils import (
     parse_iso_utc,
     status_dir,
 )
+from app.assistant.routine_manager.windows import (
+    is_in_window,
+    resolve_window,
+)
 from app.assistant.routine_manager.runners import (
     JobRoutineRunner,
     PipelineRoutineRunner,
@@ -310,6 +314,15 @@ class RoutineManager:
                 if ttype == "time" and "policy" not in trigger:
                     # Allow the explicit form to omit `policy` and inherit run_policy.
                     trigger["policy"] = run_policy
+                # Validate the active_window field early — fail loud at load
+                # time on a typo'd name rather than silently never firing.
+                if ttype == "time" and "active_window" in trigger:
+                    try:
+                        resolve_window(trigger.get("active_window"))
+                    except ValueError as e:
+                        raise ValueError(
+                            f"Routine '{routine_id}' has invalid active_window: {e}"
+                        )
             else:
                 trigger = {"type": "time", "policy": run_policy}
 
@@ -483,6 +496,18 @@ class RoutineManager:
         with self._state_lock:
             entry = self._get_state_entry(routine.routine_id)
         last_finished = parse_iso_utc(entry.last_finished_utc) or parse_iso_utc(entry.last_run_utc)
+
+        # Active window gate (composes with any time policy below).
+        # Resolved at load time, but resolve again here so a hot-edit of
+        # configs/windows.json takes effect on the next tick without restart.
+        active_window_spec = (routine.trigger or {}).get("active_window")
+        if active_window_spec:
+            try:
+                window = resolve_window(active_window_spec)
+            except ValueError as e:
+                return False, f"window resolve failed: {e}"
+            if window is not None and not is_in_window(window, now_utc):
+                return False, "outside active window"
 
         policy_type = str(routine.run_policy.get("type") or "interval").strip().lower()
 
