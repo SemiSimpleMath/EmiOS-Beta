@@ -199,6 +199,110 @@ def _build_email_message(*, email_data: Dict[str, Any], now_utc: datetime) -> Me
     )
 
 
+def _build_pod_message(*, pod: Any, now_utc: datetime) -> Message:
+    """Convert a Pod into a dayflow input Message.
+
+    Used by `_ingest_pods` for pod kinds the dayflow access.json
+    allowlist permits (camera-derived image pods today; extensible
+    to email pods, document pods, etc. as those land).
+
+    The pod's metadata.captured_at_utc anchors the timestamp when
+    available (so a doorbell ring at 3:42 PM doesn't time-shift to
+    "now" if the resolver caught up later). Falls back to pod
+    creation time, then now.
+    """
+    metadata = dict(pod.metadata) if isinstance(pod.metadata, dict) else {}
+    pod_kind = str(getattr(pod, "kind", "") or "").strip()
+    source_kind = str(metadata.get("source_kind") or "").strip()
+    camera_name = str(metadata.get("camera_name") or "").strip()
+    one_liner = str(getattr(pod, "one_liner", "") or "").strip()
+    body = str(getattr(pod, "body", "") or "").strip()
+
+    item_id = f"dayflow_pod:{pod.pod_id}"
+
+    captured_at_str = str(metadata.get("captured_at_utc") or "").strip()
+    pod_timestamp = now_utc
+    if captured_at_str:
+        try:
+            parsed = datetime.fromisoformat(captured_at_str.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            pod_timestamp = parsed.astimezone(timezone.utc)
+        except ValueError:
+            pass
+    elif getattr(pod, "created_at", None):
+        try:
+            ts = pod.created_at
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            pod_timestamp = ts.astimezone(timezone.utc)
+        except Exception:
+            pass
+
+    # Importance map. Anything that made it past pod_policy is at least
+    # medium by definition. Bedroom emergencies escalate to high; ordinary
+    # camera frames stay medium; everything else low.
+    importance_label = "medium"
+    if metadata.get("is_emergency") is True:
+        importance_label = "high"
+    elif source_kind == "ring_doorbell_significant":
+        importance_label = "medium"
+    elif source_kind == "ring_bedroom_notable":
+        importance_label = "medium"
+
+    summary_text = one_liner or body[:140] or f"{source_kind or pod_kind} pod"
+    content_parts: List[str] = []
+    if camera_name:
+        content_parts.append(f"Camera ({camera_name}): {summary_text}")
+    elif source_kind:
+        content_parts.append(f"{source_kind}: {summary_text}")
+    else:
+        content_parts.append(summary_text)
+    content = ". ".join(content_parts)
+
+    item_metadata: Dict[str, Any] = {
+        "item_id": item_id,
+        "source_type": "pod",
+        "event_type": "pod_inbound",
+        "created_at": pod_timestamp.isoformat(),
+        "created_at_local": utc_to_local(pod_timestamp).strftime("%I:%M %p"),
+        "summary": summary_text,
+        "importance": importance_label,
+        "actionability": "context_only",
+        "state": "new",
+        "state_reason": "pod_ingested",
+        "last_reviewed_at": now_utc.isoformat(),
+        "cooldown_until": None,
+        "linked_item_ids": [],
+        "pod_id": pod.pod_id,
+        "pod_kind": pod_kind,
+        "pod_source_kind": source_kind,
+        "pod_one_liner": one_liner,
+        "pod_body_excerpt": body[:2000],
+        "camera_id": metadata.get("camera_id"),
+        "camera_name": camera_name,
+        "captured_at_utc": captured_at_str,
+    }
+    # Carry through scalar fields from pod metadata so downstream agents
+    # don't need to re-fetch the pod for filtering. Skip nested types.
+    for k, v in metadata.items():
+        if k in item_metadata:
+            continue
+        if isinstance(v, (str, int, float, bool)) or v is None:
+            item_metadata[f"pod_meta_{k}"] = v
+
+    return Message(
+        id=item_id,
+        data_type="dayflow_input_item",
+        sub_data_type=["dayflow_orchestrator", "input_layer", "new", "pod", "dayflow_artifact"],
+        sender="pod_ingest",
+        content=content,
+        timestamp=pod_timestamp,
+        room_id="dayflow_orchestrator",
+        metadata=item_metadata,
+    )
+
+
 def _load_emails_from_event_repo(*, now_utc: datetime) -> List[Dict[str, Any]]:
     """Load today's important emails (importance >= 5) from the event repository."""
     import json

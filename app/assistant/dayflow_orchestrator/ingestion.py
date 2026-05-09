@@ -19,6 +19,7 @@ from app.assistant.dayflow_orchestrator.contracts import assign_short_ids, get_m
 from app.assistant.dayflow_orchestrator.input_message_builder import (
     _build_email_message,
     _build_delegation_message,
+    _build_pod_message,
     _load_dayflow_requests,
     _load_emails_from_event_repo,
     mark_dayflow_requests_ingested,
@@ -26,6 +27,7 @@ from app.assistant.dayflow_orchestrator.input_message_builder import (
 from app.assistant.dayflow_orchestrator.orchestrator_status import (
     CHAT_WATERMARK_KEY,
     DAYFLOW_ORCHESTRATOR_ROOM_ID,
+    POD_WATERMARK_KEY,
     load_orchestrator_status,
     persist_orchestrator_status,
 )
@@ -124,6 +126,122 @@ def _ingest_chat(
     return new_only
 
 
+def _load_dayflow_pod_kinds_filter() -> list[Dict[str, Any]]:
+    """Read pod-kind allowlist from dayflow access config.
+
+    Each entry is a dict with at least a 'kind' field; an optional
+    'source_kind' narrows further. Empty list means no pod ingestion.
+    """
+    access_path = (
+        Path(__file__).resolve().parent.parent
+        / "rooms"
+        / DAYFLOW_ORCHESTRATOR_ROOM_ID
+        / "access.json"
+    )
+    if not access_path.exists():
+        return []
+    data = json.loads(access_path.read_text(encoding="utf-8"))
+    raw = data.get("ingestion_pod_kinds")
+    if raw is None:
+        return []  # absent = pod ingestion off
+    if not isinstance(raw, list):
+        raise ValueError(
+            "_load_dayflow_pod_kinds_filter: 'ingestion_pod_kinds' must be a list."
+        )
+    out: list[Dict[str, Any]] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        kind = str(entry.get("kind") or "").strip()
+        if not kind:
+            continue
+        out.append({
+            "kind": kind,
+            "source_kind": str(entry.get("source_kind") or "").strip() or None,
+        })
+    return out
+
+
+def _pod_matches_filter(pod: Any, filters: list[Dict[str, Any]]) -> bool:
+    pod_kind = str(getattr(pod, "kind", "") or "").strip()
+    pod_meta = getattr(pod, "metadata", None) or {}
+    pod_source_kind = ""
+    if isinstance(pod_meta, dict):
+        pod_source_kind = str(pod_meta.get("source_kind") or "").strip()
+    for f in filters:
+        if f["kind"] != pod_kind:
+            continue
+        required_source = f.get("source_kind")
+        if required_source and required_source != pod_source_kind:
+            continue
+        return True
+    return False
+
+
+def _ingest_pods(
+    existing_ids: set[str], now_utc: datetime,
+) -> list[Message]:
+    """Ingest new pods from pod_store as dayflow items.
+
+    Filters by `ingestion_pod_kinds` allowlist in access.json. Pods of
+    other kinds (manual uploads, email attachments, etc.) are not
+    ingested — they remain available via pod_search but don't enter
+    dayflow's working set unless explicitly allowed.
+    """
+    filters = _load_dayflow_pod_kinds_filter()
+    if not filters:
+        return []  # pod ingestion disabled
+
+    from app.assistant.pod_store.pod_store import PodStore
+
+    status = load_orchestrator_status()
+    raw_watermark = status.get(POD_WATERMARK_KEY)
+    since_utc: datetime | None = None
+    if raw_watermark:
+        try:
+            since_utc = parse_iso_utc_strict(raw_watermark, label=POD_WATERMARK_KEY)
+        except Exception as e:
+            logger.warning("[pod_ingest] bad watermark %r, ignoring: %s", raw_watermark, e)
+            since_utc = None
+    if since_utc is None:
+        # First run: cap at start-of-day so we don't replay history.
+        since_utc = _get_day_start_utc(now_utc)
+
+    store = PodStore()
+    # Query without kind filter — we may have multiple kinds in the
+    # allowlist; filter post-fetch by the (kind, source_kind) tuple.
+    pods = store.query(since_utc=since_utc, limit=200)
+
+    new: list[Message] = []
+    max_seen_ts = since_utc
+    for pod in pods:
+        if not _pod_matches_filter(pod, filters):
+            continue
+        try:
+            msg = _build_pod_message(pod=pod, now_utc=now_utc)
+        except Exception as e:
+            logger.error("[pod_ingest] failed to build message for pod %s: %s", pod.pod_id, e)
+            continue
+        item_id = str(getattr(msg, "id", "") or "").strip()
+        if item_id and item_id not in existing_ids:
+            new.append(msg)
+        # Advance watermark even on dedup so we don't re-query the row.
+        try:
+            ts = pod.created_at
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            if ts > max_seen_ts:
+                max_seen_ts = ts
+        except Exception:
+            pass
+
+    if max_seen_ts > since_utc:
+        status[POD_WATERMARK_KEY] = max_seen_ts.isoformat()
+        persist_orchestrator_status(status)
+
+    return new
+
+
 def _ingest_emails(
     existing_ids: set[str], now_utc: datetime,
 ) -> list[Message]:
@@ -179,13 +297,14 @@ def run_dayflow_ingestion(
     chat_items = _ingest_chat(existing_ids, now)
     email_items = _ingest_emails(existing_ids, now)
     delegation_items, delegation_requests = _ingest_delegation_requests(existing_ids, now)
+    pod_items = _ingest_pods(existing_ids, now)
 
-    all_new = chat_items + email_items + delegation_items
+    all_new = chat_items + email_items + delegation_items + pod_items
 
     if not all_new:
         logger.info("run_dayflow_ingestion: no new items to ingest.")
         return {
-            "chat": 0, "email": 0, "delegation": 0, "total": 0,
+            "chat": 0, "email": 0, "delegation": 0, "pod": 0, "total": 0,
         }
 
     # 3. Assign short_ids.
@@ -244,10 +363,12 @@ def run_dayflow_ingestion(
         "chat": len(chat_items),
         "email": len(email_items),
         "delegation": len(delegation_items),
+        "pod": len(pod_items),
         "total": len(all_new),
     }
     logger.info(
-        "run_dayflow_ingestion: ingested %d item(s) — chat=%d email=%d delegation=%d",
-        summary["total"], summary["chat"], summary["email"], summary["delegation"],
+        "run_dayflow_ingestion: ingested %d item(s). chat=%d email=%d delegation=%d pod=%d",
+        summary["total"], summary["chat"], summary["email"],
+        summary["delegation"], summary["pod"],
     )
     return summary
