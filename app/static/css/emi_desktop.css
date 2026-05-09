@@ -12,15 +12,16 @@
   --desktop-gap: 12px;
 
   /* Typography scale — change these to resize everything */
-  /* 8pt ≈ 0.5rem at 16px root. Scale everything from there. */
-  --font-xs: 0.4rem;    /* dates, meta, secondary labels */
-  --font-sm: 0.45rem;   /* timestamps, details, sub-text */
-  --font-base: 0.5rem;  /* default body/widget text (~8pt) */
-  --font-md: 0.55rem;   /* chat text, input fields */
-  --font-lg: 0.65rem;   /* header title */
-  --icon-sm: 0.5rem;    /* card title icons */
-  --icon-base: 0.6rem;  /* header icons */
-  --icon-lg: 0.7rem;    /* menu toggle */
+  /* Roughly 80% of the vertical layout's scale; smaller than vertical
+     because the side rails are narrower, but above readability floor. */
+  --font-xs: 0.65rem;   /* dates, meta, secondary labels */
+  --font-sm: 0.72rem;   /* timestamps, details, sub-text */
+  --font-base: 0.8rem;  /* default body/widget text */
+  --font-md: 0.85rem;   /* chat text, input fields */
+  --font-lg: 1.0rem;    /* header title */
+  --icon-sm: 0.8rem;    /* card title icons */
+  --icon-base: 0.95rem; /* header icons */
+  --icon-lg: 1.1rem;    /* menu toggle */
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; font-family: inherit; }

@@ -1,0 +1,20 @@
+{# Narrow weather widget for the horizontal/desktop layout.
+
+   Reuses .weather-box and .sun/.moon class hooks so weather.js drives
+   the same bg-color cycle and sun→moon transition as the full widget.
+   weather_narrow.css overrides sun/moon positioning to the top-right
+   corner instead of an arc trajectory across the sky.
+
+   Time is populated by the helper in weather.js (same updateScene
+   tick). Temp uses the canonical IDs that news_weather_widgets.js
+   already writes to. #}
+<div class="weather-box weather-narrow sky">
+    <div class="sun"></div>
+    <div class="moon"></div>
+
+    <div class="weather-narrow__time" id="weather_narrow_time"></div>
+
+    <div class="weather-narrow__temp">
+        <span id="weather_temp_number">--</span><span id="weather_temp_degree">°</span>
+    </div>
+</div>

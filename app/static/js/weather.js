@@ -4,9 +4,11 @@ document.addEventListener("DOMContentLoaded", () => {
   const moon = document.querySelector('.moon');
   const starsContainer = document.querySelector('.stars');
   const grounds = document.querySelectorAll('.ground1, .ground2');
+  const narrowTime = document.getElementById('weather_narrow_time');
 
-  // Generate Stars
+  // Generate Stars (skipped on the narrow widget — no .stars element).
   function createStars(count) {
+    if (!starsContainer) return;
     for (let i = 0; i < count; i++) {
       const star = document.createElement('div');
       star.classList.add('star');
@@ -196,8 +198,18 @@ function timeToMillisecondsFromMidnight(timeString) {
     const moonTop = boxHeight * 0.2;    // Moon's peak (20% height)
     const moonBottom = boxHeight;       // Moon's starting/ending position
 
-    const sunX = (boxWidth / 2) - (sun.clientWidth / 2); // Fixed X for sun
-    const moonXCenter = boxWidth / 2;                    // Center X for moon
+    // Narrow widget: pin both bodies to the right edge so they arc
+    // up/down on the right side of the strip instead of crossing the
+    // sky horizontally. Detected via presence of #weather_narrow_time.
+    const narrow = !!narrowTime;
+    const rightEdgeMargin = 14;
+
+    const sunX = narrow
+      ? (boxWidth - sun.clientWidth - rightEdgeMargin)
+      : ((boxWidth / 2) - (sun.clientWidth / 2));
+    const moonXCenter = narrow
+      ? (boxWidth - moon.clientWidth - rightEdgeMargin)
+      : (boxWidth / 2);
 
     if (isSun) {
       let y;
@@ -225,9 +237,15 @@ function timeToMillisecondsFromMidnight(timeString) {
 
         const angle = Math.PI * factor; // Angle from 0 to π radians (half-circle)
 
-        // Calculate X and Y positions based on sine and cosine
-        x = moonXCenter + Math.cos(angle) * (boxWidth / 3); // X oscillates left to right
-        y = moonBottom - Math.sin(angle) * (moonBottom - moonTop); // Y follows the arc (half-circle)
+        if (narrow) {
+          // Pin to right edge; arc bottom -> top -> bottom across the night.
+          x = moonXCenter;
+          y = moonBottom - Math.sin(angle) * (moonBottom - moonTop);
+        } else {
+          // Original: half-circle across the bottom of the full widget.
+          x = moonXCenter + Math.cos(angle) * (boxWidth / 3);
+          y = moonBottom - Math.sin(angle) * (moonBottom - moonTop);
+        }
 
         return { x, y };
       } else {
@@ -295,8 +313,21 @@ function timeToMillisecondsFromMidnight(timeString) {
       isNight = false; // Daytime
     }
 
-    // Update stars visibility
-    starsContainer.style.opacity = isNight ? 1 : 0;
+    // Update stars visibility (narrow widget has no stars element).
+    if (starsContainer) {
+      starsContainer.style.opacity = isNight ? 1 : 0;
+    }
+
+    // Narrow widget — populate clock face if present.
+    if (narrowTime) {
+      const now = new Date();
+      let hh = now.getHours();
+      const mm = String(now.getMinutes()).padStart(2, '0');
+      const ampm = hh >= 12 ? 'PM' : 'AM';
+      hh = hh % 12 || 12;
+      const next = `${hh}:${mm} ${ampm}`;
+      if (narrowTime.textContent !== next) narrowTime.textContent = next;
+    }
 
     // Update moon visibility
     if (isNight) {
