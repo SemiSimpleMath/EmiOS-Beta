@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Skills</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/setup_wizard.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/skills.css') }}?v={{ static_v }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+<div class="container">
+    <header class="topbar">
+        <div class="title-block">
+            <h1>Skills</h1>
+            <p class="subtitle">
+                Skills are <em>action instructions</em> for agents. Resources are data — different concept.
+                Three ways skills get into an agent's prompt.
+            </p>
+        </div>
+    </header>
+
+    <section class="skills-explainer">
+        <div class="explainer-card">
+            <h3><i class="fas fa-thumbtack"></i> Per-agent always-injected</h3>
+            <p>Listed in an agent's <code>config.yaml</code> under <code>skills:</code>. Loaded every time that agent runs. The user-editable ones live below as featured editors (Email, Dayflow).</p>
+        </div>
+        <div class="explainer-card">
+            <h3><i class="fas fa-key"></i> Keyword-triggered</h3>
+            <p>Skill's frontmatter has <code>auto_inject_when.task_keywords</code>. Auto-injects whenever the agent's task / incoming message contains one of the keywords. No per-agent declaration needed.</p>
+        </div>
+        <div class="explainer-card">
+            <h3><i class="fas fa-share-nodes"></i> Shared across agents</h3>
+            <p>Same skill referenced in multiple agents' <code>skills:</code> lists. Built once, reused.</p>
+        </div>
+    </section>
+
+    <section class="skills-matrix-note">
+        <p>
+            <em>Worth knowing:</em> a skill is just markdown with frontmatter. Nothing stops a skill from being passed
+            agent-to-agent as a pod attachment — one agent learns something, drops it as a skill pod, the next agent
+            picks it up.
+            <strong>"Whoa. I know kung fu."</strong> &nbsp;<span class="dim">"Show me."</span>
+        </p>
+    </section>
+
+    <h2>Featured editors</h2>
+    <div class="featured-grid">
+        <a class="featured-card" href="/skills/email">
+            <div class="featured-icon"><i class="fas fa-envelope"></i></div>
+            <div class="featured-text">
+                <h3>Email</h3>
+                <p>How Emi handles your inbox: filtering rules, VIP senders, what's important, what to skip.</p>
+            </div>
+            <div class="featured-arrow">&rsaquo;</div>
+        </a>
+        <a class="featured-card" href="/skills/dayflow">
+            <div class="featured-icon"><i class="fas fa-calendar-day"></i></div>
+            <div class="featured-text">
+                <h3>Dayflow</h3>
+                <p>How the dayflow orchestrator behaves: nudge timing, escalation policy, your overrides on top of the public template.</p>
+            </div>
+            <div class="featured-arrow">&rsaquo;</div>
+        </a>
+    </div>
+
+    <h2>All registered skills</h2>
+    <p class="hint">Loaded from <code>skills/&lt;name&gt;/SKILL.md</code> at startup.</p>
+
+    <div class="skills-section">
+        <h3>Per-agent always-injected</h3>
+        <div class="skills-list" id="skills-agent-specific"><div class="hint">Loading…</div></div>
+    </div>
+
+    <div class="skills-section">
+        <h3>Keyword-triggered</h3>
+        <div class="skills-list" id="skills-keyword"><div class="hint">Loading…</div></div>
+    </div>
+
+    <div class="skills-section">
+        <h3>Shared across agents</h3>
+        <div class="skills-list" id="skills-shared"><div class="hint">Loading…</div></div>
+    </div>
+</div>
+
+<script>
+(async function () {
+    function escapeHtml(s) {
+        return String(s || "").replace(/[&<>"]/g, (c) => ({
+            "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;",
+        }[c]));
+    }
+    function renderBucket(rootId, items, emptyText) {
+        const root = document.getElementById(rootId);
+        if (!items || !items.length) {
+            root.innerHTML = `<div class="hint">${emptyText}</div>`;
+            return;
+        }
+        root.innerHTML = items.map((s) => {
+            const agents = s.agents.length
+                ? `<div class="skill-meta">used by: ${s.agents.map(escapeHtml).join(", ")}</div>`
+                : `<div class="skill-meta dim">no agents currently bind this</div>`;
+            const keywords = s.task_keywords && s.task_keywords.length
+                ? `<div class="skill-keywords">triggers on: ${s.task_keywords.map(k => `<span class="kw">${escapeHtml(k)}</span>`).join(" ")}</div>`
+                : "";
+            return `<div class="skill-card">
+                <div class="skill-name">${escapeHtml(s.name)}</div>
+                <div class="skill-description">${escapeHtml(s.description)}</div>
+                ${agents}
+                ${keywords}
+            </div>`;
+        }).join("");
+    }
+    try {
+        const r = await fetch("/api/skills");
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const data = await r.json();
+        renderBucket("skills-agent-specific", data.agent_specific, "None.");
+        renderBucket("skills-keyword", data.keyword, "None — keyword auto-trigger lands here when skills opt in.");
+        renderBucket("skills-shared", data.shared, "None.");
+    } catch (e) {
+        for (const id of ["skills-agent-specific", "skills-keyword", "skills-shared"]) {
+            document.getElementById(id).innerHTML = `<div class="hint bad">Failed: ${escapeHtml(e.message)}</div>`;
+        }
+    }
+})();
+</script>
+</body>
+</html>

@@ -929,6 +929,163 @@ def important_resources_page():
     return render_template('important_resources_settings.html')
 
 
+# ---------------------------------------------------------------------------
+# Skills pages
+#   /skills          — overview: three injection patterns + featured editors
+#   /skills/email    — dedicated editor for email user prefs (a SKILL: action
+#                      instructions for the email agent)
+#   /skills/dayflow  — dedicated editor for personal dayflow orchestrator
+#                      preferences (a SKILL: action instructions for the
+#                      strategic_planner)
+# ---------------------------------------------------------------------------
+
+# Map of editor-page → underlying instruction file. Strict allowlist —
+# the API only reads/writes these specific paths, never an arbitrary file
+# from a request param.
+_EDITABLE_SKILL_PATHS = {
+    "email":   "resources/instructions/resource_email_user_prefs.md",
+    "dayflow": "resources/instructions/resource_orchestrator_user_prefs_personal.md",
+}
+
+
+def _skill_path(skill_id: str) -> Path:
+    rel = _EDITABLE_SKILL_PATHS.get(skill_id)
+    if not rel:
+        raise ValueError(f"unknown editable skill: {skill_id!r}")
+    return Path(get_project_root()) / rel
+
+
+@preferences_bp.route('/skills', methods=['GET'])
+def skills_overview_page():
+    """Skills overview: lists the three injection patterns and the
+    featured user-editable instruction sets (email, dayflow)."""
+    return render_template('skills_overview.html')
+
+
+@preferences_bp.route('/skills/email', methods=['GET'])
+def skills_email_page():
+    """Dedicated editor for the email-agent skill."""
+    return render_template('skills_email.html')
+
+
+@preferences_bp.route('/skills/dayflow', methods=['GET'])
+def skills_dayflow_page():
+    """Dedicated editor for the dayflow-orchestrator skill."""
+    return render_template('skills_dayflow.html')
+
+
+@preferences_bp.route('/api/skills', methods=['GET'])
+def skills_list_api():
+    """Catalog of skills for the overview page, grouped by injection pattern.
+
+    Walks SkillRegistry for the loaded markdown skills and walks every
+    agent's config.yaml `skills:` field to compute usage. Three buckets:
+
+      - shared        : referenced by 2+ agents
+      - agent_specific: referenced by exactly 1 agent (no auto-trigger)
+      - keyword       : has metadata.auto_inject_when.task_keywords
+    """
+    import yaml as _yaml
+    from collections import defaultdict
+
+    skill_to_agents: dict[str, list[str]] = defaultdict(list)
+    agents_dir = Path(get_project_root()) / "app" / "assistant" / "agents"
+    if agents_dir.exists():
+        for cfg_path in agents_dir.rglob("config.yaml"):
+            try:
+                cfg = _yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+            except Exception:
+                continue
+            agent_skills = cfg.get("skills") or []
+            if not isinstance(agent_skills, list):
+                continue
+            agent_name = str(cfg.get("name") or "").strip() or cfg_path.parent.name
+            for s in agent_skills:
+                sname = str(s).strip()
+                if sname and agent_name not in skill_to_agents[sname]:
+                    skill_to_agents[sname].append(agent_name)
+
+    # Walk SkillRegistry for loaded skills + their auto-trigger metadata.
+    try:
+        from app.assistant.ServiceLocator.service_locator import DI
+        registry = getattr(DI, "skill_registry", None)
+        headers = registry.headers() if registry else []
+    except Exception:
+        headers = []
+
+    shared, agent_specific, keyword = [], [], []
+    for h in headers:
+        agents = skill_to_agents.get(h.name, [])
+        has_keywords = bool(
+            h.auto_inject_when and getattr(h.auto_inject_when, "task_keywords", None)
+        )
+        entry = {
+            "name": h.name,
+            "description": h.description,
+            "agents": agents,
+            "task_keywords": (
+                list(h.auto_inject_when.task_keywords) if has_keywords else []
+            ),
+        }
+        if has_keywords:
+            keyword.append(entry)
+        elif len(agents) >= 2:
+            shared.append(entry)
+        else:
+            agent_specific.append(entry)
+
+    # Sort each bucket alphabetically for stable display.
+    for bucket in (shared, agent_specific, keyword):
+        bucket.sort(key=lambda e: e["name"])
+
+    return jsonify({
+        "shared": shared,
+        "agent_specific": agent_specific,
+        "keyword": keyword,
+    })
+
+
+@preferences_bp.route('/api/skills/<skill_id>', methods=['GET'])
+def skill_get_api(skill_id: str):
+    """Read the markdown body of an editable skill (email or dayflow)."""
+    try:
+        path = _skill_path(skill_id)
+    except ValueError:
+        return jsonify({"error": "unknown skill"}), 404
+    if not path.exists():
+        return jsonify({"skill_id": skill_id, "content": "", "exists": False})
+    try:
+        content = path.read_text(encoding="utf-8")
+    except Exception as e:
+        logger.error("Failed reading skill %s: %s", skill_id, e)
+        return jsonify({"error": "read failed"}), 500
+    return jsonify({"skill_id": skill_id, "content": content, "exists": True})
+
+
+@preferences_bp.route('/api/skills/<skill_id>', methods=['PUT'])
+def skill_put_api(skill_id: str):
+    """Atomic write of an editable skill's markdown body."""
+    try:
+        path = _skill_path(skill_id)
+    except ValueError:
+        return jsonify({"error": "unknown skill"}), 404
+    payload = request.get_json(silent=True) or {}
+    content = str(payload.get("content") or "")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        with tmp.open("w", encoding="utf-8", newline="\n") as f:
+            f.write(content)
+            if not content.endswith("\n"):
+                f.write("\n")
+            f.flush()
+        tmp.replace(path)
+    except Exception as e:
+        logger.error("Failed writing skill %s: %s", skill_id, e)
+        return jsonify({"error": "write failed"}), 500
+    return jsonify({"ok": True, "skill_id": skill_id, "bytes": len(content)})
+
+
 def _important_resource_abs_path(resource_id: str) -> Path:
     spec = _IMPORTANT_RESOURCE_SPECS.get(resource_id)
     if not isinstance(spec, dict):

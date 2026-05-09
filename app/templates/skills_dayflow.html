@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Skill — Dayflow</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/setup_wizard.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/skills.css') }}?v={{ static_v }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+<div class="container skill-editor-container">
+    <header class="topbar">
+        <div class="title-block">
+            <a class="back-link" href="/skills">&lsaquo; All skills</a>
+            <h1><i class="fas fa-calendar-day"></i> Dayflow skill</h1>
+            <p class="subtitle">
+                Personal overlay on top of the public dayflow orchestrator template.
+                Your nudge-timing rules, escalation policy, override defaults — anything below extends or overrides
+                the public template at LLM read time. This file is gitignored.
+            </p>
+        </div>
+    </header>
+
+    <section class="skill-editor">
+        <textarea id="skill-content" class="skill-textarea" spellcheck="false"
+                  placeholder="Loading…"></textarea>
+        <div class="skill-editor-toolbar">
+            <span class="save-status" id="save-status"></span>
+            <button class="btn primary" id="save-btn">Save</button>
+        </div>
+    </section>
+</div>
+
+<script>
+(function () {
+    const SKILL_ID = "dayflow";
+    const ta = document.getElementById("skill-content");
+    const status = document.getElementById("save-status");
+    const btn = document.getElementById("save-btn");
+
+    function setStatus(text, kind) {
+        status.textContent = text;
+        status.className = "save-status" + (kind ? " " + kind : "");
+    }
+
+    async function load() {
+        try {
+            const r = await fetch(`/api/skills/${SKILL_ID}`);
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            const data = await r.json();
+            ta.value = data.content || "";
+            setStatus(data.exists ? "" : "(empty — new file)", "dim");
+        } catch (e) {
+            setStatus(`Load failed: ${e.message}`, "bad");
+        }
+    }
+
+    async function save() {
+        btn.disabled = true;
+        setStatus("Saving…", "dim");
+        try {
+            const r = await fetch(`/api/skills/${SKILL_ID}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ content: ta.value }),
+            });
+            const data = await r.json().catch(() => ({}));
+            if (!r.ok || data.ok === false) throw new Error(data.error || ("HTTP " + r.status));
+            setStatus(`Saved ${data.bytes} bytes.`, "ok");
+        } catch (e) {
+            setStatus(`Save failed: ${e.message}`, "bad");
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    btn.addEventListener("click", save);
+    document.addEventListener("keydown", (e) => {
+        if ((e.metaKey || e.ctrlKey) && e.key === "s") { e.preventDefault(); save(); }
+    });
+    load();
+})();
+</script>
+</body>
+</html>
