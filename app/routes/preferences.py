@@ -435,14 +435,34 @@ def camera_page(alias):
 
 
 def _camera_snapshot_dirs() -> list:
-    """Return the dirs the snapshot UI scans. Ring frames land in
-    data/ring_snapshots/; local_camera_snapshot frames land in
-    data/local_camera_snapshots/. The UI lists both."""
+    """Return the dirs the snapshot UI scans.
+
+    Three sources, all flattened to a list of leaf directories the UI
+    iterates non-recursively:
+
+      - data/ring_snapshots/         — raw Ring bridge captures (pre-analysis)
+      - data/local_camera_snapshots/ — raw RTSP captures (pre-analysis)
+      - data/cameras/<name>/<date>/  — per-camera analyzed frames after
+        the camera_dispatcher relocates the JPEG and writes sidecars
+
+    The per-camera tree is the post-analysis source of truth. Without
+    walking it the UI would silently lose every frame the dispatcher
+    has processed.
+    """
     repo_root = Path(__file__).resolve().parents[2]
-    return [
+    dirs = [
         repo_root / "data" / "ring_snapshots",
         repo_root / "data" / "local_camera_snapshots",
     ]
+    cameras_root = repo_root / "data" / "cameras"
+    if cameras_root.is_dir():
+        for cam_dir in sorted(cameras_root.iterdir()):
+            if not cam_dir.is_dir():
+                continue
+            for date_dir in sorted(cam_dir.iterdir()):
+                if date_dir.is_dir():
+                    dirs.append(date_dir)
+    return dirs
 
 
 def _ring_snapshots_dir():

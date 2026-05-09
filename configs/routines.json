@@ -22,6 +22,28 @@
       "notes": "Handles every ring_snapshot_captured event. Routes by camera_id to the per-camera analyzer + storage + pod policy declared in configs/cameras.json. Replaces the bespoke register_camera_dispatcher() startup hook with a declarative event-triggered routine."
     },
     {
+      "id": "ring_motion_poll",
+      "enabled": true,
+      "name": "Ring motion poll → snapshot",
+      "runner": "function",
+      "spec": {
+        "function_name": "ring_motion_poll",
+        "lookback_minutes": 5
+      },
+      "run_policy": {
+        "type": "interval",
+        "min_interval_seconds": 60
+      },
+      "max_run_seconds": 60,
+      "on_error": {
+        "max_failures": 6,
+        "backoff_base_seconds": 60,
+        "backoff_max_seconds": 1800,
+        "then": "disable_with_ticket"
+      },
+      "notes": "Polls Ring's recent-events history per camera every 60s. For each new motion/ding event since the watermark, calls the snapshot bridge → publishes ring_snapshot_captured → camera_dispatch runs the analyzer and mints a pod. Watermark in data/ring_motion_watermark.json. First poll on a cold start does NOT replay history; it just sets the watermark."
+    },
+    {
       "id": "morning_briefing",
       "enabled": false,
       "_comment": "Example task-based routine. Provide your own tasks/morning_briefing/task_spec.md, then toggle on via /routines admin UI (per-machine status, never commits to this file).",
