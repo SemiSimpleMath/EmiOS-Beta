@@ -698,7 +698,10 @@ def _brief_state_missing_dates(
         "specific date; use prose like 'around 2010' or 'late 2020s' when you "
         "have only a fuzzy bound). Set confidence in [0,1]: >= 0.8 will be "
         "auto-applied by the executor; below that the executor escalates to "
-        "the user as a clarifying question. If the data genuinely doesn't "
+        "the user as a clarifying question. Follow date references in the "
+        "prose with kg_query (e.g. 'when Katy was 13' → look up Katy's birth); "
+        "deriving a range from KG facts is reasoning, not invention. If the "
+        "data genuinely doesn't "
         "answer, propose op='escalate_user' with a specific question for the "
         "user (e.g. 'When did Annika start middle school?'). Never invent dates."
     )
