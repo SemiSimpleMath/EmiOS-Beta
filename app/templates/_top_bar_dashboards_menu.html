@@ -1,0 +1,57 @@
+{# Dashboards menu (new top-bar entry).
+
+   Places to GO and look at things — dashboards, viewers, editors,
+   and a Rooms submenu for jumping between conversation surfaces.
+
+   Items here are page links only. No toggles, no settings.
+#}
+<li class="menu-item">
+  <a href="/daily_summary" target="_blank" class="menu-btn">
+    <i class="fas fa-calendar-day"></i>
+    <span>Daily Summary</span>
+  </a>
+</li>
+<li class="menu-item">
+  <a href="/insights" target="_blank" class="menu-btn">
+    <i class="fas fa-brain"></i>
+    <span>Insights</span>
+  </a>
+</li>
+<li class="menu-item">
+  <a href="/routines" target="_blank" class="menu-btn">
+    <i class="fas fa-clock"></i>
+    <span>Routines &amp; Schedule</span>
+  </a>
+</li>
+<li class="menu-item">
+  <a href="/settings/integrations/ring/snapshots" target="_blank" class="menu-btn">
+    <i class="fas fa-images"></i>
+    <span>Camera Snapshots</span>
+  </a>
+</li>
+<li class="menu-item">
+  <a href="/doc/editor" target="_blank" class="menu-btn">
+    <i class="fas fa-file-alt"></i>
+    <span>Document Editor</span>
+  </a>
+</li>
+{% if music_enabled %}
+<li class="menu-item">
+  <a href="/music" target="_blank" class="menu-btn">
+    <i class="fas fa-music"></i>
+    <span>Music</span>
+  </a>
+</li>
+{% endif %}
+<li class="menu-item menu-submenu">
+  <button class="menu-btn submenu-toggle">
+    <i class="fas fa-comments"></i>
+    <span>Rooms</span>
+    <i class="fas fa-chevron-down submenu-arrow"></i>
+  </button>
+  <ul class="submenu">
+    <li class="submenu-item"><a href="/" class="menu-btn"><i class="fas fa-home"></i><span>Master room</span></a></li>
+    <li class="submenu-item"><a href="/emi-code" target="_blank" class="menu-btn"><i class="fas fa-code"></i><span>EmiCode</span></a></li>
+    <li class="submenu-item"><a href="/kg-dev" target="_blank" class="menu-btn"><i class="fas fa-terminal"></i><span>KG Dev Console</span></a></li>
+  </ul>
+</li>

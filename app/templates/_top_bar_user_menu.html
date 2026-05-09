@@ -1,14 +1,22 @@
-{# Shared user (left hamburger) menu items.
+{# Settings menu (left hamburger).
 
-   Included by both chat_bot.html (vertical) and chat_bot_desktop.html
-   (horizontal) so adding/removing an item only needs one edit. The
-   wrapping <div class="dropdown-menu"><ul class="menu-list"> stays in
-   each template — only the <li> contents live here.
+   Reorganized into four conceptual sections per the menu reorg notes:
+     - UI            : appearance + sensory toggles
+     - How Emi acts  : behavior / personality / skills / instructions
+     - How Emi runs  : operational / scheduling / dev-adjacent toggles
+     - Integrations  : third-party hookups + secrets
 
-   IDs are canonical to what app/static/js/emi/menu_controls.js listens
-   for (menu-theme-toggle, menu-speak-mode, menu-quiet-mode). Don't add
-   layout-specific suffixes — they'd silently dead-link the buttons.
+   Section headers are rendered as non-interactive .menu-section-label
+   <li>s. Most items are inline (clear at one glance); subsubmenus are
+   reserved for the Integrations cluster where the items are
+   service-specific configuration pages.
+
+   IDs of the toggle buttons are canonical to menu_controls.js
+   (menu-theme-toggle, menu-speak-mode, menu-quiet-mode). Don't add
+   layout-specific suffixes.
 #}
+
+<li class="menu-section-label">UI</li>
 <li class="menu-item">
   <button id="menu-theme-toggle" class="menu-btn">
     <i class="fas fa-sun"></i>
@@ -27,24 +35,8 @@
     <span>Quiet Mode: Off</span>
   </button>
 </li>
-<li class="menu-item">
-  <a href="/daily_summary" target="_blank" class="menu-btn">
-    <i class="fas fa-calendar-day"></i>
-    <span>Daily Summary</span>
-  </a>
-</li>
-<li class="menu-item">
-  <a href="/doc/editor" target="_blank" class="menu-btn">
-    <i class="fas fa-file-alt"></i>
-    <span>Document Editor</span>
-  </a>
-</li>
-<li class="menu-item">
-  <a href="/insights" target="_blank" class="menu-btn">
-    <i class="fas fa-brain"></i>
-    <span>Insights</span>
-  </a>
-</li>
+
+<li class="menu-section-label">How {{ assistant_name }} acts</li>
 <li class="menu-item">
   <a href="/personalize" target="_blank" class="menu-btn">
     <i class="fas fa-sliders-h"></i>
@@ -52,23 +44,27 @@
   </a>
 </li>
 <li class="menu-item">
-  <a href="/routines" target="_blank" class="menu-btn">
-    <i class="fas fa-clock"></i>
-    <span>Routines &amp; Schedule</span>
+  <a href="/skills" target="_blank" class="menu-btn">
+    <i class="fas fa-graduation-cap"></i>
+    <span>Skills</span>
   </a>
 </li>
-{% if music_enabled %}
 <li class="menu-item">
-  <a href="/music" target="_blank" class="menu-btn">
-    <i class="fas fa-music"></i>
-    <span>Music</span>
+  <a href="/skills/email" target="_blank" class="menu-btn">
+    <i class="fas fa-envelope"></i>
+    <span>Email instructions</span>
   </a>
 </li>
-{% endif %}
+<li class="menu-item">
+  <a href="/skills/dayflow" target="_blank" class="menu-btn">
+    <i class="fas fa-calendar-day"></i>
+    <span>Dayflow instructions</span>
+  </a>
+</li>
 <li class="menu-item menu-submenu">
   <button class="menu-btn submenu-toggle">
-    <i class="fas fa-cogs"></i>
-    <span>Settings</span>
+    <i class="fas fa-user"></i>
+    <span>Profile</span>
     <i class="fas fa-chevron-down submenu-arrow"></i>
   </button>
   <ul class="submenu">
@@ -76,25 +72,50 @@
     <li class="submenu-item"><a href="/settings/user-bio" class="menu-btn"><i class="fas fa-user-pen"></i><span>Your Bio</span></a></li>
     <li class="submenu-item"><a href="/settings/assistant" class="menu-btn"><i class="fas fa-robot"></i><span>Assistant</span></a></li>
     <li class="submenu-item"><a href="/settings/wellness" class="menu-btn"><i class="fas fa-heartbeat"></i><span>Wellness</span></a></li>
-    <li class="submenu-item"><a href="/settings/quiet-mode" class="menu-btn"><i class="fas fa-moon"></i><span>Quiet Mode</span></a></li>
-    <li class="submenu-item"><a href="/settings/important-resources" class="menu-btn"><i class="fas fa-file-pen"></i><span>Important Resources</span></a></li>
-  </ul>
-</li>
-<li class="menu-item menu-submenu">
-  <button class="menu-btn submenu-toggle">
-    <i class="fas fa-plug"></i>
-    <span>Integrations</span>
-    <i class="fas fa-chevron-down submenu-arrow"></i>
-  </button>
-  <ul class="submenu">
-    <li class="submenu-item"><a href="/settings/features" class="menu-btn"><i class="fas fa-toggle-on"></i><span>Features</span></a></li>
-    <li class="submenu-item"><a href="/settings/integrations" class="menu-btn"><i class="fas fa-plug"></i><span>Integrations</span></a></li>
-    <li class="submenu-item"><a href="/settings/integrations/google" class="menu-btn"><i class="fab fa-google"></i><span>Google OAuth</span></a></li>
-    <li class="submenu-item"><a href="/settings/integrations/ring" class="menu-btn"><i class="fas fa-video"></i><span>Ring Cameras</span></a></li>
-    <li class="submenu-item"><a href="/settings/api-keys" class="menu-btn"><i class="fas fa-key"></i><span>API Keys</span></a></li>
     <li class="submenu-item"><a href="/agent-directives" class="menu-btn"><i class="fas fa-scroll"></i><span>Agent Directives</span></a></li>
   </ul>
 </li>
+
+<li class="menu-section-label">How {{ assistant_name }} runs</li>
+<li class="menu-item">
+  <a href="/settings/quiet-mode" target="_blank" class="menu-btn">
+    <i class="fas fa-moon"></i>
+    <span>Quiet Hours</span>
+  </a>
+</li>
+<li class="menu-item">
+  <a href="/settings/features" target="_blank" class="menu-btn">
+    <i class="fas fa-toggle-on"></i>
+    <span>Features</span>
+  </a>
+</li>
+
+<li class="menu-section-label">Integrations</li>
+<li class="menu-item">
+  <a href="/settings/integrations" target="_blank" class="menu-btn">
+    <i class="fas fa-plug"></i>
+    <span>Integrations hub</span>
+  </a>
+</li>
+<li class="menu-item">
+  <a href="/settings/integrations/google" target="_blank" class="menu-btn">
+    <i class="fab fa-google"></i>
+    <span>Google OAuth</span>
+  </a>
+</li>
+<li class="menu-item">
+  <a href="/settings/integrations/ring" target="_blank" class="menu-btn">
+    <i class="fas fa-video"></i>
+    <span>Ring Cameras</span>
+  </a>
+</li>
+<li class="menu-item">
+  <a href="/settings/api-keys" target="_blank" class="menu-btn">
+    <i class="fas fa-key"></i>
+    <span>API Keys</span>
+  </a>
+</li>
+
 <li class="menu-item menu-item--danger">
   <button id="menu-shutdown" class="menu-btn menu-btn--danger">
     <i class="fas fa-power-off"></i>

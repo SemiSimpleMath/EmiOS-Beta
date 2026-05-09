@@ -14,7 +14,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/emi_desktop.css') }}?v={{ static_v }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/weather.css') }}?v={{ static_v }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/weather_desktop.css') }}?v={{ static_v }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/weather_narrow.css') }}?v={{ static_v }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/proactive_popup.css') }}?v={{ static_v }}">
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css"
@@ -43,6 +43,10 @@
       <i class="fas fa-volume-down" id="mute-icon"></i>
       <i class="fas fa-volume-mute hidden" id="unmute-icon"></i>
     </span>
+    <!-- Dashboards Menu Button -->
+    <button id="dash-menu-toggle-btn" class="menu-toggle-btn dash-menu-toggle-btn" aria-label="Toggle Dashboards Menu" title="Dashboards">
+      <i class="fas fa-th-large"></i>
+    </button>
     <!-- My Life (KG + Wiki) Menu Button -->
     <button id="life-menu-toggle-btn" class="menu-toggle-btn life-menu-toggle-btn" aria-label="Toggle My Life Menu" title="My Life">
       <i class="fas fa-book-open"></i>
@@ -58,6 +62,13 @@
   <div class="dropdown-menu hidden" id="dropdown-menu">
     <ul class="menu-list">
       {% include '_top_bar_user_menu.html' %}
+    </ul>
+  </div>
+
+  <!-- Dashboards dropdown menu -->
+  <div class="dropdown-menu dropdown-menu--right hidden" id="dash-dropdown-menu">
+    <ul class="menu-list">
+      {% include '_top_bar_dashboards_menu.html' %}
     </ul>
   </div>
 
@@ -86,7 +97,7 @@
   <aside class="d-rail-left" aria-label="Day overview">
 
     <div class="d-card d-card--weather">
-      {% include 'weather_widget.html' %}
+      {% include '_weather_widget_narrow.html' %}
     </div>
 
     <div class="d-card">

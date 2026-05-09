@@ -38,6 +38,22 @@
   margin: 0.5rem 0;
 }
 
+/* Section labels inside dropdowns. Non-interactive separators that
+   group items by purpose (UI / How Emi acts / Integrations / etc.)
+   without nesting into a submenu. */
+.menu-section-label {
+  list-style: none;
+  border-bottom: none;
+  padding: 0.6rem 1.25rem 0.25rem;
+  font-size: var(--font-xs, 0.72rem);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted, #8a8aa0);
+  font-weight: 600;
+  user-select: none;
+}
+.menu-section-label:first-child { padding-top: 0.4rem; }
+
 .menu-btn {
   display: flex;
   align-items: center;

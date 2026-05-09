@@ -47,6 +47,11 @@
     <i class="fas fa-volume-mute hidden" id="unmute-icon"></i>
   </div>
 
+  <!-- Dashboards Menu Button -->
+  <button id="dash-menu-toggle-btn" class="menu-toggle-btn dash-menu-toggle-btn" aria-label="Toggle Dashboards Menu" title="Dashboards">
+    <i class="fas fa-th-large"></i>
+  </button>
+
   <!-- My Life (KG + Wiki) Menu Button -->
   <button id="life-menu-toggle-btn" class="menu-toggle-btn life-menu-toggle-btn" aria-label="Toggle My Life Menu" title="My Life">
     <i class="fas fa-book-open"></i>
@@ -63,6 +68,13 @@
   <div id="dropdown-menu" class="dropdown-menu hidden">
     <ul class="menu-list">
       {% include '_top_bar_user_menu.html' %}
+    </ul>
+  </div>
+
+  <!-- Dashboards Dropdown Menu -->
+  <div id="dash-dropdown-menu" class="dropdown-menu dropdown-menu--right hidden">
+    <ul class="menu-list">
+      {% include '_top_bar_dashboards_menu.html' %}
     </ul>
   </div>
 

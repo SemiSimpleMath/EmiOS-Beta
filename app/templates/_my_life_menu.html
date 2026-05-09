@@ -1,10 +1,12 @@
-{# Shared My Life (KG + Wiki + Entities) menu items.
+{# Shared My Life menu items.
 
-   Both chat_bot.html (vertical) and chat_bot_desktop.html (horizontal)
-   include this partial, so adding/removing a link only needs one edit.
+   Pure read paths: places to LOOK at what Emi has remembered. No
+   maintenance, no admin (those moved to Dev → KG / wiki maintenance).
+   No Camera Snapshots (moved to Dashboards). No KG Dev Console
+   (moved to Dashboards → Rooms).
 
-   See also _top_bar_user_menu.html and _top_bar_dev_menu.html for the
-   other two shared dropdowns.
+   See also _top_bar_user_menu.html (Settings), _top_bar_dashboards_menu.html
+   (Dashboards), _top_bar_dev_menu.html (Dev) for the other dropdowns.
 #}
 <li class="menu-item">
   <a href="/wiki/" target="_blank" class="menu-btn">
@@ -25,50 +27,14 @@
   </a>
 </li>
 <li class="menu-item">
-  <a href="/kg-interests" target="_blank" class="menu-btn">
-    <i class="fas fa-sliders-h"></i>
-    <span>KG Interests (what to track)</span>
-  </a>
-</li>
-<li class="menu-item">
-  <a href="/kg-proposals/" target="_blank" class="menu-btn">
-    <i class="fas fa-clipboard-list"></i>
-    <span>Shadow KG / Proposals</span>
-  </a>
-</li>
-<li class="menu-item">
   <a href="/entity_cards" target="_blank" class="menu-btn">
     <i class="fas fa-address-card"></i>
     <span>Entity Cards</span>
   </a>
 </li>
 <li class="menu-item">
-  <a href="/entity-cards-admin" target="_blank" class="menu-btn">
-    <i class="fas fa-sync-alt"></i>
-    <span>Entity Cards Admin (regen)</span>
-  </a>
-</li>
-<li class="menu-item">
-  <a href="/entity-card-maintenance" target="_blank" class="menu-btn">
-    <i class="fas fa-broom"></i>
-    <span>Entity Card Maintenance</span>
-  </a>
-</li>
-<li class="menu-item">
-  <a href="/kg-maintenance" target="_blank" class="menu-btn">
-    <i class="fas fa-stethoscope"></i>
-    <span>KG Maintenance</span>
-  </a>
-</li>
-<li class="menu-item">
-  <a href="/settings/integrations/ring/snapshots" target="_blank" class="menu-btn">
-    <i class="fas fa-images"></i>
-    <span>Camera Snapshots</span>
-  </a>
-</li>
-<li class="menu-item">
-  <a href="/kg-dev" target="_blank" class="menu-btn">
-    <i class="fas fa-terminal"></i>
-    <span>KG Dev Console (chat with KG)</span>
+  <a href="/personalize#beliefs" target="_blank" class="menu-btn">
+    <i class="fas fa-lightbulb"></i>
+    <span>Beliefs</span>
   </a>
 </li>
