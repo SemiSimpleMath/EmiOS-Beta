@@ -396,3 +396,8 @@ resources/user/resource_kg_interests.json
 tasks/allowlist_test_output.txt
 # Personal install-for-friends snippet (email-pasteable copy of the README/BETA install).
 /INSTALL_FOR_FRIENDS.md
+
+# Personal routines — entries in this folder override matching public/<id>.json
+# and are not shared with the public repo. Examples: hardcoded camera ids,
+# screen-capture cadences, custom morning briefings.
+/configs/routines/private/

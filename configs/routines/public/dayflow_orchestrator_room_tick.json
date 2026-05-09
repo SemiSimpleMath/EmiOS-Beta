@@ -1,0 +1,18 @@
+{
+  "id": "dayflow_orchestrator_room_tick",
+  "enabled": false,
+  "name": "Dayflow orchestrator room cadence (REPLACED by DayflowScheduler)",
+  "aliases": [
+    "dayflow orchestrator tick",
+    "dayflow room cadence"
+  ],
+  "runner": "function",
+  "spec": {
+    "function_name": "dayflow_orchestrator_cadence_tick"
+  },
+  "run_policy": {
+    "type": "interval",
+    "min_interval_seconds": 300
+  },
+  "notes": "DISABLED: Replaced by event-driven DayflowScheduler. Kept for reference."
+}

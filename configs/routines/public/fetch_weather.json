@@ -1,0 +1,22 @@
+{
+  "id": "fetch_weather",
+  "enabled": true,
+  "name": "Fetch weather",
+  "aliases": [
+    "weather fetch",
+    "get weather"
+  ],
+  "runner": "tool",
+  "spec": {
+    "tool_name": "get_weather",
+    "arguments": {
+      "forecast_type": "current"
+    }
+  },
+  "feature_guard": "weather",
+  "run_policy": {
+    "type": "interval",
+    "min_interval_seconds": 660
+  },
+  "notes": "Periodic weather update. City defaults from resource_current_location.json."
+}

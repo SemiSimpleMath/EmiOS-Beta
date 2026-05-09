@@ -1,0 +1,21 @@
+{
+  "id": "weekly_insights_pipeline",
+  "enabled": true,
+  "name": "Weekly insights pipeline",
+  "aliases": [
+    "weekly pipeline",
+    "weekly insights",
+    "weekly synthesis",
+    "week review"
+  ],
+  "runner": "pipeline",
+  "spec": {
+    "pipeline_id": "weekly_insights"
+  },
+  "run_policy": {
+    "type": "weekly",
+    "day_of_week": "Monday",
+    "time_local": "00:10"
+  },
+  "notes": "Reads the 7 most recent daily assessment summaries and synthesizes cross-day patterns and belief candidates."
+}

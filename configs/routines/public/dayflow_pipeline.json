@@ -1,0 +1,20 @@
+{
+  "id": "dayflow_pipeline",
+  "enabled": true,
+  "name": "Day flow pipeline",
+  "aliases": [
+    "dayflow",
+    "day flow",
+    "physical pipeline",
+    "wellness pipeline"
+  ],
+  "runner": "pipeline",
+  "spec": {
+    "pipeline_id": "dayflow"
+  },
+  "run_policy": {
+    "type": "interval",
+    "min_interval_seconds": 60
+  },
+  "notes": "Step-based DayFlow pipeline."
+}

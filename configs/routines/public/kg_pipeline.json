@@ -1,0 +1,24 @@
+{
+  "id": "kg_pipeline",
+  "enabled": true,
+  "name": "KG pipeline",
+  "aliases": [
+    "kg pipeline",
+    "knowledge graph pipeline",
+    "kg chat pipeline"
+  ],
+  "runner": "pipeline",
+  "spec": {
+    "pipeline_id": "kg_pipeline"
+  },
+  "trigger": {
+    "type": "time",
+    "policy": {
+      "type": "daily",
+      "time_local": "23:00"
+    },
+    "active_window": "kg_active"
+  },
+  "run_policy": {},
+  "notes": "Ingests chat messages into the knowledge graph (2026-04-25 refactor \u00e2\u20ac\u201d bucket-per-stage architecture). Runs once per day at 23:00 inside the kg_active window (configs/windows.json). Tune the window itself, not the time_local \u00e2\u20ac\u201d the window is the active period; time_local just says 'fire at the start of it.'"
+}

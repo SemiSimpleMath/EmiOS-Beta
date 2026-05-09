@@ -1,0 +1,22 @@
+{
+  "id": "timesheet_routine",
+  "enabled": false,
+  "name": "Timesheet routine",
+  "aliases": [
+    "timesheet routine",
+    "timesheets routine",
+    "timesheet"
+  ],
+  "runner": "task",
+  "spec": {
+    "task_file": "tasks/timesheet/task_spec.md",
+    "execution_mode": "compiled_task",
+    "compiled_file": "tasks/timesheet/timesheet_narratives_v1.json",
+    "information": "Generate timesheet narratives from dated timesheet log and write canonical narratives output."
+  },
+  "run_policy": {
+    "type": "daily",
+    "time_local": "09:00"
+  },
+  "notes": "Manual/on-demand timesheet narrative routine. Scheduled execution remains disabled by default."
+}

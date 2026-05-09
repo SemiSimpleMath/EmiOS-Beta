@@ -1,0 +1,24 @@
+{
+  "id": "example_camera_motion_poll",
+  "_comment": "Example: per-camera Ring motion poll. Copy this file to configs/routines/private/<your_camera>_motion_poll.json, set spec.camera_id to your Ring device id (find via /settings/integrations/ring), and flip enabled=true. Add a trigger.active_window if you only want it polling during certain hours (see configs/windows.json).",
+  "enabled": false,
+  "name": "Example Ring camera motion poll",
+  "runner": "function",
+  "spec": {
+    "function_name": "ring_camera_motion_poll",
+    "camera_id": "REPLACE_WITH_YOUR_RING_CAMERA_ID",
+    "lookback_minutes": 5
+  },
+  "run_policy": {
+    "type": "interval",
+    "min_interval_seconds": 60
+  },
+  "max_run_seconds": 60,
+  "on_error": {
+    "max_failures": 6,
+    "backoff_base_seconds": 60,
+    "backoff_max_seconds": 1800,
+    "then": "disable_with_ticket"
+  },
+  "notes": "Polls Ring's recent-events history for one camera. On any new motion/ding event since the watermark, captures a fresh snapshot via the Ring bridge → publishes ring_snapshot_captured → camera_dispatch routes to the analyzer + skill configured for this camera in configs/cameras.json."
+}

@@ -1,0 +1,18 @@
+{
+  "id": "proposal_promoter",
+  "enabled": true,
+  "name": "Claim Proposal Promoter (nightly)",
+  "aliases": [],
+  "runner": "function",
+  "spec": {
+    "function_name": "proposal_promoter",
+    "commit": true,
+    "limit": 500
+  },
+  "run_policy": {
+    "type": "daily",
+    "time_local": "02:30",
+    "quiet_hours_ok": true
+  },
+  "notes": "Nightly sweep over pending claim_proposals. Auto-promotes anything resolvable + conflict-free. Held proposals (conflicts, lock violations, placeholders) stay in the review queue. Manual trigger: POST /kg-proposals/run-promoter (dry-run) or ?commit=1."
+}

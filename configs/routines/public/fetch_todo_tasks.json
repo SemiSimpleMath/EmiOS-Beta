@@ -1,0 +1,24 @@
+{
+  "id": "fetch_todo_tasks",
+  "enabled": true,
+  "name": "Fetch todo tasks",
+  "aliases": [
+    "tasks fetch",
+    "get tasks",
+    "get todo"
+  ],
+  "runner": "tool",
+  "spec": {
+    "tool_name": "get_todo_tasks",
+    "arguments": {
+      "include_completed": false,
+      "repo_update": true
+    }
+  },
+  "feature_guard": "tasks",
+  "run_policy": {
+    "type": "interval",
+    "min_interval_seconds": 1860
+  },
+  "notes": "Periodic Google Tasks sync."
+}

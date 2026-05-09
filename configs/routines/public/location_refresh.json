@@ -1,0 +1,15 @@
+{
+  "id": "location_refresh",
+  "enabled": true,
+  "name": "Location Refresh",
+  "aliases": [],
+  "runner": "function",
+  "spec": {
+    "function_name": "location_refresh"
+  },
+  "run_policy": {
+    "type": "interval",
+    "min_interval_seconds": 900
+  },
+  "notes": "Rebuilds user location timeline from calendar events and updates resource_current_location.json. Used by weather tool and location_summary context."
+}

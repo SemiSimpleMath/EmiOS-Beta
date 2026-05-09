@@ -17,9 +17,27 @@ metadata:
 
 # Adding a new routine
 
-Routines are declarative entries in `configs/routines.json`. The
-`RoutineManager` loads them on every refresh tick — edit, save,
-no restart needed.
+Routines are declarative entries — one JSON file per routine, named
+`<id>.json`, in one of two folders:
+
+- **`configs/routines/public/`** — tracked, shipped with the repo. For
+  universal routines anyone running EmiOS would want.
+- **`configs/routines/private/`** — gitignored, your personal extras
+  (hardcoded camera ids, custom morning briefings, screen capture, etc).
+
+Both folders are merged into the active routine list at load time. If
+the same `id` appears in both, the private file wins — useful for
+customizing a tracked routine's cadence or active_window without
+forking the public entry.
+
+Top-level settings (`enabled`, `max_workers`, `state_resource_file`)
+live in `configs/routines.json` and apply globally. The `RoutineManager`
+reloads on every refresh tick — edit, save, no restart needed.
+
+A canonical disabled example lives at
+`configs/routines/public/example_camera_motion_poll.json`. Copy it to
+`configs/routines/private/<your_camera>_motion_poll.json`, fill in your
+camera id, flip enabled=true, done.
 
 ## Routine entry shape
 

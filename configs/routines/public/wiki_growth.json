@@ -1,0 +1,20 @@
+{
+  "id": "wiki_growth",
+  "enabled": true,
+  "name": "Wiki growth (build new pages)",
+  "aliases": [],
+  "runner": "function",
+  "spec": {
+    "function_name": "wiki_growth",
+    "max_new_pages": 5,
+    "min_degree": 4,
+    "run_critic": true,
+    "vault_path": ""
+  },
+  "run_policy": {
+    "type": "daily",
+    "time_local": "03:30",
+    "quiet_hours_ok": true
+  },
+  "notes": "Builds up to max_new_pages new prose pages each night for the highest-degree Entity nodes that don't yet have one. Runs after wiki_nightly_refresh (03:00). Pairs with refresh: refresh maintains existing pages, growth adds new ones. Tune max_new_pages to control daily LLM spend; raise temporarily if a one-off catch-up is needed."
+}

@@ -1,0 +1,20 @@
+{
+  "id": "daily_insights_pipeline",
+  "enabled": true,
+  "name": "Daily insights pipeline",
+  "aliases": [
+    "daily pipeline",
+    "nightly pipeline",
+    "daily insights",
+    "insights pipeline"
+  ],
+  "runner": "pipeline",
+  "spec": {
+    "pipeline_id": "daily_insights"
+  },
+  "run_policy": {
+    "type": "daily",
+    "time_local": "00:05"
+  },
+  "notes": "Nightly pipeline: archive context + tickets, build timeline, extract insights, apply to resource files, build assessment + summary. Runs steps sequentially in-process."
+}

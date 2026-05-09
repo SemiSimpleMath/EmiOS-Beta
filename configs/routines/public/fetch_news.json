@@ -1,0 +1,22 @@
+{
+  "id": "fetch_news",
+  "enabled": true,
+  "name": "Fetch news",
+  "aliases": [
+    "news fetch",
+    "get news"
+  ],
+  "runner": "tool",
+  "spec": {
+    "tool_name": "get_news",
+    "arguments": {
+      "feed_urls": []
+    }
+  },
+  "feature_guard": "news",
+  "run_policy": {
+    "type": "interval",
+    "min_interval_seconds": 1380
+  },
+  "notes": "Periodic news fetch from configured RSS feeds. Empty feed_urls falls back to DEFAULT_FEEDS."
+}

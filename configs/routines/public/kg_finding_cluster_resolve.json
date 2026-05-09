@@ -1,0 +1,16 @@
+{
+  "id": "kg_finding_cluster_resolve",
+  "enabled": true,
+  "name": "KG finding cluster resolver (distill redundant findings)",
+  "aliases": [],
+  "runner": "function",
+  "spec": {
+    "function_name": "kg_finding_cluster_resolve"
+  },
+  "run_policy": {
+    "type": "daily",
+    "time_local": "03:30",
+    "quiet_hours_ok": true
+  },
+  "notes": "Reads pending findings, groups by primary_node_id, calls kg_finding_cluster_resolver to verify which candidate clusters share ONE root question. Confirmed leads get synthesized root_question; siblings get superseded_by stamped (hidden from default UI). Resolving a lead cascades to its siblings. Runs after wiki_nightly_refresh (03:00) so wiki_contradiction findings of the same night are eligible for clustering."
+}

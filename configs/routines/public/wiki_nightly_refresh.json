@@ -1,0 +1,18 @@
+{
+  "id": "wiki_nightly_refresh",
+  "enabled": true,
+  "name": "Wiki nightly refresh",
+  "aliases": [],
+  "runner": "function",
+  "spec": {
+    "function_name": "wiki_nightly_refresh",
+    "run_critic": true,
+    "vault_path": ""
+  },
+  "run_policy": {
+    "type": "daily",
+    "time_local": "03:00",
+    "quiet_hours_ok": true
+  },
+  "notes": "Scans the vault, regenerates only sections affected by KG node/edge updates since each page's generated_at, then runs the consistency critic. Runs after proposal_promoter (02:30) so newly-promoted nodes flow into the wiki the same night."
+}

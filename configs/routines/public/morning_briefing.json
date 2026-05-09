@@ -1,0 +1,21 @@
+{
+  "id": "morning_briefing",
+  "enabled": false,
+  "_comment": "Example task-based routine. Provide your own tasks/morning_briefing/task_spec.md, then toggle on via /routines admin UI (per-machine status, never commits to this file).",
+  "name": "Morning Briefing",
+  "aliases": [
+    "morning briefing",
+    "daily briefing"
+  ],
+  "run_policy": {
+    "type": "daily",
+    "time_local": "05:30"
+  },
+  "runner": "task",
+  "spec": {
+    "task_file": "tasks/morning_briefing/task_spec.md",
+    "compiled_file": "tasks/morning_briefing/morning_briefing.json",
+    "execution_mode": "compiled_task"
+  },
+  "notes": "Compiled task: playwright headlines, emails, todos, daily summary agent, save to storage."
+}

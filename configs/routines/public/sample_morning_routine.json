@@ -1,0 +1,13 @@
+{
+  "id": "sample_morning_routine",
+  "enabled": false,
+  "run_policy": {
+    "type": "daily",
+    "time_local": "07:00"
+  },
+  "runner": "task",
+  "spec": {
+    "task_file": "tasks/morning_routine/task_spec.md"
+  },
+  "notes": "Example routine. Enable and adjust time to use."
+}

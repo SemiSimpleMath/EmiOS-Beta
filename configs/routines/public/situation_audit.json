@@ -1,0 +1,15 @@
+{
+  "id": "situation_audit",
+  "enabled": true,
+  "name": "Situation Auditor",
+  "aliases": [],
+  "runner": "function",
+  "spec": {
+    "function_name": "situation_audit"
+  },
+  "run_policy": {
+    "type": "interval",
+    "min_interval_seconds": 1800
+  },
+  "notes": "Periodic background audit of all active context. Checks for contradictions, conflicts, and anomalies across data sources. Notifies user of findings via chat. Passive observer only \u00e2\u20ac\u201d does not modify plans or tasks."
+}

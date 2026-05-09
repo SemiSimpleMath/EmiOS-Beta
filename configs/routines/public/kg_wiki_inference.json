@@ -1,0 +1,20 @@
+{
+  "id": "kg_wiki_inference",
+  "enabled": true,
+  "name": "Wiki connection investigator (suggest new KG edges)",
+  "aliases": [
+    "wiki inference",
+    "wiki edges"
+  ],
+  "runner": "function",
+  "spec": {
+    "function_name": "kg_wiki_inference",
+    "subject_limit": 10
+  },
+  "run_policy": {
+    "type": "daily",
+    "time_local": "04:15",
+    "quiet_hours_ok": true
+  },
+  "notes": "Reads the 10 freshest wiki pages and runs wiki_connection_investigator to propose edges (and sometimes new target nodes) the page implies but the KG doesn't yet have. Proposals flow through the standard claim_proposal pipeline so the promoter's merge gates apply. Runs after wiki_nightly_refresh (03:00) and the cluster/executor drains so it sees the freshest pages and only generates novel proposals."
+}

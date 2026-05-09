@@ -41,21 +41,56 @@ def _entry_keys(entry: RoutineRegistryEntry) -> list[str]:
 
 def load_routine_registry(config_path: str | None = None) -> list[RoutineRegistryEntry]:
     """
-    Loads routines from configs/routines.json.
+    Loads routines from the configs/routines/{public,private}/ folders
+    (one <id>.json per routine), plus any legacy `routines` array still
+    in configs/routines.json. Private overrides public on id collision.
+
     Supports optional fields: name, aliases.
     """
-    file_path = resolve_repo_path(config_path or "configs/routines.json")
-    if not file_path.exists():
-        logger.warning("Routine config not found: %s", file_path)
-        return []
+    settings_path = resolve_repo_path(config_path or "configs/routines.json")
+    items: list[Any] = []
+    seen_ids: set[str] = set()
 
-    try:
-        cfg = json.loads(file_path.read_text(encoding="utf-8")) or {}
-    except Exception as e:
-        logger.warning("Failed to parse routine config: %s", e)
-        return []
+    # Public + private folders.
+    configs_dir = settings_path.parent
+    for folder_name, allow_override in [("public", False), ("private", True)]:
+        folder = configs_dir / "routines" / folder_name
+        if not folder.is_dir():
+            continue
+        for f in sorted(folder.glob("*.json")):
+            try:
+                entry = json.loads(f.read_text(encoding="utf-8"))
+            except Exception as e:
+                logger.warning("Failed to parse %s: %s", f, e)
+                continue
+            if not isinstance(entry, dict):
+                continue
+            rid = str(entry.get("id") or "").strip()
+            if not rid:
+                continue
+            if rid in seen_ids:
+                if allow_override:
+                    items = [it for it in items if str(it.get("id") or "").strip() != rid]
+                else:
+                    continue
+            items.append(entry)
+            seen_ids.add(rid)
 
-    items = cfg.get("routines") or []
+    # Legacy monolithic shape: configs/routines.json `routines` array.
+    if settings_path.exists():
+        try:
+            cfg = json.loads(settings_path.read_text(encoding="utf-8")) or {}
+        except Exception as e:
+            logger.warning("Failed to parse routine config: %s", e)
+            cfg = {}
+        for entry in cfg.get("routines") or []:
+            if not isinstance(entry, dict):
+                continue
+            rid = str(entry.get("id") or "").strip()
+            if rid and rid not in seen_ids:
+                items.append(entry)
+                seen_ids.add(rid)
+
     entries: list[RoutineRegistryEntry] = []
     for item in items:
         if not isinstance(item, dict):

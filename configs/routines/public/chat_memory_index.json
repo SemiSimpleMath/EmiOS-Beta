@@ -1,0 +1,15 @@
+{
+  "id": "chat_memory_index",
+  "enabled": true,
+  "name": "Chat Memory Indexer",
+  "aliases": [],
+  "runner": "function",
+  "spec": {
+    "function_name": "chat_memory_index"
+  },
+  "run_policy": {
+    "type": "interval",
+    "min_interval_seconds": 3600
+  },
+  "notes": "Indexes recent chat summaries and user messages into ChromaDB for conversational memory RAG. Summaries indexed over 90 days, user messages over 14 days."
+}

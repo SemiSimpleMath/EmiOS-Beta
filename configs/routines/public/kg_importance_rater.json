@@ -1,0 +1,17 @@
+{
+  "id": "kg_importance_rater",
+  "enabled": true,
+  "name": "KG importance rater (nodes + edges)",
+  "aliases": [],
+  "runner": "function",
+  "spec": {
+    "function_name": "kg_importance_rater",
+    "batch_size_edges": 50,
+    "batch_size_nodes": 60
+  },
+  "run_policy": {
+    "type": "interval",
+    "min_interval_seconds": 1800
+  },
+  "notes": "Rates any node/edge with NULL importance via me::edge_importance_rater + me::importance_rater. Cheap, idempotent, runs every 30 min so the wiki refresh's importance pre-filter has scores by the time it runs."
+}

@@ -1,0 +1,20 @@
+{
+  "id": "kg_finding_executor_drain",
+  "enabled": true,
+  "name": "KG finding executor drain (apply or escalate)",
+  "aliases": [
+    "execute findings",
+    "apply findings"
+  ],
+  "runner": "function",
+  "spec": {
+    "function_name": "kg_finding_executor_drain",
+    "limit": 10
+  },
+  "run_policy": {
+    "type": "daily",
+    "time_local": "03:45",
+    "quiet_hours_ok": true
+  },
+  "notes": "Drains investigated findings whose 24h dev-page grace window has expired. Filters to disposition='auto_apply' (set by kg_investigation::final_answer when its confidence is high enough); 'needs_user_review' findings stay in the user queue. Hands each to kg_resolution_manager which reads the recommendation prose and applies the matching mutations from its full mutator suite (merge/delete/update/etc.). Closes the self-healing loop: pending \u00e2\u2020\u2019 investigated \u00e2\u2020\u2019 executed (mutations applied) | escalated (planner couldn't operationalize) | dismissed (take_action=False short-circuit, written by the investigator before this routine runs)."
+}

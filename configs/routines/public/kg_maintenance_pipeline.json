@@ -1,0 +1,21 @@
+{
+  "id": "kg_maintenance_pipeline",
+  "enabled": true,
+  "name": "KG maintenance pipeline",
+  "aliases": [
+    "kg maintenance",
+    "kg repair",
+    "knowledge graph maintenance",
+    "kg cleanup"
+  ],
+  "runner": "pipeline",
+  "spec": {
+    "pipeline_id": "kg_maintenance_pipeline"
+  },
+  "run_policy": {
+    "type": "weekly",
+    "day_of_week": "Monday",
+    "time_local": "02:00"
+  },
+  "notes": "Weekly KG maintenance scan: orphan nodes, missing descriptions, suspect nodes (LLM), duplicate pairs (LLM random sampling). All findings are written to kg_maintenance_finding table for review at /kg-maintenance."
+}

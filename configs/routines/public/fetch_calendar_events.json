@@ -1,0 +1,31 @@
+{
+  "id": "fetch_calendar_events",
+  "enabled": true,
+  "name": "Fetch calendar events",
+  "aliases": [
+    "calendar fetch",
+    "get calendar"
+  ],
+  "runner": "tool",
+  "spec": {
+    "tool_name": "get_calendar_events",
+    "arguments": {
+      "calendar_names": [
+        "primary",
+        "birthday",
+        "holidays in united states",
+        "family",
+        "work",
+        "food"
+      ],
+      "single_events": true,
+      "repo_update": true
+    }
+  },
+  "feature_guard": "calendar",
+  "run_policy": {
+    "type": "interval",
+    "min_interval_seconds": 1620
+  },
+  "notes": "Periodic calendar sync. Defaults to local midnight \u00e2\u2020\u2019 +7 days when no dates provided."
+}

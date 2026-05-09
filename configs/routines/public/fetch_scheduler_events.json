@@ -1,0 +1,20 @@
+{
+  "id": "fetch_scheduler_events",
+  "enabled": true,
+  "name": "Fetch scheduler events",
+  "aliases": [
+    "scheduler fetch",
+    "get scheduler events"
+  ],
+  "runner": "tool",
+  "spec": {
+    "tool_name": "get_scheduler_events",
+    "arguments": {}
+  },
+  "feature_guard": "scheduler",
+  "run_policy": {
+    "type": "interval",
+    "min_interval_seconds": 180
+  },
+  "notes": "Periodic internal scheduler event sync. Defaults to midnight \u00e2\u2020\u2019 +7 days."
+}

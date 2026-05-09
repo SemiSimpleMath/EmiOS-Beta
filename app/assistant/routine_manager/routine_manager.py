@@ -238,8 +238,69 @@ class RoutineManager:
     # ---------------------------------------------------------------------
 
     def _load_config(self) -> Dict[str, Any]:
-        config_path = get_configs_dir() / self.config_filename
-        return read_json_file(config_path) or {}
+        """Load routine settings (top-level) + glob per-routine files from
+        the public + private folders.
+
+        Layout:
+        - configs/routines.json       — settings only (enabled, max_workers,
+                                        state_resource_file, schema_version)
+        - configs/routines/public/    — tracked, one <id>.json per routine
+        - configs/routines/private/   — gitignored, personal routines
+
+        Both folders are merged into the `routines` array on the returned
+        config dict. If a routine id appears in both, the private one wins
+        (mirrors the "local file overrides tracked file" convention).
+        """
+        configs_dir = get_configs_dir()
+        config_path = configs_dir / self.config_filename
+        config = read_json_file(config_path) or {}
+
+        routines: list[Dict[str, Any]] = []
+        seen_ids: set[str] = set()
+
+        # Public folder first; private overrides on collision.
+        for folder_name, allow_override in [("public", False), ("private", True)]:
+            folder = configs_dir / "routines" / folder_name
+            if not folder.is_dir():
+                continue
+            for f in sorted(folder.glob("*.json")):
+                entry = read_json_file(f)
+                if not isinstance(entry, dict):
+                    logger.warning("[routine_manager] %s did not parse as a dict; skipping", f)
+                    continue
+                rid = str(entry.get("id") or "").strip()
+                if not rid:
+                    logger.warning("[routine_manager] %s has no 'id' field; skipping", f)
+                    continue
+                if rid in seen_ids:
+                    if allow_override:
+                        # Private replaces public.
+                        routines = [r for r in routines if r.get("id") != rid]
+                    else:
+                        logger.warning(
+                            "[routine_manager] duplicate routine id %r in %s; keeping first",
+                            rid, f,
+                        )
+                        continue
+                routines.append(entry)
+                seen_ids.add(rid)
+
+        # If the legacy monolithic shape is still present (configs/routines.json
+        # carries a `routines` array), treat its entries as additional public
+        # entries. New installs won't have this; existing installs migrate at
+        # their own pace.
+        legacy = config.get("routines")
+        if isinstance(legacy, list) and legacy:
+            for entry in legacy:
+                if not isinstance(entry, dict):
+                    continue
+                rid = str(entry.get("id") or "").strip()
+                if rid and rid not in seen_ids:
+                    routines.append(entry)
+                    seen_ids.add(rid)
+
+        config["routines"] = routines
+        return config
 
     def _load_state(self, config: Dict[str, Any]) -> None:
         """

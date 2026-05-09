@@ -1,0 +1,16 @@
+{
+  "id": "camera_dispatch",
+  "enabled": true,
+  "name": "Camera dispatcher (event-triggered)",
+  "runner": "function",
+  "spec": {
+    "function_name": "camera_dispatch"
+  },
+  "trigger": {
+    "type": "event",
+    "topic": "ring_snapshot_captured"
+  },
+  "run_policy": {},
+  "max_run_seconds": 120,
+  "notes": "Handles every ring_snapshot_captured event. Routes by camera_id to the per-camera analyzer + storage + pod policy declared in configs/cameras.json. Replaces the bespoke register_camera_dispatcher() startup hook with a declarative event-triggered routine."
+}
