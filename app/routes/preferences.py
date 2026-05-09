@@ -957,9 +957,16 @@ def _skill_path(skill_id: str) -> Path:
 
 @preferences_bp.route('/skills', methods=['GET'])
 def skills_overview_page():
-    """Skills overview: lists the three injection patterns and the
-    featured user-editable instruction sets (email, dayflow)."""
+    """Skills overview: lists injection patterns and featured editors.
+    The full registry listing is on its own subpage (/skills/all) since
+    it's too tall to share screen with the explainer."""
     return render_template('skills_overview.html')
+
+
+@preferences_bp.route('/skills/all', methods=['GET'])
+def skills_all_page():
+    """Full registry listing, grouped by injection pattern."""
+    return render_template('skills_all.html')
 
 
 @preferences_bp.route('/skills/email', methods=['GET'])

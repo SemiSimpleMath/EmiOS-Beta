@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>All registered skills</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/setup_wizard.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/skills.css') }}?v={{ static_v }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+<div class="container">
+    <header class="topbar">
+        <div class="title-block">
+            <a class="back-link" href="/skills">&lsaquo; Skills overview</a>
+            <h1>All registered skills</h1>
+            <p class="subtitle">
+                Loaded from <code>skills/&lt;name&gt;/SKILL.md</code> at startup.
+                Grouped by how they get into an agent's prompt.
+            </p>
+        </div>
+    </header>
+
+    <div class="skills-section">
+        <h3>Per-agent always-injected</h3>
+        <p class="hint">Declared in one agent's <code>config.yaml</code>. Loaded every run of that agent.</p>
+        <div class="skills-list" id="skills-agent-specific"><div class="hint">Loading…</div></div>
+    </div>
+
+    <div class="skills-section">
+        <h3>Keyword-triggered</h3>
+        <p class="hint">Skill's frontmatter declares <code>auto_inject_when.task_keywords</code>. Auto-injects when a task or message contains a match — no per-agent declaration needed.</p>
+        <div class="skills-list" id="skills-keyword"><div class="hint">Loading…</div></div>
+    </div>
+
+    <div class="skills-section">
+        <h3>Shared across agents (pod-passable)</h3>
+        <p class="hint">Same skill referenced by two or more agents' <code>skills:</code> lists. Because skills are just markdown, an agent can also drop one as a pod and another agent can pick it up — see the kung-fu note on the overview.</p>
+        <div class="skills-list" id="skills-shared"><div class="hint">Loading…</div></div>
+    </div>
+
+    <div class="skills-meta-note">
+        <p>
+            <strong>Discoverable</strong> isn't a separate bucket — every loaded skill is queryable via
+            <code>SkillRegistry.discover(query)</code>. An agent can semantically search the catalog at runtime and pull a
+            skill on demand without anyone declaring it ahead of time.
+        </p>
+    </div>
+</div>
+
+<script>
+(async function () {
+    function escapeHtml(s) {
+        return String(s || "").replace(/[&<>"]/g, (c) => ({
+            "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;",
+        }[c]));
+    }
+    function renderBucket(rootId, items, emptyText) {
+        const root = document.getElementById(rootId);
+        if (!items || !items.length) {
+            root.innerHTML = `<div class="hint">${emptyText}</div>`;
+            return;
+        }
+        root.innerHTML = items.map((s) => {
+            const agents = s.agents.length
+                ? `<div class="skill-meta">used by: ${s.agents.map(escapeHtml).join(", ")}</div>`
+                : `<div class="skill-meta dim">no agents currently bind this</div>`;
+            const keywords = s.task_keywords && s.task_keywords.length
+                ? `<div class="skill-keywords">triggers on: ${s.task_keywords.map(k => `<span class="kw">${escapeHtml(k)}</span>`).join(" ")}</div>`
+                : "";
+            return `<div class="skill-card">
+                <div class="skill-name">${escapeHtml(s.name)}</div>
+                <div class="skill-description">${escapeHtml(s.description)}</div>
+                ${agents}
+                ${keywords}
+            </div>`;
+        }).join("");
+    }
+    try {
+        const r = await fetch("/api/skills");
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const data = await r.json();
+        renderBucket("skills-agent-specific", data.agent_specific, "None.");
+        renderBucket("skills-keyword", data.keyword, "None — keyword auto-trigger lands here when skills opt in.");
+        renderBucket("skills-shared", data.shared, "None.");
+    } catch (e) {
+        for (const id of ["skills-agent-specific", "skills-keyword", "skills-shared"]) {
+            document.getElementById(id).innerHTML = `<div class="hint bad">Failed: ${escapeHtml(e.message)}</div>`;
+        }
+    }
+})();
+</script>
+</body>
+</html>

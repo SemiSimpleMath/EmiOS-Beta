@@ -14,37 +14,39 @@
         <div class="title-block">
             <h1>Skills</h1>
             <p class="subtitle">
-                Skills are <em>action instructions</em> for agents. Resources are data — different concept.
-                Three ways skills get into an agent's prompt.
+                Skills are <em>action instructions</em> for agents. Four ways they can land in an agent's prompt.
             </p>
         </div>
     </header>
 
-    <section class="skills-explainer">
+    <section class="skills-explainer four-up">
         <div class="explainer-card">
             <h3><i class="fas fa-thumbtack"></i> Per-agent always-injected</h3>
-            <p>Listed in an agent's <code>config.yaml</code> under <code>skills:</code>. Loaded every time that agent runs. The user-editable ones live below as featured editors (Email, Dayflow).</p>
+            <p>Listed in an agent's <code>config.yaml</code> under <code>skills:</code>. Loaded every time that agent runs.</p>
         </div>
         <div class="explainer-card">
             <h3><i class="fas fa-key"></i> Keyword-triggered</h3>
-            <p>Skill's frontmatter has <code>auto_inject_when.task_keywords</code>. Auto-injects whenever the agent's task / incoming message contains one of the keywords. No per-agent declaration needed.</p>
+            <p>The skill's frontmatter has <code>auto_inject_when.task_keywords</code>. Auto-injects when a task or message contains a match. No per-agent declaration needed.</p>
         </div>
         <div class="explainer-card">
-            <h3><i class="fas fa-share-nodes"></i> Shared across agents</h3>
-            <p>Same skill referenced in multiple agents' <code>skills:</code> lists. Built once, reused.</p>
+            <h3><i class="fas fa-share-nodes"></i> Pod-shared between agents</h3>
+            <p>A skill is just markdown. One agent learns or writes one, drops it as a pod, the next agent picks it up. Same shape every time, passable by reference.</p>
+        </div>
+        <div class="explainer-card">
+            <h3><i class="fas fa-magnifying-glass"></i> Discoverable</h3>
+            <p>Agents can semantically search the registry at runtime and load any skill on demand — no one has to declare it ahead of time. <code>SkillRegistry.discover(query)</code>.</p>
         </div>
     </section>
 
     <section class="skills-matrix-note">
         <p>
-            <em>Worth knowing:</em> a skill is just markdown with frontmatter. Nothing stops a skill from being passed
-            agent-to-agent as a pod attachment — one agent learns something, drops it as a skill pod, the next agent
-            picks it up.
+            On pod-sharing: a skill is just markdown with frontmatter. Nothing stops an agent from minting one as a pod and handing it off.
             <strong>"Whoa. I know kung fu."</strong> &nbsp;<span class="dim">"Show me."</span>
         </p>
     </section>
 
     <h2>Featured editors</h2>
+    <p class="hint">User-editable skills with their own dedicated page.</p>
     <div class="featured-grid">
         <a class="featured-card" href="/skills/email">
             <div class="featured-icon"><i class="fas fa-envelope"></i></div>
@@ -65,65 +67,15 @@
     </div>
 
     <h2>All registered skills</h2>
-    <p class="hint">Loaded from <code>skills/&lt;name&gt;/SKILL.md</code> at startup.</p>
-
-    <div class="skills-section">
-        <h3>Per-agent always-injected</h3>
-        <div class="skills-list" id="skills-agent-specific"><div class="hint">Loading…</div></div>
-    </div>
-
-    <div class="skills-section">
-        <h3>Keyword-triggered</h3>
-        <div class="skills-list" id="skills-keyword"><div class="hint">Loading…</div></div>
-    </div>
-
-    <div class="skills-section">
-        <h3>Shared across agents</h3>
-        <div class="skills-list" id="skills-shared"><div class="hint">Loading…</div></div>
-    </div>
+    <p class="hint">Loaded from <code>skills/&lt;name&gt;/SKILL.md</code> at startup. Full listing on its own page.</p>
+    <a class="featured-card" href="/skills/all">
+        <div class="featured-icon"><i class="fas fa-list"></i></div>
+        <div class="featured-text">
+            <h3>Browse the registry</h3>
+            <p>Every loaded skill, grouped by injection pattern.</p>
+        </div>
+        <div class="featured-arrow">&rsaquo;</div>
+    </a>
 </div>
-
-<script>
-(async function () {
-    function escapeHtml(s) {
-        return String(s || "").replace(/[&<>"]/g, (c) => ({
-            "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;",
-        }[c]));
-    }
-    function renderBucket(rootId, items, emptyText) {
-        const root = document.getElementById(rootId);
-        if (!items || !items.length) {
-            root.innerHTML = `<div class="hint">${emptyText}</div>`;
-            return;
-        }
-        root.innerHTML = items.map((s) => {
-            const agents = s.agents.length
-                ? `<div class="skill-meta">used by: ${s.agents.map(escapeHtml).join(", ")}</div>`
-                : `<div class="skill-meta dim">no agents currently bind this</div>`;
-            const keywords = s.task_keywords && s.task_keywords.length
-                ? `<div class="skill-keywords">triggers on: ${s.task_keywords.map(k => `<span class="kw">${escapeHtml(k)}</span>`).join(" ")}</div>`
-                : "";
-            return `<div class="skill-card">
-                <div class="skill-name">${escapeHtml(s.name)}</div>
-                <div class="skill-description">${escapeHtml(s.description)}</div>
-                ${agents}
-                ${keywords}
-            </div>`;
-        }).join("");
-    }
-    try {
-        const r = await fetch("/api/skills");
-        if (!r.ok) throw new Error("HTTP " + r.status);
-        const data = await r.json();
-        renderBucket("skills-agent-specific", data.agent_specific, "None.");
-        renderBucket("skills-keyword", data.keyword, "None — keyword auto-trigger lands here when skills opt in.");
-        renderBucket("skills-shared", data.shared, "None.");
-    } catch (e) {
-        for (const id of ["skills-agent-specific", "skills-keyword", "skills-shared"]) {
-            document.getElementById(id).innerHTML = `<div class="hint bad">Failed: ${escapeHtml(e.message)}</div>`;
-        }
-    }
-})();
-</script>
 </body>
 </html>
