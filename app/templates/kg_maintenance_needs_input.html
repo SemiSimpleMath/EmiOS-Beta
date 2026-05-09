@@ -2,20 +2,21 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Investigated findings — KG Maintenance</title>
+  <title>Needs your input — KG Maintenance</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/kg_maintenance.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/kg_maintenance_investigated.css') }}">
 </head>
 <body>
   <header class="kgm-header">
-    <h1>All investigation results</h1>
+    <h1>Needs your input</h1>
     <p class="kgm-sub">
-      Every finding the investigator has diagnosed — auto-apply ones run themselves
-      after a 24h grace; needs-user-review ones wait for you. Read the report, refine
-      the recommendation, then Accept to run now or Decline to dismiss.
+      Findings the investigator decided <strong>can't be auto-applied</strong> without
+      user context — usually missing dates, ambiguous resolutions, or irreversible
+      operations. Answer the question (typically by refining the recommendation prose),
+      then Accept to run, or Decline to dismiss.
       <br>
       <a href="/kg-maintenance/">← back to dashboard</a>
-      <a href="/kg-maintenance/needs-input" style="margin-left:1.5em;">Items needing your input →</a>
+      <a href="/kg-maintenance/investigated" style="margin-left:1.5em;">All investigation results →</a>
     </p>
   </header>
 
@@ -54,15 +55,15 @@
 
     window.loadFindings = async function loadFindings() {
       const type = document.getElementById('filter-type').value;
-      let url = '/kg-maintenance/api/investigated?limit=300';
+      let url = '/kg-maintenance/api/investigated?disposition=needs_user_review&limit=300';
       if (type) url += '&type=' + encodeURIComponent(type);
       list.innerHTML = '<p class="inv-loading">Loading…</p>';
       try {
         const res = await fetch(url);
         const data = await res.json();
-        countEl.textContent = `${data.length} finding${data.length === 1 ? '' : 's'}`;
+        countEl.textContent = `${data.length} item${data.length === 1 ? '' : 's'} waiting on you`;
         if (!data.length) {
-          list.innerHTML = '<p class="inv-empty">No investigated findings right now.</p>';
+          list.innerHTML = '<p class="inv-empty">Nothing waiting on your input right now. ✓</p>';
           return;
         }
         list.innerHTML = data.map(renderCard).join('');
@@ -73,10 +74,7 @@
 
     function renderCard(f) {
       const r = f.investigation_report_json || {};
-      // New shape (post-2026-05-07): prose recommendation + disposition.
-      // Old shape (proposed_action): rendered as fallback for legacy findings.
       const recommendation = r.recommendation || '';
-      const disposition = (r.disposition || '').trim();
       const userQuestion = r.user_question || '';
       const confidenceFloat = typeof r.confidence === 'number' ? r.confidence : (r.proposed_action || {}).confidence;
       const confidence = confidenceFloat != null ? (confidenceFloat * 100).toFixed(0) + '%' : '';
@@ -95,44 +93,23 @@
         ? `<div class="inv-questions"><h4>Other open questions</h4><ul>${openQuestions.map(q => `<li>${esc(q)}</li>`).join('')}</ul></div>`
         : '';
 
-      const dispositionBadge = disposition === 'needs_user_review'
-        ? '<span class="inv-disposition inv-disposition-user">needs your review</span>'
-        : disposition === 'auto_apply'
-          ? '<span class="inv-disposition inv-disposition-auto">auto-apply (24h grace)</span>'
-          : '';
-
-      // Grace timer for auto_apply: countdown from investigated_at + 24h
-      let graceHtml = '';
-      if (disposition === 'auto_apply' && f.investigated_at) {
-        const inv = new Date(f.investigated_at).getTime();
-        const expires = inv + 24 * 60 * 60 * 1000;
-        const remaining = Math.max(0, expires - Date.now());
-        const hours = Math.floor(remaining / 3_600_000);
-        const minutes = Math.floor((remaining % 3_600_000) / 60_000);
-        graceHtml = remaining > 0
-          ? `<div class="inv-grace">⏳ Auto-applies in ${hours}h ${minutes}m unless you accept / decline.</div>`
-          : '<div class="inv-grace inv-grace-expired">⏰ Grace expired — pending next executor cron.</div>';
-      }
-
+      // User question is the headline reason this lives here — render it big.
       const userQHtml = userQuestion
-        ? `<div class="inv-user-question"><h4>Question for you</h4><p class="inv-prose">${esc(userQuestion)}</p></div>`
-        : '';
-
-      // Legacy fallback: render the old proposed_action if no recommendation exists.
-      const legacyProposed = (!recommendation && r.proposed_action)
-        ? `<div class="inv-proposed inv-legacy">
-             <h4>Proposed action (legacy schema): <code>${esc(r.proposed_action.op || '?')}</code></h4>
-             ${r.proposed_action.args ? `<div class="inv-prose">${esc(r.proposed_action.args)}</div>` : ''}
+        ? `<div class="inv-user-question inv-user-question-prominent">
+             <h4>What the investigator needs from you</h4>
+             <p class="inv-prose">${esc(userQuestion)}</p>
            </div>`
-        : '';
+        : `<div class="inv-user-question">
+             <h4>Marked needs-user-review (no specific question recorded)</h4>
+             <p class="inv-prose inv-prose-muted">Investigator flagged this for review without a specific user question. Read the recommendation and decide.</p>
+           </div>`;
 
       return `
-        <article class="inv-card" id="card-${esc(f.id)}" data-disposition="${esc(disposition)}">
+        <article class="inv-card" id="card-${esc(f.id)}" data-disposition="needs_user_review">
           <header class="inv-card-head">
             <div class="inv-card-head-left">
               <span class="inv-type-badge inv-type-${esc(f.finding_type)}">${esc(f.finding_type.replace(/_/g, ' '))}</span>
               <span class="inv-priority inv-priority-${esc(f.priority)}">${esc(f.priority)}</span>
-              ${dispositionBadge}
               ${confidence ? `<span class="inv-confidence">conf ${confidence}</span>` : ''}
             </div>
             <div class="inv-card-head-right">
@@ -141,15 +118,14 @@
             </div>
           </header>
 
-          ${graceHtml}
           ${userQHtml}
 
-          ${recommendation || r.proposed_action ? `
+          ${recommendation ? `
           <div class="inv-recommendation">
-            <h4>Recommendation <span class="inv-rec-hint">(edit to refine; autosaves on blur — this is what the executor will run)</span></h4>
+            <h4>Your answer / refined recommendation <span class="inv-rec-hint">(this is what the executor will run when you Accept; autosaves on blur)</span></h4>
             <textarea id="rec-${esc(f.id)}" rows="6" class="inv-rec-textarea"
                       onblur="saveRecommendation('${esc(f.id)}')"
-                      placeholder="What should happen and why...">${esc(recommendation)}</textarea>
+                      placeholder="Answer the question above, or refine the recommendation...">${esc(recommendation)}</textarea>
             <span class="inv-save-status" id="save-status-${esc(f.id)}"></span>
           </div>
 
@@ -160,8 +136,6 @@
                       placeholder="Your thoughts about this finding — won't be sent to the executor.">${esc(operatorNotes)}</textarea>
             <span class="inv-save-status" id="notes-save-status-${esc(f.id)}"></span>
           </div>` : ''}
-
-          ${legacyProposed}
 
           ${r.diagnosis ? `<details class="inv-collapsible"><summary>Diagnosis</summary><div class="inv-prose">${esc(r.diagnosis)}</div></details>` : ''}
           ${evidenceHtml}
@@ -176,7 +150,7 @@
 
           <div class="inv-actions">
             <button type="button" class="inv-btn inv-btn-accept" onclick="acceptFinding('${esc(f.id)}')"
-                    title="Run the recommendation now via kg_resolution_manager — bypasses the 24h grace.">
+                    title="Run the (refined) recommendation now via kg_resolution_manager.">
               ✓ Accept (run now)
             </button>
             <button type="button" class="inv-btn inv-btn-dismiss" onclick="dismissFinding('${esc(f.id)}')"
@@ -200,10 +174,6 @@
       setTimeout(() => { el.textContent = ''; el.classList.remove('is-error'); }, 3500);
     }
 
-    // Autosave on blur — the dev edits the recommendation prose, clicks
-    // away, change persists. The 24h grace timer keeps counting; the
-    // edited prose is what the executor will run on grace expiry (or
-    // immediate run via Accept).
     window.saveRecommendation = async function saveRecommendation(id) {
       const recommendation = recommendationValue(id);
       try {
@@ -219,10 +189,6 @@
       }
     };
 
-    // Notes: separate from recommendation — your private context. Stored
-    // on investigation_report_json.operator_notes; not consumed by the
-    // executor. Useful for "I'm watching this one" or "discussed with X
-    // on Y date — apply only after Z."
     function notesValue(id) {
       const ta = document.getElementById('notes-' + id);
       return ta ? ta.value : '';
@@ -249,8 +215,6 @@
       }
     };
 
-    // Accept = run via kg_resolution_manager NOW (bypasses the 24h grace).
-    // The current saved recommendation prose is what gets executed.
     window.acceptFinding = async function acceptFinding(id) {
       const card = document.getElementById('card-' + id);
       if (!confirm('Run this recommendation now via kg_resolution_manager?\n\nThis applies the (possibly edited) prose to the KG. Reversible only via kg_revision_log.')) return;
@@ -281,7 +245,6 @@
       }
     };
 
-    // Decline = mark dismissed; no execution.
     window.dismissFinding = async function dismissFinding(id) {
       if (!confirm('Decline this finding?\n\nNo KG changes will be made; the finding is closed as dismissed.')) return;
       try {

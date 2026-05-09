@@ -1,24 +1,46 @@
 /* Shared styles for the /kg-maintenance dashboard and its sub-pages.
    Includes:
-     - CSS custom properties (theme palette) so any page that links this
-       file inherits the dark theme without re-declaring vars
+     - Theme palette aliased to the site's emi_tokens so kg_maintenance pages
+       match the rest of the app (light + dark)
+     - Body baseline (so these standalone pages — they don't extend base.html
+       — still pick up the right background, text, and font-family)
      - Investigation report viewer (sectioned report_block)
      - Date-gaps page styles (.date-gaps-*)
+
+   Status colors (--ok/--warn/--bad/--info) intentionally stay literal — they
+   carry semantic meaning (priority, reversibility, success/failure badges)
+   that shouldn't shift between light and dark themes.
 */
 
+@import url('emi_tokens.css');
+
 :root {
-    --bg: #0f172a;
-    --panel: #111827;
-    --panel-soft: #1f2937;
-    --text: #e5e7eb;
-    --muted: #9ca3af;
+    --bg: var(--background-color);
+    --panel: var(--widget-background);
+    --panel-soft: var(--widget-background-hover);
+    --text: var(--text-color);
+    --muted: var(--text-muted);
+    --line: var(--border-color);
+    --info: var(--accent-color);
+    --chip: var(--widget-background-hover);
+    /* Status colors — semantic, theme-agnostic. */
     --ok: #10b981;
     --warn: #f59e0b;
     --bad: #ef4444;
-    --info: #60a5fa;
-    --line: #374151;
-    --chip: #334155;
 }
+
+/* Page baseline. These pages are standalone HTML (no base.html extends),
+   so apply the typography + background here. */
+body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Roboto', -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    margin: 0;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+body * { box-sizing: border-box; }
 
 .report-block {
     display: none;

@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime, timezone
+from typing import Optional
 
 from flask import Blueprint, jsonify, render_template, request
 
@@ -518,29 +519,94 @@ def _persist_report_field(finding_id: str, field: str, value) -> None:
 
 @kg_maintenance_bp.route("/investigated", methods=["GET"])
 def investigated_review():
-    """Page listing all status='investigated' findings with their reports."""
+    """All investigated findings — the firehose. Auto-apply ones execute
+    automatically after a 24h grace; needs-user-review ones wait for the
+    user (and have their own focused page at /kg-maintenance/needs-input)."""
     return render_template("kg_maintenance_investigated.html")
+
+
+@kg_maintenance_bp.route("/needs-input", methods=["GET"])
+def needs_input_review():
+    """Focused queue: only investigated findings where the investigator
+    explicitly asked for user input (disposition='needs_user_review').
+
+    Typical reason: the investigator can't fill in start/end dates,
+    needs context the graph doesn't carry, or the proposed action is
+    irreversible enough that explicit consent is warranted. These never
+    auto-apply — they sit until the user answers."""
+    return render_template("kg_maintenance_needs_input.html")
+
+
+def _filter_by_disposition(findings: list, disposition: Optional[str]) -> list:
+    """Disposition lives inside investigation_report_json; filter in Python."""
+    if not disposition:
+        return findings
+    out = []
+    for f in findings:
+        report = f.get("investigation_report_json") or {}
+        if isinstance(report, str):
+            try:
+                report = json.loads(report)
+            except Exception:
+                continue
+        if not isinstance(report, dict):
+            continue
+        if (report.get("disposition") or "").strip() == disposition:
+            out.append(f)
+    return out
 
 
 @kg_maintenance_bp.route("/api/investigated", methods=["GET"])
 def api_investigated():
-    """Findings with status='investigated', sorted by priority desc then newest."""
+    """Findings with status='investigated', sorted by priority desc then newest.
+
+    Optional ``?disposition=auto_apply|needs_user_review`` filters the
+    JSON-blob disposition field. When set, fetch a wider window so the
+    paginated slice still has enough survivors after filtering."""
     try:
         finding_type = request.args.get("type") or None
         limit = min(int(request.args.get("limit", 200)), 500)
         offset = int(request.args.get("offset", 0))
     except (TypeError, ValueError):
         return jsonify({"error": "limit and offset must be integers"}), 400
+    disposition = (request.args.get("disposition") or "").strip() or None
+    if disposition and disposition not in ("auto_apply", "needs_user_review"):
+        return jsonify({"error": "disposition must be auto_apply or needs_user_review"}), 400
     try:
+        # Fetch wider when filtering since the JSON-blob filter happens in Python
+        # — over-fetch gives the slice room to land enough rows.
+        fetch_limit = limit if not disposition else min(limit * 4, 500)
         findings = get_findings(
             status="investigated",
             finding_type=finding_type,
-            limit=limit,
+            limit=fetch_limit,
             offset=offset,
         )
+        if disposition:
+            findings = _filter_by_disposition(findings, disposition)[:limit]
         return jsonify(findings)
     except Exception:
         logger.debug("[kg_maintenance] api_investigated failed", exc_info=True)
+        raise
+
+
+@kg_maintenance_bp.route("/api/investigated/counts", methods=["GET"])
+def api_investigated_counts():
+    """Quick counts split by disposition for header badges + dashboard.
+
+    Returns: { "auto_apply": int, "needs_user_review": int, "total": int }
+    """
+    try:
+        findings = get_findings(status="investigated", limit=500)
+        auto = sum(1 for f in _filter_by_disposition(findings, "auto_apply"))
+        needs = sum(1 for f in _filter_by_disposition(findings, "needs_user_review"))
+        return jsonify({
+            "auto_apply": auto,
+            "needs_user_review": needs,
+            "total": len(findings),
+        })
+    except Exception:
+        logger.debug("[kg_maintenance] api_investigated_counts failed", exc_info=True)
         raise
 
 

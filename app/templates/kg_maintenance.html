@@ -6,22 +6,12 @@
   <title>KG Maintenance</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/kg_maintenance.css') }}">
   <style>
-    :root {
-      --bg: #0f172a;
-      --panel: #111827;
-      --panel-soft: #1f2937;
-      --text: #e5e7eb;
-      --muted: #9ca3af;
-      --ok: #10b981;
-      --warn: #f59e0b;
-      --bad: #ef4444;
-      --info: #60a5fa;
-      --line: #374151;
-      --chip: #334155;
-    }
+    /* Theme variables, baseline body styles, and the Roboto font family
+       come from kg_maintenance.css (which imports emi_tokens.css). The
+       rules below are dashboard-specific layout. */
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: var(--bg); color: var(--text); font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; font-size: 14px; }
-    .container { max-width: 1440px; margin: 0 auto; padding: 20px; }
+    body { font-size: 0.9rem; }
+    .container { max-width: 1440px; margin: 0 auto; padding: 22px 28px; }
 
     /* header */
     .topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; flex-wrap: wrap; gap: 12px; }
@@ -118,7 +108,9 @@
     .toggle-evidence { background: none; border: none; color: var(--info); cursor: pointer; font-size: 11px; padding: 0; }
 
     /* action buttons */
-    .btn { padding: 5px 12px; border-radius: 5px; border: none; cursor: pointer; font-size: 12px; font-weight: 600; }
+    .btn { padding: 6px 14px; border-radius: 6px; border: none; cursor: pointer; font-size: 0.78rem; font-weight: 600; font-family: inherit; transition: opacity 0.15s, transform 0.1s; }
+    .btn:active { transform: translateY(1px); }
+    .link-count { font-weight: 500; opacity: 0.75; margin-left: 2px; }
     .btn-execute  { background: #1d4ed8; color: #fff; }
     .btn-approve  { background: #065f46; color: #a7f3d0; }
     .btn-reject   { background: #7f1d1d; color: #fca5a5; }
@@ -244,12 +236,28 @@
     </select>
     <div style="margin-left:auto; display:flex; gap:6px;">
       <a href="/kg-maintenance/date-gaps" class="btn btn-primary" style="text-decoration:none">Date gaps{% set _dg_pending = (summary.by_type.state_missing_dates or {}).get('pending', 0) %}{% if _dg_pending %} ({{ _dg_pending }}){% endif %} →</a>
-      <a href="/kg-maintenance/investigated" class="btn btn-primary" style="text-decoration:none" title="Review findings the investigator has already diagnosed — add notes, accept, or dismiss">Investigated →</a>
+      <a href="/kg-maintenance/investigated" class="btn btn-primary" style="text-decoration:none" title="All investigation results — auto-apply ones run after a 24h grace; you can intervene here">All investigations <span id="link-count-investigated" class="link-count"></span> →</a>
+      <a href="/kg-maintenance/needs-input" class="btn btn-primary" style="text-decoration:none" title="Findings the investigator decided need your input before they can be applied">Needs your input <span id="link-count-needs-input" class="link-count"></span> →</a>
       <a href="/kg-maintenance/queue" class="btn btn-primary" style="text-decoration:none">View action queue →</a>
       <button class="btn btn-approve" onclick="bulkAction('approve')">Approve selected</button>
       <button class="btn btn-reject" onclick="bulkAction('reject')">Reject selected</button>
     </div>
   </div>
+  <script>
+    // Populate the small (N) counts on the All-investigations / Needs-input
+    // dashboard links so the user knows whether there's anything waiting.
+    (async function loadInvestigatedCounts() {
+      try {
+        const r = await fetch('/kg-maintenance/api/investigated/counts');
+        if (!r.ok) return;
+        const c = await r.json();
+        const a = document.getElementById('link-count-investigated');
+        const n = document.getElementById('link-count-needs-input');
+        if (a && c.total) a.textContent = '(' + c.total + ')';
+        if (n && c.needs_user_review) n.textContent = '(' + c.needs_user_review + ')';
+      } catch (_) { /* silent */ }
+    })();
+  </script>
 
   <div class="table-wrap">
     <table id="findings-table">
