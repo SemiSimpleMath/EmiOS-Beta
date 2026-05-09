@@ -85,9 +85,10 @@ def initialize_system():
     emi_reminder_handler = DI.agent_factory.create_agent('emi_reminder_handler', DI.global_blackboard)
     ServiceLocator.register('emi_reminder_handler', emi_reminder_handler)
 
-    logger.info("Registering ring snapshot subscribers...")
-    from app.assistant.ring_analysis.subscribers import register_ring_subscribers
-    register_ring_subscribers()
+    # Camera dispatch is now wired declaratively as the camera_dispatch
+    # routine in configs/routines.json (trigger.type=event,
+    # topic=ring_snapshot_captured). The routine_manager subscribes at
+    # routine-load time. No bootstrap call needed here.
 
     # Slack inbound is handled exclusively by the /slack/events webhook
     # (app/routes/slack_events.py). The legacy SlackInterface polling

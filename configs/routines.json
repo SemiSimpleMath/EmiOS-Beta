@@ -5,6 +5,22 @@
   "state_resource_file": "resource_routine_status.json",
   "routines": [
     {
+      "id": "camera_dispatch",
+      "enabled": true,
+      "name": "Camera dispatcher (event-triggered)",
+      "runner": "function",
+      "spec": {
+        "function_name": "camera_dispatch"
+      },
+      "trigger": {
+        "type": "event",
+        "topic": "ring_snapshot_captured"
+      },
+      "run_policy": {},
+      "max_run_seconds": 120,
+      "notes": "Handles every ring_snapshot_captured event. Routes by camera_id to the per-camera analyzer + storage + pod policy declared in configs/cameras.json. Replaces the bespoke register_camera_dispatcher() startup hook with a declarative event-triggered routine."
+    },
+    {
       "id": "morning_briefing",
       "enabled": false,
       "_comment": "Example task-based routine. Provide your own tasks/morning_briefing/task_spec.md, then toggle on via /routines admin UI (per-machine status, never commits to this file).",

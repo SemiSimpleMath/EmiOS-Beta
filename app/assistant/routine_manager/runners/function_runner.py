@@ -26,12 +26,20 @@ class FunctionRoutineRunner:
         if fn is None:
             raise ValueError(f"Unknown routine function: {fn_name}")
 
-        # Prefer keyword invocation; allow older callables.
+        # Prefer keyword invocation. Newer event-trigger handlers accept
+        # event_message; fall back to older signatures for backward compat.
         try:
-            fn(target_date=run_ctx.target_date, routine=routine)
+            fn(
+                target_date=run_ctx.target_date,
+                routine=routine,
+                event_message=run_ctx.event_message,
+            )
         except TypeError:
             try:
-                fn(run_ctx.target_date)
+                fn(target_date=run_ctx.target_date, routine=routine)
             except TypeError:
-                fn()
+                try:
+                    fn(run_ctx.target_date)
+                except TypeError:
+                    fn()
         return RoutineRunResult(status="success", data={"function_name": fn_name})

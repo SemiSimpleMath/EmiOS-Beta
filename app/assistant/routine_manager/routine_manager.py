@@ -972,12 +972,13 @@ class RoutineManager:
                     routine.routine_id, topic, e, exc_info=True,
                 )
 
-    def _on_event_fire(self, routine_id: str, _message: Any) -> None:
+    def _on_event_fire(self, routine_id: str, message: Any) -> None:
         """Handler invoked by event_hub when a subscribed event publishes.
 
         Re-reads the current routine from config so toggles take effect
         without restart. Honors the same concurrency caps and AFK guard
-        as time-triggered routines.
+        as time-triggered routines. Passes the triggering message through
+        to the runner so handlers can read the payload.
         """
         try:
             routine = self._resolve_current_routine(routine_id)
@@ -1006,7 +1007,7 @@ class RoutineManager:
                 return
 
             logger.info("Routine triggered by event: %s", routine_id)
-            self._run_in_thread(routine)
+            self._run_in_thread(routine, event_message=message)
         except Exception as e:
             logger.error(
                 "[routine_manager] event handler crashed for routine=%s: %s",
@@ -1030,10 +1031,10 @@ class RoutineManager:
     # Execution
     # ---------------------------------------------------------------------
 
-    def _run_in_thread(self, routine: RoutineConfig) -> None:
+    def _run_in_thread(self, routine: RoutineConfig, *, event_message: Any = None) -> None:
         def _target():
             try:
-                self._execute_routine(routine)
+                self._execute_routine(routine, event_message=event_message)
             finally:
                 with self._lock:
                     self._running.discard(routine.routine_id)
@@ -1144,6 +1145,7 @@ class RoutineManager:
         *,
         target_date: Optional[str] = None,
         propagate_exceptions: bool = False,
+        event_message: Any = None,
     ) -> None:
         config = self._load_config()
         run_id = uuid.uuid4().hex[:8]
@@ -1186,6 +1188,7 @@ class RoutineManager:
                 now_local=started_at_local,
                 target_date=target_date,
                 force=bool((routine.spec or {}).get("force", False)),
+                event_message=event_message,
             )
             logger.info(
                 "Routine dispatch: id=%s run_id=%s runner=%s spec_keys=%s",

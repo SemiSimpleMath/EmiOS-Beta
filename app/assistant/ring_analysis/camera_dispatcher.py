@@ -37,23 +37,7 @@ _MAX_PAIR_GAP_SECONDS = 10 * 60
 
 
 # ---------------------------------------------------------------------------
-# Public entry point — register one dispatcher per distinct event topic.
-# ---------------------------------------------------------------------------
-
-def register_camera_dispatcher() -> None:
-    """Wire the dispatcher onto event_hub for each topic the registry uses."""
-    for topic in camera_registry.event_topics():
-        DI.event_hub.register_event(topic, _on_camera_event)
-        logger.info("[camera_dispatcher] subscribed to event topic %r", topic)
-    cams = camera_registry.load_cameras()
-    logger.info(
-        "[camera_dispatcher] registered (%d camera(s): %s)",
-        len(cams), ", ".join(c.get("name", c.get("id", "?")) for c in cams),
-    )
-
-
-# ---------------------------------------------------------------------------
-# Core dispatch
+# Core dispatch — invoked by the camera_dispatch routine (event-triggered)
 # ---------------------------------------------------------------------------
 
 def _on_camera_event(message: Message) -> None:
