@@ -21,6 +21,216 @@ Code paths:
 Both rater agents live under `me::` because the lens being scored is the
 relationship-from-the-user's-perspective lens.
 
+## How Entity importance is determined
+
+`me::importance_rater` (`app/assistant/agents/me/importance_rater/`) is
+an LLM agent. The driver `regenerate_importance()` pulls Entity nodes
+in batches of 60, fetches each node's edges (capped per node), renders
+a numbered block per node (label + node_type + category + description
++ neighbor edges), and asks the agent to return one 0–10 score per id.
+
+The prompt anchors calibration explicitly:
+
+| Band | Examples |
+|---|---|
+| 9.0–10.0 | Self, partner, children, parents, very close family. Critical home/job. Defining lifelong friends. Formative mentors who shaped the user's life path |
+| 7.0–8.9 | Siblings, in-laws, very close friends, primary employer, central long-term project, significant teachers/collaborators |
+| 5.0–6.9 | Cousins, regular colleagues, ongoing pets, regular places (home city, frequent restaurants) |
+| 3.0–4.9 | Old colleagues, neighbors, occasional friends, hobbies, recurring services |
+| 1.0–2.9 | One-off mentions, products / brands / video games / movies / TV shows mentioned in passing |
+| 0.0–0.9 | Generic concepts, taxonomy scaffolding, email subject lines, junk extracted from automated messages |
+
+Plus a **lens-specific bias**: this is a relationship lens. People,
+organizations, places, and groups can score 7+. Phone numbers, email
+addresses, dates, prices, calendar events, devices, files, documents
+score 0–3 regardless of who they belong to or how often they appear.
+
+Past-tense ("the late X") and closed-era relationships (deceased
+mentor, ex-employer that defined a career) are explicitly NOT lowered
+— they're still defining presences.
+
+Persisted to `kg_node_metadata.importance`. The routine runs in
+`only_unrated=True` mode by default, so the rater backfills new
+content rather than re-rating settled scores every cycle.
+
+## How Edge importance is determined
+
+`me::edge_importance_rater` (`app/assistant/agents/me/edge_importance_rater/`)
+rates edges **from the source node's perspective** on the same 0–10
+scale. The driver pulls edges in batches and renders each as
+(source label, relationship_type, target label, edge sentence).
+
+Two key disciplines from the prompt:
+
+1. **Reason before score.** The agent must write a 1–2 sentence reason
+   restating what the edge sentence describes, why it matters to the
+   source, and which calibration band fits. Forcing the reason first
+   keeps the score honest.
+2. **Read the edge sentence, not the relationship_type.** `has_state`
+   covers everything from "is deceased" (9–10) to "has email address"
+   (1–2). The label is a coarse extraction bucket; the sentence is
+   what's being scored.
+
+Calibration:
+
+| Band | Examples |
+|---|---|
+| 9.0–10.0 | `married_to`, `parent_of`, `child_of`, `sibling_of` to immediate family. Primary employer / lifelong career anchor |
+| 7.0–8.9 | `close_friend_of`, `mentor_of`, formative teacher, central long-term collaborator, in-laws |
+| 5.0–6.9 | `colleague_of`, `friend_of` (regular), `neighbor_of` (engaged), recurring teammates, ongoing pets |
+| 3.0–4.9 | `met_at`, `knows`, peripheral coworkers, one-time collaborators |
+| 1.0–2.9 | `attended`, `participated_in`, public figures admired but never met |
+| 0.0–0.9 | Extraction artifacts, generic concept relations, taxonomy scaffolding, contextless edges |
+
+The "from source's perspective" framing means asymmetry is preserved:
+a father may be defining to his son (10); the same son may be one of
+many to the father (still typically 9–10 for immediate family, but
+the asymmetry shows up at the edges of the band).
+
+Persisted to `kg_edge_metadata.importance`.
+
+## How importance of other node types is determined
+
+**It currently isn't, in any systematic way.** State / Event / Goal /
+Property nodes have an `importance` column that exists and is read by
+many consumers, but no rater fills it. What's there is whatever a
+proposal promoter or manual write happened to set, often the
+documented default `0.5` or `NULL`.
+
+The architectural intent is that these node types inherit importance
+from the edges that touch them — a State linking Jukka and Katy by an
+`is_married` edge weighted 10.0 should be ~10/10; a State linking a
+peripheral entity by a generic `topic` edge should be near zero. The
+edge rater already produces the input to this derivation (per-edge
+importance from the source's perspective). What's missing is the
+aggregation step.
+
+Until a rater is wired in, the runtime workaround in
+`app/assistant/kg_investigator/finding_priority.py` reads
+`state.importance` when set, otherwise computes
+`MAX(edge.importance) / 10` over edges touching the node — the same
+signal a State rater would aggregate. This is per-call, not persisted.
+
+## Compositional techniques in use today
+
+Two patterns are implemented in production code:
+
+### Direct read (`node.importance` / `edge.importance`)
+Cheapest pattern. Reads the rater's stored score. Falls back to
+`DEFAULT_SCORE = 0.5` when the value is NULL — the source of most
+"why does Marika & Joe's marriage rank below Seija's hiking?"
+surprises, since a never-rated marriage and a rated-but-modest
+hiking preference both compare against 0.5.
+
+Used everywhere: every consumer of `kg_node_metadata.importance`.
+
+### Blended importance × PageRank
+`app/assistant/kg_core/kg_utils/node_importance.py:27-28`:
+```
+priority = 0.4 × node.importance + 0.6 × node.pagerank_score
+```
+
+PageRank dominates because it's structural (connectedness × edge
+weights), while raw importance is one rater's per-node call.
+PageRank is computed offline and stored on `kg_node_metadata.pagerank_score`;
+edge weights (the edge rater's output) determine how importance flows
+along each edge during the PageRank computation. Used for ranking
+candidates in the wiki-page generator and the entity-card pipeline.
+
+### Max-of-edges fallback (for unrated nodes)
+The drain ordering in
+`app/assistant/kg_investigator/finding_priority.py` reads
+`node.importance` when set, otherwise computes
+`MAX(edge.importance) / 10` over edges touching the node — same
+signal the State rater would aggregate, computed inline so unrated
+nodes don't get buried until a rater catches up.
+
+This is a per-call workaround, not a persisted pattern. The
+intended-but-unbuilt State rater would persist this aggregation.
+
+## Compositional theory (planned)
+
+The patterns above are descriptive — they capture what's wired in
+today. Two further compositions are theoretically useful and would
+become relevant once a State rater exists, but **are not implemented
+anywhere**:
+
+### Multiplicative chain (transitivity along edges) — PLANNED
+
+Importance flows. If the user's friend Alice scores 8 from the user's
+perspective, and Alice's father Bob scores 9 from Alice's perspective,
+then Bob's importance to the user is approximately:
+
+```
+imp(Bob from user)  ≈  imp(Alice from user) × imp(Bob from Alice) / 10
+                    =  8 × 9 / 10  =  7.2
+```
+
+The `/ 10` keeps the result on the same 0–10 scale (both factors are
+0–10). This is an approximation, useful when:
+- the chain is short (one or two hops)
+- relationships along the chain are aligned in sign / role
+- only one path between the endpoints matters
+
+It loses information when:
+- the chain has nodes that *change* importance (a friend's hated
+  coworker is not `10 × negative/10`; sign and context are lost)
+- multiple paths exist between the endpoints (the product of one path
+  ignores the others)
+- the chain is long enough that edge-weight noise compounds
+
+Use case: cheap "how important is X to me?" queries where X isn't
+directly connected to the user but a short relationship path exists.
+
+### Personalized PageRank (multi-path propagation) — POTENTIALLY ALREADY DONE
+
+Full-graph propagation, source-biased on the user. The right tool
+when multiple paths between the user and a target should sum, not
+take the max of one path. Edge weights (the edge rater's output)
+determine flow rate along each edge.
+
+`kg_node_metadata.pagerank_score` is populated, but I haven't
+verified whether the current pagerank computation is actually
+*personalized* on the user (vs a global pagerank) or whether it
+weights edges by the edge rater's importance scores. Worth verifying
+before relying on it as the multi-path tool. (TODO: read the
+pagerank_score producer.)
+
+### State / Event / Goal rater — PLANNED (the main missing piece)
+
+Two viable shapes:
+
+1. **Deterministic SQL aggregate.** For each unrated State, set
+   `importance = MAX(edge.importance) / 10` over its edges, gated on
+   the edge rater having run. Cheap; aligned with the "state
+   importance comes from edges" intent. Risk: max collapses when many
+   moderate edges exist (a State touching ten 4.0 edges scores the
+   same as one touching a single 4.0 edge). A weighted sum or
+   importance-aware aggregate would handle that better but is more
+   complex.
+2. **Parallel LLM rater.** A prompt similar to `me::importance_rater`
+   but tuned for States (different calibration: life events vs
+   preferences vs background facts). Pass
+   `only_node_types=["State", "Event", "Goal"]` to
+   `regenerate_importance`. More flexible; spends LLM tokens on
+   something the edge data already encodes most of.
+
+Recommendation: ship #1 first (closes the 41% NULL gap deterministic-
+ally and cheaply). Add #2 later if the SQL aggregate produces
+inversions (e.g., a defining-life-event State outranked by a
+trivially-mentioned-many-times State because of edge count).
+
+### Picking the right composition
+
+| You want… | Use | Status |
+|---|---|---|
+| Rank a single node fast | direct read with edge-fallback for nulls | implemented (drain queue) |
+| Rank candidates for wiki / card generation | blended importance + pagerank | implemented |
+| Rank a State that the rater missed | `MAX(edge.importance) / 10` | implemented (drain queue, per-call) |
+| Persist State importance | State rater (deterministic or LLM) | **planned** |
+| "How important is X to me?" — short chain | multiplicative chain | **planned** |
+| "How important is X to me?" — multi-path / hub effects | personalized PageRank | partially built (pagerank_score column populated; verify producer) |
+
 ## The gap: State / Event / Goal nodes
 
 State (and Event, Goal, Property) importance values exist but **no agent
