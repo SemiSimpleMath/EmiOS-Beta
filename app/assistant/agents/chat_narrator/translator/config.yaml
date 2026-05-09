@@ -16,5 +16,4 @@ user_context_items:
   - task          # the planner's what_i_am_thinking
   - information   # display name + manager context
 
-system_context_items:
-  - resource_assistant_data
+system_context_items: []
