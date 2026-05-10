@@ -72,13 +72,19 @@ def ring_camera_motion_poll(
 
     captures = 0
     if new_events:
+        logger.info(
+            "[ring_camera_motion_poll] camera=%s saw %d new event(s); attempting capture",
+            camera_id, len(new_events),
+        )
         try:
             _capture_snapshot(camera_id)
             captures = 1
+            logger.info("[ring_camera_motion_poll] camera=%s capture succeeded", camera_id)
         except Exception as e:
             logger.warning(
-                "[ring_camera_motion_poll] snapshot capture failed for %s (%d new events): %s",
+                "[ring_camera_motion_poll] camera=%s snapshot capture FAILED (%d new events): %s",
                 camera_id, len(new_events), e,
+                exc_info=True,
             )
 
     new_wm = _max_event_timestamp(events) or (

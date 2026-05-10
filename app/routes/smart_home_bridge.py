@@ -1085,12 +1085,95 @@ async def _ring_capture_snapshot(ring: Any, cam_id: str, retries: int = 15, dela
     )
 
 
+async def _ring_capture_from_recent_recording(ring: Any, cam_id: str) -> bytes:
+    """Pull the most recent motion event's RECORDING and extract the first
+    frame. More reliable than the snapshot endpoint for battery cams:
+    Ring already has the video (uploaded after motion fired); we just
+    download it and grab a frame.
+
+    Bonus: the frame is from when Ring's motion sensor actually triggered,
+    not "now" (which is often 30-90s after the subject left frame).
+
+    Requires a Ring Protect subscription so recordings are produced. Raises
+    if no recording is available (no recent events, or recording not yet
+    uploaded, or no Ring Protect).
+    """
+    import asyncio as _asyncio
+    import shutil as _shutil
+    import subprocess as _subprocess
+    import tempfile as _tempfile
+    import os as _os
+    import aiohttp as _aiohttp
+
+    if not _shutil.which("ffmpeg"):
+        raise RuntimeError("ffmpeg not found on PATH (needed to extract a frame from the Ring recording).")
+
+    cam = _ring_find_camera(ring, str(cam_id))
+    history = await cam.async_history(limit=1)
+    if not history:
+        raise RuntimeError("No recent events for camera (history empty).")
+
+    event = history[0]
+    event_id = event.get("id") if isinstance(event, dict) else getattr(event, "id", None)
+    if not event_id:
+        raise RuntimeError("Most recent event has no id.")
+
+    url = await cam.async_recording_url(event_id)
+    if not url:
+        raise RuntimeError(f"No recording URL for event {event_id} (recording may still be uploading or Ring Protect not active).")
+
+    timeout = _aiohttp.ClientTimeout(total=20)
+    async with _aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.get(url) as resp:
+            if resp.status != 200:
+                raise RuntimeError(f"Ring recording fetch returned HTTP {resp.status}.")
+            mp4_bytes = await resp.read()
+
+    if not mp4_bytes:
+        raise RuntimeError("Ring recording was empty.")
+
+    with _tempfile.TemporaryDirectory(prefix="ring_recording_") as tmp:
+        mp4_path = _os.path.join(tmp, "event.mp4")
+        jpg_path = _os.path.join(tmp, "frame.jpg")
+        with open(mp4_path, "wb") as f:
+            f.write(mp4_bytes)
+        # Extract the first frame; -ss 0.5s skips an occasional black opening.
+        cmd = [
+            "ffmpeg", "-y", "-loglevel", "error",
+            "-ss", "0.5",
+            "-i", mp4_path,
+            "-frames:v", "1", "-q:v", "2",
+            jpg_path,
+        ]
+        try:
+            result = await _asyncio.to_thread(
+                _subprocess.run, cmd, capture_output=True, timeout=15,
+            )
+        except _subprocess.TimeoutExpired as exc:
+            raise RuntimeError("ffmpeg timed out extracting frame from Ring recording.") from exc
+        if result.returncode != 0:
+            stderr = (result.stderr or b"").decode(errors="replace").strip()[-500:]
+            raise RuntimeError(f"ffmpeg failed extracting Ring frame: {stderr}")
+        with open(jpg_path, "rb") as f:
+            return f.read()
+
+
 async def _ring_get_snapshot(camera_id: str) -> Dict[str, Any]:
     from datetime import datetime, timezone
     ring, auth = await _ring_load_ring_and_auth()
     try:
         cam = _ring_find_camera(ring, camera_id)  # validates the id exists
-        snapshot_bytes = await _ring_capture_snapshot(ring, str(cam.id))
+        # Prefer the recent-recording path (more reliable; what the user
+        # actually expects when Ring's app shows a video). Fall back to the
+        # snapshot endpoint when no recording is available — first run on a
+        # camera, missing Ring Protect, recording still uploading, etc.
+        snapshot_bytes = None
+        try:
+            snapshot_bytes = await _ring_capture_from_recent_recording(ring, str(cam.id))
+            logger.info("[ring] frame from recent recording for camera %s (%d bytes)", camera_id, len(snapshot_bytes or b""))
+        except Exception as e:
+            logger.info("[ring] recording-frame path unavailable for %s (%s); falling back to snapshot endpoint", camera_id, e)
+            snapshot_bytes = await _ring_capture_snapshot(ring, str(cam.id))
         if not isinstance(snapshot_bytes, (bytes, bytearray)) or not snapshot_bytes:
             raise RuntimeError("Ring returned an empty snapshot.")
         ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
