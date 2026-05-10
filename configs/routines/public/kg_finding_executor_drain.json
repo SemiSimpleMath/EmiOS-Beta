@@ -12,9 +12,8 @@
     "limit": 10
   },
   "run_policy": {
-    "type": "daily",
-    "time_local": "03:45",
-    "quiet_hours_ok": true
+    "type": "interval",
+    "min_interval_seconds": 900
   },
-  "notes": "Drains investigated findings whose 24h dev-page grace window has expired. Filters to disposition='auto_apply' (set by kg_investigation::final_answer when its confidence is high enough); 'needs_user_review' findings stay in the user queue. Hands each to kg_resolution_manager which reads the recommendation prose and applies the matching mutations from its full mutator suite (merge/delete/update/etc.). Closes the self-healing loop: pending \u00e2\u2020\u2019 investigated \u00e2\u2020\u2019 executed (mutations applied) | escalated (planner couldn't operationalize) | dismissed (take_action=False short-circuit, written by the investigator before this routine runs)."
+  "notes": "Drains the executor bucket every 15 min. Picks up investigated findings whose 24h dev-page grace window has expired AND user-Accepted findings (the /accept endpoint backdates investigated_at past the grace gate as a queue signal). Filters to disposition='auto_apply'; 'needs_user_review' findings stay in the user queue. Hands each to kg_resolution_manager which reads the recommendation prose and applies the matching mutations from its full mutator suite (merge/delete/update/etc.). Closes the self-healing loop: pending → investigated → executed (mutations applied) | escalated (planner couldn't operationalize) | dismissed (take_action=False short-circuit). For instant drain without waiting up to 15 min, hit POST /api/routines/kg_finding_executor_drain/run-now (the 'Run executor now' button on /kg-maintenance/investigated)."
 }
