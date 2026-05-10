@@ -534,49 +534,75 @@ class DailyContextGeneratorStep(BaseStep):
 
     def _get_recent_chat_excerpts(self, ctx: StepContext, *, hours: int) -> list[dict]:
         """
-        Daily-context policy:
-        - recent window is configured in stage config (hours)
-        - default chat filters apply (no commands, no injections, no summaries)
-        - message content is the entity-resolved form when available
-          (`kg_resolved_message.resolved_text`); falls back to raw text
-          for messages the resolver hasn't reached yet
-        - return excerpt dicts for prompt consumption
+        Read recent master_room chat directly from unified_log_2026.
+
+        Was reading from DI.global_blackboard.get_recent_chat_since_utc,
+        which is in-memory and doesn't survive Flask restart (and isn't
+        reliably populated by the current chat ingest path anymore).
+        unified_log_2026 is the canonical store; query it directly.
+
+        Window: last 1 hour, master_room only. Chat-eligibility filter
+        mirrors KG pipeline Stage 1 (chat sources, user/assistant role,
+        non-empty message). Raw message text — no entity-resolution
+        JOIN; daily context wants the user's actual words, not the
+        resolver's substitution.
+
+        ``hours`` and the room scope are accepted for signature
+        compatibility but the query is hardcoded to master_room / 1h.
         """
+        from types import SimpleNamespace
+        from sqlalchemy import text as sql_text
+        from app.models.db_manager import get_db_manager
+
         try:
-            from app.assistant.ServiceLocator.service_locator import DI
-            from app.assistant.database.kg_pipeline_models import KGResolvedMessage
-            from app.models.db_manager import get_db_manager
-
-            cutoff_utc = datetime.now(timezone.utc) - timedelta(hours=int(hours))
+            cutoff_utc = datetime.now(timezone.utc) - timedelta(hours=1)
+            # unified_log_2026.timestamp stores naive UTC as
+            # "YYYY-MM-DD HH:MM:SS.ffffff" (space separator, no TZ marker).
+            # ISO format with "T" + "+00:00" would not compare correctly.
+            cutoff_str = cutoff_utc.strftime("%Y-%m-%d %H:%M:%S.%f")
             scope = resolve_room_scope(pipeline_config=ctx.pipeline_config, step_config=ctx.step_config)
-            msgs = DI.global_blackboard.get_recent_chat_since_utc(
-                cutoff_utc,
-                limit=None,
-                room_id=scope["room_id"],
-                room_surface=scope["room_surface"],
-                shared_room_ids=scope.get("shared_chat_room_ids", []),
-            ) or []
 
-            msg_ids = [m.id for m in msgs if getattr(m, "id", None)]
-            resolved_by_id: dict[str, str] = {}
-            if msg_ids:
-                with get_db_manager().read_session() as session:
-                    rows = session.query(
-                        KGResolvedMessage.unified_log_id,
-                        KGResolvedMessage.resolved_text,
-                    ).filter(
-                        KGResolvedMessage.unified_log_id.in_(msg_ids)
-                    ).all()
-                    resolved_by_id = {uid: txt for uid, txt in rows if txt}
+            with get_db_manager().read_session() as session:
+                rows = session.execute(
+                    sql_text(
+                        """
+                        SELECT timestamp, role, speaker_name, room_id, message
+                        FROM unified_log_2026
+                        WHERE room_id = 'master_room'
+                          AND source IN ('chat', 'room_slack', 'room_sms', 'room_ui')
+                          AND role IN ('user', 'assistant')
+                          AND message IS NOT NULL
+                          AND TRIM(message) != ''
+                          AND timestamp >= :cutoff
+                        ORDER BY timestamp ASC
+                        """
+                    ),
+                    {"cutoff": cutoff_str},
+                ).fetchall()
 
-            annotated = [
-                m.model_copy(update={"content": resolved_by_id[m.id]})
-                if getattr(m, "id", None) in resolved_by_id
-                else m
-                for m in msgs
-            ]
-            return messages_to_chat_excerpts(annotated, consumer_room_id=scope["room_id"])
+            msgs = []
+            for r in rows:
+                ts_raw = r[0]
+                if isinstance(ts_raw, str):
+                    try:
+                        ts = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
+                    except ValueError:
+                        continue
+                else:
+                    ts = ts_raw
+                if ts and ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                msgs.append(SimpleNamespace(
+                    timestamp=ts,
+                    role=r[1],
+                    sender=r[2] or r[1] or "",
+                    room_id=r[3],
+                    content=r[4],
+                    metadata=None,
+                ))
+            return messages_to_chat_excerpts(msgs, consumer_room_id=scope["room_id"])
         except Exception:
+            logger.warning("DailyContextGeneratorStep: chat excerpt fetch failed", exc_info=True)
             return []
 
     def reset(self, ctx: StepContext) -> None:
