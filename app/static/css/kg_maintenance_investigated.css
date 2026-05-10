@@ -486,3 +486,24 @@
   font-style: normal;
   font-weight: 600;
 }
+.inv-closed-queued {
+  background: color-mix(in srgb, var(--warn, #d4a017) 22%, var(--panel));
+  color: color-mix(in srgb, var(--warn, #d4a017) 80%, var(--text));
+  font-style: normal;
+  font-weight: 600;
+}
+.inv-btn-drain {
+  margin-left: auto;
+  background: color-mix(in srgb, var(--info) 25%, var(--panel));
+  border-color: color-mix(in srgb, var(--info) 55%, var(--line));
+  color: color-mix(in srgb, var(--info) 78%, var(--text));
+  font-weight: 600;
+}
+.inv-btn-drain:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--info) 42%, var(--panel));
+  border-color: var(--info);
+}
+.inv-btn-drain:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

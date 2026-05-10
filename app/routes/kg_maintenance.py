@@ -656,13 +656,31 @@ def api_finding_recommendation(finding_id):
 
 @kg_maintenance_bp.route("/api/finding/<finding_id>/accept", methods=["POST"])
 def api_finding_accept(finding_id):
-    """Run the (possibly-edited) recommendation NOW via kg_resolution_manager.
-    Bypasses the 24h grace window; called by the Accept button on the dev page.
+    """Mark a finding ready for the executor drain. Returns immediately.
 
-    The terminal status is written by the resolution manager's own report
-    handling. Synchronous — blocks until the manager finishes (10-90s for
-    a typical run).
+    The bucket is the kg_maintenance_finding table itself; the fixer is
+    the existing kg_finding_executor_drain routine (single-worker,
+    serial). This endpoint just opts the finding into the queue by:
+      - forcing disposition='auto_apply' (the user clicked Accept,
+        which IS the override regardless of prior disposition)
+      - backdating investigated_at past the 24h grace window so the
+        drain query sees it as eligible
+
+    The drain runs on its cron schedule and processes the queue
+    serially. To process immediately without waiting for cron, hit
+    POST /api/routines/kg_finding_executor_drain/run-now (the "Run
+    executor now" button on the investigated page does this).
+
+    Was synchronous before — direct execute_one() on the request
+    thread. That blocked the browser for 10-90s and risked SQLite
+    write contention if the user speed-clicked across multiple
+    findings. The bucket-and-fixer pattern eliminates both.
     """
+    from datetime import timedelta
+    from sqlalchemy.orm.attributes import flag_modified
+    from app.models.base import get_session as _get_session
+    from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
+
     try:
         finding = get_finding(finding_id)
         if finding is None:
@@ -670,9 +688,38 @@ def api_finding_accept(finding_id):
         if finding["status"] != "investigated":
             return jsonify({"error": f"Cannot accept finding in status {finding['status']!r}"}), 409
 
-        from app.assistant.kg_investigator.finding_executor import execute_one
-        result = execute_one(finding_id)
-        return jsonify(result)
+        session = _get_session()
+        try:
+            f = session.query(KGMaintenanceFinding).filter_by(id=finding_id).first()
+            if f is None:
+                return jsonify({"error": "Finding not found"}), 404
+            # Force disposition=auto_apply inside the JSON report (the
+            # drain query filters on this).
+            report = f.investigation_report_json or {}
+            if isinstance(report, str):
+                try:
+                    report = json.loads(report)
+                except Exception:
+                    report = {}
+            if not isinstance(report, dict):
+                report = {}
+            report = dict(report)
+            report["disposition"] = "auto_apply"
+            f.investigation_report_json = report
+            flag_modified(f, "investigation_report_json")
+            # Backdate investigated_at past the 24h grace gate.
+            f.investigated_at = utc_now() - timedelta(hours=25)
+            session.commit()
+        finally:
+            session.close()
+
+        logger.info("[kg_maintenance] /accept queued finding=%s for executor drain", finding_id)
+        return jsonify({
+            "ok": True,
+            "status": "queued",
+            "finding_id": finding_id,
+            "message": "Queued for the executor drain. Will run on next cron tick, or click 'Run executor now' to drain immediately.",
+        })
     except Exception as e:
         logger.error("[kg_maintenance] accept failed id=%s: %s", finding_id, e, exc_info=True)
         return jsonify({"error": str(e)}), 500

@@ -217,10 +217,10 @@
 
     window.acceptFinding = async function acceptFinding(id) {
       const card = document.getElementById('card-' + id);
-      if (!confirm('Run this recommendation now via kg_resolution_manager?\n\nThis applies the (possibly edited) prose to the KG. Reversible only via kg_revision_log.')) return;
+      if (!confirm('Queue this finding for the executor?\n\nIt will run via kg_resolution_manager on the next cron tick. To drain immediately, use the "Run executor now" button on /kg-maintenance/investigated.')) return;
       const actions = card?.querySelector('.inv-actions');
       const prevHtml = actions?.innerHTML;
-      if (actions) actions.innerHTML = '<span class="inv-applying">⚡ Running… (10-90s)</span>';
+      if (actions) actions.innerHTML = '<span class="inv-applying">queueing…</span>';
       try {
         const res = await fetch(`/kg-maintenance/api/finding/${id}/accept`, {
           method: 'POST',
@@ -229,14 +229,12 @@
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || res.statusText);
-        card.classList.add('is-closed');
-        const summary = data.result_summary || data.outcome?.result_summary || '(no summary)';
-        const term = data.terminal_status || data.outcome?.outcome || 'ran';
+        card.classList.add('is-queued');
         if (actions) {
           actions.innerHTML = `
             <div class="inv-applied-block">
-              <span class="inv-closed-badge inv-closed-applied">${esc(term)}</span>
-              <p class="inv-applied-summary">${esc(summary)}</p>
+              <span class="inv-closed-badge inv-closed-queued">queued</span>
+              <p class="inv-applied-summary">Will run on next executor tick. Refresh after running to see terminal status.</p>
             </div>`;
         }
       } catch (e) {
