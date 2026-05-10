@@ -332,16 +332,20 @@ def _lazy_kg_importance_rater(*, target_date=None, routine=None):
     to tune throughput per call.
     """
     from app.me.edge_importance import regenerate_edge_importance
-    from app.me.importance import regenerate_importance
+    from app.me.importance import regenerate_importance, regenerate_state_importance
     spec = (routine.spec if routine and hasattr(routine, "spec") else {}) or {}
     batch_edges = int(spec.get("batch_size_edges", 50))
     batch_nodes = int(spec.get("batch_size_nodes", 60))
 
     edge_count = regenerate_edge_importance(batch_size=batch_edges, only_unrated=True)
     node_scores = regenerate_importance(batch_size=batch_nodes, only_unrated=True)
+    # State / Event / Goal / Property: derive from edge importance.
+    # Runs AFTER the edge rater so the inputs are fresh.
+    state_count = regenerate_state_importance(only_unrated=True)
     return {
         "edges_rated": int(edge_count or 0),
         "nodes_rated": len(node_scores or {}),
+        "state_nodes_rated": int(state_count or 0),
     }
 
 

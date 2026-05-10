@@ -311,6 +311,82 @@ def regenerate_importance(
     return scores
 
 
+def regenerate_state_importance(*, only_unrated: bool = True) -> int:
+    """Fill State / Event / Goal / Property node importance from edge importance.
+
+    These node types don't get LLM-rated — `me::importance_rater` only
+    runs on Entity nodes by design (lens treats State/Event/Goal as
+    connective tissue derived from the entities they connect). Their
+    importance is computed: max importance of any edge connecting to
+    the node, scaled to 0-1 to match the Entity rater's stored scale.
+
+    Mirrors the architectural intent ``state importance comes from
+    edge importance``. The edge rater (``me::edge_importance_rater``)
+    decides how much weight each connection carries; this function
+    aggregates upward.
+
+    Single SQL UPDATE per node (mirroring ``regenerate_importance``'s
+    pattern); preserves ``updated_at`` to avoid cascading wiki +
+    entity-card refreshes on score-only changes.
+
+    Args:
+        only_unrated: when True (default), skip nodes whose
+            ``importance`` is non-null. Used by the periodic backfill
+            routine. False = re-rate all eligible nodes.
+
+    Returns the number of nodes updated.
+    """
+    from sqlalchemy import text as sql_text
+
+    started = time.time()
+
+    null_filter = "AND n.importance IS NULL" if only_unrated else ""
+    select_sql = f"""
+        SELECT n.id, MAX(e.importance) / 10.0 AS score
+        FROM kg_node_metadata n
+        JOIN kg_edge_metadata e
+          ON e.source_id = n.id OR e.target_id = n.id
+        WHERE n.node_type IN ('State', 'Event', 'Goal', 'Property')
+          AND e.importance IS NOT NULL
+          {null_filter}
+        GROUP BY n.id
+    """
+
+    with get_db_manager().read_session() as session:
+        rows = session.execute(sql_text(select_sql)).fetchall()
+
+    updates = [(r[0], float(r[1])) for r in rows if r[1] is not None]
+    if not updates:
+        logger.info("state importance: no eligible nodes (only_unrated=%s)", only_unrated)
+        return 0
+
+    persisted = 0
+    failed = 0
+    with get_db_manager().transaction(op="state_importance_persist") as session:
+        for nid, score in updates:
+            try:
+                session.query(Node).filter(Node.id == nid).update(
+                    # Same updated_at-preserving pattern as regenerate_importance:
+                    # importance is a derived score; bumping updated_at would
+                    # cascade into wiki + card refreshes on no semantic change.
+                    {Node.importance: score, Node.updated_at: Node.updated_at},
+                    synchronize_session=False,
+                )
+                persisted += 1
+            except Exception as e:
+                logger.warning("state importance: DB write failed for node %s: %s", nid, e)
+                failed += 1
+        session.commit()
+
+    elapsed = time.time() - started
+    logger.info(
+        "state importance: rated %d State/Event/Goal/Property nodes in %.1fs (%d failures, only_unrated=%s)",
+        persisted, elapsed, failed, only_unrated,
+    )
+    return persisted
+
+
 if __name__ == "__main__":  # pragma: no cover
     import app.assistant.tests.test_setup  # noqa: F401
     regenerate_importance()
+    regenerate_state_importance()
