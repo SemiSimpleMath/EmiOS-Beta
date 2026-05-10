@@ -38,22 +38,95 @@ def _state_path() -> Path:
 
 
 def _load_config() -> Dict[str, Any]:
+    """Load settings from configs/routines.json + glob per-routine files
+    from configs/routines/{public,private}/.
+
+    Mirrors RoutineManager._load_config so the admin UI sees exactly
+    what the runtime sees. Private folder overrides public on id
+    collision (matches the runtime semantics).
+    """
     p = _config_path()
-    if not p.exists():
-        return {"routines": []}
-    with p.open("r", encoding="utf-8") as f:
-        return json.load(f)
+    config: Dict[str, Any] = {}
+    if p.exists():
+        with p.open("r", encoding="utf-8") as f:
+            config = json.load(f) or {}
+
+    routines: list = []
+    seen_ids: set[str] = set()
+
+    configs_dir = p.parent
+    for folder_name, allow_override in [("public", False), ("private", True)]:
+        folder = configs_dir / "routines" / folder_name
+        if not folder.is_dir():
+            continue
+        for f in sorted(folder.glob("*.json")):
+            try:
+                entry = json.loads(f.read_text(encoding="utf-8"))
+            except Exception as e:
+                logger.warning("[routines_admin] %s did not parse: %s", f, e)
+                continue
+            if not isinstance(entry, dict):
+                continue
+            rid = str(entry.get("id") or "").strip()
+            if not rid:
+                continue
+            if rid in seen_ids:
+                if allow_override:
+                    routines = [r for r in routines if r.get("id") != rid]
+                else:
+                    continue
+            entry["_source_file"] = str(f)
+            routines.append(entry)
+            seen_ids.add(rid)
+
+    # Legacy fallback: any `routines` array still present in
+    # configs/routines.json gets appended (older installs).
+    legacy = config.get("routines")
+    if isinstance(legacy, list):
+        for entry in legacy:
+            if not isinstance(entry, dict):
+                continue
+            rid = str(entry.get("id") or "").strip()
+            if rid and rid not in seen_ids:
+                routines.append(entry)
+                seen_ids.add(rid)
+
+    config["routines"] = routines
+    return config
 
 
 def _save_config(config: Dict[str, Any]) -> None:
-    """Atomic write: tmp file → fsync → replace."""
-    p = _config_path()
-    tmp = p.with_suffix(p.suffix + ".tmp")
-    with tmp.open("w", encoding="utf-8", newline="\n") as f:
-        json.dump(config, f, indent=2, ensure_ascii=False)
-        f.write("\n")
-        f.flush()
-    tmp.replace(p)
+    """Persist routine entries to their per-routine files.
+
+    Each routine carries its `_source_file` from _load_config; we write
+    back to that path. Routines without _source_file (e.g., new entries)
+    fall back to configs/routines/private/<id>.json so user-added
+    routines stay out of the public repo by default.
+
+    Note: this only handles entries — top-level settings (enabled,
+    max_workers, state_resource_file) live in configs/routines.json
+    and are not modified by this admin path.
+    """
+    routines = config.get("routines") or []
+    private_dir = _config_path().parent / "routines" / "private"
+    private_dir.mkdir(parents=True, exist_ok=True)
+    for entry in routines:
+        if not isinstance(entry, dict):
+            continue
+        rid = str(entry.get("id") or "").strip()
+        if not rid:
+            continue
+        target = entry.get("_source_file") or str(private_dir / f"{rid}.json")
+        # Strip the synthetic _source_file before serializing.
+        to_write = {k: v for k, v in entry.items() if k != "_source_file"}
+        target_path = Path(target)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target_path.with_suffix(target_path.suffix + ".tmp")
+        with tmp.open("w", encoding="utf-8", newline="\n") as f:
+            json.dump(to_write, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+            f.flush()
+        tmp.replace(target_path)
 
 
 def _load_state() -> Dict[str, Any]:
