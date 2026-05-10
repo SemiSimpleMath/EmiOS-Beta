@@ -121,17 +121,25 @@ def collect_entity_window_ids(
             if entity is None:
                 return []
             eid = entity.id
+        # window_id was dropped from kg_node_metadata + kg_edge_metadata on
+        # 2026-05-04 (see 09_KG_PIPELINE.md schema migration history). The
+        # data lives on the per-observation evidence rows. Edge side needs
+        # an extra JOIN to kg_edge_metadata because kg_edge_evidence stores
+        # edge_id rather than the source_id/target_id we need to filter on.
         rows = session.execute(
             text(
                 """
                 SELECT DISTINCT window_id FROM (
-                    SELECT window_id FROM kg_edge_metadata
-                    WHERE window_id IS NOT NULL
-                      AND (source_id = :eid OR target_id = :eid)
+                    SELECT ee.window_id
+                    FROM kg_edge_evidence ee
+                    JOIN kg_edge_metadata em ON em.id = ee.edge_id
+                    WHERE ee.window_id IS NOT NULL
+                      AND (em.source_id = :eid OR em.target_id = :eid)
                     UNION
-                    SELECT window_id FROM kg_node_metadata
-                    WHERE window_id IS NOT NULL
-                      AND id = :eid
+                    SELECT ne.window_id
+                    FROM kg_node_evidence ne
+                    WHERE ne.window_id IS NOT NULL
+                      AND ne.node_id = :eid
                 )
                 LIMIT :lim
                 """
