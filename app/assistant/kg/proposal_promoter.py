@@ -935,7 +935,9 @@ def _create_kg_node_from_proposal(
         attributes=attrs,
         start_date=proposal_node.valid_from,
         end_date=proposal_node.valid_to,
-        start_date_confidence=proposal_node.start_date_confidence,
+        start_date_confidence=_effective_start_date_confidence(
+            session, proposal_id, proposal_node
+        ),
         end_date_confidence=proposal_node.end_date_confidence,
         start_date_prose=proposal_node.valid_from_prose,
         end_date_prose=proposal_node.valid_to_prose,
@@ -1186,6 +1188,66 @@ def _earliest_proposal_evidence(session, proposal_id: str):
         .order_by(ClaimProposalEvidence.observed_at.asc())
         .first()
     )
+
+
+def _effective_start_date_confidence(
+    session, proposal_id: str, proposal_node: ClaimProposalNode,
+) -> Optional[str]:
+    """Decide what start_date_confidence should land on the new kg_node row.
+
+    Guardrail for the chat-stamp default: meta_data_add and date-fill agents
+    are supposed to emit 'inferred' (or 'estimated') whenever they derive
+    a start_date from prose with no explicit calendar phrase. They drift
+    toward 'actual' anyway, so a backfill audit ran in 2026-05-11
+    (scripts/audit_actual_dates_no_explicit_evidence.py) and downgraded
+    285 rows. This helper enforces the same rule at promote time so the
+    bad label never lands.
+
+    Rule: for State/Event/Goal nodes carrying start_date_confidence='actual',
+    if the start_date's calendar day matches any of this proposal's
+    evidence row chat dates (observed_at), downgrade to 'inferred'.
+    Past-event recall ("we got married 2003-09-09" mentioned in a 2026
+    chat) keeps 'actual' because start_date != chat_date.
+
+    Returns the value to use for start_date_confidence (string or None).
+    """
+    raw = proposal_node.start_date_confidence
+    if (raw or "").lower() != "actual":
+        return raw
+    if proposal_node.node_type not in {"State", "Event", "Goal"}:
+        return raw
+    sd = proposal_node.valid_from
+    if sd is None:
+        return raw
+    sd_iso = sd.strftime("%Y-%m-%d") if hasattr(sd, "strftime") else str(sd)[:10]
+    if len(sd_iso) < 10:
+        return raw
+
+    from app.assistant.database.claim_proposals import ClaimProposalEvidence
+    rows = (
+        session.query(ClaimProposalEvidence.observed_at)
+        .filter(ClaimProposalEvidence.proposal_id == proposal_id)
+        .all()
+    )
+    chat_dates: set[str] = set()
+    for (ts,) in rows:
+        if ts is None:
+            continue
+        if hasattr(ts, "strftime"):
+            chat_dates.add(ts.strftime("%Y-%m-%d"))
+        else:
+            s = str(ts)
+            if len(s) >= 10:
+                chat_dates.add(s[:10])
+
+    if sd_iso in chat_dates:
+        logger.info(
+            "[promoter] downgrade start_date_confidence actual→inferred "
+            "(chat-stamp default) for %s %r start_date=%s",
+            proposal_node.node_type, proposal_node.label, sd_iso,
+        )
+        return "inferred"
+    return raw
 
 
 def _write_node_evidence(
