@@ -422,15 +422,25 @@ def is_now_admissible(
     category: str | None,
     goal_status: str | None,
     locked_by_user_at,
+    valid_currently=None,
 ) -> bool:
     """Apply the NOW filter to a KG node.
 
     Returns True iff the node belongs on a card (vs. relegated to wiki).
     Closed states and past one-off events get filtered out; the wiki picks
     them up via a different projection.
+
+    `valid_currently` (added 2026-05-12): authoritative validity flag set
+    by meta_data_add at enrichment time. False = explicit closing evidence
+    in the source window (closing event, "after moving away" prose, etc.)
+    → reject regardless of structured end_date. None = no closing evidence
+    (default) → fall through to the existing structural checks.
     """
     if locked_by_user_at is not None:
         return True  # user-locked overrides
+    # Strong signal: explicit closing evidence trumps structural inference.
+    if valid_currently is False:
+        return False
     if node_type == 'State':
         # Active iff no end_date or end_date in the future.
         if end_date is None:

@@ -9,10 +9,10 @@ Use them to better assess temporal relevance and biographical significance of ea
 #### END OF ADDITIONAL KNOWN CONTEXT ####
 {% endif %}
 
-These are nodes you need to enrich:
+These are State and Event nodes you need to enrich:
 {{ nodes }}
 
-Here is the conversation window the nodes came from. Entity references are already expanded to canonical names. Use this to capture aliases that appear anywhere in the window: when one sentence creates a node for an entity and another sentence in the same window names a nickname, term of address, or alternate form for that entity, emit the alternate form as an alias on that node.
+Here is the conversation window the nodes came from. Entity references are already expanded to canonical names. Read the whole window to understand the temporal arc — what events open and close states, which states are bounded by other events, which mentions are about the past versus the present. This is your primary source for deciding `valid_currently`.
 {{ resolved_window }}
 
 

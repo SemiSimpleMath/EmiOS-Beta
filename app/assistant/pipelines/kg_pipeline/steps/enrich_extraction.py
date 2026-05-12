@@ -129,69 +129,104 @@ class EnrichExtractionStep:
         resolved_window: str,
         message_timestamp: str,
     ) -> List[Dict]:
-        """Call meta_data_add agent on a single component. Returns enriched nodes
-        merged with originals. Error-safe: returns originals on failure."""
+        """Call meta_data_add agent on State + Event nodes from a single component.
+
+        Scoped to State + Event only (2026-05-12). Entity/Concept/Property
+        pass through unchanged — they don't need this enrichment. Goals get
+        valid_currently from goal_status deterministically (no LLM call).
+        Returns enriched nodes merged with originals. Error-safe: returns
+        originals on failure.
+        """
         if not nodes:
             return nodes
 
-        from app.assistant.ServiceLocator.service_locator import DI
-
-        try:
-            agent = DI.agent_factory.create_agent(ENRICHER_AGENT_NAME)
-            if agent is None:
-                logger.warning("[kg_pipeline.enrich] could not create meta_data_add agent")
-                return nodes
-        except Exception as exc:
-            logger.warning("[kg_pipeline.enrich] meta_data_add unavailable: %s", exc)
-            return nodes
-
-        valid_nodes = [n for n in nodes if n.get("temp_id")]
-        if not valid_nodes:
-            return nodes
-
-        node_payloads = [
-            {
-                "temp_id": n.get("temp_id"),
-                "node_type": n.get("node_type"),
-                "label": n.get("label"),
-                "category": n.get("category"),
-                "sentence": n.get("sentence"),
-            }
-            for n in valid_nodes
+        # Partition: only State+Event go through the LLM. Everything else
+        # passes through (Entity/Concept/Property unchanged; Goal handled
+        # by the deterministic goal-status path below).
+        agent_targets = [
+            n for n in nodes
+            if n.get("temp_id") and n.get("node_type") in ("State", "Event")
+        ]
+        goal_targets = [
+            n for n in nodes
+            if n.get("temp_id") and n.get("node_type") == "Goal"
         ]
 
-        sentences = [n.get("sentence") or "" for n in valid_nodes]
-        combined_sentence = " | ".join(dict.fromkeys(s for s in sentences if s))
-        if not combined_sentence:
-            edge_sents = [e.get("sentence") or "" for e in (edges or [])]
-            combined_sentence = " | ".join(dict.fromkeys(s for s in edge_sents if s))
-
-        agent_input = {
-            "nodes": _json.dumps(node_payloads, ensure_ascii=True),
-            "resolved_sentence": combined_sentence,
-            "resolved_window": resolved_window,
-            "message_timestamp": message_timestamp,
-        }
-        scope = build_pipeline_scope_context(
-            pipeline_id="kg_pipeline", actor_id="enrich_extraction",
-        )
-
-        try:
-            resp = agent.action_handler(Message(agent_input=agent_input, scope_context=scope))
-            data = resp.data if resp and hasattr(resp, "data") else {}
-        except Exception as exc:
-            logger.warning("[kg_pipeline.enrich] meta_data_add call failed: %s", exc)
-            return nodes
-
-        meta_nodes = data.get("Nodes") or [] if isinstance(data, dict) else []
         meta_by_temp: Dict[str, Dict[str, Any]] = {}
-        for mn in meta_nodes:
-            if isinstance(mn, dict) and mn.get("temp_id"):
-                meta_by_temp[str(mn["temp_id"])] = mn
+
+        if agent_targets:
+            from app.assistant.ServiceLocator.service_locator import DI
+
+            try:
+                agent = DI.agent_factory.create_agent(ENRICHER_AGENT_NAME)
+                if agent is None:
+                    logger.warning("[kg_pipeline.enrich] could not create meta_data_add agent")
+                    agent = None
+            except Exception as exc:
+                logger.warning("[kg_pipeline.enrich] meta_data_add unavailable: %s", exc)
+                agent = None
+
+            if agent is not None:
+                node_payloads = [
+                    {
+                        "temp_id": n.get("temp_id"),
+                        "node_type": n.get("node_type"),
+                        "label": n.get("label"),
+                        "category": n.get("category"),
+                        "sentence": n.get("sentence"),
+                    }
+                    for n in agent_targets
+                ]
+
+                sentences = [n.get("sentence") or "" for n in agent_targets]
+                combined_sentence = " | ".join(dict.fromkeys(s for s in sentences if s))
+                if not combined_sentence:
+                    edge_sents = [e.get("sentence") or "" for e in (edges or [])]
+                    combined_sentence = " | ".join(dict.fromkeys(s for s in edge_sents if s))
+
+                agent_input = {
+                    "nodes": _json.dumps(node_payloads, ensure_ascii=True),
+                    "resolved_sentence": combined_sentence,
+                    "resolved_window": resolved_window,
+                    "message_timestamp": message_timestamp,
+                }
+                scope = build_pipeline_scope_context(
+                    pipeline_id="kg_pipeline", actor_id="enrich_extraction",
+                )
+
+                try:
+                    resp = agent.action_handler(Message(agent_input=agent_input, scope_context=scope))
+                    data = resp.data if resp and hasattr(resp, "data") else {}
+                except Exception as exc:
+                    logger.warning("[kg_pipeline.enrich] meta_data_add call failed: %s", exc)
+                    data = {}
+
+                meta_nodes = data.get("Nodes") or [] if isinstance(data, dict) else []
+                for mn in meta_nodes:
+                    if isinstance(mn, dict) and mn.get("temp_id"):
+                        meta_by_temp[str(mn["temp_id"])] = mn
+
+        # Goal nodes: deterministic valid_currently from goal_status. No LLM.
+        # Goals carry their lifecycle on goal_status (active|completed|abandoned|dormant).
+        # 'completed' and 'abandoned' = no longer pursued → valid_currently=false.
+        # 'active' and 'dormant' (and unset) → null (presumed valid).
+        for gn in goal_targets:
+            gs = (gn.get("goal_status") or "").lower()
+            if gs in ("completed", "abandoned"):
+                meta_by_temp[str(gn["temp_id"])] = {
+                    "temp_id": gn["temp_id"],
+                    "valid_currently": False,
+                    "validity_reason": f"goal_status={gs}",
+                }
 
         if not meta_by_temp:
             return nodes
 
+        # Merge enrichment back onto original node dicts. Field whitelist
+        # reflects the slimmed meta_data_add output (2026-05-12):
+        # dropped aliases/hash_tags/valid_during; added valid_currently +
+        # validity_reason. goal_status comes from extractor for Goal nodes,
+        # not from this agent.
         merged: List[Dict] = []
         for n in nodes:
             tid = str(n.get("temp_id") or "")
@@ -201,12 +236,17 @@ class EnrichExtractionStep:
                 continue
             combined = dict(n)
             for fld in (
-                "aliases", "hash_tags", "start_date", "start_date_confidence",
+                "start_date", "start_date_confidence",
                 "start_date_prose", "end_date", "end_date_confidence",
-                "end_date_prose", "valid_during", "semantic_label", "goal_status",
-                "confidence", "importance",
+                "end_date_prose", "valid_currently", "validity_reason",
+                "semantic_label", "confidence",
             ):
                 val = meta.get(fld)
+                # valid_currently is allowed to be False (which is falsy but meaningful).
+                if fld == "valid_currently":
+                    if val is not None:
+                        combined[fld] = val
+                    continue
                 if val not in (None, "", []):
                     combined[fld] = val
             merged.append(combined)

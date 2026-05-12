@@ -408,6 +408,8 @@ def write_one_proposal_group(
             valid_to_prose=n.get("valid_to_prose") or n.get("end_date_prose"),
             start_date_confidence=n.get("start_date_confidence"),
             end_date_confidence=n.get("end_date_confidence"),
+            valid_currently=n.get("valid_currently"),
+            validity_reason=n.get("validity_reason") or None,
         )
         session.add(row)
         # Flush every node so its UUID PK exists before edges reference it.

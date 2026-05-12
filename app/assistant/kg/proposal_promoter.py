@@ -941,6 +941,11 @@ def _create_kg_node_from_proposal(
         end_date_confidence=proposal_node.end_date_confidence,
         start_date_prose=proposal_node.valid_from_prose,
         end_date_prose=proposal_node.valid_to_prose,
+        # Validity assessment from meta_data_add (State/Event) or
+        # deterministic goal_status path (Goal). Null when no closing
+        # evidence; False when explicitly bounded. Never True.
+        valid_currently=proposal_node.valid_currently,
+        validity_reason=proposal_node.validity_reason,
         source="proposal_promoter",
         created_from_proposal_id=proposal_id,
     )

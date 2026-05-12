@@ -432,6 +432,7 @@ def _collect_candidate_facts(session: Session, entity: Node) -> List[Dict[str, A
         admissible = is_now_admissible(
             other.node_type, other.end_date, other.category,
             other.goal_status, other.locked_by_user_at,
+            valid_currently=getattr(other, "valid_currently", None),
         )
         if not admissible:
             continue
@@ -995,7 +996,8 @@ def _hydrate_sources(session: Session, bullet: EntityCardBullet) -> List[Node]:
 def _any_source_admits(nodes: List[Node]) -> bool:
     for n in nodes:
         if is_now_admissible(n.node_type, n.end_date, n.category,
-                             n.goal_status, n.locked_by_user_at):
+                             n.goal_status, n.locked_by_user_at,
+                             valid_currently=getattr(n, "valid_currently", None)):
             return True
     return False
 

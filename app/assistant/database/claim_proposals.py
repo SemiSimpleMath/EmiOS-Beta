@@ -186,6 +186,15 @@ class ClaimProposalNode(Base):
     start_date_confidence = Column(String(32), nullable=True)
     end_date_confidence = Column(String(32), nullable=True)
 
+    # Validity assessment (2026-05-12). Set by meta_data_add for State/Event
+    # nodes when the window has explicit bounding evidence (closing event,
+    # explicit past prose like "after moving to Seattle"). Goal nodes get
+    # it from goal_status deterministically. NULL = no closing evidence
+    # (presumed valid). FALSE = explicitly closed. We never stamp TRUE —
+    # asymmetric trust, only the negative signal is strong.
+    valid_currently = Column(Boolean, nullable=True)
+    validity_reason = Column(Text, nullable=True)
+
     # Resolution outputs (filled during promotion).
     resolved_node_id = Column(String, nullable=True, index=True)
     resolution_action = Column(String(32), nullable=False, default="pending")

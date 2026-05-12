@@ -3,7 +3,7 @@
 
 import uuid
 from sqlalchemy import (
-    Column, String, JSON, DateTime, Text, ForeignKey, Float, Integer,
+    Boolean, Column, String, JSON, DateTime, Text, ForeignKey, Float, Integer,
     UniqueConstraint, Index, func
 )
 from sqlalchemy.orm import relationship
@@ -65,10 +65,19 @@ class Node(Base):
     updated_at = Column(AwareUtcDateTime, nullable=False, default=utc_now, onupdate=utc_now)
     
     # Promoted fields
-    valid_during = Column(Text, nullable=True)
+    valid_during = Column(Text, nullable=True)  # DEPRECATED 2026-05-12 — superseded by valid_currently; column retained for legacy readers
     hash_tags = Column(JSON, nullable=True)  # Stored as JSON array in SQLite
     semantic_label = Column(String, nullable=True)
     goal_status = Column(String, nullable=True)
+
+    # Validity assessment (2026-05-12). Replaces valid_during for the
+    # "is this still in effect" question. Set by meta_data_add for
+    # State/Event when bounding evidence exists; by deterministic code
+    # for Goal (from goal_status). NULL = no closing evidence (presumed
+    # valid). FALSE = explicitly closed. We never stamp TRUE — asymmetric
+    # trust, only the negative signal is strong.
+    valid_currently = Column(Boolean, nullable=True)
+    validity_reason = Column(Text, nullable=True)
     
     # NOTE: Embeddings are stored in ChromaDB, not here
 
