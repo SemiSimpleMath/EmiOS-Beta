@@ -200,6 +200,12 @@ SUMMARY = 'summary'
 LEVEL_0 = 'level_0'
 
 
+# `general_facts` is the catch-all BULLETS section on every template. The
+# section_tagger should only reject facts that aren't really about the
+# entity; anything that survives the NOW + importance pre-filters has
+# already passed the "should it exist" decision and must land somewhere.
+# If the tagger picks `reject` anyway, the builder reroutes the fact to
+# `general_facts` so meaningful edges never silently disappear.
 SECTION_TEMPLATES = {
     'Person': [
         ('level_0', LEVEL_0),
@@ -211,6 +217,7 @@ SECTION_TEMPLATES = {
         ('what_they_do', BULLETS),
         ('notes', BULLETS),
         ('current_connections', BULLETS),
+        ('general_facts', BULLETS),
     ],
     'Place': [
         ('level_0', LEVEL_0),
@@ -220,6 +227,7 @@ SECTION_TEMPLATES = {
         ('location', BULLETS),
         ('characteristics', BULLETS),
         ('connection_to_user', BULLETS),
+        ('general_facts', BULLETS),
     ],
     'Pod': [
         ('level_0', LEVEL_0),
@@ -227,6 +235,7 @@ SECTION_TEMPLATES = {
         ('alias', ALIAS),
         ('content_summary', BULLETS),
         ('connections', BULLETS),
+        ('general_facts', BULLETS),
     ],
     'Concept': [
         ('level_0', LEVEL_0),
@@ -234,6 +243,7 @@ SECTION_TEMPLATES = {
         ('alias', ALIAS),
         ('definition', BULLETS),
         ('relevance', BULLETS),
+        ('general_facts', BULLETS),
     ],
     '_default': [
         ('level_0', LEVEL_0),
@@ -242,6 +252,7 @@ SECTION_TEMPLATES = {
         ('contact', BULLETS),
         ('connection_to_user', BULLETS),
         ('notes', BULLETS),
+        ('general_facts', BULLETS),
     ],
 }
 
@@ -280,6 +291,7 @@ SECTION_BULLET_CAPS: dict[str, int] = {
     'connections':          6,
     'definition':           4,
     'relevance':            4,
+    'general_facts':        10,  # catch-all — generous cap so meaningful edges aren't truncated
 }
 DEFAULT_BULLET_CAP = 8
 

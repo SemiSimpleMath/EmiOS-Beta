@@ -21,12 +21,17 @@ losing them, just routing them correctly.
 
 ## What to REJECT (route to wiki, not card)
 
+`reject` means "this fact is not card-worthy" — NOT "no section fits."
+If no specific section fits but the fact is genuinely about this entity
+and timely, use `general_facts` instead. Reserve `reject` for:
+
 - Closed states with end_date in the past — "worked at X 2010-2015",
   "lived in Y 2018-2020"
 - Past one-off events that aren't definitional — trips, illnesses,
   meetings, projects that ended, episodes
 - Achieved or abandoned goals
 - Transient daily moods or one-time observations
+- Facts where the entity is only a passing mention, not the subject
 
 ## Section choice
 
@@ -46,9 +51,16 @@ Pick the best fit per fact. Common patterns:
 - **what_they_do** — active occupation, ongoing projects
 - **notes** — active preferences, traits, ongoing context
 - **current_connections** — other entities they currently interact with
+- **general_facts** — catch-all bucket for card-worthy facts that don't
+  fit any other section. Use this for anything substantive that survives
+  the NOW filter but doesn't match the card's specific section list
+  (e.g. on a Place card with no `origin` section: "Jukka was born here";
+  on a Concept card with no `applications` section: "X is used by Y").
 
 If a fact could fit multiple sections, prefer the most specific one.
 Contact info beats notes; specific role beats generic relationship.
+A specific section ALWAYS beats `general_facts` — only use it when no
+domain-specific section is a real fit.
 
 ## Confidence
 

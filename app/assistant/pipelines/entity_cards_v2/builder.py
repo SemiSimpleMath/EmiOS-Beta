@@ -105,15 +105,32 @@ def build_card(entity_node_id: str) -> Dict[str, Any]:
             )
             tagged = _run_section_tagger(entity, facts, bullet_sections)
 
-        # 3. Group accepted facts by section
+        # 3. Group facts by section. `reject` and hallucinated section names
+        # are NOT silently dropped — the fact already passed the NOW filter
+        # and the CARD_FACT_IMPORTANCE_FLOOR pre-filter, so "should it exist
+        # on the card" was already decided. The section_tagger's only job is
+        # bucket selection. Any fact whose chosen section is invalid or
+        # `reject` is routed to `general_facts`, which exists on every
+        # template (see SECTION_TEMPLATES). This was Issue surfaced 2026-05-12
+        # when Place entities (Espoo, Finland, California, ...) hit the
+        # `_default` template, had no semantic fit, and the tagger rejected
+        # all their edges — producing empty cards for real entities.
+        rerouted = 0
         by_section: Dict[str, List[Dict[str, Any]]] = {}
         for tag in tagged:
-            if tag['section'] == 'reject':
-                continue
-            if tag['section'] not in bullet_sections:
-                # Hallucinated section name — drop
+            if tag['section'] == 'reject' or tag['section'] not in bullet_sections:
+                if 'general_facts' in bullet_sections:
+                    rerouted += 1
+                    by_section.setdefault('general_facts', []).append(
+                        {**tag, 'section': 'general_facts'}
+                    )
                 continue
             by_section.setdefault(tag['section'], []).append(tag)
+        if rerouted:
+            logger.info(
+                "[entity_cards_v2] %s: %d fact(s) rerouted from reject/hallucinated → general_facts",
+                entity.label, rerouted,
+            )
 
         # 4. Render bullets per section. Three-stage pipeline:
         #    a. Chunk the renderer input if section has > RENDERER_CHUNK_SIZE
