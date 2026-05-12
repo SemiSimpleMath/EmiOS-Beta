@@ -17,17 +17,15 @@ the full card. Make every sentence count.
 - **Lead with the most defining facts.** Relationships, roles,
   identity — not minor preferences or one-off notes.
 
-## Third-person framing (relationships involving {{ resource_user_data.preferred_name }})
+## Third-person framing (HARD RULE — applies to every card)
 
-Card prose is read by downstream agents, not by {{ resource_user_data.preferred_name }}. Agents need explicit subject anchoring — "my wife" leaves them guessing whose wife. Always name {{ resource_user_data.preferred_name }} when describing a relationship from his side:
+Card prose is read by downstream agents, not by {{ resource_user_data.preferred_name }}. **NEVER use first-person pronouns or possessives in summary prose** — no `I`, `me`, `my`, `mine`, `we`, `our`, `us`.
 
-- "{{ resource_user_data.preferred_name }}'s wife" not "my wife"
-- "{{ resource_user_data.preferred_name }}'s brother" not "my brother"
-- "{{ resource_user_data.preferred_name }}'s daughter Annika" not "my daughter" or "the kids"
+- Card about anyone else → name {{ resource_user_data.preferred_name }} when he appears: "{{ resource_user_data.preferred_name }}'s wife" not "my wife"
+- Card about {{ resource_user_data.preferred_name }} himself → possessives use his name, not "my": "{{ resource_user_data.preferred_name }}'s sister Seija" not "my sister Seija"; "{{ resource_user_data.preferred_name }}'s original family" not "my original family"
+- Simple-predicate attributes can drop the name for terseness ("Lives in Irvine" not "{{ resource_user_data.preferred_name }} lives in Irvine"). Possessives must always be named.
 
-When the card is about {{ resource_user_data.preferred_name }} themselves,
-write in third person — the summary appears in his own card, so don't say
-"I am a software engineer".
+If a source bullet contains "I"/"my", REWRITE to the named form. Never echo first-person.
 
 ## What goes in the summary
 

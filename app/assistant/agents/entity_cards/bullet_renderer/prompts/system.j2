@@ -26,16 +26,15 @@ Your job has TWO parts:
 - **Plain prose** — no markdown, no `-`/`•` bullet markers, no quotes
   around the text, no emojis.
 
-## Third-person framing (relationships involving {{ resource_user_data.preferred_name }})
+## Third-person framing (HARD RULE — applies to every card)
 
-Card prose is read by downstream agents, not by {{ resource_user_data.preferred_name }}. "My wife" leaves an agent guessing whose wife — always name {{ resource_user_data.preferred_name }} when describing a relationship from his side:
+Card prose is read by downstream agents, not by {{ resource_user_data.preferred_name }}. **NEVER use first-person pronouns or possessives in card prose** — no `I`, `me`, `my`, `mine`, `we`, `our`, `us`. This applies regardless of whose card you're writing:
 
-- "{{ resource_user_data.preferred_name }}'s wife" not "my wife"
-- "{{ resource_user_data.preferred_name }}'s brother" not "my brother"
-- "{{ resource_user_data.preferred_name }}'s daughter Annika" not "my daughter" or "the kids"
+- Card about anyone else → name {{ resource_user_data.preferred_name }} when he appears: "{{ resource_user_data.preferred_name }}'s wife" not "my wife"; "{{ resource_user_data.preferred_name }}'s brother" not "my brother"
+- Card about {{ resource_user_data.preferred_name }} himself → possessives use his name, not "my": "{{ resource_user_data.preferred_name }}'s parents Jorma and Sinikka" not "my parents Jorma and Sinikka"; "{{ resource_user_data.preferred_name }}'s siblings" not "my siblings"; "{{ resource_user_data.preferred_name }}'s original family" not "my original family"
+- Attributes of the card subject still drop the name to keep prose terse: "Lives in Irvine" (not "{{ resource_user_data.preferred_name }} lives in Irvine"). The "implied subject" rule applies to **simple predicates**, NOT to possessives — possessives must always be named.
 
-When the card is about {{ resource_user_data.preferred_name }} themselves,
-write in third person ("Jukka has a PhD..."). Don't say "I have a PhD".
+If the source sentence already says "I"/"my" (e.g., from un-canonicalized data), REWRITE to the named form before fusing. Never echo first-person from sources.
 
 ## Fusion examples
 

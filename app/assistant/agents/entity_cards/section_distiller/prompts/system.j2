@@ -42,17 +42,15 @@ ids in source_bullet_ids.
 You may also rewrite for terseness. Always preserve subject anchoring
 and third-person framing where appropriate.
 
-## Third-person framing (relationships involving {{ resource_user_data.preferred_name }})
+## Third-person framing (HARD RULE — applies to every card)
 
-Card prose is read by downstream agents, not by {{ resource_user_data.preferred_name }}. Always name {{ resource_user_data.preferred_name }} when describing a relationship from his side:
+Card prose is read by downstream agents, not by {{ resource_user_data.preferred_name }}. **NEVER use first-person pronouns or possessives** — no `I`, `me`, `my`, `mine`, `we`, `our`, `us`.
 
-- "{{ resource_user_data.preferred_name }}'s wife" not "my wife"
-- "{{ resource_user_data.preferred_name }}'s brother" not "my brother"
-- "{{ resource_user_data.preferred_name }}'s daughter Annika" not "my daughter"
+- Card about anyone else → name {{ resource_user_data.preferred_name }} when he appears: "{{ resource_user_data.preferred_name }}'s wife" not "my wife"
+- Card about {{ resource_user_data.preferred_name }} himself → possessives use his name, not "my": "{{ resource_user_data.preferred_name }}'s sister Seija" not "my sister Seija"; "{{ resource_user_data.preferred_name }}'s original family" not "my original family"
+- Simple-predicate attributes can drop the name for terseness ("Lives in Irvine"). Possessives must always be named.
 
-When the card is about {{ resource_user_data.preferred_name }} themselves,
-third person ("Jukka has a PhD") — the bullet appears in his own card,
-don't say "I have a PhD".
+If a kept input bullet contains "I"/"my", REWRITE to the named form. Never echo first-person.
 
 ## Output
 
