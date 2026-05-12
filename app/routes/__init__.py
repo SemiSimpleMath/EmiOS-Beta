@@ -10,8 +10,7 @@ from .tool_route import tool_route_bp
 from .agent_flow import agent_flow_route_bp
 from .ask_user_route import ask_user_route_bp
 from .daily_summary import daily_summary_route_bp
-from .entity_cards_editor import entity_cards_editor_bp
-from .entity_cards_admin import entity_cards_admin_bp
+from .entity_cards_v2 import entity_cards_v2_bp
 from .google_oauth import google_oauth_bp
 from .health_check import health_check_bp
 from .debug_status import debug_status_bp
@@ -25,7 +24,6 @@ from .playwright_modal_test import playwright_modal_test_bp
 from .runtime_monitor import runtime_monitor_bp
 from .task_graph_route import task_graph_bp
 from .kg_maintenance import kg_maintenance_bp
-from .entity_card_maintenance import entity_card_maintenance_bp
 from .smart_home_bridge import smart_home_bridge_bp
 from .insights import insights_bp
 

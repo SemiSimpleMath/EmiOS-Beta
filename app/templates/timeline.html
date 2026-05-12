@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Timeline — {{ entity_label }}</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/timeline.css') }}">
+</head>
+<body>
+    <div class="page">
+        <header class="page-header">
+            <a class="back-link" href="/chat_bot"><i class="fas fa-arrow-left"></i> Back</a>
+            <h1>
+                <i class="fas fa-stream"></i>
+                {{ entity_label }}
+                {% if entity_importance is not none %}
+                    <span class="importance-badge" title="Importance">{{ "%.1f"|format(entity_importance) }}</span>
+                {% endif %}
+            </h1>
+            {% if entity_description %}
+            <p class="entity-desc">{{ entity_description }}</p>
+            {% endif %}
+        </header>
+
+        {% if error %}
+        <div class="error-message">{{ error }}</div>
+        {% else %}
+
+        <div class="controls">
+            <label class="control-group">
+                Min importance:
+                <input type="range" id="impFilter" min="0" max="10" step="0.5" value="3.0">
+                <span id="impFilterVal">3.0</span>
+            </label>
+            <label class="control-group">
+                <input type="checkbox" id="showEstimated" checked>
+                Show estimated dates
+            </label>
+            <label class="control-group">
+                <input type="checkbox" id="showProseOnly" checked>
+                Show prose-only entries
+            </label>
+            <div class="count-summary">
+                <span id="visibleCount">0</span> / <span id="totalCount">0</span> entries
+            </div>
+            <button id="backToOverviewBtn" class="zoom-back-btn hidden" onclick="backToOverview()">
+                <i class="fas fa-arrow-left"></i>
+                Back to all years (zoomed: <span class="btn-year-label"></span>)
+            </button>
+        </div>
+
+        <div class="zoom-hint">
+            Tip: click a year on the axis to zoom into month-level detail.
+        </div>
+
+        <div class="timeline-wrap">
+            <button id="prevPageBtn" class="page-arrow page-arrow-left hidden" onclick="prevPage()" title="Previous">
+                <i class="fas fa-chevron-left"></i>
+            </button>
+            <button id="nextPageBtn" class="page-arrow page-arrow-right hidden" onclick="nextPage()" title="Next">
+                <i class="fas fa-chevron-right"></i>
+            </button>
+            <svg id="timelineSvg" preserveAspectRatio="xMinYMin meet"></svg>
+            <div id="pageIndicator" class="page-indicator hidden"></div>
+        </div>
+
+        <div id="detailPanel" class="detail-panel hidden">
+            <button class="close-btn" onclick="hideDetail()"><i class="fas fa-times"></i></button>
+            <div id="detailContent"></div>
+        </div>
+
+        <div class="legend">
+            <h3>Legend</h3>
+            <div class="legend-row">
+                <span class="dot dot-imp-10"></span> Major (≥7) —
+                <span class="dot dot-imp-5"></span> Moderate (4–7) —
+                <span class="dot dot-imp-1"></span> Minor (&lt;4)
+            </div>
+            <div class="legend-row">
+                <span class="dot solid"></span> Actual date —
+                <span class="dot dashed"></span> Inferred/Estimated —
+                <span class="dot dotted"></span> Prose only
+            </div>
+            <div class="legend-row category-legend"></div>
+        </div>
+
+        {% endif %}
+    </div>
+
+    <script>
+        window.ENTITY_ID = {{ entity_id|tojson }};
+        window.ENTITY_LABEL = {{ entity_label|tojson }};
+    </script>
+    <script src="{{ url_for('static', filename='js/timeline.js') }}"></script>
+</body>
+</html>

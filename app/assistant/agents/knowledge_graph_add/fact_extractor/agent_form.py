@@ -7,7 +7,7 @@ class Node(BaseModel):
     node_type: str
     temp_id: str
     label: str
-    core: str
+    category: str
     sentence: str
     reasoning: str
 

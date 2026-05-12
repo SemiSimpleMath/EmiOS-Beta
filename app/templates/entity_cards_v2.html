@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Entity Cards V2</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/entity_cards_v2.css') }}">
+</head>
+<body>
+    <div class="ec2-app">
+        <aside class="ec2-sidebar">
+            <header class="ec2-sidebar-header">
+                <h1>Entity Cards <span class="ec2-version">v2</span></h1>
+                <button class="ec2-add-btn" onclick="openCreateModal()">+ Add card</button>
+                <input type="search" id="ec2-search" placeholder="filter…" autocomplete="off">
+                <div class="ec2-meta" id="ec2-count">loading…</div>
+            </header>
+            <ul class="ec2-list" id="ec2-list"></ul>
+        </aside>
+        <main class="ec2-detail" id="ec2-detail">
+            <div class="ec2-placeholder">Select a card from the left.</div>
+        </main>
+    </div>
+
+    <!-- Create / edit modal -->
+    <div class="ec2-modal-backdrop" id="ec2-modal-backdrop" onclick="closeModalOnBackdrop(event)">
+        <div class="ec2-modal" role="dialog" aria-modal="true">
+            <header class="ec2-modal-header">
+                <h2 id="ec2-modal-title">Add card</h2>
+                <button class="ec2-modal-close" onclick="closeModal()" aria-label="Close">×</button>
+            </header>
+            <form id="ec2-form" onsubmit="submitForm(event)">
+                <label class="ec2-form-row">
+                    <span class="ec2-form-label">Title <span class="ec2-required">*</span></span>
+                    <input type="text" id="ec2-form-title" required maxlength="120" placeholder="e.g. Phil">
+                </label>
+                <label class="ec2-form-row">
+                    <span class="ec2-form-label">Aliases <span class="ec2-form-hint">comma separated</span></span>
+                    <input type="text" id="ec2-form-aliases" placeholder="e.g. the dog, Philly">
+                </label>
+                <label class="ec2-form-row">
+                    <span class="ec2-form-label">Content <span class="ec2-required">*</span></span>
+                    <textarea id="ec2-form-content" required rows="6"
+                        placeholder="What this name refers to, so the assistant resolves it correctly when it comes up in chat."></textarea>
+                </label>
+                <div class="ec2-form-error" id="ec2-form-error"></div>
+                <div class="ec2-form-actions">
+                    <button type="button" class="ec2-btn-secondary" onclick="closeModal()">Cancel</button>
+                    <button type="submit" class="ec2-btn-primary" id="ec2-form-submit">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+    const $ = (id) => document.getElementById(id);
+    let _allCards = [];
+    let _currentId = null;
+    let _editingId = null;  // null = create mode; uuid = edit mode
+
+    async function loadList() {
+        const r = await fetch('/api/entity-cards-v2');
+        const data = await r.json();
+        _allCards = data.cards || [];
+        renderList();
+    }
+
+    function renderList() {
+        const q = ($('ec2-search').value || '').toLowerCase().trim();
+        const items = _allCards.filter(c => {
+            if (!q) return true;
+            if ((c.entity_label || '').toLowerCase().includes(q)) return true;
+            const aliases = c.card_aliases || [];
+            return aliases.some(a => (a || '').toLowerCase().includes(q));
+        });
+        $('ec2-count').textContent = `${items.length} of ${_allCards.length} cards`;
+        const ul = $('ec2-list');
+        ul.innerHTML = '';
+        for (const c of items) {
+            const li = document.createElement('li');
+            li.className = 'ec2-item' + (c.id === _currentId ? ' active' : '');
+            const aliasChips = (c.card_aliases || []).slice(0, 3)
+                .map(a => `<span class="ec2-alias-chip">${escape(a)}</span>`).join('');
+            const sourceBadge = c.is_kg_card
+                ? `<span class="ec2-source-badge ec2-source-kg" title="Built from the KG">kg</span>`
+                : `<span class="ec2-source-badge ec2-source-manual" title="User-authored">manual</span>`;
+            li.innerHTML = `
+                <div class="ec2-item-label">${escape(c.entity_label)} ${sourceBadge}</div>
+                <div class="ec2-item-meta">
+                    <span class="ec2-tag">${escape(c.entity_category || c.entity_type || '?')}</span>
+                    <span class="ec2-meta-text">${c.sections}§ · ${c.bullets}•</span>
+                </div>
+                ${aliasChips ? `<div class="ec2-item-aliases">${aliasChips}</div>` : ''}`;
+            li.onclick = () => loadDetail(c.id);
+            ul.appendChild(li);
+        }
+    }
+
+    async function loadDetail(id) {
+        _currentId = id;
+        renderList();
+        const r = await fetch(`/api/entity-cards-v2/${id}`);
+        const card = await r.json();
+        const d = $('ec2-detail');
+        if (card.error) { d.innerHTML = `<div class="ec2-error">${escape(card.error)}</div>`; return; }
+
+        const sourceBadge = card.is_kg_card
+            ? `<span class="ec2-source-badge ec2-source-kg">kg-driven</span>`
+            : `<span class="ec2-source-badge ec2-source-manual">manual</span>`;
+
+        const editButtons = card.is_kg_card
+            ? `<span class="ec2-readonly-hint">KG cards rebuild from the pipeline — edit the KG node instead.</span>`
+            : `<button class="ec2-icon-btn" onclick="openEditModal('${escape(card.id)}')" title="Edit">✏️ Edit</button>
+               <button class="ec2-icon-btn ec2-danger" onclick="deleteCard('${escape(card.id)}', '${escape(card.entity_label)}')" title="Delete">🗑️ Delete</button>`;
+
+        const aliasRow = (card.card_aliases && card.card_aliases.length)
+            ? `<div class="ec2-detail-aliases">
+                 <span class="ec2-detail-aliases-label">Aliases:</span>
+                 ${card.card_aliases.map(a => `<span class="ec2-alias-chip">${escape(a)}</span>`).join('')}
+               </div>`
+            : '';
+
+        const parts = [];
+        parts.push(`<header class="ec2-detail-header">
+            <h2>${escape(card.entity_label)} ${sourceBadge}</h2>
+            ${aliasRow}
+            <div class="ec2-detail-meta">
+                <span class="ec2-tag">${escape(card.entity_category || card.entity_type || '?')}</span>
+                <span class="ec2-meta-text">built ${formatTs(card.last_built_at)}</span>
+                <span class="ec2-detail-actions">${editButtons}</span>
+            </div>
+        </header>`);
+        for (const s of card.sections || []) {
+            parts.push(renderSection(s));
+        }
+        d.innerHTML = parts.join('');
+    }
+
+    function renderSection(s) {
+        const parts = [`<section class="ec2-section ec2-section-${s.section_name}">`];
+        parts.push(`<h3>${escape(s.section_name)}</h3>`);
+        if (s.intro_text) {
+            parts.push(`<div class="ec2-intro">${escape(s.intro_text)}</div>`);
+        }
+        if (s.bullets && s.bullets.length) {
+            parts.push('<ul class="ec2-bullets">');
+            for (const b of s.bullets) {
+                const tier = b.confidence_tier ? `<span class="ec2-tier ec2-tier-${b.confidence_tier}">${escape(b.confidence_tier)}</span>` : '';
+                parts.push(`<li>${escape(b.bullet_text)} ${tier}</li>`);
+            }
+            parts.push('</ul>');
+        }
+        parts.push('</section>');
+        return parts.join('');
+    }
+
+    // ── Modal: create + edit ───────────────────────────────────────────────
+    function openCreateModal() {
+        _editingId = null;
+        $('ec2-modal-title').textContent = 'Add card';
+        $('ec2-form-title').value = '';
+        $('ec2-form-aliases').value = '';
+        $('ec2-form-content').value = '';
+        $('ec2-form-error').textContent = '';
+        $('ec2-modal-backdrop').classList.add('open');
+        setTimeout(() => $('ec2-form-title').focus(), 50);
+    }
+
+    async function openEditModal(cardId) {
+        const r = await fetch(`/api/entity-cards-v2/${cardId}`);
+        const card = await r.json();
+        if (card.error) { alert(card.error); return; }
+        _editingId = cardId;
+        $('ec2-modal-title').textContent = 'Edit card';
+        $('ec2-form-title').value = card.card_title || '';
+        $('ec2-form-aliases').value = (card.card_aliases || []).join(', ');
+        // Use summary section's intro_text as the canonical content.
+        const summary = (card.sections || []).find(s => s.section_name === 'summary');
+        $('ec2-form-content').value = summary ? (summary.intro_text || '') : '';
+        $('ec2-form-error').textContent = '';
+        $('ec2-modal-backdrop').classList.add('open');
+        setTimeout(() => $('ec2-form-content').focus(), 50);
+    }
+
+    function closeModal() {
+        $('ec2-modal-backdrop').classList.remove('open');
+    }
+    function closeModalOnBackdrop(ev) {
+        if (ev.target.id === 'ec2-modal-backdrop') closeModal();
+    }
+
+    async function submitForm(ev) {
+        ev.preventDefault();
+        const title = $('ec2-form-title').value.trim();
+        const aliases = $('ec2-form-aliases').value;
+        const content = $('ec2-form-content').value.trim();
+        const errEl = $('ec2-form-error');
+        errEl.textContent = '';
+        const btn = $('ec2-form-submit');
+        btn.disabled = true;
+        try {
+            const url = _editingId
+                ? `/api/entity-cards-v2/${_editingId}`
+                : '/api/entity-cards-v2';
+            const method = _editingId ? 'PUT' : 'POST';
+            const r = await fetch(url, {
+                method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title, aliases, content }),
+            });
+            const data = await r.json();
+            if (!r.ok) {
+                errEl.textContent = data.error || `HTTP ${r.status}`;
+                return;
+            }
+            closeModal();
+            await loadList();
+            await loadDetail(data.id);
+        } catch (e) {
+            errEl.textContent = String(e);
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    async function deleteCard(cardId, label) {
+        if (!confirm(`Delete card "${label}"? This can't be undone.`)) return;
+        const r = await fetch(`/api/entity-cards-v2/${cardId}`, { method: 'DELETE' });
+        const data = await r.json();
+        if (!r.ok) { alert(data.error || `HTTP ${r.status}`); return; }
+        _currentId = null;
+        $('ec2-detail').innerHTML = '<div class="ec2-placeholder">Select a card from the left.</div>';
+        loadList();
+    }
+
+    function escape(s) {
+        if (s === null || s === undefined) return '';
+        return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    function formatTs(ts) {
+        if (!ts) return '?';
+        try { return new Date(ts).toLocaleString(); } catch { return ts; }
+    }
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && $('ec2-modal-backdrop').classList.contains('open')) {
+            closeModal();
+        }
+    });
+
+    $('ec2-search').addEventListener('input', renderList);
+    loadList();
+    </script>
+</body>
+</html>

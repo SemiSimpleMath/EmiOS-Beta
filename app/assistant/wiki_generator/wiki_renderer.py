@@ -87,14 +87,6 @@ def _det_close() -> str:
     return "<!-- /WIKI:DET -->"
 
 
-def _auto_open(slug: str) -> str:
-    return f"<!-- WIKI:AUTO {slug} -->"
-
-
-def _auto_close() -> str:
-    return "<!-- /WIKI:AUTO -->"
-
-
 def _comment(text: str) -> str:
     return f"<!-- {text} -->"
 
@@ -130,11 +122,6 @@ def _read_metadata_bits(node, edge) -> str:
     valid_during = getattr(node, "valid_during", None)
     if valid_during:
         bits.append(f"valid_during: {valid_during}")
-    utt_ts = getattr(edge, "original_message_timestamp", None) if edge is not None else None
-    if utt_ts is not None:
-        utt_fmt = _fmt_date(utt_ts)
-        if utt_fmt:
-            bits.append(f"utterance: {utt_fmt}")
     date_conf = getattr(node, "start_date_confidence", None)
     if date_conf:
         bits.append(f"date_confidence: {date_conf}")

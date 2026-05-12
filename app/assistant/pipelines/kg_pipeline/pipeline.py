@@ -83,6 +83,8 @@ class KGPipeline:
             "date": result.date,
             "status": result.status,
             "workers": result.workers,
+            "halt_reason": result.halt_reason,
+            "halt_step": result.halt_step,
         }
 
     def stop(self) -> None:

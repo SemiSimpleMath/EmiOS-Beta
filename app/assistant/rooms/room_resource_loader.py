@@ -121,6 +121,10 @@ def load_room_context_for_manager(room_id: str) -> Dict[str, Any]:
     access blocks, splits body by H1 headers into the named blackboard
     keys, and returns the flat dict consumers expect.
 
+    Returns an empty dict when ``room_id`` is missing, non-string, or
+    blank — callers in inbound paths sometimes invoke this before
+    validating the message envelope.
+
     Raises loudly on a missing or malformed ROOM.md, missing required
     sections, or missing identity content (every room must declare
     who it is).

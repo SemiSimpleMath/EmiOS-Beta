@@ -24,7 +24,6 @@ from typing import Any, Dict, Optional
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import (
-    Message,
     UserMessage,
     UserMessageData,
 )
@@ -192,15 +191,12 @@ class OutboundChatPublisher:
             logger.warning("[outbound] sms_transport not available; dropping")
             return False
         body = self._embed_sender_in_body(sender, text)
-        # SmsRoomTransport.send_reply signature varies by implementation;
-        # pass to/from when available.
-        try:
-            sms_transport.send_reply(
-                to=to_number, body=body, from_number=from_number or None,
-            )
-        except TypeError:
-            # Older transports may use different kwargs.
-            sms_transport.send_reply(to=to_number, body=body)
+        # SmsRoomTransport.send_reply takes keyword-only (to_number, from_number, body).
+        sms_transport.send_reply(
+            to_number=to_number,
+            from_number=from_number or "",
+            body=body,
+        )
         logger.info(
             "[outbound] sms publish sender=%r to=%s len=%d",
             sender, to_number, len(text),

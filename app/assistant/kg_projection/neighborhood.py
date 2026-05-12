@@ -110,6 +110,55 @@ class KGGap:
 
 
 @dataclass
+class PodNodeShim:
+    """Node-shaped placeholder for an edge endpoint that's a pod URI.
+
+    Pod URIs (``datapod:<kind>:<hash>``) can appear as edge endpoints but
+    don't have ``kg_node_metadata`` rows (no mirror layer — pod_store is
+    the sole source of truth). This shim lets downstream consumers walk
+    the neighborhood without special-casing pod endpoints; they see a
+    ``node_type='Pod'`` object with .id / .label / .category / etc.
+    """
+    id: str
+    label: str
+    node_type: str = "Pod"
+    category: Optional[str] = None
+    description: Optional[str] = None
+    original_sentence: Optional[str] = None
+    start_date: Any = None
+    end_date: Any = None
+    aliases: List[str] = field(default_factory=list)
+    attributes: Dict[str, Any] = field(default_factory=dict)
+
+
+def _resolve_endpoint_or_pod_shim(session, node_id: str):
+    """Return Node, PodNodeShim, or None for an edge endpoint id.
+
+    None signals a genuine dangling edge (endpoint id is neither in
+    kg_node_metadata nor a known pod URI in pod_store).
+    """
+    node = session.query(Node).filter(Node.id == node_id).first()
+    if node is not None:
+        return node
+    # Not a regular kg_node — is it a pod URI?
+    from app.assistant.pod_store.pod_uri import POD_URI_RE
+    if not POD_URI_RE.fullmatch(node_id or ""):
+        return None
+    from app.assistant.pod_store.pod_store import PodStore
+    pod = PodStore().get(node_id)
+    if pod is None:
+        return None  # URI-shaped but pod was deleted — genuine gap
+    body_excerpt = (pod.body or "")[:400] if pod.body else None
+    return PodNodeShim(
+        id=node_id,
+        label=(pod.one_liner or node_id)[:200],
+        category=pod.kind,
+        description=pod.one_liner,
+        original_sentence=body_excerpt,
+    )
+
+
+@dataclass
 class EntityNeighborhood:
     entity: Node
     entity_card: Optional[Dict[str, Any]] = None
@@ -181,7 +230,7 @@ def get_entity_neighborhood(
         misc_outgoing: List[Tuple[Edge, Node]] = []
 
         for edge in outgoing:
-            target = session.query(Node).filter(Node.id == edge.target_id).first()
+            target = _resolve_endpoint_or_pod_shim(session, edge.target_id)
             if target is None:
                 gaps.append(KGGap("dangling_target", f"Edge {edge.id} points to missing node {edge.target_id}", edge_id=edge.id))
                 continue
@@ -206,7 +255,7 @@ def get_entity_neighborhood(
         inbound_events: List[EventConnection] = []
 
         for edge in incoming:
-            source = session.query(Node).filter(Node.id == edge.source_id).first()
+            source = _resolve_endpoint_or_pod_shim(session, edge.source_id)
             if source is None:
                 gaps.append(KGGap("dangling_source", f"Edge {edge.id} has missing source {edge.source_id}", edge_id=edge.id))
                 continue
@@ -293,27 +342,61 @@ def _find_first_entity_connected_to(session, hub_node_id: str, *, exclude_entity
 
 
 def _load_entity_card(session, entity_node_id: str) -> Optional[Dict[str, Any]]:
-    """Look up the entity_cards row for this KG node, if one exists."""
+    """Look up the v2 entity card for this KG node, if one exists.
+
+    Returns a dict compatible with the legacy v1 EntityCard shape so existing
+    consumers (e.g. wiki_renderer reads ``key_facts``) keep working. ``summary``
+    comes from the v2 SUMMARY section's intro_text; ``key_facts`` is the flat
+    list of bullets across the entity's bullet sections.
+    """
     try:
-        from app.assistant.entity_management.entity_cards import EntityCard
+        from app.assistant.entity_management.entity_card_v2 import (
+            EntityCardV2, EntityCardSection, EntityCardBullet, SUMMARY,
+        )
     except Exception as e:
-        logger.debug("entity_cards module unavailable: %s", e)
+        logger.debug("entity_card_v2 module unavailable: %s", e)
         return None
     try:
-        card = session.query(EntityCard).filter(EntityCard.source_node_id == entity_node_id).first()
+        card = (
+            session.query(EntityCardV2)
+            .filter(
+                EntityCardV2.entity_node_id == entity_node_id,
+                EntityCardV2.is_active == True,  # noqa: E712
+            )
+            .one_or_none()
+        )
         if card is None:
             return None
+
+        sections = (
+            session.query(EntityCardSection)
+            .filter(EntityCardSection.card_id == card.id)
+            .order_by(EntityCardSection.position)
+            .all()
+        )
+        summary_text: Optional[str] = None
+        key_facts: list = []
+        for s in sections:
+            if s.section_name == SUMMARY and s.intro_text:
+                summary_text = s.intro_text
+                continue
+            bullets = (
+                session.query(EntityCardBullet)
+                .filter(EntityCardBullet.section_id == s.id)
+                .order_by(EntityCardBullet.position)
+                .all()
+            )
+            for b in bullets:
+                if b.bullet_text:
+                    key_facts.append(b.bullet_text)
+
         return {
             "id": card.id,
-            "entity_name": card.entity_name,
+            "entity_node_id": card.entity_node_id,
             "entity_type": card.entity_type,
-            "summary": card.summary,
-            "key_facts": card.key_facts or [],
-            "relationships": card.relationships or [],
-            "user_relevance_reason": card.user_relevance_reason,
-            "aliases": card.aliases or [],
-            "confidence": card.confidence,
+            "summary": summary_text,
+            "key_facts": key_facts,
         }
     except Exception as e:
-        logger.warning("Failed to load entity_card for node %s: %s", entity_node_id, e)
+        logger.warning("Failed to load v2 entity card for node %s: %s", entity_node_id, e)
         return None

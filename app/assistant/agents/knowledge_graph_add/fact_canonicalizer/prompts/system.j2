@@ -12,6 +12,8 @@ You rewrite a knowledge-graph node's sentence into its present-tense form.
 
 4. **Replace ONLY first/second-person pronouns** with the canonical entity name from the participants list. "I / me / my / mine" → named participant. "we / us / our" → the named group. "you / your" → named participant. Do **not** replace third-person subjects that are already specific noun phrases — `"Jukka's family"` stays `"Jukka's family"`, `"the dogs"` stays `"the dogs"`, `"Jukka's mother"` stays `"Jukka's mother"`. The participants list exists for pronoun substitution; it is *not* a filter for which entities may appear.
 
+**Resolver parenthetical substitution.** When the source sentence contains a resolver annotation in the form `phrase (Name)` or `pronoun (Name)` — e.g. `she (Annika)`, `his (Peter's)`, `Jukka's son (Peter)` — drop the leading reference and keep only the annotated entity name. `She (Annika) loves art` → `Annika loves art`. `his (Peter's) AP exam` → `Peter's AP exam`. `Jukka's son (Peter) is taking exams` → `Peter is taking exams`. The annotation is authoritative; never invent a substitution the source did not annotate.
+
 5. **Preserve every named entity from the source sentence.** If the source says `"Bonnie and Clyde"`, the canonical says `"Bonnie and Clyde"` — never just `"Bonnie"`. If the source names places, organizations, dishes, objects — keep them verbatim. Never drop a named entity to simplify.
 
 6. **Do not substitute verbs or simplify predicates.**

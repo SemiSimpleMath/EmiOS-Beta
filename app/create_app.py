@@ -118,7 +118,6 @@ def create_app(config_class="config.DevelopmentConfig"):
         agent_flow_route_bp,
         ask_user_route_bp,
         daily_summary_route_bp,
-        entity_cards_editor_bp,
         kg_visualizer_bp,
         google_oauth_bp,
         health_check_bp,
@@ -164,9 +163,10 @@ def create_app(config_class="config.DevelopmentConfig"):
     app.register_blueprint(agent_flow_route_bp)
     app.register_blueprint(ask_user_route_bp)
     app.register_blueprint(daily_summary_route_bp)
-    app.register_blueprint(entity_cards_editor_bp)
-    from app.routes.entity_cards_admin import entity_cards_admin_bp
-    app.register_blueprint(entity_cards_admin_bp)
+    from app.routes.entity_cards_v2 import entity_cards_v2_bp
+    app.register_blueprint(entity_cards_v2_bp)
+    from app.routes.timeline import timeline_bp
+    app.register_blueprint(timeline_bp)
     app.register_blueprint(health_check_bp)
     app.register_blueprint(debug_status_bp)
     app.register_blueprint(debug_logging_bp)
@@ -193,6 +193,8 @@ def create_app(config_class="config.DevelopmentConfig"):
     app.register_blueprint(doc_bp)
     from app.routes.kg_maintenance import kg_maintenance_bp
     app.register_blueprint(kg_maintenance_bp)
+    from app.routes.kg_pipeline_status import kg_pipeline_status_bp
+    app.register_blueprint(kg_pipeline_status_bp)
     from app.routes.kg_proposals import kg_proposals_bp
     app.register_blueprint(kg_proposals_bp)
     from app.routes.kg_dev import kg_dev_bp
@@ -205,9 +207,7 @@ def create_app(config_class="config.DevelopmentConfig"):
     app.register_blueprint(kg_interests_bp)
     from app.routes.wiki_viewer import wiki_viewer_bp
     app.register_blueprint(wiki_viewer_bp)
-    from app.routes.entity_card_maintenance import entity_card_maintenance_bp
-    app.register_blueprint(entity_card_maintenance_bp)
-    
+
     # Wellness management
     from app.routes.wellness_mgmt import wellness_mgmt_bp
     app.register_blueprint(wellness_mgmt_bp)

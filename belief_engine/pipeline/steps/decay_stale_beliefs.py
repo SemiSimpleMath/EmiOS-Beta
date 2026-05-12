@@ -52,6 +52,15 @@ class DecayStaleBeliefsStep:
         chronic_review_ttl_days: int = DEFAULT_CHRONIC_REVIEW_TTL_DAYS,
         now_utc: Optional[datetime] = None,
     ) -> None:
+        if temporary_ttl_days <= 0:
+            raise ValueError(f"temporary_ttl_days must be positive (got {temporary_ttl_days})")
+        if chronic_review_ttl_days <= 0:
+            raise ValueError(f"chronic_review_ttl_days must be positive (got {chronic_review_ttl_days})")
+        if now_utc is not None:
+            if now_utc.tzinfo is None:
+                raise ValueError("now_utc must be timezone-aware")
+            now_utc = now_utc.astimezone(timezone.utc)
+
         self.domain = domain
         self.temporary_ttl_days = temporary_ttl_days
         self.chronic_review_ttl_days = chronic_review_ttl_days

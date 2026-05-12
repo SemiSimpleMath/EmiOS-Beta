@@ -290,12 +290,6 @@ class Agent:
         """
         return ""
 
-    def _format_entity_field(self, entities: List[str], field_name: str) -> str:
-        return self.components.entity_injector.format_entity_field(entities, field_name)
-
-    def _format_entity_multi_field(self, entities: List[str], field_names: List[str]) -> str:
-        return self.components.entity_injector.format_entity_multi_field(entities, field_names)
-
     def _resolve_resource(self, resource_id: str) -> Any:
         return self.components.context_injector.resolve_resource(self, resource_id)
 

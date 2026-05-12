@@ -3,20 +3,20 @@ Step 4: Canonicalize near-duplicate beliefs within a domain.
 
 Strategy:
 - Load all active beliefs for the domain.
-- Sort them by embedding proximity (nearest-neighbour walk) so semantically
-  similar beliefs end up adjacent in the list.
-- Send chunks of ~CHUNK_SIZE beliefs to the belief_canonicalizer LLM.
-- The LLM decides which beliefs to merge, deprecate, or leave as-is.
-- Repeat until a full pass produces zero merges (convergence).
+- Sort them by embedding proximity using a nearest-neighbour walk so
+  semantically similar beliefs tend to be adjacent.
+- Send overlapping chunks of beliefs to the belief_canonicalizer LLM.
+- The LLM decides which beliefs to merge or leave as-is.
+- Repeat until a full pass produces zero merges.
 - Max passes is capped to avoid infinite loops.
 
-The threshold is only used to sort/group candidates. The LLM makes all
-merge decisions — no hard cosine cutoff for actual merges.
+The embedding proximity is only used to sort/group candidates. The LLM makes
+all merge decisions. There is no hard cosine cutoff for actual merges.
 """
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set
 
 from app.assistant.ServiceLocator.service_locator import ServiceLocator
 from app.assistant.manager_runtime.services.scope_adapter import build_system_scope_context
@@ -29,16 +29,17 @@ logger = logging.getLogger(__name__)
 
 _AGENT_NAME = "belief_engine::belief_canonicalizer"
 CHUNK_SIZE = 40
+CHUNK_OVERLAP = 8
 MAX_PASSES = 5
 
 
 def _proximity_sort(
-    beliefs: List[BeliefRecord],
-    store: BeliefStore,
+        beliefs: List[BeliefRecord],
+        store: BeliefStore,
 ) -> List[BeliefRecord]:
     """
-    Sort beliefs so semantically similar ones are adjacent using a
-    greedy nearest-neighbour walk over Chroma embeddings.
+    Sort beliefs so semantically similar ones are adjacent using a greedy
+    nearest-neighbour walk over Chroma embeddings.
 
     Falls back to original order if embeddings are unavailable.
     """
@@ -46,21 +47,26 @@ def _proximity_sort(
         return beliefs
 
     try:
+        # TODO: Replace private access with a public BeliefStore method, e.g.
+        # store.get_embeddings_for_domain(domain), when available.
         chroma = store._chroma
         id_to_vec: Dict[str, List[float]] = {
-            bid: vec
-            for bid, vec in chroma.get_all_for_domain(beliefs[0].domain)
+            belief_id: vec
+            for belief_id, vec in chroma.get_all_for_domain(beliefs[0].domain)
         }
     except Exception as exc:
-        logger.debug("[CanonicalizeBeliefSet] proximity sort unavailable: %s — using original order", exc)
+        logger.debug(
+            "[CanonicalizeBeliefSet] proximity sort unavailable: %s; using original order",
+            exc,
+        )
         return beliefs
 
-    id_to_belief = {b.id: b for b in beliefs}
+    id_to_belief = {belief.id: belief for belief in beliefs}
     remaining: Set[str] = set(id_to_belief)
 
-    # Start with the first belief (arbitrary seed).
     ordered: List[BeliefRecord] = []
     current_id = beliefs[0].id
+
     remaining.discard(current_id)
     ordered.append(id_to_belief[current_id])
 
@@ -69,11 +75,7 @@ def _proximity_sort(
     while remaining:
         current_vec = id_to_vec.get(current_id)
         if current_vec is None:
-            # No embedding — just append remaining in original order.
-            for b in beliefs:
-                if b.id in remaining:
-                    ordered.append(b)
-                    remaining.discard(b.id)
+            _append_remaining_in_original_order(ordered, remaining, beliefs)
             break
 
         cv = np.array(current_vec)
@@ -82,25 +84,24 @@ def _proximity_sort(
         best_id: Optional[str] = None
         best_score = -1.0
 
-        for rid in remaining:
-            rv = id_to_vec.get(rid)
-            if rv is None:
+        for remaining_id in remaining:
+            remaining_vec = id_to_vec.get(remaining_id)
+            if remaining_vec is None:
                 continue
-            rv_arr = np.array(rv)
-            rv_norm = np.linalg.norm(rv_arr)
+
+            rv = np.array(remaining_vec)
+            rv_norm = np.linalg.norm(rv)
+
             if cv_norm == 0 or rv_norm == 0:
                 continue
-            score = float(np.dot(cv, rv_arr) / (cv_norm * rv_norm))
+
+            score = float(np.dot(cv, rv) / (cv_norm * rv_norm))
             if score > best_score:
                 best_score = score
-                best_id = rid
+                best_id = remaining_id
 
         if best_id is None:
-            # Fallback: append remaining in original order.
-            for b in beliefs:
-                if b.id in remaining:
-                    ordered.append(b)
-                    remaining.discard(b.id)
+            _append_remaining_in_original_order(ordered, remaining, beliefs)
             break
 
         ordered.append(id_to_belief[best_id])
@@ -110,27 +111,98 @@ def _proximity_sort(
     return ordered
 
 
-def _format_chunk_block(chunk: List[BeliefRecord], offset: int) -> str:
-    lines = []
-    for i, b in enumerate(chunk, offset + 1):
+def _append_remaining_in_original_order(
+        ordered: List[BeliefRecord],
+        remaining: Set[str],
+        beliefs: List[BeliefRecord],
+) -> None:
+    """Append remaining beliefs in their original order."""
+    for belief in beliefs:
+        if belief.id in remaining:
+            ordered.append(belief)
+            remaining.discard(belief.id)
+
+
+def _iter_overlapping_chunks(
+        beliefs: List[BeliefRecord],
+        *,
+        chunk_size: int = CHUNK_SIZE,
+        overlap: int = CHUNK_OVERLAP,
+) -> List[List[BeliefRecord]]:
+    """
+    Build overlapping chunks so near-duplicates at chunk boundaries can still
+    be reviewed together.
+    """
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be positive")
+
+    if overlap < 0:
+        raise ValueError("overlap cannot be negative")
+
+    if overlap >= chunk_size:
+        raise ValueError("overlap must be smaller than chunk_size")
+
+    chunks: List[List[BeliefRecord]] = []
+    step = chunk_size - overlap
+
+    for start in range(0, len(beliefs), step):
+        chunk = beliefs[start: start + chunk_size]
+        if chunk:
+            chunks.append(chunk)
+
+        if start + chunk_size >= len(beliefs):
+            break
+
+    return chunks
+
+
+def _get_active_current_chunk(
+        chunk: List[BeliefRecord],
+        store: BeliefStore,
+) -> List[BeliefRecord]:
+    """
+    Refresh chunk records from the store and drop beliefs that were deprecated
+    earlier in the same pass.
+    """
+    active_chunk: List[BeliefRecord] = []
+
+    for belief in chunk:
+        current = store.get_by_key(belief.belief_key)
+        if current is None:
+            continue
+        if current.status == "deprecated":
+            continue
+        active_chunk.append(current)
+
+    return active_chunk
+
+
+def _format_chunk_block(chunk: List[BeliefRecord]) -> str:
+    lines: List[str] = []
+
+    for i, belief in enumerate(chunk, 1):
         lines.append(
-            f"{i}. key={b.belief_key!r}  confidence={b.confidence}  "
-            f"obs={b.observation_count}  scope={b.scope}"
+            f"{i}. key={belief.belief_key!r}  "
+            f"confidence={belief.confidence}  "
+            f"obs={belief.observation_count}  "
+            f"scope={belief.scope}"
         )
-        lines.append(f"   {b.statement}")
+        lines.append(f"   {belief.statement}")
         lines.append("")
+
     return "\n".join(lines)
 
 
 def _run_canonicalization_pass(
-    beliefs: List[BeliefRecord],
-    domain: str,
-    store: BeliefStore,
-    agent_factory: Any,
+        beliefs: List[BeliefRecord],
+        domain: str,
+        store: BeliefStore,
+        agent_factory: Any,
 ) -> int:
     """
-    Send all beliefs in CHUNK_SIZE chunks to the canonicalizer LLM.
-    Returns total number of merges performed this pass.
+    Send all beliefs in overlapping chunks to the canonicalizer LLM.
+
+    Returns the total number of merge operations performed this pass.
     """
     total_merges = 0
 
@@ -141,18 +213,15 @@ def _run_canonicalization_pass(
         scope_id=f"scope::belief_engine::canonicalize::{domain}",
     )
 
-    for chunk_start in range(0, len(beliefs), CHUNK_SIZE):
-        chunk = beliefs[chunk_start: chunk_start + CHUNK_SIZE]
-        # Skip chunks that are all already deprecated mid-pass.
-        active_chunk = [
-            b for b in chunk
-            if store.get_by_key(b.belief_key) is not None
-            and (store.get_by_key(b.belief_key) or b).status != "deprecated"
-        ]
+    chunks = _iter_overlapping_chunks(beliefs)
+
+    for chunk_index, chunk in enumerate(chunks, 1):
+        active_chunk = _get_active_current_chunk(chunk, store)
+
         if len(active_chunk) < 2:
             continue
 
-        clusters_block = _format_chunk_block(active_chunk, chunk_start)
+        clusters_block = _format_chunk_block(active_chunk)
 
         agent = agent_factory.create_agent(_AGENT_NAME)
         if agent is None:
@@ -160,7 +229,10 @@ def _run_canonicalization_pass(
 
         msg = Message(
             agent_input={
-                "task": f"Review {len(active_chunk)} beliefs from the '{domain}' domain. Merge, split, or keep as-is per your instructions.",
+                "task": (
+                    f"Review {len(active_chunk)} beliefs from the '{domain}' domain. "
+                    "Merge duplicate beliefs or keep them as-is per your instructions."
+                ),
                 "clusters_block": clusters_block,
                 "domain": domain,
                 "date_today": get_local_time_str(),
@@ -170,37 +242,51 @@ def _run_canonicalization_pass(
 
         resp = agent.action_handler(msg)
         payload = resp.data if resp and hasattr(resp, "data") else {}
+
         canonical_beliefs = payload.get("canonical_beliefs") or []
         notes = payload.get("canonicalization_notes")
 
         if notes:
-            logger.info("[CanonicalizeBeliefSet] chunk %d notes: %s", chunk_start, notes)
+            logger.info(
+                "[CanonicalizeBeliefSet] domain=%s chunk=%d notes: %s",
+                domain,
+                chunk_index,
+                notes,
+            )
 
-        for cb in canonical_beliefs:
+        for canonical_belief in canonical_beliefs:
+            surviving_key = canonical_belief.get("belief_key", "")
+            deprecated_keys = canonical_belief.get("deprecated_keys") or []
+
+            if not surviving_key or not deprecated_keys:
+                continue
+
             try:
-                surviving_key = cb.get("belief_key", "")
-                deprecated_keys = cb.get("deprecated_keys") or []
-                if not surviving_key or not deprecated_keys:
-                    continue
-
                 store.merge_belief(
                     surviving_key=surviving_key,
-                    surviving_statement=cb.get("statement", ""),
-                    surviving_confidence=cb.get("confidence", "medium"),
-                    surviving_scope=cb.get("scope", "chronic"),
+                    surviving_statement=canonical_belief.get("statement", ""),
+                    surviving_confidence=canonical_belief.get("confidence", "medium"),
+                    surviving_scope=canonical_belief.get("scope", "chronic"),
                     deprecated_keys=deprecated_keys,
                     domain=domain,
-                    merge_reasoning=cb.get("merge_reasoning", ""),
+                    merge_reasoning=canonical_belief.get("merge_reasoning", ""),
                 )
+
                 total_merges += 1
+
                 logger.info(
-                    "[CanonicalizeBeliefSet] merged %s ← %s",
-                    surviving_key, deprecated_keys,
+                    "[CanonicalizeBeliefSet] domain=%s merged %s <- %s",
+                    domain,
+                    surviving_key,
+                    deprecated_keys,
                 )
+
             except Exception as exc:
                 logger.exception(
-                    "[CanonicalizeBeliefSet] merge failed surviving=%s: %s",
-                    cb.get("belief_key", "?"), exc,
+                    "[CanonicalizeBeliefSet] domain=%s merge failed surviving=%s: %s",
+                    domain,
+                    surviving_key,
+                    exc,
                 )
 
     return total_merges
@@ -210,9 +296,9 @@ class CanonicalizeBeliefSetStep:
     """
     Step 4 of BeliefEnginePipeline.
 
-    Repeatedly presents all active domain beliefs (sorted by proximity,
-    chunked to CHUNK_SIZE) to the belief_canonicalizer LLM until no more
-    merges are produced (convergence) or MAX_PASSES is reached.
+    Repeatedly presents all active domain beliefs, sorted by proximity and
+    grouped into overlapping chunks, to the belief_canonicalizer LLM until no
+    more merges are produced or MAX_PASSES is reached.
     """
 
     name = "canonicalize_belief_set"
@@ -220,44 +306,56 @@ class CanonicalizeBeliefSetStep:
     def __init__(self, domain: str) -> None:
         self.domain = domain
 
-    def inputs(self, ctx: Any) -> list:
+    def inputs(self, ctx: Any) -> List[str]:
         return ["db: user_beliefs (active, domain-filtered)"]
 
-    def outputs(self, ctx: Any) -> list:
+    def outputs(self, ctx: Any) -> List[str]:
         return []
 
-    def run(self, ctx: Any, *, dry_run: bool = False) -> dict:
+    def run(self, ctx: Any, *, dry_run: bool = False) -> Dict[str, Any]:
         store = BeliefStore()
-        beliefs = store.list_by_domain(self.domain)
 
-        if len(beliefs) < 2:
+        initial_beliefs = store.list_by_domain(self.domain)
+        initial_count = len(initial_beliefs)
+
+        if initial_count < 2:
             logger.info(
-                "[CanonicalizeBeliefSet] domain=%s — fewer than 2 beliefs, nothing to canonicalize",
+                "[CanonicalizeBeliefSet] domain=%s fewer than 2 beliefs, nothing to canonicalize",
                 self.domain,
             )
             ctx.canonicalization_result = {
                 "status": "skipped",
                 "reason": "too_few_beliefs",
                 "domain": self.domain,
+                "initial_belief_count": initial_count,
+                "final_belief_count": initial_count,
+                "total_merges": 0,
+                "passes": 0,
             }
             return ctx.canonicalization_result
 
         logger.info(
-            "[CanonicalizeBeliefSet] domain=%s starting with %d beliefs, chunk_size=%d max_passes=%d",
-            self.domain, len(beliefs), CHUNK_SIZE, MAX_PASSES,
+            "[CanonicalizeBeliefSet] domain=%s starting with %d beliefs, chunk_size=%d overlap=%d max_passes=%d",
+            self.domain,
+            initial_count,
+            CHUNK_SIZE,
+            CHUNK_OVERLAP,
+            MAX_PASSES,
         )
 
-        # Sort by proximity so similar beliefs land in the same chunk.
-        sorted_beliefs = _proximity_sort(beliefs, store)
+        sorted_beliefs = _proximity_sort(initial_beliefs, store)
 
         if dry_run:
+            chunks = _iter_overlapping_chunks(sorted_beliefs)
             ctx.canonicalization_result = {
                 "status": "dry_run",
                 "domain": self.domain,
-                "belief_count": len(sorted_beliefs),
+                "belief_count": initial_count,
+                "chunk_size": CHUNK_SIZE,
+                "chunk_overlap": CHUNK_OVERLAP,
                 "chunks": [
-                    [b.belief_key for b in sorted_beliefs[i: i + CHUNK_SIZE]]
-                    for i in range(0, len(sorted_beliefs), CHUNK_SIZE)
+                    [belief.belief_key for belief in chunk]
+                    for chunk in chunks
                 ],
             }
             return ctx.canonicalization_result
@@ -266,59 +364,85 @@ class CanonicalizeBeliefSetStep:
         if agent_factory is None:
             raise RuntimeError("agent_factory not available in DI")
 
-        total_merged = 0
-        total_deprecated = 0
+        total_merges = 0
+        passes_run = 0
+        converged = False
 
         for pass_num in range(1, MAX_PASSES + 1):
-            # Reload after each pass — some beliefs may have been deprecated.
-            beliefs = store.list_by_domain(self.domain)
-            if len(beliefs) < 2:
-                logger.info("[CanonicalizeBeliefSet] domain=%s pass=%d — down to %d beliefs, done",
-                            self.domain, pass_num, len(beliefs))
+            passes_run = pass_num
+
+            current_beliefs = store.list_by_domain(self.domain)
+            current_count = len(current_beliefs)
+
+            if current_count < 2:
+                logger.info(
+                    "[CanonicalizeBeliefSet] domain=%s pass=%d down to %d beliefs, done",
+                    self.domain,
+                    pass_num,
+                    current_count,
+                )
+                converged = True
                 break
 
-            sorted_beliefs = _proximity_sort(beliefs, store)
+            sorted_beliefs = _proximity_sort(current_beliefs, store)
+
             logger.info(
                 "[CanonicalizeBeliefSet] domain=%s pass=%d beliefs=%d",
-                self.domain, pass_num, len(beliefs),
+                self.domain,
+                pass_num,
+                current_count,
             )
 
             merges_this_pass = _run_canonicalization_pass(
-                sorted_beliefs, self.domain, store, agent_factory
+                sorted_beliefs,
+                self.domain,
+                store,
+                agent_factory,
             )
-            total_merged += merges_this_pass
-            # Each merge depreciates len(deprecated_keys) beliefs — track roughly.
-            total_deprecated += merges_this_pass  # at minimum 1 deprecated per merge
+
+            total_merges += merges_this_pass
 
             logger.info(
                 "[CanonicalizeBeliefSet] domain=%s pass=%d merges=%d",
-                self.domain, pass_num, merges_this_pass,
+                self.domain,
+                pass_num,
+                merges_this_pass,
             )
 
             if merges_this_pass == 0:
                 logger.info(
                     "[CanonicalizeBeliefSet] domain=%s converged after %d pass(es)",
-                    self.domain, pass_num,
+                    self.domain,
+                    pass_num,
                 )
+                converged = True
                 break
-        else:
+
+        if not converged:
             logger.warning(
                 "[CanonicalizeBeliefSet] domain=%s hit MAX_PASSES=%d without converging",
-                self.domain, MAX_PASSES,
+                self.domain,
+                MAX_PASSES,
             )
 
         final_count = len(store.list_by_domain(self.domain))
+
         logger.info(
-            "[CanonicalizeBeliefSet] domain=%s done: %d→%d beliefs, total_merges=%d",
-            self.domain, len(beliefs), final_count, total_merged,
+            "[CanonicalizeBeliefSet] domain=%s done: %d -> %d beliefs, total_merges=%d passes=%d",
+            self.domain,
+            initial_count,
+            final_count,
+            total_merges,
+            passes_run,
         )
 
         ctx.canonicalization_result = {
             "status": "ok",
             "domain": self.domain,
-            "initial_belief_count": len(beliefs),
+            "initial_belief_count": initial_count,
             "final_belief_count": final_count,
-            "total_merges": total_merged,
-            "passes": pass_num,
+            "total_merges": total_merges,
+            "passes": passes_run,
+            "converged": converged,
         }
         return ctx.canonicalization_result

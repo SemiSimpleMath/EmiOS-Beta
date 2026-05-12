@@ -212,14 +212,13 @@ class ClaimProposalEdge(Base):
         nullable=False, index=True,
     )
 
-    source_node_id = Column(
-        String, ForeignKey("claim_proposal_node.id", ondelete="CASCADE"),
-        nullable=False, index=True,
-    )
-    target_node_id = Column(
-        String, ForeignKey("claim_proposal_node.id", ondelete="CASCADE"),
-        nullable=False, index=True,
-    )
+    # NOTE: source_node_id and target_node_id are not ForeignKey columns.
+    # Pod URIs (datapod:<kind>:<hash>) flow through as edge endpoints without
+    # corresponding claim_proposal_node placeholder rows after the no-mirror
+    # migration on 2026-05-10. Validity is enforced by the promoter
+    # (admission check against pod_store), not by the proposal-internal FK.
+    source_node_id = Column(String, nullable=False, index=True)
+    target_node_id = Column(String, nullable=False, index=True)
 
     predicate = Column(String(128), nullable=False, index=True)
     bidirectional = Column(Boolean, nullable=False, default=False)

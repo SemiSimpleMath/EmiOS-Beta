@@ -14,7 +14,7 @@ when, and where the gaps are.
 Code paths:
 - Routine: `app/assistant/routine_manager/routine_functions.py` `_lazy_kg_importance_rater`
 - Entity rater: `app/me/importance.py` `regenerate_importance()` — defaults `only_node_types=["Entity"]`
-- Edge rater: `app/me/edge_importance.py` `regenerate_edge_importance()`
+- Edge rater: `app/assistant/kg/edge_importance.py` `regenerate_edge_importance()` (relocated from `app/me/` 2026-05-11 — general KG infrastructure, not lens-only)
 - Entity rater agent: `app/assistant/agents/me/importance_rater/`
 - Edge rater agent: `app/assistant/agents/me/edge_importance_rater/`
 

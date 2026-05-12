@@ -28,8 +28,6 @@ import json as _json
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import and_
-
 from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.utils.logging_config import get_logger
@@ -343,24 +341,34 @@ def run_executable_findings(*, limit: int = 5) -> Dict[str, Any]:
     if not ids:
         return {"status": "no_executable_findings", "processed": 0, "results": []}
 
+    # execute_one() returns one of: "executed", "escalated", "error",
+    # "not_found_or_no_recommendation". Bucket these explicitly so the
+    # log reflects reality instead of marking every escalation as an error.
     results: List[Dict[str, Any]] = []
-    ran = errors = 0
+    executed = escalated = errors = skipped = 0
     for fid in ids:
         r = execute_one(fid)
         results.append(r)
-        if r.get("status") == "ran":
-            ran += 1
-        else:
+        st = r.get("status")
+        if st == "executed":
+            executed += 1
+        elif st == "escalated":
+            escalated += 1
+        elif st == "error":
             errors += 1
+        else:
+            skipped += 1
 
     logger.info(
-        "[finding_executor] processed=%d ran=%d errors=%d",
-        len(ids), ran, errors,
+        "[finding_executor] processed=%d executed=%d escalated=%d errors=%d skipped=%d",
+        len(ids), executed, escalated, errors, skipped,
     )
     return {
         "status": "ok",
         "processed": len(ids),
-        "ran": ran,
+        "executed": executed,
+        "escalated": escalated,
         "errors": errors,
+        "skipped": skipped,
         "results": results,
     }

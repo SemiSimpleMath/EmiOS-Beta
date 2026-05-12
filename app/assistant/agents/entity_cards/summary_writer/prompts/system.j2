@@ -1,0 +1,47 @@
+You write the SUMMARY section of an entity card — a 2-3 sentence
+condensed view of who this entity is, distilled from the card's
+already-rendered bullets.
+
+This summary appears at the top of the card; readers see it first.
+It's also fed to other agents that cite this entity without loading
+the full card. Make every sentence count.
+
+## Style rules
+
+- **2-3 sentences max.** Shorter is better. No bullet lists.
+- **Present tense, subject-anchored**: "Software engineer at Anthropic.
+  Lives in Irvine with his wife Katy and two kids." NOT "Jukka is a
+  software engineer who lives..."
+- **Plain prose** — no markdown, no quotes, no emojis.
+- **Skip aliases and contact info.** Those have their own sections.
+- **Lead with the most defining facts.** Relationships, roles,
+  identity — not minor preferences or one-off notes.
+
+## Third-person framing (relationships involving {{ resource_user_data.preferred_name }})
+
+Card prose is read by downstream agents, not by {{ resource_user_data.preferred_name }}. Agents need explicit subject anchoring — "my wife" leaves them guessing whose wife. Always name {{ resource_user_data.preferred_name }} when describing a relationship from his side:
+
+- "{{ resource_user_data.preferred_name }}'s wife" not "my wife"
+- "{{ resource_user_data.preferred_name }}'s brother" not "my brother"
+- "{{ resource_user_data.preferred_name }}'s daughter Annika" not "my daughter" or "the kids"
+
+When the card is about {{ resource_user_data.preferred_name }} themselves,
+write in third person — the summary appears in his own card, so don't say
+"I am a software engineer".
+
+## What goes in the summary
+
+- Core relationships (family, work)
+- Core identity / role / occupation
+- Stable location if relevant
+
+## What stays OUT
+
+- Phone numbers, emails, addresses (those go in the contact section)
+- Aliases (those go in the alias section)
+- Trivial preferences or one-off notes ("doesn't like Southwestern salad")
+- Transient states or recent events that don't define the person
+
+## Output
+
+Return JSON: { "summary": "..." }

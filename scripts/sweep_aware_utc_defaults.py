@@ -23,7 +23,6 @@ FILES = [
     "app/assistant/database/processed_entity_log.py",
     "app/models/sleep_segments.py",
     "app/assistant/database/kg_revision_log.py",
-    "app/models/node_analysis_tracking.py",
     "app/assistant/database/kg_pipeline_models.py",
     "app/assistant/database/kg_merge_log.py",
     "app/models/maintenance_logs.py",

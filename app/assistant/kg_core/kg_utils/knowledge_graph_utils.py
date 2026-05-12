@@ -152,10 +152,9 @@ class KnowledgeGraphUtils:
                   confidence: Optional[float] = None,
                   importance: Optional[float] = None,
                   source: Optional[str] = None,
-                  # New schema fields (provenance)
-                  original_message_id: Optional[str] = None,
+                  # Per-claim canonical sentence (separate from per-observation
+                  # provenance which lives in kg_node_evidence)
                   original_sentence: Optional[str] = None,
-                  sentence_id: Optional[str] = None
                   ) -> Tuple[Node, str]:
         """
         Creates and adds a new node to the session.
@@ -187,10 +186,7 @@ class KnowledgeGraphUtils:
             confidence=confidence,
             importance=importance,
             source=source,
-            # New schema fields (provenance - immutable)
-            original_message_id=original_message_id,
             original_sentence=original_sentence,
-            sentence_id=sentence_id
         )
         
         # Store label embedding in ChromaDB
@@ -230,14 +226,9 @@ class KnowledgeGraphUtils:
                                     relationship_type: str,
                                     attributes: Optional[Dict[str, Any]] = None,
                                     sentence: Optional[str] = None,
-                                    original_message_timestamp: Optional[datetime] = None,
                                     confidence: Optional[float] = None,
                                     importance: Optional[float] = None,
                                     source: Optional[str] = None,
-                                    # New schema fields
-                                    original_message_id: Optional[str] = None,
-                                    sentence_id: Optional[str] = None,
-                                    relationship_descriptor: Optional[str] = None,
                                     # Semantic deduplication
                                     semantic_dedup: bool = True,
                                     similarity_threshold: float = 0.6
@@ -322,16 +313,10 @@ class KnowledgeGraphUtils:
             relationship_type=relationship_type,
             attributes=attributes,
             sentence=sentence,
-            original_message_timestamp=original_message_timestamp,
             # Note: embeddings are now stored in ChromaDB, not as columns
-            # New first-class fields
             confidence=confidence,
             importance=importance,
             source=source,
-            # New schema fields
-            original_message_id=original_message_id,
-            sentence_id=sentence_id,
-            relationship_descriptor=relationship_descriptor,
         )
         self.session.add(new_edge)
         

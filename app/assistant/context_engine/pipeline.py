@@ -168,9 +168,11 @@ def run_context_activation_pipeline(
         )
         logger.debug("pipeline: memo written brief_id=%s", brief.brief_id)
     except Exception as e:
+        # Memo distillation is the last stage and not load-bearing — the
+        # pipeline's earlier output (brief, reasoning_result) is still useful.
+        # Log + continue so a memo bug doesn't lose that work.
         logger.error("pipeline: memo distillation failed (non-fatal) brief_id=%s: %s", brief.brief_id, e)
         logger.debug("pipeline: memo distillation exception details", exc_info=True)
-        raise
 
     total_elapsed = time.perf_counter() - t_total
     logger.info(

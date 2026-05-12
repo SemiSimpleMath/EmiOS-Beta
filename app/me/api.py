@@ -401,9 +401,9 @@ def node_detail(node_id: str):
         in_count = session.query(Edge).filter(Edge.target_id == node_id).count()
         out_count = session.query(Edge).filter(Edge.source_id == node_id).count()
 
-        attrs = node.attributes if isinstance(node.attributes, dict) else {}
         is_goal = (node.node_type or "") == "Goal"
-        # goal_status: first-class column. last_pursued_at: bookkeeping on attrs.
+        # goal_status + last_pursued_at: both first-class columns now
+        # (last_pursued_at promoted from attributes JSON 2026-05-11).
         return jsonify({
             "id": str(node.id),
             "label": node.label or "",
@@ -421,7 +421,10 @@ def node_detail(node_id: str):
             "wiki_url": _wiki_url_for(node),
             # Goal lifecycle fields. None for non-Goal node types.
             "goal_status": (node.goal_status if is_goal else None),
-            "last_pursued_at": (attrs.get("last_pursued_at") if is_goal else None),
+            "last_pursued_at": (
+                node.last_pursued_at.isoformat()
+                if is_goal and node.last_pursued_at else None
+            ),
         })
 
 

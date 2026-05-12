@@ -50,6 +50,51 @@ def _degree_map_for(session, node_ids) -> dict:
     return out
 
 
+def _serialize_pod_uri_as_node(pod_uri: str, *, degree: int | None = None) -> dict | None:
+    """Render a pod URI as a node-shaped dict for the visualizer.
+
+    Pods don't have kg_node_metadata rows (no mirror — pod_store is the sole
+    source of truth). When a BFS hits a pod URI as an edge endpoint, this
+    fetches metadata from pod_store and returns the same shape as
+    _serialize_node so the frontend renders it without special-casing.
+
+    Returns None if the URI isn't a valid pod URI or the pod is missing
+    from pod_store (genuine dangling edge).
+    """
+    from app.assistant.pod_store.pod_uri import POD_URI_RE
+    if not POD_URI_RE.fullmatch(pod_uri or ""):
+        return None
+    from app.assistant.pod_store.pod_store import PodStore
+    pod = PodStore().get(pod_uri)
+    if pod is None:
+        return None
+    return {
+        'id': pod_uri,
+        'label': (pod.one_liner or pod_uri)[:200],
+        'type': 'Pod',
+        'category': pod.kind,
+        'aliases': [],
+        'description': pod.one_liner,
+        'original_sentence': (pod.body or "")[:400] if pod.body else None,
+        'attributes': {},
+        'start_date': None,
+        'end_date': None,
+        'start_date_confidence': None,
+        'end_date_confidence': None,
+        'created_at': pod.created_at.isoformat() if getattr(pod, 'created_at', None) else None,
+        'updated_at': None,
+        'valid_during': None,
+        'hash_tags': list(pod.tags or []),
+        'semantic_label': None,
+        'goal_status': None,
+        'confidence': None,
+        'importance': None,
+        'source': 'pod_store',
+        'degree': degree,
+        'taxonomy_paths': [],
+    }
+
+
 def _serialize_node(node: Node, *, degree: int | None = None) -> dict:
     return {
         'id': str(node.id),
@@ -85,11 +130,7 @@ def _serialize_edge(edge: Edge) -> dict:
         'target_node': str(edge.target_id),
         'type': edge.relationship_type,
         'attributes': edge.attributes if edge.attributes else {},
-        'original_message_id': edge.original_message_id,
-        'sentence_id': edge.sentence_id,
-        'relationship_descriptor': edge.relationship_descriptor,
         'sentence': edge.sentence,
-        'original_message_timestamp': edge.original_message_timestamp.isoformat() if edge.original_message_timestamp else None,
         'created_at': edge.created_at.isoformat() if edge.created_at else None,
         'updated_at': edge.updated_at.isoformat() if edge.updated_at else None,
         'confidence': edge.confidence,
@@ -433,14 +474,29 @@ def get_subgraph():
         degrees = _degree_map_for(session, [n.id for n in nodes])
         node_data = [_serialize_node(n, degree=degrees.get(n.id, 0)) for n in nodes]
 
+        # Pod URIs in `visible` won't come back from the Node query (no mirror).
+        # Render them as Pod-typed nodes from pod_store so the frontend doesn't
+        # see orphan edges. Degree is computed via the existing helper, which
+        # works for any id string.
+        resolved_ids = {n.id for n in nodes}
+        unresolved = visible - resolved_ids
+        if unresolved:
+            pod_degrees = _degree_map_for(session, list(unresolved))
+            for pid in unresolved:
+                pod_node = _serialize_pod_uri_as_node(pid, degree=pod_degrees.get(pid, 0))
+                if pod_node is not None:
+                    node_data.append(pod_node)
+                    resolved_ids.add(pid)
+
         # Deduplicate edges (BFS can see the same edge from both endpoints
-        # on successive hops) and keep only those fully inside the subgraph.
+        # on successive hops) and keep only those whose endpoints both resolved
+        # (kg_node OR pod-shim). Edges to genuinely dangling ids are dropped.
         seen_edge_ids: set = set()
         edge_data: list = []
         for e in all_edges:
             if e.id in seen_edge_ids:
                 continue
-            if e.source_id not in visible or e.target_id not in visible:
+            if e.source_id not in resolved_ids or e.target_id not in resolved_ids:
                 continue
             seen_edge_ids.add(e.id)
             edge_data.append(_serialize_edge(e))

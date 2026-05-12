@@ -16,8 +16,9 @@ def normalize_extraction_result(extraction_data: Dict[str, Any]) -> Tuple[List[D
     """
     Normalize fact_extractor output into plain node/edge dicts.
 
-    Legacy compatibility:
-    - map node['core'] -> node['category'] when present
+    The extractor's Node form has `category` as a first-class field
+    (renamed from legacy `core` on 2026-05-10). No JSON duplication —
+    `category` is the only place it lives.
     """
     nodes = extraction_data.get("nodes", []) if isinstance(extraction_data, dict) else []
     edges = extraction_data.get("edges", []) if isinstance(extraction_data, dict) else []
@@ -31,11 +32,9 @@ def normalize_extraction_result(extraction_data: Dict[str, Any]) -> Tuple[List[D
                 "node_type": getattr(n, "node_type", None),
                 "temp_id": getattr(n, "temp_id", None),
                 "label": getattr(n, "label", None),
-                "core": getattr(n, "core", None),
+                "category": getattr(n, "category", None),
                 "sentence": getattr(n, "sentence", None),
             }
-        if "core" in node and "category" not in node:
-            node["category"] = node.get("core")
         normalized_nodes.append(node)
 
     normalized_edges: List[Dict[str, Any]] = []

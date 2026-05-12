@@ -24,6 +24,25 @@ from sqlalchemy import and_, or_, func
 # Use KnowledgeGraphUtils class for these functions
 
 
+def _endpoint_label_and_type(node, endpoint_id: str) -> Tuple[Optional[str], Optional[str]]:
+    """Resolve an edge endpoint's display label and type.
+
+    For regular kg_nodes, reads ``.label`` / ``.node_type``. For pod URIs
+    (``datapod:<kind>:<hash>``) — which are valid edge endpoints with no
+    kg_node_metadata row — falls back to pod_store metadata so the response
+    surfaces a usable label instead of None.
+    """
+    if node is not None:
+        return node.label, node.node_type
+    from app.assistant.pod_store.pod_uri import POD_URI_RE
+    if endpoint_id and POD_URI_RE.fullmatch(endpoint_id):
+        from app.assistant.pod_store.pod_store import PodStore
+        pod = PodStore().get(endpoint_id)
+        if pod is not None:
+            return (pod.one_liner or endpoint_id)[:200], "Pod"
+    return None, None
+
+
 def delete_node(node_id, session: Session):
     """
     Delete a node and all its edges (edges are deleted via ON DELETE CASCADE).
@@ -227,13 +246,16 @@ def describe_node(node_id, session: Session, filters: Dict[str, Any] = None, max
         details["warning"] = warning_message
 
     for e in inbound:
-        # load the source node so we can show its label
+        # load the source node so we can show its label. For pod-URI endpoints
+        # (no kg_node row by design), fall back to pod_store metadata so agents
+        # see "[image: ...]" / "[chat_cluster: ...]" instead of a null label.
         src = session.get(Node, e.source_id)
+        src_label, src_type = _endpoint_label_and_type(src, e.source_id)
         edge_data = {
             "edge_id": str(e.id),
             "from_node_id": str(e.source_id),
-            "from_node_label": src.label if src else None,
-            "from_node_type": src.node_type if src else None,
+            "from_node_label": src_label,
+            "from_node_type": src_type,
             "from_is_active": _state_or_event_is_active(src, _now_for_currency) if src else True,
             "edge_type": e.relationship_type,
             "sentence": e.sentence
@@ -243,13 +265,13 @@ def describe_node(node_id, session: Session, filters: Dict[str, Any] = None, max
         details["inbound_edges"].append(edge_data)
 
     for e in outbound:
-        # load the target node so we can show its label
         tgt = session.get(Node, e.target_id)
+        tgt_label, tgt_type = _endpoint_label_and_type(tgt, e.target_id)
         edge_data = {
             "edge_id": str(e.id),
             "to_node_id": str(e.target_id),
-            "to_node_label": tgt.label if tgt else None,
-            "to_node_type": tgt.node_type if tgt else None,
+            "to_node_label": tgt_label,
+            "to_node_type": tgt_type,
             "to_is_active": _state_or_event_is_active(tgt, _now_for_currency) if tgt else True,
             "edge_type": e.relationship_type,
             "sentence": e.sentence
@@ -593,12 +615,13 @@ def describe_edge(
         "suggested_qualifiers": attrs.get("suggested_qualifiers"),
     }
 
-    # Provenance-like fields if you store them in attributes
+    # Provenance-like fields if you store them in attributes. The edge's
+    # canonical per-observation timestamp now lives in kg_edge_evidence
+    # (JOIN through edge_id) — this dict is just legacy-attribute scrape.
     provenance = {
         "reference_text": attrs.get("reference_text"),
         "provenance_timestamp": attrs.get("provenance_timestamp"),
         "source": attrs.get("data_source"),
-        "original_message_timestamp": attrs.get("original_message_timestamp"),
     }
 
     # Headline synthesis, small and deterministic
@@ -1512,23 +1535,15 @@ def inspect_node_neighborhood(
         src = session.get(Node, edge.source_id)
         if not src:
             continue
-        
-        # Prioritize original_message_timestamp over provenance_timestamp for temporal reasoning
-        edge_attrs = edge.attributes or {}
-        if edge_attrs.get("original_message_timestamp") and edge_attrs.get("provenance_timestamp"):
-            # Create a copy and prioritize the original timestamp
-            prioritized_attrs = edge_attrs.copy()
-            prioritized_attrs["timestamp"] = edge_attrs["original_message_timestamp"]
-            prioritized_attrs["message_timestamp"] = edge_attrs["original_message_timestamp"]
-        else:
-            prioritized_attrs = edge_attrs
-        
+        # Per-observation provenance lives in kg_edge_evidence (JOIN through
+        # edge_id). The denormalized columns (original_message_timestamp,
+        # relationship_descriptor) were removed 2026-05-10 — readers wanting
+        # timestamps should JOIN kg_edge_evidence.message_timestamp.
         edges.append({
             "direction": "in",
             "edge_type": edge.relationship_type,
-            "edge_attributes": prioritized_attrs,
+            "edge_attributes": edge.attributes or {},
             "sentence": edge.sentence,
-            "relationship_descriptor": edge.relationship_descriptor,
             "connected_node": {
                 "id": str(src.id),
                 "label": src.label,
@@ -1542,23 +1557,11 @@ def inspect_node_neighborhood(
         tgt = session.get(Node, edge.target_id)
         if not tgt:
             continue
-        
-        # Prioritize original_message_timestamp over provenance_timestamp for temporal reasoning
-        edge_attrs = edge.attributes or {}
-        if edge_attrs.get("original_message_timestamp") and edge_attrs.get("provenance_timestamp"):
-            # Create a copy and prioritize the original timestamp
-            prioritized_attrs = edge_attrs.copy()
-            prioritized_attrs["timestamp"] = edge_attrs["original_message_timestamp"]
-            prioritized_attrs["message_timestamp"] = edge_attrs["original_message_timestamp"]
-        else:
-            prioritized_attrs = edge_attrs
-        
         edges.append({
             "direction": "out",
             "edge_type": edge.relationship_type,
-            "edge_attributes": prioritized_attrs,
+            "edge_attributes": edge.attributes or {},
             "sentence": edge.sentence,
-            "relationship_descriptor": edge.relationship_descriptor,
             "connected_node": {
                 "id": str(tgt.id),
                 "label": tgt.label,

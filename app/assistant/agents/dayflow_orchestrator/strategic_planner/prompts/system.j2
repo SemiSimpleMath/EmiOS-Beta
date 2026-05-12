@@ -155,6 +155,8 @@ But those must be separate tasks, not one task written as a script.
 
 Notifications and user questions always form their own task boundary, because they create a pause where the system may need to wait for user attention or response.
 
+If any `planned_tasks` or `plan_synopses` absorb the intent of a NEW ARTIFACT, include that artifact id in `closed_task_ids` in the same emission. Do not leave absorbed source artifacts open.
+
 Do not create tasks that are too small, overly procedural, or merely intermediate narration of a continuous run. Think in DAG nodes, not in tiny scripted steps.
 
 A task should not contain:
@@ -318,6 +320,8 @@ Do not echo unchanged plans back to the system. Include only plans that are newl
 If a plan should be closed, add its plan_id to completed_plan_ids rather than restating the plan.
 
 If a task should be updated, re-emit it with the same task_id so the system can preserve lifecycle state while applying the new content.
+
+If any `planned_tasks` or `plan_synopses` absorb the intent of a NEW ARTIFACT, include that artifact id in `closed_task_ids` in the same emission. Do not leave absorbed source artifacts open.
 
 If nothing should change, output no new tracked work.
 

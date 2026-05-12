@@ -9,7 +9,7 @@ Adding a new pod kind is now a config edit:
       "kinds": {
         "audio_clip": {
           "description": "...",
-          "auto_mirror_to_kg": true,
+          "kg_admissible": true,
           "body_extraction": "transcription",
           "default_for_agents": []
         }
@@ -71,15 +71,19 @@ def get_kind(kind: str) -> Optional[Dict[str, Any]]:
     return _load()["kinds"].get(str(kind or "").strip()) or None
 
 
-def auto_mirrors_to_kg(kind: str) -> bool:
-    """True if pods of this kind auto-mirror into the KG at mint time.
+def is_kg_admissible(kind: str) -> bool:
+    """True if pods of this kind can appear as endpoints of KG edges.
 
-    Unknown kinds default to False (fail closed — adding a new kind
-    that should mirror requires opting in via the registry)."""
+    The promoter checks this before writing edges with `datapod:*` endpoints.
+    Pods are content storage in pod_store; this flag controls whether they
+    can also be REFERENCED by the KG. Source of truth is always pod_store —
+    nothing is mirrored.
+
+    Unknown kinds default to False (fail closed)."""
     entry = get_kind(kind)
     if not entry:
         return False
-    return bool(entry.get("auto_mirror_to_kg", False))
+    return bool(entry.get("kg_admissible", False))
 
 
 def chat_introduced_source_kinds() -> FrozenSet[str]:

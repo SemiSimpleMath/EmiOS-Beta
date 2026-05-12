@@ -84,6 +84,7 @@ class ReevaluateBeliefsStep:
 
         stats = {"rewritten": 0, "qualified": 0, "split": 0, "deprecated": 0, "confirmed": 0, "errors": 0}
         notes_collected: List[str] = []
+        today_iso = datetime.now(timezone.utc).date().isoformat()
 
         for belief_key in contested_keys:
             belief = store.get_by_key(belief_key)
@@ -124,10 +125,20 @@ class ReevaluateBeliefsStep:
                 if reevaluation_notes:
                     notes_collected.append(f"[{belief_key}] {reevaluation_notes}")
 
+                # Track whether anything in revised_beliefs actually touches the
+                # original belief_key. If a split returns only NEW keys (i.e.
+                # the agent failed to use the original key for the primary child
+                # as instructed), the original would otherwise be orphaned —
+                # we deprecate it after the loop as a safety net.
+                original_key_touched = False
+
                 for rb in revised_beliefs:
                     action = rb.get("action", "confirm")
                     revised_key = rb.get("belief_key", belief_key)
-                    revised_statement = rb.get("statement", "")
+                    revised_statement = (rb.get("statement") or "").strip()
+
+                    if revised_key == belief.belief_key:
+                        original_key_touched = True
 
                     if action == "deprecate":
                         store.deprecate(revised_key, reason=rb.get("reasoning", "re-evaluation"))
@@ -136,23 +147,33 @@ class ReevaluateBeliefsStep:
                         continue
 
                     if action == "confirm":
-                        # Confirmed — restore to active if it was contested
-                        if belief.status == "contested":
-                            req = BeliefUpsertRequest(
-                                domain=ctx.domain,
-                                belief_key=revised_key,
-                                statement=belief.statement,
-                                confidence=rb.get("confidence", belief.confidence),
-                                scope=rb.get("scope", belief.scope),
-                                status="active",
-                                last_confirmed=datetime.now(timezone.utc).date().isoformat(),
-                            )
-                            store.upsert_belief(req)
+                        # Confirmed means "still true today" — always upsert so
+                        # last_confirmed bumps, regardless of prior status. If
+                        # the agent supplied a revised statement, use it;
+                        # otherwise keep the existing one.
+                        req = BeliefUpsertRequest(
+                            domain=ctx.domain,
+                            belief_key=revised_key,
+                            statement=revised_statement or belief.statement,
+                            confidence=rb.get("confidence", belief.confidence),
+                            scope=rb.get("scope", belief.scope),
+                            status="active",
+                            last_confirmed=today_iso,
+                        )
+                        store.upsert_belief(req)
                         stats["confirmed"] += 1
                         logger.info("[ReevaluateBeliefs] confirmed %s", revised_key)
                         continue
 
-                    # rewrite | qualify | split — all update the statement authoritatively
+                    # rewrite | qualify | split — statement is authoritative.
+                    # Refuse to upsert an empty statement (would blank the belief).
+                    if not revised_statement:
+                        logger.warning(
+                            "[ReevaluateBeliefs] empty statement for action=%s key=%s — skipping",
+                            action, revised_key,
+                        )
+                        continue
+
                     conditions_val: Optional[dict] = None
                     raw_conditions = rb.get("conditions")
                     if raw_conditions:
@@ -166,7 +187,7 @@ class ReevaluateBeliefsStep:
                         scope=rb.get("scope", belief.scope),
                         status=rb.get("status", "active"),
                         conditions=conditions_val,
-                        last_confirmed=datetime.now(timezone.utc).date().isoformat(),
+                        last_confirmed=today_iso,
                     )
                     store.upsert_belief(req)
                     logger.info(
@@ -181,6 +202,21 @@ class ReevaluateBeliefsStep:
                     elif action == "split":
                         stats["split"] += 1
 
+                # Safety net for split: if the agent emitted revised beliefs
+                # but none used the original key, the original is now orphaned.
+                # Deprecate it so the belief store doesn't accumulate stale
+                # parents alongside narrower children.
+                if revised_beliefs and not original_key_touched:
+                    store.deprecate(
+                        belief.belief_key,
+                        reason="superseded by re-evaluation (split into new keys)",
+                    )
+                    stats["deprecated"] += 1
+                    logger.info(
+                        "[ReevaluateBeliefs] auto-deprecated orphaned original %s",
+                        belief.belief_key,
+                    )
+
             except Exception as exc:
                 stats["errors"] += 1
                 logger.exception(
@@ -190,7 +226,7 @@ class ReevaluateBeliefsStep:
 
         logger.info("[ReevaluateBeliefs] domain=%s stats=%s", ctx.domain, stats)
         ctx.reevaluation_result = {
-            "status": "ok",
+            "status": "partial_error" if stats["errors"] > 0 else "ok",
             "domain": ctx.domain,
             "contested_count": len(contested_keys),
             "stats": stats,

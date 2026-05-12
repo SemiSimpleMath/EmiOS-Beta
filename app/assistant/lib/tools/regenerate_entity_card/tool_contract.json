@@ -1,6 +1,6 @@
 {
   "name": "regenerate_entity_card",
-  "description": "Force-regenerate the entity card for one entity from current KG state. Use after KG mutations that change facts the card was summarizing (e.g. you closed a State node, you renamed a node, you added a new fact about the entity) so the card reflects the latest graph. Card generation runs through generate_and_persist_card with force=true and the shared card_gen_slot lock — no risk of corrupting concurrent writers. Synchronous; takes ~5-15s while the LLM rewrites the card.",
+  "description": "Force-regenerate the v2 entity card for one entity from current KG state. Use after KG mutations that change facts the card was summarizing (e.g. you closed a State node, you renamed a node, you added a new fact about the entity) so the card reflects the latest graph. Synchronous; rebuilds all sections (alias, contact, summary, level_0, plus bullet sections). Latency scales with neighborhood size — typical entities ~30-90s, the user's own card ~5-10 min.",
   "inputs": [
     {
       "name": "entity_label",
@@ -24,7 +24,7 @@
     {
       "path": "data",
       "type": "object",
-      "description": "{ok, entity_label, regenerated, summary, key_facts_count}."
+      "description": "{ok, entity_label, entity_node_id, regenerated, sections, bullets}."
     }
   ],
   "arguments_prompt": "Arguments for regenerate_entity_card:\n- entity_label (required): the entity whose card needs refreshing\n- reason (optional): one-line context for the audit log",

@@ -1,0 +1,19 @@
+name: kg_node_section_tagger
+class_name: Agent
+llm_params:
+  engine: gpt-5.4-mini
+  model_tier: "mini"
+  timeout: 60
+  llm_provider: "openai"
+allowed_tools: []
+except_tools: []
+
+user_context_items:
+  - nodes_block
+  - namespaces_block
+
+system_context_items:
+  - resource_user_data
+  - resource_assistant_data
+
+type: agent

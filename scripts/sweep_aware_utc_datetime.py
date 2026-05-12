@@ -27,7 +27,6 @@ FILES = [
     "app/assistant/database/kg_chat_projection.py",
     "app/models/sleep_segments.py",
     "app/models/wake_segments.py",
-    "app/models/node_analysis_tracking.py",
     "app/models/maintenance_logs.py",
     "app/models/duplicate_node_tracking.py",
     "app/models/active_segments.py",

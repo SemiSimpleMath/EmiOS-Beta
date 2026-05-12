@@ -317,13 +317,19 @@ def regenerate_state_importance(*, only_unrated: bool = True) -> int:
     These node types don't get LLM-rated — `me::importance_rater` only
     runs on Entity nodes by design (lens treats State/Event/Goal as
     connective tissue derived from the entities they connect). Their
-    importance is computed: max importance of any edge connecting to
-    the node, scaled to 0-1 to match the Entity rater's stored scale.
+    importance is **derived** via the per-edge formula:
 
-    Mirrors the architectural intent ``state importance comes from
-    edge importance``. The edge rater (``me::edge_importance_rater``)
-    decides how much weight each connection carries; this function
-    aggregates upward.
+        max(src_imp × edge_imp / 10)  over all incoming edges
+
+    where ``src_imp`` is the importance of the entity on the OTHER end
+    of the edge (the connecting node, not the state itself), and
+    ``edge_imp`` is the edge's own LLM-rated importance from that
+    source's perspective. Both inputs are 0-10, the /10 keeps the
+    product in 0-10. The MAX picks the most-important connection.
+
+    Architecture: see ``project_lens_unified_importance_model.md`` —
+    a State's importance is "how important is this state to ANY entity
+    that owns it?", taking the strongest pull.
 
     Single SQL UPDATE per node (mirroring ``regenerate_importance``'s
     pattern); preserves ``updated_at`` to avoid cascading wiki +
@@ -341,13 +347,22 @@ def regenerate_state_importance(*, only_unrated: bool = True) -> int:
     started = time.time()
 
     null_filter = "AND n.importance IS NULL" if only_unrated else ""
+    # JOIN twice: once to the edge, once to the "other end" entity so we
+    # can read its importance. CASE picks the other end relative to n.
     select_sql = f"""
-        SELECT n.id, MAX(e.importance) / 10.0 AS score
+        SELECT n.id,
+               MAX(src.importance * e.importance / 10.0) AS score
         FROM kg_node_metadata n
         JOIN kg_edge_metadata e
           ON e.source_id = n.id OR e.target_id = n.id
+        JOIN kg_node_metadata src
+          ON src.id = CASE
+                        WHEN e.source_id = n.id THEN e.target_id
+                        ELSE e.source_id
+                      END
         WHERE n.node_type IN ('State', 'Event', 'Goal', 'Property')
           AND e.importance IS NOT NULL
+          AND src.importance IS NOT NULL
           {null_filter}
         GROUP BY n.id
     """

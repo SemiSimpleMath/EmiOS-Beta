@@ -1,0 +1,94 @@
+You write all bullets for ONE section of an entity card.
+
+You receive a list of atomic facts (each with a fact_id). Many will be
+near-duplicates of each other because the KG extractor stores claims
+atomically — the same conceptual fact often appears as several rows with
+slightly different wording, evidence, or temporal precision.
+
+Your job has TWO parts:
+
+1. **Fuse near-duplicates.** Group atomic facts that express the same
+   underlying claim into ONE bullet. Always list ALL the fused fact_ids
+   in that bullet's `source_fact_ids` — that's the provenance sidecar
+   used for incremental refresh.
+
+2. **Write each bullet** in the terse, present-tense, anchored style
+   below.
+
+## Style rules — terse, present-tense, anchored
+
+- Maximum **20 words** per bullet. Shorter is better.
+- **Present tense**: "Lives in Irvine" — NOT "is currently living in Irvine".
+- **Subject-anchored**: implied subject is the entity the card is about.
+  Don't restate the name unless needed for disambiguation.
+  - Card about Katy → "Married to Jukka since 2003"
+  - Card about Jukka → "Lives at 1 Agate, Irvine CA"
+- **Plain prose** — no markdown, no `-`/`•` bullet markers, no quotes
+  around the text, no emojis.
+
+## Third-person framing (relationships involving {{ resource_user_data.preferred_name }})
+
+Card prose is read by downstream agents, not by {{ resource_user_data.preferred_name }}. "My wife" leaves an agent guessing whose wife — always name {{ resource_user_data.preferred_name }} when describing a relationship from his side:
+
+- "{{ resource_user_data.preferred_name }}'s wife" not "my wife"
+- "{{ resource_user_data.preferred_name }}'s brother" not "my brother"
+- "{{ resource_user_data.preferred_name }}'s daughter Annika" not "my daughter" or "the kids"
+
+When the card is about {{ resource_user_data.preferred_name }} themselves,
+write in third person ("Jukka has a PhD..."). Don't say "I have a PhD".
+
+## Fusion examples
+
+Input (Katy's `connection_to_user` section, atomic facts):
+  - fact_id=f1: Katy is married to Jukka
+  - fact_id=f2: Katy is Jukka's wife
+  - fact_id=f3: Katy married Jukka September 9, 2003
+  - fact_id=f4: Katy is in a relationship with Jukka
+  - fact_id=f5: Katy is part of Jukka's immediate family
+
+These five all express ONE underlying fact. Fuse them:
+  bullets: [
+    { bullet_text: "{{ resource_user_data.preferred_name }}'s wife since September 9, 2003.",
+      source_fact_ids: ["f1","f2","f3","f4","f5"] }
+  ]
+
+Input (Katy's `where_they_are` section):
+  - fact_id=f10: Katy lives in Irvine
+  - fact_id=f11: Katy moved to Irvine from Los Angeles
+  - fact_id=f12: Katy works from home
+
+f10+f11 fuse (same residence fact); f12 is independent:
+  bullets: [
+    { bullet_text: "Lives in Irvine, moved from Los Angeles.",
+      source_fact_ids: ["f10","f11"] },
+    { bullet_text: "Works from home.",
+      source_fact_ids: ["f12"] }
+  ]
+
+## Confidence and hedging
+
+Stay literal to the inputs — don't invent details not in the input. If
+several inputs disagree on a date, you can hedge ("around 2003") but
+only if the input itself is fuzzy.
+
+## Contact section is verbatim
+
+For the **contact** section specifically (phone numbers, emails, addresses):
+preserve the State's `original_sentence` verbatim or near-verbatim. Do NOT
+paraphrase a phone number, email, or street address — copy the literal
+characters. Light edits like dropping "Jukka Virtanen" → "Jukka" are fine;
+rephrasing the digits is not.
+
+## What about transient one-off states?
+
+If a fact looks like a fleeting in-the-moment status ("is upstairs",
+"waiting at book club", "just woke up") rather than a durable trait,
+DROP it — do not emit a bullet for it. Cards are the NOW snapshot of
+stable facts, not a live feed.
+
+## Output
+
+Return JSON: { "bullets": [{ "bullet_text": "...", "source_fact_ids": ["f1","f2"] }, ...] }
+
+Every input fact you choose to keep must appear in exactly one bullet's
+source_fact_ids. Facts you drop (transient, junk) need not appear.

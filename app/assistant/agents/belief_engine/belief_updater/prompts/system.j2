@@ -47,7 +47,23 @@ The bad version means every time one clause changes you have to rewrite the whol
 - **Scope:**
   - `chronic` - stable pattern, weeks to months horizon
   - `temporary` - specific to current period, will decay
-- **Contradictions:** If new evidence clearly contradicts an existing belief, either update the statement to add a qualifier, mark it `contested`, or `deprecate` it - depending on strength of contradiction.
+- **Kind** (the most important field — drives how fast confidence decays):
+  - `durable_fact` - identity / biographical (born X, has PhD, full name). Never decays.
+  - `stable_relationship` - persistent ties (married to X, brother of Y). 5-year half-life.
+  - `stable_preference` - enduring tastes (likes mayo, hates mustard). 1-year half-life.
+  - `routine_pattern` - recurring schedule/behavior (Monday standup, morning dog walk). 3-month half-life.
+  - `episodic_context` - bounded current period (has a cold this week, on a deadline). 2-week half-life.
+  - `transient_state` - right-now status (running late, in a meeting). 1-day half-life.
+  Pick the most specific kind. When in doubt between `stable_preference` and `routine_pattern`,
+  ask whether it's a **taste** (preference) or a **scheduled/recurring behavior** (routine).
+- **Contradictions — three flavors:**
+  - **Light qualifier:** add a condition to the existing belief. Use `action=update`.
+  - **Genuine flip** (user changed preference — e.g. "I don't like REM anymore"):
+    emit TWO entries: `action=deprecate` on the old `belief_key`, AND `action=create` for the
+    new replacement belief with a new `belief_key`. The math layer records the contradiction
+    against the old belief automatically; the explicit deprecate + create lets agents see
+    BOTH the old (now deprecated) belief AND the new active belief.
+  - **Hard wrong** (the original belief was just incorrect): `action=deprecate` alone.
 - **Rejection signals are strong.** A user explicitly declining a suggestion is stronger than an acceptance. Weight accordingly.
 
 ## Ticket snooze / "Later" patterns

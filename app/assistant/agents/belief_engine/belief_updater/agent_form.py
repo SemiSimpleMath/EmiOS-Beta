@@ -31,6 +31,25 @@ class BeliefOutput(BaseModel):
     scope: Literal["chronic", "temporary"] = Field(
         description="chronic = durable long-term belief. temporary = days/weeks horizon."
     )
+    kind: Literal[
+        "durable_fact",
+        "stable_relationship",
+        "stable_preference",
+        "routine_pattern",
+        "episodic_context",
+        "transient_state",
+    ] = Field(
+        description=(
+            "Belief kind — drives the decay half-life. Pick the most specific match:\n"
+            "  durable_fact = identity / biographical (born X, has PhD, full name). Never decays.\n"
+            "  stable_relationship = persistent ties (married to X, brother of Y). Half-life ~5 yr.\n"
+            "  stable_preference = enduring tastes/preferences (likes mayo, hates mustard). Half-life ~1 yr.\n"
+            "  routine_pattern = recurring routine/schedule (Monday standup, morning dog walk). Half-life ~3 mo.\n"
+            "  episodic_context = bounded current period (has a cold this week, on a deadline). Half-life ~2 wk.\n"
+            "  transient_state = right-now status (running late, in a meeting). Half-life ~1 day.\n"
+            "Required on `create`. Optional on `update` — supply only if reclassifying the kind."
+        )
+    )
     status: Literal["active", "contested", "deprecated"] = Field(
         default="active",
         description=(
@@ -39,12 +58,15 @@ class BeliefOutput(BaseModel):
             "deprecated = no longer believed to be true."
         )
     )
-    action: Literal["create", "update", "deprecate", "no_change"] = Field(
+    action: Literal["create", "update", "deprecate", "no_change", "replace"] = Field(
         description=(
             "create = new belief not previously in the store. "
             "update = existing belief needs its statement or confidence revised. "
             "deprecate = belief is no longer valid based on evidence. "
-            "no_change = existing belief is confirmed as-is, only increment observation count."
+            "no_change = existing belief is confirmed as-is, only increment observation count. "
+            "replace = deprecate this belief AND create a new one in its place (use for preference flips like "
+            "'I no longer like X' — emit two output entries: one with action='deprecate' on the old key, "
+            "one with action='create' for the new replacement belief)."
         )
     )
     evidence_refs: List[int] = Field(

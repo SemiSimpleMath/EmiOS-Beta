@@ -10,7 +10,6 @@ import uuid
 from datetime import datetime
 
 from app.models.base import get_session
-from app.assistant.entity_management.entity_cards import EntityCard
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -454,71 +453,14 @@ def complete_setup():
         _generate_master_room_resources(data, pronoun_subjective, pronoun_objective)
         _generate_system_room_resources(data)
         
-        # 8. Create initial entity cards for important people (SQLite version)
-        session_db = get_session()
-        try:
-            full_name = user_data['full_name']
-            
-            # Delete existing entity cards to avoid duplicates
-            existing_cards = session_db.query(EntityCard).all()
-            for card in existing_cards:
-                session_db.delete(card)
-            session_db.commit()
-            
-            # Create entity card for the user
-            user_card = EntityCard(
-                id=str(uuid.uuid4()),
-                entity_name=full_name,
-                entity_type='Person',
-                summary=f"{full_name} is the user of this AI assistant (pronouns: {pronoun_subjective}/{pronoun_objective}).",
-                key_facts=json.dumps([
-                    f"Name: {full_name}",
-                    f"Pronouns: {pronoun_subjective}/{pronoun_objective}",
-                    f"Birthdate: {user_data.get('birthdate', 'Not specified')}",
-                    f"Job: {user_data.get('job', 'Not specified')}"
-                ]),
-                relationships=json.dumps([]),
-                aliases=json.dumps([full_name, user_data['first_name'], user_data.get('preferred_name', full_name)]),
-                card_metadata=json.dumps({}),
-                is_active=True,
-                usage_count=0
-            )
-            session_db.add(user_card)
-            
-            # Create entity cards for important people
-            important_people = data.get('important_people', [])
-            for person in important_people:
-                if person.get('name'):
-                    summary = f"{person['name']} is {full_name}'s {person.get('relationship', 'acquaintance')}."
-                    
-                    key_facts = [
-                        f"Name: {person['name']}",
-                        f"Relationship: {person.get('relationship', 'Known to user')}"
-                    ]
-                    if person.get('birthdate'):
-                        key_facts.append(f"Birthdate: {person['birthdate']}")
-                    
-                    person_card = EntityCard(
-                        id=str(uuid.uuid4()),
-                        entity_name=person['name'],
-                        entity_type='Person',
-                        summary=summary,
-                        key_facts=json.dumps(key_facts),
-                        relationships=json.dumps([f"{person.get('relationship', 'Known to')} {full_name}"]),
-                        aliases=json.dumps([person['name']]),
-                        card_metadata=json.dumps({}),
-                        is_active=True,
-                        usage_count=0
-                    )
-                    session_db.add(person_card)
-            
-            session_db.commit()
-        except Exception as e:
-            session_db.rollback()
-            raise e
-        finally:
-            session_db.close()
-        
+        # 8. Initial entity cards: deferred.
+        # The v1 entity_cards seeding here was retired on 2026-05-10 with the
+        # rest of v1. Cards are now built by app.assistant.pipelines.entity_cards_v2
+        # after the user's first KG ingest run (chat → KG → kg_nodes for user
+        # + mentioned people → build_card per Group A entity). The setup wizard
+        # itself doesn't need to mint kg_nodes — those land naturally during
+        # the first chat session.
+
         # Everything succeeded — NOW mark setup as complete.
         # This is intentionally last so a partial failure doesn't lock the user
         # out of the wizard.

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional
-
 from app.assistant.pipelines.pipeline_registry import resolve_pipeline
 
 from .types import RoutineLike

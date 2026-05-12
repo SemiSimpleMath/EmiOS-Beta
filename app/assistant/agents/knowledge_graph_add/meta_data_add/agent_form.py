@@ -25,7 +25,6 @@ class Node(BaseModel):
     semantic_label: str
     goal_status: str
     confidence: float
-    importance: float
 
 class AgentForm(BaseModel):
     Nodes: List[Node]

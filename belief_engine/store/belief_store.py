@@ -41,7 +41,7 @@ class BeliefRecord:
     domain: str
     belief_key: str
     statement: str
-    confidence: str          # high | medium | low
+    confidence: str          # high | medium | low (stored at extraction)
     scope: str               # chronic | temporary
     status: str              # active | contested | deprecated
     conditions: Optional[Dict[str, Any]]
@@ -50,6 +50,14 @@ class BeliefRecord:
     last_confirmed: Optional[str]
     created_at: str
     updated_at: str
+    # Decay v2 (2026-05-11): kind drives half-life; snapshot cols populated by
+    # RecomputeBeliefSnapshotStep. Optional so legacy callers don't break.
+    kind: Optional[str] = None
+    last_contradicted_at: Optional[str] = None
+    current_support_weight: Optional[float] = None
+    current_contradiction_weight: Optional[float] = None
+    current_net_weight: Optional[float] = None
+    current_confidence_band: Optional[str] = None
 
 
 @dataclass
@@ -78,6 +86,9 @@ class BeliefUpsertRequest:
     conditions: Optional[Dict[str, Any]] = None
     first_observed: Optional[str] = None
     last_confirmed: Optional[str] = None
+    # `kind` drives belief decay half-life. None preserves any existing kind
+    # on update; if NULL after upsert, recompute step falls back to heuristic.
+    kind: Optional[str] = None
 
 
 @dataclass
@@ -90,6 +101,11 @@ class EvidenceInput:
     source_ref: Optional[str] = None
     raw_text: Optional[str] = None
     weight: float = 1.0
+    # Optional explicit valence override. If None, derived from signal_type
+    # at insert time. Use 'support' / 'contradict' / 'qualify'.
+    valence: Optional[str] = None
+    # Provenance — which agent / pipeline step wrote this evidence row.
+    extracted_by: Optional[str] = None
 
 
 class BeliefStore:
@@ -119,6 +135,12 @@ class BeliefStore:
             last_confirmed=row.last_confirmed,
             created_at=row.created_at,
             updated_at=row.updated_at,
+            kind=getattr(row, "kind", None),
+            last_contradicted_at=getattr(row, "last_contradicted_at", None),
+            current_support_weight=getattr(row, "current_support_weight", None),
+            current_contradiction_weight=getattr(row, "current_contradiction_weight", None),
+            current_net_weight=getattr(row, "current_net_weight", None),
+            current_confidence_band=getattr(row, "current_confidence_band", None),
         )
 
     @staticmethod
@@ -244,6 +266,15 @@ class BeliefStore:
         now = _now_iso()
         new_id = str(uuid.uuid4())  # used on insert; ignored on conflict
 
+        # Resolve kind for insert: use supplied or heuristic-classify so new
+        # rows always have a kind (drives decay half-life).
+        kind_value = req.kind
+        if kind_value is None:
+            from belief_engine.decay import classify_kind_heuristic
+            kind_value = classify_kind_heuristic(
+                belief_key=req.belief_key, domain=req.domain, scope=req.scope,
+            )
+
         stmt = sqlite_insert(UserBelief).values(
             id=new_id,
             domain=req.domain,
@@ -252,6 +283,7 @@ class BeliefStore:
             confidence=req.confidence,
             scope=req.scope,
             status=req.status,
+            kind=kind_value,
             conditions=json.dumps(req.conditions) if req.conditions else None,
             observation_count=1,
             first_observed=req.first_observed or now,
@@ -259,18 +291,24 @@ class BeliefStore:
             created_at=now,
             updated_at=now,
         )
+        # On conflict: preserve existing kind unless caller explicitly supplies one.
+        # The COALESCE-style preserve is what differentiates "the LLM reclassified
+        # this belief's kind" from "the LLM didn't say anything about kind."
+        update_set = {
+            "statement":         stmt.excluded.statement,
+            "confidence":        stmt.excluded.confidence,
+            "scope":             stmt.excluded.scope,
+            "status":            stmt.excluded.status,
+            "conditions":        stmt.excluded.conditions,
+            "observation_count": UserBelief.observation_count + 1,
+            "last_confirmed":    stmt.excluded.last_confirmed,
+            "updated_at":        stmt.excluded.updated_at,
+        }
+        if req.kind is not None:
+            update_set["kind"] = stmt.excluded.kind
         stmt = stmt.on_conflict_do_update(
             index_elements=["belief_key"],
-            set_={
-                "statement":         stmt.excluded.statement,
-                "confidence":        stmt.excluded.confidence,
-                "scope":             stmt.excluded.scope,
-                "status":            stmt.excluded.status,
-                "conditions":        stmt.excluded.conditions,
-                "observation_count": UserBelief.observation_count + 1,
-                "last_confirmed":    stmt.excluded.last_confirmed,
-                "updated_at":        stmt.excluded.updated_at,
-            },
+            set_=update_set,
         )
 
         session = get_session()
@@ -647,6 +685,31 @@ class BeliefStore:
     # ------------------------------------------------------------------
 
     def _insert_evidence(self, belief_id: str, ev: EvidenceInput, now: str) -> None:
+        """Insert a belief_evidence row with valence + half_life_snapshot derived.
+
+        - valence: caller can supply explicitly; falls back to mapping from
+          signal_type via belief_engine.decay.valence_from_signal_type.
+        - half_life_days_snapshot: looked up from the owning belief's `kind`,
+          so historical half-life changes don't retroactively reshape decay.
+        """
+        from sqlalchemy import text as _sa_text
+        from belief_engine.decay import valence_from_signal_type, half_life_for_kind
+
+        resolved_valence = ev.valence or valence_from_signal_type(ev.signal_type)
+
+        # Pull owning belief's kind for the half-life snapshot.
+        kind: Optional[str] = None
+        session_q = get_session()
+        try:
+            row = session_q.execute(
+                _sa_text("SELECT kind FROM user_beliefs WHERE id = :id"),
+                {"id": belief_id},
+            ).fetchone()
+            kind = row[0] if row else None
+        finally:
+            session_q.close()
+        half_life_snapshot = half_life_for_kind(kind)
+
         ev_id = str(uuid.uuid4())
         session = get_session()
         try:
@@ -661,6 +724,9 @@ class BeliefStore:
                     summary=ev.summary,
                     raw_text=ev.raw_text,
                     weight=ev.weight,
+                    valence=resolved_valence,
+                    half_life_days_snapshot=half_life_snapshot,
+                    extracted_by=ev.extracted_by,
                     created_at=now,
                 )
             )

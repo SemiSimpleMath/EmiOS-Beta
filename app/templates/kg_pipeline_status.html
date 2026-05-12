@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KG Pipeline Status</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/kg_pipeline_status.css') }}">
+</head>
+<body>
+    <header>
+        <h1>KG Pipeline Status</h1>
+        <div class="ts" id="ts">loading…</div>
+    </header>
+
+    <div id="err-container"></div>
+
+    <div class="grid">
+        <div class="card" id="card-stages">
+            <h2>Stage queues (pending)</h2>
+            <div id="stages-body">loading…</div>
+        </div>
+
+        <div class="card" id="card-subsystems">
+            <h2>Subsystem flags</h2>
+            <div id="subsystems-body">loading…</div>
+        </div>
+
+        <div class="card" id="card-totals">
+            <h2>Pipeline-table totals</h2>
+            <div id="totals-body">loading…</div>
+        </div>
+
+        <div class="card" id="card-kg">
+            <h2>Knowledge graph</h2>
+            <div id="kg-body">loading…</div>
+        </div>
+
+        <div class="card" id="card-tiers">
+            <h2>Confidence tiers</h2>
+            <div id="tiers-body">loading…</div>
+        </div>
+    </div>
+
+    <footer>auto-refreshes every 10s · GET /api/kg-pipeline/status.json</footer>
+
+    <script>
+    (function () {
+        const $ = (id) => document.getElementById(id);
+
+        function fmtCount(n) {
+            if (typeof n !== 'number') return String(n);
+            return n.toLocaleString();
+        }
+
+        function bandClass(n) {
+            if (n === 0) return 'zero';
+            if (n > 100) return 'large';
+            return 'pending';
+        }
+
+        function renderStages(q) {
+            // q: {resolver: N, segmenter: N, extractor: N, enricher: N, write_proposals: N, promoter: N}
+            const stages = [
+                ['resolver',        'Resolver'],
+                ['segmenter',       'Segmenter'],
+                ['extractor',       'Critic+Extractor'],
+                ['enricher',        'Enricher'],
+                ['write_proposals', 'Write proposals'],
+                ['promoter',        'Promoter'],
+            ];
+            const max = Math.max(1, ...stages.map(([k]) => q[k] || 0));
+            const html = stages.map(([k, label]) => {
+                const v = q[k] || 0;
+                const pct = (v / max) * 100;
+                const cls = v === 0 ? 'zero' : '';
+                return `
+                    <div class="stage-row">
+                      <div class="name">${label}</div>
+                      <div class="bar"><div class="fill ${cls}" style="width:${pct}%"></div></div>
+                      <div class="count">${fmtCount(v)}</div>
+                    </div>`;
+            }).join('');
+            $('stages-body').innerHTML = html;
+        }
+
+        function renderSubsystems(s) {
+            const rows = Object.entries(s).map(([name, on]) => {
+                const flag = on
+                    ? '<span class="flag on">ON</span>'
+                    : '<span class="flag off">OFF</span>';
+                return `<div class="row"><span class="label">${name}</span><span class="value">${flag}</span></div>`;
+            }).join('');
+            $('subsystems-body').innerHTML = rows;
+        }
+
+        function renderTotals(t) {
+            const rows = [
+                ['unified_log_2026_total',     'unified_log_2026 (chat history)'],
+                ['kg_resolved_message',         'resolved messages'],
+                ['kg_window',                   'windows'],
+                ['kg_window_extraction',        'extractions'],
+                ['kg_window_enrichment',        'enrichments'],
+                ['claim_proposal',              'proposals (any status)'],
+                ['claim_proposal_node',         '  nodes proposed'],
+                ['claim_proposal_edge',         '  edges proposed'],
+            ];
+            const html = rows.map(([k, label]) => {
+                const v = t[k] ?? 0;
+                return `<div class="row"><span class="label">${label}</span><span class="value">${fmtCount(v)}</span></div>`;
+            }).join('');
+            $('totals-body').innerHTML = html;
+        }
+
+        function renderKG(t, byType) {
+            const rows = [
+                ['kg_node_metadata',           'nodes (kg_node_metadata)'],
+                ['kg_edge_metadata',           'edges (kg_edge_metadata)'],
+                ['kg_node_evidence',           'node evidence rows'],
+                ['kg_edge_evidence',           'edge evidence rows'],
+                ['entity_cards_active',        'active entity cards'],
+                ['kg_maintenance_findings_open', 'open maintenance findings'],
+            ];
+            let html = rows.map(([k, label]) => {
+                const v = t[k] ?? 0;
+                return `<div class="row"><span class="label">${label}</span><span class="value">${fmtCount(v)}</span></div>`;
+            }).join('');
+            if (byType && Object.keys(byType).length) {
+                html += '<h2 style="margin-top:0.75rem;">Nodes by type</h2>';
+                html += '<div class="subgrid">';
+                for (const [type, n] of Object.entries(byType)) {
+                    html += `<span class="label">${type}</span><span class="value">${fmtCount(n)}</span>`;
+                }
+                html += '</div>';
+            }
+            $('kg-body').innerHTML = html;
+        }
+
+        function renderTiers(tb) {
+            const blocks = [['node', 'Nodes by tier'], ['edge', 'Edges by tier']];
+            let html = '';
+            for (const [k, label] of blocks) {
+                const m = tb[k] || {};
+                if (!Object.keys(m).length) continue;
+                html += `<h2 style="margin-top:0.5rem;">${label}</h2>`;
+                html += '<div class="subgrid">';
+                for (const [tier, n] of Object.entries(m)) {
+                    html += `<span class="label">${tier}</span><span class="value">${fmtCount(n)}</span>`;
+                }
+                html += '</div>';
+            }
+            if (!html) html = '<div class="row"><span class="label muted">no data yet</span></div>';
+            $('tiers-body').innerHTML = html;
+        }
+
+        async function refresh() {
+            try {
+                const res = await fetch('/api/kg-pipeline/status.json', { cache: 'no-store' });
+                if (!res.ok) {
+                    throw new Error(`HTTP ${res.status}`);
+                }
+                const d = await res.json();
+                if (d.error) {
+                    $('err-container').innerHTML = `<div class="error-box">${d.error}</div>`;
+                    return;
+                }
+                $('err-container').innerHTML = '';
+                $('ts').textContent = d.generated_at_utc;
+                renderStages(d.stage_queues || {});
+                renderSubsystems(d.subsystems || {});
+                renderTotals(d.totals || {});
+                renderKG(d.totals || {}, d.node_breakdown_by_type || {});
+                renderTiers(d.confidence_tier_breakdown || {});
+            } catch (err) {
+                $('err-container').innerHTML = `<div class="error-box">fetch error: ${err.message}</div>`;
+            }
+        }
+
+        refresh();
+        setInterval(refresh, 10_000);
+    })();
+    </script>
+</body>
+</html>

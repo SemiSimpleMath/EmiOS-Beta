@@ -106,6 +106,8 @@ Property is used to describe an enduring property or quality of another node. Ex
 
 Sentences need to be self-contained, meaning that they have all names in them and if someone reads the sentence they understand it without looking at node labels. It should be a sentence that by itself could be used to generate the node.
 
+**Preserve resolver parenthetical annotations verbatim** in your sentence. If the source reads `he (Peter)` or `Jukka's son (Peter)`, keep that exact form in the sentence you write — do not strip the parenthetical and do not collapse to just the name. The downstream canonicalizer uses the annotations to produce the final present-tense node sentence.
+
 Write the sentence as a natural claim, not as a description of a node. Do not name the node type in the sentence. Avoid formulations like "X has the state that ...", "X has a preference that ...", "X has a belief that ...", "X has a political leaning state ...", or "X has a state of ...". The label already encodes the category. The sentence should express only the underlying content in normal language. Instead of prefacing with "Jukka has a state of ...", write the obvious human meaning directly: "Jukka loves dogs."
 
 ## EXAMPLES:
@@ -172,11 +174,11 @@ source: "entity_1", target: "state_1", label: "has_state", sentence: "Tomas want
 source: "state_1", target: "entity_2", label: "desired_actor", sentence: "Tomas wants the Bloom open-source community to be the actor that prioritizes the refactoring."
 source: "state_1", target: "entity_3", label: "targets", sentence: "Tomas's preference targets Bloom's codebase as the thing to be refactored first."
 
-### "core" represents what the essence of the node is.  So if you only see node_type and core, you would understand the node. Often core is same as the label.  However, when label is entity name, core should represent the underlying concept. eg. label is
-'Leo', 'core' should be 'person'.
+### "category" represents what the essence of the node is.  So if you only see node_type and category, you would understand the node. Often category is same as the label.  However, when label is entity name, category should represent the underlying concept. eg. label is
+'Leo', 'category' should be 'person'.
 
 Pick the most specific idea that describes the node itself, not its relationships.
-Be sure that the core is unambiguous.  eg. not "director" but "movie director".  not "security" but "cyber security".  Bring in enough context that the category is unambiguous.
+Be sure that the category is unambiguous.  eg. not "director" but "movie director".  not "security" but "cyber security".  Bring in enough context that the category is unambiguous.
 If node_type = entity: person, dog, band, movie.
 If node_type = event: wedding, eating, conversation.
 If node_type = state of: belief, ownership, marriage, happiness.
@@ -184,12 +186,12 @@ If node_type = goal of (type): fitness goal, project improvement, travel goal.
 If node_type = concept of: mathematics, democracy, evil.
 
 Rules:
-Core never encodes other subjects or objects. Do not write "ownership of a boat." Use ownership as the state, and represent the boat as a separate entity node linked by edges.
+Category never encodes other subjects or objects. Do not write "ownership of a boat." Use ownership as the state, and represent the boat as a separate entity node linked by edges.
 Do not write "belief in Santa Claus." Use belief as the state, and link to the Santa Claus entity via edges.
-Sentences may contain subject and object. The node's core captures only the intrinsic type.
+Sentences may contain subject and object. The node's category captures only the intrinsic type.
 Examples:
-"Shawshank Redemption is one of Leo's favorite movies." - entity node with core movie. Preference is a separate state node linked to the movie and Leo.
-"Tomas wants to improve the search engine's accuracy." - goal node with core project improvement goal. The "search engine accuracy" is a separate entity or concept node, linked from the goal.
+"Shawshank Redemption is one of Leo's favorite movies." - entity node with category movie. Preference is a separate state node linked to the movie and Leo.
+"Tomas wants to improve the search engine's accuracy." - goal node with category project improvement goal. The "search engine accuracy" is a separate entity or concept node, linked from the goal.
 
 
 CRITICAL:

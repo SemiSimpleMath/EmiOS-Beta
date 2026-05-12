@@ -34,10 +34,13 @@ class AgentRegistry:
         self.registry_loaded = False
 
     def load_agents(self):
-        # load agents
+        # Load agents into self.configs.
         self._load_all_agent_configs()
-        # Load control nodes
-        self.control_nodes = self._load_all_control_nodes()
+        # Load control nodes into self.configs (tagged with type='control_node'
+        # so callers can distinguish; see ToolArguments / agent_flow_manager /
+        # agent_loader / tool_caller — they look up by name on self.configs
+        # and check the 'type' discriminator).
+        self._load_all_control_nodes()
 
         self.registry_loaded = True
 
@@ -50,10 +53,9 @@ class AgentRegistry:
         - Avoids deepcopy (locks/clients/lambdas can break deepcopy and it's expensive)
         """
         child = AgentRegistry(agents_dir=self.agents_dir, control_nodes_dir=self.control_nodes_dir)
-        # Preserve loaded state and control nodes.
+        # Preserve loaded state. Control nodes live in self.configs since the
+        # 2026-05-10 cleanup; no separate copy needed.
         child.registry_loaded = bool(getattr(self, "registry_loaded", False))
-        if hasattr(self, "control_nodes"):
-            child.control_nodes = getattr(self, "control_nodes")
 
         # Shallow-copy configs, but remove any instantiated agent objects.
         new_configs = {}
@@ -397,8 +399,6 @@ class AgentRegistry:
             logger.error(f"❌ Control nodes directory '{self.control_nodes_dir}' does not exist.")
             return {}
 
-        control_nodes = {}
-
         for control_file in self.control_nodes_dir.glob("*.py"):
             if control_file.stem == "control_node" or control_file.name == "__init__.py":
                 continue  # Skip base class and init file
@@ -418,7 +418,7 @@ class AgentRegistry:
                 control_class = self._load_control_node_class(control_file)
 
                 if control_class:
-                    # ✅ Store control node info in the same format as agents
+                    # Store control node info in the same format as agents.
                     self.configs[control_name] = {
                         "name": control_name,
                         "class_name": control_class.__name__,
@@ -432,8 +432,6 @@ class AgentRegistry:
             except Exception as e:
                 logger.error(f"❌ Error loading control node {control_name}: {e}")
                 continue
-
-        return control_nodes
 
 
 
@@ -495,22 +493,16 @@ class AgentRegistry:
         """Retrieve the registered class reference for an agent."""
         return self.configs.get(name, {}).get("class", None)
 
-    def get_control_node_class(self, name):
-        """Retrieve the registered class reference for a control node."""
-        return self.control_nodes.get(name, None)
-
     def get_all_agents(self):
         """Return a dictionary of all available agent configurations."""
         return self.configs
 
     def register_agent_instance(self, agent_name, agent_instance):
-        """Store the instantiated agent inside the registry."""
+        """Store the instantiated agent inside the registry. Works for both
+        regular agents and control nodes — both live in self.configs."""
         if agent_name in self.configs:
             self.configs[agent_name]["instance"] = agent_instance
-            logger.info(f"✅ Registered instance for agent {agent_name}")
-        elif hasattr(self, "control_nodes") and agent_name in self.control_nodes:
-            self.control_nodes[agent_name]["instance"] = agent_instance
-            logger.info(f"✅ Registered instance for control node {agent_name}")
+            logger.info(f"✅ Registered instance for {self.configs[agent_name].get('type','agent')} {agent_name}")
         else:
             # Manager-local alias (e.g. 'return_control' -> ReturnControlNode).
             # Store in configs so get_agent_instance can retrieve it at runtime.
@@ -518,13 +510,9 @@ class AgentRegistry:
             logger.info(f"✅ Registered instance for manager-local alias {agent_name}")
 
     def get_agent_instance(self, agent_name):
-        """Retrieve an initialized agent instance."""
-        instance = self.configs.get(agent_name, {}).get("instance", None)
-        if instance is not None:
-            return instance
-        if hasattr(self, "control_nodes"):
-            return self.control_nodes.get(agent_name, {}).get("instance", None)
-        return None
+        """Retrieve an initialized agent instance (works for control nodes too —
+        they live in self.configs since the 2026-05-10 cleanup)."""
+        return self.configs.get(agent_name, {}).get("instance", None)
 
     def get_agent_input_form(self, agent_name):
         """
@@ -544,7 +532,7 @@ def main():
 
     print("\n=== Testing Class Lookup ===")
     print("emi_agent class:", registry.get_agent_class("emi_agent"))
-    print("ToolCaller control node:", registry.get_control_node_class("tool_caller"))
+    print("ToolCaller control node:", registry.get_agent_class("tool_caller"))
 
 
 if __name__ == "__main__":

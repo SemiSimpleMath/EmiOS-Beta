@@ -18,7 +18,7 @@ import sqlite3
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Protocol
+from typing import Any, Dict, List, Optional, Protocol
 
 from app.assistant.utils.logging_config import get_logger
 
@@ -54,11 +54,53 @@ class PipelineRunResult:
     date: str
     status: str
     workers: List[Dict[str, Any]] = field(default_factory=list)
+    # Populated when a worker halts due to a non-DB-lock error or quota event.
+    # Operator reads this to know whether to wait for window reset, top up
+    # the LLM account, fix code, or just resume on next schedule.
+    halt_reason: Optional[str] = None
+    halt_step: Optional[str] = None
 
 
 def _is_database_locked(exc: BaseException) -> bool:
     msg = str(exc).lower()
     return "database is locked" in msg or isinstance(exc, sqlite3.OperationalError)
+
+
+# Quota / rate-limit detection — match by exception class name + message
+# substring so we don't have to import every LLM client package here.
+# When any of these fire we HALT the whole pipeline (no auto-retry). The
+# operator decides whether to wait for window reset or top up the account.
+_QUOTA_CLASS_NAMES = {
+    "RateLimitError",          # openai.RateLimitError, anthropic.RateLimitError
+    "APIStatusError",          # OpenAI catch-all status errors (429/500-family)
+    "InsufficientQuotaError",
+    "QuotaExceededError",
+    "OverloadedError",         # Anthropic 529
+    "ServiceUnavailableError", # provider-side temporary
+}
+_QUOTA_MSG_SUBSTRINGS = (
+    "rate limit",
+    "quota",
+    "insufficient_quota",
+    "too many requests",
+    "exceeded your current quota",
+    "billing",
+    "credit balance",
+    "you exceeded",
+)
+
+
+def _is_quota_error(exc: BaseException) -> bool:
+    """True if the exception looks like a quota/rate-limit/billing issue.
+
+    We bias toward HALT (false positives cost a stop, false negatives cost
+    runaway bills). When in doubt, treat as quota.
+    """
+    name = type(exc).__name__
+    if name in _QUOTA_CLASS_NAMES:
+        return True
+    msg = str(exc).lower()
+    return any(s in msg for s in _QUOTA_MSG_SUBSTRINGS)
 
 
 class KGPipelineRunner:
@@ -80,6 +122,11 @@ class KGPipelineRunner:
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
         self._worker_stats: Dict[str, WorkerStats] = {}
+        # Halt reason recorded by the first worker that hits a non-DB-lock
+        # error or a quota error. Surfaced in the final PipelineRunResult so
+        # the operator knows WHY the pipeline stopped.
+        self._halt_reason: Optional[str] = None
+        self._halt_step: Optional[str] = None
 
     def run(
         self,
@@ -130,12 +177,18 @@ class KGPipelineRunner:
                 for s in self._worker_stats.values()
             ]
 
+        # If a worker halted, override status to make it loud
+        if self._halt_reason is not None and overall_status not in ("halted",):
+            overall_status = "halted"
+
         return PipelineRunResult(
             pipeline_id=getattr(ctx, "pipeline_id", "kg_pipeline"),
             run_id=getattr(ctx, "run_id", ""),
             date=getattr(ctx, "date_str", ""),
             status=overall_status,
             workers=worker_dicts,
+            halt_reason=self._halt_reason,
+            halt_step=self._halt_step,
         )
 
     def stop(self) -> None:
@@ -172,6 +225,7 @@ class KGPipelineRunner:
             except Exception as exc:
                 elapsed = time.monotonic() - t0
                 is_db_lock = _is_database_locked(exc)
+                is_quota = _is_quota_error(exc)
                 with self._lock:
                     stats.iterations += 1
                     stats.total_duration_s += elapsed
@@ -179,18 +233,37 @@ class KGPipelineRunner:
                         stats.db_lock_retries += 1
                     else:
                         stats.errors += 1
+
                 if is_db_lock:
+                    # Transient — retry after backoff. Standard SQLite behavior.
                     logger.warning(
                         "[kg_pipeline] %s: database locked, backing off %.1fs",
                         thread_name, self._db_lock_backoff,
                     )
                     self._stop_event.wait(self._db_lock_backoff)
                     continue
-                logger.exception(
-                    "[kg_pipeline] %s: step.run_one_cycle() raised %s: %s",
-                    thread_name, type(exc).__name__, exc,
-                )
 
+                # NON-DB-LOCK error → HALT the whole pipeline. Any of:
+                #   - quota/rate-limit (don't auto-retry, kill bills)
+                #   - extractor/agent error
+                #   - DB integrity error
+                #   - unexpected schema mismatch
+                # Record the cause (first writer wins; others see stop_event set)
+                # so the operator knows WHY the pipeline stopped.
+                reason = "QUOTA/RATE-LIMIT" if is_quota else "ERROR"
+                with self._lock:
+                    if self._halt_reason is None:
+                        self._halt_reason = f"{reason}: {type(exc).__name__}: {str(exc)[:300]}"
+                        self._halt_step = step.name
+                logger.error(
+                    "[kg_pipeline] %s: HALTING — %s: %s: %s",
+                    thread_name, reason, type(exc).__name__, exc,
+                    exc_info=True,
+                )
+                self._stop_event.set()
+                return
+
+            # Normal end of iteration — sleep poll_interval, then check stop_event
             self._stop_event.wait(self._poll_interval)
 
         logger.info("[kg_pipeline] %s: worker stopped", thread_name)

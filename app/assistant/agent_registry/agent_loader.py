@@ -3,7 +3,6 @@
 import re
 
 from app.assistant.ServiceLocator.service_locator import DI
-from app.assistant.agent_classes.Agent import Agent
 
 from app.assistant.utils.logging_config import get_logger
 logger = get_logger(__name__)
@@ -103,7 +102,7 @@ class AgentLoader:
         class_key = self._camel_to_snake(declared_class)
         if not class_key:
             return None
-        entry = self.agent_registry.configs.get(class_key, self.agent_registry.control_nodes.get(class_key))
+        entry = self.agent_registry.configs.get(class_key)
         if not isinstance(entry, dict):
             return None
         if entry.get("type") != "control_node":

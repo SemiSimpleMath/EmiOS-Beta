@@ -105,9 +105,6 @@ def _synthesise_brief(
     primary_user: str,
 ) -> str:
     """Single Gemini call: KG briefing → markdown dossier."""
-    import google.genai.types as gtypes
-    from app.services.llm_client import GeminiLLM
-
     visitor_seeds = [s for s in seeds if s.lower() != primary_user.lower()]
     visitor_label = visitor_seeds[0] if visitor_seeds else seeds[0]
 

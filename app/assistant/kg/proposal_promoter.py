@@ -551,47 +551,115 @@ def _first_window_id_for_proposal(session, proposal_id: str) -> Optional[str]:
         return None
 
 
+def _resolved_window_text(session, window_id: str, max_chars: int = 600) -> Optional[str]:
+    """Reconstruct the entity-resolved prose for a window.
+
+    Walks kg_window_message → kg_resolved_message and returns the
+    `speaker: text` joined snippet using the resolver's entity-enriched
+    output. Falls back per-message to raw `unified_log_2026.message` when
+    a row hasn't been resolved yet (transitional). Returns None if the
+    window has no messages or window_id is empty.
+
+    This is the canonical "what did the chat actually say, with entities
+    expanded" view. Every agent in the KG pipeline that needs window
+    context should consume THIS, not raw source_text — per the
+    `feedback_full_resolved_window_beats_fragments` rule.
+    """
+    if not window_id:
+        return None
+    try:
+        from sqlalchemy import text as sql_text
+        rows = session.execute(
+            sql_text(
+                "SELECT ul.role, ul.speaker_name, "
+                "       COALESCE(rm.resolved_text, ul.message) AS text "
+                "FROM kg_window_message wm "
+                "JOIN unified_log_2026 ul ON ul.id = wm.unified_log_id "
+                "LEFT JOIN kg_resolved_message rm ON rm.unified_log_id = wm.unified_log_id "
+                "WHERE wm.window_id = :w "
+                "ORDER BY wm.item_order"
+            ),
+            {"w": window_id},
+        ).fetchall()
+        if not rows:
+            return None
+        lines: list[str] = []
+        for role, speaker, txt in rows:
+            t = (txt or "").strip()
+            if not t:
+                continue
+            who = (speaker or role or "user").strip() or "user"
+            lines.append(f"{who}: {t}")
+        if not lines:
+            return None
+        out = "\n".join(lines)
+        return out if len(out) <= max_chars else out[:max_chars] + "…"
+    except Exception:
+        return None
+
+
 def _node_window_text(session, node_id: str, max_chars: int = 600) -> Optional[str]:
-    """Source text from kg_node_evidence's first window for this node.
-    Compact pipe-delimited message snippet (already in the table) — gives
-    the merger the actual chat context the node was extracted from, which
-    is what disambiguates same-label states whose participants overlap by
-    chance. Returns None if no evidence text exists.
+    """Entity-resolved chat context for the node's earliest evidence window.
+
+    Gives the node_data_merger the actual disambiguated chat the node was
+    extracted from. With entity references expanded ("(Peter)" inline
+    instead of "he"), the merger no longer has to redo coreference and
+    can judge same-label vs different-target with the same information
+    the resolver already produced.
+
+    Falls back to the raw `kg_node_evidence.source_text` snapshot when no
+    window_id is present (legacy rows from before the resolver was wired).
+    Returns None if no evidence row exists.
     """
     try:
         from sqlalchemy import text as sql_text
         row = session.execute(
             sql_text(
-                "SELECT source_text FROM kg_node_evidence "
-                "WHERE node_id = :nid AND source_text IS NOT NULL "
+                "SELECT source_text, window_id FROM kg_node_evidence "
+                "WHERE node_id = :nid "
                 "ORDER BY created_at ASC LIMIT 1"
             ),
             {"nid": node_id},
         ).fetchone()
-        if not row or not row[0]:
+        if not row:
             return None
-        txt = str(row[0])
+        source_text, window_id = row
+        resolved = _resolved_window_text(session, window_id, max_chars=max_chars) if window_id else None
+        if resolved:
+            return resolved
+        if not source_text:
+            return None
+        txt = str(source_text)
         return txt if len(txt) <= max_chars else txt[:max_chars] + "…"
     except Exception:
         return None
 
 
 def _proposal_window_text(session, proposal_id: str, max_chars: int = 600) -> Optional[str]:
-    """raw_text from claim_proposal_evidence's first window for this
-    proposal — the new-side counterpart of _node_window_text."""
+    """Entity-resolved chat context for the proposal's earliest evidence
+    window — the new-side counterpart of _node_window_text.
+
+    Falls back to the raw `claim_proposal_evidence.raw_text` snapshot when
+    no window_id is recorded for the proposal."""
     try:
         from sqlalchemy import text as sql_text
         row = session.execute(
             sql_text(
-                "SELECT raw_text FROM claim_proposal_evidence "
-                "WHERE proposal_id = :pid AND raw_text IS NOT NULL "
+                "SELECT raw_text, window_id FROM claim_proposal_evidence "
+                "WHERE proposal_id = :pid "
                 "ORDER BY created_at ASC LIMIT 1"
             ),
             {"pid": proposal_id},
         ).fetchone()
-        if not row or not row[0]:
+        if not row:
             return None
-        txt = str(row[0])
+        raw_text, window_id = row
+        resolved = _resolved_window_text(session, window_id, max_chars=max_chars) if window_id else None
+        if resolved:
+            return resolved
+        if not raw_text:
+            return None
+        txt = str(raw_text)
         return txt if len(txt) <= max_chars else txt[:max_chars] + "…"
     except Exception:
         return None
@@ -759,17 +827,14 @@ def _create_kg_node_from_proposal(
     if ttl is not None and proposal_node.node_type in RELATIONSHIP_LIKE_TYPES:
         attrs["ttl"] = ttl
 
-    # Goal lifecycle: stamp last_pursued_at on the attributes blob —
-    # the dormancy sweep + recency UI rendering read it. The
-    # `goal_status` first-class column on Node is the canonical
-    # status field (vocabulary: active | dormant | completed |
-    # abandoned). Default to 'active' on creation when meta_data_add
-    # didn't already assign a value (it usually does for explicit
-    # Goal-completion proposals from chat).
-    if proposal_node.node_type == "Goal":
-        if proposal_node.valid_from:
-            ts = proposal_node.valid_from
-            attrs["last_pursued_at"] = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
+    # Goal lifecycle: last_pursued_at is now a first-class column on Node
+    # (promoted from attributes JSON 2026-05-11). Stamped on Goal nodes from
+    # proposal_node.valid_from. The dormancy sweep + recency UI read the
+    # column directly. `goal_status` (also first-class) is the canonical
+    # status field (vocabulary: active | dormant | completed | abandoned).
+    proposed_last_pursued_at = None
+    if proposal_node.node_type == "Goal" and proposal_node.valid_from:
+        proposed_last_pursued_at = proposal_node.valid_from
 
     sentence_for_node = (proposal_node.sentence or "") if hasattr(proposal_node, "sentence") else ""
     if proposal_node.node_type in {"State", "Event", "Goal"} and canonical_sentence:
@@ -785,10 +850,75 @@ def _create_kg_node_from_proposal(
     if proposal_node.node_type == "Goal" and not proposed_goal_status:
         proposed_goal_status = "active"
 
+    # semantic_label is also a first-class column. meta_data_add produces it,
+    # enrich_extraction carries it into attributes_json, but historically the
+    # promoter never popped it out — leaving 36% of nodes with NULL
+    # semantic_label and the value buried in the JSON blob. Pop it now.
+    proposed_semantic_label = (
+        attrs.pop("semantic_label", None)
+        if isinstance(attrs, dict) else None
+    )
+
+    # importance: not set at promotion time. Nodes land with NULL importance.
+    # The dedicated raters (me::importance_rater for Entity, regenerate_state_importance
+    # for State/Event/Goal/Property derivation) fill it in via the
+    # _lazy_kg_importance_rater routine that runs periodically — that path
+    # preserves cross-node calibration which a per-promotion rating would lose.
+    # (Historical: meta_data_add used to emit importance as a side-effect, and
+    # this function ×10'd and copied it through. Both were removed 2026-05-11
+    # in favor of the dedicated-rater-only path.)
+
+    # confidence + valid_during are first-class columns on Node but were
+    # historically left in attributes_json — audit 2026-05-11 found 0/3026
+    # rows had Node.confidence / Node.valid_during set, while the JSON had
+    # them for 997/1000 and 737/1000 respectively. Same fix pattern: pop and
+    # promote.
+    proposed_confidence: Optional[float] = None
+    if isinstance(attrs, dict):
+        raw_conf = attrs.pop("confidence", None)
+        try:
+            if raw_conf is not None:
+                proposed_confidence = float(raw_conf)
+        except (TypeError, ValueError):
+            proposed_confidence = None
+    proposed_valid_during: Optional[str] = (
+        attrs.pop("valid_during", None) if isinstance(attrs, dict) else None
+    )
+    if proposed_valid_during is not None:
+        proposed_valid_during = str(proposed_valid_during).strip() or None
+
+    # Observation lifecycle (promoted to first-class columns 2026-05-11).
+    # first_observed comes from the originating chat message timestamp, not
+    # node-creation time. observation_count starts at 1.
+    proposed_first_observed = None
+    proposed_last_observed = None
+    if isinstance(attrs, dict):
+        # Strip any stale JSON values (older proposals may carry them).
+        attrs.pop("first_observed", None)
+        attrs.pop("last_observed", None)
+        attrs.pop("observation_count", None)
+    # Pull from the proposal row directly — it's the canonical source.
+    obs_anchor = (
+        getattr(proposal_node, "valid_from", None)
+        or getattr(proposal_node, "created_at", None)
+    )
+    if obs_anchor is not None:
+        proposed_first_observed = obs_anchor
+
     new = Node(
         label=proposal_node.label,
         node_type=proposal_node.node_type,
         goal_status=proposed_goal_status,
+        semantic_label=proposed_semantic_label,
+        # importance intentionally not set — filled in post-promotion by the
+        # periodic me::importance_rater pass (cross-node calibration > per-node
+        # isolation).
+        confidence=proposed_confidence,
+        valid_during=proposed_valid_during,
+        first_observed=proposed_first_observed,
+        last_pursued_at=proposed_last_pursued_at,
+        # last_observed stays NULL until first re-observation.
+        # observation_count defaults to 1 (column default).
         # Present-tense canonical for State/Event/Goal (via fact_canonicalizer);
         # raw extractor sentence for Entity/Concept/Property. Verbatim source
         # is preserved in evidence + window_id, not on the node.
@@ -876,20 +1006,23 @@ def _estimate_state_ttl(
 
 
 def _refresh_on_reobservation(node: Node, proposal: ClaimProposal) -> None:
-    """Bump the matched node's observation-tracking attributes.
+    """Bump the matched node's observation-tracking columns + attributes.
 
     Called on ``matched_existing`` in the promoter. Without this the decay
     step can't tell "re-observed last week" from "nobody's mentioned this
     in 6 months" — the ``updated_at`` column doesn't distinguish.
 
-    Sets / updates:
-      - ``attributes.last_observed`` — always overwrite with this proposal's
+    Updates first-class columns (promoted from JSON 2026-05-11):
+      - ``Node.last_observed`` — always overwrite with this proposal's
         observation timestamp (decay reads this).
-      - ``attributes.first_observed`` — only set if missing (back-compat for
+      - ``Node.first_observed`` — only set if missing (back-compat for
         legacy nodes pre-attribute-tracking).
-      - ``attributes.observation_count`` — increment.
-      - ``attributes.confidence`` — gentle bump (+0.05, capped at 1.0) but
+      - ``Node.observation_count`` — increment by 1.
+      - ``Node.confidence`` — gentle bump (+0.05, capped at 1.0) but
         only if already set; don't invent a confidence from nothing.
+
+    Goal lifecycle (also first-class as of 2026-05-11):
+      - ``Node.last_pursued_at`` — bumped on every Goal re-observation.
 
     CRITICAL: must NOT bump Node.updated_at. Re-observation is bookkeeping
     on existing claims — the underlying KG content didn't change. Bumping
@@ -903,14 +1036,15 @@ def _refresh_on_reobservation(node: Node, proposal: ClaimProposal) -> None:
     observed = proposal.last_observed_at or proposal.first_observed_at
     if observed is None:
         return
-    iso = observed.isoformat() if hasattr(observed, "isoformat") else str(observed)
-    attrs = dict(node.attributes or {}) if isinstance(node.attributes, dict) else {}
-    attrs["last_observed"] = iso
-    attrs.setdefault("first_observed", iso)
-    attrs["observation_count"] = int(attrs.get("observation_count") or 1) + 1
-    if "confidence" in attrs:
+
+    # Compute the column updates from the existing values
+    new_last_observed = observed
+    new_first_observed = node.first_observed or observed
+    new_observation_count = int(node.observation_count or 1) + 1
+    new_confidence = node.confidence
+    if new_confidence is not None:
         try:
-            attrs["confidence"] = min(1.0, float(attrs["confidence"]) + 0.05)
+            new_confidence = min(1.0, float(new_confidence) + 0.05)
         except (TypeError, ValueError):
             pass
 
@@ -918,11 +1052,12 @@ def _refresh_on_reobservation(node: Node, proposal: ClaimProposal) -> None:
     # active and bumps the recency signal the dormancy sweep reads.
     # Terminal closures (column goal_status in {"completed", "abandoned"})
     # must NOT be silently reopened — surface as a finding instead.
-    # `goal_status` is the first-class column on Node; `last_pursued_at`
-    # lives on attributes since it's bookkeeping not status.
+    # `goal_status` AND `last_pursued_at` are both first-class columns
+    # now (last_pursued_at promoted from JSON 2026-05-11).
     revive_to_active = False
+    new_last_pursued_at = node.last_pursued_at
     if (node.node_type or "") == "Goal":
-        attrs["last_pursued_at"] = iso
+        new_last_pursued_at = observed
         cur_status = (node.goal_status or "").lower()
         if cur_status not in ("completed", "abandoned"):
             revive_to_active = True
@@ -936,11 +1071,26 @@ def _refresh_on_reobservation(node: Node, proposal: ClaimProposal) -> None:
         # caller's commit will flush it (with the unwanted updated_at bump).
         # This branch shouldn't fire in production — _refresh_on_reobservation
         # is only called from _evaluate_and_apply with a live session.
-        node.attributes = attrs
+        node.last_observed = new_last_observed
+        node.first_observed = new_first_observed
+        node.observation_count = new_observation_count
+        if new_confidence is not None:
+            node.confidence = new_confidence
+        if new_last_pursued_at is not None:
+            node.last_pursued_at = new_last_pursued_at
         if revive_to_active:
             node.goal_status = "active"
         return
-    update_values = {"attributes": attrs, "updated_at": Node.updated_at}
+    update_values = {
+        "last_observed": new_last_observed,
+        "first_observed": new_first_observed,
+        "observation_count": new_observation_count,
+        "updated_at": Node.updated_at,
+    }
+    if new_confidence is not None:
+        update_values["confidence"] = new_confidence
+    if new_last_pursued_at is not None:
+        update_values["last_pursued_at"] = new_last_pursued_at
     if revive_to_active:
         update_values["goal_status"] = "active"
     session.execute(
@@ -948,9 +1098,12 @@ def _refresh_on_reobservation(node: Node, proposal: ClaimProposal) -> None:
         .where(Node.id == node.id)
         .values(**update_values)
     )
-    # Force ORM to reload attributes on next access so downstream callers
-    # see the post-update value rather than the cached pre-update one.
-    session.expire(node, ["attributes"])
+    # Force ORM to reload columns on next access so downstream callers
+    # see post-update values rather than cached pre-update ones.
+    session.expire(node, [
+        "last_observed", "first_observed", "observation_count",
+        "confidence", "last_pursued_at",
+    ])
 
 
 def _canonicalize_sentence(
@@ -1271,7 +1424,7 @@ def _snapshot_state_candidate(session, cand: Node) -> Dict[str, Any]:
         "end_date": cand.end_date.isoformat() if cand.end_date else None,
         "start_date_prose": cand.start_date_prose,
         "end_date_prose": cand.end_date_prose,
-        "first_observed": cand_attrs.get("first_observed") if isinstance(cand_attrs, dict) else None,
+        "first_observed": cand.first_observed.isoformat() if cand.first_observed else None,
         "ttl_duration_class": (cand_ttl.get("duration_class") if isinstance(cand_ttl, dict) else None),
         "source_window_id": cand_window,
         "source_window_end_ts": _window_end_ts(session, cand_window),
@@ -1594,7 +1747,9 @@ def _prepare_proposal_plan(proposal_id: str) -> Optional[_PromoterPlan]:
                 # `source_window_text` on each candidate so the merger
                 # can compare actual context, not just labels.
                 "source_window_text": proposal_window_text,
-                "first_observed": attrs.get("first_observed") if isinstance(attrs, dict) else None,
+                # first_observed = valid_from on the proposal (canonical
+                # source; previously buried in attributes JSON).
+                "first_observed": snap["valid_from"].isoformat() if snap["valid_from"] else None,
                 "ttl_duration_class": (proposal_ttl.get("duration_class") if isinstance(proposal_ttl, dict) else None),
             }
             matched_node_id = _call_node_merger_for_state_match(new_node_ctx, candidates)
@@ -1810,29 +1965,64 @@ def _evaluate_and_apply(
     resolved_lookup: Dict[str, Optional[str]] = {pn.id: pn.resolved_node_id for pn in pnodes}
 
     # Pod URIs (datapod:<kind>:<id>) bypass proposal-node resolution because
-    # they are already valid kg_node_metadata ids via kg_mirror — the pod
-    # node is minted at PodStore.put() time. The fact_extractor + proposal
-    # writer thread these URIs through verbatim; here the promoter accepts
-    # them as already-resolved endpoints.
+    # pod_store is the sole source of truth for pods (no kg_node mirror).
+    # The FK on kg_edge_metadata.{source,target}_id → kg_node_metadata.id
+    # was dropped as part of the no-mirror migration; this admission check
+    # is the replacement gate. A pod URI endpoint is accepted iff:
+    #   1. it exists in pod_store, AND
+    #   2. its kind is `kg_admissible: true` in configs/pod_kinds.json.
+    # Otherwise the proposal abandons with reason "pod_not_admissible".
     from app.assistant.pod_store.pod_uri import POD_URI_RE
+    from app.assistant.pod_store.pod_store import PodStore
+    from app.assistant.pod_store import pod_kind_registry
+
+    _pod_store_for_admission: Optional[PodStore] = None
+    _pod_admission_cache: Dict[str, bool] = {}
+
+    def _pod_uri_is_admissible(uri: str) -> bool:
+        nonlocal _pod_store_for_admission
+        if uri in _pod_admission_cache:
+            return _pod_admission_cache[uri]
+        if _pod_store_for_admission is None:
+            _pod_store_for_admission = PodStore()
+        pod = _pod_store_for_admission.get(uri)
+        ok = bool(pod) and pod_kind_registry.is_kg_admissible(pod.kind or "")
+        _pod_admission_cache[uri] = ok
+        return ok
 
     def _resolve_endpoint(pn_id: str) -> Optional[str]:
         v = resolved_lookup.get(pn_id)
         if v is not None:
             return v
         if pn_id and POD_URI_RE.fullmatch(pn_id):
-            return pn_id  # pod URI is its own kg_node_metadata id
+            if _pod_uri_is_admissible(pn_id):
+                return pn_id
+            # Pod URI not admissible — caller treats as unresolved endpoint
+            # and the edge gets skipped with an explicit reason.
+            return None
+        return None
+
+    def _pod_admission_reason(pn_id: str) -> Optional[str]:
+        """If pn_id is a pod URI that failed admission, return why."""
+        if not pn_id or not POD_URI_RE.fullmatch(pn_id):
+            return None
+        if pn_id in _pod_admission_cache and not _pod_admission_cache[pn_id]:
+            return f"pod {pn_id[:50]} not admissible (missing or kind not kg_admissible)"
         return None
 
     for pe in pedges:
         src_kg = _resolve_endpoint(pe.source_node_id)
         tgt_kg = _resolve_endpoint(pe.target_node_id)
         if src_kg is None or tgt_kg is None:
-            # dry-run may leave new nodes without resolved_node_id — mark skipped
+            pod_reason = _pod_admission_reason(pe.source_node_id) or _pod_admission_reason(pe.target_node_id)
+            if pod_reason:
+                reason = pod_reason
+            elif not commit:
+                reason = "endpoint unresolved (new-node in dry-run)"
+            else:
+                reason = "endpoint unresolved (unexpected in commit mode)"
             dec.edge_outcomes.append(
-                _EdgeOutcome(pe.id, "skipped_conflict", None,
-                             "endpoint unresolved (new-node in dry-run)" if not commit else
-                             "endpoint unresolved (unexpected in commit mode)")
+                _EdgeOutcome(pe.id, "skipped_conflict", None, reason)
             )
             continue
 
@@ -1885,7 +2075,9 @@ def _evaluate_and_apply(
                 target_id=tgt_kg,
                 relationship_type=pe.predicate,
                 sentence=pe.sentence,
-                window_id=None,  # proposal is window-level; edge record sits without
+                # Per-observation provenance (window_id, source message id,
+                # timestamp) is in kg_edge_evidence — not denormalized here.
+                # 2026-05-10 schema cleanup removed kg_edge_metadata.window_id.
                 source="proposal_promoter",
                 created_from_proposal_id=proposal.id,
             )
@@ -2034,6 +2226,13 @@ def run_promoter(*, limit: int = 100, commit: bool = False) -> Dict[str, Any]:
         except Exception:
             stats["errors"] += 1
             logger.exception("[promoter] outer handler on proposal %s", pid)
+
+    # Tagging is NOT done here. Per the post-claim-proposal pipeline:
+    # promote (NULL importance) → importance rater fills it in → section
+    # tagger fires on the rated nodes → card / wiki dirty-sweep picks up
+    # the new tags. Both rating and tagging happen inside
+    # _lazy_kg_importance_rater so they share the same trigger and the
+    # tagger sees real importance values when it runs.
 
     stats["_samples"] = samples
     return stats

@@ -1,0 +1,12 @@
+{
+  "policy_id": "pipeline_policy::entity_cards_v2::v1",
+  "owner_id": "entity_cards_v2",
+  "surface": "pipeline",
+  "visibility": "owner_only",
+  "resources": {
+    "allowed_global_resources": ["all"],
+    "allowed_room_resources": [],
+    "denied_resources": [],
+    "resource_groups": ["chat", "memory"]
+  }
+}

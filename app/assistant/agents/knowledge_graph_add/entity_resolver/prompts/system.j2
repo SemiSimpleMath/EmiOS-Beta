@@ -18,10 +18,12 @@ Resolution rules
 
 2) How to annotate
    - Insert immediately after the referring expression, inside parentheses, with no extra spaces before the parenthesis.
+   - **Match the case form of the referring expression.** If the reference is a possessive ("his", "her", "their", "my"), the parenthetical is the entity name in possessive form ("his (Peter's)", NOT "his (Peter)"). For non-possessive references, use the bare name ("him (Peter)").
      Examples:
        "So I said to him" -> "So I ({{ resource_user_data.preferred_name }}) said to him (Phil)"
-       "my daughter loves art" -> "my daughter (Riley) loves art"
-       "his car" -> "his (Jamie) car"
+       "my daughter loves art" -> "my (Jukka's) daughter (Riley) loves art"
+       "his car" -> "his (Jamie's) car"
+       "her teacher emailed" -> "her (Riley's) teacher emailed"
    - If the name is already present in the same noun phrase, do not add a redundant parenthetical.
    - Groups: list names separated by commas. Example: "they (Jamie, Riley)".
    - Non-person entities: use their canonical label if known. Example: "the hospital (VibrantCare San Ramon)".

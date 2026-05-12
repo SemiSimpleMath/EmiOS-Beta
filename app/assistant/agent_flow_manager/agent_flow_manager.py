@@ -54,26 +54,6 @@ def is_json_serializable(value):
     except (TypeError, OverflowError):
         return False
 
-def build_flow_config_yaml(flow, agents_dict):
-    edges = flow["edges"]
-
-    # Build UUID → name lookup from agents_dict
-    id_to_name = {agent_id: agent_data['name'] for agent_id, agent_data in agents_dict.items()}
-
-    state_map = {}
-    for edge in edges:
-        source = edge["source"]
-        target = edge["target"]
-
-        source_name = id_to_name.get(source, source)
-        target_name = id_to_name.get(target, target)
-
-        state_map[source_name] = target_name
-
-    return {
-        "state_map": state_map
-    }
-
 def _hydrate_agent_config(name: str, config: dict) -> dict:
     # Copy to avoid mutating caller; only keep serializable values.
     result = {k: v for k, v in config.items() if is_json_serializable(v)}

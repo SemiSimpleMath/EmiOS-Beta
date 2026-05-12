@@ -57,7 +57,6 @@ NODE_ID_REFERENCES: List[Tuple[str, str]] = [
     ("event_nodes", "parent_event_node_id"),
     ("event_nodes", "root_event_node_id"),
     ("event_node_sources", "event_node_id"),
-    ("node_analysis_tracking", "node_id"),
     ("kg_node_evidence", "node_id"),
     ("claim_proposal_node", "resolved_node_id"),
     ("claim_proposal_edge", "source_node_id"),
@@ -114,10 +113,7 @@ def snapshot_node(node) -> Dict[str, Any]:
         "importance": node.importance,
         "source": node.source,
         "pagerank_score": node.pagerank_score,
-        "window_id": getattr(node, "window_id", None),
-        "original_message_id": getattr(node, "original_message_id", None),
         "original_sentence": getattr(node, "original_sentence", None),
-        "sentence_id": getattr(node, "sentence_id", None),
         "created_at": _iso(getattr(node, "created_at", None)),
         "updated_at": _iso(getattr(node, "updated_at", None)),
     }
@@ -138,16 +134,11 @@ def snapshot_edge(edge) -> Dict[str, Any]:
         "source_id": str(edge.source_id) if edge.source_id else None,
         "target_id": str(edge.target_id) if edge.target_id else None,
         "relationship_type": edge.relationship_type,
-        "relationship_descriptor": edge.relationship_descriptor,
         "attributes": edge.attributes,
-        "original_message_id": getattr(edge, "original_message_id", None),
-        "sentence_id": getattr(edge, "sentence_id", None),
         "sentence": getattr(edge, "sentence", None),
-        "original_message_timestamp": _iso(getattr(edge, "original_message_timestamp", None)),
         "confidence": edge.confidence,
         "importance": getattr(edge, "importance", None),
         "source": edge.source,
-        "window_id": getattr(edge, "window_id", None),
     }
 
 
@@ -184,9 +175,9 @@ def reroute_edges(
     # All of loser's edges — every column (we need snapshots for the dropped ones).
     loser_edge_rows = session.execute(
         text(
-            "SELECT id, source_id, target_id, relationship_type, relationship_descriptor, "
-            "attributes, original_message_id, sentence_id, sentence, "
-            "original_message_timestamp, confidence, importance, source, window_id "
+            "SELECT id, source_id, target_id, relationship_type, "
+            "attributes, sentence, "
+            "confidence, importance, source "
             "FROM kg_edge_metadata "
             "WHERE source_id = :loser OR target_id = :loser"
         ),
@@ -212,20 +203,11 @@ def reroute_edges(
                 "source_id": src,
                 "target_id": tgt,
                 "relationship_type": rel,
-                "relationship_descriptor": row["relationship_descriptor"],
                 "attributes": row["attributes"],
-                "original_message_id": row["original_message_id"],
-                "sentence_id": row["sentence_id"],
                 "sentence": row["sentence"],
-                "original_message_timestamp": (
-                    row["original_message_timestamp"].isoformat()
-                    if row["original_message_timestamp"] and hasattr(row["original_message_timestamp"], "isoformat")
-                    else row["original_message_timestamp"]
-                ),
                 "confidence": row["confidence"],
                 "importance": row["importance"],
                 "source": row["source"],
-                "window_id": row["window_id"],
             })
             session.execute(
                 text("DELETE FROM kg_edge_metadata WHERE id = :eid"),
@@ -450,12 +432,12 @@ def merge_nodes_in_session(
     # referencing loser, but the ORM's cached collections may still hold the
     # pre-reroute Edge instances, and SQLAlchemy's nullify path tries to
     # flush source_id=NULL updates that violate NOT NULL. Raw SQL DELETE
-    # bypasses the ORM entirely; the DB-level ON DELETE CASCADE handles any
-    # leftover edges (there should be none).
-    # Delete loser via raw SQL so SQLAlchemy doesn't walk any ORM
-    # relationship collections (which can still hold pre-reroute edge
-    # instances via back_populates). The DB's ON DELETE CASCADE handles any
-    # stragglers at the FK level — there should be none after reroute.
+    # bypasses the ORM entirely.
+    #
+    # NOTE: The FK + ON DELETE CASCADE that previously cleaned up stragglers
+    # was dropped on 2026-05-10 (no-mirror migration). reroute_edges() above
+    # is now solely responsible for ensuring zero edges reference the loser
+    # before this DELETE — otherwise they would become orphaned rows.
     session.expunge(loser_node)
     session.execute(
         text("DELETE FROM kg_node_metadata WHERE id = :id"),

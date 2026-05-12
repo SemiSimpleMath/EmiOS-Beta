@@ -324,28 +324,58 @@ wiki_nightly_refresh = _lazy_wiki_nightly_refresh
 
 def _lazy_kg_importance_rater(*, target_date=None, routine=None):
     """Periodic: rate any node/edge with NULL importance via the existing
-    batch raters (me::importance_rater + me::edge_importance_rater). Cheap,
-    idempotent, runs every ~30 min so newly-promoted content has scores by
+    batch raters (me::importance_rater + me::edge_importance_rater).
+    Idempotent, runs every ~30 min so newly-promoted content has scores by
     the time the wiki refresh's importance pre-filter runs against it.
 
     Reads ``spec.batch_size_edges`` / ``spec.batch_size_nodes`` if you want
     to tune throughput per call.
+
+    The **edge rater is gated by `kg_edge_importance_rating` subsystem flag**
+    (default OFF — it's expensive and the entity + state-derivation paths
+    work fine without per-edge importance until you want PageRank weighted
+    by relationship strength). Flip the flag on at `/dev/subsystems` when
+    you want to start populating `kg_edge_metadata.importance`.
     """
-    from app.me.edge_importance import regenerate_edge_importance
+    from app.assistant.kg.edge_importance import regenerate_edge_importance
+    from app.assistant.utils.subsystem_flags import is_subsystem_enabled
     from app.me.importance import regenerate_importance, regenerate_state_importance
     spec = (routine.spec if routine and hasattr(routine, "spec") else {}) or {}
     batch_edges = int(spec.get("batch_size_edges", 50))
     batch_nodes = int(spec.get("batch_size_nodes", 60))
 
-    edge_count = regenerate_edge_importance(batch_size=batch_edges, only_unrated=True)
+    if is_subsystem_enabled("kg_edge_importance_rating"):
+        edge_count = regenerate_edge_importance(batch_size=batch_edges, only_unrated=True)
+        edge_status = int(edge_count or 0)
+    else:
+        edge_count = 0
+        edge_status = "skipped (subsystem disabled)"
+
     node_scores = regenerate_importance(batch_size=batch_nodes, only_unrated=True)
-    # State / Event / Goal / Property: derive from edge importance.
-    # Runs AFTER the edge rater so the inputs are fresh.
+    # State / Event / Goal / Property: derive from edge importance × source
+    # entity importance via max(src_imp × edge_imp / 10). Runs AFTER the edge
+    # rater so the inputs are fresh.
     state_count = regenerate_state_importance(only_unrated=True)
+
+    # Section tagging — runs AFTER importance rating completes so the tagger
+    # can see real importance values (gate by source-entity importance is
+    # well-defined). Per the deferred-dependency chain:
+    #   promote (NULL imp) → rate → tag → card / wiki dirty-sweep
+    # tag_nodes_by_id walks every taggable State/Event/Goal/Property without
+    # a tag yet (backfill semantics — idempotent on repeated runs).
+    tag_stats = {}
+    try:
+        from app.assistant.kg.section_tagging import backfill_untagged_nodes
+        tag_stats = backfill_untagged_nodes()
+    except Exception:
+        logger.exception("[kg_importance_rater] tagging step failed")
+        tag_stats = {"error": "exception"}
+
     return {
-        "edges_rated": int(edge_count or 0),
+        "edges_rated": edge_status,
         "nodes_rated": len(node_scores or {}),
         "state_nodes_rated": int(state_count or 0),
+        "tagging": tag_stats,
     }
 
 

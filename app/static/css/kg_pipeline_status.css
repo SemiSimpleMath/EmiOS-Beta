@@ -1,0 +1,143 @@
+/* KG pipeline status dashboard */
+
+:root {
+    --bg: #1a1a2e;
+    --card-bg: #16213e;
+    --text: #eee;
+    --muted: #9ba3b4;
+    --accent: #0f3460;
+    --highlight: #e94560;
+    --success: #4ecca3;
+    --warning: #ffc107;
+    --border: #2d3a5a;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 1.5rem;
+    line-height: 1.4;
+}
+
+header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 1.5rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--border);
+}
+
+header h1 { font-size: 1.4rem; }
+header .ts { font-size: 0.85rem; color: var(--muted); }
+
+.grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 1rem;
+}
+
+.card {
+    background: var(--card-bg);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    border: 1px solid var(--border);
+}
+
+.card h2 {
+    font-size: 0.95rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.75rem;
+    font-weight: 600;
+}
+
+.row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 0.35rem 0;
+    border-bottom: 1px dashed rgba(255,255,255,0.05);
+}
+.row:last-child { border-bottom: none; }
+
+.row .label { color: var(--text); }
+.row .label.muted { color: var(--muted); font-size: 0.9rem; }
+
+.row .value {
+    font-family: 'Consolas', 'Menlo', monospace;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.value.zero    { color: var(--success); }
+.value.pending { color: var(--warning); }
+.value.large   { color: var(--highlight); }
+
+/* Stage queue bars */
+.stage-row {
+    display: grid;
+    grid-template-columns: 130px 1fr 60px;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.35rem 0;
+}
+.stage-row .name { color: var(--text); font-size: 0.95rem; }
+.stage-row .bar {
+    height: 6px;
+    background: var(--accent);
+    border-radius: 3px;
+    overflow: hidden;
+    position: relative;
+}
+.stage-row .bar .fill {
+    height: 100%;
+    background: var(--warning);
+    transition: width 0.3s ease;
+}
+.stage-row .bar .fill.zero { background: var(--success); }
+.stage-row .count {
+    text-align: right;
+    font-family: 'Consolas', 'Menlo', monospace;
+    font-weight: 600;
+}
+
+.flag {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    border-radius: 3px;
+    font-size: 0.8rem;
+    margin-left: 0.5rem;
+}
+.flag.on  { background: var(--success); color: #000; }
+.flag.off { background: var(--highlight); color: #fff; }
+
+.error-box {
+    background: rgba(233, 69, 96, 0.15);
+    border: 1px solid var(--highlight);
+    padding: 0.75rem;
+    border-radius: 4px;
+    color: var(--highlight);
+    font-family: monospace;
+    font-size: 0.85rem;
+}
+
+.subgrid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.25rem 1rem;
+    margin-top: 0.5rem;
+}
+.subgrid .label { font-size: 0.85rem; color: var(--muted); }
+.subgrid .value { font-size: 0.9rem; }
+
+footer {
+    margin-top: 1.5rem;
+    color: var(--muted);
+    font-size: 0.8rem;
+    text-align: center;
+}

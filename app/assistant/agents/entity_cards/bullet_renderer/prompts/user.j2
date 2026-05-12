@@ -1,0 +1,20 @@
+## Card subject
+
+{{ entity_descriptor }}
+
+## Section
+
+{{ section_name }}
+
+## Atomic source facts (fuse near-duplicates into single bullets)
+
+{{ source_facts }}
+
+## Your job
+
+Write all bullets for this section. Fuse atomic facts that express the
+same underlying claim into one bullet. Drop transient in-the-moment
+states. List the fused `fact_id`s in each bullet's `source_fact_ids`.
+
+Return JSON:
+{ "bullets": [ { "bullet_text": "...", "source_fact_ids": ["f1","f2"] }, ... ] }

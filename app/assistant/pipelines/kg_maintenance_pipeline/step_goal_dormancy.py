@@ -103,6 +103,7 @@ def run(ctx: PipelineContext) -> dict:
                 Node.id, Node.label, Node.node_type, Node.category,
                 Node.created_at, Node.attributes, Node.locked_by_user_at,
                 Node.goal_status,
+                Node.first_observed, Node.last_observed, Node.last_pursued_at,
             )
             .filter(Node.node_type == "Goal")
             .filter(Node.end_date.is_(None))
@@ -110,7 +111,11 @@ def run(ctx: PipelineContext) -> dict:
         )
 
         for row in candidates:
-            nid, label, ntype, category, created_at, attributes, locked_at, col_goal_status = row
+            (
+                nid, label, ntype, category, created_at, attributes, locked_at,
+                col_goal_status,
+                col_first_observed, col_last_observed, col_last_pursued_at,
+            ) = row
             candidates_examined += 1
 
             attrs = attributes if isinstance(attributes, dict) else {}
@@ -145,7 +150,10 @@ def run(ctx: PipelineContext) -> dict:
                 continue
 
             threshold_days = _dormancy_threshold_days(attrs)
-            anchor = _resolve_recency_anchor(attrs, created_at)
+            anchor = _resolve_recency_anchor(
+                col_last_pursued_at, col_last_observed, col_first_observed,
+                created_at,
+            )
             if anchor is None:
                 # No recency signal at all — be conservative, skip.
                 skipped_recent_activity += 1
@@ -257,18 +265,25 @@ def _dormancy_threshold_days(attrs: Dict[str, Any]) -> float:
 
 
 def _resolve_recency_anchor(
-    attrs: Dict[str, Any], created_at: Optional[datetime]
+    last_pursued_at: Optional[datetime],
+    last_observed: Optional[datetime],
+    first_observed: Optional[datetime],
+    created_at: Optional[datetime],
 ) -> Optional[datetime]:
     """Pick the most-recent observation signal: last_pursued_at >
     last_observed > first_observed > created_at. All values normalized
-    to naive UTC to match `now` in the caller."""
+    to naive UTC to match `now` in the caller.
+
+    All three observation fields are first-class columns on Node since
+    2026-05-11; the caller passes them directly rather than digging
+    through attributes JSON."""
     candidates = []
-    for key in ("last_pursued_at", "last_observed", "first_observed"):
-        v = attrs.get(key) if isinstance(attrs, dict) else None
-        if v:
-            ts = _parse_ts(v)
-            if ts is not None:
-                candidates.append(ts)
+    for v in (last_pursued_at, last_observed, first_observed):
+        if v is None:
+            continue
+        ts = _to_naive_utc(v)
+        if ts is not None:
+            candidates.append(ts)
     if created_at is not None:
         candidates.append(_to_naive_utc(created_at))
     if not candidates:

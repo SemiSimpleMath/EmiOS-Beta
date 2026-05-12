@@ -28,6 +28,42 @@ from app.assistant.utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 
+# Min-interval map for the user-controlled frequency setting (assistant_core
+# JSON, edited in /settings/assistant UI). The pipeline scheduler's own
+# `min_interval_seconds` floor still applies on top of this; the goal here
+# is to let the user dial Emi's chattiness from "never" to "frequent" without
+# touching the dayflow config.
+_MIN_INTERVAL_FOR_FREQUENCY: Dict[str, int] = {
+    "off":      10 ** 12,   # effectively never (also short-circuited above)
+    "rare":     3 * 3600,   # 3 hours
+    "regular":  20 * 60,    # 20 minutes
+    "frequent": 5 * 60,     # 5 minutes
+}
+_DEFAULT_FREQUENCY = "regular"
+
+
+def _load_conversation_starter_frequency() -> str:
+    """Read frequency from resources/assistant/assistant_core.json. Falls back
+    to 'regular' if the file is missing, unparseable, or has no value set —
+    matches the existing default for users who haven't visited the settings
+    page since this feature shipped.
+    """
+    try:
+        from app.assistant.utils.path_utils import get_resources_dir
+        core_path = get_resources_dir() / "assistant" / "assistant_core.json"
+        if not core_path.exists():
+            return _DEFAULT_FREQUENCY
+        data = json.loads(core_path.read_text(encoding="utf-8"))
+        cs = data.get("conversation_starter") if isinstance(data, dict) else None
+        if not isinstance(cs, dict):
+            return _DEFAULT_FREQUENCY
+        freq = (cs.get("frequency") or "").strip().lower()
+        return freq if freq in _MIN_INTERVAL_FOR_FREQUENCY else _DEFAULT_FREQUENCY
+    except Exception:
+        logger.debug("Could not load conversation_starter.frequency", exc_info=True)
+        return _DEFAULT_FREQUENCY
+
+
 def _extract_first_question(memo_text: str) -> str:
     """
     Pull the first bullet question from a context_activation memo.
@@ -373,6 +409,12 @@ class ConversationStarterStep(BaseStep):
         # Random KG node + neighborhood for creative inspiration
         kg_random_topic = self._get_random_kg_topic()
 
+        # Life timeline gaps — surfaces estimated-date confirmations, multi-year
+        # coverage holes, and prose-only facts the user could pin. Lets the
+        # starter weave grounding questions naturally instead of always
+        # picking from random recent activity.
+        life_gaps = self._get_life_gaps()
+
         # Very lightweight hints
         day_type_hints = "workday" if ctx.now_local.weekday() < 5 else "weekend"
 
@@ -390,7 +432,40 @@ class ConversationStarterStep(BaseStep):
             "recent_chat_excerpts": recent_chat_excerpts,
             "timeline_head": timeline_head,
             "kg_random_topic": kg_random_topic,
+            "life_gaps": life_gaps,
         }
+
+    def _get_life_gaps(self) -> Dict[str, Any]:
+        """Compute conversation hooks from the primary user's life timeline:
+        estimated dates worth confirming, multi-year coverage holes, and
+        prose-only high-importance facts that could be pinned to an ISO date.
+
+        Pure SQL + sort. No LLM cost. Returned to the conversation_starter
+        agent as the ``life_gaps`` context item.
+
+        Fail-soft: any error returns an empty dict so the starter degrades to
+        its other context sources rather than failing.
+        """
+        try:
+            from app.assistant.kg.timeline_gaps import compute_timeline_gaps
+            from app.assistant.kg.db.knowledge_graph_db_sqlite import Node
+            from app.assistant.kg_core.user_identity import get_primary_user_name
+            from app.models.db_manager import get_db_manager
+
+            user_name = get_primary_user_name()
+            with get_db_manager().read_session() as session:
+                user_node = (
+                    session.query(Node)
+                    .filter(Node.label == user_name, Node.node_type == "Entity")
+                    .first()
+                )
+                primary_id = user_node.id if user_node else None
+            if not primary_id:
+                return {}
+            return compute_timeline_gaps(primary_id)
+        except Exception:
+            logger.debug("Could not compute life_gaps", exc_info=True)
+            return {}
 
     def _get_random_kg_topic(self) -> Dict[str, Any]:
         """Pick a random KG node and return it with its immediate neighborhood."""
@@ -413,36 +488,65 @@ class ConversationStarterStep(BaseStep):
                 if node is None:
                     return {}
 
-                # Get immediate connections.
+                # Get immediate connections. LEFT-style outerjoin so edges
+                # to pod URIs (no kg_node row by design) still surface; pod
+                # labels hydrate from pod_store via _pod_label() below.
+                from app.assistant.pod_store.pod_uri import POD_URI_RE
+                _pod_cache: dict = {}
+
+                def _pod_label(uri: str):
+                    if uri in _pod_cache:
+                        return _pod_cache[uri]
+                    if not uri or not POD_URI_RE.fullmatch(uri):
+                        _pod_cache[uri] = (None, None)
+                        return _pod_cache[uri]
+                    from app.assistant.pod_store.pod_store import PodStore
+                    pod = PodStore().get(uri)
+                    if pod is None:
+                        _pod_cache[uri] = (None, None)
+                    else:
+                        _pod_cache[uri] = ((pod.one_liner or uri)[:200], "Pod")
+                    return _pod_cache[uri]
+
                 connections = []
                 outgoing = (
                     session.query(Edge, Node)
-                    .join(Node, Edge.target_id == Node.id)
+                    .outerjoin(Node, Edge.target_id == Node.id)
                     .filter(Edge.source_id == node.id)
                     .limit(8)
                     .all()
                 )
                 for edge, target in outgoing:
+                    if target is not None:
+                        t_label, t_type = target.label, target.node_type
+                    else:
+                        t_label, t_type = _pod_label(edge.target_id)
+                    if t_label is None:
+                        continue
                     connections.append({
                         "relationship": edge.relationship_type,
-                        "descriptor": edge.relationship_descriptor or "",
-                        "target": target.label,
-                        "target_type": target.node_type,
+                        "target": t_label,
+                        "target_type": t_type,
                     })
 
                 incoming = (
                     session.query(Edge, Node)
-                    .join(Node, Edge.source_id == Node.id)
+                    .outerjoin(Node, Edge.source_id == Node.id)
                     .filter(Edge.target_id == node.id)
                     .limit(8)
                     .all()
                 )
                 for edge, source in incoming:
+                    if source is not None:
+                        s_label, s_type = source.label, source.node_type
+                    else:
+                        s_label, s_type = _pod_label(edge.source_id)
+                    if s_label is None:
+                        continue
                     connections.append({
                         "relationship": edge.relationship_type,
-                        "descriptor": edge.relationship_descriptor or "",
-                        "source": source.label,
-                        "source_type": source.node_type,
+                        "source": s_label,
+                        "source_type": s_type,
                     })
 
                 return {
@@ -482,6 +586,28 @@ class ConversationStarterStep(BaseStep):
     def run(self, ctx: StepContext) -> StepResult:
         boundary_date_local = self._boundary_date_local(ctx)
         stage_cfg = ctx.step_config or {}
+
+        # ── User-controlled frequency gate ────────────────────────────────────
+        # Read assistant_core.json conversation_starter.frequency (set in the
+        # /settings/assistant UI). Maps to a min-interval that overrides the
+        # pipeline's default schedule. "off" disables entirely.
+        freq = _load_conversation_starter_frequency()
+        if freq == "off":
+            return StepResult(output={"status": "skipped", "reason": "frequency=off"})
+        min_interval_seconds = _MIN_INTERVAL_FOR_FREQUENCY.get(freq, 600)
+        pointer_for_gate = self._load_latest_pointer(ctx)
+        last_sent_iso = pointer_for_gate.get("last_sent_utc")
+        if last_sent_iso:
+            try:
+                last_sent_dt = datetime.fromisoformat(last_sent_iso.replace("Z", "+00:00"))
+                elapsed = (ctx.now_utc - last_sent_dt).total_seconds()
+                if elapsed < min_interval_seconds:
+                    return StepResult(output={
+                        "status": "skipped",
+                        "reason": f"frequency={freq} (need {int(min_interval_seconds)}s, elapsed {int(elapsed)}s)",
+                    })
+            except Exception:
+                logger.debug("[ConversationStarter] frequency gate: bad last_sent_utc; allowing", exc_info=True)
 
         # ── Context activation memo fast-path ─────────────────────────────────
         # If the context_engine has prepared an unaddressed memo (background

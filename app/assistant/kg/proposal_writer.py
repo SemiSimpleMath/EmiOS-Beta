@@ -25,7 +25,6 @@ from app.assistant.database.kg_pipeline_models import (
 )
 from app.assistant.kg.claim_classifier import classify_claim_type
 from app.assistant.kg.predicate_vocabulary import normalize_predicate
-from app.assistant.kg.proposal_group_splitter import split_into_connected_components
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -377,16 +376,16 @@ def write_one_proposal_group(
         label = ((n.get("label") or "").strip())[:512] or "(unknown)"
         node_type = (n.get("node_type") or "Entity").strip() or "Entity"
 
-        # Plumb first_observed into attributes so promoter can carry it
-        # forward to the KG node — used by decay as the floor anchor when
-        # start_date is NULL (beliefs, preferences without a known onset).
+        # first_observed no longer stored in attributes — it's a first-class
+        # column on Node since 2026-05-11, derived from proposal_node.valid_from
+        # at promotion time. Promoter handles the column write directly.
         extractor_attrs = n.get("attributes") or {}
         merged_attrs = dict(extractor_attrs) if isinstance(extractor_attrs, dict) else {}
-        if observed_iso is not None:
-            merged_attrs.setdefault("first_observed", observed_iso)
-        # Carry enrichment fields that don't map to first-class columns.
-        for fld in ("aliases", "hash_tags", "semantic_label", "goal_status",
-                    "confidence", "importance", "valid_during", "core"):
+        # Carry enrichment fields that the promoter pops back out to first-class
+        # columns. semantic_label / goal_status / confidence / valid_during all
+        # have first-class columns and the promoter pops them. importance was
+        # removed from meta_data_add 2026-05-11 — dedicated rater is the source.
+        for fld in ("semantic_label", "goal_status", "confidence", "valid_during"):
             val = n.get(fld)
             if val not in (None, "", []):
                 merged_attrs[fld] = val
@@ -419,16 +418,16 @@ def write_one_proposal_group(
             temp_to_uuid[extractor_tid] = row.id
         stats["nodes_written"] = stats.get("nodes_written", 0) + 1
 
-    # Pod URIs (e.g., datapod:image:abc...) are already valid kg_node ids —
-    # see app/assistant/pod_store/kg_mirror.py. The fact_extractor emits
-    # them verbatim as edge endpoints when an attached image / video / email
-    # is the subject. Insert a placeholder claim_proposal_node row whose id
-    # IS the URI so the FK on claim_proposal_edge.target_node_id is
-    # satisfied; mark it resolution_action="matched_pod_mirror" so the
-    # promoter knows it's already a real kg_node and skips re-resolution.
+    # Pod URIs (e.g., datapod:image:abc...) are KG references, not kg_nodes.
+    # The fact_extractor emits them verbatim as edge endpoints when an
+    # attached image is the subject. We do NOT mint a claim_proposal_node
+    # placeholder for them — the FK on claim_proposal_edge.{source,target}
+    # _node_id was dropped as part of the no-mirror migration. The promoter
+    # validates pod URIs against pod_store at admission time.
+    #
+    # All we need here is to add the URI to temp_to_uuid so the edge writer
+    # threads the URI through as the resolved endpoint.
     from app.assistant.pod_store.pod_uri import POD_URI_RE
-    from app.assistant.pod_store.pod_store import PodStore
-    pod_store_for_labels = None
     pod_uris_seen: set[str] = set()
     for e in edges:
         for tid in (
@@ -438,24 +437,7 @@ def write_one_proposal_group(
             if not tid or not POD_URI_RE.fullmatch(tid) or tid in pod_uris_seen:
                 continue
             pod_uris_seen.add(tid)
-            if pod_store_for_labels is None:
-                pod_store_for_labels = PodStore()
-            pod = pod_store_for_labels.get(tid)
-            label = (pod.one_liner if pod else tid)[:512] or tid
-            category = (pod.kind if pod else None)
-            session.add(ClaimProposalNode(
-                id=tid,
-                proposal_id=proposal.id,
-                extractor_temp_id=tid,
-                label=label,
-                node_type="Pod",
-                category=category,
-                resolved_node_id=tid,
-                resolution_action="matched_pod_mirror",
-            ))
-            session.flush()
             temp_to_uuid[tid] = tid
-            stats["nodes_written"] = stats.get("nodes_written", 0) + 1
 
     for e in edges:
         src_tid = str(e.get("source") or e.get("source_temp_id") or "")

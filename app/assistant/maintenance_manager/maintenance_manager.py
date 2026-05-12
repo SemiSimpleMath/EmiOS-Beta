@@ -1,6 +1,5 @@
 from datetime import datetime, timedelta, timezone
 import threading
-from app.assistant.log_ingestion import LogIngestionPolicy
 from app.assistant.maintenance_manager.daily_summary_scheduler import DailySummaryScheduler
 from app.assistant.manager_runtime.services.scope_adapter import build_system_scope_context
 from app.assistant.ServiceLocator.service_locator import DI
@@ -25,8 +24,6 @@ class MaintenanceManager:
         # Initialize daily summary scheduler for idle mode processing
         self.daily_summary_scheduler = DailySummaryScheduler()
 
-        # Track if KG repair pipeline is currently running (to prevent concurrent runs)
-        self.kg_repair_pipeline_running = False
 
         # Thread safety for maintenance operations
         self.processing_lock = threading.RLock()
@@ -236,73 +233,6 @@ class MaintenanceManager:
             self.daily_summary_running = False
             logger.info("📋 Daily summary background worker finished")
 
-    def run_kg_processing(self):
-        """
-        Process unified_log messages through knowledge graph pipeline.
-        This includes entity resolution and knowledge graph building.
-        
-        Eligibility is controlled by:
-        - Feature flag (enable_kg in settings)
-        - Quiet hours (per-feature quiet hours in settings)
-        - Not already running (kg_processing_running flag)
-        - Rate limiting (15 min interval via should_publish)
-        
-        Runs in a separate thread to avoid blocking other maintenance tasks.
-        """
-        # Check if a KG processing thread is already running (double-check)
-        if getattr(self, 'kg_processing_running', False):
-            logger.info("⏸️ KG processing already running in background - skipping")
-            return
-
-        # Mark as running and spawn thread
-        self.kg_processing_running = True
-        start_monitored_thread(
-            owner="maintenance_manager",
-            name="maintenance-kg-processing",
-            target=self._kg_processing_worker,
-            daemon=True,
-            kind="background_worker",
-            metadata={"component": "maintenance_manager", "worker": "kg_processing"},
-        )
-        logger.info("🧠 Started knowledge graph processing in background thread")
-
-    def _kg_processing_worker(self):
-        """Background worker for KG processing"""
-        kg_utils = None
-        try:
-            logger.info("🧠 Starting knowledge graph processing...")
-
-            # Step 1: Entity resolution (unified_log → processed_entity_log)
-            from app.assistant.kg_core.kg_pipeline_old.log_preprocessing import process_unified_log_chunks_with_entity_resolution
-
-            entity_result = process_unified_log_chunks_with_entity_resolution(
-                chunk_size=8,
-                overlap_size=3,
-                source_filter='chat',  # Only process chat messages
-                role_filter=['user', 'assistant']
-            )
-
-            logger.info(f"✅ Entity resolution completed: {entity_result}")
-
-            # Step 2: Knowledge graph processing (processed_entity_log → KG)
-            from app.assistant.kg_core.kg_pipeline_old.kg_pipeline import process_all_processed_entity_logs_to_kg
-
-            kg_result = process_all_processed_entity_logs_to_kg(
-                batch_size=100,
-                max_batches=1,  # Process one batch per idle cycle to avoid blocking
-                role_filter=['user', 'assistant']
-            )
-
-            logger.info(f"✅ Knowledge graph processing completed: {kg_result}")
-
-        except Exception as e:
-            logger.error(f"❌ Error in KG processing: {e}")
-        finally:
-            # Ensure session is closed even on error
-            if kg_utils:
-                kg_utils.close_session()
-            self.kg_processing_running = False
-
     def run_location_tracking(self):
         """
         Build/refresh the location timeline based on calendar events.
@@ -414,106 +344,3 @@ class MaintenanceManager:
         except Exception as e:
             logger.error(f"❌ Error saving exploration results: {e}")
 
-    def run_kg_repair_pipeline(self):
-        """
-        Run the KG Repair Pipeline to identify and fix problematic nodes.
-        
-        This is the main entry point for the pipeline, providing Flask + DI context
-        needed for the questioner stage (ask_user tool) and implementer stage (kg_team).
-        """
-        # Prevent concurrent pipeline runs
-        if self.kg_repair_pipeline_running:
-            logger.info("⏸️ KG Repair Pipeline already running - skipping this cycle")
-            return
-
-        try:
-            self.kg_repair_pipeline_running = True
-            logger.info("🔧 Starting KG Repair Pipeline...")
-
-            from app.assistant.kg_repair_pipeline.pipeline_orchestrator import KGPipelineOrchestrator
-
-            # Create the orchestrator
-            orchestrator = KGPipelineOrchestrator()
-
-            # Run the pipeline (max 1 node per run for fast testing)
-            pipeline_state = orchestrator.run_pipeline(max_nodes=1)
-
-            # Log results
-            logger.info(f"✅ KG Repair Pipeline completed:")
-            logger.info(f"   Nodes identified: {pipeline_state.total_nodes_identified}")
-            logger.info(f"   Nodes validated: {pipeline_state.nodes_validated}")
-            logger.info(f"   Nodes questioned: {pipeline_state.nodes_questioned}")
-            logger.info(f"   Nodes resolved: {pipeline_state.nodes_resolved}")
-            logger.info(f"   Nodes skipped: {pipeline_state.nodes_skipped}")
-            logger.info(f"   Errors: {len(pipeline_state.errors)}")
-
-            # Save pipeline results
-            self._save_pipeline_results(pipeline_state)
-
-            return {
-                'success': True,
-                'nodes_identified': pipeline_state.total_nodes_identified,
-                'nodes_validated': pipeline_state.nodes_validated,
-                'nodes_questioned': pipeline_state.nodes_questioned,
-                'nodes_resolved': pipeline_state.nodes_resolved,
-                'nodes_skipped': pipeline_state.nodes_skipped,
-                'errors': pipeline_state.errors,
-                'timestamp': datetime.now(timezone.utc).isoformat()
-            }
-
-        except Exception as e:
-            logger.error(f"❌ Error in KG Repair Pipeline: {e}", exc_info=True)
-            return {
-                'success': False,
-                'error': str(e),
-                'timestamp': datetime.now(timezone.utc).isoformat()
-            }
-        finally:
-            # Always clear the running flag
-            self.kg_repair_pipeline_running = False
-
-    def _save_pipeline_results(self, pipeline_state):
-        """
-        Save KG repair pipeline results to a file for review.
-        """
-        try:
-            import os
-            import json
-
-            # Create a timestamped filename
-            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-            filename = f"kg_repair_pipeline_{timestamp}.json"
-
-            # Save to the kg_repair_pipeline directory
-            results_dir = os.path.join(os.path.dirname(__file__), "..", "kg_repair_pipeline", "results")
-            os.makedirs(results_dir, exist_ok=True)
-
-            filepath = os.path.join(results_dir, filename)
-
-            pipeline_data = {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "nodes_identified": pipeline_state.total_nodes_identified,
-                "nodes_validated": pipeline_state.nodes_validated,
-                "nodes_questioned": pipeline_state.nodes_questioned,
-                "nodes_resolved": pipeline_state.nodes_resolved,
-                "nodes_skipped": pipeline_state.nodes_skipped,
-                "errors": pipeline_state.errors,
-                "processed_nodes": [
-                    {
-                        "node_id": node.id,
-                        "label": node.label,
-                        "status": node.status,
-                        "problem_description": node.problem_description,
-                        "resolution_notes": node.resolution_notes
-                    }
-                    for node in pipeline_state.problematic_nodes
-                ]
-            }
-
-            with open(filepath, 'w', encoding='utf-8') as f:
-                json.dump(pipeline_data, f, indent=2, ensure_ascii=False)
-
-            logger.info(f"📁 Pipeline results saved to: {filepath}")
-
-        except Exception as e:
-            logger.error(f"❌ Error saving pipeline results: {e}")

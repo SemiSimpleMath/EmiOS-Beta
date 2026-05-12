@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional
-
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.utils.pydantic_classes import ToolMessage
 

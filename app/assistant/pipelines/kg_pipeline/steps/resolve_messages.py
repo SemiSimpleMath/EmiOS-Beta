@@ -56,7 +56,13 @@ CHAT_SOURCES = {
 CHAT_ROLES = {"user", "assistant"}
 ALLOWED_ROOMS = {"master_room"}
 
-BATCH_NEW_SIZE = 10
+BATCH_NEW_SIZE = 20
+# Overlap carried into each batch so the LLM keeps entity-name mappings across
+# batch boundaries. 10 prior resolved messages is usually enough — typical
+# conversations re-mention names within that span, and a larger overlap inflates
+# the per-call prompt without adding much continuity. Together with
+# BATCH_NEW_SIZE=20 this gives ~30 messages of LLM input per cycle, which keeps
+# structured-output generation snappy without sacrificing entity continuity.
 BATCH_CONTEXT_SIZE = 10
 RESOLVER_AGENT_NAME = "knowledge_graph_add::entity_resolver"
 RESOLVER_VERSION = "kg_pipeline_v1"
@@ -68,14 +74,13 @@ class ResolveMessagesStep:
 
     # Local-date cutoff (YYYY-MM-DD). Messages with local_date < this are ignored.
     # Set to None to process the entire history (backfill mode).
-    START_LOCAL_DATE: Optional[str] = "2026-04-25"
+    START_LOCAL_DATE: Optional[str] = "2026-05-10"
 
-    # Sharper UTC-precise cutoff used to skip a one-time recovery backlog
-    # (2026-04-29: ~13K source-clobbered chat rows revived after the
-    # save_to_unified_db identity-fields fix). Anything older than this
-    # timestamp is invisible to the resolver — no LLM cost, no segmenter
-    # work. Set to None to revert to the START_LOCAL_DATE-only cutoff.
-    START_TIMESTAMP_UTC: Optional[str] = "2026-04-30T03:00:00+00:00"
+    # Sharper UTC-precise cutoff used to skip pre-wipe chat history.
+    # Updated 2026-05-10: KG nuked, fresh-start cutoff = nuke day. Any
+    # legacy chat before this is invisible to the resolver — no LLM
+    # cost, no segmenter work. Set to None to process the whole history.
+    START_TIMESTAMP_UTC: Optional[str] = "2026-05-10T00:00:00+00:00"
 
     @staticmethod
     def _local_date(ts: datetime) -> date:
@@ -169,8 +174,18 @@ class ResolveMessagesStep:
                 .filter(UnifiedLog2026.timestamp < end_utc)
             ).order_by(UnifiedLog2026.timestamp.asc(), UnifiedLog2026.id.asc()).all()
 
-            existing_set = set(
-                rid for (rid,) in session.query(KGResolvedMessage.unified_log_id)
+            # Pull each prior-resolved message's actual resolved_text so the
+            # batch planner can pass the real entity-tagged prose forward as
+            # context. Earlier implementations stored a "ALREADY_RESOLVED"
+            # placeholder here, which meant the LLM saw zero entity mappings
+            # from prior batches and re-guessed every cross-batch pronoun
+            # (manufacturing ghost entities like "Jukka Virtanen's Son" when
+            # Peter had been named just 30 seconds earlier).
+            existing_map = dict(
+                session.query(
+                    KGResolvedMessage.unified_log_id,
+                    KGResolvedMessage.resolved_text,
+                )
                 .filter(KGResolvedMessage.unified_log_id.in_([r.id for r in rows]))
                 .all()
             )
@@ -181,7 +196,7 @@ class ResolveMessagesStep:
                     "role": r.role,
                     "speaker_name": r.speaker_name,
                     "raw_text": r.message,
-                    "resolved_text": None if r.id not in existing_set else "ALREADY_RESOLVED",
+                    "resolved_text": existing_map.get(r.id),
                 }
                 for r in rows
             ]

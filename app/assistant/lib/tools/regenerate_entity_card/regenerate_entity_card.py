@@ -1,10 +1,8 @@
 """Tool: regenerate_entity_card
 
-Wraps `generate_and_persist_card(entity_label, force=True)` so a manager
-can refresh one entity's card after KG mutations changed the facts the
-card summarized. The shared card_gen_slot lock keeps concurrent
-regenerations safe; this tool sets blocking=True so the call waits its
-turn rather than failing fast.
+Wraps the entity_cards_v2 builder so a manager can refresh one entity's
+card after KG mutations changed the facts the card summarized. Looks up
+the kg_node by label, then calls ``build_card(entity_node_id)``.
 """
 from __future__ import annotations
 
@@ -31,26 +29,43 @@ class RegenerateEntityCardTool(BaseTool):
                 content="Missing required argument: entity_label",
             )
 
+        # Resolve label → kg_node id. Prefer category='person' when there are
+        # multiple matches (most entity-card requests target people).
+        from app.models.base import get_session
+        from app.assistant.kg.db.knowledge_graph_db_sqlite import Node
+
+        session = get_session()
         try:
-            from app.assistant.pipelines.entity_cards.card_writer import (
-                generate_and_persist_card,
+            nodes = (
+                session.query(Node)
+                .filter(Node.label == entity_label, Node.node_type == "Entity")
+                .all()
             )
+            if not nodes:
+                return ToolResult(
+                    result_type="error",
+                    content=f"No KG node found with label {entity_label!r}",
+                    data={"ok": False, "entity_label": entity_label},
+                )
+            node = next((n for n in nodes if n.category == "person"), nodes[0])
+            entity_node_id = node.id
+        finally:
+            session.close()
+
+        try:
+            from app.assistant.pipelines.entity_cards_v2 import build_card
         except Exception as e:
             return ToolResult(
                 result_type="error",
-                content=f"Failed to import card writer: {e}",
+                content=f"Failed to import v2 card builder: {e}",
             )
 
         logger.info(
-            "[regenerate_entity_card] starting label=%s reason=%s",
-            entity_label, reason or "(none)",
+            "[regenerate_entity_card] starting label=%s node=%s reason=%s",
+            entity_label, entity_node_id[:8], reason or "(none)",
         )
         try:
-            card = generate_and_persist_card(
-                entity_label,
-                force=True,
-                blocking=True,
-            )
+            result = build_card(entity_node_id)
         except Exception as e:
             logger.error(
                 "[regenerate_entity_card] failed for %s: %s",
@@ -62,24 +77,31 @@ class RegenerateEntityCardTool(BaseTool):
                 data={"ok": False, "entity_label": entity_label, "error": str(e)},
             )
 
-        # The card dict varies in shape across versions; pull the
-        # widely-stable fields and ignore the debug `_inputs`.
-        summary = (card.get("summary") or "")[:200] if isinstance(card, dict) else ""
-        key_facts = card.get("key_facts") if isinstance(card, dict) else None
-        kf_count = len(key_facts) if isinstance(key_facts, list) else 0
+        status = result.get("status") if isinstance(result, dict) else None
+        sections = result.get("sections") if isinstance(result, dict) else None
+        bullets = result.get("bullets") if isinstance(result, dict) else None
+
+        if status != "ok":
+            return ToolResult(
+                result_type="success",
+                content=f"Card for {entity_label!r}: {status}",
+                data={"ok": True, "entity_label": entity_label, **(result or {})},
+            )
 
         return ToolResult(
             result_type="success",
             content=(
-                f"Regenerated entity card for {entity_label!r} "
-                f"({kf_count} key facts). {('Reason: ' + reason) if reason else ''}"
+                f"Regenerated v2 entity card for {entity_label!r} "
+                f"({sections} sections, {bullets} bullets). "
+                f"{('Reason: ' + reason) if reason else ''}"
             ).strip(),
             data={
                 "ok": True,
                 "entity_label": entity_label,
+                "entity_node_id": entity_node_id,
                 "regenerated": True,
-                "summary": summary,
-                "key_facts_count": kf_count,
+                "sections": sections,
+                "bullets": bullets,
             },
         )
 

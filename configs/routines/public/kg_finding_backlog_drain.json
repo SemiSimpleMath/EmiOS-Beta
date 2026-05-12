@@ -1,6 +1,6 @@
 {
   "id": "kg_finding_backlog_drain",
-  "enabled": true,
+  "enabled": false,
   "name": "KG finding backlog drain",
   "aliases": [
     "drain findings",
@@ -16,5 +16,5 @@
     "type": "daily",
     "time_local": "03:00"
   },
-  "notes": "Daily: investigate up to 5 oldest pending kg_maintenance_findings (FIFO drain). Picks from the global pending queue, complementing the weekly kg_maintenance_pipeline which only investigates findings produced by its own run."
+  "notes": "[DISABLED 2026-05-10 POST-NUKE \u2014 re-enable when KG pipeline rebuilt] Daily: investigate up to 5 oldest pending kg_maintenance_findings (FIFO drain). Picks from the global pending queue, complementing the weekly kg_maintenance_pipeline which only investigates findings produced by its own run."
 }

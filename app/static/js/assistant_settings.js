@@ -61,6 +61,12 @@ async function loadAssistantSettings() {
         if (styleRadio) styleRadio.checked = true;
         document.getElementById('chat_guidelines').value = guidelines.guidelines || '';
 
+        // Conversation starter frequency (defaults to 'regular' if not set yet)
+        const cs = result.data.conversation_starter || {};
+        const freq = cs.frequency || 'regular';
+        const freqSel = document.getElementById('conversation_starter_frequency');
+        if (freqSel) freqSel.value = freq;
+
     } catch (error) {
         console.error('Error loading assistant settings:', error);
         showError('Failed to load settings');
@@ -120,6 +126,9 @@ async function saveAssistantSettings(e) {
         chat_guidelines: {
             style: document.querySelector('input[name="communication_style"]:checked').value,
             guidelines: document.getElementById('chat_guidelines').value.trim()
+        },
+        conversation_starter: {
+            frequency: (document.getElementById('conversation_starter_frequency')?.value || 'regular')
         }
     };
 

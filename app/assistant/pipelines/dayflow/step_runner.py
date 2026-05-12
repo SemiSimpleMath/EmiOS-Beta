@@ -127,7 +127,7 @@ class DayFlowRunner:
                     )
                     step.reset(step_ctx)
                 except Exception as e:
-                    logger.error("[dayflow_] reset failed for %s: %s", name, e)
+                    logger.error("[dayflow] reset failed for %s: %s", name, e)
             ctx.mark_daily_reset_done()
             reset_ran = True
             results.append(

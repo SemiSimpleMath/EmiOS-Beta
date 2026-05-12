@@ -52,19 +52,16 @@ def _to_evidence_input(item: EvidenceItem) -> EvidenceInput:
         summary=item.summary,
         raw_text=item.raw_text,
         weight=item.weight,
+        extracted_by="belief_engine::belief_updater",
     )
 
 
 def _resolve_evidence_by_refs(
     items: List[EvidenceItem], refs: List[int]
 ) -> List[EvidenceItem]:
-    """
-    Resolve 1-based evidence indices (as emitted by the LLM) to EvidenceItem objects.
-    Out-of-range indices are silently ignored.
-    Falls back to the full item list when refs is empty — this handles legacy/no_change
-    cases where the LLM didn't populate refs, but for new creates/updates an empty
-    refs list means the LLM chose not to cite any evidence (attach nothing).
-    """
+    """Resolve 1-based evidence indices (as emitted by the LLM) to EvidenceItem
+    objects. Out-of-range indices are logged and skipped. Empty refs → attach
+    no evidence (the LLM chose not to cite any)."""
     if not refs:
         return []
     resolved = []
@@ -81,6 +78,13 @@ class UpdateBeliefsStep:
     name = "update_beliefs"
 
     def __init__(self, domain: str) -> None:
+        # Validate domain config up front so a typo doesn't silently produce
+        # an empty existing-beliefs block and zero matches downstream.
+        from belief_engine.config import get_domain_config
+        if get_domain_config(domain) is None:
+            raise ValueError(
+                f"Unknown belief-engine domain {domain!r} — no entry in domain config."
+            )
         self.domain = domain
 
     def inputs(self, ctx: Any) -> list:
@@ -108,7 +112,9 @@ class UpdateBeliefsStep:
         items = bundle.items
         evidence_block = bundle.as_block()
 
-        # Build semantic query from all insight items first, then ticket summaries.
+        # One semantic query over the whole evidence batch — coarse but cheap;
+        # surfaces beliefs related to the overall topic mix rather than each
+        # individual item. Adequate for the small batches we run today.
         combined_query = " ".join(item.summary for item in items)
         existing_hits = store.find_similar(
             combined_query,
@@ -143,6 +149,7 @@ class UpdateBeliefsStep:
         stats = {"created": 0, "updated": 0, "deprecated": 0, "no_change": 0, "errors": 0, "contested": 0}
         # Beliefs that need re-evaluation (confidence dropped or explicitly contested)
         contested_keys: List[str] = []
+        today_iso = datetime.now(timezone.utc).date().isoformat()
 
         _CONFIDENCE_RANK = {"high": 2, "medium": 1, "low": 0}
 
@@ -170,7 +177,7 @@ class UpdateBeliefsStep:
                             confidence=existing.confidence,
                             scope=existing.scope,
                             status=existing.status,
-                            last_confirmed=datetime.now(timezone.utc).date().isoformat(),
+                            last_confirmed=today_iso,
                         )
                         refs = bo.get("evidence_refs") or []
                         relevant_ev = _resolve_evidence_by_refs(items, refs)
@@ -180,6 +187,17 @@ class UpdateBeliefsStep:
 
                 new_confidence = bo.get("confidence", "medium")
                 new_status = bo.get("status", "active")
+                new_statement = (bo.get("statement") or "").strip()
+
+                # Refuse to upsert an empty statement — would blank the belief
+                # in the store. The agent_form requires statement; this guards
+                # against degenerate output.
+                if not new_statement:
+                    logger.warning(
+                        "[UpdateBeliefsStep] empty statement on %s action=%s — skipping",
+                        belief_key, action,
+                    )
+                    continue
 
                 # Fetch existing before upsert to detect confidence drops
                 existing_before = store.get_by_key(belief_key) if action == "update" else None
@@ -188,11 +206,12 @@ class UpdateBeliefsStep:
                 req = BeliefUpsertRequest(
                     domain=self.domain,
                     belief_key=belief_key,
-                    statement=bo.get("statement", ""),
+                    statement=new_statement,
                     confidence=new_confidence,
                     scope=bo.get("scope", "chronic"),
                     status=new_status,
-                    last_confirmed=datetime.now(timezone.utc).date().isoformat(),
+                    last_confirmed=today_iso,
+                    kind=bo.get("kind"),
                 )
                 refs = bo.get("evidence_refs") or []
                 relevant_ev = _resolve_evidence_by_refs(items, refs)
@@ -204,22 +223,22 @@ class UpdateBeliefsStep:
                 )
 
                 # Flag for re-evaluation if:
-                # 1. Confidence dropped from the previous value, OR
-                # 2. Status was explicitly set to contested by the LLM
-                if action == "update":
-                    if new_status == "contested":
-                        contested_keys.append(belief_key)
-                        store.mark_contested(belief_key)
-                        stats["contested"] += 1
-                        logger.info("[UpdateBeliefsStep] marked contested: %s", belief_key)
-                    elif _CONFIDENCE_RANK.get(new_confidence, 1) < _CONFIDENCE_RANK.get(prev_confidence, 1):
-                        contested_keys.append(belief_key)
-                        store.mark_contested(belief_key)
-                        stats["contested"] += 1
-                        logger.info(
-                            "[UpdateBeliefsStep] confidence drop %s→%s on %s → queued for re-eval",
-                            prev_confidence, new_confidence, belief_key,
-                        )
+                # 1. Status was set to contested (applies to BOTH create and update —
+                #    a fresh-but-contested belief needs the reevaluator too), OR
+                # 2. Confidence dropped from a known previous value (update only).
+                if new_status == "contested":
+                    contested_keys.append(belief_key)
+                    store.mark_contested(belief_key)
+                    stats["contested"] += 1
+                    logger.info("[UpdateBeliefsStep] marked contested: %s", belief_key)
+                elif action == "update" and _CONFIDENCE_RANK.get(new_confidence, 1) < _CONFIDENCE_RANK.get(prev_confidence, 1):
+                    contested_keys.append(belief_key)
+                    store.mark_contested(belief_key)
+                    stats["contested"] += 1
+                    logger.info(
+                        "[UpdateBeliefsStep] confidence drop %s→%s on %s → queued for re-eval",
+                        prev_confidence, new_confidence, belief_key,
+                    )
 
                 if action == "create":
                     stats["created"] += 1
@@ -239,7 +258,7 @@ class UpdateBeliefsStep:
 
         logger.info("[UpdateBeliefsStep] domain=%s stats=%s", self.domain, stats)
         ctx.belief_update_result = {
-            "status": "ok",
+            "status": "partial_error" if stats["errors"] > 0 else "ok",
             "domain": self.domain,
             "stats": stats,
             "contested_keys": contested_keys,

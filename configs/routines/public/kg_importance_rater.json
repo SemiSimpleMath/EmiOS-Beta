@@ -1,6 +1,6 @@
 {
   "id": "kg_importance_rater",
-  "enabled": true,
+  "enabled": false,
   "name": "KG importance rater (nodes + edges)",
   "aliases": [],
   "runner": "function",
@@ -13,5 +13,5 @@
     "type": "interval",
     "min_interval_seconds": 1800
   },
-  "notes": "Rates any node/edge with NULL importance via me::edge_importance_rater + me::importance_rater. Cheap, idempotent, runs every 30 min so the wiki refresh's importance pre-filter has scores by the time it runs."
+  "notes": "[DISABLED 2026-05-10 POST-NUKE \u2014 re-enable when KG pipeline rebuilt] Rates any node/edge with NULL importance via me::edge_importance_rater + me::importance_rater. Cheap, idempotent, runs every 30 min so the wiki refresh's importance pre-filter has scores by the time it runs."
 }

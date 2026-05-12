@@ -174,6 +174,26 @@
                 </div>
             </div>
 
+            <!-- Conversation Starter -->
+            <div class="settings-section">
+                <h2>Conversation Starter</h2>
+                <p class="section-hint">How often {{ assistant_name|default('Emi') }} initiates a chat with you when you're at the keyboard.</p>
+
+                <div class="form-group">
+                    <label for="conversation_starter_frequency">Frequency</label>
+                    <select id="conversation_starter_frequency">
+                        <option value="off">Off — never initiate</option>
+                        <option value="rare">Rare — at most once every ~3 hours</option>
+                        <option value="regular">Regular — about once every 20 minutes when at keyboard</option>
+                        <option value="frequent">Frequent — as often as every ~5 minutes</option>
+                    </select>
+                    <p class="form-hint">
+                        The assistant still decides per-attempt whether the moment is right (you're focused, mid-task, etc.).
+                        This control sets the minimum spacing between attempts.
+                    </p>
+                </div>
+            </div>
+
             <!-- Voice -->
             <div class="settings-section">
                 <h2>Voice</h2>

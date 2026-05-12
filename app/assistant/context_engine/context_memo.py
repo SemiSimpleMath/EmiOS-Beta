@@ -87,7 +87,6 @@ def write_memo_to_blackboard(
     The message is NOT shown in the user-facing chat feed (is_chat=False).
     ContextInjector reads it and prepends it to Emi's context block.
     """
-    from datetime import datetime, timezone
     from app.assistant.ServiceLocator.service_locator import DI
     from app.assistant.utils.pydantic_classes import Message
 

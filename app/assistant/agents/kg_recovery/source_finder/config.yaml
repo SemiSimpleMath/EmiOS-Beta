@@ -1,0 +1,12 @@
+name: kg_recovery::source_finder
+class_name: Agent
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.4-mini"
+  model_tier: "smart"
+allowed_tools: []
+except_tools: []
+user_context_items:
+  - node_descriptor
+  - candidate_messages
+system_context_items: []

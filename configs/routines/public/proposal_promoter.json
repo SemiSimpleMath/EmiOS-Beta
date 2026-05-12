@@ -1,6 +1,6 @@
 {
   "id": "proposal_promoter",
-  "enabled": true,
+  "enabled": false,
   "name": "Claim Proposal Promoter (nightly)",
   "aliases": [],
   "runner": "function",
@@ -14,5 +14,5 @@
     "time_local": "02:30",
     "quiet_hours_ok": true
   },
-  "notes": "Nightly sweep over pending claim_proposals. Auto-promotes anything resolvable + conflict-free. Held proposals (conflicts, lock violations, placeholders) stay in the review queue. Manual trigger: POST /kg-proposals/run-promoter (dry-run) or ?commit=1."
+  "notes": "[DISABLED 2026-05-10 POST-NUKE \u2014 re-enable when KG pipeline rebuilt] Nightly sweep over pending claim_proposals. Auto-promotes anything resolvable + conflict-free. Held proposals (conflicts, lock violations, placeholders) stay in the review queue. Manual trigger: POST /kg-proposals/run-promoter (dry-run) or ?commit=1."
 }

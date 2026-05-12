@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Timelines</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/timeline.css') }}">
+    <style>
+        .listings-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 12px;
+            margin-top: 16px;
+        }
+        .listing-card {
+            background: #1e1e2e;
+            border: 1px solid #2a2a3a;
+            border-radius: 8px;
+            padding: 14px 16px;
+            text-decoration: none;
+            color: #d8d8e0;
+            transition: transform 0.1s, border-color 0.1s, background 0.1s;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .listing-card:hover {
+            transform: translateY(-2px);
+            border-color: #7c5af7;
+            background: #25253a;
+        }
+        .listing-card .lc-name {
+            font-size: 1.05em;
+            font-weight: 600;
+        }
+        .listing-card .lc-meta {
+            font-size: 0.8em;
+            color: #8888a0;
+            display: flex;
+            justify-content: space-between;
+        }
+        .listing-card .lc-imp {
+            color: #f76b6b;
+            font-weight: 600;
+        }
+        .listing-card .lc-count {
+            font-size: 0.75em;
+            color: #6f6f88;
+        }
+        .empty-state {
+            background: #1e1e2e;
+            border: 1px dashed #3a3a4f;
+            padding: 32px;
+            border-radius: 8px;
+            text-align: center;
+            color: #8888a0;
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <header class="page-header">
+            <a class="back-link" href="/chat_bot"><i class="fas fa-arrow-left"></i> Back to Chat</a>
+            <h1><i class="fas fa-stream"></i> Life Timelines</h1>
+            <p class="entity-desc">Pick a person to see their life timeline — major events, durations, and gaps.</p>
+        </header>
+
+        {% if listings %}
+            <div class="listings-grid">
+                {% for l in listings %}
+                <a class="listing-card" href="{{ l.href }}">
+                    <span class="lc-name">{{ l.label }}</span>
+                    <span class="lc-meta">
+                        <span>{{ l.category or '—' }}</span>
+                        {% if l.importance is not none %}
+                            <span class="lc-imp">{{ "%.1f"|format(l.importance) }}</span>
+                        {% endif %}
+                    </span>
+                    <span class="lc-count">{{ l.fact_count }} dated fact{{ "" if l.fact_count == 1 else "s" }}</span>
+                </a>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <p>No entities have enough dated facts for a timeline yet.</p>
+                <p>Once the KG pipeline + importance rater catch up, this list will populate.</p>
+            </div>
+        {% endif %}
+    </div>
+</body>
+</html>

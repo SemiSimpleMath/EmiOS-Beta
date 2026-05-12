@@ -1,0 +1,14 @@
+name: entity_cards::summary_writer
+class_name: Agent
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.4-mini"
+  model_tier: "smart"
+allowed_tools: []
+except_tools: []
+user_context_items:
+  - entity_descriptor
+  - alias_line
+  - card_bullets
+system_context_items:
+  - resource_user_data

@@ -1,13 +1,20 @@
 """
-Entity Catalog - Fast in-memory index for entity detection
-Preloads all active entity cards and their aliases for O(1) lookup
+Entity Catalog - Fast in-memory index for entity detection.
+
+Reads from entity_card_v2 directly. Each active card contributes:
+  - card_title  → the canonical entity name (the catalog key)
+  - card_aliases → additional match strings
+
+This serves both kg-backed cards (where the builder populates
+card_title/card_aliases from the underlying KG node) and non-kg
+cards (where the user provides them directly). No KG join.
 """
 
 import threading
 from collections import defaultdict
 from typing import Dict, Set, Tuple, List
 from app.models.base import get_session
-from app.assistant.entity_management.entity_cards import EntityCard
+from app.assistant.entity_management.entity_card_v2 import EntityCardV2
 from app.assistant.utils.logging_config import get_logger
 import json
 
@@ -102,23 +109,29 @@ class EntityCatalog:
             self._load_from_db()
 
     def _load_from_db(self) -> None:
-        """Internal loader. Assumes caller holds lock when needed."""
+        """Internal loader. Assumes caller holds lock when needed.
+
+        Scans entity_card_v2 directly. card_title is the canonical name;
+        card_aliases is a JSON list of additional match strings. Both kg
+        and non-kg cards index the same way.
+        """
         if self._loaded:
             return
 
         logger.info("Loading Entity Catalog from database...")
         session = get_session()
         try:
-            cards = (
-                session.query(EntityCard)
-                .filter(EntityCard.is_active == True)  # noqa: E712
+            rows = (
+                session.query(EntityCardV2.card_title, EntityCardV2.card_aliases)
+                .filter(EntityCardV2.is_active == True)  # noqa: E712
+                .filter(EntityCardV2.card_title.isnot(None))
                 .all()
             )
         except Exception as e:
             logger.debug(
-                "EntityCatalog: could not load entity_cards (table may not exist yet on fresh install): %s", e
+                "EntityCatalog: could not load entity cards (tables may not exist yet on fresh install): %s", e
             )
-            cards = []
+            rows = []
             self._loaded = True
             return
         finally:
@@ -128,8 +141,8 @@ class EntityCatalog:
         single_word_count = 0
         multi_word_count = 0
 
-        for card in cards:
-            canonical = card.entity_name
+        for card_title, aliases in rows:
+            canonical = card_title
             if not canonical:
                 continue
 
@@ -137,13 +150,7 @@ class EntityCatalog:
             entity_count += 1
 
             names: List[str] = [canonical]
-            # Processed aliases
-            names.extend(_ensure_list(card.aliases))
-            # Original KG aliases
-            names.extend(_ensure_list(card.original_aliases))
-
-            # If you want to also include EntityCardIndex terms later,
-            # you can add them here. For now we stick to names and aliases.
+            names.extend(_ensure_list(aliases))
 
             for raw_name in names:
                 tokens = _normalize_name_to_tokens(raw_name)

@@ -1,0 +1,147 @@
+{
+  "schema_version": 1,
+  "week_end": "2026-05-10",
+  "week_start": "2026-05-04",
+  "days_included": [
+    "2026-05-04",
+    "2026-05-05",
+    "2026-05-06",
+    "2026-05-07",
+    "2026-05-08",
+    "2026-05-09"
+  ],
+  "days_missing": [
+    "2026-05-10"
+  ],
+  "generated_at_utc": "2026-05-11T14:03:17.982391+00:00",
+  "insights": {
+    "week_label": "Week of May 4-9, 2026",
+    "executive_summary": [
+      "Sleep quality and duration were the most prominent issue: the week began with excellent rest but quickly devolved into a stretch of 5 straight nights of short, fragmented, or poor sleep, leading to accumulated sleep debt, daytime headaches, and repeated trialing of evening sleep-improvement tactics.",
+      "Significant nutrition routine change: on May 7 (Thu), Jukka officially ended his longstanding intermittent fasting habit, opting instead for a calorie-restricted, portion-controlled approach, reflected in both meal timing and content for the rest of the week.",
+      "Work was consistently completed during structured 9:00–16:30 blocks (May 5–8), with a notable rhythm of deep, focus-driven coding/personal projects on May 7 and a lighter, computer-focused flow on Saturday May 9.",
+      "Wellness micro-habits—hydration, standing, finger stretches—were tracked and consistently maintained (4+ days), even on low-energy or headache-recovery days, suggesting a robust baseline adherence.",
+      "Family logistics, caregiving, and pet care were ever-present: mornings and evenings regularly included dog walks (user typically handles evenings), school/admin forms, food duties, and robust family/social rituals (notably, Friday Night Meats on May 8).",
+      "Communication and digital organization demands were high—especially on May 8–9—with heavy assistant use for outbound email, calendar management, and family planning.",
+      "Recurring household automation and routine interruptions (Ring, light automations) surfaced several times, suggesting systematic reliability issues.",
+      "Even with energy constraints, deliberate efforts were made to maintain or improve routines—especially in sleep hygiene (liquid taper, CPAP, early lights-out) and nutrition (GERD-aware meal planning, portion control)."
+    ],
+    "dominant_themes": [
+      {
+        "theme": "Fragmented, insufficient sleep with mounting sleep debt and targeted mitigation attempts",
+        "frequency": "May 5–9 (5 consecutive nights)",
+        "significance": "This trend drove daytime energy lows, created or exacerbated headaches, and demanded explicit behavioral adaptations (evening liquid taper, CPAP readiness, earlier bedtimes). Addressing sleep continuity became a clear recovery goal by week's end.",
+        "evidence": [
+          "May 5: 'terrible' 5.5 hours of sleep, evening wind-down structured to protect sleep",
+          "May 6–7: Sub-7 hour nights, split or low-quality segments, with ongoing daytime fatigue",
+          "May 8: 'Good' but subjectively fragmented 6.5 hours; intent to 'not wake up' at night",
+          "May 9: Short, fragmented sleep again ('bad' quality), sluggish baseline and more headache management"
+        ]
+      },
+      {
+        "theme": "Major dietary pattern change: intermittent fasting replaced by calorie restriction with portion control",
+        "frequency": "Switch on May 7, then sustained through May 8–9 (and explicitly discussed, tracked)",
+        "significance": "A rare, explicit modification to nutrition strategy affecting both daily meal timing and food choices; this may alter routine energy, digestive outcomes, and weight management trends.",
+        "evidence": [
+          "May 7: 'Formally ended intermittent fasting and began a calorie-reduced, portion-control approach...'",
+          "May 8: 'Switched from intermittent fasting to calorie restriction', tracking intake, meal reminders",
+          "May 9: GERD constraint awareness and explicit mention of tomato/chocolate/wine triggers at dinner"
+        ]
+      },
+      {
+        "theme": "Wellness habits (hydration, standing, finger stretch) embedded as persistent, resilient micro-behaviours",
+        "frequency": "Visible and documented on 5–6 days (May 4–9)",
+        "significance": "Despite fluctuating energy and health, user consistently accepted or complied with >70% of reminders, indicating these micro-habits are robust and resilient anchors supporting baseline wellbeing.",
+        "evidence": [
+          "May 5: 'hydration, standing, and finger-stretch reminders ... consistently accepted and acted on'",
+          "May 6–8: multiple reminders logged and accepted throughout tensile workdays",
+          "May 9: headache-recovery marked by repeated hydration, standing break, and finger stretch compliance"
+        ]
+      },
+      {
+        "theme": "Family logistics, dog care, and caregiving integrated into daily flow",
+        "frequency": "Every day; multiple blocks per day",
+        "significance": "User's family and pet responsibilities (school forms, family time, dog walks/feeding) are continuous and structure work and recovery periods, while Friday Night Meats and flexible family dinners act as prime social anchors.",
+        "evidence": [
+          "May 4: 'Family logistics while Katy was sick', multi-pronged caregiving, dog walks",
+          "May 6–8: Dinner prep, family time, Peter's exams, dog walking and feeding timing discussed in detail",
+          "May 8–9: Dog care (evening walks by user), routine family-time and key social events (Friday Night Meats, family dinners)"
+        ]
+      },
+      {
+        "theme": "Assistant as admin/communication copilot: supporting routines, logistics, and outbound info",
+        "frequency": "Consistently active May 5–9 (4+ days)",
+        "significance": "High reliance on digital tools for outbound communication (emails, reminders), family/ritual planning, and work reentry, reflecting both task complexity and high trust in assistant-memory integration.",
+        "evidence": [
+          "May 5: 'explicitly asked for 1-2 nudges at lunch... reminded to clock back in after lunch'",
+          "May 8–9: Multiple successful/failed outbound emails, ‘Friday Night Meats’ and travel coordination, auto-mailing files and updates"
+        ]
+      }
+    ],
+    "sleep_pattern": "Sleep quality declined sharply after May 4’s excellent (~9.5 hour) rest, with five consecutive nights (May 5–9) of sub-7-hour, fragmented, or low-quality sleep, leading to clear sleep debt and symptoms (headaches, energy drop). Active experimentation with mitigation (liquid taper, early lights-out, CPAP consistency) began May 8 and 9.",
+    "health_pattern": "The week showed a gradual decline in baseline physical and mental energy, primarily linked to cumulative sleep debt and occasional headaches (May 8–9). Despite low energy, adherence to hydration, micro-breaks, and structured wind-downs remained high. A pivot in nutrition approach and GERD-aware food restrictions suggest increasing focus on long-term health management.",
+    "work_pattern": "Work was steady, with full 9:00–16:30 blocks (May 5–8), often under suboptimal sleep/energy but consistently completed. Coding/personal project time was marked by deep, uninterrupted blocks (especially on May 7). There was deliberate protection of post-work/family/social time, and digital/assistant tools are increasingly leveraged for admin and reentry. Off-work Saturday (May 9) was characterized by long, undemanding desk time by choice.",
+    "belief_candidates": [
+      {
+        "statement": "User has migrated from intermittent fasting to a calorie-restricted, portion-control eating plan as of May 7, 2026.",
+        "domain": "food",
+        "confidence": "high",
+        "conditions": "Belief applies on/after May 7, 2026, unless reverted in future summaries.",
+        "evidence": [
+          "May 7: 'Formally ended intermittent fasting and began a calorie-reduced, portion-control approach...'",
+          "May 8: 'Switched from intermittent fasting to calorie restriction', tracked in system reminders"
+        ]
+      },
+      {
+        "statement": "Consistent sleep fragmentation and sub-7-hour nights prompt deliberate, structured evening wind-downs (liquid taper, CPAP, early lights-out) aimed at improving continuity.",
+        "domain": "sleep",
+        "confidence": "high",
+        "conditions": "Observed every night May 5–9 (inclusive) and reflected in both behavior and direct user intent.",
+        "evidence": [
+          "May 5: Evening routines constructed to protect/prolong sleep after a poor night",
+          "May 8: 'I would like to not wake up...', introduced liquid taper and lights-out timing",
+          "May 9: Continued short, fragmented sleep with repeated sleep-improvement nudges"
+        ]
+      },
+      {
+        "statement": "Wellness micro-habits (hydration, standing, finger stretches) are embedded in user’s daily life, even during low-energy or disrupted health periods.",
+        "domain": "wellness",
+        "confidence": "high",
+        "conditions": "Pattern holds across workdays and weekends, regardless of energy level or presence of headache.",
+        "evidence": [
+          "May 5: Micro-break and hydration routines supported full workday under sleep debt",
+          "May 7: 'Hydration, standing breaks, and finger stretches were repeatedly prompted and usually accepted'",
+          "May 9: High compliance with hydration/finger stretch breaks during headache recovery, as tracked in system"
+        ]
+      },
+      {
+        "statement": "Dog-care responsibilities are divided: Katy usually does morning walks, user typically handles evening walks and much of the feeding, with kids assisting with water bowls; dinner cues involve dogs waiting by the desk.",
+        "domain": "routine",
+        "confidence": "high",
+        "conditions": "Observed contextually on and after May 7, 2026.",
+        "evidence": [
+          "May 7: 'clarified: Katy usually does morning walks, user handles evenings and feeding'",
+          "May 8–9: Evening dog-walk consistently noted, user manages dinner cues and feeding"
+        ]
+      },
+      {
+        "statement": "Friday Night Meats is a protected, high-value weekly ritual for relaxation and family/sibling connection.",
+        "domain": "routine",
+        "confidence": "high",
+        "conditions": "Applies to Friday evenings (explicitly May 8, 2026, and treated as enduring unless revoked).",
+        "evidence": [
+          "May 8: 'Friday Night Meats... a way to relax a bit, see family—high-priority weekly ritual'",
+          "May 8–9: The event is coordinated each week, with invites and digital reminders"
+        ]
+      }
+    ],
+    "open_questions": [
+      "Will early liquid taper and bedtime routines produce measurable improvement in sleep continuity next week, or is further intervention required?",
+      "Can the user maintain consistent calorie-restriction/portion-control eating, and will this have positive health or energy impacts over the coming weeks?",
+      "Will underlying home automation and smart routine disruptions (Ring, light routines) escalate or necessitate systematic troubleshooting?",
+      "How sustainable is high adherence to micro wellness habits as overall energy and sleep debt fluctuate?",
+      "Does the user’s heavy reliance on digital assistant for emailing/communication introduce new memory or reliability gaps, or will workflow continue to improve?"
+    ]
+  },
+  "archive_path": "E:\\EmiAi_sqlite\\week_context\\2026\\19\\resource_weekly_insights.json"
+}

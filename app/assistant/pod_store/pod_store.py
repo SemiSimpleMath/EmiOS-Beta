@@ -74,10 +74,10 @@ class PodStore:
     def put(self, pod: Pod) -> None:
         """Insert a new pod or update an existing one (idempotent by pod_id).
 
-        Also writes (or refreshes) a thin ``kg_node_metadata`` mirror row so
-        edges from Entity / Event / State nodes can target this pod. See
-        ``kg_mirror.ensure_pod_node`` for the projection rules and the
-        edge-direction convention (KG-node → Pod).
+        pod_store is the sole source of truth for pod content. The KG
+        references pods by URI directly (no kg_node mirror); the promoter
+        checks `pod_kind_registry.is_kg_admissible()` when writing edges
+        with `datapod:*` endpoints.
         """
         with self._lock:
             session = get_session()
@@ -101,20 +101,6 @@ class PodStore:
                 raise
             finally:
                 session.close()
-
-        # Mirror outside the pod_store session — kg_mirror opens its own
-        # session against kg_node_metadata. Best-effort: a mirror failure
-        # logs but doesn't roll back the pod write (the pod itself is
-        # still useful even without the KG projection).
-        try:
-            from app.assistant.pod_store.kg_mirror import ensure_pod_node
-            ensure_pod_node(pod)
-        except Exception as e:
-            from app.assistant.utils.logging_config import get_logger
-            get_logger(__name__).warning(
-                "PodStore.put: kg_mirror.ensure_pod_node failed for %s: %s",
-                pod.pod_id, e,
-            )
 
     def get(self, pod_id: str) -> Optional[Pod]:
         with self._lock:

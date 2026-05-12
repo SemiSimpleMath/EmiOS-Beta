@@ -1,0 +1,27 @@
+## Card subject
+
+{{ entity_descriptor }}
+
+## Section
+
+{{ section_name }}
+
+## Maximum output bullets
+
+{{ max_bullets }}
+
+## Candidate bullets (output of upstream renderer — pick the best)
+
+{{ candidate_bullets }}
+
+## Your job
+
+Pick the ≤ {{ max_bullets }} most identity-defining bullets for this
+section. Fuse closely-related kept bullets. Drop conversational
+specifics, minor opinions, and one-off observations. Cards are
+curated, not exhaustive.
+
+Return JSON:
+{ "bullets": [ { "bullet_text": "...", "source_bullet_ids": ["b1","b2"] }, ... ] }
+
+Every kept input bullet_id must appear in exactly one output bullet.

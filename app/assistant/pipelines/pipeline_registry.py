@@ -54,10 +54,6 @@ def _ensure_defaults_registered() -> None:
         "app.assistant.pipelines.dayflow.pipeline", fromlist=["DayFlowPipeline"]
     ).DayFlowPipeline())
 
-    _try_register("entity_cards", lambda: __import__(
-        "app.assistant.pipelines.entity_cards.pipeline", fromlist=["EntityCardsPipeline"]
-    ).EntityCardsPipeline())
-
     _try_register("kg_pipeline", lambda: __import__(
         "app.assistant.pipelines.kg_pipeline.pipeline", fromlist=["KGPipeline"]
     ).KGPipeline())
@@ -80,10 +76,6 @@ def _ensure_defaults_registered() -> None:
     _try_register("kg_maintenance_pipeline", lambda: __import__(
         "app.assistant.pipelines.kg_maintenance_pipeline.pipeline", fromlist=["KGMaintenancePipeline"]
     ).KGMaintenancePipeline())
-
-    _try_register("entity_card_maintenance_pipeline", lambda: __import__(
-        "app.assistant.pipelines.entity_card_maintenance_pipeline.pipeline", fromlist=["EntityCardMaintenancePipeline"]
-    ).EntityCardMaintenancePipeline())
 
 
 def resolve_pipeline(pipeline_id: str) -> Optional[Pipeline]:

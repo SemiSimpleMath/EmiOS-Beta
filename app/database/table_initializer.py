@@ -80,113 +80,21 @@ def initialize_music_tables():
 
 
 def initialize_entity_card_tables():
-    """
-    Create entity card tables (core feature)
-    Always runs on startup
-    
-    Tables (5):
-    - entity_cards, entity_card_usage, entity_card_index
-    - entity_card_run_log, description_run_log
-    """
-    logger.info("Initializing entity card tables...")
+    """Create v2 entity card tables.
 
-    from app.assistant.entity_management.entity_cards import EntityCard  # noqa: F401 – registers table with Base.metadata
+    Tables (4):
+    - entity_card_v2, entity_card_section, entity_card_bullet,
+      entity_card_bullet_source_node
+    """
+    logger.info("Initializing entity card v2 tables...")
+
+    # Importing the module registers all four v2 tables with Base.metadata
+    # via their class definitions.
+    from app.assistant.entity_management import entity_card_v2  # noqa: F401
 
     engine = get_current_engine()
     Base.metadata.create_all(engine, checkfirst=True)
-    logger.info("✅ Entity card tables initialized (5 tables)")
-
-    _seed_entity_cards_from_resources()
-
-
-def _seed_entity_cards_from_resources():
-    """Re-create entity cards from resource files if the table is empty.
-
-    This handles the case where the database was deleted (e.g. to pick up
-    schema changes) but SETUP_COMPLETE=true so the wizard won't run again.
-    Skips entirely if setup hasn't completed yet (no identity data to seed with).
-    """
-    from app.assistant.utils.path_utils import setup_complete
-    if not setup_complete():
-        return
-    import json
-    from pathlib import Path
-    from app.models.base import get_session
-    from app.assistant.entity_management.entity_cards import EntityCard
-
-    session = get_session()
-    try:
-        if session.query(EntityCard).first() is not None:
-            return
-
-        from app.assistant.utils.path_utils import get_resources_dir
-        user_data_file = get_resources_dir() / "user" / "resource_user_data.json"
-        if not user_data_file.exists():
-            return
-
-        data = json.loads(user_data_file.read_text(encoding="utf-8"))
-        full_name = data.get("full_name")
-        if not full_name:
-            return
-
-        import uuid
-        pronouns = data.get("pronouns", {})
-        subj = pronouns.get("subjective", "they")
-        obj = pronouns.get("objective", "them")
-
-        user_card = EntityCard(
-            id=str(uuid.uuid4()),
-            entity_name=full_name,
-            entity_type="Person",
-            summary=f"{full_name} is the user of this AI assistant (pronouns: {subj}/{obj}).",
-            key_facts=json.dumps([
-                f"Name: {full_name}",
-                f"Pronouns: {subj}/{obj}",
-                f"Birthdate: {data.get('birthdate', 'Not specified')}",
-                f"Job: {data.get('job', 'Not specified')}",
-            ]),
-            relationships=json.dumps([]),
-            aliases=json.dumps([
-                full_name,
-                data.get("first_name", full_name),
-                data.get("preferred_name", full_name),
-            ]),
-            card_metadata=json.dumps({}),
-            is_active=True,
-            usage_count=0,
-        )
-        session.add(user_card)
-
-        for person in data.get("important_people", []):
-            name = (person.get("name") or "").strip()
-            if not name:
-                continue
-            rel = person.get("relationship", "acquaintance")
-            key_facts = [f"Name: {name}", f"Relationship: {rel}"]
-            if person.get("birthdate"):
-                key_facts.append(f"Birthdate: {person['birthdate']}")
-
-            session.add(EntityCard(
-                id=str(uuid.uuid4()),
-                entity_name=name,
-                entity_type="Person",
-                summary=f"{name} is {full_name}'s {rel}.",
-                key_facts=json.dumps(key_facts),
-                relationships=json.dumps([f"{rel} {full_name}"]),
-                aliases=json.dumps([name]),
-                card_metadata=json.dumps({}),
-                is_active=True,
-                usage_count=0,
-            ))
-
-        session.commit()
-        count = session.query(EntityCard).count()
-        logger.info("Seeded %d entity card(s) from resource_user_data.json", count)
-    except Exception as e:
-        session.rollback()
-        logger.error("Failed to seed entity cards from resources: %s", e, exc_info=True)
-    finally:
-        session.close()
+    logger.info("✅ Entity card v2 tables initialized (4 tables)")
 
 
 def initialize_news_tables():
@@ -363,6 +271,8 @@ def _seed_kg_core_nodes():
             confidence=1.0,
             importance=1.0,
             source="seed",
+            confidence_tier="axiom",
+            locked_by_user_at=now,
             created_at=now,
             updated_at=now,
         )
@@ -380,6 +290,8 @@ def _seed_kg_core_nodes():
             confidence=1.0,
             importance=1.0,
             source="seed",
+            confidence_tier="axiom",
+            locked_by_user_at=now,
             created_at=now,
             updated_at=now,
         )
@@ -401,6 +313,8 @@ def _seed_kg_core_nodes():
             confidence=1.0,
             importance=1.0,
             source="seed",
+            confidence_tier="axiom",
+            locked_by_user_at=now,
             created_at=now,
             updated_at=now,
         )
@@ -413,13 +327,12 @@ def _seed_kg_core_nodes():
             source_id=user_node.id,
             target_id=state_node.id,
             relationship_type="Participant",
-            relationship_descriptor="user being assisted",
             sentence=f"{user_label} is the user being assisted in this relationship.",
             attributes={"role": "user", "role_type": "recipient"},
             confidence=1.0,
             importance=1.0,
             source="seed",
-            original_message_timestamp=now,
+            confidence_tier="axiom",
             created_at=now,
             updated_at=now,
         )
@@ -429,13 +342,12 @@ def _seed_kg_core_nodes():
             source_id=assistant_node.id,
             target_id=state_node.id,
             relationship_type="Participant",
-            relationship_descriptor="assistant providing help",
             sentence=f"{assistant_label} is the AI assistant in this relationship.",
             attributes={"role": "assistant", "role_type": "provider"},
             confidence=1.0,
             importance=1.0,
             source="seed",
-            original_message_timestamp=now,
+            confidence_tier="axiom",
             created_at=now,
             updated_at=now,
         )

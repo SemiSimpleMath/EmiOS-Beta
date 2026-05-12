@@ -1663,6 +1663,7 @@ def update_assistant_core():
         identity_in = data.get('assistant_identity') or {}
         relationship_in = data.get('relationship') or {}
         guidelines_in = data.get('chat_guidelines') or {}
+        conversation_starter_in = data.get('conversation_starter') or {}
 
         current['assistant_identity'].update({
             k: v for k, v in identity_in.items() if v is not None
@@ -1672,6 +1673,11 @@ def update_assistant_core():
         })
         current['chat_guidelines'].update({
             k: v for k, v in guidelines_in.items() if v is not None
+        })
+        # conversation_starter group is new (2026-05-12) — initialize if missing
+        cs_block = current.setdefault('conversation_starter', {'frequency': 'regular'})
+        cs_block.update({
+            k: v for k, v in conversation_starter_in.items() if v is not None
         })
 
         update_resource_data('assistant_core', current)

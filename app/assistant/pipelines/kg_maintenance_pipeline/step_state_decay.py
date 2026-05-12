@@ -82,6 +82,7 @@ def run(ctx: PipelineContext) -> dict:
                 Node.id, Node.label, Node.node_type, Node.start_date,
                 Node.created_at, Node.updated_at, Node.attributes,
                 Node.locked_by_user_at, Node.importance,
+                Node.first_observed, Node.last_observed,
             )
             .filter(Node.node_type.in_(("State", "Event")))
             .filter(Node.end_date.is_(None))
@@ -89,14 +90,17 @@ def run(ctx: PipelineContext) -> dict:
         )
 
         for row in candidates:
-            nid, label, ntype, start_date, created_at, updated_at, attributes, locked_at, importance = row
+            (
+                nid, label, ntype, start_date, created_at, updated_at,
+                attributes, locked_at, importance,
+                first_observed, last_observed,
+            ) = row
             scanned += 1
-            # Decay anchor: prefer real start_date; else the "first_observed"
-            # floor carried from the originating proposal's evidence (stored
-            # in attributes); else fall back to created_at as last resort.
+            # Decay anchor: prefer real start_date; else the first_observed
+            # column (promoted from JSON 2026-05-11) — the originating chat
+            # message timestamp; else fall back to created_at as last resort.
             # All sources may arrive tz-aware (legacy data) or naive — coerce
             # to naive UTC to match `now` and the rest of the comparisons.
-            first_observed = _extract_first_observed(attributes)
             reference_start = _to_naive_utc(start_date or first_observed or created_at)
             if reference_start is None:
                 continue  # nothing to anchor decay against
@@ -127,21 +131,21 @@ def run(ctx: PipelineContext) -> dict:
                 continue
 
             # Re-observed since expected end → keep alive. Use ONLY
-            # ``attributes.last_observed`` here. Earlier fallback to
-            # ``updated_at`` poisoned the filter — pagerank/description
-            # maintenance writes bump updated_at on every node every run, so
-            # 85% of nodes (those without last_observed) all looked
-            # "recently observed" no matter how stale the underlying state
-            # was. Result: 0 auto_decay closures despite 1,282+ candidates
-            # past their TTL.
+            # ``Node.last_observed`` here (promoted from JSON 2026-05-11).
+            # Earlier fallback to ``updated_at`` poisoned the filter —
+            # pagerank/description maintenance writes bump updated_at on
+            # every node every run, so nodes without last_observed all
+            # looked "recently observed" no matter how stale the underlying
+            # state was. Result: 0 auto_decay closures despite 1,282+
+            # candidates past their TTL.
             #
             # Without last_observed populated, we treat the node as "not
             # re-observed since promotion" → close per TTL. The promoter's
             # matched-existing path is responsible for stamping
             # last_observed when the same fact gets reasserted; that's the
             # only legitimate signal of re-observation.
-            last_observed = _extract_last_observed(attributes)
-            if last_observed and last_observed >= expected_end:
+            last_observed_naive = _to_naive_utc(last_observed)
+            if last_observed_naive and last_observed_naive >= expected_end:
                 skipped_recent_activity += 1
                 continue
 
@@ -239,12 +243,17 @@ def _to_naive_utc(dt: Optional[datetime]) -> Optional[datetime]:
     return dt
 
 
-def _extract_first_observed(attributes):
-    """Pull the 'first_observed' timestamp from node attributes, if present.
+# first_observed and last_observed were promoted from attributes JSON to
+# first-class Node columns on 2026-05-11. The query above now selects the
+# columns directly. These extractor helpers are retained for any caller
+# that still passes an attributes dict, but new callers should read
+# Node.first_observed / Node.last_observed instead.
 
-    Stored by the proposal writer from the originating evidence's
-    observed_at timestamp. Lets decay compute an anchor date for states
-    that don't have a real start_date (beliefs, preferences).
+def _extract_first_observed(attributes):
+    """[Deprecated] Pull first_observed from attributes JSON.
+
+    Prefer reading Node.first_observed (column) directly. This helper
+    exists only for legacy callers that operate on attributes dicts.
     """
     if not attributes:
         return None
@@ -269,14 +278,10 @@ def _extract_first_observed(attributes):
 
 
 def _extract_last_observed(attributes) -> Optional[datetime]:
-    """Pull the 'last_observed' timestamp from node attributes, if present.
+    """[Deprecated] Pull last_observed from attributes JSON.
 
-    Bumped by ``proposal_promoter._refresh_on_reobservation`` each time a
-    new proposal matches this node. Decay uses it as the authoritative
-    "has this been re-observed recently?" signal — the noisier
-    ``updated_at`` column was tried as a fallback in an earlier version
-    but had to be removed (every pagerank/description maintenance write
-    bumped updated_at, masking real silence).
+    Prefer reading Node.last_observed (column) directly. This helper
+    exists only for legacy callers that operate on attributes dicts.
     """
     if not attributes:
         return None

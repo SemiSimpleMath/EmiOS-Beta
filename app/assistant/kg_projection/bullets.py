@@ -140,9 +140,9 @@ def render_bullets(neighborhood: EntityNeighborhood) -> List[Bullet]:
 
     # ---- misc edges ----
     for edge, target in neighborhood.misc_outgoing:
-        out.append(_misc_outgoing_bullet(edge, target, entity_id))
+        out.append(_misc_outgoing_bullet(edge, target))
     for source, edge in neighborhood.misc_incoming:
-        out.append(_misc_incoming_bullet(source, edge, entity_id))
+        out.append(_misc_incoming_bullet(source, edge))
 
     return out
 
@@ -311,7 +311,7 @@ def _goal_bullet(g: GoalTargeting, *, subkind: str) -> Bullet:
     )
 
 
-def _misc_outgoing_bullet(edge, target, entity_id: Optional[str]) -> Bullet:
+def _misc_outgoing_bullet(edge, target) -> Bullet:
     rel = (edge.relationship_type or "relates_to").replace("_", " ").lower()
     target_label = getattr(target, "label", "") or "(unlabeled)"
     node_tag = f" {{node:{target.id}}}" if getattr(target, "id", None) else ""
@@ -327,7 +327,7 @@ def _misc_outgoing_bullet(edge, target, entity_id: Optional[str]) -> Bullet:
     )
 
 
-def _misc_incoming_bullet(source, edge, entity_id: Optional[str]) -> Bullet:
+def _misc_incoming_bullet(source, edge) -> Bullet:
     rel = (edge.relationship_type or "relates_to").replace("_", " ").lower()
     source_label = getattr(source, "label", "") or "(unlabeled)"
     node_tag = f" {{node:{source.id}}}" if getattr(source, "id", None) else ""
@@ -405,11 +405,6 @@ def _read_metadata_bits(node, edge) -> str:
     end_prose = getattr(node, "end_date_prose", None)
     if end_prose:
         bits.append(f"end_date_prose: {end_prose}")
-    utt_ts = getattr(edge, "original_message_timestamp", None) if edge is not None else None
-    if utt_ts is not None:
-        utt_fmt = _fmt_date(utt_ts)
-        if utt_fmt:
-            bits.append(f"utterance: {utt_fmt}")
     date_conf = getattr(node, "start_date_confidence", None)
     if date_conf:
         bits.append(f"date_confidence: {date_conf}")

@@ -135,7 +135,7 @@ class BaseStep:
         """
         Load this step's dedicated config file if it exists.
 
-        Looks for: pipelines/dayflow_/step_configs/config_step_<step_id>.json
+        Looks for: pipelines/dayflow/step_configs/config_step_<step_id>.json
         Returns empty dict if not found.
         """
         step_id = (getattr(self, "step_id", "") or "").strip()

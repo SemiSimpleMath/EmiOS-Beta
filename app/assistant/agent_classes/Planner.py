@@ -4,7 +4,6 @@ from app.assistant.utils.pydantic_classes import Message, ToolResult
 from app.assistant.utils.history_formatting import format_recent_history
 
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.time_utils import get_local_time_str
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.lib.tool_registry.mcp_install_registry import list_installed_records
 
@@ -77,10 +76,6 @@ class Planner(Agent):
                 merged = [t for t in merged if t not in denyset]
 
         return merged
-
-    def _action_contract_required(self) -> bool:
-        # Planner-family agents always use strict action/action_input contract.
-        return True
 
     def build_recent_history(self, agent_messages):
         """

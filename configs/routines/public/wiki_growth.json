@@ -1,6 +1,6 @@
 {
   "id": "wiki_growth",
-  "enabled": true,
+  "enabled": false,
   "name": "Wiki growth (build new pages)",
   "aliases": [],
   "runner": "function",
@@ -16,5 +16,5 @@
     "time_local": "03:30",
     "quiet_hours_ok": true
   },
-  "notes": "Builds up to max_new_pages new prose pages each night for the highest-degree Entity nodes that don't yet have one. Runs after wiki_nightly_refresh (03:00). Pairs with refresh: refresh maintains existing pages, growth adds new ones. Tune max_new_pages to control daily LLM spend; raise temporarily if a one-off catch-up is needed."
+  "notes": "[DISABLED 2026-05-10 POST-NUKE \u2014 re-enable when KG pipeline rebuilt] Builds up to max_new_pages new prose pages each night for the highest-degree Entity nodes that don't yet have one. Runs after wiki_nightly_refresh (03:00). Pairs with refresh: refresh maintains existing pages, growth adds new ones. Tune max_new_pages to control daily LLM spend; raise temporarily if a one-off catch-up is needed."
 }

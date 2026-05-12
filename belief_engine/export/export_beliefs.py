@@ -38,17 +38,25 @@ def export_beliefs(*, domain: Optional[str] = None) -> Path:
 
     entries = []
     for b in beliefs:
+        # Decay v2: prefer the evidence-weighted snapshot band (computed nightly
+        # by RecomputeBeliefSnapshotStep). Stored b.confidence is the LLM's
+        # extraction-time read; the snapshot is what stays current as evidence
+        # accumulates and ages. Fall back to b.confidence if no snapshot yet
+        # (fresh belief between Update and Recompute).
+        effective_confidence = b.current_confidence_band or b.confidence
         entry: dict = {
             "belief_key": b.belief_key,
             "domain": b.domain,
             "statement": b.statement,
-            "confidence": b.confidence,
+            "confidence": effective_confidence,
             "scope": b.scope,
             "status": b.status,
             "observation_count": b.observation_count,
             "first_observed": b.first_observed,
             "last_confirmed": b.last_confirmed,
         }
+        if b.kind:
+            entry["kind"] = b.kind
         if b.conditions:
             entry["conditions"] = b.conditions
         entries.append(entry)

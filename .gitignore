@@ -382,6 +382,16 @@ emi_shared.css
 /scripts/unmerge_performance_hub.py
 /scripts/cleanup_collaboration_node.py
 /scripts/delete_grocery_stuff.py
+/scripts/recover_legacy_provenance.py
+/scripts/recover_phd_in_math.py
+/scripts/find_legacy_sources.py
+/scripts/repair_mismatched_evidence.py
+/scripts/apply_legacy_recovery.py
+/scripts/nuke_kg.py
+/scripts/migrate_add_confidence_tier.py
+/scripts/run_pipeline_batch.py
+/data/legacy_recovery/entity_cards_archive.md
+/data/legacy_recovery/
 configs/smart_home_tools.json
 
 # ── User-specific runtime data and configs ───────────────────────────────────

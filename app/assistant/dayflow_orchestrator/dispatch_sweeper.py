@@ -116,7 +116,7 @@ def sweep_stale_dispatches(now_utc: Optional[datetime] = None) -> int:
     """Close in-flight dispatches that are past their timeout.
 
     Soft timeout: no active manager invocation and >10 minutes old.
-    Hard timeout: >4 hours old regardless of invocation state.
+    Hard timeout: >2 hours old regardless of invocation state.
 
     When a dispatch is closed, the acted_on source item is revived to
     ``actionable`` only if it is still in ``dispatched`` state. Items the

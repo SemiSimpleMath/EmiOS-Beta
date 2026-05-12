@@ -576,12 +576,17 @@ def _load_window_items(session, window_id: Optional[str]) -> List[Dict[str, Any]
     from sqlalchemy import text as sql_text
     rows = session.execute(
         sql_text(
+            # Raw verbatim from unified_log_2026 — this is the "original
+            # source chat window" view. The entity-annotated version is
+            # rendered separately by _load_window_resolved (the nested
+            # details block in the template). Using ul.message directly
+            # avoids the COALESCE-to-resolved fallback that previously made
+            # both blocks show the same text whenever resolved_text existed.
             "SELECT wm.item_order, ul.role, ul.speaker_name, "
-            "       COALESCE(rm.resolved_text, ul.message) AS text, "
+            "       ul.message AS text, "
             "       ul.timestamp "
             "FROM kg_window_message wm "
-            "JOIN unified_log_2026 ul        ON ul.id = wm.unified_log_id "
-            "LEFT JOIN kg_resolved_message rm ON rm.unified_log_id = wm.unified_log_id "
+            "JOIN unified_log_2026 ul ON ul.id = wm.unified_log_id "
             "WHERE wm.window_id = :w "
             "ORDER BY wm.item_order"
         ),

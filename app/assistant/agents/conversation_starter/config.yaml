@@ -23,5 +23,6 @@ user_context_items:
   - recent_chat_excerpts
   - timeline_head
   - kg_random_topic
+  - life_gaps
   - resource_user_data
 

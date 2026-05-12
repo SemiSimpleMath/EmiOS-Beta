@@ -112,9 +112,32 @@ def _extract_search_terms(summary: str, email_sender: str, email_subject: str) -
 
 
 def _build_kg_context(search_terms: List[str], session) -> str:
-    """Run semantic search for each term and format results with neighborhoods."""
+    """Run semantic search for each term and format results with neighborhoods.
+
+    Edge endpoints may be pod URIs (no kg_node row by design). We use
+    outerjoin + pod_store fallback so pod-endpoint edges still surface.
+    """
     from app.assistant.kg_core.kg_utils.kg_tools import semantic_find_node_by_text
     from app.assistant.kg.db.knowledge_graph_db_sqlite import Edge, Node
+    from app.assistant.pod_store.pod_uri import POD_URI_RE
+
+    _pod_cache: Dict[str, tuple] = {}
+
+    def _resolve_endpoint(node_obj, endpoint_id: str):
+        """Return (label, node_type) for an edge endpoint; hydrate pod URIs from pod_store."""
+        if node_obj is not None:
+            return node_obj.label, node_obj.node_type
+        if not endpoint_id or not POD_URI_RE.fullmatch(endpoint_id):
+            return None, None
+        if endpoint_id in _pod_cache:
+            return _pod_cache[endpoint_id]
+        from app.assistant.pod_store.pod_store import PodStore
+        pod = PodStore().get(endpoint_id)
+        if pod is None:
+            _pod_cache[endpoint_id] = (None, None)
+        else:
+            _pod_cache[endpoint_id] = ((pod.one_liner or endpoint_id)[:200], "Pod")
+        return _pod_cache[endpoint_id]
 
     lines = []
     seen = set()
@@ -131,15 +154,21 @@ def _build_kg_context(search_terms: List[str], session) -> str:
                 lines.append(f"- [{node.node_type}] **{node.label}** (match={score:.2f}){desc}")
 
                 for edge, target in (
-                    session.query(Edge, Node).join(Node, Edge.target_id == Node.id)
+                    session.query(Edge, Node).outerjoin(Node, Edge.target_id == Node.id)
                     .filter(Edge.source_id == node.id).limit(5).all()
                 ):
-                    lines.append(f"    → {edge.relationship_type} → {target.label} [{target.node_type}]")
+                    t_label, t_type = _resolve_endpoint(target, edge.target_id)
+                    if t_label is None:
+                        continue
+                    lines.append(f"    → {edge.relationship_type} → {t_label} [{t_type}]")
                 for edge, source in (
-                    session.query(Edge, Node).join(Node, Edge.source_id == Node.id)
+                    session.query(Edge, Node).outerjoin(Node, Edge.source_id == Node.id)
                     .filter(Edge.target_id == node.id).limit(5).all()
                 ):
-                    lines.append(f"    ← {source.label} [{source.node_type}] → {edge.relationship_type}")
+                    s_label, s_type = _resolve_endpoint(source, edge.source_id)
+                    if s_label is None:
+                        continue
+                    lines.append(f"    ← {s_label} [{s_type}] → {edge.relationship_type}")
         except Exception as e:
             logger.warning("context_enricher_prep: search failed for %r: %s", term, e)
 

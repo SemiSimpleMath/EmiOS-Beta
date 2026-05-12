@@ -138,32 +138,32 @@ def _build_active_items() -> str:
             lines.append("**Plans:**")
             for p in plans:
                 plan_id = p.get("plan_id", "")
-                synopsis = str(p.get("synopsis") or p.get("summary") or "")[:100]
+                synopsis = str(p.get("synopsis") or p.get("summary") or "")
                 lines.append(f"- [{plan_id}] {synopsis}")
 
         if active:
             lines.append(f"**Actionable tasks ({len(active)}):**")
-            for m in active[:10]:
+            for m in active:
                 sid = m.get("short_id", "")
-                summary = str(m.get("summary") or "")[:100]
+                summary = str(m.get("summary") or "")
                 lines.append(f"- task {sid}: {summary}")
 
         if dispatched:
             lines.append(f"**Dispatched tasks ({len(dispatched)}):**")
-            for m in dispatched[:10]:
+            for m in dispatched:
                 sid = m.get("short_id", "")
-                summary = str(m.get("summary") or "")[:80]
-                result = str(m.get("execution_result_summary") or "")[:60]
+                summary = str(m.get("summary") or "")
+                result = str(m.get("execution_result_summary") or "")
                 lines.append(f"- task {sid}: {summary}")
                 if result:
                     lines.append(f"  result: {result}")
 
         if waiting:
             lines.append(f"**Waiting tasks ({len(waiting)}):**")
-            for m in waiting[:10]:
+            for m in waiting:
                 sid = m.get("short_id", "")
-                summary = str(m.get("summary") or "")[:80]
-                wait_reason = str(m.get("wait_reason") or m.get("state_reason") or "")[:60]
+                summary = str(m.get("summary") or "")
+                wait_reason = str(m.get("wait_reason") or m.get("state_reason") or "")
                 lines.append(f"- task {sid}: {summary}")
                 if wait_reason:
                     lines.append(f"  waiting for: {wait_reason}")
@@ -195,13 +195,13 @@ def _build_recent_actions(now_utc: datetime) -> str:
             created = parse_iso_utc(str(meta.get("created_at") or ""))
             if created and created >= cutoff:
                 time_local = created.astimezone(local_tz).strftime("%I:%M %p")
-                summary = str(meta.get("summary") or "")[:100]
+                summary = str(meta.get("summary") or "")
                 actions.append(f"- [{time_local}] {summary}")
 
         if not actions:
             return "### Recent Actions\nNo actions in last 4 hours."
 
-        return "### Recent Actions (last 4 hours)\n" + "\n".join(actions[-15:])
+        return "### Recent Actions (last 4 hours)\n" + "\n".join(actions)
     except Exception as e:
         logger.debug("situation_snapshot: recent actions failed: %s", e)
         return ""
@@ -252,8 +252,8 @@ def _build_recently_closed(now_utc: datetime) -> str:
 
             time_local = ts.astimezone(local_tz).strftime("%I:%M %p")
             sid = meta.get("short_id", "")
-            summary = str(meta.get("summary") or "")[:100]
-            result = str(meta.get("execution_result_summary") or "")[:80]
+            summary = str(meta.get("summary") or "")
+            result = str(meta.get("execution_result_summary") or "")
             closed_entries.append((ts, sid, time_local, summary, result))
 
         if not closed_entries:
@@ -261,7 +261,7 @@ def _build_recently_closed(now_utc: datetime) -> str:
 
         closed_entries.sort(key=lambda x: x[0])
         lines = [f"### Recently Closed Items (last 4 hours) ({len(closed_entries)})"]
-        for _, sid, time_local, summary, result in closed_entries[-15:]:
+        for _, sid, time_local, summary, result in closed_entries:
             lines.append(f"- [{time_local}] task {sid}: {summary}")
             if result:
                 lines.append(f"  result: {result}")
@@ -284,7 +284,7 @@ def _build_ticket_responses(now_utc: datetime) -> str:
             if items:
                 has_any = True
                 lines.append(f"**{category.upper()}:**")
-                for t in items[:5]:
+                for t in items:
                     title = t.get("title") or t.get("message") or ""
                     comment = t.get("user_comment") or ""
                     lines.append(f"- {title}")

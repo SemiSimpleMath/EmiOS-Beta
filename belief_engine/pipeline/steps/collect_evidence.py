@@ -1,10 +1,9 @@
 """
 Step 1: Collect evidence from available sources for a given domain.
 
-Sources (in priority order):
+Sources:
   1. daily_insights   — actionable items from resource_daily_insights.json (last N days)
   2. ticket_signals   — accepted/rejected tickets from timeline_merged.json (last N days)
-  3. kg_edges         — signal sentences from the KG (chronic background, runs if KG is available)
 
 Writes a structured evidence bundle to the run context.
 """
@@ -13,7 +12,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -26,14 +25,26 @@ logger = logging.getLogger(__name__)
 _LOOKBACK_DAYS = 14
 
 
-def _domain_tags(domain: str) -> List[str]:
+def _require_domain_config(domain: str):
+    """Fetch domain config or fail loudly. A missing domain typically means
+    the caller passed a typo'd name — silently returning empty lists would
+    let the whole pipeline run with zero evidence and zero error, which
+    breaks debuggability."""
     cfg = get_domain_config(domain)
-    return list(cfg.tags) if cfg else []
+    if cfg is None:
+        raise ValueError(
+            f"Unknown belief-engine domain {domain!r} — no entry in domain config. "
+            f"Check belief_engine.config.get_domain_config."
+        )
+    return cfg
+
+
+def _domain_tags(domain: str) -> List[str]:
+    return list(_require_domain_config(domain).tags)
 
 
 def _domain_ticket_types(domain: str) -> List[str]:
-    cfg = get_domain_config(domain)
-    return list(cfg.ticket_types) if cfg else []
+    return list(_require_domain_config(domain).ticket_types)
 
 
 @dataclass
@@ -172,7 +183,6 @@ def _collect_ticket_signals(domain: str, lookback_days: int) -> List[EvidenceIte
             state = entry.get("state", "")
             user_action = entry.get("user_action", "")
             user_text = entry.get("user_text", "")
-            message = entry.get("message", "")  # Emi's context blurb — not a user comment
             title = entry.get("title", stype)
 
             # Extract actual user comment if present (format: "...Additional from user: <text>")

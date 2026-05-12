@@ -41,6 +41,7 @@ import json
 from typing import Any
 
 import numpy as np
+from sqlalchemy import text
 
 from app.assistant.kg_maintenance.store import upsert_finding
 from app.assistant.pipelines.context import PipelineContext
@@ -64,6 +65,10 @@ MAX_EDGE_SENTENCES = 5
 
 MAX_NEIGHBORS = 10
 
+# Tier 4 (anchor-propagation) tunables.
+ANCHOR_MIN_EDGE_COUNT = 5  # only Entity anchors with >=N edges can drive a candidate
+TIER4_MAX_PAIRS = 80       # safety cap on pairs Tier 4 emits per run
+
 
 # ── Phase 1: read node descriptors ────────────────────────────────────────────
 
@@ -81,6 +86,7 @@ def _load_node_descriptors() -> dict[str, dict[str, Any]]:
         nodes = session.query(
             Node.id, Node.label, Node.description, Node.node_type,
             Node.aliases, Node.category, Node.semantic_label,
+            Node.original_sentence,
         ).all()
 
         edges = (
@@ -152,6 +158,7 @@ def _load_node_descriptors() -> dict[str, dict[str, Any]]:
             "aliases": raw_aliases,
             "category": r.category or "",
             "semantic_label": r.semantic_label or "",
+            "original_sentence": (r.original_sentence or ""),
             "edge_sentences": sentence_index.get(nid, []),
             "edge_count": edge_count_index.get(nid, 0),
             "neighborhood": neighbor_index.get(nid, []),
@@ -161,16 +168,215 @@ def _load_node_descriptors() -> dict[str, dict[str, Any]]:
     return descriptors
 
 
+def _load_anchor_propagation_data(descriptors: dict[str, dict]) -> dict[str, Any]:
+    """Build the adjacency indices Tier 4 needs.
+
+    For each Entity anchor (node_type='Entity' with >= ANCHOR_MIN_EDGE_COUNT
+    edges), collect: every 1-hop State/Event/Goal node it connects to,
+    that state node's "other side" Entity endpoints, plus the edge sentences
+    on both legs.
+
+    The structural signal Tier 4 uses: anchor A has multiple state nodes
+    sharing (predicate, state_label, state_category); each state node has
+    its own "other Entity" endpoint; those other Entities become candidate
+    pair members ("A relates to both X and Y via the same predicate path —
+    maybe X and Y are the same referent").
+
+    Returns:
+      {
+        "anchor_to_states": {anchor_id: [state_record, ...]},
+        "state_to_others": {state_id: [other_record, ...]},
+      }
+    """
+    from app.assistant.kg.db.knowledge_graph_db import Edge, Node
+
+    session = get_session()
+    try:
+        rows = session.execute(
+            text(
+                "SELECT e.source_id, e.target_id, e.relationship_type, e.sentence, "
+                "       sn.node_type, sn.label, "
+                "       tn.node_type, tn.label, tn.category, tn.start_date "
+                "FROM kg_edge_metadata e "
+                "JOIN kg_node_metadata sn ON sn.id = e.source_id "
+                "JOIN kg_node_metadata tn ON tn.id = e.target_id "
+            )
+        ).fetchall()
+    finally:
+        session.close()
+
+    from collections import defaultdict
+    anchor_to_states: dict[str, list[dict]] = defaultdict(list)
+    state_to_others: dict[str, list[dict]] = defaultdict(list)
+
+    for r in rows:
+        s_id, t_id, rel, sent = str(r[0]), str(r[1]), r[2], r[3]
+        s_type, s_lbl = r[4] or "", r[5] or ""
+        t_type, t_lbl, t_cat, t_start = r[6] or "", r[7] or "", r[8] or "", r[9]
+
+        # Entity → State/Event/Goal direction (Entity is potential anchor)
+        if s_type == "Entity" and t_type in ("State", "Event", "Goal"):
+            anchor_to_states[s_id].append({
+                "predicate": rel or "related_to",
+                "direction": "outgoing",
+                "state_id": t_id, "state_label": t_lbl,
+                "state_category": (t_cat or "").strip().lower(),
+                "state_start_date": str(t_start)[:10] if t_start else None,
+                "edge_sentence": sent or "",
+            })
+        # State/Event/Goal → Entity (Entity may be anchor; state is the bridge)
+        if t_type == "Entity" and s_type in ("State", "Event", "Goal"):
+            anchor_to_states[t_id].append({
+                "predicate": rel or "related_to",
+                "direction": "incoming",
+                "state_id": s_id, "state_label": s_lbl,
+                "state_category": "",
+                "state_start_date": None,
+                "edge_sentence": sent or "",
+            })
+        # State → Entity (the "other side" of a state)
+        if s_type in ("State", "Event", "Goal") and t_type == "Entity":
+            state_to_others[s_id].append({
+                "other_id": t_id, "other_label": t_lbl,
+                "other_category": (t_cat or "").strip().lower(),
+                "predicate": rel or "related_to",
+                "direction": "outgoing",
+                "edge_sentence": sent or "",
+            })
+        if t_type in ("State", "Event", "Goal") and s_type == "Entity":
+            state_to_others[t_id].append({
+                "other_id": s_id, "other_label": s_lbl,
+                "other_category": "",
+                "predicate": rel or "related_to",
+                "direction": "incoming",
+                "edge_sentence": sent or "",
+            })
+
+    # Fill empty other_category from descriptors (we already have category there)
+    for st_id, recs in state_to_others.items():
+        for r in recs:
+            if not r["other_category"]:
+                d = descriptors.get(r["other_id"])
+                if d:
+                    r["other_category"] = (d.get("category") or "").strip().lower()
+
+    return {"anchor_to_states": anchor_to_states, "state_to_others": state_to_others}
+
+
+def _anchor_propagation_pairs(
+    descriptors: dict[str, dict],
+    prop_data: dict[str, Any],
+) -> list[tuple[str, str, dict]]:
+    """Tier 4 candidate generator.
+
+    For each Entity anchor with >= ANCHOR_MIN_EDGE_COUNT edges, group its
+    state-connected neighbors by (predicate, state_label, state_category).
+    For each group with ≥2 distinct "other side" Entity endpoints AND no
+    explicit date conflict among the state nodes, emit those Entity
+    endpoints as candidate dup pairs. The pair's anchor context carries
+    the edge sentences on both legs so the LLM can verify the merge by
+    reading the actual claims.
+
+    Returns: list of (entity_a_id, entity_b_id, anchor_context_dict).
+    Caller dedupes against already-seen pairs and combines with other tiers.
+    """
+    from collections import defaultdict
+    anchor_to_states = prop_data["anchor_to_states"]
+    state_to_others = prop_data["state_to_others"]
+    pairs: list[tuple[str, str, dict]] = []
+
+    for anchor_id, states in anchor_to_states.items():
+        anchor_desc = descriptors.get(anchor_id)
+        if not anchor_desc:
+            continue
+        if (anchor_desc.get("node_type") or "") != "Entity":
+            continue
+        if (anchor_desc.get("edge_count") or 0) < ANCHOR_MIN_EDGE_COUNT:
+            continue
+
+        # Group anchor-side records by (predicate, state_label, state_category)
+        groups: dict[tuple[str, str, str], list[dict]] = defaultdict(list)
+        for s in states:
+            key = (s["predicate"], (s["state_label"] or "").lower(), s["state_category"])
+            groups[key].append(s)
+
+        for key, members in groups.items():
+            if len(members) < 2:
+                continue
+            # For each state in the group, collect its "other" Entity endpoints
+            entity_to_evidence: dict[str, list[dict]] = defaultdict(list)
+            for m in members:
+                for o in state_to_others.get(m["state_id"], []):
+                    if o["other_id"] == anchor_id:
+                        continue  # don't pair the anchor with itself
+                    o_desc = descriptors.get(o["other_id"])
+                    if not o_desc or (o_desc.get("node_type") or "") != "Entity":
+                        continue
+                    entity_to_evidence[o["other_id"]].append({
+                        "state_label": m["state_label"],
+                        "state_category": m["state_category"],
+                        "predicate_anchor_state": m["predicate"],
+                        "state_start_date": m["state_start_date"],
+                        "anchor_to_state_sentence": m["edge_sentence"],
+                        "state_to_other_sentence": o["edge_sentence"],
+                    })
+
+            ents = list(entity_to_evidence.keys())
+            if len(ents) < 2:
+                continue
+
+            # All unordered pairs with category match + no explicit date conflict
+            for i in range(len(ents)):
+                a = ents[i]
+                a_evidence = entity_to_evidence[a]
+                a_cat = (descriptors.get(a, {}).get("category") or "").strip().lower()
+                for j in range(i + 1, len(ents)):
+                    b = ents[j]
+                    b_evidence = entity_to_evidence[b]
+                    b_cat = (descriptors.get(b, {}).get("category") or "").strip().lower()
+                    # Category filter: skip cross-category pairs (person vs place, etc.)
+                    if a_cat and b_cat and a_cat != b_cat:
+                        continue
+                    # Date conflict: any (a_state, b_state) with both dates set
+                    # and differing → reject (recurring/distinct-occurrence rule).
+                    has_conflict = False
+                    for ae in a_evidence:
+                        if has_conflict:
+                            break
+                        for be in b_evidence:
+                            if ae["state_start_date"] and be["state_start_date"]:
+                                if ae["state_start_date"] != be["state_start_date"]:
+                                    has_conflict = True
+                                    break
+                    if has_conflict:
+                        continue
+                    pairs.append((a, b, {
+                        "anchor_id": anchor_id,
+                        "anchor_label": anchor_desc.get("label") or "",
+                        "predicate_path": key,
+                        "a_evidence": a_evidence[:2],
+                        "b_evidence": b_evidence[:2],
+                    }))
+
+    # Cap so a few high-fanout anchors don't dominate the LLM budget.
+    return pairs[:TIER4_MAX_PAIRS]
+
+
 # ── Phase 2: three-tier candidate generation ──────────────────────────────────
 
 def _build_candidate_pairs(
     descriptors: dict[str, dict],
-) -> list[tuple[str, str, str]]:
+) -> tuple[list[tuple[str, str, str]], dict[tuple[str, str], dict]]:
     """
-    Generate candidate duplicate pairs using three tiers.
-    Returns list of (node_id_a, node_id_b, tier_source) tuples, deduplicated.
-    Pairs are sorted by combined edge count (most connected first) so the
-    most important nodes are reviewed within the per-run budget.
+    Generate candidate duplicate pairs using four tiers.
+    Returns:
+      - candidates: list of (node_id_a, node_id_b, tier_source) tuples, deduplicated.
+        Pairs are sorted by combined edge count (most connected first) so the
+        most important nodes are reviewed within the per-run budget.
+      - pair_anchor_context: dict keyed by sorted-pair tuple (a, b) carrying
+        anchor-propagation context (anchor entity + per-side edge sentences)
+        for pairs sourced from Tier 4. Empty dict for pairs from Tiers 1-3.
+        Consumed by _confirm_pairs_with_llm to enrich the LLM brief.
     """
     from app.assistant.kg_maintenance.verdict_store import load_distinct_pairs
 
@@ -181,13 +387,18 @@ def _build_candidate_pairs(
 
     seen_pairs: set[tuple[str, str]] = set()
     candidates: list[tuple[str, str, str]] = []
+    pair_anchor_context: dict[tuple[str, str], dict] = {}
     cross_type_skipped = 0
     prior_verdict_skipped = 0
 
-    def _add_pair(a: str, b: str, tier: str) -> None:
+    def _add_pair(a: str, b: str, tier: str, anchor_ctx: dict | None = None) -> None:
         nonlocal cross_type_skipped, prior_verdict_skipped
         key = (min(a, b), max(a, b))
         if key in seen_pairs:
+            # Already added by an earlier tier; if a richer anchor context
+            # arrives now, fold it in so the LLM still gets it.
+            if anchor_ctx and key not in pair_anchor_context:
+                pair_anchor_context[key] = anchor_ctx
             return
         # Cross-type duplicate proposals are nearly always wrong: an
         # Entity (e.g. a recurring social-event entity with hundreds
@@ -209,6 +420,8 @@ def _build_candidate_pairs(
             return
         seen_pairs.add(key)
         candidates.append((a, b, tier))
+        if anchor_ctx:
+            pair_anchor_context[key] = anchor_ctx
 
     all_ids = list(descriptors.keys())
 
@@ -271,10 +484,31 @@ def _build_candidate_pairs(
         "[duplicate_scan] Tier 3 (embedding similarity): %d new pairs",
         len(candidates) - tier2_count,
     )
+    tier3_count = len(candidates)
+
+    # --- Tier 4: Anchor-propagation ---
+    # Structural: when a single Entity anchor relates to two endpoints via
+    # the same predicate path through structurally-similar state nodes, those
+    # endpoints are merge candidates. Catches kinship/role placeholders
+    # (Jukka's son <-> Peter, Phil's mother <-> Pam) and label variants that
+    # share a workplace/school/family relation but whose strings don't match.
+    try:
+        prop_data = _load_anchor_propagation_data(descriptors)
+        for a, b, anchor_ctx in _anchor_propagation_pairs(descriptors, prop_data):
+            _add_pair(a, b, "anchor_propagation", anchor_ctx=anchor_ctx)
+    except Exception as exc:
+        logger.warning("[duplicate_scan] Tier 4 failed: %s", exc, exc_info=True)
+
+    logger.info(
+        "[duplicate_scan] Tier 4 (anchor propagation): %d new pairs",
+        len(candidates) - tier3_count,
+    )
+
     logger.info(
         "[duplicate_scan] Total unique candidate pairs: %d "
-        "(cross_type_skipped=%d, prior_verdict_skipped=%d)",
+        "(cross_type_skipped=%d, prior_verdict_skipped=%d, anchor_ctx_count=%d)",
         len(candidates), cross_type_skipped, prior_verdict_skipped,
+        len(pair_anchor_context),
     )
 
     # Prioritize pairs involving the most-connected nodes
@@ -285,7 +519,7 @@ def _build_candidate_pairs(
         return ec_a + ec_b
 
     candidates.sort(key=_pair_priority, reverse=True)
-    return candidates[:MAX_PAIRS_PER_RUN]
+    return candidates[:MAX_PAIRS_PER_RUN], pair_anchor_context
 
 
 def _embedding_similarity_pairs(all_node_ids: list[str]) -> list[tuple[str, str]]:
@@ -363,18 +597,134 @@ def _embedding_similarity_pairs(all_node_ids: list[str]) -> list[tuple[str, str]
 
 # ── Phase 3: LLM confirmation ─────────────────────────────────────────────────
 
+def _triage_filter_pairs(
+    pairs: list[tuple[str, str, str]],
+    descriptors: dict[str, dict],
+    scope_context,
+    pair_anchor_context: dict[tuple[str, str], dict],
+) -> list[tuple[str, str, str]]:
+    """Pre-filter step: nano-class LLM marks each pair as 'distinct' (drop) or
+    'uncertain' (forward to the heavy detector). Asymmetric trust — we trust
+    the nano's NO (drop), but never its YES (it never emits 'merge').
+
+    Falls back to passing all pairs through if the triage agent fails.
+    """
+    if not pairs:
+        return pairs
+    try:
+        agent = DI.agent_factory.create_agent("kg_maintenance::duplicate_triage")
+        if agent is None:
+            logger.warning("[duplicate_scan] triage agent unavailable — skipping pre-filter")
+            return pairs
+    except Exception as exc:
+        logger.warning("[duplicate_scan] triage agent create failed: %s — skipping pre-filter", exc)
+        return pairs
+
+    # Build a compact per-pair brief.
+    brief_pairs = []
+    for idx, (nid_a, nid_b, tier) in enumerate(pairs):
+        da = descriptors.get(nid_a) or {}
+        db = descriptors.get(nid_b) or {}
+        entry: dict[str, Any] = {
+            "pair_index": idx + 1,
+            "tier": tier,
+            "a": {
+                "label": da.get("label"),
+                "node_type": da.get("node_type"),
+                "category": da.get("category"),
+                "aliases": da.get("aliases") or [],
+                "description": (da.get("description") or "")[:200],
+                "original_sentence": da.get("original_sentence") or "",
+                "edge_sentences": (da.get("edge_sentences") or [])[:3],
+            },
+            "b": {
+                "label": db.get("label"),
+                "node_type": db.get("node_type"),
+                "category": db.get("category"),
+                "aliases": db.get("aliases") or [],
+                "description": (db.get("description") or "")[:200],
+                "original_sentence": db.get("original_sentence") or "",
+                "edge_sentences": (db.get("edge_sentences") or [])[:3],
+            },
+        }
+        key = (min(nid_a, nid_b), max(nid_a, nid_b))
+        anchor_ctx = pair_anchor_context.get(key)
+        if anchor_ctx:
+            entry["shared_anchor"] = {
+                "anchor_label": anchor_ctx.get("anchor_label"),
+                "predicate_path": list(anchor_ctx.get("predicate_path") or []),
+                "a_edges": [
+                    {"anchor_to_state": e.get("anchor_to_state_sentence"),
+                     "state_to_other": e.get("state_to_other_sentence"),
+                     "state_start_date": e.get("state_start_date")}
+                    for e in (anchor_ctx.get("a_evidence") or [])
+                ],
+                "b_edges": [
+                    {"anchor_to_state": e.get("anchor_to_state_sentence"),
+                     "state_to_other": e.get("state_to_other_sentence"),
+                     "state_start_date": e.get("state_start_date")}
+                    for e in (anchor_ctx.get("b_evidence") or [])
+                ],
+            }
+        brief_pairs.append(entry)
+
+    try:
+        response = agent.action_handler(
+            Message(
+                agent_input={"pairs_batch": json.dumps(brief_pairs, ensure_ascii=False)},
+                scope_context=scope_context,
+            )
+        )
+    except Exception as exc:
+        logger.warning("[duplicate_scan] triage call failed: %s — passing all pairs through", exc)
+        return pairs
+
+    data = response.data if response and hasattr(response, "data") else {}
+    verdicts_raw = (data.get("pairs") if isinstance(data, dict) else None) or []
+    distinct_indices: set[int] = set()
+    for v in verdicts_raw:
+        if not isinstance(v, dict):
+            continue
+        try:
+            idx = int(v.get("pair_index") or 0)
+        except (TypeError, ValueError):
+            continue
+        verdict = str(v.get("verdict") or "").strip().lower()
+        if verdict == "distinct" and 1 <= idx <= len(pairs):
+            distinct_indices.add(idx - 1)
+
+    survivors = [p for i, p in enumerate(pairs) if i not in distinct_indices]
+    logger.info(
+        "[duplicate_scan] Triage: %d pairs → %d survived (%d dropped as 'distinct')",
+        len(pairs), len(survivors), len(distinct_indices),
+    )
+    return survivors
+
+
 def _confirm_pairs_with_llm(
     pairs: list[tuple[str, str, str]],
     descriptors: dict[str, dict],
     scope_context,
+    pair_anchor_context: dict[tuple[str, str], dict] | None = None,
 ) -> list[dict]:
     """
     Calls kg_maintenance::duplicate_detector for each candidate pair.
     Sends rich context including aliases, category, and neighborhood.
+    For Tier 4 (anchor-propagation) pairs, additionally includes the shared
+    anchor entity + edge sentences on both legs in `analysis_context.shared_anchor`
+    so the agent can decide via direct edge-sentence comparison.
+
     Returns a flat list of merge_action dicts.
 
     No DB session is open during this function.
     """
+    pair_anchor_context = pair_anchor_context or {}
+
+    # Pre-filter cheap: nano-class triage drops obviously-distinct pairs so the
+    # heavy detector only spends time on plausible ones. Asymmetric trust:
+    # we accept its NO, never its YES (the detector still owns the merge call).
+    pairs = _triage_filter_pairs(pairs, descriptors, scope_context, pair_anchor_context)
+
     agent = DI.agent_factory.create_agent("kg_maintenance::duplicate_detector")
     merge_actions: list[dict] = []
 
@@ -411,16 +761,40 @@ def _confirm_pairs_with_llm(
                 "neighborhood_sample": neighborhood_sample,
             })
 
+        analysis_context: dict[str, Any] = {
+            "pair_index": idx + 1,
+            "total_pairs": len(pairs),
+            "detection_tier": tier,
+        }
+        key = (min(nid_a, nid_b), max(nid_a, nid_b))
+        anchor_ctx = pair_anchor_context.get(key)
+        if anchor_ctx:
+            # Tier 4 anchor-propagation context — the strongest structural
+            # signal a duplicate-detector LLM can use: a shared anchor entity
+            # plus the actual edge-sentences linking the anchor to each side.
+            analysis_context["shared_anchor"] = {
+                "anchor_label": anchor_ctx.get("anchor_label"),
+                "predicate_path": list(anchor_ctx.get("predicate_path") or []),
+                "a_edges": [
+                    {"anchor_to_state": e.get("anchor_to_state_sentence"),
+                     "state_to_other": e.get("state_to_other_sentence"),
+                     "state_start_date": e.get("state_start_date")}
+                    for e in (anchor_ctx.get("a_evidence") or [])
+                ],
+                "b_edges": [
+                    {"anchor_to_state": e.get("anchor_to_state_sentence"),
+                     "state_to_other": e.get("state_to_other_sentence"),
+                     "state_start_date": e.get("state_start_date")}
+                    for e in (anchor_ctx.get("b_evidence") or [])
+                ],
+            }
+
         try:
             response = agent.action_handler(
                 Message(
                     agent_input={
                         "duplicate_group_data": json.dumps(node_data, ensure_ascii=False),
-                        "analysis_context": json.dumps({
-                            "pair_index": idx + 1,
-                            "total_pairs": len(pairs),
-                            "detection_tier": tier,
-                        }),
+                        "analysis_context": json.dumps(analysis_context),
                     },
                     scope_context=scope_context,
                 )
@@ -500,14 +874,18 @@ def run(ctx: PipelineContext) -> dict:
         logger.info("[duplicate_scan] No nodes in graph — skipping")
         return {"nodes_loaded": 0, "candidate_pairs": 0, "llm_confirmed_actions": 0, "new_findings": 0}
 
-    # Phase 2 — three-tier candidate generation (no DB, no LLM)
-    pairs = _build_candidate_pairs(descriptors)
+    # Phase 2 — four-tier candidate generation (no LLM; Tier 4 takes one
+    # extra read session for the anchor-propagation graph walk)
+    pairs, pair_anchor_context = _build_candidate_pairs(descriptors)
     if not pairs:
         logger.info("[duplicate_scan] No candidate pairs found")
         return {"nodes_loaded": len(descriptors), "candidate_pairs": 0, "llm_confirmed_actions": 0, "new_findings": 0}
 
     # Phase 3 — LLM confirmation (no session open)
-    merge_actions = _confirm_pairs_with_llm(pairs, descriptors, scope_context)
+    merge_actions = _confirm_pairs_with_llm(
+        pairs, descriptors, scope_context,
+        pair_anchor_context=pair_anchor_context,
+    )
 
     # Phase 4 — write findings (store manages its own sessions)
     new_findings = _write_findings(merge_actions, pipeline_run_id=ctx.run_id)

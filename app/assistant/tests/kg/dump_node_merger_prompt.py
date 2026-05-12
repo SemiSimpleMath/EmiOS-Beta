@@ -134,7 +134,8 @@ def _build_new_node_ctx_from_proposal(s, prop_node_id: str) -> dict:
         "source_window_id": window_id,
         "source_window_end_ts": _window_end_ts(s, window_id) if window_id else None,
         "source_window_text": window_text,
-        "first_observed": attrs.get("first_observed") if isinstance(attrs, dict) else None,
+        # first_observed = valid_from on the proposal node (no longer in JSON).
+        "first_observed": _iso(pn.valid_from),
         "ttl_duration_class": (ttl.get("duration_class") if isinstance(ttl, dict) else None),
     }
 

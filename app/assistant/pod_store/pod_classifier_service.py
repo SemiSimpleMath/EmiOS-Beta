@@ -450,21 +450,29 @@ class PodClassifierService:
         return "\n".join(lines)
 
     def _classify_burst(self, burst_text: str) -> Dict[str, Any]:
+        """Pass 1: classify a chat burst. Fails open on agent error — a
+        burst-classification failure shouldn't crash the pod pipeline (matches
+        the fail-open pattern in _critique_pod / _resolve_entities)."""
         from app.assistant.ServiceLocator.service_locator import DI
-        agent = DI.agent_factory.create_agent("pod_classifier")
-        if agent is None:
-            logger.error("PodClassifier: agent_factory returned None for pod_classifier")
-            return {}
-        result = agent.action_handler(
-            Message(
-                agent_input={
-                    "burst_content": burst_text,
-                    "tag_vocabulary": self._tag_vocabulary,
-                }
+        try:
+            agent = DI.agent_factory.create_agent("pod_classifier")
+            if agent is None:
+                logger.error("PodClassifier: agent_factory returned None for pod_classifier")
+                return {}
+            result = agent.action_handler(
+                Message(
+                    agent_input={
+                        "burst_content": burst_text,
+                        "tag_vocabulary": self._tag_vocabulary,
+                    }
+                )
             )
-        )
-        data = result.data if isinstance(getattr(result, "data", None), dict) else {}
-        return data
+            data = result.data if isinstance(getattr(result, "data", None), dict) else {}
+            return data
+        except Exception as e:
+            logger.error("PodClassifier: classify_burst failed: %s", e)
+            logger.debug("PodClassifier classify_burst exception details", exc_info=True)
+            return {}
 
     def _critique_pod(
         self,

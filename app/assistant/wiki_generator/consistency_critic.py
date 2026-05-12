@@ -69,14 +69,45 @@ def _build_ground_truth_block(entity_node_id: str, entity_label: str) -> str:
 
     session = get_session()
     try:
-        row = session.execute(
-            sql_text(
-                "SELECT summary, key_facts FROM entity_cards WHERE source_node_id = :nid"
-            ),
-            {"nid": entity_node_id},
-        ).fetchone()
+        # Read summary + flattened bullets from the v2 card. This replaces
+        # the v1 "SELECT summary, key_facts FROM entity_cards" query — v1
+        # was retired 2026-05-10.
+        from app.assistant.entity_management.entity_card_v2 import (
+            EntityCardV2, EntityCardSection, EntityCardBullet, SUMMARY,
+        )
+        card = (
+            session.query(EntityCardV2)
+            .filter(
+                EntityCardV2.entity_node_id == entity_node_id,
+                EntityCardV2.is_active == True,  # noqa: E712
+            )
+            .one_or_none()
+        )
+        summary_text = None
+        key_facts_list: list = []
+        if card is not None:
+            sections = (
+                session.query(EntityCardSection)
+                .filter(EntityCardSection.card_id == card.id)
+                .order_by(EntityCardSection.position)
+                .all()
+            )
+            for s in sections:
+                if s.section_name == SUMMARY and s.intro_text:
+                    summary_text = s.intro_text
+                    continue
+                bullets = (
+                    session.query(EntityCardBullet)
+                    .filter(EntityCardBullet.section_id == s.id)
+                    .order_by(EntityCardBullet.position)
+                    .all()
+                )
+                for b in bullets:
+                    if b.bullet_text:
+                        key_facts_list.append(b.bullet_text)
+        row = (summary_text, key_facts_list) if card is not None else None
     except Exception as e:
-        logger.warning("Could not read entity_card for %s: %s", entity_node_id, e)
+        logger.warning("Could not read v2 entity card for %s: %s", entity_node_id, e)
         row = None
     finally:
         session.close()

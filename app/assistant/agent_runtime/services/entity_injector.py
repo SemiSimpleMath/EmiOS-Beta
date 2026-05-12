@@ -7,9 +7,7 @@ from app.assistant.utils.assistant_name import get_assistant_name
 from app.assistant.utils.logging_config import get_logger
 from app.models.base import get_session
 from app.assistant.entity_management.entity_cards import (
-    get_entity_card_by_name,
-    extract_entity_field,
-    extract_entity_field_leveled,
+    get_entity_card_for_prompt_injection_level,
 )
 
 logger = get_logger(__name__)
@@ -25,25 +23,6 @@ ENTITY_INJECTION_KEYS: set[str] = {
     "entity_card",
 }
 DEFAULT_ENTITY_SCAN_KEYS = ["incoming_message", "task", "information", "recent_history"]
-CONTACT_DETAIL_KEYWORDS = {
-    "phone",
-    "number",
-    "email",
-    "address",
-    "contact",
-    "call",
-    "text",
-    "mobile",
-    "cell",
-}
-PROFILE_DETAIL_KEYWORDS = {
-    "who is",
-    "tell me about",
-    "details",
-    "background",
-    "bio",
-    "profile",
-}
 
 
 class EntityInjector:
@@ -71,62 +50,23 @@ class EntityInjector:
         return set(ENTITY_INJECTION_KEYS)
 
     def format_entity_cards_leveled(self, entities: List[str], *, level: int = 1) -> str:
-        """Render detected entities using the view-level system (0/1/2)."""
+        """Render detected entities using the view-level system.
+
+        Reads entirely through ``get_entity_card_for_prompt_injection_level``
+        which is backed by entity_card_v2. Returns empty for entities without
+        an active v2 card.
+        """
         if not entities:
             return ""
         session = get_session()
         blocks: list[str] = []
         try:
             for name in entities:
-                card = get_entity_card_by_name(session, name)
-                if card:
-                    rendered = extract_entity_field_leveled(card, level=level)
-                    if rendered:
-                        blocks.append(rendered)
+                rendered = get_entity_card_for_prompt_injection_level(session, name, level=level)
+                if rendered:
+                    blocks.append(rendered)
         finally:
             session.close()
-        return "\n\n".join(blocks)
-
-    def format_entity_field(self, entities: List[str], field_name: str) -> str:
-        if not entities:
-            return ""
-        session = get_session()
-        blocks = []
-        try:
-            for name in entities:
-                card = get_entity_card_by_name(session, name)
-                if card:
-                    val = extract_entity_field(card, field_name)
-                    if val:
-                        blocks.append(f"• {name}:\n{val}")
-        finally:
-            session.close()
-        return "\n\n".join(blocks)
-
-    def format_entity_multi_field(self, entities: List[str], field_names: List[str]) -> str:
-        if not entities or not field_names:
-            return ""
-
-        session = get_session()
-        blocks = []
-        try:
-            for entity_name in entities:
-                card = get_entity_card_by_name(session, entity_name)
-                if not card:
-                    continue
-
-                entity_parts = [f"{entity_name}:"]
-                for field_name in field_names:
-                    val = extract_entity_field(card, field_name)
-                    if val:
-                        display_name = field_name.replace("_", " ").title()
-                        entity_parts.append(f"  {display_name}: {val}")
-
-                if len(entity_parts) > 1:
-                    blocks.append("\n".join(entity_parts))
-        finally:
-            session.close()
-
         return "\n\n".join(blocks)
 
     def render_user_prompt_with_entities(
@@ -176,22 +116,29 @@ class EntityInjector:
             if not final_entities:
                 return rendered_output
 
-            render_fields = self._expand_entity_field_keys_for_keywords(render_fields, rendered_output)
             final_context = dict(user_context or {})
 
+            # entity_card (and the per-level aliases like entity_level_0,
+            # entity_summary, etc.) all render via the level-based v2 path.
+            # The granular field-extraction path (entity_info, entity_relationships,
+            # entity_key_facts as individual keys) was removed when v1 was
+            # retired — no production agents requested those keys.
             card_level = int((agent.config or {}).get("entity_card_level", 1))
-            if "entity_card" in entity_injection_keys:
-                final_context["entity_card"] = self.format_entity_cards_leveled(
-                    final_entities, level=card_level,
+            level_by_key = {
+                "entity_level_0": 0,
+                "entity_summary": 1,
+                "entity_context": 2,
+                "entity_info": 2,
+                "entity_key_facts": 2,
+                "entity_metadata": 4,
+                "entity_injection": 1,
+                "entity_card": card_level,
+            }
+            for key in entity_injection_keys:
+                level = level_by_key.get(key, card_level)
+                final_context[key] = self.format_entity_cards_leveled(
+                    final_entities, level=level,
                 )
-
-            final_context["entity_info"] = self.format_entity_multi_field(final_entities, render_fields)
-            for field in render_fields:
-                key = f"entity_{field}"
-                if key in {"entity_info", "entity_card"}:
-                    continue
-                if key in entity_injection_keys:
-                    final_context[key] = self.format_entity_field(final_entities, field)
             return template.render(**final_context).replace("\n\n", "\n")
         except Exception as e:
             logger.error("[%s] Entity detection failed during prompt rendering: %s", agent_name, e)
@@ -412,35 +359,5 @@ class EntityInjector:
             seen.add(ent)
             deduped.append(ent)
         return deduped
-
-    @staticmethod
-    def _expand_entity_field_keys_for_keywords(field_keys: List[str], source_text: str) -> List[str]:
-        ordered: list[str] = []
-        seen = set()
-        for key in field_keys or []:
-            if isinstance(key, str) and key.strip() and key not in seen:
-                seen.add(key)
-                ordered.append(key)
-
-        text = str(source_text or "").strip().lower()
-        if not text:
-            return ordered
-
-        def _contains_phrase(phrases: set[str]) -> bool:
-            return any(p in text for p in phrases)
-
-        def _add(key: str) -> None:
-            if key not in seen:
-                seen.add(key)
-                ordered.append(key)
-
-        if _contains_phrase(CONTACT_DETAIL_KEYWORDS):
-            _add("contact_info")
-            _add("key_facts")
-
-        if _contains_phrase(PROFILE_DETAIL_KEYWORDS):
-            _add("level_0")
-
-        return ordered
 
 

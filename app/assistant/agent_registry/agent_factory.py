@@ -2,7 +2,6 @@
 
 from app.assistant.lib.blackboard.Blackboard import Blackboard
 from app.assistant.ServiceLocator.service_locator import DI
-from app.assistant.utils.pydantic_classes import Message
 import threading
 
 from app.assistant.utils.logging_config import get_logger
@@ -64,34 +63,3 @@ class AgentFactory:
 
 
 
-agent_input = """
-From: John Doe <john.doe@example.com>
-To: user@example.com
-Subject: Project Deadline Extension
-Date: Mon, 10 Mar 2025 14:45:00 -0800
-
-Hi Team,
-
-I wanted to inform you that the deadline for the Alpha Project has been extended by one week due to unexpected delays in the testing phase. The new deadline is now March 20, 2025.
-
-Please ensure all outstanding tasks are completed by then. Let me know if there are any blockers.
-
-Best,
-John
-"""
-
-
-def main():
-    agent = DI.agent_factory.create_agent('email_parser')
-    msg = Message(
-        data_type="task",
-        sender="System",
-        receiver=None,
-        content="",
-        agent_input=agent_input
-    )
-    agent.action_handler(msg)
-
-
-if __name__ == "__main__":
-    main()

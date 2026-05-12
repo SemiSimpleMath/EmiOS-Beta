@@ -68,7 +68,9 @@ def run(ctx: PipelineContext, *, limit: Optional[int] = None) -> dict:
         candidates = (
             session.query(
                 Node.id, Node.label, Node.original_sentence,
-                Node.created_at, Node.attributes,
+                Node.created_at,
+                Node.goal_status,
+                Node.last_pursued_at, Node.last_observed,
             )
             .filter(Node.node_type == "Goal")
             .filter(Node.end_date.is_(None))  # not already terminal
@@ -77,25 +79,9 @@ def run(ctx: PipelineContext, *, limit: Optional[int] = None) -> dict:
     finally:
         session.close()
 
-    # Filter to active or dormant (skip terminals defensively).
-    # Need to refetch with goal_status column for filtering. Open a
-    # short read to grab the column too.
-    session = get_session()
-    try:
-        with_status = (
-            session.query(Node.id, Node.goal_status)
-            .filter(Node.node_type == "Goal")
-            .filter(Node.end_date.is_(None))
-            .all()
-        )
-        status_by_id = {str(nid): (gs or "active").lower() for nid, gs in with_status}
-    finally:
-        session.close()
-
     active_goals: List[Dict[str, Any]] = []
-    for nid, label, sent, created_at, attrs in candidates:
-        a = attrs if isinstance(attrs, dict) else {}
-        status = status_by_id.get(str(nid), "active")
+    for nid, label, sent, created_at, gs, last_pursued_at, last_observed in candidates:
+        status = (gs or "active").lower()
         if status in ("completed", "abandoned"):
             continue
         active_goals.append({
@@ -103,8 +89,9 @@ def run(ctx: PipelineContext, *, limit: Optional[int] = None) -> dict:
             "label": label or "",
             "sentence": sent or "",
             "created_at": created_at,
-            "last_pursued_at": parse_iso_utc(a.get("last_pursued_at")),
-            "last_observed": parse_iso_utc(a.get("last_observed")),
+            # All three columns first-class since 2026-05-11.
+            "last_pursued_at": last_pursued_at,
+            "last_observed": last_observed,
         })
 
     # Pick the K most-recently-touched (descending by max(last_pursued, last_observed)).

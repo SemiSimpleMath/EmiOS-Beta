@@ -1,0 +1,15 @@
+name: entity_cards::section_distiller
+class_name: Agent
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.4-mini"
+  model_tier: "smart"
+allowed_tools: []
+except_tools: []
+user_context_items:
+  - entity_descriptor
+  - section_name
+  - max_bullets
+  - candidate_bullets
+system_context_items:
+  - resource_user_data

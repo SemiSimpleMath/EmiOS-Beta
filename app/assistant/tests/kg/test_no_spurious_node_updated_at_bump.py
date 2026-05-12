@@ -41,10 +41,18 @@ from app.assistant.kg.proposal_promoter import (
 from app.models.base import get_session
 
 
-def _seed_node(session, *, label: str, node_type: str = "Entity", attributes=None) -> Node:
+def _seed_node(
+    session, *, label: str, node_type: str = "Entity", attributes=None,
+    first_observed=None, last_observed=None, observation_count=1,
+    last_pursued_at=None,
+) -> Node:
     n = Node(
         label=label, node_type=node_type,
         attributes=attributes or {}, source="seed",
+        first_observed=first_observed,
+        last_observed=last_observed,
+        observation_count=observation_count,
+        last_pursued_at=last_pursued_at,
     )
     session.add(n)
     session.flush()
@@ -158,9 +166,12 @@ class TestRefreshOnReobservationDoesNotBumpMatchedNode:
     def test_reobservation_preserves_matched_node_updated_at(self):
         s = get_session()
         try:
+            # first_observed + observation_count are first-class columns since
+            # 2026-05-11; the seed helper should set them directly on the Node.
             existing = _seed_node(
                 s, label="Annika_Test", node_type="Entity",
-                attributes={"first_observed": "2025-01-01T00:00:00", "observation_count": 1},
+                first_observed=datetime(2025, 1, 1, tzinfo=timezone.utc),
+                observation_count=1,
             )
             s.commit()
             existing_id = existing.id
@@ -203,15 +214,17 @@ class TestRefreshOnReobservationDoesNotBumpMatchedNode:
             s.close()
 
         # Observation tracking did update (function did its job).
+        # All three lifecycle fields are first-class columns now.
         s = get_session()
         try:
             n = s.query(Node).filter(Node.id == existing_id).first()
-            assert n.attributes["observation_count"] == 2, "observation_count should increment"
-            # Compare prefix only — SQLite strips tzinfo on round-trip and the
-            # function stores observed_at.isoformat(), so suffix may differ.
-            assert n.attributes["last_observed"].startswith(
-                observed_at.isoformat().split("+")[0]
-            ), "last_observed should update"
+            assert n.observation_count == 2, "observation_count should increment"
+            assert n.last_observed is not None, "last_observed should be set"
+            # Compare to-the-second; SQLite drops tzinfo on round-trip so
+            # ts may come back as naive — compare on isoformat prefix.
+            stored = n.last_observed.replace(tzinfo=None) if n.last_observed.tzinfo else n.last_observed
+            expected = observed_at.replace(tzinfo=None)
+            assert abs((stored - expected).total_seconds()) < 1.0, "last_observed should match the observation timestamp"
         finally:
             s.close()
 

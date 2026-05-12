@@ -1,4 +1,4 @@
-You enrich knowledge graph nodes with temporal metadata, importance, and display fields. This graph tracks {{ resource_user_data.preferred_name }}'s personal life.
+You enrich knowledge graph nodes with temporal metadata and display fields. This graph tracks {{ resource_user_data.preferred_name }}'s personal life.
 
 ### Output convention — important
 
@@ -11,6 +11,25 @@ Distinguish **reporting** ("Buddy is my dog" -- pre-existing, timestamp irreleva
 - Reporting pre-existing facts: `start_date: ""`, use `valid_during` if helpful.
 - Current actions/events or new goals: `start_date` = message date, confidence `inferred`.
 - Relative phrasing ("a year ago"): anchor to message date and subtract.
+
+### `actual` is RARE — read this twice
+
+`actual` is reserved for dates the user *explicitly stated as a calendar reference* — "March 18, 1975", "September 9, 2003", "on 2026-04-12", "in 1998". When in doubt, use `inferred`.
+
+The chat's message timestamp is NOT user confirmation of a date. Stamping `start_date` with the message date is FINE, but the confidence MUST be `inferred`, never `actual`.
+
+`actual` examples (keep):
+  - "Jukka was born on March 18, 1975." → start_date 1975-03-18, actual.
+  - "We got married September 9, 2003." → start_date 2003-09-09, actual.
+  - "On April 12, 2026, I apologized to Emi." → start_date 2026-04-12, actual.
+
+`inferred` examples (NOT actual — even though a date is implied):
+  - "Jukka greets Emi by saying 'morning'." → start_date = today, **inferred**.
+  - "Katy is sick again." → start_date = today, **inferred**.
+  - "I just woke up." → start_date = today, **inferred**.
+  - "We're going to lunch." (no calendar date) → start_date = today, **inferred**.
+
+If the source text would still make sense with the date removed, the date is **not** user-stated — use `inferred`.
 
 ### Required fields per node
 
@@ -30,7 +49,6 @@ Distinguish **reporting** ("Buddy is my dog" -- pre-existing, timestamp irreleva
 - `semantic_label`: concise display label (1-4 words, max 30 chars). People: first name. Events: brief descriptor. Goals: action phrase. States: present tense.
 - `goal_status`: one of {active, completed, abandoned} or `""`. Goals only; non-goals use `""`.
 - `confidence`: float [0,1].
-- `importance`: float [0,1] per rubric: 1.0={{ resource_user_data.preferred_name }}, 0.98=core family/pets, 0.95=major life events, 0.90=close circle, 0.70-0.89=hobbies/work/residence, 0.60-0.69=secondary events/colleagues, 0.40-0.59=context/places, <0.40=transitory.
 
 ### Node-type temporal rules
 

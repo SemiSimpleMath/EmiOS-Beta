@@ -53,15 +53,20 @@ def _fetch_node(session, node_id: str) -> Optional[Dict[str, Any]]:
 
 
 def _fetch_neighborhood(session, node_id: str, *, limit: int = 30) -> Dict[str, List[Dict[str, Any]]]:
-    """Return (out_edges, in_edges). Each edge dict: relationship_type, sentence, other_id, other_label, other_type."""
+    """Return (out_edges, in_edges). Each edge dict: relationship_type, sentence, other_id, other_label, other_type.
+
+    Uses LEFT JOIN so edges whose other endpoint is a pod URI (datapod:*)
+    — which has no kg_node_metadata row by design — still surface, with
+    other_label hydrated from pod_store.
+    """
     if not node_id:
         return {"out": [], "in": []}
     out_rows = session.execute(
         sql_text(
             "SELECT e.relationship_type, e.sentence, "
-            "       t.id AS other_id, t.label AS other_label, t.node_type AS other_type "
+            "       e.target_id AS other_id, t.label AS other_label, t.node_type AS other_type "
             "FROM kg_edge_metadata e "
-            "JOIN kg_node_metadata t ON t.id = e.target_id "
+            "LEFT JOIN kg_node_metadata t ON t.id = e.target_id "
             "WHERE e.source_id = :nid "
             "ORDER BY e.created_at DESC LIMIT :lim"
         ),
@@ -70,22 +75,46 @@ def _fetch_neighborhood(session, node_id: str, *, limit: int = 30) -> Dict[str, 
     in_rows = session.execute(
         sql_text(
             "SELECT e.relationship_type, e.sentence, "
-            "       s.id AS other_id, s.label AS other_label, s.node_type AS other_type "
+            "       e.source_id AS other_id, s.label AS other_label, s.node_type AS other_type "
             "FROM kg_edge_metadata e "
-            "JOIN kg_node_metadata s ON s.id = e.source_id "
+            "LEFT JOIN kg_node_metadata s ON s.id = e.source_id "
             "WHERE e.target_id = :nid "
             "ORDER BY e.created_at DESC LIMIT :lim"
         ),
         {"nid": node_id, "lim": limit},
     ).fetchall()
 
+    # Hydrate pod-URI endpoints from pod_store so other_label/other_type are
+    # populated for edges that go to pods. Lookup cache scoped to this call.
+    from app.assistant.pod_store.pod_uri import POD_URI_RE
+    _pod_cache: Dict[str, Any] = {}
+    def _hydrate_pod(other_id: str):
+        if other_id in _pod_cache:
+            return _pod_cache[other_id]
+        if not other_id or not POD_URI_RE.fullmatch(other_id):
+            _pod_cache[other_id] = (None, None)
+            return _pod_cache[other_id]
+        from app.assistant.pod_store.pod_store import PodStore
+        pod = PodStore().get(other_id)
+        if pod is None:
+            _pod_cache[other_id] = (None, None)
+        else:
+            _pod_cache[other_id] = ((pod.one_liner or other_id)[:200], "Pod")
+        return _pod_cache[other_id]
+
     def _to_dict(r):
+        other_id = r[2]
+        label = r[3]
+        ntype = r[4]
+        if label is None:
+            pod_label, pod_type = _hydrate_pod(other_id)
+            label, ntype = pod_label, pod_type
         return {
             "relationship_type": r[0],
             "sentence": r[1],
-            "other_id": r[2],
-            "other_label": r[3],
-            "other_type": r[4],
+            "other_id": other_id,
+            "other_label": label,
+            "other_type": ntype,
         }
     return {"out": [_to_dict(r) for r in out_rows], "in": [_to_dict(r) for r in in_rows]}
 

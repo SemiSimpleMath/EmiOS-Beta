@@ -11,7 +11,7 @@ _PARENTS_INDEX_PATTERN = re.compile(r"\.parents\[\d+\]")
 _CRITICAL_FILES = [
     "app/assistant/control_nodes/task_compile_metadata_node.py",
     "app/assistant/control_nodes/task_compile_post_node.py",
-    "app/assistant/lib/tools/run_compiled_task/run_compiled_task.py",
+    "app/assistant/lib/tools/run_task/run_task.py",
     "app/assistant/routine_manager/runners/taskrunner/task_runner.py",
     "app/assistant/utils/task_spec_loader.py",
     "app/assistant/utils/task_registry.py",
@@ -26,16 +26,12 @@ _CRITICAL_FILES = [
     "app/assistant/control_nodes/tool_result_handler.py",
     "app/assistant/room_session_manager/room_session_manager.py",
     "app/assistant/agent_registry/agent_registry.py",
-    "app/assistant/tool_contracts/backfill_tool_metadata.py",
-    "app/assistant/tool_contracts/generate_missing_tool_contracts.py",
     "app/assistant/pipelines/dayflow/utils/context_sources.py",
     "app/assistant/pipelines/dayflow/activity/activity_recorder.py",
     "app/assistant/lib/core_tools/slack/slack.py",
     "app/assistant/agent_classes/ToolArgumentsPlaywright.py",
     "app/assistant/lib/google_auth/google_credentials.py",
     "app/assistant/dj_manager/music_dataset.py",
-    "app/assistant/database/migrations/add_is_provisional_column.py",
-    "app/assistant/database/migrations/add_active_segments_table.py",
     "app/assistant/agent_flow_manager/agent_flow_manager.py",
 ]
 
