@@ -84,6 +84,32 @@ def build_card(entity_node_id: str) -> Dict[str, Any]:
         if entity is None:
             return {'status': 'error', 'reason': f'node {entity_node_id} not found'}
 
+        # 0. Card-worthiness gate. A single passing mention isn't enough to
+        # graduate to a card surface — re-observation is the strongest signal
+        # that the entity matters. Carded entities must satisfy:
+        #   observation_count >= 2  (mentioned in multiple chat windows)
+        #   OR observation_count == 1 AND degree >= 10  (one-window deep dive)
+        #   OR locked_by_user_at IS NOT NULL  (user-authored / pinned)
+        # Surfaced 2026-05-12: 42% of cards were on singleton-observed
+        # entities — Bellevue (mentioned once), passing-mention places, and
+        # placeholder labels — polluting RAG and chat_gate.
+        if entity.locked_by_user_at is None:
+            obs = entity.observation_count or 0
+            if obs < 2:
+                edge_count = session.query(Edge).filter(
+                    (Edge.source_id == entity.id) | (Edge.target_id == entity.id)
+                ).count()
+                if edge_count < 10:
+                    logger.info(
+                        "[entity_cards_v2] %s: not card-worthy "
+                        "(obs=%d degree=%d) — skipping",
+                        entity.label, obs, edge_count,
+                    )
+                    return {
+                        'status': 'skipped',
+                        'reason': f'not card-worthy: obs={obs} degree={edge_count}',
+                    }
+
         # 1. Collect candidate facts (NOW-filtered neighborhood)
         facts = _collect_candidate_facts(session, entity)
         if not facts:
