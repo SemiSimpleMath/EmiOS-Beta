@@ -25,13 +25,21 @@ from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-_COLLECTION_NAME = "chat_memory_v2"  # v2: user messages indexed from kg_resolved_message.resolved_text
+# v3: switched embedding model from chromadb default (all-MiniLM-L6-v2, 2021,
+# MTEB retrieval ~56) to BAAI/bge-base-en-v1.5 (2023, MTEB retrieval ~64,
+# 768-dim). Dimension change forces a new collection name. Query/doc text
+# is also augmented before embedding: queries get the bge instruction prefix
+# and docs get a "[type date]" prefix so the model sees temporal + role context.
+_COLLECTION_NAME = "chat_memory_v3"
+_EMBEDDING_MODEL = "BAAI/bge-base-en-v1.5"
+_BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
 _SUMMARY_LOOKBACK_DAYS = 90   # Summaries are compact and carry biographical context.
 _USER_MSG_LOOKBACK_DAYS = 14  # Raw user messages are noisy — keep recent only.
 _DEFAULT_TOP_K = 8
 
 
 _chroma_client = None
+_embedding_function = None
 
 
 def _get_chroma_client():
@@ -50,12 +58,36 @@ def _get_chroma_client():
     return _chroma_client
 
 
+def _get_embedding_function():
+    """Local sentence-transformers embedder (BAAI/bge-base-en-v1.5).
+
+    First call downloads the model (~440MB) to the HF cache; subsequent
+    calls are CPU-only and free."""
+    global _embedding_function
+    if _embedding_function is None:
+        from chromadb.utils import embedding_functions
+        _embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
+            model_name=_EMBEDDING_MODEL,
+        )
+    return _embedding_function
+
+
+def _augment_doc_text(text: str, *, doc_type: str, timestamp: str) -> str:
+    """Prepend a compact `[type date]` header so the embedding model sees
+    temporal + role context, not just the raw sentence. Time-aware queries
+    ("last week", "yesterday") embed closer to docs with matching dates."""
+    date = (timestamp or "")[:10]
+    header = f"[{doc_type} {date}]" if date else f"[{doc_type}]"
+    return f"{header}\n{text}"
+
+
 def _get_collection():
     """Get or create the chat_memory collection."""
     client = _get_chroma_client()
     return client.get_or_create_collection(
         name=_COLLECTION_NAME,
         metadata={"hnsw:space": "cosine"},
+        embedding_function=_get_embedding_function(),
     )
 
 
@@ -136,13 +168,14 @@ def index_recent_summaries(
         if doc_id in ids:
             continue
 
-        documents.append(msg)
+        documents.append(_augment_doc_text(msg, doc_type="summary", timestamp=ts_str))
         ids.append(doc_id)
         metadatas.append({
             "timestamp": ts_str,
             "type": "summary",
             "role": str(row.role or "").strip().lower(),
             "room_id": room_id,
+            "raw_text": msg,
         })
 
     for row, resolved_text in user_msg_rows:
@@ -155,13 +188,14 @@ def index_recent_summaries(
         if doc_id in ids:
             continue
 
-        documents.append(text)
+        documents.append(_augment_doc_text(text, doc_type="user_message", timestamp=ts_str))
         ids.append(doc_id)
         metadatas.append({
             "timestamp": ts_str,
             "type": "user_message",
             "role": "user",
             "room_id": room_id,
+            "raw_text": text,
         })
 
     if not documents:
@@ -223,10 +257,15 @@ def recall(
     if not query or not query.strip():
         return []
 
+    # bge-base-en-v1.5 was trained with an asymmetric instruction for the
+    # query side. Prepending the canonical prefix lifts MTEB retrieval by
+    # ~3-5 points; doc side stays raw.
+    prefixed_query = _BGE_QUERY_PREFIX + query.strip()
+
     try:
         collection = _get_collection()
         results = collection.query(
-            query_texts=[query.strip()],
+            query_texts=[prefixed_query],
             n_results=top_k,
             where={"room_id": room_id},
         )
@@ -243,8 +282,11 @@ def recall(
     distances = results["distances"][0] if results.get("distances") else [0.0] * len(docs)
 
     for doc, meta, dist in zip(docs, metas, distances):
+        # `doc` is the augmented "[type date]\ntext" form used for embedding;
+        # surface the clean `raw_text` (stored in metadata) to the prompt.
+        clean_text = meta.get("raw_text") or doc
         matches.append({
-            "text": doc,
+            "text": clean_text,
             "timestamp": meta.get("timestamp", ""),
             "type": meta.get("type", ""),
             "distance": round(dist, 4),
