@@ -1,6 +1,6 @@
 {
   "id": "wiki_nightly_refresh",
-  "enabled": false,
+  "enabled": true,
   "name": "Wiki nightly refresh",
   "aliases": [],
   "runner": "function",
@@ -14,5 +14,5 @@
     "time_local": "03:00",
     "quiet_hours_ok": true
   },
-  "notes": "[DISABLED 2026-05-10 POST-NUKE \u2014 re-enable when KG pipeline rebuilt] Scans the vault, regenerates only sections affected by KG node/edge updates since each page's generated_at, then runs the consistency critic. Runs after proposal_promoter (02:30) so newly-promoted nodes flow into the wiki the same night."
+  "notes": "Re-enabled 2026-05-12 after KG pipeline rebuild + 2026-Q1 re-extraction. Scans the vault, regenerates only sections affected by KG node/edge updates since each page's generated_at, then runs the consistency critic. Runs after proposal_promoter (02:30) so newly-promoted nodes flow into the wiki the same night."
 }

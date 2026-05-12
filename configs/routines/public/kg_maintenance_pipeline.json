@@ -1,6 +1,6 @@
 {
   "id": "kg_maintenance_pipeline",
-  "enabled": false,
+  "enabled": true,
   "name": "KG maintenance pipeline",
   "aliases": [
     "kg maintenance",
@@ -17,5 +17,5 @@
     "day_of_week": "Monday",
     "time_local": "02:00"
   },
-  "notes": "[DISABLED 2026-05-10 POST-NUKE \u2014 re-enable when KG pipeline rebuilt] Weekly KG maintenance scan: orphan nodes, missing descriptions, suspect nodes (LLM), duplicate pairs (LLM random sampling). All findings are written to kg_maintenance_finding table for review at /kg-maintenance."
+  "notes": "Re-enabled 2026-05-12 after KG pipeline rebuild + Tier 4 anchor-propagation duplicate scan + nano-triage. Weekly KG maintenance scan: orphan nodes, missing descriptions, suspect nodes (LLM), duplicate pairs (Tier 4 + LLM random sampling). All findings are written to kg_maintenance_finding table for review at /kg-maintenance."
 }
