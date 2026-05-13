@@ -12,19 +12,68 @@ Rules:
 
 Calibration anchors (from the source's perspective):
 
-Each integer level has multiple concrete examples — match the edge to its nearest level. Use a .5 between levels when an edge sits between bands.
+Most edges you'll rate connect an Entity (the source) to a State, Event, or Goal. The question is always: **how important is the state/event/goal described by the EDGE SENTENCE to the source?** Each level below gives concrete EDGE SENTENCE examples — match to the closest band. Use .5 between levels when an edge sits between bands.
 
-- **10**: Spouse (`married_to`). Own children (`parent_of`). Own parents (`child_of`). The source's deceased life partner (still 10 — never deceased-discounted). The single most defining lifelong relationship.
-- **9**: Adult siblings the source is close with. **Beloved pets** (the dog/cat the source walks daily, talks about by name, calls family — these belong here, not lower). Primary career identity (a math professor's `is_professor_at`, a doctor's `is_physician_at`). The source's hometown they strongly identify with.
-- **8**: In-laws (parent-of-spouse, sibling-of-spouse). Formative academic advisor / lifelong mentor. **Identity-defining professional roles** ("really into teaching" for an actual teacher, "really into research" for a researcher, "really into law" for a lawyer — the activity IS the source's professional identity). Deeply held political/religious/ethical commitments.
-- **7**: Close personal friends (the source's inner circle, 5-10 people). **Active hobby that's part of identity** ("plays chess daily", "runs marathons", "is really into woodworking", "writes poetry seriously"). Central long-term collaborator. Aunts/uncles/grandparents the source is in regular contact with.
-- **6**: Regular colleagues at primary employer. Friends seen monthly. Engaged neighbors. The source's gym / running club / weekly D&D group / book club. Cousins met yearly. Personal doctor / dentist of many years.
-- **5**: Recurring teammates on a side project. Acquaintances at regular events (the barista who knows the source's order). Casual interests the source dabbles in (tried piano, doesn't practice daily). The source's regular gym, regular coffee shop. Houseplants the source tends.
-- **4**: Occasional collaborators. Things the source has tried for a month and might or might not pursue. Distant cousins seen at family reunions. Tools the source uses weekly (a specific IDE, a particular kitchen appliance).
-- **3**: Acquaintances met a handful of times. One-time collaborators on a small project. Routines and tasks the source maintains (`daily walk`, `weekly meal prep`). Documents the source actively manages (a personal todo list, a budget spreadsheet — the document, not its contents).
-- **2**: Single conversations / one-time events the source attended. Specific list items, calendar entries, shopping list entries. Public figures the source admires but has never met. Tools / apps / devices the source uses occasionally.
-- **1**: One-off mentions of strangers. A single dinner at a restaurant the source ate at once. Brand names, products, generic items casually referenced. Section headers / structural metadata on a document the source owns ("the first section is sushi" — structural, not relational).
-- **0**: Extraction artifacts. Contextless edges. Generic concept-to-concept relations. Taxonomy scaffolding. Edge sentences that read like data-pipeline noise rather than a fact about a real person's life.
+- **10**: The most defining relationships and states of the source's life.
+  - "Jukka is married to Katy since September 9, 2003."
+  - "Katy is Peter's mother."
+  - "Anna's father is dying of cancer."
+  - "John still grieves his late wife Mary."
+- **9**: Family-tier bonds and primary career anchors.
+  - "Jukka and Katy have two beloved dogs, Bonnie and Clyde, that they walk daily."
+  - "Mike is a senior software engineer at Google — his primary career."
+  - "Seija is Jukka's sister; they talk monthly."
+  - "Jorma is Jukka's father, who lives in Finland."
+- **8**: In-laws, formative mentors, identity-defining professional/personal commitments, life-goal commitments.
+  - "Pam is Katy's mother and Jukka's mother-in-law."
+  - "David Weisbart is really into teaching — it's central to his professional identity as a math professor."
+  - "Jukka is a committed atheist."
+  - "Professor Varadarajan was Jukka's PhD advisor at UCLA."
+  - "Jukka's goal is to raise his children to become good adults." (long-term life goal)
+- **7**: Active hobbies/passions that are part of identity; close friends; long-term collaborators; multi-year goals the source is actively pursuing.
+  - "Jukka plays chess online almost daily and identifies as a chess player."
+  - "Phil and Jukka are long-time close friends since high school."
+  - "Annika is taking honors choir; she sings regularly."
+  - "Peter is really into competitive math."
+  - "Jukka would like to reach a 2000 chess rating before he dies." (multi-year active goal)
+- **6**: Regular ongoing engagement that's part of routine but not identity-defining.
+  - "Jukka has weekly engineering syncs with the AVID staff at his primary employer."
+  - "Jukka regularly drinks coffee in the morning."
+  - "Jukka and Katy see Marika and Joe at family gatherings every couple of months."
+  - "Bonnie and Clyde get walked twice a day."
+- **5**: Casual interests, recurring but light states, soft commitments.
+  - "Jukka occasionally plays Disco Elysium when he wants to wind down."
+  - "Jukka likes Bob's Burgers."
+  - "Katy goes to her book club tonight."
+  - "Jukka is interested in personal knowledge graphs."
+  - "Jukka wants to read more books this year." (soft active goal)
+  - "Jukka is trying to eat healthier." (ongoing intent without sharp commitment)
+- **4**: Occasional one-time events that mattered briefly; tools and resources used weekly.
+  - "Jukka had a great Coachella experience in 2024."
+  - "Jukka uses VS Code as his primary IDE."
+  - "Jukka attended his cousin's wedding last summer."
+- **3**: Routines, maintained tasks, actively-managed documents/lists, immediate-week goals.
+  - "Wednesday is Jukka's family's trash night."
+  - "Jukka maintains a shopping list for Ralph's."
+  - "Jukka is working on his Q2 timesheet."
+  - "Annika's school day starts at 8 AM."
+  - "Jukka needs to take the dogs out at 5pm today." (transient daily intent)
+  - "Jukka wants to clean the garage this weekend." (this-week goal)
+- **2**: Single events, list items, transient states, public figures the source admires.
+  - "Ralph's shopping list includes deli chicken tenders for Annika."
+  - "Jukka has a headache today."
+  - "Jukka watched an episode of GOT last night."
+  - "Jukka admires Bob Dylan's songwriting."
+- **1**: Structural metadata, brand mentions in passing, momentary intentions, in-the-moment wants.
+  - "The first section on Ralph's shopping list is the deli/sushi section."
+  - "Jukka wishes he had a glass of milk right now." (momentary craving, treated as transient goal)
+  - "Jukka mentioned Bjork in a conversation about music."
+  - "Jukka's email address is jukka@example.com." (contact info)
+  - "Jukka wants to pick up coffee before the meeting." (in-the-moment intent)
+- **0**: Extraction noise.
+  - "The document is called Ralph's shopping list." (data-pipeline label)
+  - "is_a Concept" with no meaningful binding.
+  - Contextless edges that read like database scaffolding rather than a real-life fact.
 
 Discipline:
 - The relationship_type alone is sometimes ambiguous; weigh source identity, target identity, and the original sentence together.

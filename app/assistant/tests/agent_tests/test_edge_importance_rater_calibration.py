@@ -179,6 +179,56 @@ CALIBRATION_CASES = [
         "expected_max": 4.0,
         "rationale": "Single-day attendance — 1-3 per prompt rules",
     },
+
+    # ====== GOAL edges — span the full range ======
+    {
+        "name": "goal_long_term_identity",
+        "input": (
+            "id: test-10\n"
+            "source label: Jukka Virtanen\n"
+            "edge label: has_goal\n"
+            "target label: Raise Good Children\n"
+            "source sentence: Jukka is a father of Peter and Annika.\n"
+            "target sentence: Long-term life goal of raising children to become good adults.\n"
+            "EDGE SENTENCE — THIS IS THE ONE WHOSE IMPORTANCE TO THE SOURCE YOU ARE EVALUATING: "
+            "Jukka's goal is to raise his children to become good adults."
+        ),
+        "expected_min": 7.0,
+        "expected_max": 10.0,
+        "rationale": "Identity-defining life goal — 8+ per prompt level-8 example",
+    },
+    {
+        "name": "goal_multi_year_active",
+        "input": (
+            "id: test-11\n"
+            "source label: Jukka Virtanen\n"
+            "edge label: has_goal\n"
+            "target label: 2000 Chess Rating\n"
+            "source sentence: Jukka plays chess regularly.\n"
+            "target sentence: Multi-year goal to reach a 2000 chess.com rating.\n"
+            "EDGE SENTENCE — THIS IS THE ONE WHOSE IMPORTANCE TO THE SOURCE YOU ARE EVALUATING: "
+            "Jukka would like to reach a 2000 chess rating before he dies."
+        ),
+        "expected_min": 6.0,
+        "expected_max": 9.0,
+        "rationale": "Multi-year active goal tied to hobby identity — 7 per prompt level-7 example",
+    },
+    {
+        "name": "goal_transient_momentary",
+        "input": (
+            "id: test-12\n"
+            "source label: Jukka Virtanen\n"
+            "edge label: has_goal\n"
+            "target label: Glass of Milk\n"
+            "source sentence: Jukka is the user.\n"
+            "target sentence: Transient momentary craving for milk.\n"
+            "EDGE SENTENCE — THIS IS THE ONE WHOSE IMPORTANCE TO THE SOURCE YOU ARE EVALUATING: "
+            "Jukka wishes he had a big cold glass of milk right now."
+        ),
+        "expected_min": 0.0,
+        "expected_max": 2.5,
+        "rationale": "Momentary craving treated as transient goal — 1 per prompt level-1 example",
+    },
 ]
 
 
