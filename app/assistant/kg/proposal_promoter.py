@@ -290,24 +290,51 @@ def _filter_candidates_by_weighted_overlap(
     return kept
 
 
-def _filter_candidates_by_label_equality(
+_LABEL_SIMILARITY_THRESHOLD = 0.6   # cosine similarity, tuneable
+# Calibrated 2026-05-12 against the Parenthood/Marriage/Sibling/Closeness
+# candidate distribution. Reasoning: Jaccard upstream already requires
+# majority participant overlap, so by the time this filter runs the
+# candidates ALL share most participants. In that filtered pool,
+# same-concept-different-label pairs typically embed at 0.5-0.9+ and
+# different-concept candidates land at 0.4-0.6. 0.6 catches the merge-worthy
+# same-concept variants ('Parenthood' ↔ 'Parent-Child Relationship',
+# 'Marriage' ↔ 'Marriage Start') while still filtering most concept
+# mismatches. LLM verification is the final arbiter for residual noise.
+
+
+def _filter_candidates_by_label_or_similarity(
     scored: list,
     new_label: str,
+    new_sentence: Optional[str] = None,
 ) -> list:
-    """Decide-not-a-match for candidates whose label differs from the new
-    proposal's label (case-insensitive, trimmed equality).
+    """Keep candidates that match by label OR by sentence-embedding similarity.
 
-    Why: labels are intentionally drawn from a narrow standardized set,
-    so SAME label is weak evidence (the narrow set conflates many distinct
-    things — still need LLM). But DIFFERENT labels are strong evidence:
-    the standardization wouldn't put truly-related instances in different
-    buckets. So label-mismatch is a hard reject without LLM.
+    Relaxed 2026-05-12 from strict label-equality (formerly
+    `_filter_candidates_by_label_equality`). The strict filter was rejecting
+    legitimate same-concept-different-phrasing matches like
+    "Parenthood" ↔ "Parent-Child Relationship" and
+    "Marriage" ↔ "Marriage Start", producing parallel State/Event hubs
+    across windows.
+
+    Decision tiers:
+      1. Same label (case-insensitive trim) → KEEP — same standardized
+         bucket, hand to LLM to verify (the bucket conflates instances).
+      2. Different label BUT cosine similarity of sentence embeddings
+         >= LABEL_SIMILARITY_THRESHOLD → KEEP — semantically related,
+         worth LLM verification.
+      3. Different label AND embedding similarity below threshold (or
+         embedding unavailable) → DROP — strong evidence of unrelated
+         instances, save the LLM call.
+
+    Failure-isolated: chroma/embedder down → degrade to label-only
+    (matches old behavior), log warning.
 
     Args:
         scored: candidate list as returned by
-            ``_score_candidates_by_participant_overlap``. Each item's
-            ``"node"`` must have a ``.label`` attribute.
+            ``_score_candidates_by_participant_overlap``.
         new_label: the new proposal's label.
+        new_sentence: the new proposal's sentence (canonical or raw —
+            either is fine, embeddings are robust to small phrasing diffs).
 
     Returns:
         Filtered scored list, same shape.
@@ -315,10 +342,76 @@ def _filter_candidates_by_label_equality(
     new_norm = (new_label or "").strip().casefold()
     if not new_norm:
         return scored  # no new label to compare against — pass through
-    return [
-        s for s in scored
-        if (getattr(s["node"], "label", "") or "").strip().casefold() == new_norm
-    ]
+
+    # Tier 1: same label
+    same_label = []
+    diff_label = []
+    for s in scored:
+        cand_norm = (getattr(s["node"], "label", "") or "").strip().casefold()
+        if cand_norm == new_norm:
+            same_label.append(s)
+        else:
+            diff_label.append(s)
+
+    if not diff_label or not new_sentence or not new_sentence.strip():
+        return same_label
+
+    # Tier 2: embedding similarity for different-label candidates
+    try:
+        from app.assistant.embeddings.embedder import embed_text
+        from app.assistant.kg.chroma.chroma_embedding_manager import get_chroma_manager
+        import numpy as np
+    except Exception as exc:
+        logger.warning(
+            "[promoter] embedding similarity unavailable for label-relax filter: %s "
+            "(falling back to strict label-only)", exc,
+        )
+        return same_label
+
+    try:
+        new_emb = np.array(embed_text(new_sentence), dtype=float)
+        new_n = float(np.linalg.norm(new_emb))
+        if new_n == 0.0:
+            return same_label
+        cm = get_chroma_manager()
+        cand_ids = [s["node"].id for s in diff_label]
+        result = cm.node_context_collection.get(
+            ids=cand_ids, include=["embeddings"]
+        )
+        emb_by_id: Dict[str, list] = {}
+        for cid, emb in zip(result.get("ids") or [], result.get("embeddings") or []):
+            if emb is not None and len(emb) > 0:
+                emb_by_id[cid] = emb
+        kept_diff = []
+        for s in diff_label:
+            cand_emb = emb_by_id.get(s["node"].id)
+            if cand_emb is None:
+                continue  # no embedding → can't compare → drop (conservative)
+            cand_v = np.array(cand_emb, dtype=float)
+            cand_n = float(np.linalg.norm(cand_v))
+            if cand_n == 0.0:
+                continue
+            sim = float(np.dot(new_emb, cand_v) / (new_n * cand_n))
+            if sim >= _LABEL_SIMILARITY_THRESHOLD:
+                kept_diff.append(s)
+        if kept_diff:
+            logger.info(
+                "[promoter] label-relax kept %d diff-label candidate(s) via "
+                "embedding similarity (threshold=%.2f)",
+                len(kept_diff), _LABEL_SIMILARITY_THRESHOLD,
+            )
+        return same_label + kept_diff
+    except Exception as exc:
+        logger.warning(
+            "[promoter] label-relax embedding lookup failed: %s "
+            "(falling back to strict label-only)", exc,
+        )
+        return same_label
+
+
+# Back-compat alias for the old name; deprecate in a follow-up.
+def _filter_candidates_by_label_equality(scored, new_label):
+    return _filter_candidates_by_label_or_similarity(scored, new_label, None)
 
 
 def _filter_candidates_by_min_jaccard(
@@ -1794,12 +1887,16 @@ def _prepare_proposal_plan(proposal_id: str) -> Optional[_PromoterPlan]:
                         scored, entity_degrees,
                     )
 
-            # Label-mismatch exclusion. Labels are intentionally drawn from
-            # a narrow standardized set, so SAME label is weak evidence and
-            # still requires LLM, but DIFFERENT labels are strong evidence
-            # of non-match — the standardization wouldn't put truly-related
-            # instances in different buckets.
-            scored = _filter_candidates_by_label_equality(scored, pn.label)
+            # Label-mismatch exclusion (relaxed 2026-05-12).
+            # Strict label-equality dropped legitimate same-concept matches
+            # like "Parenthood" ↔ "Parent-Child Relationship" or
+            # "Marriage" ↔ "Marriage Start" → parallel State hubs accumulated.
+            # New behavior: keep candidates with same label OR with sentence-
+            # embedding cosine similarity >= LABEL_SIMILARITY_THRESHOLD (0.7).
+            # LLM verification (`node_merger`) downstream is the final arbiter.
+            scored = _filter_candidates_by_label_or_similarity(
+                scored, pn.label, pn.sentence,
+            )
 
             # Cap LLM input — hub participants (Jukka) explode candidate count.
             candidate_lists[pn.id] = [
