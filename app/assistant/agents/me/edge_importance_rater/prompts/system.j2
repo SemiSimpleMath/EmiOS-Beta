@@ -12,12 +12,19 @@ Rules:
 
 Calibration anchors (from the source's perspective):
 
-- 9.0–10.0: Defining lifelong bonds — `married_to`, `parent_of`, `child_of`, `sibling_of` to immediate family. Primary employer / lifelong career anchor.
-- 7.0–8.9: Significant ongoing relationships — `close_friend_of`, `mentor_of`, `student_of` for formative teachers, central long-term collaborator, in-laws.
-- 5.0–6.9: Regular but not defining — `colleague_of`, `friend_of` (regular), `neighbor_of` (engaged), recurring teammates, ongoing pets.
-- 3.0–4.9: Occasional / acquaintance — `met_at`, `knows`, `coworker_of` (peripheral), one-time collaborators.
-- 1.0–2.9: One-off mentions — `attended`, `participated_in`, `mentioned_in`, public figures admired but never met.
-- 0.0–0.9: Extraction artifacts — generic concept relations, taxonomy scaffolding, contextless edges.
+Each integer level has multiple concrete examples — match the edge to its nearest level. Use a .5 between levels when an edge sits between bands.
+
+- **10**: Spouse (`married_to`). Own children (`parent_of`). Own parents (`child_of`). The source's deceased life partner (still 10 — never deceased-discounted). The single most defining lifelong relationship.
+- **9**: Adult siblings the source is close with. **Beloved pets** (the dog/cat the source walks daily, talks about by name, calls family — these belong here, not lower). Primary career identity (a math professor's `is_professor_at`, a doctor's `is_physician_at`). The source's hometown they strongly identify with.
+- **8**: In-laws (parent-of-spouse, sibling-of-spouse). Formative academic advisor / lifelong mentor. **Identity-defining professional roles** ("really into teaching" for an actual teacher, "really into research" for a researcher, "really into law" for a lawyer — the activity IS the source's professional identity). Deeply held political/religious/ethical commitments.
+- **7**: Close personal friends (the source's inner circle, 5-10 people). **Active hobby that's part of identity** ("plays chess daily", "runs marathons", "is really into woodworking", "writes poetry seriously"). Central long-term collaborator. Aunts/uncles/grandparents the source is in regular contact with.
+- **6**: Regular colleagues at primary employer. Friends seen monthly. Engaged neighbors. The source's gym / running club / weekly D&D group / book club. Cousins met yearly. Personal doctor / dentist of many years.
+- **5**: Recurring teammates on a side project. Acquaintances at regular events (the barista who knows the source's order). Casual interests the source dabbles in (tried piano, doesn't practice daily). The source's regular gym, regular coffee shop. Houseplants the source tends.
+- **4**: Occasional collaborators. Things the source has tried for a month and might or might not pursue. Distant cousins seen at family reunions. Tools the source uses weekly (a specific IDE, a particular kitchen appliance).
+- **3**: Acquaintances met a handful of times. One-time collaborators on a small project. Routines and tasks the source maintains (`daily walk`, `weekly meal prep`). Documents the source actively manages (a personal todo list, a budget spreadsheet — the document, not its contents).
+- **2**: Single conversations / one-time events the source attended. Specific list items, calendar entries, shopping list entries. Public figures the source admires but has never met. Tools / apps / devices the source uses occasionally.
+- **1**: One-off mentions of strangers. A single dinner at a restaurant the source ate at once. Brand names, products, generic items casually referenced. Section headers / structural metadata on a document the source owns ("the first section is sushi" — structural, not relational).
+- **0**: Extraction artifacts. Contextless edges. Generic concept-to-concept relations. Taxonomy scaffolding. Edge sentences that read like data-pipeline noise rather than a fact about a real person's life.
 
 Discipline:
 - The relationship_type alone is sometimes ambiguous; weigh source identity, target identity, and the original sentence together.
