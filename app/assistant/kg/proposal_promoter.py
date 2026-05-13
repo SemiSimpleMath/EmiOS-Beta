@@ -951,7 +951,43 @@ def _create_kg_node_from_proposal(
     )
     session.add(new)
     session.flush()
+    # Embed-at-write (2026-05-12): immediately compute and store the
+    # node's context embedding in ChromaDB so it's discoverable by Tier 3
+    # of the maintenance duplicate scan on the very next run, instead of
+    # waiting up to 7 days for the periodic context_embedding_backfill.
+    # Failure-isolated — chroma down / model unavailable / embedding error
+    # all log a warning and let the node persist. The backfill step
+    # remains the safety net.
+    _embed_and_store_node(new.id, sentence_for_node)
     return new
+
+
+def _embed_and_store_node(node_id: str, sentence: str) -> None:
+    """Compute the context embedding for a freshly-written node and store
+    it in ChromaDB's node_context_collection. No-op + warn on any failure.
+
+    Single responsibility: don't query, don't decide; just persist the
+    embedding for the given (node_id, sentence). The dedup pipelines that
+    consume these embeddings remain the policy layer.
+    """
+    if not sentence or not str(sentence).strip():
+        return
+    try:
+        from app.assistant.embeddings.embedder import embed_text
+        from app.assistant.kg.chroma.chroma_embedding_manager import get_chroma_manager
+    except Exception as exc:
+        logger.warning("[promoter] embedding modules unavailable: %s", exc)
+        return
+    try:
+        emb = embed_text(sentence)
+        cm = get_chroma_manager()
+        cm.store_node_context_embedding(node_id, sentence, emb)
+    except Exception as exc:
+        logger.warning(
+            "[promoter] failed to embed/store node %s: %s "
+            "(falls back to periodic backfill)",
+            node_id[:8] if node_id else "?", exc,
+        )
 
 
 def _estimate_state_ttl(
