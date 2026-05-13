@@ -311,6 +311,87 @@ def regenerate_importance(
     return scores
 
 
+def regenerate_entity_importance(*, only_unrated: bool = True) -> int:
+    """Derive Entity / Concept node importance from edge importance.
+
+    Replaces the buggy `me::importance_rater` LLM path 2026-05-12 (which
+    rated Emi at 3.0 despite 346 edges + 154 observations, because the
+    LLM categorized her as an "AI tool" per the prompt's tools-vs-people
+    framing). The edge graph already encodes the truth — let it speak.
+
+    Formula:
+
+        Entity.importance = max(edge.importance for edge in adjacent_edges(Entity))
+
+    Pure max, no node multiplication. (Unlike State/Event derivation which
+    uses `max(src_imp × edge_imp / 10)` because their importance is
+    inherited via their most-important participant; for an Entity the
+    edges themselves directly express how important the entity is from
+    someone else's perspective.)
+
+    Edge importance is rated from the source's perspective by
+    `me::edge_importance_rater`. So `Jukka --addressee--> Emi` rated 9
+    (Jukka cares deeply about her) makes Emi's max-adjacent-edge = 9 →
+    Emi.importance = 9. Same edge contributes to Jukka too.
+
+    Unrated edges are simply skipped — derivation is a lower bound. As
+    edge rater backfills, node importances refresh on next run.
+
+    Args:
+        only_unrated: when True (default), skip nodes whose
+            ``importance`` is non-null. False = re-rate all eligible nodes.
+
+    Returns the number of nodes updated.
+    """
+    from sqlalchemy import text as sql_text
+
+    started = time.time()
+
+    null_filter = "AND n.importance IS NULL" if only_unrated else ""
+    select_sql = f"""
+        SELECT n.id,
+               MAX(e.importance) AS score
+        FROM kg_node_metadata n
+        JOIN kg_edge_metadata e
+          ON e.source_id = n.id OR e.target_id = n.id
+        WHERE n.node_type IN ('Entity', 'Concept')
+          AND e.importance IS NOT NULL
+          {null_filter}
+        GROUP BY n.id
+    """
+
+    with get_db_manager().read_session() as session:
+        rows = session.execute(sql_text(select_sql)).fetchall()
+
+    updates = [(r[0], float(r[1])) for r in rows if r[1] is not None]
+    if not updates:
+        logger.info("entity importance: no eligible nodes (only_unrated=%s)", only_unrated)
+        return 0
+
+    persisted = 0
+    failed = 0
+    with get_db_manager().transaction(op="entity_importance_persist") as session:
+        for nid, score in updates:
+            try:
+                session.query(Node).filter(Node.id == nid).update(
+                    {Node.importance: score, Node.updated_at: Node.updated_at},
+                    synchronize_session=False,
+                )
+                persisted += 1
+            except Exception as e:
+                logger.warning("entity importance: DB write failed for node %s: %s", nid, e)
+                failed += 1
+        session.commit()
+
+    elapsed = time.time() - started
+    logger.info(
+        "entity importance: rated %d Entity/Concept nodes in %.1fs "
+        "(%d failures, only_unrated=%s)",
+        persisted, elapsed, failed, only_unrated,
+    )
+    return persisted
+
+
 def regenerate_state_importance(*, only_unrated: bool = True) -> int:
     """Fill State / Event / Goal / Property node importance from edge importance.
 
@@ -403,5 +484,7 @@ def regenerate_state_importance(*, only_unrated: bool = True) -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     import app.assistant.tests.test_setup  # noqa: F401
-    regenerate_importance()
-    regenerate_state_importance()
+    # Entity / Concept derived from edge importance (max adjacent).
+    regenerate_entity_importance(only_unrated=False)
+    # State / Event / Goal / Property derived via max(src_imp × edge_imp / 10).
+    regenerate_state_importance(only_unrated=False)

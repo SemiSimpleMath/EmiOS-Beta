@@ -323,39 +323,40 @@ wiki_nightly_refresh = _lazy_wiki_nightly_refresh
 
 
 def _lazy_kg_importance_rater(*, target_date=None, routine=None):
-    """Periodic: rate any node/edge with NULL importance via the existing
-    batch raters (me::importance_rater + me::edge_importance_rater).
-    Idempotent, runs every ~30 min so newly-promoted content has scores by
-    the time the wiki refresh's importance pre-filter runs against it.
+    """Periodic: rate edges via LLM, then DERIVE all node importance from edges.
 
-    Reads ``spec.batch_size_edges`` / ``spec.batch_size_nodes`` if you want
-    to tune throughput per call.
+    Architecture (2026-05-12): one LLM rater (edges only). Node importance
+    is mechanical derivation:
+      - Entity / Concept: `max(adjacent edge.importance)`
+      - State / Event / Goal / Property: `max(src_imp × edge_imp / 10)`
 
-    The **edge rater is gated by `kg_edge_importance_rating` subsystem flag**
-    (default OFF — it's expensive and the entity + state-derivation paths
-    work fine without per-edge importance until you want PageRank weighted
-    by relationship strength). Flip the flag on at `/dev/subsystems` when
-    you want to start populating `kg_edge_metadata.importance`.
+    Replaces the buggy `me::importance_rater` Entity-LLM path which
+    misrated Emi 3.0 because it categorized her as an "AI tool" via the
+    prompt's framing. The edge graph already encodes the truth.
+
+    Edge rating is mandatory (was previously subsystem-gated OFF) because
+    derivation now depends on it. Unrated edges contribute None and are
+    skipped — derivation is a safe lower bound that improves as the edge
+    rater backfills.
+
+    Reads ``spec.batch_size_edges`` for edge rater throughput.
     """
     from app.assistant.kg.edge_importance import regenerate_edge_importance
-    from app.assistant.utils.subsystem_flags import is_subsystem_enabled
-    from app.me.importance import regenerate_importance, regenerate_state_importance
+    from app.me.importance import regenerate_entity_importance, regenerate_state_importance
     spec = (routine.spec if routine and hasattr(routine, "spec") else {}) or {}
     batch_edges = int(spec.get("batch_size_edges", 50))
-    batch_nodes = int(spec.get("batch_size_nodes", 60))
 
-    if is_subsystem_enabled("kg_edge_importance_rating"):
-        edge_count = regenerate_edge_importance(batch_size=batch_edges, only_unrated=True)
-        edge_status = int(edge_count or 0)
-    else:
-        edge_count = 0
-        edge_status = "skipped (subsystem disabled)"
+    # Step 1: rate edges via me::edge_importance_rater. The single LLM input.
+    edge_count = regenerate_edge_importance(batch_size=batch_edges, only_unrated=True)
+    edge_status = int(edge_count or 0)
 
-    node_scores = regenerate_importance(batch_size=batch_nodes, only_unrated=True)
-    # State / Event / Goal / Property: derive from edge importance × source
-    # entity importance via max(src_imp × edge_imp / 10). Runs AFTER the edge
-    # rater so the inputs are fresh.
-    state_count = regenerate_state_importance(only_unrated=True)
+    # Step 2: derive Entity / Concept importance from adjacent edge importance.
+    # Pure max; runs AFTER edge rater so inputs are fresh.
+    entity_count = regenerate_entity_importance(only_unrated=False)
+
+    # Step 3: derive State / Event / Goal / Property importance via
+    # max(src_imp × edge_imp / 10). Depends on Entity importance from step 2.
+    state_count = regenerate_state_importance(only_unrated=False)
 
     # Section tagging — runs AFTER importance rating completes so the tagger
     # can see real importance values (gate by source-entity importance is
@@ -373,8 +374,8 @@ def _lazy_kg_importance_rater(*, target_date=None, routine=None):
 
     return {
         "edges_rated": edge_status,
-        "nodes_rated": len(node_scores or {}),
-        "state_nodes_rated": int(state_count or 0),
+        "entity_nodes_derived": int(entity_count or 0),
+        "state_nodes_derived": int(state_count or 0),
         "tagging": tag_stats,
     }
 

@@ -1,6 +1,6 @@
 {
   "id": "kg_importance_rater",
-  "enabled": false,
+  "enabled": true,
   "name": "KG importance rater (nodes + edges)",
   "aliases": [],
   "runner": "function",
@@ -13,5 +13,5 @@
     "type": "interval",
     "min_interval_seconds": 1800
   },
-  "notes": "[DISABLED 2026-05-10 POST-NUKE \u2014 re-enable when KG pipeline rebuilt] Rates any node/edge with NULL importance via me::edge_importance_rater + me::importance_rater. Cheap, idempotent, runs every 30 min so the wiki refresh's importance pre-filter has scores by the time it runs."
+  "notes": "Re-enabled 2026-05-12 with new architecture: ONE LLM rater (me::edge_importance_rater on unrated edges), then all node importance is DERIVED. Entity/Concept = max(adjacent edge importance). State/Event/Goal/Property = max(src_imp \u00d7 edge_imp / 10). Replaces the buggy me::importance_rater Entity-LLM path which misrated Emi at 3.0 because the prompt categorized her as an AI tool. Cheap, idempotent, runs every 30 min."
 }
