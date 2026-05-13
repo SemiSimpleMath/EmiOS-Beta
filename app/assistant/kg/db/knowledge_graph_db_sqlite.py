@@ -363,6 +363,58 @@ class Edge(Base):
     )
 
 
+# --- Edge canonicalization tables (2026-05-12) -------------------------
+# SQLite port of the Postgres-era edge_canon design. Used by the
+# proposal_writer canonicalization pass to fold LLM-emitted predicate
+# variants into canonical edge_type names. Seed data in
+# scratch/_seed_edge_canon.py (adapted from
+# app/assistant/kg_core/kg_setup/_archived/edge_canon_postgres/).
+class EdgeCanon(Base):
+    __tablename__ = 'edge_canon'
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    # Canonical predicate name (e.g. 'owner_in', 'has_state').
+    edge_type = Column(String, nullable=False, unique=True)
+    # Inverse edge name (NULL when symmetric — 'colleague_in' has no inverse).
+    inverse = Column(String, nullable=True)
+    # Domain/range = source/target node type expected for this edge.
+    domain_type = Column(String, nullable=False)
+    range_type = Column(String, nullable=False)
+    is_symmetric = Column(Boolean, default=False)
+    # Semantic grouping ('ownership_state', 'employment_state', etc.)
+    # for browsing + ontology consistency.
+    category = Column(String, nullable=True)
+    description = Column(Text, nullable=True)
+    example = Column(Text, nullable=True)
+    created_at = Column(AwareUtcDateTime, nullable=False, default=utc_now)
+
+    __table_args__ = (
+        Index('ix_edge_canon_edge_type', 'edge_type'),
+        Index('ix_edge_canon_category', 'category'),
+    )
+
+
+class EdgeAlias(Base):
+    __tablename__ = 'edge_alias'
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    canon_id = Column(
+        String, ForeignKey('edge_canon.id', ondelete='CASCADE'),
+        nullable=False,
+    )
+    # The non-canonical predicate string that maps to canon (e.g. 'owns_in',
+    # 'wife', 'work_for'). Globally unique — same surface form can only
+    # canonicalize to one target. Conflicts are rare; if they arise, refine
+    # to qualified lookup (domain_type, range_type) later.
+    raw_text = Column(String, nullable=False, unique=True)
+    created_at = Column(AwareUtcDateTime, nullable=False, default=utc_now)
+
+    __table_args__ = (
+        Index('ix_edge_alias_canon_id', 'canon_id'),
+        Index('ix_edge_alias_raw_text', 'raw_text'),
+    )
+
+
 # Node type constants for compatibility. 'Pod' is intentionally NOT included
 # here — pods are addressed by URI directly in kg_edge_metadata.source_id /
 # target_id and have no kg_node_metadata rows.

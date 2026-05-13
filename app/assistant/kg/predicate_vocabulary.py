@@ -182,30 +182,42 @@ def normalize_predicate(raw: str) -> Tuple[str, bool]:
         - ``was_mapped``: True iff ``raw`` matched a known alias OR needed
           case/whitespace normalization. False iff it was already clean.
 
-    Unknown predicates pass through with basic normalization and are logged
-    at INFO level so the vocabulary can grow deliberately.
+    Lookup order (2026-05-12):
+      1. Exact-case in-code PREDICATE_ALIASES
+      2. Lowercased + whitespace-collapsed normalization
+      3. CANONICAL_PREDICATES set (the normalized form is already canonical)
+      4. Case-insensitive in-code alias map
+      5. **DB-backed edge_alias table** (the 223-entry seed from the
+         archived Postgres-era design, ported 2026-05-12). Searched both
+         exact-raw and lowercased forms. Cached at module level.
+      6. Unknown — pass through normalized, log for vocabulary growth.
     """
     if not raw:
         return raw, False
 
-    # Exact alias match (case-sensitive) — covers capitalized variants.
+    # 1. Exact alias match (case-sensitive) — covers capitalized variants.
     if raw in PREDICATE_ALIASES:
         return PREDICATE_ALIASES[raw], True
 
     normalized = _basic_normalize(raw)
 
+    # 2-3. Already canonical after normalization.
     if normalized in CANONICAL_PREDICATES:
         return normalized, normalized != raw
 
-    # Case-insensitive alias match by checking the full alias map lowercased.
-    # Built lazily once; cached as a module-level dict on first use.
+    # 4. Case-insensitive in-code alias map.
     global _LOWER_ALIAS_CACHE
     if _LOWER_ALIAS_CACHE is None:
         _LOWER_ALIAS_CACHE = {k.lower(): v for k, v in PREDICATE_ALIASES.items()}
     if normalized in _LOWER_ALIAS_CACHE:
         return _LOWER_ALIAS_CACHE[normalized], True
 
-    # Unknown predicate — pass through normalized, log for review.
+    # 5. DB-backed edge_alias lookup (223+ aliases from the seeded design).
+    db_canon = _db_alias_lookup(raw, normalized)
+    if db_canon is not None:
+        return db_canon, db_canon != raw
+
+    # 6. Unknown predicate — pass through normalized, log for review.
     logger.info(
         "[predicate_vocabulary] novel predicate observed: raw=%r normalized=%r",
         raw, normalized,
@@ -214,3 +226,70 @@ def normalize_predicate(raw: str) -> Tuple[str, bool]:
 
 
 _LOWER_ALIAS_CACHE: dict[str, str] | None = None
+
+# DB-backed alias cache: raw_text (already lowercased) → canonical edge_type.
+# Loaded lazily on first normalize_predicate call and cached for the process
+# lifetime. The edge_alias table is small enough (~223 rows) to fit in memory
+# trivially; reloads only happen if the process restarts. New aliases added
+# via the kg_maintenance pipeline will be picked up on the next process boot.
+_DB_ALIAS_CACHE: dict[str, str] | None = None
+
+
+def _db_alias_lookup(raw: str, normalized: str) -> str | None:
+    """Look up an alias in the edge_alias table. Returns the canonical
+    edge_type string, or None if not found. Falls back silently if the
+    table doesn't exist (e.g., in tests using a fresh DB)."""
+    global _DB_ALIAS_CACHE
+    if _DB_ALIAS_CACHE is None:
+        _DB_ALIAS_CACHE = _load_db_alias_cache()
+    if not _DB_ALIAS_CACHE:
+        return None
+    # Try exact raw first, then normalized (lowercased)
+    return _DB_ALIAS_CACHE.get(raw) or _DB_ALIAS_CACHE.get(normalized)
+
+
+def _load_db_alias_cache() -> dict[str, str]:
+    """Load the edge_alias → edge_canon.edge_type mapping into memory.
+    Empty dict if the table is missing or empty — never errors out."""
+    try:
+        from app.models.base import get_session
+        from app.assistant.kg.db.knowledge_graph_db_sqlite import (
+            EdgeAlias, EdgeCanon,
+        )
+    except Exception:
+        return {}
+    try:
+        session = get_session()
+        try:
+            rows = (
+                session.query(EdgeAlias.raw_text, EdgeCanon.edge_type)
+                .join(EdgeCanon, EdgeCanon.id == EdgeAlias.canon_id)
+                .all()
+            )
+        finally:
+            session.close()
+    except Exception as exc:
+        logger.warning(
+            "[predicate_vocabulary] edge_alias DB lookup unavailable: %s "
+            "(falling back to in-code alias map only)", exc,
+        )
+        return {}
+    cache: dict[str, str] = {}
+    for raw_text, canon in rows:
+        if not raw_text or not canon:
+            continue
+        # Index by raw and by lowercased form so both pre- and post-normalize
+        # lookup paths hit.
+        cache[raw_text] = canon
+        cache[raw_text.lower()] = canon
+    logger.info(
+        "[predicate_vocabulary] loaded %d DB alias entries", len(cache),
+    )
+    return cache
+
+
+def reset_db_alias_cache() -> None:
+    """Force the DB alias cache to reload on next normalize_predicate call.
+    Call after seeding new aliases in a long-running process."""
+    global _DB_ALIAS_CACHE
+    _DB_ALIAS_CACHE = None
