@@ -43,6 +43,7 @@ class OneShotToolRunner(BaseTool):
         "get_todo_tasks",
         "create_calendar_event",
         "create_repeating_calendar_event",
+        "get_calendar_events",
         "get_weather",
         "set_ui_mute",
         "peak_at_link",

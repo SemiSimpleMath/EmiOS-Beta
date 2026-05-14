@@ -69,6 +69,7 @@
 
     // Per-cluster density caps + binning thresholds.
     const PER_CLUSTER_CAP = 3;        // shown per bin (overview-binned) or per year
+    const PER_MONTH_CAP = 5;          // shown per month in year-detail; "+N more" zooms into month
     const BIN_SIZE = 5;               // years per bin
     const BIN_THRESHOLD = 15;          // span > this triggers binning in overview
     const UNDATED_LABEL_CAP = 5;       // max labeled prose-only entries in lane
@@ -79,9 +80,10 @@
     let totalEntries = 0;
 
     // Mode state
-    let mode = "overview";        // 'overview' | 'bin-detail' | 'year-detail'
+    let mode = "overview";        // 'overview' | 'bin-detail' | 'year-detail' | 'month-detail'
     let detailBinStart = null;    // bin-detail anchor
-    let detailYear = null;        // year-detail anchor
+    let detailYear = null;        // year-detail anchor (also set in month-detail)
+    let detailMonth = null;       // month-detail anchor (1..12)
     let pageIndex = 0;            // page within overview (binned or year-by-year)
 
     function getContainerWidth() {
@@ -155,6 +157,7 @@
         mode = "overview";
         detailBinStart = null;
         detailYear = null;
+        detailMonth = null;
         pageIndex = 0;
         render();
     }
@@ -162,12 +165,21 @@
         mode = "bin-detail";
         detailBinStart = binStart;
         detailYear = null;
+        detailMonth = null;
         pageIndex = 0;
         render();
     }
     function setModeYearDetail(year) {
         mode = "year-detail";
         detailYear = year;
+        detailMonth = null;
+        pageIndex = 0;
+        render();
+    }
+    function setModeMonthDetail(year, month) {
+        mode = "month-detail";
+        detailYear = year;
+        detailMonth = month;
         pageIndex = 0;
         render();
     }
@@ -208,6 +220,10 @@
     window.prevPage = prevPage;
     window.nextPage = nextPage;
     function stepBack() {
+        if (mode === "month-detail") {
+            setModeYearDetail(detailYear);
+            return;
+        }
         if (mode === "year-detail") {
             // If we came from a bin context (overview was binned), step to bin-detail.
             // Else go all the way back to overview.
@@ -229,7 +245,11 @@
         const btn = document.getElementById("backToOverviewBtn");
         if (!btn) return;
         const label = btn.querySelector(".btn-year-label");
-        if (mode === "year-detail") {
+        if (mode === "month-detail") {
+            btn.classList.remove("hidden");
+            const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+            label.textContent = `${monthNames[detailMonth - 1]} ${detailYear}`;
+        } else if (mode === "year-detail") {
             btn.classList.remove("hidden");
             label.textContent = `year ${detailYear}`;
         } else if (mode === "bin-detail") {
@@ -242,7 +262,9 @@
 
     function render() {
         updateModeButton();
-        if (mode === "year-detail") {
+        if (mode === "month-detail") {
+            renderMonthDetail(detailYear, detailMonth);
+        } else if (mode === "year-detail") {
             renderYearDetail(detailYear);
         } else if (mode === "bin-detail") {
             renderBinDetail(detailBinStart);
@@ -268,7 +290,7 @@
         const PAD_LEFT = 60;
         const PAD_RIGHT = 40;
         const AXIS_Y = 40;
-        const ROW_HEIGHT = 22;
+        const ROW_HEIGHT = 30;
         const ROW_TOP = AXIS_Y + 18;
 
         const dated = visible.filter((e) => e.year != null);
@@ -412,7 +434,7 @@
         const PAD_LEFT = 80;
         const PAD_RIGHT = 60;
         const AXIS_Y = 50;
-        const ROW_HEIGHT = 22;
+        const ROW_HEIGHT = 30;
         const ROW_TOP = AXIS_Y + 22;
         const W = getContainerWidth();
         const usable = W - PAD_LEFT - PAD_RIGHT;
@@ -504,7 +526,7 @@
         const PAD_LEFT = 80;
         const PAD_RIGHT = 60;
         const AXIS_Y = 50;
-        const ROW_HEIGHT = 22;
+        const ROW_HEIGHT = 30;
         const ROW_TOP = AXIS_Y + 22;
         const W = getContainerWidth();
         const usable = W - PAD_LEFT - PAD_RIGHT;
@@ -555,16 +577,114 @@
         let maxRowsAny = 0;
         Object.keys(byMonth).forEach((mKey) => {
             const m = Number(mKey);
-            const list = byMonth[m].slice().sort((a, b) => {
-                const da = parseDay(a.date_iso);
-                const db = parseDay(b.date_iso);
-                if (da !== db) return da - db;
-                return importanceDesc(a, b);
+            // Sort by importance first (so the top-N is the most-important
+            // items, not just the earliest in the month). Within the visible
+            // list we keep importance-desc; date order is reserved for the
+            // month-detail view where everything fits.
+            const list = byMonth[m].slice().sort(importanceDesc);
+            const shown = list.slice(0, PER_MONTH_CAP);
+            const hidden = list.length - shown.length;
+            const x = m >= 1 && m <= 12 ? monthToX(m) : PAD_LEFT - 20;
+            shown.forEach((e, i) => {
+                maxRowsAny = Math.max(maxRowsAny, i + 1);
+                const yPx = ROW_TOP + i * ROW_HEIGHT;
+                drawEntry(svg, e, x, yPx, /*showLabel*/ true);
             });
+            if (hidden > 0 && m >= 1 && m <= 12) {
+                const row = shown.length;
+                maxRowsAny = Math.max(maxRowsAny, row + 1);
+                const yPx = ROW_TOP + row * ROW_HEIGHT;
+                drawMoreBadge(svg, x, yPx, hidden,
+                    () => setModeMonthDetail(year, m),
+                    `Click to zoom into ${year}-${String(m).padStart(2, "0")} (${hidden} more)`);
+            }
+        });
+
+        finalizeViewBox(svg, W, ROW_TOP, maxRowsAny, ROW_HEIGHT);
+        updatePageControls(1);
+    }
+
+    // ── Month-detail mode (one month, day spread, no cap) ──────────────────
+    function renderMonthDetail(year, month) {
+        const svg = document.getElementById("timelineSvg");
+        svg.innerHTML = "";
+        const filt = getFilters();
+        const monthEntries = entries
+            .filter((e) => entryPasses(e, filt))
+            .filter((e) => e.year === year && parseMonth(e.date_iso) === month);
+
+        document.getElementById("visibleCount").textContent = monthEntries.length;
+        if (monthEntries.length === 0) {
+            const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+            renderEmpty(svg, `No entries for ${monthNames[month - 1]} ${year} match current filters.`);
+            updatePageControls(1);
+            return;
+        }
+
+        const PAD_LEFT = 80;
+        const PAD_RIGHT = 60;
+        const AXIS_Y = 50;
+        const ROW_HEIGHT = 30;
+        const ROW_TOP = AXIS_Y + 22;
+        const W = getContainerWidth();
+        const usable = W - PAD_LEFT - PAD_RIGHT;
+        const daysInMonth = new Date(year, month, 0).getDate();
+        const dayToX = (d) => PAD_LEFT + (d - 0.5) / daysInMonth * usable;
+
+        // Axis (day ticks)
+        const axisGroup = document.createElementNS(SVG_NS, "g");
+        axisGroup.setAttribute("class", "tl-axis");
+        const axisLine = document.createElementNS(SVG_NS, "line");
+        axisLine.setAttribute("x1", PAD_LEFT);
+        axisLine.setAttribute("x2", W - PAD_RIGHT);
+        axisLine.setAttribute("y1", AXIS_Y);
+        axisLine.setAttribute("y2", AXIS_Y);
+        axisLine.setAttribute("stroke", "#3a3a4f");
+        axisGroup.appendChild(axisLine);
+        // Label every 5th day to keep the axis readable.
+        for (let d = 1; d <= daysInMonth; d++) {
+            const x = dayToX(d);
+            const tick = document.createElementNS(SVG_NS, "line");
+            tick.setAttribute("x1", x);
+            tick.setAttribute("x2", x);
+            tick.setAttribute("y1", AXIS_Y - 4);
+            tick.setAttribute("y2", AXIS_Y + 4);
+            tick.setAttribute("stroke", "#5a5a6e");
+            axisGroup.appendChild(tick);
+            if (d === 1 || d % 5 === 0 || d === daysInMonth) {
+                const label = document.createElementNS(SVG_NS, "text");
+                label.setAttribute("class", "tl-year-label");
+                label.setAttribute("x", x);
+                label.setAttribute("y", AXIS_Y - 10);
+                label.setAttribute("text-anchor", "middle");
+                label.textContent = d;
+                axisGroup.appendChild(label);
+            }
+        }
+        const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+        const title = document.createElementNS(SVG_NS, "text");
+        title.setAttribute("class", "tl-year-bigtitle");
+        title.setAttribute("x", 8);
+        title.setAttribute("y", AXIS_Y - 8);
+        title.textContent = `${monthNames[month - 1]} ${year}`;
+        axisGroup.appendChild(title);
+        svg.appendChild(axisGroup);
+
+        // Spread by day, stack within day. No cap — month-detail shows everything.
+        const byDay = {};
+        monthEntries.forEach((e) => {
+            const d = parseDay(e.date_iso) || 0;
+            (byDay[d] = byDay[d] || []).push(e);
+        });
+
+        let maxRowsAny = 0;
+        Object.keys(byDay).forEach((dKey) => {
+            const d = Number(dKey);
+            const list = byDay[d].slice().sort(importanceDesc);
+            const x = d >= 1 && d <= daysInMonth ? dayToX(d) : PAD_LEFT - 20;
             list.forEach((e, i) => {
                 maxRowsAny = Math.max(maxRowsAny, i + 1);
                 const yPx = ROW_TOP + i * ROW_HEIGHT;
-                const x = m >= 1 && m <= 12 ? monthToX(m) : PAD_LEFT - 20;
                 drawEntry(svg, e, x, yPx, /*showLabel*/ true);
             });
         });
@@ -729,11 +849,20 @@
         svg.appendChild(dot);
 
         if (showLabel) {
+            // Label sits UNDER the dot, centered horizontally. Narrow column,
+            // tight truncation. Full text on hover (the <title> on the dot
+            // already carries the verbatim label + sentence).
             const lbl = document.createElementNS(SVG_NS, "text");
             lbl.setAttribute("class", "tl-event-label");
-            lbl.setAttribute("x", x + r + 4);
-            lbl.setAttribute("y", y + 4);
-            lbl.textContent = e.label.length > 36 ? e.label.slice(0, 34) + "…" : e.label;
+            lbl.setAttribute("x", x);
+            lbl.setAttribute("y", y + r + 10);
+            lbl.setAttribute("text-anchor", "middle");
+            lbl.textContent = e.label.length > 18 ? e.label.slice(0, 16) + "…" : e.label;
+            // Tooltip with full text — duplicates the dot's title so hovering
+            // the label also works.
+            const lblTitle = document.createElementNS(SVG_NS, "title");
+            lblTitle.textContent = `${e.date_iso || e.date_prose || "?"} · ${e.label}${e.importance != null ? " · imp " + e.importance.toFixed(1) : ""}`;
+            lbl.appendChild(lblTitle);
             lbl.addEventListener("click", () => showDetail(e));
             lbl.style.cursor = "pointer";
             svg.appendChild(lbl);

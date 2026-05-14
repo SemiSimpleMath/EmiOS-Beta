@@ -93,7 +93,7 @@ export type ViewMode = '2d' | '3d';
 export interface ExplorationState {
   /** All node IDs currently in the visible set */
   visibleNodeIds: Set<string>;
-  /** Whether we are in hub mode (degree threshold) or free exploration */
+  /** Whether we are in hub mode (importance threshold) or free exploration */
   mode: 'hubs' | 'exploration';
-  degreeThreshold: number;
+  importanceThreshold: number;
 }

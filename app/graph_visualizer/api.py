@@ -375,12 +375,15 @@ def get_hubs():
     """Return nodes whose degree (in + out edges) >= min_degree.
 
     Query params:
-      min_degree  int  default 3
+      min_degree  int  default 1 (skip true orphans)
+
+    Visibility filtering by importance happens CLIENT-SIDE in the visualizer —
+    this endpoint returns the full graph (above the orphan floor) so the
+    slider can re-filter without re-fetching.
     """
-    min_degree = int(request.args.get('min_degree', 3))
+    min_degree = int(request.args.get('min_degree', 1))
     session = get_session()
     try:
-        # Count degree per node using a single SQL query
         from sqlalchemy import text
         rows = session.execute(text(
             """
@@ -402,16 +405,40 @@ def get_hubs():
 
         nodes = session.query(Node).filter(Node.id.in_(node_ids)).all()
         node_data = [_serialize_node(n, degree=int(degree_map.get(n.id, 0))) for n in nodes]
+        known_node_ids = {str(n.id) for n in nodes}
 
-        # Only edges where both endpoints are visible
+        # Edges where AT LEAST one endpoint is a known node. The other endpoint
+        # may be a pod URI (kg_node_metadata has no pod rows). We surface pods
+        # as Pod-typed nodes from pod_store and DROP any edges whose endpoints
+        # remain unknown (dangling refs that would crash the frontend renderer).
         visible_ids = set(node_ids)
         edges = session.query(Edge).filter(
-            Edge.source_id.in_(visible_ids),
-            Edge.target_id.in_(visible_ids)
+            (Edge.source_id.in_(visible_ids)) | (Edge.target_id.in_(visible_ids))
         ).all()
-        edge_data = [_serialize_edge(e) for e in edges]
 
-        logger.debug("Hubs (min_degree=%d): %d nodes, %d edges", min_degree, len(node_data), len(edge_data))
+        # Collect non-node endpoints and try to resolve them as pods
+        pod_node_data = []
+        added_endpoints: set[str] = set()
+        for e in edges:
+            for endpoint in (str(e.source_id), str(e.target_id)):
+                if endpoint in known_node_ids or endpoint in added_endpoints:
+                    continue
+                pod = _serialize_pod_uri_as_node(endpoint)
+                if pod is not None:
+                    pod_node_data.append(pod)
+                    added_endpoints.add(endpoint)
+                    known_node_ids.add(endpoint)
+
+        # Drop dangling edges (endpoint that's neither a real node nor a pod).
+        edges = [
+            e for e in edges
+            if str(e.source_id) in known_node_ids and str(e.target_id) in known_node_ids
+        ]
+        edge_data = [_serialize_edge(e) for e in edges]
+        node_data.extend(pod_node_data)
+
+        logger.debug("Hubs (min_degree=%d): %d nodes (%d pods), %d edges",
+                     min_degree, len(node_data), len(pod_node_data), len(edge_data))
 
         return jsonify({
             'nodes': node_data,

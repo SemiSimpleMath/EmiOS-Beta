@@ -279,8 +279,8 @@ body {
 .tl-event-bar:hover { opacity: 1; }
 .tl-event-label {
     fill: #d8d8e0;
-    font-size: 11px;
-    text-shadow: 0 0 4px #15151f, 0 0 4px #15151f;
+    font-size: 9px;
+    text-shadow: 0 0 3px #15151f, 0 0 3px #15151f;
 }
 
 /* Zoom controls */

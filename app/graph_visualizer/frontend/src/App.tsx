@@ -38,8 +38,9 @@ const App: React.FC = () => {
   const [nodeTypes, setNodeTypes] = useState<string[]>([]);
   const [edgeTypes, setEdgeTypes] = useState<string[]>([]);
   const [viewMode, setViewMode] = useState<ViewMode>('3d');
-  // Slider local state — we debounce the actual fetch
-  const [sliderValue, setSliderValue] = useState(3);
+  // Slider local state — min importance threshold. Default 10 (top tier only).
+  // User drops the slider to reveal lower-importance nodes.
+  const [sliderValue, setSliderValue] = useState(10);
   // Expansion hops — how far to walk out from a clicked/searched node.
   // 0 = node only, 1 = direct neighbors, 2 = neighbors-of-neighbors.
   const [expandHops, setExpandHops] = useState(1);
@@ -73,7 +74,7 @@ const App: React.FC = () => {
 
   const { highlightedNodes, highlightedEdges, highlightNodes, highlightEdges, clearHighlights } = useHighlights();
   const { contextMenu, openContextMenu, closeContextMenu } = useContextMenu();
-  const { physicsConfigured, graphRef, configurePhysics, onEngineStop, resetPhysics } = useGraphPhysics();
+  const { physicsConfigured, graphStable, tickCount, graphRef, configurePhysics, onEngineStop, onEngineTick, resetPhysics } = useGraphPhysics();
 
   // Initial load
   useEffect(() => {
@@ -87,7 +88,7 @@ const App: React.FC = () => {
       }
     };
     init();
-    loadHubs(3);
+    loadHubs();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -97,13 +98,13 @@ const App: React.FC = () => {
     }
   }, [graphData, physicsConfigured, configurePhysics]);
 
-  const handleDegreeChange = useCallback((value: number) => {
+  // Slider only updates the threshold. Visibility filtering happens in the
+  // render layer (nodeVisibility/linkVisibility in GraphCanvas) so the
+  // physics layout doesn't restart — the graph is the same simulated graph,
+  // just with some nodes hidden.
+  const handleImportanceChange = useCallback((value: number) => {
     setSliderValue(value);
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      resetToHubs(value);
-    }, 400);
-  }, [resetToHubs]);
+  }, []);
 
   const handleResetToHubs = useCallback(() => {
     resetToHubs(sliderValue);
@@ -241,6 +242,8 @@ const App: React.FC = () => {
     onToggleAutoRefresh: () => {},
     onSearch: () => setShowSearchModal(true),
     onCloseSidebar: () => setSidebarOpen(false),
+    onImportanceUp: () => setSliderValue(v => Math.min(10, +(v + 0.1).toFixed(1))),
+    onImportanceDown: () => setSliderValue(v => Math.max(0, +(v - 0.1).toFixed(1))),
   });
 
   // Client-side filtering on top of the current visible set.
@@ -256,6 +259,12 @@ const App: React.FC = () => {
 
     const hasAnyNodeFilter =
       !!searchQuery || !!nodeTypeFilter || !!taxonomyKeyword || !!taxonomyPath;
+
+    // Importance threshold is handled at the *render* layer (nodeVisibility /
+    // linkVisibility callbacks in GraphCanvas) so the physics layout doesn't
+    // restart every time the user nudges the slider. filteredGraphData here
+    // only handles search / type / taxonomy filters, which DO change the
+    // membership of the simulated graph.
 
     // Step 1: compute main-node ids by applying all node filters.
     let mainIds: Set<string>;
@@ -345,8 +354,22 @@ const App: React.FC = () => {
     };
   }, [searchQuery, expandHops, filteredGraphData, expandNode]);
 
-  const visibleNodeCount = filteredGraphData?.nodes.length ?? 0;
-  const visibleEdgeCount = filteredGraphData?.edges.length ?? 0;
+  // Visible counts respect both the (membership) filter and the (render-time)
+  // importance threshold. Nodes with null importance are treated as below
+  // any positive threshold.
+  const { visibleNodeCount, visibleEdgeCount } = useMemo(() => {
+    if (!filteredGraphData) return { visibleNodeCount: 0, visibleEdgeCount: 0 };
+    const visibleNodeIds = new Set<string>();
+    for (const n of filteredGraphData.nodes) {
+      if ((n.importance ?? -1) >= sliderValue) visibleNodeIds.add(n.id);
+    }
+    let edgeCount = 0;
+    for (const e of filteredGraphData.edges) {
+      if (visibleNodeIds.has(getNodeId(e.source_node)) &&
+          visibleNodeIds.has(getNodeId(e.target_node))) edgeCount++;
+    }
+    return { visibleNodeCount: visibleNodeIds.size, visibleEdgeCount: edgeCount };
+  }, [filteredGraphData, sliderValue]);
 
   return (
     <div className="h-screen flex flex-col bg-gray-900">
@@ -357,8 +380,8 @@ const App: React.FC = () => {
         loading={loading}
         showStats={showStats}
         onToggleStats={() => setShowStats(!showStats)}
-        degreeThreshold={sliderValue}
-        onDegreeChange={handleDegreeChange}
+        importanceThreshold={sliderValue}
+        onImportanceChange={handleImportanceChange}
         onResetToHubs={handleResetToHubs}
         visibleNodeCount={visibleNodeCount}
         visibleEdgeCount={visibleEdgeCount}
@@ -412,7 +435,11 @@ const App: React.FC = () => {
           onBackgroundClick={handleBackgroundClick}
           graphRef={graphRef}
           onEngineStop={onEngineStop}
+          onEngineTick={onEngineTick}
           nodeTypes={nodeTypes}
+          graphStable={graphStable}
+          tickCount={tickCount}
+          importanceThreshold={sliderValue}
         />
 
         <Sidebar
@@ -442,7 +469,9 @@ const App: React.FC = () => {
 
       <KeyboardHelpModal isOpen={showHelpModal} onClose={() => setShowHelpModal(false)} />
 
-      {loading && <LoadingScreen progress={0} message="Loading…" />}
+      {/* No separate full-screen LoadingScreen — the GraphCanvas's
+          "Computing layout…" / "Loading graph…" dark overlay handles both
+          the fetch and physics-settling phases. */}
 
       {error && <LoadError error={error} retryCount={0} onRetry={() => resetToHubs(sliderValue)} />}
     </div>

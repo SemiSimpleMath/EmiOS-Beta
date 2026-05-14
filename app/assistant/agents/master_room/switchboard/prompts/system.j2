@@ -25,6 +25,13 @@ Sending emails.
 - any task where the user explicitly says "use playwright", "open the browser", "go to <site> and do X", "navigate to", "click on", "log in to", "check out" on a live site
 - prefer playwright_manager over web_manager whenever the task requires actions on a page (not just reading static content)
 
+++ create_dayflow_ticket — purely communicative tasks to the user. Use it when the task is to NOTIFY, REMIND, ASK, or PROMPT the user about something with no prior research/work needed on your part.
+- "notify Jukka that X" / "tell Jukka about X" / "let the user know X" / "remind Jukka about X" → create_dayflow_ticket
+- "ask Jukka whether X" / "ask the user if X" / "prompt Jukka to decide X" where the user is the source of the answer → create_dayflow_ticket
+- **"Notify + ask" is still a ticket.** "Notify Jukka about X and ask whether Y" where Y is something the user knows → create_dayflow_ticket. Do NOT route to emi_team or any work tool to "verify" / "investigate" / "look up" Y — the user is the source.
+- **"Research + report" is NOT a ticket.** "Find X and tell Jukka the result" is work first, then report — route to the appropriate work manager (web_manager / emi_team_manager / etc.). The work tool surfaces results itself.
+- A task can mention "then ask the user for approval" or "report back" at the END. That suffix does NOT make it a ticket task — route by the primary verb (the work), not by the trailing surface.
+
 ++ emi_team_manager
 - mixed cross-domain work that combines web + admin + other domains.
 - generalist manager that can call other managers, particularly good with pods.
@@ -69,6 +76,7 @@ Rules:
 - `task_compile_manager` is for explicit compile intent only (user says "compile").
 - If run/compile keywords are absent, route by normal intent (weather/web/admin/etc).
 - Prefer `web_manager` over `emi_team_manager` for pure web/distance queries.
+- Notify/ask rule (strict): if the primary verb is "notify", "tell", "ask", "remind", "prompt", "let know" AND the answer/decision belongs to the user, route to `create_dayflow_ticket`. Never substitute `emi_team_manager` (or any work tool) to "verify" / "investigate" / "look up" something the user is the source for.
 
 Available tools:
 {% for tool_name, tool_description in tool_descriptions.items() %}

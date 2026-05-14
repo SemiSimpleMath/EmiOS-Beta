@@ -8,9 +8,9 @@ interface HeaderBarProps {
   loading: boolean;
   showStats: boolean;
   onToggleStats: () => void;
-  // Hub controls
-  degreeThreshold: number;
-  onDegreeChange: (value: number) => void;
+  // Hub controls — slider sets min importance (0-10); below threshold is hidden.
+  importanceThreshold: number;
+  onImportanceChange: (value: number) => void;
   onResetToHubs: () => void;
   visibleNodeCount: number;
   visibleEdgeCount: number;
@@ -29,8 +29,8 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
   loading,
   showStats,
   onToggleStats,
-  degreeThreshold,
-  onDegreeChange,
+  importanceThreshold,
+  onImportanceChange,
   onResetToHubs,
   visibleNodeCount,
   visibleEdgeCount,
@@ -56,17 +56,29 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
 
         {/* Center: degree slider + node count */}
         <div className="flex items-center gap-4 flex-1 min-w-0">
-          <div className="flex items-center gap-2 min-w-0">
+          <div
+            className="flex items-center gap-2 min-w-0"
+            // Mouse wheel over the slider bumps the threshold by 0.1.
+            // Up/right scroll = lower threshold (reveal more); down/left = raise.
+            onWheel={e => {
+              e.preventDefault();
+              const delta = e.deltaY > 0 ? 0.1 : -0.1;
+              const next = Math.max(0, Math.min(10, +(importanceThreshold + delta).toFixed(1)));
+              if (next !== importanceThreshold) onImportanceChange(next);
+            }}
+            title="Drag the slider, or use [-] / [=] keys, or hover and scroll the mouse wheel. Step = 0.1."
+          >
             <label className="text-xs text-gray-400 whitespace-nowrap">
-              Min degree: <span className="text-white font-semibold">{degreeThreshold}</span>
+              Min importance: <span className="text-white font-semibold">{importanceThreshold.toFixed(1)}</span>
             </label>
             <input
               type="range"
-              min={1}
-              max={20}
-              value={degreeThreshold}
-              onChange={e => onDegreeChange(Number(e.target.value))}
-              className="w-32 accent-blue-500"
+              min={0}
+              max={10}
+              step={0.1}
+              value={importanceThreshold}
+              onChange={e => onImportanceChange(Number(e.target.value))}
+              className="w-48 accent-blue-500"
             />
           </div>
 

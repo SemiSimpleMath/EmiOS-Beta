@@ -7,6 +7,9 @@ interface KeyboardShortcutsProps {
   onToggleAutoRefresh?: () => void;
   onSearch?: () => void;
   onCloseSidebar?: () => void;
+  // Bump the importance threshold by +/-0.1. Triggered by [=] / [+] and [-] keys.
+  onImportanceUp?: () => void;
+  onImportanceDown?: () => void;
 }
 
 export const useKeyboardShortcuts = ({
@@ -15,7 +18,9 @@ export const useKeyboardShortcuts = ({
   onClearHighlights,
   onToggleAutoRefresh,
   onSearch,
-  onCloseSidebar
+  onCloseSidebar,
+  onImportanceUp,
+  onImportanceDown,
 }: KeyboardShortcutsProps) => {
   
   const handleKeyDown = useCallback((event: KeyboardEvent) => {
@@ -77,8 +82,20 @@ export const useKeyboardShortcuts = ({
           console.log('Show keyboard shortcuts help');
         }
         break;
+      // Importance slider step. Use [=]/[+] (same key) to raise (hide more)
+      // and [-] to lower (reveal more). 0.1 increments handled by callers.
+      case '=':
+      case '+':
+        event.preventDefault();
+        onImportanceUp?.();
+        break;
+      case '-':
+      case '_':
+        event.preventDefault();
+        onImportanceDown?.();
+        break;
     }
-  }, [onRefresh, onExport, onClearHighlights, onToggleAutoRefresh, onSearch, onCloseSidebar]);
+  }, [onRefresh, onExport, onClearHighlights, onToggleAutoRefresh, onSearch, onCloseSidebar, onImportanceUp, onImportanceDown]);
 
   useEffect(() => {
     document.addEventListener('keydown', handleKeyDown);

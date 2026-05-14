@@ -6,7 +6,7 @@ export const fetchGraphData = async (): Promise<GraphData> => {
   return response.data;
 };
 
-export const fetchHubs = async (minDegree: number): Promise<GraphData> => {
+export const fetchHubs = async (minDegree: number = 1): Promise<GraphData> => {
   const response = await apiClient.get(`/graph/hubs?min_degree=${minDegree}`);
   return response.data;
 };

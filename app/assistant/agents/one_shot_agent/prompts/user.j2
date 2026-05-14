@@ -86,37 +86,52 @@ One-shot tool playbook:
   - participants: list[object] (optional; each item may include name/email)
   - link: str (optional URL)
 
-7) get_weather
+7) get_calendar_events
+- Use for: "what's on my calendar", "any meetings today", "check my schedule", "calendar for tomorrow / this week / next month".
+- Arguments:
+  - start_date: str (required, ISO datetime — start of the requested window)
+  - end_date: str (required, ISO datetime — end of the requested window)
+  - single_events: bool (omit unless user asks for recurrence rules; defaults to True in runtime which is what you want)
+- Time-window hints:
+  - "today" → start = today 00:01:00, end = today 23:59:59
+  - "tomorrow" → start = tomorrow 00:01:00, end = tomorrow 23:59:59
+  - "this week" → start = today 00:01:00, end = end-of-week 23:59:59
+  - "next week" → start = next Monday 00:01:00, end = next Sunday 23:59:59
+  - "next month" → start = first of next month 00:01:00, end = last of next month 23:59:59
+  - Default if unspecified: today 00:01:00 to today+7d 23:59:59
+- Avoid times exactly at 00:00:00 — use 00:01:00 or 23:59:59 for day boundaries.
+
+8) get_weather
 - Use for: weather queries.
 - Arguments:
   - city: str
   - forecast_type: str (use "current" unless user asks forecast/range)
 
-8) set_ui_mute
+9) set_ui_mute
 - Use for: mute/unmute/toggle app audio.
 - Arguments:
   - action: str ("mute" | "unmute" | "toggle")
 
-9) peak_at_link
+10) peak_at_link
 - Use for: quick link preview/peek.
 - Arguments:
   - url: str (URL)
   - max_lines: int (always 8)
   - max_chars_per_line: int (always 220)
 
-10) summarize_link
+11) summarize_link
 - Use for: summarize URL/page/article.
 - Arguments:
   - url: str (URL)
 
-11) get_important_emails
+12) get_important_emails
 - Use for: "any new emails?", "check inbox", "important emails".
 - Arguments:
   - {} (empty object) is valid and preferred for default behavior
   - start_date: str (optional ISO datetime)
   - end_date: str (optional ISO datetime)
 
-12) nest_home_control
+13) nest_home_control
 - Use for: thermostat status/mode/target temperature commands.
 - Pass any combination of state fields in one call; omit all to read.
   - mode: str (HEAT | COOL | HEATCOOL | OFF)
@@ -124,7 +139,7 @@ One-shot tool playbook:
   - fan_mode: str (ON | AUTO | OFF)
   - eco_enabled: bool
 
-13) lights_control
+14) lights_control
 - Use for: light power and brightness commands.
 - Required:
   - command: str MUST be exactly one of:
@@ -138,7 +153,7 @@ One-shot tool playbook:
   - room: str — one of the configured device aliases listed in the lights_control
     tool description. Omit room/light_id to target ALL lights.
 
-14) ring_camera_control
+15) ring_camera_control
 - Use for: Ring camera snapshot/events/siren/light.
 - Required:
   - command: str MUST be one of:

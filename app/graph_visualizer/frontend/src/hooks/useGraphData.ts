@@ -47,7 +47,7 @@ export const useGraphData = () => {
   const [graphStats, setGraphStats] = useState<GraphStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [degreeThreshold, setDegreeThreshold] = useState(3);
+  const [importanceThreshold, setImportanceThreshold] = useState(10);
   // Track which node IDs have already been expanded so we don't re-fetch
   const expandedRef = useRef<Set<string>>(new Set());
 
@@ -57,23 +57,22 @@ export const useGraphData = () => {
     setError(null);
   }, []);
 
-  const loadHubs = useCallback(async (minDegree?: number) => {
-    const threshold = minDegree ?? degreeThreshold;
+  // Load all non-orphan nodes once. Importance-based visibility filtering
+  // happens client-side via the slider in App.tsx so the user can re-filter
+  // without re-fetching.
+  const loadHubs = useCallback(async (_unused?: number) => {
     setLoading(true);
     try {
       expandedRef.current = new Set();
-      const data = await fetchHubs(threshold);
+      const data = await fetchHubs(1);  // min_degree=1 = skip orphans only
       _apply(data);
-      if (minDegree !== undefined) {
-        setDegreeThreshold(minDegree);
-      }
     } catch (err) {
       setError('Failed to load hub nodes');
       throw err;
     } finally {
       setLoading(false);
     }
-  }, [degreeThreshold, _apply]);
+  }, [_apply]);
 
   const expandNode = useCallback(async (nodeId: string, depth: number = 1) => {
     // Re-fetch at a different depth even if the node has been "expanded"
@@ -126,8 +125,8 @@ export const useGraphData = () => {
     }
   }, []);
 
-  const resetToHubs = useCallback(async (minDegree?: number) => {
-    await loadHubs(minDegree);
+  const resetToHubs = useCallback(async (minImportance?: number) => {
+    await loadHubs(minImportance);
   }, [loadHubs]);
 
   const updateGraphData = useCallback((newData: GraphData) => {
@@ -140,7 +139,7 @@ export const useGraphData = () => {
     graphStats,
     loading,
     error,
-    degreeThreshold,
+    importanceThreshold,
     loadHubs,
     expandNode,
     resetToHubs,

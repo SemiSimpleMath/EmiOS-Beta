@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
 import ForceGraph3D from 'react-force-graph-3d';
 import { GraphData, Node, Edge, ViewMode } from '../types/graph';
@@ -17,7 +17,19 @@ interface GraphCanvasProps {
   onBackgroundClick: () => void;
   graphRef: React.RefObject<any>;
   onEngineStop: () => void;
+  onEngineTick: () => void;
   nodeTypes: string[];
+  /** True after the force-directed engine has settled. While false the
+   *  canvas is hidden behind a "computing layout..." overlay so the user
+   *  never sees the jittery initial jumble. */
+  graphStable: boolean;
+  /** Number of physics ticks completed so far — surfaced in the overlay so
+   *  the user can see that physics is actually running. */
+  tickCount: number;
+  /** Render-only filter. Nodes with importance below this value are hidden
+   *  via ForceGraph's nodeVisibility / linkVisibility callbacks so the
+   *  layout is not recomputed when the slider changes. */
+  importanceThreshold: number;
 }
 
 const GraphCanvas: React.FC<GraphCanvasProps> = ({
@@ -31,8 +43,47 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
   onBackgroundClick,
   graphRef,
   onEngineStop,
+  onEngineTick,
   nodeTypes,
+  graphStable,
+  tickCount,
+  importanceThreshold,
 }) => {
+  // Read the threshold via a ref inside the visibility callbacks so the
+  // callback identity is STABLE across renders. Otherwise ForceGraph sees
+  // a "new" callback every render and restarts physics — which is why
+  // moving the slider (or any re-render) prevented the engine from settling.
+  const thresholdRef = useRef(importanceThreshold);
+  useEffect(() => { thresholdRef.current = importanceThreshold; }, [importanceThreshold]);
+
+  const isNodeVisible = useCallback((n: Node): boolean => {
+    return (n.importance ?? -1) >= thresholdRef.current;
+  }, []);
+
+  const isEdgeVisible = useCallback((e: Edge): boolean => {
+    // ForceGraph mutates source/target to objects after first render; extract safely.
+    const src: any = e.source_node;
+    const tgt: any = e.target_node;
+    const sImp = typeof src === 'object' && src ? src.importance : undefined;
+    const tImp = typeof tgt === 'object' && tgt ? tgt.importance : undefined;
+    if (sImp === undefined || tImp === undefined) return true;
+    const t = thresholdRef.current;
+    return (sImp ?? -1) >= t && (tImp ?? -1) >= t;
+  }, []);
+
+  // After the threshold changes, re-set the visibility callbacks on the
+  // ForceGraph imperative API. Just changing the prop / calling .refresh()
+  // doesn't re-evaluate visibility in 3D mode — the Three.js scene caches
+  // node visibility at creation time. The setter form re-applies it.
+  useEffect(() => {
+    const fg: any = graphRef.current;
+    if (!fg) return;
+    try {
+      if (typeof fg.nodeVisibility === 'function') fg.nodeVisibility(isNodeVisible);
+      if (typeof fg.linkVisibility === 'function') fg.linkVisibility(isEdgeVisible);
+      if (typeof fg.refresh === 'function') fg.refresh();
+    } catch { /* best-effort */ }
+  }, [importanceThreshold, graphRef, isNodeVisible, isEdgeVisible]);
   const getNodeColor = useCallback((node: Node): string => {
     if (highlightedNodes.has(node.id)) return '#ff6b6b';
     return getNodeColorByClassification(node);
@@ -57,20 +108,32 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
     return getEdgeColorUtil(edge);
   }, [highlightedEdges]);
 
+  // Memoize the wrapped graph object so ForceGraph sees the SAME data
+  // reference across renders when the underlying nodes/edges arrays haven't
+  // actually changed. Otherwise each parent re-render hands ForceGraph a
+  // "new" data object and it restarts physics, preventing the engine from
+  // ever settling. Defined BEFORE the null-data early return so hook order
+  // stays stable.
+  const wrappedGraphData = useMemo(
+    () => graphData ? { nodes: graphData.nodes, links: graphData.edges } : { nodes: [], links: [] },
+    [graphData],
+  );
+
   if (!graphData) {
     return (
-      <div className="flex-1 flex items-center justify-center bg-gray-900">
-        <div className="text-center">
-          <div className="text-gray-400 text-lg">No graph data available</div>
-          <div className="text-gray-500 text-sm mt-2">Adjust the degree threshold or search to load nodes</div>
-        </div>
+      <div
+        className="flex-1 flex items-center justify-center"
+        style={{ background: '#111827', color: '#9ca3af', fontSize: 14, gap: 12 }}
+      >
+        <div className="loading-spinner rounded-full h-4 w-4 border-b-2 border-gray-400 animate-spin" />
+        <span className="ml-3">Loading graph…</span>
       </div>
     );
   }
 
   const sharedProps = {
     ref: graphRef,
-    graphData: { nodes: graphData.nodes, links: graphData.edges } as any,
+    graphData: wrappedGraphData as any,
     linkSource: 'source_node',
     linkTarget: 'target_node',
     nodeLabel: (node: Node) => {
@@ -91,13 +154,46 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
     onNodeRightClick: onNodeRightClick,
     onBackgroundClick: onBackgroundClick,
     onEngineStop: onEngineStop,
-    cooldownTicks: 120,
+    onEngineTick: onEngineTick,
+    // warmupTicks runs SYNCHRONOUSLY before first paint and on 6k-node graphs
+    // it freezes the JS thread for tens of seconds. Keep it at 0 so each
+    // tick is async, the tick counter can advance, and the user sees life.
+    warmupTicks: 0,
+    cooldownTicks: 400,
     d3AlphaDecay: 0.02,
     d3VelocityDecay: 0.35,
+    // Render-only visibility filters — driven by the importance slider.
+    // ForceGraph does NOT restart physics when these change, so the slider
+    // can be moved freely without recomputing the layout.
+    nodeVisibility: isNodeVisible,
+    linkVisibility: isEdgeVisible,
   };
 
   return (
-    <div className="graph-visualization-container">
+    <div className="graph-visualization-container" style={{ position: 'relative' }}>
+      {/* Layout-computing overlay: hide the jittery initial jumble until
+          the d3 force engine settles (onEngineStop fires). */}
+      {!graphStable && (
+        <div
+          style={{
+            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+            zIndex: 10, background: '#111827',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: '#9ca3af', fontSize: 14, gap: 12,
+            flexDirection: 'column',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div className="loading-spinner rounded-full h-4 w-4 border-b-2 border-gray-400 animate-spin" />
+            Computing layout…
+          </div>
+          <div style={{ fontSize: 12, color: '#6b7280' }}>
+            {tickCount > 0
+              ? `${tickCount} physics ticks completed`
+              : 'waiting for the d3 force engine to start…'}
+          </div>
+        </div>
+      )}
       <div className="force-graph-container">
         {viewMode === '3d' ? (
           <ForceGraph3D

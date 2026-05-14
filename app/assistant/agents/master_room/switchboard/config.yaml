@@ -14,6 +14,8 @@ allowed_tools:
   - playwright_manager
   - emi_team_manager
   - devices_manager
+  - create_dayflow_ticket
+  - bash_manager
 except_tools: []
 allowed_nodes: []
 entity_scan_keys: [incoming_message, task, information]

@@ -307,19 +307,19 @@ class UserSettingsManager:
     
     def has_google_oauth_credentials(self) -> bool:
         """
-        Check if Google OAuth credentials exist for default account.
-        
+        Check if Google OAuth credentials exist for the default account.
+
+        The OAuth account store is the source of truth — a row there with
+        `is_active = True` means the user has connected their Google account
+        through the modern integrations flow. The legacy
+        `lib/credentials/credentials.json` file is no longer required and
+        was the cause of the integrations-page-vs-features-page disagreement.
+
         Returns:
-            True if OAuth credentials exist, False otherwise
+            True if OAuth credentials exist for DEFAULT_GOOGLE_ACCOUNT_ID,
+            False otherwise.
         """
         try:
-            this_file = Path(__file__).resolve()
-            assistant_dir = this_file.parent.parent  # Go up to assistant/
-            credentials_dir = assistant_dir / 'lib' / 'credentials'
-            credentials_json = credentials_dir / 'credentials.json'
-            if not credentials_json.exists():
-                return False
-
             from app.assistant.lib.google_auth.account_ids import DEFAULT_GOOGLE_ACCOUNT_ID
             from app.assistant.lib.google_auth.oauth_account_store import get_google_oauth_account_store
 
