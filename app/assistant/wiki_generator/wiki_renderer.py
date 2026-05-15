@@ -95,6 +95,9 @@ def _read_metadata_bits(node, edge) -> str:
     """Render the temporal frame of a State/Event/Goal bullet for downstream agents.
 
     Surfaces (when populated):
+      - valid_currently: explicit "is this still active?" boolean. Critical
+        for the writer to know a state is CLOSED even when end_date is
+        unknown. False = closed; None = active/ongoing/unknown (silent).
       - start_date_prose: LLM-extracted natural-language anchor when
         start_date itself couldn't be resolved (e.g. "after moving to
         Irvine"). Critical so the writer doesn't assume present-tense.
@@ -108,6 +111,10 @@ def _read_metadata_bits(node, edge) -> str:
       - date_confidence: e.g. heuristic_evidence / inferred / explicit.
     """
     bits: List[str] = []
+    # Surface CLOSED status first so the writer scans it before dates.
+    valid_currently = getattr(node, "valid_currently", None)
+    if valid_currently is False:
+        bits.append("status: CLOSED")
     start_prose = getattr(node, "start_date_prose", None)
     if start_prose:
         bits.append(f"start_date_prose: {start_prose}")

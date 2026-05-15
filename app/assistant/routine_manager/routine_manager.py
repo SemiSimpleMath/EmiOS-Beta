@@ -412,6 +412,19 @@ class RoutineManager:
                 if ttype == "time" and "policy" not in trigger:
                     # Allow the explicit form to omit `policy` and inherit run_policy.
                     trigger["policy"] = run_policy
+                elif (
+                    ttype == "time"
+                    and isinstance(trigger.get("policy"), dict)
+                    and trigger["policy"]
+                    and not run_policy
+                ):
+                    # Inverse case: the config put the cadence under
+                    # `trigger.policy` but left `run_policy` empty. The
+                    # scheduler's _should_run reads `run_policy` directly,
+                    # so without this lift the cadence is silently ignored
+                    # and the routine fires every tick (60s). Copy the
+                    # trigger.policy dict up so both paths see it.
+                    run_policy = dict(trigger["policy"])
                 # Validate the active_window field early — fail loud at load
                 # time on a typo'd name rather than silently never firing.
                 if ttype == "time" and "active_window" in trigger:

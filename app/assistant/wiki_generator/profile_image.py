@@ -32,9 +32,16 @@ _PROFILE_EDGES_FALLBACK = ["depicted_in"]
 def find_profile_image_pod(entity_label: str) -> Optional[Pod]:
     """Return the best image pod to use as the entity's profile picture.
 
-    Preference order: ``has_profile_image`` (canonical, intent-flavored)
-    → ``depicted_in`` (any picture the entity appears in, most recent
-    first). Returns ``None`` if neither yields an image pod.
+    Preference order:
+      1. ``has_profile_image`` — canonical, intent-flavored
+      2. ``depicted_in`` — any picture the entity appears in
+      3. **Any image pod linked to the entity** (predicate-agnostic) —
+         catches images whose edges were rewritten by the per-edge
+         canonicalize pass (e.g., ``depicted_in → subject_of``) where the
+         entity-to-pod link is still present but the predicate name no
+         longer matches our preferred list. Returns the most recent.
+
+    Returns ``None`` only if the entity has no image pod at all.
     """
     store = PodStore()
     for relations in (_PROFILE_EDGES_PRIMARY, _PROFILE_EDGES_FALLBACK):
@@ -46,7 +53,15 @@ def find_profile_image_pod(entity_label: str) -> Optional[Pod]:
         )
         if hits:
             return hits[0]
-    return None
+    # Predicate-agnostic fallback. Any image pod that an edge connects to
+    # the entity is acceptable as a profile picture — the kind=image
+    # filter is the real semantic guard, the predicate is just naming.
+    hits = store.query(
+        kind="image",
+        linked_to_entity=entity_label,
+        limit=1,
+    )
+    return hits[0] if hits else None
 
 
 def materialize_profile_image_for_vault(

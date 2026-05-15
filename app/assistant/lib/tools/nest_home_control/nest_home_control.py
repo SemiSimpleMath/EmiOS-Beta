@@ -44,6 +44,56 @@ def _fahrenheit_to_celsius(value_f: float) -> float:
     return (value_f - 32.0) * (5.0 / 9.0)
 
 
+def _celsius_to_fahrenheit(value_c: float) -> float:
+    return value_c * (9.0 / 5.0) + 32.0
+
+
+def _format_one_thermostat(t: Dict[str, Any]) -> str:
+    """Render one thermostat dict (from get_status) as a one-line summary."""
+    parts: List[str] = []
+    name = str(t.get("name") or "").strip()
+    if name:
+        # SDM device name is `enterprises/.../devices/<id>` — keep just last segment.
+        parts.append(name.split("/")[-1] if "/" in name else name)
+    amb_c = t.get("ambient_temperature_c")
+    if isinstance(amb_c, (int, float)):
+        parts.append(f"now {_celsius_to_fahrenheit(amb_c):.0f}°F")
+    mode = str(t.get("mode") or "").strip()
+    if mode:
+        parts.append(f"mode={mode}")
+    heat_c = t.get("target_heat_c")
+    cool_c = t.get("target_cool_c")
+    if isinstance(heat_c, (int, float)) and isinstance(cool_c, (int, float)) and heat_c and cool_c:
+        parts.append(f"target {_celsius_to_fahrenheit(heat_c):.0f}–{_celsius_to_fahrenheit(cool_c):.0f}°F")
+    elif isinstance(cool_c, (int, float)) and cool_c:
+        parts.append(f"target {_celsius_to_fahrenheit(cool_c):.0f}°F (cool)")
+    elif isinstance(heat_c, (int, float)) and heat_c:
+        parts.append(f"target {_celsius_to_fahrenheit(heat_c):.0f}°F (heat)")
+    hum = t.get("humidity_percent")
+    if isinstance(hum, (int, float)):
+        parts.append(f"{hum:.0f}% humidity")
+    eco = str(t.get("eco_mode") or "").strip()
+    if eco and eco.upper() not in ("OFF", "NONE", ""):
+        parts.append(f"eco={eco}")
+    return " · ".join(parts) if parts else "thermostat (no readings)"
+
+
+def _format_nest_status_content(response: Any) -> str:
+    """Build a readable content string for nest get_status responses."""
+    if not isinstance(response, dict):
+        return "Nest status: no data returned."
+    if "thermostat" in response and isinstance(response["thermostat"], dict):
+        return "Nest: " + _format_one_thermostat(response["thermostat"])
+    if "thermostats" in response and isinstance(response["thermostats"], list):
+        items = response["thermostats"]
+        if not items:
+            return "No Nest thermostats found."
+        if len(items) == 1:
+            return "Nest: " + _format_one_thermostat(items[0])
+        return "Nest thermostats: " + "; ".join(_format_one_thermostat(t) for t in items)
+    return "Nest status returned, but in an unrecognized shape."
+
+
 def _resolve_target_temperature_c(value: Any) -> float:
     raw = _coerce_numeric(value, "target_temperature")
     if _MIN_INFERRED_F <= raw <= _MAX_INFERRED_F:
@@ -131,9 +181,12 @@ class NestHomeControlTool(BaseTool):
                     arguments=read_args,
                     request_id=tool_message.request_id,
                 )
+                # Render a human-readable summary into `content` — the
+                # response formatter mostly uses `content`. The raw
+                # `data` payload is preserved for callers that want it.
                 return ToolResult(
                     result_type="smart_home",
-                    content="Nest get_status executed successfully.",
+                    content=_format_nest_status_content(response),
                     data=response,
                 )
 

@@ -132,8 +132,9 @@ One-shot tool playbook:
   - end_date: str (optional ISO datetime)
 
 13) nest_home_control
-- Use for: thermostat status/mode/target temperature commands.
-- Pass any combination of state fields in one call; omit all to read.
+- Use for: Nest thermostat — both reads (current temperature / state) and writes (mode, target temp, fan, eco).
+- **Read intents** ("what's the temperature inside?", "how warm is it?", "what's the nest reading?", "what's the AC set to?", "is the heat on?", "thermostat status"): pass `{}` (empty object). Returns ambient temperature, mode, target temp, fan mode, eco state.
+- **Write intents**: pass any combination of state fields. Mode → target → fan → eco order applied automatically.
   - mode: str (HEAT | COOL | HEATCOOL | OFF)
   - target_temperature: float (Fahrenheit, e.g. 75)
   - fan_mode: str (ON | AUTO | OFF)

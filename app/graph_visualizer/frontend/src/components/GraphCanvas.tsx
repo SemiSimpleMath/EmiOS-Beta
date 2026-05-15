@@ -71,19 +71,39 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({
     return (sImp ?? -1) >= t && (tImp ?? -1) >= t;
   }, []);
 
-  // After the threshold changes, re-set the visibility callbacks on the
-  // ForceGraph imperative API. Just changing the prop / calling .refresh()
-  // doesn't re-evaluate visibility in 3D mode — the Three.js scene caches
-  // node visibility at creation time. The setter form re-applies it.
+  // After the threshold changes, directly toggle Three.js `Object3D.visible`
+  // on each node/link mesh. We bypass the lib's `nodeVisibility` callback
+  // because in 3D it dims opacity instead of properly hiding meshes (we
+  // confirmed: filtered nodes still appeared as ghostly gray dots).
+  //
+  // The lib exposes the scene via `graphRef.current.scene()` (a THREE.Scene).
+  // ForceGraph attaches per-node Object3D meshes with `__data` pointing at
+  // the source node — we walk those and set `.visible` based on importance.
+  // No physics restart, no re-render storm, just per-mesh boolean flips.
   useEffect(() => {
     const fg: any = graphRef.current;
     if (!fg) return;
     try {
-      if (typeof fg.nodeVisibility === 'function') fg.nodeVisibility(isNodeVisible);
-      if (typeof fg.linkVisibility === 'function') fg.linkVisibility(isEdgeVisible);
-      if (typeof fg.refresh === 'function') fg.refresh();
+      const scene: any = typeof fg.scene === 'function' ? fg.scene() : null;
+      if (!scene || typeof scene.traverse !== 'function') return;
+      const t = importanceThreshold;
+      scene.traverse((obj: any) => {
+        const data = obj?.__data;
+        if (!data) return;
+        // Node objects carry the node row in __data with an importance field.
+        // Edge objects carry the edge row with source_node/target_node refs.
+        if ('importance' in data && 'node_type' in data) {
+          obj.visible = (data.importance ?? -1) >= t;
+        } else if ('source_node' in data && 'target_node' in data) {
+          const src: any = data.source_node;
+          const tgt: any = data.target_node;
+          const sImp = typeof src === 'object' && src ? src.importance : undefined;
+          const tImp = typeof tgt === 'object' && tgt ? tgt.importance : undefined;
+          obj.visible = (sImp ?? -1) >= t && (tImp ?? -1) >= t;
+        }
+      });
     } catch { /* best-effort */ }
-  }, [importanceThreshold, graphRef, isNodeVisible, isEdgeVisible]);
+  }, [importanceThreshold, graphRef]);
   const getNodeColor = useCallback((node: Node): string => {
     if (highlightedNodes.has(node.id)) return '#ff6b6b';
     return getNodeColorByClassification(node);

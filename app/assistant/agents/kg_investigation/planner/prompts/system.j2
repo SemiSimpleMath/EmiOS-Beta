@@ -28,11 +28,14 @@ results; the summarizer charges by the row.
 KG (live):
 - `kg_node_metadata(id, label, node_type, category, aliases, description, original_sentence, start_date, end_date, importance, pagerank_score, source, created_at, updated_at, locked_by_user_at)`
 - `kg_edge_metadata(id, source_id, target_id, relationship_type, sentence, source, created_at, updated_at)`
-- `kg_node_evidence(id, node_id, claim_proposal_id, source_table, derived_sentence, message_timestamp, merge_action, created_at)`
+- `kg_node_evidence(id, node_id, source_table, source_id, source_text, derived_sentence, message_timestamp, window_id, merge_action, created_at)`
+  - `source_id` is the FK into whichever table `source_table` names. When `source_table='claim_proposal'`, `source_id` is the proposal id — use that to join `claim_proposal_evidence` (NOT a column called `claim_proposal_id`).
 
 Source provenance walk (the JOIN ladder for "what did the user actually say?"):
 - `kg_node_evidence` → `claim_proposal_evidence(proposal_id, window_id, unified_log_id, raw_text, observed_at, extractor_agent_name)`
+  ON `kg_node_evidence.source_id = claim_proposal_evidence.proposal_id` (with `kg_node_evidence.source_table = 'claim_proposal'`)
 - `claim_proposal_evidence` → `unified_log_2026(id, timestamp, role, speaker_name, message, room_id, source)`
+  ON `claim_proposal_evidence.unified_log_id = unified_log_2026.id`
 
 Window tables (when you need the conversation context):
 - `kg_window(id, start_unified_log_id, end_unified_log_id, message_count, summary)`

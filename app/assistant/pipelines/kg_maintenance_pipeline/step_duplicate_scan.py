@@ -445,29 +445,47 @@ def _build_candidate_pairs(
     logger.info("[duplicate_scan] Tier 1 (alias overlap): %d pairs", len(candidates))
     tier1_count = len(candidates)
 
-    # --- Tier 2: Label containment (same node_type) ---
-    # The shorter label must be >= 60% of the longer label's length to avoid
-    # noisy matches like "Jukka" contained in "Jukka's CPAP machine".
-    # This catches "Jukka" / "Jukka Virtanen" (5/15=33% — too low) but that's
-    # already covered by Tier 1 alias overlap.  Tier 2 is for cases like
-    # "Morning routine" / "Morning routine (weekday)" where aliases don't help.
+    # --- Tier 2: Label containment / token-subset (same node_type) ---
+    # Two paths emit a pair:
+    #   (a) raw substring with length ratio ≥ 60% — original behavior. Catches
+    #       "Morning routine" / "Morning routine (weekday)" where aliases don't
+    #       help. Ratio gates noise like "Jukka" inside "Jukka's CPAP machine".
+    #   (b) **whole-word token subset** — the shorter label's tokens are ALL
+    #       present in the longer label's tokens. Catches "Joe" / "Joe Booth",
+    #       "Katy" / "Katy Bowen", "Peter" / "Peter Virtanen" — first-name vs
+    #       full-name pairs that the % ratio rejects. Word boundaries make this
+    #       safe: "joes" doesn't match "joe" as a token, so we don't accidentally
+    #       pair "Joe" with "Joes Pizza".
+    import re as _re
     CONTAINMENT_MIN_RATIO = 0.60
-    by_type: dict[str, list[tuple[str, str]]] = {}
+    def _tokens(s: str) -> list[str]:
+        return [t for t in _re.split(r"[^A-Za-z0-9]+", s.lower()) if t]
+
+    by_type: dict[str, list[tuple[str, str, frozenset]]] = {}
     for nid, d in descriptors.items():
         if d["label"] and len(d["label"].strip()) >= 3:
             nt = d["node_type"]
-            by_type.setdefault(nt, []).append((nid, d["label"].strip().lower()))
+            lbl = d["label"].strip().lower()
+            by_type.setdefault(nt, []).append((nid, lbl, frozenset(_tokens(lbl))))
 
     for nt, entries in by_type.items():
         entries.sort(key=lambda x: len(x[1]))
         for i in range(len(entries)):
-            nid_i, label_i = entries[i]
+            nid_i, label_i, toks_i = entries[i]
             for j in range(i + 1, len(entries)):
-                nid_j, label_j = entries[j]
+                nid_j, label_j, toks_j = entries[j]
                 if label_i == label_j:
                     continue
+                # Path (a): high-ratio substring containment
                 if label_i in label_j and len(label_i) / len(label_j) >= CONTAINMENT_MIN_RATIO:
                     _add_pair(nid_i, nid_j, "label_containment")
+                    continue
+                # Path (b): whole-word token subset — the shorter label's
+                # non-empty token set is fully inside the longer label's
+                # token set. Requires the shorter to have at least one
+                # token (already guaranteed by len>=3 + tokenizer).
+                if toks_i and toks_i.issubset(toks_j):
+                    _add_pair(nid_i, nid_j, "label_token_subset")
 
     logger.info(
         "[duplicate_scan] Tier 2 (label containment): %d new pairs",

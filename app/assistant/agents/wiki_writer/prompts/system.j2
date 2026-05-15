@@ -76,6 +76,7 @@ Each fact bullet's metadata bracket may include `type:` (State, Event, or Goal),
 
 - A State with `valid_during: ongoing` and no `end_date:` is currently true. Write it in present tense. This is the answer to "what is currently the case for this entity."
 - A State with `end_date:` or `end_date_prose:`, or with `valid_during: one-off`, has ended. Write it in past tense.
+- **`status: CLOSED` is authoritative.** If the metadata bracket contains `status: CLOSED`, the state has ended even when no `end_date:` is given. Write in past tense. Do not use "currently" or "still" about a CLOSED state.
 - An Event is a single past occurrence. Write it in past tense.
 
 #### State with no validity window — hedge
