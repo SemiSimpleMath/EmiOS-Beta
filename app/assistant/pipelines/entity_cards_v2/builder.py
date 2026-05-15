@@ -52,7 +52,16 @@ logger = get_logger(__name__)
 # distribution we saw on Katy's edges: family bonds 9-10, career 7-8,
 # transient/system 0-1 — 3.0 cleanly drops the trivia band without
 # accidentally cutting career/identity facts.
-CARD_FACT_IMPORTANCE_FLOOR = 3.0
+# Take the top K NOW-admissible facts (sorted by importance desc) and pass
+# them all to the renderer. Replaces an earlier importance-floor pre-filter
+# (CARD_FACT_IMPORTANCE_FLOOR = 3.0) that dropped any fact below 3.0 on
+# both node and edge. The floor was calibrated for hub nodes and silently
+# starved sparse entities — FNM with 3 neighbors lost its defining
+# Bob's-Burgers reference because the rater (a) scored generic-shaped
+# edges low and (b) had no anchor for "the cultural reference IS the
+# identity." Top-K is shape-agnostic: sparse entities keep everything,
+# hub entities get the most important slice.
+CARD_FACT_TOP_K = 40
 
 
 # A bullet may come from multiple source facts. The grouping policy:
@@ -133,8 +142,8 @@ def build_card(entity_node_id: str) -> Dict[str, Any]:
 
         # 3. Group facts by section. `reject` and hallucinated section names
         # are NOT silently dropped — the fact already passed the NOW filter
-        # and the CARD_FACT_IMPORTANCE_FLOOR pre-filter, so "should it exist
-        # on the card" was already decided. The section_tagger's only job is
+        # and the top-K cut, so "should it exist on the card" was already
+        # decided. The section_tagger's only job is
         # bucket selection. Any fact whose chosen section is invalid or
         # `reject` is routed to `general_facts`, which exists on every
         # template (see SECTION_TEMPLATES). This was Issue surfaced 2026-05-12
@@ -396,20 +405,14 @@ def _collect_candidate_facts(session: Session, entity: Node) -> List[Dict[str, A
     """Walk the entity's edges, build a list of NOW-admissible facts.
 
     A "fact" = one connected node (or its connecting edge) that survives
-    the NOW filter AND the importance pre-filter. Returns dicts ready to
-    send to section_tagger.
+    the NOW filter. Returns dicts ready to send to section_tagger.
 
-    Importance pre-filter: facts whose connected node (the State/Event/Goal)
-    has a derived importance below ``CARD_FACT_IMPORTANCE_FLOOR`` are
-    dropped here, BEFORE the LLM renderer/distiller sees them. The state
-    derivation formula ``max(src_imp × edge_imp / 10)`` correctly suppresses
-    trivia ("Katy was awake", "out of cooking spray") because their edge
-    importance scores near 0. NULL importance lets the fact through —
-    transition-friendly, won't suppress unrated nodes.
+    After collection, the list is sorted by importance descending and
+    truncated to CARD_FACT_TOP_K. On sparse entities the truncation is a
+    no-op (count < K); on hubs it keeps the most-important slice.
     """
     facts: List[Dict[str, Any]] = []
     fid_counter = 0
-    dropped_low_importance = 0
 
     def _next_fid() -> str:
         nonlocal fid_counter
@@ -437,18 +440,8 @@ def _collect_candidate_facts(session: Session, entity: Node) -> List[Dict[str, A
         if not admissible:
             continue
 
-        # Importance pre-filter — skip trivial facts before they ever hit
-        # bullet_renderer. NULL importance (unrated) passes through.
         node_imp = other.importance
         edge_imp = edge.importance
-        if node_imp is not None and node_imp < CARD_FACT_IMPORTANCE_FLOOR:
-            # Allow the rare case where the state itself is low but the
-            # specific edge connecting THIS entity has high importance from
-            # the entity's POV (e.g. the spouse edge to a shared-State node
-            # whose other participant is incidental).
-            if edge_imp is None or edge_imp < CARD_FACT_IMPORTANCE_FLOOR:
-                dropped_low_importance += 1
-                continue
 
         # Build a fact descriptor
         facts.append({
@@ -479,17 +472,18 @@ def _collect_candidate_facts(session: Session, entity: Node) -> List[Dict[str, A
             },
         })
 
-    if dropped_low_importance > 0:
-        logger.info(
-            "[entity_cards_v2] %s: collected %d facts, dropped %d below importance floor %.1f",
-            entity.label, len(facts), dropped_low_importance, CARD_FACT_IMPORTANCE_FLOOR,
-        )
-
     # Sort by importance descending so downstream rendering chunks see the
     # high-importance facts FIRST. If the section has 30 input facts and the
     # renderer chunks them in groups of 10, the top-importance bullets are
     # guaranteed in the first chunk. NULL importance sorts at the end.
     facts.sort(key=lambda f: -(f.get('node_importance') or f.get('edge_importance') or 0))
+
+    if len(facts) > CARD_FACT_TOP_K:
+        logger.info(
+            "[entity_cards_v2] %s: %d facts collected, truncating to top %d by importance",
+            entity.label, len(facts), CARD_FACT_TOP_K,
+        )
+        facts = facts[:CARD_FACT_TOP_K]
 
     return facts
 

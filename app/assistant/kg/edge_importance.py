@@ -55,13 +55,18 @@ def _build_edge_block(
     if src is None or tgt is None:
         return None
 
-    def _node_desc(n: Node) -> str:
-        desc = (n.description or "").strip()
-        if not desc:
+    def _node_sentence(n: Node) -> str:
+        """Canonical present-tense sentence written at promotion time.
+        Falls back to description (a later-written projection that may be
+        empty) only if original_sentence is itself missing."""
+        sent = (getattr(n, "original_sentence", None) or "").strip()
+        if not sent:
+            sent = (n.description or "").strip()
+        if not sent:
             return "-"
-        if len(desc) > 240:
-            desc = desc[:237] + "..."
-        return desc
+        if len(sent) > 240:
+            sent = sent[:237] + "..."
+        return sent
 
     edge_sent = (edge.sentence or "").strip()
     if len(edge_sent) > 280:
@@ -70,10 +75,12 @@ def _build_edge_block(
     lines = [
         f"id: {edge.id}",
         f"source label: {src.label or '-'}",
+        f"source type: {src.node_type or '-'}/{src.category or '-'}",
+        f"source sentence: {_node_sentence(src)}",
         f"edge label: {edge.relationship_type or '-'}",
         f"target label: {tgt.label or '-'}",
-        f"source sentence: {_node_desc(src)}",
-        f"target sentence: {_node_desc(tgt)}",
+        f"target type: {tgt.node_type or '-'}/{tgt.category or '-'}",
+        f"target sentence: {_node_sentence(tgt)}",
         f"EDGE SENTENCE — THIS IS THE ONE WHOSE IMPORTANCE TO THE SOURCE YOU ARE EVALUATING: {edge_sent or '-'}",
     ]
     return "\n".join(lines)

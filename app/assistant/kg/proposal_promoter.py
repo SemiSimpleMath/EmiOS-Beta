@@ -75,16 +75,20 @@ def _is_placeholder_label(label: str) -> bool:
 # Node resolution
 # ---------------------------------------------------------------------------
 
+_ENTITY_LIKE_MATCH_TYPES = ["Entity", "Concept", "Goal"]
+
+
 def _resolve_entity_like(session, label: str) -> Optional[Node]:
     """Match an Entity/Concept/Goal node by canonical label or alias.
 
     Prefers locked + higher pagerank when multiple match.
 
-    NOT for Property — Property nodes are subject-scoped (each entity gets
-    its own "Date of Birth" / "Phone Number" / etc.) and must use
-    `_resolve_property` instead. Label-only match would otherwise glob
-    every "Date of Birth" mention into a single shared node, attaching
-    unrelated people as participants.
+    Hard-gated to {Entity, Concept, Goal}. Type mismatch is the #1
+    rejection criterion — an Entity proposal must never bind to a
+    State/Event/Property canonical, regardless of label or pagerank.
+    State/Event resolution goes through the separate relationship-like
+    path (Jaccard participant overlap + LLM merger). Property goes
+    through `_resolve_property` (subject-scoped match).
     """
     if not label:
         return None
@@ -95,7 +99,7 @@ def _resolve_entity_like(session, label: str) -> Optional[Node]:
     hit = (
         session.query(Node)
         .filter(func.lower(Node.label) == label_lower)
-        .filter(Node.node_type != "Property")
+        .filter(Node.node_type.in_(_ENTITY_LIKE_MATCH_TYPES))
         .order_by(Node.locked_by_user_at.desc().nulls_last(),
                   Node.pagerank_score.desc().nulls_last())
         .first()
@@ -106,7 +110,7 @@ def _resolve_entity_like(session, label: str) -> Optional[Node]:
     like_pat = f'%"{label_lower}"%'
     return (
         session.query(Node)
-        .filter(Node.node_type != "Property")
+        .filter(Node.node_type.in_(_ENTITY_LIKE_MATCH_TYPES))
         .filter(func.lower(func.coalesce(func.cast(Node.aliases, type_=__import__("sqlalchemy").String), "")).like(like_pat))
         .order_by(Node.locked_by_user_at.desc().nulls_last(),
                   Node.pagerank_score.desc().nulls_last())
