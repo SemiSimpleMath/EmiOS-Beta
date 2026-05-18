@@ -4,8 +4,8 @@ Step: description_fill
 Generates descriptions for nodes that currently have none, prioritised by a
 blended score of:
 
-    priority = IMPORTANCE_WEIGHT × node.importance
-             + PAGERANK_WEIGHT   × node.pagerank_score
+    priority = LENS_BLEND_IMPORTANCE_WEIGHT × node.importance
+             + LENS_BLEND_PAGERANK_WEIGHT   × node.pagerank_score
 
 Both fields default to 0.5 when NULL.  The top-N nodes (default 50) by this
 score are processed in order — highest priority first — so LLM budget is
@@ -31,10 +31,10 @@ from __future__ import annotations
 
 from app.assistant.pipelines.context import PipelineContext
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.kg_core.kg_utils.node_importance import (
-    get_important_nodes,
-    IMPORTANCE_WEIGHT,
-    PAGERANK_WEIGHT,
+from app.assistant.kg_core.kg_utils.node_importance import get_important_nodes
+from app.assistant.importance.consumers import (
+    LENS_BLEND_IMPORTANCE_WEIGHT,
+    LENS_BLEND_PAGERANK_WEIGHT,
 )
 from app.models.base import get_session
 
@@ -113,7 +113,7 @@ def run(ctx: PipelineContext, max_nodes: int = 50) -> dict:
     errors = 0
 
     for snap in work_queue:
-        blend = IMPORTANCE_WEIGHT * snap.importance + PAGERANK_WEIGHT * snap.pagerank
+        blend = LENS_BLEND_IMPORTANCE_WEIGHT * snap.importance + LENS_BLEND_PAGERANK_WEIGHT * snap.pagerank
         try:
             description = generate_description_for_node(snap.node_id)
             processed += 1

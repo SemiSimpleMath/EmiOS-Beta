@@ -22,8 +22,16 @@ def compute_approval_reasons(
     tool_name: str,
     tool_config: dict,
     scope_context: ScopeContext | None,
+    tool_message: ToolMessage | None = None,
 ) -> list[str]:
-    """Return a list of reasons why *tool_name* requires approval (empty = no approval needed)."""
+    """Return a list of reasons why *tool_name* requires approval (empty = no approval needed).
+
+    ``tool_message`` is optional but enables the per-tool argument-aware
+    softening hook (BaseTool.compute_approval_reduction). Callers that
+    have a tool_message in hand (ToolCaller does) should pass it so the
+    hook can fire; callers that don't (e.g., contract-level audits)
+    leave it None and the hook is skipped.
+    """
     import os
     if os.environ.get("EMI_BYPASS_APPROVAL") == "1":
         return []
@@ -41,6 +49,33 @@ def compute_approval_reasons(
     # Authority 100 is the admin bypass: no tool needs approval at max authority.
     if authority_level >= 100:
         return []
+
+    # Per-tool argument-aware softening (BaseTool.compute_approval_reduction).
+    # A tool can opt into "this specific invocation is safer than the default,
+    # lower the bar." Canonical example: send_email returns 95 when the
+    # recipient is in the explicit email allowlist, so dayflow_orchestrator
+    # (authority 95) can autonomously email family members without firing
+    # a confirmation ticket per send.
+    tool_class = tool_config.get("tool_class")
+    if tool_message is not None and tool_class is not None:
+        try:
+            instance = tool_class() if isinstance(tool_class, type) else tool_class
+            softened = instance.compute_approval_reduction(tool_message, authority_level)
+        except Exception:
+            logger.warning(
+                "[tool_approval] compute_approval_reduction raised for %s; "
+                "falling back to standard approval logic", tool_name,
+                exc_info=True,
+            )
+            softened = None
+        if softened is not None and authority_level >= int(softened):
+            # The invocation passes the softened bar; bypass approval entirely.
+            # We still allow `scope.requires_approval_tools` to win (the user
+            # has explicitly named this tool as requiring approval for this
+            # scope, even on the softened path) — those reasons are already
+            # appended above and short-circuit out.
+            if not reasons:
+                return []
 
     contract = tool_config.get("tool_contract") if isinstance(tool_config.get("tool_contract"), dict) else {}
     metadata = contract.get("metadata") if isinstance(contract.get("metadata"), dict) else {}

@@ -69,7 +69,7 @@
     "latency_class": "fast",
     "front_door": false,
     "room_visibility_default": "conditional",
-    "approval_required": true,
-    "planner_description": "Send an email (or SMS via email gateway)."
+    "approval_min_authority": 99,
+    "planner_description": "Send an email (or SMS via email gateway). Recipients on configs/email_allowlist.yaml (family, close contacts) can be sent at authority 95 — dayflow_orchestrator path with no confirmation ticket. Anyone else requires master_room (authority 99) approval."
   }
 }

@@ -218,32 +218,39 @@ PER_PAGE_REFRESH_COOLDOWN_DAYS = 7
 # considered for triggering a section refresh. Drops ephemeral chat-extracted
 # noise before the critic gate runs. Tunable; 4 keeps "median-ish" content
 # moving and excludes the long tail of trivia.
-CHANGE_IMPORTANCE_THRESHOLD = 4.0
+from app.assistant.importance.consumers import WIKI_REFRESH_CHANGE_FLOOR
 
 
 def _filter_changed_by_importance(
-    changed_ids: List[str], threshold: float = CHANGE_IMPORTANCE_THRESHOLD,
+    changed_ids: List[str], threshold: float = WIKI_REFRESH_CHANGE_FLOOR,
 ) -> List[str]:
-    """Drop ids whose node.importance is NULL or below threshold.
+    """Drop ids whose effective_importance is NULL or below threshold.
 
     NULL is treated as "below threshold" — unrated content shouldn't trigger
     refresh until the periodic kg_importance_rater routine has rated it.
+
+    Uses `effective_importance` so damping (when calibrated) will
+    automatically suppress artifact-pattern nodes from triggering wiki
+    refresh storms.
     """
     if not changed_ids:
         return []
     from app.assistant.kg.db.knowledge_graph_db_sqlite import Node
+    from app.assistant.importance.effective import effective_importance
     from app.models.db_manager import get_db_manager
     kept: List[str] = []
     with get_db_manager().read_session() as session:
-        rows = (
-            session.query(Node.id, Node.importance)
+        nodes = (
+            session.query(Node)
             .filter(Node.id.in_(list(changed_ids)))
             .all()
         )
-        imp_by_id = {str(rid): (None if imp is None else float(imp)) for rid, imp in rows}
+        node_by_id = {str(n.id): n for n in nodes}
     for nid in changed_ids:
-        imp = imp_by_id.get(str(nid))
-        if imp is not None and imp >= threshold:
+        node = node_by_id.get(str(nid))
+        if node is None or node.importance is None:
+            continue
+        if effective_importance(node) >= threshold:
             kept.append(nid)
     return kept
 

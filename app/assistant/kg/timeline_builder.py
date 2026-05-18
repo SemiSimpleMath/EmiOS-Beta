@@ -33,11 +33,13 @@ logger = logging.getLogger(__name__)
 # don't carry time semantics meaningful to a life-event log.
 _TIMELINE_NODE_TYPES = {"State", "Event", "Goal"}
 
-# Importance bands used by the renderer. The cutoffs match the existing
-# 0-10 scale; tweak here without touching downstream agents.
-_BAND_MAJOR = 7.0   # ★ marker
-_BAND_MID = 4.0     # · marker
-# everything below _BAND_MID renders without a prefix (still included)
+from app.assistant.importance.display import (
+    IMPORTANCE_BAND_MAJOR,
+    IMPORTANCE_BAND_MID,
+    importance_marker,
+)
+# Bands: ≥ IMPORTANCE_BAND_MAJOR renders ★; ≥ IMPORTANCE_BAND_MID renders ·;
+# below IMPORTANCE_BAND_MID renders without a prefix (still included).
 
 _OUTPUT_DIR = get_repo_root() / "resources" / "kg_derived" / "timelines"
 
@@ -119,18 +121,6 @@ def _date_column(entry: TimelineEntry) -> str:
     return start
 
 
-def _importance_marker(imp: Optional[float]) -> str:
-    """Visual weight for the importance column. Falls back to bare entry
-    when importance is unrated (None) — common during transition."""
-    if imp is None:
-        return "  "
-    if imp >= _BAND_MAJOR:
-        return "★ "
-    if imp >= _BAND_MID:
-        return "· "
-    return "  "
-
-
 def collect_entries(session: Session, entity_id: str) -> List[TimelineEntry]:
     """Walk every State/Event/Goal connected to ``entity_id`` that has a
     date (ISO or prose). Returns chronologically sorted entries."""
@@ -196,8 +186,8 @@ def render_markdown(entity: Node, entries: List[TimelineEntry]) -> str:
         f"*Generated {utc_now().date().isoformat()} from {len(entries)} dated "
         f"{entity.node_type or 'entity'}-connected fact{'s' if len(entries) != 1 else ''}.*",
         "",
-        f"Importance: ★ = major (≥ {_BAND_MAJOR}); "
-        f"· = moderate ({_BAND_MID}–{_BAND_MAJOR}); "
+        f"Importance: ★ = major (≥ {IMPORTANCE_BAND_MAJOR}); "
+        f"· = moderate ({IMPORTANCE_BAND_MID}–{IMPORTANCE_BAND_MAJOR}); "
         f"unmarked = minor/unrated.",
         "Date confidence: `YYYY-MM-DD` = actual; `YYYY-MM-DD?` = inferred; "
         "`YYYY-MM-DD?est` = estimated; prose-only when no ISO known.",
@@ -212,7 +202,7 @@ def render_markdown(entity: Node, entries: List[TimelineEntry]) -> str:
             body_lines.append("")
             body_lines.append(f"## {year}")
             last_year = year
-        marker = _importance_marker(e.importance)
+        marker = importance_marker(e.importance)
         # Prefer the canonical sentence; fall back to label when missing.
         text = e.sentence or e.label
         body_lines.append(f"- `{date_str}` {marker}{text}")

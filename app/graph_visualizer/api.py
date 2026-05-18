@@ -116,11 +116,28 @@ def _serialize_node(node: Node, *, degree: int | None = None) -> dict:
         'semantic_label': node.semantic_label,
         'goal_status': node.goal_status,
         'confidence': node.confidence,
+        # Raw stored value (editable through this admin endpoint).
         'importance': node.importance,
+        # Effective importance after damping. Slider filtering and any
+        # gating UI in the visualizer should use this; the edit form
+        # should bind to the raw `importance` field so user-supplied
+        # values write through to the storage column cleanly.
+        # When damping is no-op (current), effective == raw.
+        'effective_importance': _effective_importance_safe(node),
         'source': node.source,
         'degree': degree,
         'taxonomy_paths': [],
     }
+
+
+def _effective_importance_safe(node) -> float:
+    """Wrap effective_importance for serialization sites where local
+    import would clutter the call site."""
+    from app.assistant.importance.effective import effective_importance
+    try:
+        return effective_importance(node)
+    except Exception:
+        return 0.0
 
 
 def _serialize_edge(edge: Edge) -> dict:
@@ -361,6 +378,7 @@ def update_node(node_id):
             'attributes': node.attributes if node.attributes else {},
             'confidence': node.confidence,
             'importance': node.importance,
+            'effective_importance': _effective_importance_safe(node),
             'semantic_label': node.semantic_label,
             'updated_at': node.updated_at.isoformat() if node.updated_at else None
         })

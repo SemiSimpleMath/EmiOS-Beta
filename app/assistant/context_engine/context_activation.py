@@ -33,8 +33,10 @@ logger = get_logger(__name__)
 
 DEFAULT_DEPTH = 2
 DEFAULT_TOP_K_CONVERGENCE = 15
-DEFAULT_IMPORTANCE_THRESHOLD = 0.5
-DEFAULT_SECOND_WAVE_IMPORTANCE = 0.4
+from app.assistant.importance.consumers import (
+    CONTEXT_ACTIVATION_THRESHOLD,
+    CONTEXT_ACTIVATION_SECOND_WAVE_THRESHOLD,
+)
 DEFAULT_SECOND_WAVE_MAX = 12
 
 
@@ -188,8 +190,8 @@ def run_context_activation(
     owner_id: str,
     depth: int = DEFAULT_DEPTH,
     top_k_convergence: int = DEFAULT_TOP_K_CONVERGENCE,
-    importance_threshold: float = DEFAULT_IMPORTANCE_THRESHOLD,
-    second_wave_importance: float = DEFAULT_SECOND_WAVE_IMPORTANCE,
+    importance_threshold: float = CONTEXT_ACTIVATION_THRESHOLD,
+    second_wave_importance: float = CONTEXT_ACTIVATION_SECOND_WAVE_THRESHOLD,
     second_wave_max: int = DEFAULT_SECOND_WAVE_MAX,
 ) -> ActivationResult:
     """

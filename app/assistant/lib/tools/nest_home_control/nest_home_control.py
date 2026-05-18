@@ -79,13 +79,25 @@ def _format_one_thermostat(t: Dict[str, Any]) -> str:
 
 
 def _format_nest_status_content(response: Any) -> str:
-    """Build a readable content string for nest get_status responses."""
+    """Build a readable content string for nest get_status responses.
+
+    The smart_home gateway envelopes the bridge's actual payload under
+    a `result` key (top-level keys are command/integration/ok/result).
+    The formatter checks both the envelope's `result` AND the top level
+    so callers that bypass the gateway in tests (or future bridges
+    that don't envelope) keep working.
+    """
     if not isinstance(response, dict):
         return "Nest status: no data returned."
-    if "thermostat" in response and isinstance(response["thermostat"], dict):
-        return "Nest: " + _format_one_thermostat(response["thermostat"])
-    if "thermostats" in response and isinstance(response["thermostats"], list):
-        items = response["thermostats"]
+    # Smart-home gateway wraps the bridge payload in {ok, result: {...}}.
+    # Unwrap if present so we can find the thermostat fields.
+    payload = response
+    if isinstance(response.get("result"), dict):
+        payload = response["result"]
+    if "thermostat" in payload and isinstance(payload["thermostat"], dict):
+        return "Nest: " + _format_one_thermostat(payload["thermostat"])
+    if "thermostats" in payload and isinstance(payload["thermostats"], list):
+        items = payload["thermostats"]
         if not items:
             return "No Nest thermostats found."
         if len(items) == 1:

@@ -21,7 +21,7 @@ import app.assistant.tests.test_setup  # noqa: F401
 
 
 # Each case represents one edge fed to the rater. Use the EXACT format
-# the rater expects (mirror `app.assistant.kg.edge_importance._build_edge_block`).
+# the rater expects (mirror `app.assistant.importance.scoring._build_edge_block`).
 # expected_min/max are the score bounds — score must satisfy
 # expected_min <= score <= expected_max.
 CALIBRATION_CASES = [

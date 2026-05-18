@@ -6,10 +6,21 @@ Steps (run in order, each self-manages its own sessions):
   2. context_embedding_backfill — backfill context embeddings        (embedding API, no LLM)
   3. duplicate_scan             — three-tier candidates + LLM confirm (most expensive)
   4. pagerank                   — weighted PageRank, writes scores   (cheap, no LLM)
-  5. description_fill           — LLM descriptions for top-N nodes   (LLM, batched)
-  6. missing_dates_scan         — bounded-category States/Events with NULL start_date,
+  5. missing_dates_scan         — bounded-category States/Events with NULL start_date,
                                   scored by top-2 sum of connected entity pageranks
                                   (cheap, structural; feeds the date-gap question queue)
+
+NOTE on description_fill: the legacy step generated `node.description`
+prose from raw edge neighborhoods for nodes the wiki didn't cover. It
+was wired here but conflicts with the correct flow — wiki page lead
+paragraphs are the authoritative source of node.description (synced
+back by page_writer._sync_lead_to_node_description). Non-wiki nodes
+should simply have empty descriptions, not fabricated ones. Removed
+from the pipeline 2026-05-16. Existing fabricated descriptions in the
+DB are left in place as legacy noise; no rollback. step_description_fill.py
+and description_creator.py are kept on disk in case the back-sync
+direction (find nodes whose wiki lead never landed and pull it in) is
+ever wanted, but neither runs as part of this pipeline.
 
 Execution of findings is NOT automatic — findings land in kg_maintenance_finding
 for human review in the /kg-maintenance UI.  The user approves or rejects, then
@@ -86,17 +97,17 @@ class KGMaintenancePipeline:
         _run_step("pagerank", lambda: (
             __import__("app.assistant.pipelines.kg_maintenance_pipeline.step_pagerank", fromlist=["run"]).run(ctx)
         ))
-        _run_step("description_fill", lambda: (
-            __import__("app.assistant.pipelines.kg_maintenance_pipeline.step_description_fill", fromlist=["run"]).run(ctx, max_nodes=description_max_nodes)
-        ))
+        # description_fill removed 2026-05-16 — wiki page leads are the
+        # authoritative source of node.description (synced via
+        # page_writer._sync_lead_to_node_description); fabricating
+        # descriptions from raw neighborhood for non-wiki nodes was the
+        # opposite direction.
         # state_decay used to fire here as well, but it's owned by the daily
         # `kg_state_decay` routine (02:45 every night) — running it again here
         # on Monday would just close already-closed States. Dropped to avoid
         # the double-fire.
         # Pagerank must run before this so connected-entity scores reflect
-        # the most recent graph state. pagerank is step 4 above; this is
-        # step 5 now (after state_decay was removed), so ordering still
-        # holds as long as 'pagerank' isn't skipped.
+        # the most recent graph state.
         _run_step("missing_dates_scan", lambda: (
             __import__("app.assistant.pipelines.kg_maintenance_pipeline.step_missing_dates_scan", fromlist=["run"]).run(ctx)
         ))

@@ -106,6 +106,17 @@ class Node(Base):
     # nodes. Promoted from attributes JSON 2026-05-11.
     last_pursued_at = Column(AwareUtcDateTime, nullable=True)
 
+    # last_dupe_scanned_at = the timestamp at which this node was last
+    # evaluated against the rest of the graph by the weekly duplicate scan.
+    # NULL means "never scanned" (newly promoted, or never reached a
+    # successful maintenance run). The scan's candidate generator uses
+    # this to skip pair (A, B) when BOTH sides have a stamp — those pairs
+    # have already been triaged and either persisted as a `distinct`
+    # verdict or escalated to a duplicate_node finding. Pairs where at
+    # least one side is NULL still get evaluated. Stamped to T_run for
+    # every node at the end of a successful maintenance run.
+    last_dupe_scanned_at = Column(AwareUtcDateTime, nullable=True)
+
     # Computed graph metrics — recalculated by KGMaintenancePipeline, never overwritten by extraction
     pagerank_score = Column(Float, nullable=True)
 
@@ -203,6 +214,10 @@ class Node(Base):
         Index('ix_kg_nodes_last_observed', 'last_observed'),
         # Goal dormancy sweep filters by this.
         Index('ix_kg_nodes_last_pursued_at', 'last_pursued_at'),
+        # Duplicate scan filters on NULL-stamp rows; index makes the
+        # "find new_or_dirty" query a fast index scan instead of a table
+        # scan over all 6k+ nodes.
+        Index('ix_kg_nodes_last_dupe_scanned_at', 'last_dupe_scanned_at'),
     )
 
 

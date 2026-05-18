@@ -118,65 +118,34 @@ class WebFillRef(BaseTool):
                 details={"backend": "mcp", "server_id": self.SERVER_ID, "mcp_tool_name": self.MCP_CLICK},
             )
 
-        # Step 2: Clear + type + optional Enter via browser_run_code.
-        t_json = json.dumps(text)
-        js = f"""
-async (page) => {{
-  const TEXT = {t_json};
-  const SUBMIT = {str(bool(submit)).lower()};
-  const CLEAR_FIRST = {str(bool(clear_first)).lower()};
-  const DELAY = {80 if slowly else 0};
-
-  await page.waitForTimeout(60);
-
-  if (CLEAR_FIRST) {{
-    try {{
-      await page.keyboard.press("Control+A");
-      await page.keyboard.press("Backspace");
-    }} catch (e) {{}}
-    try {{
-      await page.keyboard.press("Meta+A");
-      await page.keyboard.press("Backspace");
-    }} catch (e) {{}}
-    try {{
-      await page.evaluate(() => {{
-        const el = document.activeElement;
-        if (!el) return;
-        const tag = (el.tagName || "").toLowerCase();
-        if (tag === "input" || tag === "textarea") {{
-          el.value = "";
-          el.dispatchEvent(new Event("input", {{ bubbles: true }}));
-          el.dispatchEvent(new Event("change", {{ bubbles: true }}));
-        }}
-      }});
-    }} catch (e) {{}}
-  }}
-
-  await page.keyboard.type(TEXT, DELAY ? {{ delay: DELAY }} : undefined);
-  if (SUBMIT) {{
-    await page.waitForTimeout(1000);
-    await page.keyboard.press("Enter");
-    await page.waitForTimeout(220);
-  }}
-
-  return {{ ok: true }};
-}}
-""".strip()
-
-        code_resp = mcp_stdio_call_tool(
+        # Step 2: Type via browser_type. The MCP `browser_run_code` tool
+        # was removed in a 2026 playwright-mcp upgrade; the typing path
+        # now goes through `browser_type` directly with target=ref.
+        # `clear_first` is folded into browser_type's behavior — the tool
+        # already clears focusable inputs before typing in current
+        # playwright-mcp, so we don't replay a JS clear step.
+        type_args = {
+            "target": ref,
+            "element": element or "form input",
+            "text": text,
+            "submit": bool(submit),
+        }
+        if slowly:
+            type_args["slowly"] = True
+        type_resp = mcp_stdio_call_tool(
             server_entry=server_entry,
-            tool_name=self.MCP_RUN_CODE,
-            arguments={"code": js},
+            tool_name="browser_type",
+            arguments=type_args,
             timeout_s=timeout_s,
         )
-        code_text, code_error, _ = format_mcp_tool_result_content(code_resp)
+        code_text, code_error, _ = format_mcp_tool_result_content(type_resp)
         if code_error:
             return make_tool_error(
                 error_code="mcp_call_failed",
-                message=f"web_fill_ref error: browser_run_code (type) failed: {code_text}",
+                message=f"web_fill_ref error: browser_type failed: {code_text}",
                 abort_policy="abort_tool",
                 retryable=True,
-                details={"backend": "mcp", "server_id": self.SERVER_ID, "mcp_tool_name": self.MCP_RUN_CODE},
+                details={"backend": "mcp", "server_id": self.SERVER_ID, "mcp_tool_name": "browser_type"},
             )
 
         # Step 3: Snapshot.

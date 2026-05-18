@@ -341,8 +341,11 @@ def _lazy_kg_importance_rater(*, target_date=None, routine=None):
 
     Reads ``spec.batch_size_edges`` for edge rater throughput.
     """
-    from app.assistant.kg.edge_importance import regenerate_edge_importance
-    from app.me.importance import regenerate_entity_importance, regenerate_state_importance
+    from app.assistant.importance.scoring import (
+        regenerate_edge_importance,
+        regenerate_entity_importance,
+        regenerate_state_importance,
+    )
     spec = (routine.spec if routine and hasattr(routine, "spec") else {}) or {}
     batch_edges = int(spec.get("batch_size_edges", 50))
 

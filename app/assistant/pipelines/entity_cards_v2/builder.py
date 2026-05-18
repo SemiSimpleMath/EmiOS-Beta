@@ -43,25 +43,28 @@ from app.models.base import get_session
 logger = get_logger(__name__)
 
 
-# Importance floor for facts to reach the renderer/distiller. Computed from
-# the State node's derived importance (max(src_imp × edge_imp / 10)) — see
-# regenerate_state_importance. Facts below this floor are dropped at
-# collection time so we never pay LLM cost on trivia like "Katy was
-# upstairs" / "out of cooking spray". NULL importance passes through
-# (transition-friendly when rater hasn't run yet). Calibrate against the
-# distribution we saw on Katy's edges: family bonds 9-10, career 7-8,
-# transient/system 0-1 — 3.0 cleanly drops the trivia band without
-# accidentally cutting career/identity facts.
-# Take the top K NOW-admissible facts (sorted by importance desc) and pass
-# them all to the renderer. Replaces an earlier importance-floor pre-filter
-# (CARD_FACT_IMPORTANCE_FLOOR = 3.0) that dropped any fact below 3.0 on
-# both node and edge. The floor was calibrated for hub nodes and silently
-# starved sparse entities — FNM with 3 neighbors lost its defining
-# Bob's-Burgers reference because the rater (a) scored generic-shaped
-# edges low and (b) had no anchor for "the cultural reference IS the
-# identity." Top-K is shape-agnostic: sparse entities keep everything,
-# hub entities get the most important slice.
-CARD_FACT_TOP_K = 40
+# Selection policy for facts reaching the renderer/distiller:
+#
+# A fact is kept iff EITHER its importance is at or above CARD_FACT_FLOOR,
+# OR the section_tagger has marked its source node as `contact` (phone /
+# email / address / handle). Contact info is load-bearing for downstream
+# agents regardless of the rater's score — the source-perspective edge
+# rater systematically undervalues "X's phone number" because it isn't
+# important to X, it's important to whoever wants to reach X. Without
+# the carve-out, contact States routinely lose the importance cut on
+# any moderately-connected person and the card never gets a contact
+# section. We also require the source node to still be NOW-admissible,
+# so a replaced phone number doesn't resurface.
+#
+# Safety net: if floor + contact carve-out yields fewer than
+# CARD_FACT_MIN_KEEP facts, top up by taking the next most-important
+# facts until we reach it. This prevents sparse entities (a person
+# mentioned once or twice, with all-low-importance edges) from being
+# starved into an empty card.
+from app.assistant.importance.consumers import (
+    CARD_FACT_FLOOR,
+    CARD_FACT_MIN_KEEP,
+)
 
 
 # A bullet may come from multiple source facts. The grouping policy:
@@ -93,31 +96,33 @@ def build_card(entity_node_id: str) -> Dict[str, Any]:
         if entity is None:
             return {'status': 'error', 'reason': f'node {entity_node_id} not found'}
 
-        # 0. Card-worthiness gate. A single passing mention isn't enough to
-        # graduate to a card surface — re-observation is the strongest signal
-        # that the entity matters. Carded entities must satisfy:
-        #   observation_count >= 2  (mentioned in multiple chat windows)
-        #   OR observation_count == 1 AND degree >= 10  (one-window deep dive)
-        #   OR locked_by_user_at IS NOT NULL  (user-authored / pinned)
-        # Surfaced 2026-05-12: 42% of cards were on singleton-observed
-        # entities — Bellevue (mentioned once), passing-mention places, and
-        # placeholder labels — polluting RAG and chat_gate.
-        if entity.locked_by_user_at is None:
+        # 0. Card-worthiness gate. Routed through the canonical gate at
+        # `consumers.is_card_worthy`. Policy: pass if any of
+        #   - locked_by_user_at IS NOT NULL                  (user-pinned)
+        #   - observation_count >= 2                         (re-observed)
+        #   - observation_count == 1 AND degree >= 10        (one deep window)
+        #   - effective_importance >= CARD_HIGH_IMPORTANCE_FLOOR
+        #                                                    (graph says defining)
+        # We compute degree here once and pass it in so is_card_worthy
+        # doesn't open its own session.
+        from app.assistant.importance.consumers import is_card_worthy
+        degree = session.query(Edge).filter(
+            (Edge.source_id == entity.id) | (Edge.target_id == entity.id)
+        ).count()
+        if not is_card_worthy(entity, degree=degree):
             obs = entity.observation_count or 0
-            if obs < 2:
-                edge_count = session.query(Edge).filter(
-                    (Edge.source_id == entity.id) | (Edge.target_id == entity.id)
-                ).count()
-                if edge_count < 10:
-                    logger.info(
-                        "[entity_cards_v2] %s: not card-worthy "
-                        "(obs=%d degree=%d) — skipping",
-                        entity.label, obs, edge_count,
-                    )
-                    return {
-                        'status': 'skipped',
-                        'reason': f'not card-worthy: obs={obs} degree={edge_count}',
-                    }
+            logger.info(
+                "[entity_cards_v2] %s: not card-worthy "
+                "(obs=%d degree=%d importance=%s) — skipping",
+                entity.label, obs, degree, entity.importance,
+            )
+            return {
+                'status': 'skipped',
+                'reason': (
+                    f'not card-worthy: obs={obs} degree={degree} '
+                    f'importance={entity.importance}'
+                ),
+            }
 
         # 1. Collect candidate facts (NOW-filtered neighborhood)
         facts = _collect_candidate_facts(session, entity)
@@ -476,16 +481,93 @@ def _collect_candidate_facts(session: Session, entity: Node) -> List[Dict[str, A
     # high-importance facts FIRST. If the section has 30 input facts and the
     # renderer chunks them in groups of 10, the top-importance bullets are
     # guaranteed in the first chunk. NULL importance sorts at the end.
-    facts.sort(key=lambda f: -(f.get('node_importance') or f.get('edge_importance') or 0))
+    def _imp(f: Dict[str, Any]) -> float:
+        # Scale-aware fallback. When node_importance is NULL (rater hasn't
+        # run yet), fall back to edge_importance / 10 so a missing-rating
+        # fact lands on the same 0-10 scale as State.importance (which
+        # is derived as `max(src_imp × edge_imp / 10)`). Without the /10
+        # rescale, fallbacks rated 5 would dominate properly-rated States
+        # at 0.5–3, distorting card fact ordering.
+        ni = f.get('node_importance')
+        if ni is not None:
+            return float(ni)
+        ei = f.get('edge_importance')
+        if ei is not None:
+            return float(ei) / 10.0
+        return 0
+    facts.sort(key=lambda f: -_imp(f))
 
-    if len(facts) > CARD_FACT_TOP_K:
+    # Apply the selection policy (see CARD_FACT_FLOOR comment).
+    contact_node_ids = _contact_tagged_node_ids(
+        session,
+        [f['source_node_ids'][0] for f in facts if f.get('source_node_ids')],
+    )
+
+    def _is_contact(f: Dict[str, Any]) -> bool:
+        sids = f.get('source_node_ids') or []
+        return bool(sids) and sids[0] in contact_node_ids
+
+    kept = [f for f in facts if _imp(f) >= CARD_FACT_FLOOR or _is_contact(f)]
+
+    if len(kept) < CARD_FACT_MIN_KEEP:
+        kept_fact_ids = {f['fact_id'] for f in kept}
+        for f in facts:
+            if f['fact_id'] in kept_fact_ids:
+                continue
+            kept.append(f)
+            if len(kept) >= CARD_FACT_MIN_KEEP:
+                break
+
+    if len(kept) < len(facts):
         logger.info(
-            "[entity_cards_v2] %s: %d facts collected, truncating to top %d by importance",
-            entity.label, len(facts), CARD_FACT_TOP_K,
+            "[entity_cards_v2] %s: %d facts collected, kept %d (floor=%.2f, contact=%d, min=%d)",
+            entity.label, len(facts), len(kept),
+            CARD_FACT_FLOOR, len(contact_node_ids), CARD_FACT_MIN_KEEP,
         )
-        facts = facts[:CARD_FACT_TOP_K]
 
-    return facts
+    return kept
+
+
+# --- Selection policy helpers ----------------------------------------------
+
+def _contact_tagged_node_ids(session: Session, node_ids: List[str]) -> set:
+    """Return the subset of ``node_ids`` carrying an active card-namespace
+    `contact` section tag. Used by _collect_candidate_facts to keep
+    phone/email/address facts past the importance floor — see
+    CARD_FACT_FLOOR comment for why."""
+    if not node_ids:
+        return set()
+    from app.assistant.kg.db.knowledge_graph_db_sqlite import NodeSectionTag
+    from app.assistant.kg.section_tagging import (
+        NAMESPACE_CARD, CARD_BUILDER_VERSION, node_content_hash,
+        tag_is_active_for_build,
+    )
+    tag_rows = (
+        session.query(NodeSectionTag)
+        .filter(
+            NodeSectionTag.namespace == NAMESPACE_CARD,
+            NodeSectionTag.section_name == 'contact',
+            NodeSectionTag.node_id.in_(set(node_ids)),
+        ).all()
+    )
+    if not tag_rows:
+        return set()
+    nodes_by_id = {
+        n.id: n for n in
+        session.query(Node).filter(Node.id.in_({t.node_id for t in tag_rows})).all()
+    }
+    result: set = set()
+    for tag in tag_rows:
+        node = nodes_by_id.get(tag.node_id)
+        if node is None:
+            continue
+        if tag_is_active_for_build(
+            tag,
+            current_content_hash=node_content_hash(node),
+            current_builder_version=CARD_BUILDER_VERSION,
+        ):
+            result.add(tag.node_id)
+    return result
 
 
 # --- Implementation: try-and-mark drop tracking -----------------------------

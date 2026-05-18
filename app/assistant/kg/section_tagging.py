@@ -285,22 +285,7 @@ def _format_nodes_block(nodes: Sequence[Node]) -> str:
     return "\n".join(lines)
 
 
-def _source_entity_importance(session: Session, node_id: str) -> Optional[float]:
-    """Return the max importance among entities that point AT this node via
-    any edge (i.e., the State/Event/Goal's "owner" entities). Used as the
-    importance gate input. Returns None if no source entity has a rated
-    importance — caller treats None as "rating not yet available" and lets
-    the node through."""
-    from app.assistant.kg.db.knowledge_graph_db_sqlite import Edge
-    rows = (
-        session.query(Node.importance)
-        .join(Edge, Edge.source_id == Node.id)
-        .filter(Edge.target_id == node_id, Node.importance.isnot(None))
-        .all()
-    )
-    if not rows:
-        return None
-    return max(float(r[0]) for r in rows)
+from app.assistant.importance.queries import max_source_entity_importance
 
 
 def tag_nodes_by_id(
@@ -359,7 +344,7 @@ def tag_nodes_by_id(
         importance_by_node: dict[str, Optional[float]] = {}
         if importance_threshold is not None:
             for n in rows:
-                importance_by_node[n.id] = _source_entity_importance(session, n.id)
+                importance_by_node[n.id] = max_source_entity_importance(session, n.id)
 
         taggable: list[Node] = []
         for n in rows:

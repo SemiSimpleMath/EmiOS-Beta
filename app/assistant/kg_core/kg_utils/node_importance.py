@@ -24,8 +24,11 @@ from app.assistant.pipelines.scope_policy import build_pipeline_scope_context
 
 logger = get_logger(__name__)
 
-IMPORTANCE_WEIGHT = 0.4
-PAGERANK_WEIGHT = 0.6
+# Blend weights for combining node importance with pagerank.
+from app.assistant.importance.consumers import (
+    LENS_BLEND_IMPORTANCE_WEIGHT,
+    LENS_BLEND_PAGERANK_WEIGHT,
+)
 DEFAULT_SCORE = 0.5
 ELIGIBLE_NODE_TYPES = {"Entity", "State", "Event", "Goal", "Property"}
 MIN_EDGES_ENTITY = 3
@@ -160,7 +163,7 @@ def get_important_nodes(
     snapshots = _query_structural_gate(session)
 
     snapshots.sort(
-        key=lambda s: IMPORTANCE_WEIGHT * s.importance + PAGERANK_WEIGHT * s.pagerank,
+        key=lambda s: LENS_BLEND_IMPORTANCE_WEIGHT * s.importance + LENS_BLEND_PAGERANK_WEIGHT * s.pagerank,
         reverse=True,
     )
 

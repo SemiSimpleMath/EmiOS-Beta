@@ -130,6 +130,20 @@ def _edge_activation(edge: Edge) -> float:
     """
     Score for an edge as a carrier of activation.
     Uses importance × recency, defaulting to mid values when missing.
+
+    CONVERGENCE-SPECIFIC ADJUSTMENT. This is the ONE place in the codebase
+    that applies recency decay on top of edge importance. The rationale:
+    the convergence engine builds a "what's contextually relevant NOW"
+    briefing, so an old high-importance edge contributes less than a fresh
+    one of the same raw importance. The recency multiplier ranges from 0.6
+    (very stale) to 1.0 (fresh) — old edges still count substantially, but
+    newer relationships pull harder.
+
+    No other consumer applies recency decay; PageRank, card-fact admission,
+    state-importance derivation, etc. all read edge.importance unmodified.
+    If you find yourself wanting recency-decayed importance elsewhere,
+    consider whether it belongs in the importance module proper (as a
+    distinct accessor) rather than re-implementing this formula.
     """
     importance = float(edge.importance or 0.5)
     recency = _recency_decay(getattr(edge, "updated_at", None))
@@ -338,12 +352,17 @@ def _build_scored_node(
     else:
         degree = _node_degree(session, node_id)
 
+    # effective_importance applies damping (currently no-op; pass-through);
+    # consumers downstream that filter by ScoredNode.importance will get
+    # damped values once damping is calibrated.
+    from app.assistant.importance.effective import effective_importance
+    eff = effective_importance(node) if node.importance is not None else 0.5
     return ScoredNode(
         node_id=node_id,
         label=node.label,
         node_type=node.node_type or "",
         description=node.description,
-        importance=float(node.importance or 0.5),
+        importance=float(eff),
         convergence_score=raw_score,
         reached_by_seeds=list(reached_by.keys()),
         reached_by_seed_labels=[seed_labels.get(s, s) for s in reached_by.keys()],

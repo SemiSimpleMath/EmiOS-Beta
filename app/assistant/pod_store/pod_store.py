@@ -67,7 +67,16 @@ class PodStore:
         session = get_session()
         try:
             engine = session.bind
-            Base.metadata.create_all(engine, tables=[PodRow.__table__], checkfirst=True)
+            from app.assistant.pod_store.models import PodProjection, PodAudit
+            Base.metadata.create_all(
+                engine,
+                tables=[
+                    PodRow.__table__,
+                    PodProjection.__table__,
+                    PodAudit.__table__,
+                ],
+                checkfirst=True,
+            )
         finally:
             session.close()
 
@@ -252,6 +261,257 @@ class PodStore:
                 return [self._row_to_pod(r) for r in rows]
             finally:
                 session.close()
+
+    # ── Authority-gated projection API ────────────────────────────────────
+    #
+    # For identity and artifact pods that carry multiple projections at
+    # different authority levels. See app/assistant/pod_store/authority.py
+    # for the band definitions and authority.check_authority for the gate.
+
+    def fetch_projection(self, pod_id: str, projection: str, *, scope) -> str:
+        """Read one projection of a pod after authority check.
+
+        Returns the projection value (string for plain/env; raw bytes
+        for file are returned as bytes — caller should know the
+        projection's storage_kind via list_projections).
+
+        Raises:
+            PodAuthorityError if scope.authority < projection.min_authority
+            PodValueMissing if the underlying storage (env var, file)
+              is absent
+            KeyError if the pod or projection doesn't exist
+        """
+        from app.assistant.pod_store.models import PodProjection
+        from app.assistant.pod_store.authority import check_authority
+        from app.assistant.pod_store.resolvers import (
+            resolve_plain, resolve_env, resolve_file,
+        )
+        session = get_session()
+        try:
+            row = (
+                session.query(PodProjection)
+                .filter(
+                    PodProjection.pod_id == pod_id,
+                    PodProjection.projection_name == projection,
+                )
+                .first()
+            )
+            if row is None:
+                self._audit(
+                    session, pod_id=pod_id, projection=projection,
+                    operation="fetch", scope=scope,
+                    outcome="denied", detail="projection not found",
+                )
+                raise KeyError(
+                    f"pod {pod_id} has no projection {projection!r}"
+                )
+            actual = check_authority(
+                pod_id=pod_id,
+                projection=projection,
+                required=row.min_authority,
+                scope=scope,
+            )
+            # Audit BEFORE resolving — covers the case where resolve_*
+            # raises PodValueMissing (pointer is stale). We logged that
+            # the read was authorized; the failure was infrastructure.
+            self._audit(
+                session, pod_id=pod_id, projection=projection,
+                operation="fetch", scope=scope,
+                outcome="allowed",
+                detail=f"storage={row.storage_kind} env_ref={row.env_ref or ''}",
+            )
+            session.commit()
+            if row.storage_kind == "plain":
+                return resolve_plain(row.plain_value)
+            if row.storage_kind == "env":
+                return resolve_env(row.env_ref)
+            if row.storage_kind == "file":
+                return resolve_file(row.file_ref)
+            raise ValueError(
+                f"pod {pod_id} projection {projection!r} has unknown "
+                f"storage_kind={row.storage_kind!r}"
+            )
+        finally:
+            session.close()
+
+    def list_projections(self, pod_id: str, *, scope) -> List[Dict[str, Any]]:
+        """List projection names a caller can fetch for this pod.
+
+        Filters by authority: projections whose min_authority exceeds
+        the caller's authority are NOT included in the result.  An
+        agent at AUTH_CHAT(50) listing an SSN pod sees `last4`,
+        `redacted`, `format` and not `full`, `area_code` — so it can't
+        even know `full` exists by enumeration.
+
+        Returns a list of dicts with keys: projection_name,
+        min_authority, storage_kind.
+        """
+        from app.assistant.pod_store.models import PodProjection
+        from app.assistant.pod_store.authority import caller_authority
+        session = get_session()
+        try:
+            actual = caller_authority(scope)
+            rows = (
+                session.query(PodProjection)
+                .filter(
+                    PodProjection.pod_id == pod_id,
+                    PodProjection.min_authority <= actual,
+                )
+                .order_by(PodProjection.min_authority.asc())
+                .all()
+            )
+            self._audit(
+                session, pod_id=pod_id, projection=None,
+                operation="list", scope=scope,
+                outcome="allowed",
+                detail=f"visible={len(rows)}",
+            )
+            session.commit()
+            return [
+                {
+                    "projection_name": r.projection_name,
+                    "min_authority": r.min_authority,
+                    "storage_kind": r.storage_kind,
+                }
+                for r in rows
+            ]
+        finally:
+            session.close()
+
+    def put_secret_pod(
+        self,
+        *,
+        pod_type: str,
+        owner_subject_id: str,
+        name: str,
+        env_ref: str,
+        scope,
+    ) -> str:
+        """Create an identity-style pod with materialized projections.
+
+        Reads the raw value once from `os.environ[env_ref]`, hands it
+        to the materializer for `pod_type`, writes the pod_store row
+        and all pod_projection rows in a single transaction. Returns
+        the new pod_id.
+
+        Authority: requires AUTH_USER (99) — only the user-equivalent
+        master_room surface can create new identity pods. This is
+        deliberate; minting a new secret pod is a sensitive operation
+        in itself.
+
+        Raises:
+            PodAuthorityError if scope.authority < AUTH_USER
+            PodValueMissing if env_ref is unset
+            KeyError if no materializer is registered for pod_type
+            ValueError if the materializer rejects the raw value
+        """
+        import os, uuid
+        from app.assistant.pod_store.models import PodProjection
+        from app.assistant.pod_store.authority import (
+            check_authority, AUTH_USER,
+        )
+        from app.assistant.pod_store.resolvers import PodValueMissing
+        from app.assistant.pod_store.materializers import get_materializer
+
+        pod_id = f"datapod:{pod_type}:{uuid.uuid4().hex[:16]}"
+        session = get_session()
+        try:
+            check_authority(
+                pod_id=pod_id, projection=None,
+                required=AUTH_USER, scope=scope,
+            )
+            raw_value = os.environ.get(env_ref)
+            if not raw_value:
+                raise PodValueMissing(
+                    f"env var {env_ref!r} is unset or empty — add it "
+                    f"to .env and restart Flask, then retry"
+                )
+            materialize = get_materializer(pod_type)
+            specs = materialize(raw_value=raw_value, env_ref=env_ref)
+            # raw_value goes out of scope here; only the env_ref pointer
+            # persists in the database for the full projection.
+            del raw_value
+
+            # Determine pod-level min_authority as the lowest projection
+            # band (any agent who can read any projection should at
+            # least be able to query the pod's existence).
+            pod_min_authority = min(s.min_authority for s in specs)
+
+            row = PodRow(
+                pod_id=pod_id,
+                kind=pod_type,
+                tags_json=[],
+                one_liner=name,
+                body=None,
+                source_refs_json=[],
+                for_agents_json=[],
+                scope_id=None,
+                min_authority=pod_min_authority,
+                created_by=getattr(scope, "actor_id", None),
+                metadata_json={
+                    "owner_subject_id": owner_subject_id,
+                    "env_ref_root": env_ref,
+                },
+            )
+            session.add(row)
+            session.flush()
+
+            for spec in specs:
+                session.add(PodProjection(
+                    id=str(uuid.uuid4()),
+                    pod_id=pod_id,
+                    projection_name=spec.projection_name,
+                    min_authority=spec.min_authority,
+                    storage_kind=spec.storage_kind,
+                    plain_value=spec.plain_value,
+                    env_ref=spec.env_ref,
+                    file_ref=spec.file_ref,
+                ))
+            self._audit(
+                session, pod_id=pod_id, projection=None,
+                operation="put", scope=scope,
+                outcome="allowed",
+                detail=f"type={pod_type} projections={len(specs)}",
+            )
+            session.commit()
+            return pod_id
+        finally:
+            session.close()
+
+    def _audit(
+        self,
+        session,
+        *,
+        pod_id: str,
+        projection,
+        operation: str,
+        scope,
+        outcome: str,
+        detail: str,
+    ) -> None:
+        """Internal: write one PodAudit row. Best-effort — audit
+        failures should never block the underlying operation, but
+        they're rare enough that letting them propagate would catch
+        infrastructure breakage early. Caller is responsible for
+        commit/rollback of the surrounding transaction.
+        """
+        import uuid
+        from app.assistant.pod_store.models import PodAudit
+        from app.assistant.pod_store.authority import caller_authority
+        session.add(PodAudit(
+            id=str(uuid.uuid4()),
+            pod_id=pod_id,
+            projection_name=projection,
+            operation=operation,
+            caller_scope_id=getattr(scope, "scope_id", None),
+            caller_scope_authority=caller_authority(scope),
+            caller_agent=getattr(scope, "actor_id", None),
+            caller_request_id=None,
+            outcome=outcome,
+            detail=detail,
+        ))
+
+    # ── End of projection API ─────────────────────────────────────────────
 
     @staticmethod
     def _row_to_pod(row: PodRow) -> Pod:

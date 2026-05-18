@@ -138,6 +138,71 @@ def record_verdict(
     return vid
 
 
+def record_distinct_pairs_bulk(
+    pairs: List[Tuple[str, str]],
+    *,
+    decided_by: str,
+    memo: str,
+    reasoning: Optional[str] = None,
+) -> int:
+    """Persist a batch of pairwise 'distinct' verdicts in a single transaction.
+
+    Used by duplicate_scan's triage step so the ~95-97% of candidate pairs
+    the nano LLM marks "distinct" don't have to be re-triaged on every
+    maintenance run. Without this, the scan paid full LLM cost on the same
+    ~24k pairs week after week.
+
+    Skips pairs that already have a non-superseded 'distinct' verdict
+    (no point bloating the verdict table with duplicate rows).
+
+    Returns the count of newly-inserted verdicts.
+    """
+    canon = [canonical_pair(a, b) for a, b in pairs if a and b]
+    canon = [(a, b) for a, b in canon if b is not None]
+    if not canon:
+        return 0
+
+    with get_db_manager().transaction(op="verdict_store.record_distinct_bulk") as session:
+        # One pass to learn which pairs already have an active distinct verdict.
+        # We compare on (a, b) tuples; the canonical_pair call above ensures
+        # a < b so the comparison is symmetric.
+        pair_set = set(canon)
+        existing = (
+            session.query(KGNodeVerdict.node_id_a, KGNodeVerdict.node_id_b)
+            .filter(
+                KGNodeVerdict.verdict_type == "distinct",
+                KGNodeVerdict.superseded_at.is_(None),
+                KGNodeVerdict.node_id_a.in_({a for a, _ in canon}),
+                KGNodeVerdict.node_id_b.in_({b for _, b in canon}),
+            )
+            .all()
+        )
+        existing_set = {(a, b) for a, b in existing}
+        to_insert = [(a, b) for (a, b) in pair_set if (a, b) not in existing_set]
+
+        n_new = 0
+        for a, b in to_insert:
+            session.add(
+                KGNodeVerdict(
+                    node_id_a=a,
+                    node_id_b=b,
+                    verdict_type="distinct",
+                    memo=memo,
+                    reasoning=reasoning,
+                    decided_by=decided_by,
+                )
+            )
+            n_new += 1
+        session.flush()
+
+    if n_new:
+        logger.info(
+            "[verdict_store] recorded %d distinct verdicts in bulk (decided_by=%s)",
+            n_new, decided_by,
+        )
+    return n_new
+
+
 def get_verdicts_for_pair(
     node_id_a: str,
     node_id_b: str,

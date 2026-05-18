@@ -1,0 +1,70 @@
+{
+  "name": "web_type_secret",
+  "description": "Fill a web form field with a value from a pod WITHOUT exposing it to you. You supply the field's accessibility-snapshot `ref` (from web_modal_scan) plus the `pod_id` and `projection` that should land in the field. The tool resolves the value at courier scope and types it via Playwright. The result tells you it was filled and how many characters, but NEVER returns the value.\n\nUse for sensitive fields (SSN, account numbers, DOB) where the value lives in an identity pod and you must not see it. For non-sensitive fields with known values (name, public email), use browser_type with the literal value instead.",
+  "inputs": [
+    {
+      "name": "pod_id",
+      "type": "string",
+      "required": true,
+      "description": "Pod URI, e.g. `datapod:identity.ssn:<id>`. Resolve via pod_list first if you need to find the pod."
+    },
+    {
+      "name": "projection",
+      "type": "string",
+      "required": true,
+      "description": "Which projection of the pod to type, e.g. `full`. The pod's authority bands determine which projections you can reference here — you don't read the value, but the tool will refuse if your authority cannot reach that projection."
+    },
+    {
+      "name": "ref",
+      "type": "string",
+      "required": false,
+      "description": "Playwright MCP accessibility-snapshot ref for the target field. Obtained from web_modal_scan. If omitted, types into the currently-focused element (you must have already focused the right field via web_modal_click)."
+    },
+    {
+      "name": "element",
+      "type": "string",
+      "required": false,
+      "description": "Human-readable element description for the Playwright MCP browser_type call. Defaults to a generic 'field for pod X projection Y' if omitted."
+    },
+    {
+      "name": "submit",
+      "type": "boolean",
+      "required": false,
+      "description": "If true, presses Enter after typing. Default false — leave the form unsubmitted so the user can review the screenshot before pressing submit. Submission should happen via a separate explicit step."
+    },
+    {
+      "name": "clear_first",
+      "type": "boolean",
+      "required": false,
+      "description": "Clear the field before typing. Default true."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Status summary with pod, projection, typed length. Value is never in the result."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured payload: pod_id, projection, typed_length, submit, ref."
+    }
+  ],
+  "arguments_prompt": "Arguments for typing a pod value into a form field:\npod_id: str                   # `datapod:<kind>:<id>` of the pod whose value goes into the field\nprojection: str               # which projection to type (e.g., 'full')\nref: Optional[str]            # accessibility snapshot ref from web_modal_scan; if omitted, uses focused element\nelement: Optional[str]        # human-readable field name for MCP browser_type\nsubmit: bool = False          # press Enter after typing? Leave false for user review\nclear_first: bool = True      # clear field before typing",
+  "metadata": {
+    "domain": "web",
+    "actions": ["type", "fill"],
+    "selectors": ["form", "field", "secret"],
+    "risk_level": "medium",
+    "side_effects": "external_action",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_min_authority": 99,
+    "planner_description": "Type a pod value into a web form field without seeing it. Use for SSN / account numbers / DOB that live in identity pods."
+  }
+}

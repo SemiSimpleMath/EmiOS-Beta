@@ -59,7 +59,7 @@ SIMILARITY_THRESHOLD = 0.88
 
 MAX_CLUSTER_SIZE = 8
 
-MAX_PAIRS_PER_RUN = 120
+MAX_PAIRS_PER_RUN = 30000  # one-time catch-up cap; drop back to 120 after the backlog clears
 
 MAX_EDGE_SENTENCES = 5
 
@@ -366,9 +366,20 @@ def _anchor_propagation_pairs(
 
 def _build_candidate_pairs(
     descriptors: dict[str, dict],
+    unscanned_ids: set[str],
 ) -> tuple[list[tuple[str, str, str]], dict[tuple[str, str], dict]]:
     """
     Generate candidate duplicate pairs using four tiers.
+
+    ``unscanned_ids`` is the set of nodes with ``last_dupe_scanned_at IS NULL``
+    — i.e., never evaluated against the graph by a prior successful run.
+    Pair (A, B) is emitted only when at least one side is in this set.
+    Pairs of two already-stamped nodes were settled by an earlier run and
+    re-triaging them is waste (constraint: "once we deem two nodes not
+    same we should not keep re-comparing them"). On the first patched
+    run, every node is in ``unscanned_ids`` so the scan does its full
+    pass; subsequent runs converge to ~0 pairs in steady state.
+
     Returns:
       - candidates: list of (node_id_a, node_id_b, tier_source) tuples, deduplicated.
         Pairs are sorted by combined edge count (most connected first) so the
@@ -390,15 +401,24 @@ def _build_candidate_pairs(
     pair_anchor_context: dict[tuple[str, str], dict] = {}
     cross_type_skipped = 0
     prior_verdict_skipped = 0
+    already_scanned_skipped = 0
 
     def _add_pair(a: str, b: str, tier: str, anchor_ctx: dict | None = None) -> None:
-        nonlocal cross_type_skipped, prior_verdict_skipped
+        nonlocal cross_type_skipped, prior_verdict_skipped, already_scanned_skipped
         key = (min(a, b), max(a, b))
         if key in seen_pairs:
             # Already added by an earlier tier; if a richer anchor context
             # arrives now, fold it in so the LLM still gets it.
             if anchor_ctx and key not in pair_anchor_context:
                 pair_anchor_context[key] = anchor_ctx
+            return
+        # Per-node scanned-stamp short-circuit. Both sides previously
+        # processed by a successful maintenance run → the pair was either
+        # triaged distinct (cached in distinct_pairs) or escalated to a
+        # finding (which the investigator path handles). Re-asking is
+        # pure waste at every layer (descriptor build, embedding, LLM).
+        if a not in unscanned_ids and b not in unscanned_ids:
+            already_scanned_skipped += 1
             return
         # Cross-type duplicate proposals are nearly always wrong: an
         # Entity (e.g. a recurring social-event entity with hundreds
@@ -524,9 +544,10 @@ def _build_candidate_pairs(
 
     logger.info(
         "[duplicate_scan] Total unique candidate pairs: %d "
-        "(cross_type_skipped=%d, prior_verdict_skipped=%d, anchor_ctx_count=%d)",
+        "(cross_type_skipped=%d, prior_verdict_skipped=%d, "
+        "already_scanned_skipped=%d, anchor_ctx_count=%d)",
         len(candidates), cross_type_skipped, prior_verdict_skipped,
-        len(pair_anchor_context),
+        already_scanned_skipped, len(pair_anchor_context),
     )
 
     # Prioritize pairs involving the most-connected nodes
@@ -712,6 +733,33 @@ def _triage_filter_pairs(
             distinct_indices.add(idx - 1)
 
     survivors = [p for i, p in enumerate(pairs) if i not in distinct_indices]
+
+    # Persist the triage's distinct verdicts so future maintenance runs
+    # short-circuit these same pairs at the `_add_pair` filter instead of
+    # paying nano-LLM cost on them every week. Without this, the same
+    # ~95-97% of candidate pairs get re-evaluated every run.
+    if distinct_indices:
+        try:
+            from app.assistant.kg_maintenance.verdict_store import (
+                record_distinct_pairs_bulk,
+            )
+            distinct_pair_ids = [
+                (pairs[i][0], pairs[i][1]) for i in distinct_indices
+            ]
+            record_distinct_pairs_bulk(
+                distinct_pair_ids,
+                decided_by="kg_maintenance::duplicate_triage",
+                memo=(
+                    "nano triage scored as distinct in duplicate_scan; "
+                    "tiers vary across batch"
+                ),
+            )
+        except Exception as exc:
+            logger.warning(
+                "[duplicate_scan] failed to persist %d triage distinct verdicts: %s",
+                len(distinct_indices), exc,
+            )
+
     logger.info(
         "[duplicate_scan] Triage: %d pairs → %d survived (%d dropped as 'distinct')",
         len(pairs), len(survivors), len(distinct_indices),
@@ -877,7 +925,7 @@ def _write_findings(merge_actions: list[dict], pipeline_run_id: str) -> int:
 
 def run(ctx: PipelineContext) -> dict:
     """
-    Returns {"nodes_loaded": int, "candidate_pairs": int, "llm_confirmed_actions": int, "new_findings": int}.
+    Returns {"nodes_loaded": int, "candidate_pairs": int, "llm_confirmed_actions": int, "new_findings": int, "nodes_stamped": int}.
     """
     logger.info("[duplicate_scan] Starting run_id=%s", ctx.run_id)
 
@@ -890,14 +938,30 @@ def run(ctx: PipelineContext) -> dict:
     descriptors = _load_node_descriptors()
     if not descriptors:
         logger.info("[duplicate_scan] No nodes in graph — skipping")
-        return {"nodes_loaded": 0, "candidate_pairs": 0, "llm_confirmed_actions": 0, "new_findings": 0}
+        return {"nodes_loaded": 0, "candidate_pairs": 0, "llm_confirmed_actions": 0, "new_findings": 0, "nodes_stamped": 0}
+
+    # Load the set of nodes that have never been evaluated by a prior
+    # successful maintenance run. The pair generator emits (A, B) only
+    # when at least one side is in this set; pairs of two already-scanned
+    # nodes were settled by an earlier run.
+    unscanned_ids = _load_unscanned_node_ids()
+    logger.info(
+        "[duplicate_scan] %d/%d nodes need scanning (last_dupe_scanned_at IS NULL)",
+        len(unscanned_ids), len(descriptors),
+    )
 
     # Phase 2 — four-tier candidate generation (no LLM; Tier 4 takes one
     # extra read session for the anchor-propagation graph walk)
-    pairs, pair_anchor_context = _build_candidate_pairs(descriptors)
+    pairs, pair_anchor_context = _build_candidate_pairs(descriptors, unscanned_ids)
     if not pairs:
         logger.info("[duplicate_scan] No candidate pairs found")
-        return {"nodes_loaded": len(descriptors), "candidate_pairs": 0, "llm_confirmed_actions": 0, "new_findings": 0}
+        # Still stamp — no work needed means every node is current.
+        n_stamped = _stamp_nodes_scanned(list(descriptors.keys()))
+        return {
+            "nodes_loaded": len(descriptors), "candidate_pairs": 0,
+            "llm_confirmed_actions": 0, "new_findings": 0,
+            "nodes_stamped": n_stamped,
+        }
 
     # Phase 3 — LLM confirmation (no session open)
     merge_actions = _confirm_pairs_with_llm(
@@ -908,11 +972,74 @@ def run(ctx: PipelineContext) -> dict:
     # Phase 4 — write findings (store manages its own sessions)
     new_findings = _write_findings(merge_actions, pipeline_run_id=ctx.run_id)
 
+    # Phase 5 — stamp every node as scanned. This is the watermark that
+    # lets the next run's pair generator skip pairs of two already-
+    # scanned nodes via `_add_pair`. Stamping all nodes (not just those
+    # in pair candidates) is correct: a node that produced zero pairs
+    # was still evaluated by the tier 1-4 generators against every
+    # other node — finding no candidates IS a complete scan result.
+    n_stamped = _stamp_nodes_scanned(list(descriptors.keys()))
+
     result = {
         "nodes_loaded": len(descriptors),
         "candidate_pairs": len(pairs),
         "llm_confirmed_actions": len(merge_actions),
         "new_findings": new_findings,
+        "nodes_stamped": n_stamped,
     }
     logger.info("[duplicate_scan] Done: %s", result)
     return result
+
+
+def _load_unscanned_node_ids() -> set[str]:
+    """Return ids of nodes with ``last_dupe_scanned_at IS NULL``."""
+    from app.assistant.kg.db.knowledge_graph_db_sqlite import Node
+    from app.models.base import get_session
+    session = get_session()
+    try:
+        rows = (
+            session.query(Node.id)
+            .filter(Node.last_dupe_scanned_at.is_(None))
+            .all()
+        )
+        return {r[0] for r in rows}
+    finally:
+        session.close()
+
+
+def _stamp_nodes_scanned(node_ids: list[str]) -> int:
+    """Stamp ``last_dupe_scanned_at = now`` on the given node ids.
+
+    Uses a direct UPDATE with ``Node.updated_at = Node.updated_at`` self-
+    reference to suppress the onupdate hook — `last_dupe_scanned_at` is
+    operational metadata, not a content change, and bumping updated_at
+    here would cascade into wiki/card refreshes for no semantic reason
+    (same protective pattern as step_pagerank).
+    """
+    if not node_ids:
+        return 0
+    from app.assistant.kg.db.knowledge_graph_db_sqlite import Node
+    from app.assistant.utils.time_utils import utc_now
+    from app.models.base import get_session
+    now = utc_now()
+    session = get_session()
+    try:
+        chunk = 500
+        n = 0
+        for i in range(0, len(node_ids), chunk):
+            batch = node_ids[i:i + chunk]
+            session.query(Node).filter(Node.id.in_(batch)).update(
+                {
+                    Node.last_dupe_scanned_at: now,
+                    Node.updated_at: Node.updated_at,
+                },
+                synchronize_session=False,
+            )
+            n += len(batch)
+        session.commit()
+        return n
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()

@@ -19,7 +19,7 @@ from __future__ import annotations
 import uuid
 from sqlalchemy import (
     Column, String, Text, Boolean, Integer,
-    ForeignKey, Index, UniqueConstraint, JSON,
+    ForeignKey, Index, UniqueConstraint, JSON, text,
 )
 from sqlalchemy.orm import relationship
 
@@ -72,6 +72,17 @@ class EntityCardV2(Base):
 
     __table_args__ = (
         Index('ix_entity_card_v2_active', 'is_active'),
+        # At most one ACTIVE card per card_title. The render path looks
+        # cards up by card_title (not by entity_node_id) so two active rows
+        # with the same title crash chat_gate's one_or_none() entity lookup.
+        # SQLite supports partial indexes; this is the structural rule, not
+        # an app-level convention.
+        Index(
+            'uq_entity_card_v2_active_title',
+            'card_title',
+            unique=True,
+            sqlite_where=text('is_active = 1'),
+        ),
     )
 
 
@@ -327,13 +338,31 @@ def render_v2_card_for_prompt_injection_level(
 
     Returns "" if no v2 card exists for this entity_name.
     """
-    card = (
+    # Defense in depth: a partial unique index enforces "at most one active
+    # card per title" at the DB layer (see __table_args__). If that
+    # invariant ever holds plural matches here, the index has been
+    # bypassed (migration window, manual surgery, fresh DB without index)
+    # and we want to know about it — log a hard ERROR, then pick the
+    # most-recent so chat_gate doesn't crash. Silent fallback would hide
+    # the structural violation that should be fixed at the source.
+    matches = (
         session.query(EntityCardV2)
         .filter(EntityCardV2.card_title == entity_name, EntityCardV2.is_active == True)  # noqa: E712
-        .one_or_none()
+        .order_by(EntityCardV2.last_built_at.desc().nullslast())
+        .all()
     )
-    if card is None:
+    if not matches:
         return ""
+    if len(matches) > 1:
+        import logging
+        logging.getLogger(__name__).error(
+            "INVARIANT VIOLATED: %d active entity_card_v2 rows with card_title=%r "
+            "(ids=%s). The uq_entity_card_v2_active_title partial unique index "
+            "should make this impossible. Falling back to most-recent by "
+            "last_built_at; investigate how the duplicates were created.",
+            len(matches), entity_name, [c.id for c in matches],
+        )
+    card = matches[0]
 
     sections = (
         session.query(EntityCardSection)

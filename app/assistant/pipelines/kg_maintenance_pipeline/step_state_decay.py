@@ -49,11 +49,11 @@ GRACE_DAYS = 3
 #     real-life consequence: jobs ending, projects ending, residences ending)
 #   - confidence is shaky (< NOTEWORTHY_LOW_CONF_THRESHOLD) — TTL agent itself
 #     is uncertain, so a human glance is cheap insurance
-#   - node importance >= NOTEWORTHY_IMPORTANCE_FLOOR — important entity, even
+#   - node importance >= STATE_DECAY_NOTEWORTHY_FLOOR — important entity, even
 #     short-term states deserve a heads-up
 NOTEWORTHY_DURATION_CLASSES = {"medium_term", "long_term", "durable"}
 NOTEWORTHY_LOW_CONF_THRESHOLD = 0.6
-NOTEWORTHY_IMPORTANCE_FLOOR = 5
+from app.assistant.importance.consumers import STATE_DECAY_NOTEWORTHY_FLOOR
 
 
 def run(ctx: PipelineContext) -> dict:
@@ -171,51 +171,63 @@ def run(ctx: PipelineContext) -> dict:
     # Write findings in a separate phase — but only for noteworthy closures.
     # Routine ephemeral/short_term closures of low-importance states are
     # already-applied facts; queueing them as review rows is pure noise.
+    #
+    # Importance gate uses effective_importance (damping-adjusted) rather
+    # than raw — once damping is calibrated, low-effective-importance
+    # closures will silence even if raw importance was inflated by
+    # fan-out artifacts.
+    from app.assistant.importance.effective import effective_importance
+    from app.assistant.kg.db.knowledge_graph_db_sqlite import Node as _Node
     findings_created = 0
     findings_silenced = 0
-    for nid, label, ntype, expected_end, ttl, importance in to_close:
-        duration_class = ttl.get("duration_class") or ""
-        ttl_confidence = float(ttl.get("confidence") or 0.5)
-        node_importance = float(importance) if importance is not None else 0.0
+    finding_session = get_session()
+    try:
+        for nid, label, ntype, expected_end, ttl, importance in to_close:
+            duration_class = ttl.get("duration_class") or ""
+            ttl_confidence = float(ttl.get("confidence") or 0.5)
+            node_obj = finding_session.get(_Node, nid)
+            node_importance = effective_importance(node_obj) if node_obj is not None else 0.0
 
-        is_noteworthy = (
-            duration_class in NOTEWORTHY_DURATION_CLASSES
-            or ttl_confidence < NOTEWORTHY_LOW_CONF_THRESHOLD
-            or node_importance >= NOTEWORTHY_IMPORTANCE_FLOOR
-        )
-        if not is_noteworthy:
-            findings_silenced += 1
-            continue
+            is_noteworthy = (
+                duration_class in NOTEWORTHY_DURATION_CLASSES
+                or ttl_confidence < NOTEWORTHY_LOW_CONF_THRESHOLD
+                or node_importance >= STATE_DECAY_NOTEWORTHY_FLOOR
+            )
+            if not is_noteworthy:
+                findings_silenced += 1
+                continue
 
-        _, created = upsert_finding(
-            finding_type="state_auto_closed",
-            primary_node_id=nid,
-            suggested_action="review",
-            reason=(
-                f"State {label!r} ({ntype}) auto-closed at {expected_end:%Y-%m-%d} — "
-                f"TTL class {duration_class} ({ttl.get('estimated_duration_days')}d). "
-                f"Reason: {ttl.get('reasoning', '')}"
-            ),
-            confidence=ttl_confidence,
-            priority="low",
-            agent_name="state_decay",
-            evidence={
-                "label": label,
-                "node_type": ntype,
-                "expected_end": expected_end.isoformat(),
-                "ttl": ttl,
-                "node_importance": node_importance,
-            },
-            pipeline_run_id=ctx.run_id,
-            # Already-applied closure — the State's end_date is set, the
-            # action is in kg_revision_log. This row is a notification of
-            # a noteworthy closure for dashboard visibility, not a work
-            # item. Skip the investigator drain; status='executed' from
-            # the start.
-            initial_status="executed",
-        )
-        if created:
-            findings_created += 1
+            _, created = upsert_finding(
+                finding_type="state_auto_closed",
+                primary_node_id=nid,
+                suggested_action="review",
+                reason=(
+                    f"State {label!r} ({ntype}) auto-closed at {expected_end:%Y-%m-%d} — "
+                    f"TTL class {duration_class} ({ttl.get('estimated_duration_days')}d). "
+                    f"Reason: {ttl.get('reasoning', '')}"
+                ),
+                confidence=ttl_confidence,
+                priority="low",
+                agent_name="state_decay",
+                evidence={
+                    "label": label,
+                    "node_type": ntype,
+                    "expected_end": expected_end.isoformat(),
+                    "ttl": ttl,
+                    "node_importance": node_importance,
+                },
+                pipeline_run_id=ctx.run_id,
+                # Already-applied closure — the State's end_date is set, the
+                # action is in kg_revision_log. This row is a notification of
+                # a noteworthy closure for dashboard visibility, not a work
+                # item. Skip the investigator drain; status='executed' from
+                # the start.
+                initial_status="executed",
+            )
+            if created:
+                findings_created += 1
+    finally:
+        finding_session.close()
 
     logger.info(
         "[state_decay] scanned=%d closed=%d findings=%d silenced=%d skipped_low_conf=%d skipped_recent=%d",

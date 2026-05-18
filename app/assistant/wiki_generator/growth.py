@@ -117,23 +117,32 @@ def pick_growth_targets(
     limit: int,
     min_degree: int = 4,
 ) -> List[str]:
-    """Top-degree Entity nodes (by total incident edges) without a prose page.
+    """Top-degree Entity nodes that pass `is_wiki_growth_candidate` and
+    don't yet have a prose page.
 
     Returns labels in degree-descending order, capped at ``limit``. Skips:
-      - entities below ``min_degree`` (too thin to write about);
+      - entities below ``min_degree`` OR below `WIKI_GROWTH_IMPORTANCE_FLOOR`
+        — both gates apply via `is_wiki_growth_candidate`; the SQL pre-
+        filters on degree (cheap), then the Python loop confirms
+        importance per surviving candidate;
       - entities whose sanitized stem already has a prose file;
       - entities marked empty whose edge count hasn't grown past the
         marker's recorded count (so new KG content auto-retries).
     """
     from app.assistant.wiki_generator.wiki_writer import _safe_filename
+    from app.assistant.importance.consumers import is_wiki_growth_candidate
 
     skip_prose = _existing_prose_stems(vault_path)
     skip_empty = _existing_empty_stems_with_degree(vault_path)
     session = get_session()
     try:
+        # SQL pre-filter on degree (cheap); apply the importance check
+        # below per row so we don't have to thread effective_importance
+        # into raw SQL. The pre-filter cuts the candidate population
+        # enough that per-row Python work is fine.
         rows = session.execute(sql_text(
             """
-            SELECT n.label, COUNT(e.id) AS deg
+            SELECT n.id, n.label, COUNT(e.id) AS deg
             FROM kg_node_metadata n
             JOIN kg_edge_metadata e
               ON e.source_id = n.id OR e.target_id = n.id
@@ -145,17 +154,32 @@ def pick_growth_targets(
             ORDER BY deg DESC
             """
         ), {"min_deg": int(min_degree)}).fetchall()
+
+        # Resolve each surviving row to a Node so is_wiki_growth_candidate
+        # can apply the importance floor. Done in a single batch query
+        # for efficiency rather than one round-trip per node.
+        from app.assistant.kg.db.knowledge_graph_db_sqlite import Node
+        node_ids = [r[0] for r in rows]
+        node_by_id = {
+            str(n.id): n
+            for n in session.query(Node).filter(Node.id.in_(node_ids)).all()
+        }
     finally:
         session.close()
 
     targets: List[str] = []
-    for label, deg in rows:
+    for nid, label, deg in rows:
         stem = _safe_filename(label)
         if stem in skip_prose:
             continue
         prior_deg = skip_empty.get(stem)
         if prior_deg is not None and int(deg) <= prior_deg:
             # Marked empty before, no new KG content since — don't retry.
+            continue
+        node = node_by_id.get(str(nid))
+        if node is None:
+            continue
+        if not is_wiki_growth_candidate(node, degree=int(deg)):
             continue
         targets.append(label)
         if len(targets) >= limit:

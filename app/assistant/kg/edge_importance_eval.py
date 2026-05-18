@@ -25,7 +25,7 @@ import yaml
 
 from app.assistant.kg.db.knowledge_graph_db_sqlite import Edge, Node
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.kg.edge_importance import _build_edge_block
+from app.assistant.importance.scoring import _build_edge_block
 from app.models.db_manager import get_db_manager
 
 logger = get_logger(__name__)

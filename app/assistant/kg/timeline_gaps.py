@@ -24,10 +24,11 @@ from sqlalchemy.orm import Session
 from app.assistant.kg.db.knowledge_graph_db_sqlite import Edge, Node
 
 
-# Importance gate for `?est` candidates we'd actually bother the user about.
+# Importance gate for `?est` candidates worth bothering the user about.
 # Lower-importance estimates aren't worth surfacing — confirming "Katy was
 # upstairs around March 2026" is noise.
-_MIN_IMPORTANCE_FOR_CONFIRMATION = 6.0
+from app.assistant.importance.consumers import TIMELINE_CONFIRMATION_FLOOR
+from app.assistant.importance.effective import effective_importance
 
 # Years gap >= this many → consider "wide coverage hole" worth asking about.
 _MIN_GAP_YEARS = 5
@@ -92,7 +93,7 @@ def _candidates_for_entity(session: Session, entity_id: str) -> Dict[str, List[G
             continue
         if c not in ("estimated", "inferred"):
             continue
-        if (n.importance or 0) < _MIN_IMPORTANCE_FOR_CONFIRMATION:
+        if effective_importance(n) < TIMELINE_CONFIRMATION_FLOOR:
             continue
         date_str = n.start_date.date().isoformat() if n.start_date else "?"
         estimated.append(GapCandidate(
@@ -143,7 +144,7 @@ def _candidates_for_entity(session: Session, entity_id: str) -> Dict[str, List[G
             continue  # has ISO already
         if not (n.start_date_prose or "").strip():
             continue
-        if (n.importance or 0) < _MIN_IMPORTANCE_FOR_CONFIRMATION:
+        if effective_importance(n) < TIMELINE_CONFIRMATION_FLOOR:
             continue
         prose_only.append(GapCandidate(
             kind="prose_only",

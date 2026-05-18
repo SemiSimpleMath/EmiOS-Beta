@@ -212,7 +212,7 @@ def _build_full_graph(
     categories: Optional[List[str]] = None,
 ) -> Tuple[nx.Graph, Dict[str, float], Optional[str]]:
     """Returns (graph, importance_map, seed_user_node_id)."""
-    from app.me.importance import get_importance_map, DEFAULT_SCORE
+    from app.assistant.importance.cache import get_importance_map, DEFAULT_SCORE
     importance = dict(get_importance_map())
 
     cat_filter: Optional[Set[str]] = None

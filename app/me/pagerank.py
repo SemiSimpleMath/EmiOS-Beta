@@ -255,7 +255,7 @@ def _pick_anchors_around_seed(
     2-hop coverage matters because Jorma/Sinikka often connect to Jukka
     through State nodes (shared experiences) rather than directly.
     """
-    from app.me.importance import get_importance_map, DEFAULT_SCORE
+    from app.assistant.importance.cache import get_importance_map, DEFAULT_SCORE
     importance = get_importance_map()
 
     if not g.has_node(seed_id):
@@ -470,7 +470,7 @@ def compute_seed_graph(
         # importance (0-10) is the primary score; PR contributes at most
         # +0.5 — a tiebreaker that disambiguates among nodes of similar
         # importance, never enough to leapfrog a calibration band.
-        from app.me.importance import get_importance_map, DEFAULT_SCORE
+        from app.assistant.importance.cache import get_importance_map, DEFAULT_SCORE
         importance_map = dict(get_importance_map())
 
         # Ownership cap: a non-person Entity (phone number, address, device,

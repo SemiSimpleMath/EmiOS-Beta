@@ -52,7 +52,7 @@ def demo_graph():
       n      max neighbors to include. Default 10, max 50.
     """
     import math
-    from app.me.importance import get_importance_map, DEFAULT_SCORE
+    from app.assistant.importance.cache import get_importance_map, DEFAULT_SCORE
 
     seed_id = (request.args.get("seed") or "").strip()
     if not seed_id:

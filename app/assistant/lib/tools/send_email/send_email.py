@@ -24,6 +24,42 @@ class SendEmail(BaseTool):
     def __init__(self):
         super().__init__('send_email')
 
+    def compute_approval_reduction(
+        self,
+        tool_message,
+        caller_authority: int,
+    ):
+        """Soften the approval bar when sending to an allowlisted recipient.
+
+        Allowlist lives in `configs/email_allowlist.yaml`. Recipients on
+        the list can be emailed at authority 95 (dayflow surface) without
+        firing a confirmation ticket. Recipients NOT on the list fall
+        through to the standard approval gate (currently:
+        approval_min_authority=99 — master_room only).
+
+        Only single-recipient sends are softened. If `to` is a comma-
+        separated list of addresses, every address must be allowlisted
+        for the softening to apply — otherwise revert to the standard
+        approval flow. (Better to over-prompt than to leak a bcc-style
+        send to an arbitrary recipient because the allowlist matched
+        the first address in a list.)
+        """
+        from app.assistant.lib.tools.send_email.allowlist import is_allowlisted
+        tool_data = tool_message.tool_data if isinstance(tool_message.tool_data, dict) else {}
+        arguments = tool_data.get('arguments') if isinstance(tool_data.get('arguments'), dict) else {}
+        to = arguments.get('to')
+        if not isinstance(to, str) or not to.strip():
+            return None
+        recipients = [r.strip() for r in to.split(',') if r.strip()]
+        if not recipients:
+            return None
+        if not all(is_allowlisted(r) for r in recipients):
+            return None
+        # All recipients are allowlisted — soften approval to chat-surface
+        # authority. dayflow_orchestrator (95) clears this; master_room (99)
+        # trivially does; any lower-authority surface still needs approval.
+        return 95
+
     def describe_action(self, tool_message: 'ToolMessage') -> tuple:
         arguments = tool_message.tool_data.get('arguments', {})
         to = arguments.get('to', 'unknown')

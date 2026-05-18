@@ -1,0 +1,88 @@
+{
+  "name": "http_request",
+  "description": "Make an HTTP request to any URL. Headers and body may carry `datapod:` references — sealed pod values (auth tokens, API keys, sensitive payloads) the tool resolves at courier scope; the resolved values never enter your transcript. Optionally seal the response into a new pod with a declared privacy class so the response body is also kept out of your transcript.\n\nUse for REST APIs (public or authenticated). For browser-rendered pages or stateful sessions, use playwright_manager instead.\n\nPod-reference format in header values or body string: `datapod:<kind>:<id>` (implicit 'full' projection) or `datapod:<kind>:<id>/<projection>` (explicit).",
+  "inputs": [
+    {
+      "name": "url",
+      "type": "string",
+      "required": true,
+      "description": "Target URL. Plain string; the URL itself is not pod-resolvable."
+    },
+    {
+      "name": "method",
+      "type": "string",
+      "required": false,
+      "description": "HTTP method. One of GET, POST, PUT, PATCH, DELETE, HEAD. Default GET."
+    },
+    {
+      "name": "headers",
+      "type": "object",
+      "required": false,
+      "description": "Request headers as a {name: value} dict. Any value starting with `datapod:` is resolved at courier scope; the resolved string never appears in your transcript. Use for Authorization, X-API-Key, etc."
+    },
+    {
+      "name": "body",
+      "type": "any",
+      "required": false,
+      "description": "Request body. May be a string, dict (sent as JSON), or `datapod:` reference (the entire body comes from the pod — useful for file uploads). Per-field pod substitution inside a dict body is NOT supported; construct the pod up front."
+    },
+    {
+      "name": "query_params",
+      "type": "object",
+      "required": false,
+      "description": "URL query params as a {name: value} dict. Appended to the URL."
+    },
+    {
+      "name": "timeout_s",
+      "type": "number",
+      "required": false,
+      "description": "Request timeout in seconds. Default 30."
+    },
+    {
+      "name": "response_pod_kind",
+      "type": "string",
+      "required": false,
+      "description": "If set, seal the response body into a new pod with this privacy class (e.g. 'health.private', 'financial.private'). The tool returns the new pod_id instead of the body; the response content never enters your transcript. Use for sensitive data you should not read."
+    },
+    {
+      "name": "follow_redirects",
+      "type": "boolean",
+      "required": false,
+      "description": "Whether to follow HTTP redirects. Default true."
+    },
+    {
+      "name": "expect_status",
+      "type": "array",
+      "required": false,
+      "description": "If set, the call fails if the response status is not in this list. E.g. [200, 201] to fail on any error response."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable status: method, host, status code, response bytes, response pod_id if sealed."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured payload: status, headers (response), content_type, content_length, body (if not sealed), response_pod_id (if sealed), duration_ms."
+    }
+  ],
+  "arguments_prompt": "Arguments for http_request:\nurl: str                           # target URL\nmethod: str = 'GET'                # GET/POST/PUT/PATCH/DELETE/HEAD\nheaders: Optional[dict]            # values may be `datapod:` refs (sealed auth)\nbody: Optional[str|dict|bytes]     # literal OR `datapod:` ref for sealed payload\nquery_params: Optional[dict]\ntimeout_s: float = 30.0\nresponse_pod_kind: Optional[str]   # if set, seal response in pod with this class\nfollow_redirects: bool = True\nexpect_status: Optional[list[int]] # fail if status not in list",
+  "metadata": {
+    "domain": "web",
+    "actions": ["fetch", "post", "api"],
+    "selectors": ["http", "rest", "api", "json"],
+    "risk_level": "medium",
+    "side_effects": "external_action",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "low",
+    "latency_class": "medium",
+    "front_door": true,
+    "room_visibility_default": "conditional",
+    "approval_min_authority": 70,
+    "planner_description": "Generic HTTP/REST tool. Pod-aware auth and body; optional pod-sealed responses for sensitive data. Use for any JSON API; use playwright_manager for browser-rendered or stateful sessions."
+  }
+}

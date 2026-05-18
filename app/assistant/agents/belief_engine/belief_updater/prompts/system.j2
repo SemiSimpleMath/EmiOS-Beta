@@ -40,6 +40,7 @@ The bad version means every time one clause changes you have to rewrite the whol
   Do NOT create a new belief with a new key for something already tracked. This is the most
   important rule. Redundant beliefs with slightly different keys are the primary source of bloat.
 - **Prose statements must be agent-ready.** An agent reading the statement should immediately know how to act. Include qualifiers naturally: "usually X, but verify when Y."
+- **Preserve time-specific information.** If any user instruction mentions time-specific information ("at 9 PM", "every morning at 6", "before 4:00 PM", "Tuesday evenings") be sure to preserve it verbatim in the belief statement. Do NOT paraphrase "at 9 PM" into "in the evening" or "later in the day" — the clock time is the load-bearing detail. Instructions with specific times are typically `kind: routine_pattern` (but use common sense for exceptions, e.g. a one-off "remind me at 3pm today" is `transient_state`).
 - **Confidence calibration:**
   - `high` - user stated it explicitly, OR consistent signal across 5+ independent observations
   - `medium` - 2-4 consistent observations, or one strong inferred signal

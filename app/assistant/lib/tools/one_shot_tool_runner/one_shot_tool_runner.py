@@ -52,6 +52,7 @@ class OneShotToolRunner(BaseTool):
         "nest_home_control",
         "lights_control",
         "ring_camera_control",
+        "http_request",
     ]
 
     def __init__(self):

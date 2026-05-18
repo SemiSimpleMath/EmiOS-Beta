@@ -371,6 +371,7 @@ class ToolCaller(ControlNode):
             tool_name=tool_name,
             tool_config=tool_config if isinstance(tool_config, dict) else {},
             scope_context=scope_context if isinstance(scope_context, ScopeContext) else None,
+            tool_message=tool_message,
         )
         approval_ticket_id = None
         if tool_name != "ask_user" and approval_reasons:
