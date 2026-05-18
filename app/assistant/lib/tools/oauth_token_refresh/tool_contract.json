@@ -1,0 +1,46 @@
+{
+  "name": "oauth_token_refresh",
+  "description": "Refresh the access_token of an auth.oauth pod using its stored refresh_token. The tool reads refresh_token + client credentials at courier scope, POSTs to the provider's token endpoint (per the pod's metadata), and updates the access_token env var in place. The next http_request that resolves `datapod:auth.oauth:<id>/access_token` picks up the new value automatically. Returns metadata only (provider, new expiry, success) — tokens never enter your transcript.\n\nUse before calling an authenticated API when the current access token may be expired. Pass `force=true` to refresh regardless of stored expiry.",
+  "inputs": [
+    {
+      "name": "pod_id",
+      "type": "string",
+      "required": true,
+      "description": "The auth.oauth pod URI (`datapod:auth.oauth:<id>`)."
+    },
+    {
+      "name": "force",
+      "type": "boolean",
+      "required": false,
+      "description": "If true, refresh even if the stored expiry suggests the token is still valid. Default false — the tool short-circuits when the token isn't near expiry."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Status summary: provider, new expiry, whether refresh actually fired or short-circuited."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured payload: ok, provider, refreshed (bool), new_expiry_iso, expires_in_seconds, refresh_token_rotated (bool)."
+    }
+  ],
+  "arguments_prompt": "Arguments for oauth_token_refresh:\npod_id: str          # the auth.oauth pod URI\nforce: bool = False  # refresh even if not near expiry",
+  "metadata": {
+    "domain": "web",
+    "actions": ["refresh", "oauth"],
+    "selectors": ["oauth", "token", "refresh"],
+    "risk_level": "medium",
+    "side_effects": "external_action",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_min_authority": 70,
+    "planner_description": "Refresh an OAuth access token. Pod-aware; tokens never enter the LLM transcript. Use before authenticated API calls when expiry is near."
+  }
+}

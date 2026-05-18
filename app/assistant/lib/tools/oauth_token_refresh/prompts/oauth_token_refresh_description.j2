@@ -1,0 +1,16 @@
+Refresh an OAuth access token without ever seeing either token yourself.
+
+Pass an `auth.oauth` pod_id. The tool:
+1. Reads the refresh_token + client credentials at courier scope (your scope is never elevated)
+2. POSTs `grant_type=refresh_token` to the provider's token endpoint (URL stored in the pod's metadata at mint time)
+3. Updates the access_token env var with the new value in place
+4. Updates the pod's `expiry` projection with the new expiration
+5. Returns metadata only — provider, new expiry, whether refresh actually fired
+
+The next `http_request` call that resolves `datapod:auth.oauth:<id>/access_token` picks up the new value automatically; no separate plumbing.
+
+Default: the tool short-circuits if the stored expiry says the current token is still valid (> 60s remaining). Pass `force=true` to refresh anyway.
+
+Use BEFORE an authenticated API call when the token may be expired. Don't refresh on every call — that wastes refresh-rate budget and rotates tokens unnecessarily.
+
+If refresh fails (refresh_token expired itself, provider error, etc.) the access token is left unchanged and the tool returns a structured error. The agent should surface this — re-authentication via the OAuth flow is a user-in-the-loop step, not an automatic recovery.

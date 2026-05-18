@@ -103,6 +103,8 @@ class PodStore:
                 row.scope_id = pod.scope_id
                 row.created_by = pod.created_by
                 row.metadata_json = dict(pod.metadata) if pod.metadata else None
+                if pod.min_authority is not None:
+                    row.min_authority = int(pod.min_authority)
                 session.add(row)
                 session.commit()
             except Exception:
@@ -386,6 +388,8 @@ class PodStore:
         name: str,
         env_ref: str,
         scope,
+        metadata: Optional[dict] = None,
+        materializer_kwargs: Optional[dict] = None,
     ) -> str:
         """Create an identity-style pod with materialized projections.
 
@@ -398,6 +402,21 @@ class PodStore:
         master_room surface can create new identity pods. This is
         deliberate; minting a new secret pod is a sensitive operation
         in itself.
+
+        Args:
+            pod_type: registered materializer kind (e.g. "identity.ssn",
+                "auth.bearer", "auth.oauth")
+            owner_subject_id: subject this pod belongs to (KG entity label)
+            name: human-readable label rendered in pod listings
+            env_ref: env var name holding the raw value
+            scope: caller's scope; must clear AUTH_USER
+            metadata: optional dict stored on PodRow.metadata_json. For pod
+                kinds that need persistent provider config (refresh_url,
+                client_id_env_ref, etc.) outside of projections.
+            materializer_kwargs: optional dict forwarded as **kwargs to the
+                materializer. Use for pod kinds that need additional inputs
+                beyond raw_value + env_ref (e.g. auth.oauth's refresh_url,
+                refresh_token_env_ref, provider).
 
         Raises:
             PodAuthorityError if scope.authority < AUTH_USER
@@ -427,7 +446,8 @@ class PodStore:
                     f"to .env and restart Flask, then retry"
                 )
             materialize = get_materializer(pod_type)
-            specs = materialize(raw_value=raw_value, env_ref=env_ref)
+            extra_kwargs = dict(materializer_kwargs or {})
+            specs = materialize(raw_value=raw_value, env_ref=env_ref, **extra_kwargs)
             # raw_value goes out of scope here; only the env_ref pointer
             # persists in the database for the full projection.
             del raw_value
@@ -437,6 +457,12 @@ class PodStore:
             # least be able to query the pod's existence).
             pod_min_authority = min(s.min_authority for s in specs)
 
+            row_metadata = {
+                "owner_subject_id": owner_subject_id,
+                "env_ref_root": env_ref,
+            }
+            if metadata:
+                row_metadata.update(dict(metadata))
             row = PodRow(
                 pod_id=pod_id,
                 kind=pod_type,
@@ -448,10 +474,7 @@ class PodStore:
                 scope_id=None,
                 min_authority=pod_min_authority,
                 created_by=getattr(scope, "actor_id", None),
-                metadata_json={
-                    "owner_subject_id": owner_subject_id,
-                    "env_ref_root": env_ref,
-                },
+                metadata_json=row_metadata,
             )
             session.add(row)
             session.flush()

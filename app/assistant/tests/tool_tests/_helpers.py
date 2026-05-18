@@ -7,7 +7,7 @@ Anything that's specific to one tool's internals belongs in that tool's own test
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional  # noqa: F401
 
 from app.assistant.utils.pydantic_classes import ToolMessage
 
@@ -72,10 +72,29 @@ class _FakeEvents:
 
 
 @dataclass
+class _FakeCalendarListRequest:
+    """Stub for service.calendarList().list(pageToken=...).execute() — returns
+    a single page with one default calendar so get_events can resolve calendar IDs."""
+    _calendars: List[Dict[str, Any]]
+
+    def execute(self) -> Dict[str, Any]:
+        return {"items": list(self._calendars)}
+
+
+@dataclass
+class _FakeCalendarList:
+    _calendars: List[Dict[str, Any]]
+
+    def list(self, *, pageToken: Optional[str] = None) -> _FakeCalendarListRequest:  # noqa: N803
+        return _FakeCalendarListRequest(self._calendars)
+
+
+@dataclass
 class FakeCalendarService:
     """
-    Minimal fake of the Google Calendar service surface used by delete_event
-    and delete_recurring_event.
+    Minimal fake of the Google Calendar service surface used by delete_event,
+    delete_recurring_event, and get_calendar_events (which enumerates
+    calendarList() before fetching events).
 
     Usage:
         svc = FakeCalendarService()
@@ -88,12 +107,20 @@ class FakeCalendarService:
     """
     calls: List[_CalledOp] = field(default_factory=list)
     _get_responses: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    # Default to one calendar named "primary" so calendarList().list().execute()
+    # returns something useful for tests that don't override.
+    _calendars: List[Dict[str, Any]] = field(
+        default_factory=lambda: [{"id": "primary", "summary": "primary"}]
+    )
 
     def set_event(self, event_id: str, event: Dict[str, Any]) -> None:
         self._get_responses[event_id] = event
 
     def events(self) -> _FakeEvents:
         return _FakeEvents(self.calls, self._get_responses)
+
+    def calendarList(self) -> _FakeCalendarList:  # noqa: N802 — matches Google API name
+        return _FakeCalendarList(self._calendars)
 
     # Convenience query helpers for tests --------------------------------
 

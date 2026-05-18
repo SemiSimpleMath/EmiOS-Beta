@@ -106,6 +106,35 @@ def known_types() -> List[str]:
     return sorted(_REGISTRY)
 
 
-# Auto-register all built-in types via side-effecting imports.
-# Add new pod-type modules to this list when you create them.
-from app.assistant.pod_store.materializers import identity_ssn  # noqa: F401,E402
+# Auto-discover all built-in pod-type modules. Each module that calls
+# `register(...)` at import-time will self-register; power users only need
+# to DROP A FILE in this directory. No central-file edit required.
+#
+# Discovery walks this package, importing every .py module except __init__
+# and anything starting with `_` (private helpers). Order is alphabetical
+# for deterministic registration. Failures during a single materializer's
+# import are logged but don't block the rest — one broken module shouldn't
+# disable the whole registry.
+import importlib as _importlib
+import pkgutil as _pkgutil
+from app.assistant.utils.logging_config import get_logger as _get_logger
+
+_logger = _get_logger(__name__)
+
+
+def _auto_discover() -> None:
+    for _info in _pkgutil.iter_modules(__path__):
+        name = _info.name
+        if name.startswith("_"):
+            continue
+        try:
+            _importlib.import_module(f"{__name__}.{name}")
+        except Exception as e:
+            _logger.error(
+                "materializers auto-discover: failed to import %s: %s",
+                name, e,
+            )
+            _logger.debug("materializer import details", exc_info=True)
+
+
+_auto_discover()

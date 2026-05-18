@@ -120,7 +120,7 @@ def test_task_name_substring_filter(monkeypatch):
         _task(task_id="c", title="Research Sam's internship deadlines"),
     ])
 
-    result = _get_tasks(tool, task_name="peter")
+    result = _get_tasks(tool, task_name="sam")
     titles = [r["title"] for r in result.data_list]
     assert len(titles) == 2
     assert "Call Sam's school" in titles
@@ -261,7 +261,7 @@ def test_filter_composition_name_plus_date_range(monkeypatch):
 
     result = _get_tasks(
         tool,
-        task_name="peter",
+        task_name="sam",
         start_date="2026-04-15T00:00:00Z",
         end_date="2026-04-20T23:59:59Z",
     )

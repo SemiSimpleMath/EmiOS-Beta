@@ -48,6 +48,11 @@ class Pod(BaseModel):
     created_by: Optional[str] = None
     created_at: Optional[datetime] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    # Optional override of PodRow.min_authority. If None at put time, the DB
+    # default (50 / AUTH_CHAT) applies. Set higher for content pods that
+    # carry sensitive payloads — e.g., HTTP response pods sealed via
+    # http_request's response_pod_kind path.
+    min_authority: Optional[int] = None
 
 
 class PodHeader(BaseModel):

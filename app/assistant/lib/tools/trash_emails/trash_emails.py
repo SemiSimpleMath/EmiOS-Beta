@@ -56,7 +56,12 @@ class TrashEmailsTool(BaseTool):
             # Ignore caller-provided max_per_sender to avoid inconsistent caps across runs.
             max_per_sender = _MAX_PER_CALL
 
-            client = GmailAPIClient()
+            # Optional account_id for multi-account Gmail users. If unset,
+            # GmailAPIClient picks the default account.
+            account_id = args.get("account_id")
+            account_id = str(account_id).strip() if account_id else None
+
+            client = GmailAPIClient(account_id=account_id) if account_id else GmailAPIClient()
 
             results = []
             total_trashed = 0

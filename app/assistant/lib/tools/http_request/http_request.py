@@ -12,15 +12,29 @@ In header VALUES or as a whole-body string:
     datapod:<kind>:<id>            -> projection 'full'
     datapod:<kind>:<id>/<proj>     -> projection <proj>
 
-## What v1 does NOT yet support
+## What v1.1 does NOT yet support
 
-- `response_pod_kind` — sealing the response into a new pod. The contract
-  documents it; setting it returns `not_implemented`. Coming in v1.1, gated
-  by a real pod-minting path for response bytes (text vs binary).
 - Per-field pod substitution inside a dict body. Pass a whole-body pod
   reference instead.
-- OAuth refresh — separate sidecar tool will handle this in v1.1.
+- OAuth refresh — separate sidecar tool will handle this in v1.2.
 - Cookie jar / stateful session — use `playwright_manager` instead.
+- Binary response sealing — `response_pod_kind` sealing currently inlines
+  the response text into the new pod's body. Binary responses (images, PDFs)
+  fall back to a metadata-only pod with a placeholder body; raw bytes are
+  not stored. File-backed projections for binary come later.
+
+## response_pod_kind (sealed responses)
+
+Set `response_pod_kind="health.private"` (or similar) to seal the response
+into a new pod. The agent receives `response_pod_id` instead of the body
+content. Authority for the new pod is derived from the kind suffix:
+
+  *.private   → AUTH_USER (99)     Jukka-equivalent only
+  *.gated     → AUTH_GATED (70)    sensitive-but-shareable
+  *.chat      → AUTH_CHAT (50)     normal agent surfaces
+  *.protected → AUTH_CHAT (50)     alias
+  *.public    → AUTH_PUBLIC (10)   display-anywhere
+  (other)     → AUTH_USER (99)     fail-closed default
 
 ## Authority
 
@@ -35,6 +49,7 @@ from __future__ import annotations
 import json
 import re
 import time
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
@@ -43,6 +58,9 @@ import requests
 
 from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
 from app.assistant.lib.core_tools.tool_error_protocol import make_tool_error
+from app.assistant.pod_store.authority import (
+    AUTH_PUBLIC, AUTH_CHAT, AUTH_GATED, AUTH_USER,
+)
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import (
     ScopeApprovalPolicy,
@@ -131,19 +149,8 @@ class HttpRequest(BaseTool):
                 abort_policy="abort_tool", retryable=False,
                 details={"method": method},
             )
-        if response_pod_kind:
-            # v1.1 territory — fresh pod minting path for response bytes.
-            return make_tool_error(
-                error_code="not_implemented",
-                message=(
-                    "http_request: response_pod_kind is documented but not "
-                    "implemented in v1. Coming in v1.1. For sensitive responses "
-                    "today, mint a pod manually after the call or use a courier "
-                    "tool that reads the response directly."
-                ),
-                abort_policy="abort_tool", retryable=False,
-                details={"response_pod_kind": response_pod_kind},
-            )
+        # response_pod_kind is now supported (v1.1) — see _seal_response_pod
+        # below for the minting path.
 
         # ---- resolve pod refs in headers + body at courier scope --------
 
@@ -287,18 +294,57 @@ class HttpRequest(BaseTool):
             except Exception:
                 body_json = None
 
+        host = urlparse(url).netloc
+        soft_cap_hit = response_bytes > _SOFT_CAP_BYTES
+
+        # ---- response_pod_kind: seal the response into a new pod -------
+
+        response_pod_id: Optional[str] = None
+        sealed_min_authority: Optional[int] = None
+        if response_pod_kind:
+            try:
+                response_pod_id, sealed_min_authority = self._seal_response_pod(
+                    response_pod_kind=response_pod_kind,
+                    body_text=body_text,
+                    is_text=is_text,
+                    content_type=content_type,
+                    method=method, url=url, host=host,
+                    status_code=response.status_code,
+                    response_bytes=response_bytes,
+                    caller_agent=self._caller_agent(tool_message),
+                    request_id=getattr(tool_message, "request_id", None),
+                )
+            except Exception as e:
+                logger.error("http_request: response pod sealing failed: %s", e)
+                logger.debug("seal_response_pod exception details", exc_info=True)
+                self._write_audit(
+                    request_id=getattr(tool_message, "request_id", None),
+                    caller_agent=self._caller_agent(tool_message),
+                    method=method, url=url,
+                    status_code=response.status_code,
+                    request_bytes=None, response_bytes=response_bytes,
+                    pods_used=pods_used, response_pod_id=None,
+                    response_pod_kind=response_pod_kind,
+                    error_code="response_pod_seal_failed", duration_ms=duration_ms,
+                )
+                return make_tool_error(
+                    error_code="response_pod_seal_failed",
+                    message=f"http_request: failed to seal response into pod: {e}",
+                    abort_policy="abort_tool", retryable=False,
+                    details={"response_pod_kind": response_pod_kind},
+                )
+
         self._write_audit(
             request_id=getattr(tool_message, "request_id", None),
             caller_agent=self._caller_agent(tool_message),
             method=method, url=url,
             status_code=response.status_code,
             request_bytes=None, response_bytes=response_bytes,
-            pods_used=pods_used, response_pod_id=None, response_pod_kind=None,
+            pods_used=pods_used, response_pod_id=response_pod_id,
+            response_pod_kind=response_pod_kind,
             error_code=None, duration_ms=duration_ms,
         )
 
-        host = urlparse(url).netloc
-        soft_cap_hit = response_bytes > _SOFT_CAP_BYTES
         parts = [
             f"http_request {method} {host}:",
             f"- status: {response.status_code}",
@@ -308,7 +354,15 @@ class HttpRequest(BaseTool):
         ]
         if pods_used:
             parts.append(f"- pods_used: {len(pods_used)} (auth resolution applied)")
-        if soft_cap_hit:
+        if response_pod_id:
+            parts.append(
+                f"- response_pod_id: {response_pod_id} "
+                f"(kind={response_pod_kind!r}, min_authority={sealed_min_authority})"
+            )
+            parts.append(
+                "- response body sealed — agents at lower authority cannot read it"
+            )
+        elif soft_cap_hit:
             parts.append(
                 f"- WARNING: response exceeds soft cap ({_SOFT_CAP_BYTES} bytes); "
                 f"consider routing through a summarizer agent before downstream use."
@@ -321,17 +375,118 @@ class HttpRequest(BaseTool):
             "content_type": content_type,
             "content_length": response_bytes,
             "duration_ms": duration_ms,
-            "body": body_text,
-            "body_json": body_json,
             "soft_cap_hit": soft_cap_hit,
             "pods_used_count": len(pods_used),
         }
+        if response_pod_id:
+            # SEALED: body never exposed to the agent. Caller must
+            # pod_fetch at the appropriate authority to read.
+            result_data["response_pod_id"] = response_pod_id
+            result_data["response_pod_kind"] = response_pod_kind
+            result_data["response_pod_min_authority"] = sealed_min_authority
+            # Release local refs so the body is not visible past this point.
+            body_text = None
+            body_json = None
+        else:
+            result_data["body"] = body_text
+            result_data["body_json"] = body_json
 
         return ToolResult(
             result_type="http_request",
             content="\n".join(parts),
             data=result_data,
         )
+
+    # ------------------------------------------------------------- sealing
+
+    @staticmethod
+    def _kind_to_min_authority(kind: str) -> int:
+        """Map a response_pod_kind string to an authority band.
+
+        Convention: the suffix after the final '.' declares the privacy class.
+        Unknown suffixes fail closed at AUTH_USER (99) — the most restrictive
+        non-courier band.
+        """
+        if not kind:
+            return AUTH_USER
+        suffix = kind.rsplit(".", 1)[-1].lower()
+        return {
+            "public":    AUTH_PUBLIC,
+            "chat":      AUTH_CHAT,
+            "protected": AUTH_CHAT,
+            "gated":     AUTH_GATED,
+            "private":   AUTH_USER,
+        }.get(suffix, AUTH_USER)
+
+    def _seal_response_pod(
+        self,
+        *,
+        response_pod_kind: str,
+        body_text: str,
+        is_text: bool,
+        content_type: str,
+        method: str, url: str, host: str,
+        status_code: int,
+        response_bytes: int,
+        caller_agent: Optional[str],
+        request_id: Optional[str],
+    ) -> Tuple[str, int]:
+        """Mint a new pod holding the response body. Returns (pod_id, min_authority).
+
+        For text responses, the body is stored inline. For binary responses,
+        v1.1 stores a placeholder body (raw bytes are NOT persisted — a
+        file-backed projection comes later). The pod_id format is
+        `datapod:<kind>:<uuid>` so the caller can reference it via the same
+        `datapod:` URI convention as identity pods.
+        """
+        from app.assistant.pod_store.contracts import Pod
+        from app.assistant.pod_store.pod_store import PodStore
+
+        pod_uuid = uuid.uuid4().hex
+        pod_id = f"datapod:{response_pod_kind}:{pod_uuid}"
+        min_authority = self._kind_to_min_authority(response_pod_kind)
+
+        # Body: inline for text, placeholder for binary. The placeholder
+        # records enough metadata for the agent to know what's there without
+        # exposing the bytes.
+        if is_text:
+            stored_body = body_text
+        else:
+            stored_body = (
+                f"<binary {response_bytes} bytes, content-type={content_type!r}; "
+                f"raw bytes not persisted in v1.1>"
+            )
+
+        one_liner = (
+            f"HTTP response: {method} {host} → {status_code} "
+            f"({response_bytes} bytes, {content_type or 'no content-type'})"
+        )
+
+        pod = Pod(
+            pod_id=pod_id,
+            kind=response_pod_kind,
+            tags=["http_response", host, response_pod_kind],
+            one_liner=one_liner,
+            body=stored_body,
+            source_refs=[],
+            for_agents=[],
+            scope_id=None,
+            created_by=caller_agent or "http_request",
+            metadata={
+                "url": url,
+                "method": method,
+                "host": host,
+                "status_code": status_code,
+                "content_type": content_type,
+                "content_length": response_bytes,
+                "is_text": is_text,
+                "sealed_at": datetime.now(timezone.utc).isoformat(),
+                "sealed_by_request_id": request_id,
+            },
+            min_authority=min_authority,
+        )
+        PodStore().put(pod)
+        return pod_id, min_authority
 
     # ----------------------------------------------------------------- pods
 
