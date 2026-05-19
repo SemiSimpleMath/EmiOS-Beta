@@ -1,0 +1,40 @@
+{
+  "name": "read_skill",
+  "description": "Load the full body (markdown content) of one or more skills by name. Call this AFTER discover_skills has surfaced candidate names — discover_skills returns headers, read_skill opens them. The returned body is intended to be incorporated into the agent's next planning step like a freshly-injected skill.\n\nMissing names come back in `missing: [...]` — no error. Cap of 5 names per call to keep the context budget sane.\n\nPairs with discover_skills the way pod_fetch pairs with pod_search.",
+  "inputs": [
+    {
+      "name": "names",
+      "type": "array",
+      "required": true,
+      "description": "Skill names to load. Example: ['image-resize', 'pod-courier']. Cap 5 per call."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Each found skill's body, separated by '=== skill: <name> ===' markers. Missing names listed at the end."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured: {found: [{name, description, body, body_chars}], missing: [name, ...], found_count, missing_count}."
+    }
+  ],
+  "arguments_prompt": "Arguments for read_skill:\n- names (required): list of skill names from discover_skills. Cap 5.\nExample: {\"names\": [\"image-resize\"]}",
+  "metadata": {
+    "domain": "tooling",
+    "actions": ["read"],
+    "selectors": ["skill"],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": true,
+    "room_visibility_default": "show",
+    "approval_required": false,
+    "planner_description": "Load full SKILL.md bodies by name (after discover_skills). Returns each body plus any missing names. Cap 5 names per call."
+  }
+}

@@ -1,0 +1,12 @@
+Browse or search the skill catalog — SKILL.md recipes that describe how to
+accomplish specific tasks using Emi's existing tools (e.g. how to resize an
+image with execute_code + Pillow, how to call the GitHub API via http_request,
+etc.).
+
+Use BEFORE writing a multi-step plan from scratch. There may already be a
+recipe. Pass a one- or two-keyword `query` like 'image', 'github', 'pdf
+extract'; omit `query` to browse everything.
+
+Returns headers only (name + description + the keywords that auto-inject the
+skill). Open one with read_skill. Pairs with read_skill the same way
+pod_search pairs with pod_fetch.

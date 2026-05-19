@@ -1,0 +1,46 @@
+{
+  "name": "discover_skills",
+  "description": "Browse or search the skill catalog. Skills are SKILL.md recipes for using Emi's tools to accomplish specific tasks (e.g. 'image-resize', 'github', 'sandboxed-python-execution'). Returns headers (name + description + auto-inject keywords) — call read_skill to load the full body of one. Use when (1) you're about to do something and want to check if a recipe already exists, or (2) the planner's phrasing didn't trigger auto-injection but a relevant skill probably does exist.\n\nExamples:\n- About to resize an image → `query='image resize'`\n- User asked something GitHub-related → `query='github'`\n- Want to see what skills exist → no query (browses)\n- Specifically interested in how to compose new tools → `query='extend tool'`\n\nPairs with read_skill the way pod_search pairs with pod_fetch. discover_skills lists; read_skill opens.",
+  "inputs": [
+    {
+      "name": "query",
+      "type": "string",
+      "required": false,
+      "description": "Intent or keywords matched against skill names and descriptions. Omit for a browse of all registered skills (sorted alphabetically)."
+    },
+    {
+      "name": "limit",
+      "type": "integer",
+      "required": false,
+      "description": "Max skills to return. Default 5, max 50."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Numbered list of matching skills with name, description, and auto-inject keywords."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured: {query, mode ('search'|'browse'), count, total_available, skills: [{name, description, auto_inject_keywords}]}."
+    }
+  ],
+  "arguments_prompt": "Arguments for discover_skills:\n- query (optional): intent or keywords. Omit to browse.\n- limit (optional): default 5, max 50.\nExample: {\"query\": \"resize image\", \"limit\": 5}",
+  "metadata": {
+    "domain": "tooling",
+    "actions": ["search", "list"],
+    "selectors": ["skill"],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": true,
+    "room_visibility_default": "show",
+    "approval_required": false,
+    "planner_description": "Browse or search the skill catalog (SKILL.md recipes for using Emi's tools). Headers only — call read_skill for full body."
+  }
+}

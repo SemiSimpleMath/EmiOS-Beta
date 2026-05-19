@@ -1,0 +1,10 @@
+Load the full markdown body of one or more skills by name. The body is the
+actual recipe — instructions, code patterns, anti-patterns — that tells you
+how to accomplish the task.
+
+Use AFTER discover_skills has surfaced candidate names. discover_skills
+returns headers; read_skill opens them. Cap 5 names per call to keep the
+context budget sane. Names that don't exist come back in `missing: [...]`,
+not as an error.
+
+Pairs with discover_skills the way pod_fetch pairs with pod_search.

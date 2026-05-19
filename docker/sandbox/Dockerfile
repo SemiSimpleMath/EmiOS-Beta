@@ -65,7 +65,10 @@ RUN pip install --no-cache-dir \
         reportlab==4.2.5
 
 # Web / HTTP
+# urllib3 pinned to silence requests' RequestsDependencyWarning when pip's
+# resolver pulls a newer urllib3 transitively.
 RUN pip install --no-cache-dir \
+        urllib3==2.2.3 \
         requests==2.32.3 \
         httpx==0.27.2 \
         beautifulsoup4==4.12.3 \
@@ -80,6 +83,13 @@ WORKDIR /workspace
 # Set Python to unbuffered so stdout/stderr stream out promptly.
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
+
+# Redirect caches into /tmp because --read-only renders default cache locations
+# (under $HOME / /root) non-writable. Matplotlib and Fontconfig otherwise emit
+# warnings on every script run.
+ENV MPLCONFIGDIR=/tmp
+ENV FONTCONFIG_PATH=/tmp
+ENV XDG_CACHE_HOME=/tmp
 
 # Default entrypoint runs the script. Host overrides via `docker run` if needed
 # (e.g., to install requirements before running).
