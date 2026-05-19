@@ -66,6 +66,7 @@ scope_contract:
   tools:
     requires_approval_tools:
       - playwright_manager
+      - execute_code
     # KG mutation surfaces are off-limits at the emi_team level. emi_team
     # reads the KG (ask_kg, kg_query, kg_find_node, kg_describe_node) but
     # never mutates it. KG editing has its own surfaces (kg_dev room,
@@ -95,7 +96,7 @@ scope_contract:
       # Sunset
       - kg_team_manager
 tool_visibility:
-  always_show: [personal_admin_manager, devices_manager, web_manager, playwright_manager, bash_manager, find_tool, install_tool, ask_user, pod_search, pod_fetch, ask_kg]
+  always_show: [personal_admin_manager, devices_manager, web_manager, playwright_manager, bash_manager, execute_code, find_tool, install_tool, ask_user, pod_search, pod_fetch, ask_kg]
   use_narrower: true
   hidden_tools:
     # --- personal_admin_manager leaf tools (call the manager instead) ---

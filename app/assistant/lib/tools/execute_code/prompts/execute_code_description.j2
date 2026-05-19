@@ -1,0 +1,54 @@
+Run a Python script in a Docker sandbox. The script lives at `/workspace/script.py`; input pods become files in `/workspace/inputs/`; anything you write to `/workspace/outputs/` auto-mints as output pods returned in the result.
+
+**Pre-installed libraries (no need for `requirements`):**
+- Numerical/data: numpy, pandas, scipy, scikit-learn
+- Charts: matplotlib, seaborn
+- Image: Pillow, opencv-python (headless), pytesseract (+ tesseract OCR)
+- Documents: openpyxl, pypdf, pymupdf, reportlab
+- Web/HTTP: requests, httpx, beautifulsoup4, lxml
+- Audio/video: ffmpeg (via subprocess)
+
+**Pod I/O.** Pass `input_pod_ids=[...]` to mount pods as files. The filename is derived from the pod's kind and id (e.g. `image_abc123.jpg`). Read with normal Python file IO. To return data, write to `/workspace/outputs/<filename>` — each file auto-mints as a new pod whose pod_id appears in `result.data.output_pod_ids`.
+
+**Sealed responses.** Set `response_pod_kind="health.private"` (or similar) to seal stdout into a new pod with that privacy class. The tool returns `response_pod_id`; the agent driving this call never reads the stdout. Downstream skills at the matching authority can pod_fetch the result.
+
+**Network is denied by default.** If your script needs to reach an API, pass `egress_allowlist=["api.openai.com", "fal.run"]` (or whatever). The script can then make HTTPS calls; all domains hit are logged for audit. Without an egress_allowlist, sockets are blocked.
+
+**Timeout.** Default 30s, hard cap 5 minutes. Long-running tasks should run as a dayflow routine, not a one-shot execute_code call.
+
+**Resource limits.** 2 CPU cores, 2GB RAM, 512 PIDs. Filesystem is read-only outside `/workspace`. Killed cleanly on timeout.
+
+**When NOT to use this tool:**
+- A single HTTP GET → use `http_request`
+- Reading a local file the user pointed to → use `bash_manager`
+- Browser interaction → use `playwright_manager`
+- A one-line text transformation you can do in your reasoning → just do it
+
+**Authority.** AUTH_USER (99). Never autonomous; always user-initiated. Dayflow can REQUEST via a ticket but the user must approve.
+
+**Examples:**
+
+Resize an image pod:
+```python
+from PIL import Image
+img = Image.open('inputs/photo.jpg')
+img.thumbnail((512, 512))
+img.save('outputs/thumb.png')
+print(f"thumbnail: {img.size}")
+```
+
+Compute spending from a CSV pod, sealed result:
+```python
+import pandas as pd
+df = pd.read_csv('inputs/transactions.csv')
+print(f"Total: ${df['amount'].sum():,.2f}")
+# Pass response_pod_kind='financial.private' so this stdout is sealed.
+```
+
+Generate a PDF report:
+```python
+from reportlab.pdfgen import canvas
+c = canvas.Canvas('outputs/report.pdf')
+c.drawString(72, 720, 'Weekly summary')
+c.save()
+```

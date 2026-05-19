@@ -1,0 +1,82 @@
+{
+  "name": "execute_code",
+  "description": "Run an agent-supplied Python script inside a sandboxed Docker container. The script can read input pods (mounted as files at /workspace/inputs/), produce output files (anything written to /workspace/outputs/ auto-mints as pods returned in the result), and optionally seal stdout into a new pod with declared privacy class. Network access is denied by default — pass `egress_allowlist` to allow specific domains.\n\nUse for: data analysis (pandas/matplotlib), image manipulation (PIL/opencv), PDF processing (pymupdf), document generation (reportlab/openpyxl), OCR (pytesseract), audio/video transcoding (ffmpeg), running test scripts, ad-hoc Python that needs libraries beyond what Emi's other tools expose.\n\nDo NOT use for: simple HTTP calls (use http_request), reading filesystem on the host (use bash_manager), browser automation (use playwright_manager), one-line text manipulation (just do it in your reasoning step).",
+  "inputs": [
+    {
+      "name": "source",
+      "type": "string",
+      "required": true,
+      "description": "Python script body. Runs as a standalone file; you do not need `if __name__ == \"__main__\":`. Input pods live at /workspace/inputs/, write output files to /workspace/outputs/."
+    },
+    {
+      "name": "language",
+      "type": "string",
+      "required": false,
+      "description": "Currently 'python' only. Default 'python'."
+    },
+    {
+      "name": "input_pod_ids",
+      "type": "array",
+      "required": false,
+      "description": "Pod URIs to make available as files in /workspace/inputs/. Pods are resolved at courier scope before the container starts."
+    },
+    {
+      "name": "fs_allowlist",
+      "type": "array",
+      "required": false,
+      "description": "Extra host paths to mount read-only inside the sandbox at /workspace/host_<basename>. Use sparingly; prefer input_pod_ids."
+    },
+    {
+      "name": "egress_allowlist",
+      "type": "array",
+      "required": false,
+      "description": "Domains the script is allowed to reach (e.g. ['api.openai.com', 'fal.run']). Default empty = no network. Advisory in v1: network IS opened when this is non-empty, and all egress is logged; per-domain enforcement is v1.1."
+    },
+    {
+      "name": "timeout_s",
+      "type": "number",
+      "required": false,
+      "description": "Per-call execution timeout in seconds. Default 30. Hard cap 300 (5 minutes); beyond that, factor into a routine."
+    },
+    {
+      "name": "response_pod_kind",
+      "type": "string",
+      "required": false,
+      "description": "If set, stdout is sealed into a new pod with this privacy class (e.g. 'health.private', 'financial.private'). The tool returns response_pod_id instead of inline stdout."
+    },
+    {
+      "name": "requirements",
+      "type": "array",
+      "required": false,
+      "description": "Extra pip packages to install before running. SLOW (15-60s per package). Only use if a needed library isn't in the base image (which already includes pandas, numpy, pillow, opencv, pymupdf, requests, etc.)."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable summary: exit code, duration, byte counts, pod ids if any."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured payload: ok, exit_code, duration_ms, stdout (or null if sealed), stderr, stdout_truncated, response_pod_id, output_pod_ids, egress_logged."
+    }
+  ],
+  "arguments_prompt": "Arguments for execute_code:\nsource: str                                # the Python script\nlanguage: str = 'python'                   # python only in v1\ninput_pod_ids: list[str] = []              # mounted at /workspace/inputs/\nfs_allowlist: list[str] = []               # extra host paths (read-only mount)\negress_allowlist: list[str] = []           # domains allowed (default deny)\ntimeout_s: float = 30.0                    # hard cap 300\nresponse_pod_kind: Optional[str] = None    # seal stdout in pod with this class\nrequirements: list[str] = []               # extra pip installs (slow)",
+  "metadata": {
+    "domain": "code_execution",
+    "actions": ["execute", "run", "compute"],
+    "selectors": ["python", "code", "script", "compute", "analysis"],
+    "risk_level": "high",
+    "side_effects": "compute",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "medium",
+    "latency_class": "medium",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_min_authority": 99,
+    "planner_description": "Run a Python script in a Docker sandbox with pre-installed data/image/PDF/web libraries. Pod-aware input/output. Network denied by default. Use for analysis, transcoding, document work, anything needing pandas/PIL/pymupdf/etc."
+  }
+}
