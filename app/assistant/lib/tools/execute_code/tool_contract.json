@@ -24,7 +24,7 @@
       "name": "fs_allowlist",
       "type": "array",
       "required": false,
-      "description": "Extra host paths to mount read-only inside the sandbox at /workspace/host_<basename>. Use sparingly; prefer input_pod_ids."
+      "description": "Extra host paths to mount read-only inside the sandbox. CRITICAL: each path is remapped to /workspace/host_<basename>/ — your script MUST use the container path, not the original host path. Example: fs_allowlist=['E:\\\\EmiAi_sqlite\\\\uploads\\\\temp'] is read inside the script at '/workspace/host_temp/'. Use this when the user pointed at a file/dir on disk; use input_pod_ids when the content is already a pod."
     },
     {
       "name": "egress_allowlist",
@@ -63,7 +63,7 @@
       "description": "Structured payload: ok, exit_code, duration_ms, stdout (or null if sealed), stderr, stdout_truncated, response_pod_id, output_pod_ids, egress_logged."
     }
   ],
-  "arguments_prompt": "Arguments for execute_code:\nsource: str                                # the Python script\nlanguage: str = 'python'                   # python only in v1\ninput_pod_ids: list[str] = []              # mounted at /workspace/inputs/\nfs_allowlist: list[str] = []               # extra host paths (read-only mount)\negress_allowlist: list[str] = []           # domains allowed (default deny)\ntimeout_s: float = 30.0                    # hard cap 300\nresponse_pod_kind: Optional[str] = None    # seal stdout in pod with this class\nrequirements: list[str] = []               # extra pip installs (slow)",
+  "arguments_prompt": "Arguments for execute_code:\nsource: str                                # the Python script\nlanguage: str = 'python'                   # python only in v1\ninput_pod_ids: list[str] = []              # pods mounted at /workspace/inputs/\nfs_allowlist: list[str] = []               # host dirs mounted READ-ONLY at /workspace/host_<basename>/ — your script must use the container path, not the host path\negress_allowlist: list[str] = []           # domains allowed (default deny)\ntimeout_s: float = 30.0                    # hard cap 300\nresponse_pod_kind: Optional[str] = None    # seal stdout in pod with this class\nrequirements: list[str] = []               # extra pip installs (slow)",
   "metadata": {
     "domain": "code_execution",
     "actions": ["execute", "run", "compute"],

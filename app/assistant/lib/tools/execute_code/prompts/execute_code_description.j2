@@ -10,6 +10,8 @@ Run a Python script in a Docker sandbox. The script lives at `/workspace/script.
 
 **Pod I/O.** Pass `input_pod_ids=[...]` to mount pods as files. The filename is derived from the pod's kind and id (e.g. `image_abc123.jpg`). Read with normal Python file IO. To return data, write to `/workspace/outputs/<filename>` — each file auto-mints as a new pod whose pod_id appears in `result.data.output_pod_ids`.
 
+**Direct file I/O via `fs_allowlist`.** As an alternative to pods, you can mount one or more host directories read-only with `fs_allowlist=["/path/to/dir", ...]`. Each path is mounted at **`/workspace/host_<basename>/`** inside the sandbox — so `fs_allowlist=["E:\\EmiAi_sqlite\\uploads\\temp"]` lands at `/workspace/host_temp/`. Your script must use that container path, NOT the original host path. Files there are read-only; write outputs to `/workspace/outputs/` as usual. Pods vs fs_allowlist: pods carry authority + lineage and copy bytes into the workspace; fs_allowlist preserves filenames + zero-copy mounts + lets you point at a whole directory. Pick by need.
+
 **Sealed responses.** Set `response_pod_kind="health.private"` (or similar) to seal stdout into a new pod with that privacy class. The tool returns `response_pod_id`; the agent driving this call never reads the stdout. Downstream skills at the matching authority can pod_fetch the result.
 
 **Network is denied by default.** If your script needs to reach an API, pass `egress_allowlist=["api.openai.com", "fal.run"]` (or whatever). The script can then make HTTPS calls; all domains hit are logged for audit. Without an egress_allowlist, sockets are blocked.
@@ -51,4 +53,18 @@ from reportlab.pdfgen import canvas
 c = canvas.Canvas('outputs/report.pdf')
 c.drawString(72, 720, 'Weekly summary')
 c.save()
+```
+
+Resize a file the user pointed at on disk (no pod needed):
+```python
+# Call args:
+#   fs_allowlist=["E:\\EmiAi_sqlite\\uploads\\temp"]
+# The host dir is mounted at /workspace/host_temp/ — use THAT path, not E:\...
+import os
+from PIL import Image
+host_dir = '/workspace/host_temp'
+src = os.path.join(host_dir, 'signal-2025-09-07-134852.jpeg')
+img = Image.open(src)
+img.thumbnail((512, 512))
+img.save('/workspace/outputs/thumb.jpg', 'JPEG', quality=85)
 ```

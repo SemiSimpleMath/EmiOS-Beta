@@ -447,12 +447,16 @@ class ExecuteCode(BaseTool):
     ) -> None:
         """Resolve each input pod at courier scope; write its bytes to inputs_dir.
 
-        Two pod shapes are common:
+        Three pod shapes are supported:
           1. Projection-style (identity, auth, artifact) — rows in PodProjection.
-             We pick 'full' if visible at courier scope, else the highest
+             Pick 'full' if visible at courier scope, else the highest
              min_authority projection the courier can read.
-          2. Body-style (chat_cluster, tool_result, email, generated docs) —
-             no projections; payload in PodRow.body. Read via PodStore.get().
+          2. File-backed (image, video, audio, document minted via
+             mint_pod_from_path / file_ingest / image_ingest) — bytes live on
+             disk at `metadata.stored_path`; `pod.body` is empty or a
+             vision-caption placeholder. Read the file directly.
+          3. Body-style (chat_cluster, tool_result, email, generated docs) —
+             no projections, no stored_path; payload in PodRow.body.
         """
         if not input_pod_ids:
             return
@@ -485,6 +489,7 @@ class ExecuteCode(BaseTool):
                 projections = []
 
             value: Any = None
+            ext_hint: Optional[str] = None
             if projections:
                 chosen = next(
                     (p for p in projections if p["projection_name"] == "full"),
@@ -501,6 +506,7 @@ class ExecuteCode(BaseTool):
                 except KeyError as e:
                     raise _PodStageError("pod_not_found", str(e))
 
+            pod = None
             if value is None:
                 pod = store.get(pod_uri)
                 if pod is None:
@@ -508,9 +514,24 @@ class ExecuteCode(BaseTool):
                         "pod_not_found",
                         f"pod {pod_uri} has no projections and no body row",
                     )
-                value = pod.body or ""
+                # File-backed pod: bytes on disk, body is empty or text caption.
+                stored_path_str = (pod.metadata or {}).get("stored_path")
+                if stored_path_str:
+                    stored_path = Path(stored_path_str)
+                    if not stored_path.is_absolute():
+                        stored_path = _REPO_ROOT / stored_path
+                    if not stored_path.is_file():
+                        raise _PodStageError(
+                            "pod_stored_file_missing",
+                            f"pod {pod_uri} declares metadata.stored_path={stored_path_str!r} "
+                            f"but file is missing at {stored_path}",
+                        )
+                    value = stored_path.read_bytes()
+                    ext_hint = stored_path.suffix.lstrip(".") or (pod.metadata or {}).get("ext", "").lstrip(".")
+                else:
+                    value = pod.body or ""
 
-            safe_name = self._pod_filename(pod_uri)
+            safe_name = self._pod_filename(pod_uri, ext=ext_hint)
             target = inputs_dir / safe_name
             if isinstance(value, bytes):
                 target.write_bytes(value)
@@ -523,10 +544,14 @@ class ExecuteCode(BaseTool):
                 )
 
     @staticmethod
-    def _pod_filename(pod_uri: str) -> str:
-        """Map a pod URI to a safe local filename. Best effort — kind+id without
-        any extension; the script can read by name."""
-        # datapod:image:abc... → image_abc.bin (no reliable ext at this layer)
+    def _pod_filename(pod_uri: str, ext: Optional[str] = None) -> str:
+        """Map a pod URI to a safe local filename.
+
+        Format: ``<kind>_<id_prefix>[.ext]``. The extension is appended when
+        the caller knows it (file-backed pods carry ``metadata.ext`` /
+        ``metadata.stored_path``'s suffix); helps downstream libs that
+        sniff by extension (ffmpeg, magic-by-name).
+        """
         parts = pod_uri.split(":")
         if len(parts) >= 3:
             kind = parts[1].replace(".", "_").replace("/", "_")
@@ -534,7 +559,11 @@ class ExecuteCode(BaseTool):
         else:
             kind = "pod"
             ident = pod_uri.replace(":", "_").replace("/", "_")
-        return f"{kind}_{ident[:32]}"
+        base = f"{kind}_{ident[:32]}"
+        ext = (ext or "").lstrip(".").lower()
+        if ext:
+            base = f"{base}.{ext}"
+        return base
 
     def _mint_output_pods(self, outputs_dir: Path, call_id: str) -> List[str]:
         """Each file in outputs_dir becomes a new pod (kind=tool_result)."""

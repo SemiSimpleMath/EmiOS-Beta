@@ -407,5 +407,202 @@ class TestExecuteCodeIntegration(unittest.TestCase):
         self.assertEqual(len(result.data["output_pod_ids"]), 1)
 
 
+class TestExecuteCodeStageInputPods(unittest.TestCase):
+    """Covers the three pod shapes _stage_input_pods has to handle:
+    projection-style, file-backed (metadata.stored_path), and body-style.
+
+    Regression target: file-backed image / video / document pods minted via
+    mint_pod_from_path were silently writing empty files into the workspace
+    because the old code only looked at pod.body. PIL.Image.open then failed
+    indistinguishably from "file isn't an image". See git blame on
+    _stage_input_pods for the fix.
+    """
+
+    def setUp(self):
+        self.tool = ExecuteCode()
+        self.tmpdir = Path(uuid.uuid4().hex)
+        # Real workspace dir on disk so write_bytes / write_text actually run.
+        self.workspace = Path(os.environ.get("TEMP", "/tmp")) / f"emi-test-{self.tmpdir}"
+        (self.workspace / "inputs").mkdir(parents=True, exist_ok=True)
+        self.inputs_dir = self.workspace / "inputs"
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.workspace, ignore_errors=True)
+
+    @staticmethod
+    def _mock_pod_store(pod_or_none, projections=None):
+        """Build a MagicMock that emulates PodStore for _stage_input_pods.
+
+        Returns a context manager that patches the PodStore class so any
+        ``PodStore()`` call returns our mock.
+        """
+        store = MagicMock()
+        store.list_projections.return_value = projections or []
+        store.get.return_value = pod_or_none
+        return patch(
+            "app.assistant.pod_store.pod_store.PodStore",
+            return_value=store,
+        )
+
+    def _make_pod(self, *, pod_id, body=None, metadata=None, kind="image"):
+        from app.assistant.pod_store.contracts import Pod
+        return Pod(
+            pod_id=pod_id,
+            kind=kind,
+            one_liner="test pod",
+            body=body,
+            metadata=metadata or {},
+        )
+
+    def test_file_backed_pod_absolute_stored_path(self):
+        """Pod with metadata.stored_path → bytes copied from disk."""
+        # Real file on disk with known bytes
+        src = self.workspace / "src_image.jpg"
+        src.write_bytes(b"\xff\xd8\xff\xe0FAKEJPEG")
+
+        pod = self._make_pod(
+            pod_id="datapod:image:abc12345",
+            metadata={"stored_path": str(src.resolve()), "ext": ".jpg"},
+        )
+
+        with self._mock_pod_store(pod):
+            self.tool._stage_input_pods(
+                input_pod_ids=["datapod:image:abc12345"],
+                inputs_dir=self.inputs_dir,
+                request_id="r1",
+            )
+
+        staged = list(self.inputs_dir.iterdir())
+        self.assertEqual(len(staged), 1)
+        self.assertTrue(staged[0].name.endswith(".jpg"), msg=staged[0].name)
+        self.assertEqual(staged[0].read_bytes(), b"\xff\xd8\xff\xe0FAKEJPEG")
+
+    def test_file_backed_pod_repo_relative_stored_path(self):
+        """Repo-relative stored_path (the actual shape file_ingest writes)
+        resolves against _REPO_ROOT and reads the bytes."""
+        from app.assistant.lib.tools.execute_code import execute_code as ec_mod
+
+        # Write a real file under a fake repo root
+        fake_repo = self.workspace / "fake_repo"
+        rel_path = Path("data") / "images" / "ab" / "fake.jpg"
+        (fake_repo / rel_path.parent).mkdir(parents=True, exist_ok=True)
+        (fake_repo / rel_path).write_bytes(b"\x89PNG\r\nfake")
+
+        pod = self._make_pod(
+            pod_id="datapod:image:abc12345",
+            metadata={"stored_path": str(rel_path).replace("\\", "/"), "ext": ".jpg"},
+        )
+
+        with patch.object(ec_mod, "_REPO_ROOT", fake_repo), \
+             self._mock_pod_store(pod):
+            self.tool._stage_input_pods(
+                input_pod_ids=["datapod:image:abc12345"],
+                inputs_dir=self.inputs_dir,
+                request_id="r1",
+            )
+
+        staged = list(self.inputs_dir.iterdir())
+        self.assertEqual(len(staged), 1)
+        self.assertEqual(staged[0].read_bytes(), b"\x89PNG\r\nfake")
+
+    def test_file_backed_pod_missing_file_raises(self):
+        """Pod declares stored_path but the file isn't there → loud failure,
+        not silent empty-write."""
+        pod = self._make_pod(
+            pod_id="datapod:image:abc12345",
+            metadata={"stored_path": "/nope/does/not/exist.jpg"},
+        )
+        from app.assistant.lib.tools.execute_code.execute_code import _PodStageError
+
+        with self._mock_pod_store(pod):
+            with self.assertRaises(_PodStageError) as cm:
+                self.tool._stage_input_pods(
+                    input_pod_ids=["datapod:image:abc12345"],
+                    inputs_dir=self.inputs_dir,
+                    request_id="r1",
+                )
+        self.assertEqual(cm.exception.error_code, "pod_stored_file_missing")
+        # No file written
+        self.assertEqual(list(self.inputs_dir.iterdir()), [])
+
+    def test_body_style_pod_falls_through_when_no_stored_path(self):
+        """chat_cluster / email / tool_result pods (no stored_path) still write
+        the text body as before — regression guard for the body-style path."""
+        pod = self._make_pod(
+            pod_id="datapod:chat_cluster:xyz",
+            kind="chat_cluster",
+            body="hello\nworld",
+            metadata={},  # no stored_path
+        )
+
+        with self._mock_pod_store(pod):
+            self.tool._stage_input_pods(
+                input_pod_ids=["datapod:chat_cluster:xyz"],
+                inputs_dir=self.inputs_dir,
+                request_id="r1",
+            )
+
+        staged = list(self.inputs_dir.iterdir())
+        self.assertEqual(len(staged), 1)
+        self.assertEqual(staged[0].read_text(encoding="utf-8"), "hello\nworld")
+
+    def test_projection_wins_over_stored_path_when_both_present(self):
+        """If a pod has projections, those win — stored_path is only consulted
+        on the no-projection path. This preserves authority-gated projection
+        semantics for projection-style pods."""
+        pod = self._make_pod(
+            pod_id="datapod:auth.bearer:abc",
+            kind="auth.bearer",
+            metadata={"stored_path": "/should/not/be/read.bin"},
+        )
+
+        store = MagicMock()
+        store.list_projections.return_value = [
+            {"projection_name": "full", "min_authority": 99},
+        ]
+        store.fetch_projection.return_value = b"projection-bytes"
+        store.get.return_value = pod  # would resolve stored_path if reached
+
+        with patch(
+            "app.assistant.pod_store.pod_store.PodStore",
+            return_value=store,
+        ):
+            self.tool._stage_input_pods(
+                input_pod_ids=["datapod:auth.bearer:abc"],
+                inputs_dir=self.inputs_dir,
+                request_id="r1",
+            )
+
+        staged = list(self.inputs_dir.iterdir())
+        self.assertEqual(len(staged), 1)
+        self.assertEqual(staged[0].read_bytes(), b"projection-bytes")
+        # get() should NOT have been called — projection path took it
+        store.get.assert_not_called()
+
+    def test_file_backed_pod_filename_includes_extension(self):
+        """The workspace filename gains the .jpg/.png suffix from the
+        stored file so downstream libs that sniff by extension work."""
+        src = self.workspace / "photo.jpeg"
+        src.write_bytes(b"\xff\xd8\xff\xe0FAKE")
+
+        pod = self._make_pod(
+            pod_id="datapod:image:def67890",
+            metadata={"stored_path": str(src.resolve())},
+        )
+
+        with self._mock_pod_store(pod):
+            self.tool._stage_input_pods(
+                input_pod_ids=["datapod:image:def67890"],
+                inputs_dir=self.inputs_dir,
+                request_id="r1",
+            )
+
+        staged = list(self.inputs_dir.iterdir())
+        self.assertEqual(len(staged), 1)
+        # Filename pattern: <kind>_<id_prefix>.<ext>
+        self.assertEqual(staged[0].name, "image_def67890.jpeg")
+
+
 if __name__ == "__main__":
     unittest.main()
