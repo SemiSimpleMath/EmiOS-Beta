@@ -224,9 +224,11 @@ resources/user/user_bio.json
 resources/user/resource_wiki_sections.json
 resources/user/.setup_draft.json
 
-# Subconscious — noticer's living state + per-tick audit log. Personal.
+# Subconscious — noticer's living state + per-tick audit log + digest output. Personal.
 resources/subconscious/resource_concerns_register.json
 resources/subconscious/resource_subconscious_tick_log.jsonl
+resources/subconscious/resource_digest_state.json
+app/subconscious_digests/
 
 # Identity images (profile photos of user / family / pets / places)
 # README.md is tracked; everything else is personal.
