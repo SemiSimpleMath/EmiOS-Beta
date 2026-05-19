@@ -1,0 +1,54 @@
+Current date and time: {{ date_time }}
+Day of week: {{ day_of_week }}
+Trigger mode: {{ trigger_mode }}
+
+## What was eaten — today + last 7 days
+{{ diet_log_7d }}
+
+## Recent significant chat clusters (last 48h)
+{{ recent_chat_clusters }}
+
+## Recent passing chat mentions (last 7 days)
+These are short utterances that did not cluster into significance, but
+often carry the friction signal:
+{{ recent_passing_mentions }}
+
+## Calendar — today + tomorrow (all calendars)
+{{ calendar_today_tomorrow }}
+
+## Calendar — week-ahead summary
+{{ calendar_week_summary }}
+
+## Sleep observations (last 7 days)
+{{ sleep_log_7d }}
+
+## Activity / exercise observations (last 7 days)
+{{ activity_log_7d }}
+
+## Family roster (who's home / traveling this week)
+{{ family_roster }}
+
+## Household members — KG entity card digests
+{{ kg_household_digests }}
+
+## Ambient state per household member (last 7 days)
+A short distilled "what's going on with them right now" per person —
+mood, current load, anything affecting them. Companion to the long-term
+KG digest above.
+{{ ambient_state_digest }}
+
+## Current concerns_register (active + addressing)
+{{ concerns_register_active }}
+
+## Recent exploration outcomes (accepted/rejected novel suggestions, last 30 days)
+{{ exploration_outcomes_30d }}
+
+## Recent dayflow items (last 48h)
+{{ dayflow_recent }}
+
+## Watchlist sources (Pass B only)
+{{ watchlist_summary }}
+
+---
+
+Operate in the five stages per your system prompt. Output an AgentForm.

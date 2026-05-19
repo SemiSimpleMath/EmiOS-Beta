@@ -1,0 +1,42 @@
+name: subconscious::noticer
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.4-mini"
+  model_tier: "smart"
+
+# v0 prototype: no tools. Stage 2 (gather more context) is a no-op for now;
+# context is fully pre-injected via the wrapping pipeline step. Tool access
+# (ask_kg, pod_search, web_manager) added in v0.5 once the context-build →
+# reason → emit flow is proven end-to-end.
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+
+# Auto-injected skills not used here — the noticer's system prompt is
+# self-contained. If a household-specific task_spec emerges from
+# skill_distiller, it'll be injected as system_context_items below.
+accept_auto_skills: false
+
+user_context_items:
+  - date_time
+  - day_of_week
+  - trigger_mode
+  - diet_log_7d
+  - recent_chat_clusters
+  - recent_passing_mentions
+  - calendar_today_tomorrow
+  - calendar_week_summary
+  - sleep_log_7d
+  - activity_log_7d
+  - family_roster
+  - kg_household_digests
+  - ambient_state_digest
+  - concerns_register_active
+  - exploration_outcomes_30d
+  - dayflow_recent
+  - watchlist_summary
+
+system_context_items:
+  - resource_user_data

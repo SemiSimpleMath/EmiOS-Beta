@@ -1,0 +1,10 @@
+{
+  "_doc": "concerns_register — the noticer's output, the proposers' input. Single source of truth for what the subconscious is paying attention to. Updated each tick by the noticer.",
+  "schema_version": 1,
+  "last_updated_utc": null,
+  "last_noticer_tick_utc": null,
+  "active": [],
+  "addressing": [],
+  "resolved": [],
+  "dormant": []
+}
