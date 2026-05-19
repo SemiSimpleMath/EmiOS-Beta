@@ -1,7 +1,7 @@
 {
   "id": "morning_briefing",
   "enabled": false,
-  "_comment": "Example task-based routine. Provide your own tasks/morning_briefing/task_spec.md, then toggle on via /routines admin UI (per-machine status, never commits to this file).",
+  "_comment": "Example task-based routine. Reference task spec + compiled IR ship as morning_briefing.task_spec.md and morning_briefing.compiled.json in this same folder — copy them into tasks/morning_briefing/ (renaming morning_briefing.compiled.json -> morning_briefing.json) on first setup, then toggle on via /routines admin UI (per-machine status, never commits to this file).",
   "name": "Morning Briefing",
   "aliases": [
     "morning briefing",

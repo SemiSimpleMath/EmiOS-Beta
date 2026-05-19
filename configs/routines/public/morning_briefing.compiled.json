@@ -1,0 +1,171 @@
+{
+  "schema_version": "task_ir_v1",
+  "task_id": "morning_briefing",
+  "created_at_utc": "2026-04-15T18:30:00+00:00",
+  "compiler_name": "task_compile_manager",
+  "compiler_version": "v1",
+  "source_task": "Morning briefing: gather headlines, emails, todos, week-ahead calendar; compile daily summary.",
+  "source_information": "{\"task_id\": \"morning_briefing\"}",
+  "source_hash": "reference_v1",
+  "entry_step_id": "step_1",
+  "steps": [
+    {
+      "id": "step_1",
+      "kind": "action",
+      "title": "Scrape CNN and BBC headlines with screenshots",
+      "executor": "playwright_manager",
+      "instruction": "Visit https://www.cnn.com and https://www.bbc.com. For each site: navigate to the home page, dismiss any cookie/consent banner per the site skill, take a screenshot, and use web_get_content to extract the top headlines. When calling browser_take_screenshot, pass an explicit filename so the file persists at a known path: use filename='cnn-${today}.png' for CNN and filename='bbc-${today}.png' for BBC (the playwright server writes these into data/playwright_screenshots/). Write all extracted headlines in your note. Return a combined result with site names, the screenshot filenames you used, and headline lists.",
+      "tools": [],
+      "next_step": "step_2",
+      "consumes_data_ids": [],
+      "produces_data_ids": [
+        "artifact_1"
+      ]
+    },
+    {
+      "id": "step_2",
+      "kind": "tool_sequence",
+      "title": "Retrieve important emails from the last 10 hours",
+      "tools": [
+        {
+          "tool": "get_important_emails",
+          "args_json": "{\"start_date\":\"${hours_ago_10}\",\"end_date\":\"${now}\",\"unseen\":false}"
+        }
+      ],
+      "next_step": "step_3",
+      "consumes_data_ids": [],
+      "produces_data_ids": [
+        "artifact_2"
+      ]
+    },
+    {
+      "id": "step_3",
+      "kind": "tool_sequence",
+      "title": "Retrieve current todo tasks",
+      "tools": [
+        {
+          "tool": "get_todo_tasks",
+          "args_json": "{\"include_completed\":false}"
+        }
+      ],
+      "next_step": "step_calendar",
+      "consumes_data_ids": [],
+      "produces_data_ids": [
+        "artifact_3"
+      ]
+    },
+    {
+      "id": "step_calendar",
+      "kind": "tool_sequence",
+      "title": "Retrieve calendar events for the next 7 days",
+      "tools": [
+        {
+          "tool": "get_calendar_events",
+          "args_json": "{\"start_date\":\"${now}\",\"end_date\":\"${days_from_now_7}\",\"single_events\":true}"
+        }
+      ],
+      "next_step": "step_4",
+      "consumes_data_ids": [],
+      "produces_data_ids": [
+        "artifact_calendar"
+      ]
+    },
+    {
+      "id": "step_4",
+      "kind": "tool_sequence",
+      "title": "Compile daily briefing via daily_summary agent",
+      "tools": [
+        {
+          "tool": "invoke_agent",
+          "args_json": "{\"agent_name\":\"daily_summary::daily_summary\",\"agent_input\":{\"task\":\"Compile the full daily briefing. Today's expected schedule is in your injected resource_expected_calendar. Use the week-ahead calendar, headlines, emails, and todos below.\",\"information\":\"Headlines and screenshots:\\n${artifact_1}\\n\\nImportant emails:\\n${artifact_2}\\n\\nTodo tasks:\\n${artifact_3}\\n\\nWeek-ahead calendar (next 7 days, all events):\\n${artifact_calendar}\"}}"
+        }
+      ],
+      "next_step": "step_5",
+      "consumes_data_ids": [
+        "artifact_1",
+        "artifact_2",
+        "artifact_3",
+        "artifact_calendar"
+      ],
+      "produces_data_ids": [
+        "artifact_4"
+      ]
+    },
+    {
+      "id": "step_5",
+      "kind": "tool_sequence",
+      "title": "Save daily briefing to storage",
+      "tools": [
+        {
+          "tool": "save_daily_summary",
+          "args_json": "{\"summary_data\":\"${artifact_4}\"}"
+        }
+      ],
+      "next_step": "step_6",
+      "consumes_data_ids": [
+        "artifact_4"
+      ],
+      "produces_data_ids": []
+    },
+    {
+      "id": "step_6",
+      "kind": "end",
+      "title": "Done",
+      "tools": [],
+      "consumes_data_ids": [],
+      "produces_data_ids": []
+    }
+  ],
+  "data_bindings": [
+    {
+      "data_id": "artifact_1",
+      "data_kind": "artifact",
+      "state_path": "task_state.artifacts.artifact_1",
+      "producer_step_id": "step_1",
+      "consumer_step_ids": [
+        "step_4"
+      ]
+    },
+    {
+      "data_id": "artifact_2",
+      "data_kind": "artifact",
+      "state_path": "task_state.artifacts.artifact_2",
+      "producer_step_id": "step_2",
+      "consumer_step_ids": [
+        "step_4"
+      ]
+    },
+    {
+      "data_id": "artifact_3",
+      "data_kind": "artifact",
+      "state_path": "task_state.artifacts.artifact_3",
+      "producer_step_id": "step_3",
+      "consumer_step_ids": [
+        "step_4"
+      ]
+    },
+    {
+      "data_id": "artifact_calendar",
+      "data_kind": "artifact",
+      "state_path": "task_state.artifacts.artifact_calendar",
+      "producer_step_id": "step_calendar",
+      "consumer_step_ids": [
+        "step_4"
+      ]
+    },
+    {
+      "data_id": "artifact_4",
+      "data_kind": "artifact",
+      "state_path": "task_state.artifacts.artifact_4",
+      "producer_step_id": "step_4",
+      "consumer_step_ids": [
+        "step_5"
+      ]
+    }
+  ],
+  "preloaded_task_state": {
+    "facts": {},
+    "artifacts": {},
+    "flags": {}
+  }
+}
