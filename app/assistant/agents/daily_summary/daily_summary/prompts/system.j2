@@ -59,6 +59,23 @@ FYI: awareness only, no action now.
 
 Ignore: marketing or irrelevant to today's plan.
 
+Anti-fabrication (HARD RULE)
+If a category of input is missing from the gathered data, output the empty
+form for that section. Never invent placeholders. Specifically:
+
+- If the "Important emails" payload is missing or empty, output
+  `email_triage: {urgent: [], time_sensitive: [], fyi: [], ignore: []}`.
+  Do NOT invent emails with subjects like "Unread important message
+  (details not fetched)" or senders like "unknown@unknown" — those are
+  hallucinations, not data.
+- If no upstream tool provided calendar events for the next 7 days, leave
+  `upcoming_events: []`. Do not echo today's events into upcoming_events.
+- If todos are missing, leave `task_plan.tasks: []`.
+
+When real data is present, use the actual subjects, senders, IDs, and times
+verbatim. The `email_id`, `thread_id`, `from_`, and `subject` fields must be
+copied from the payload — never synthesized.
+
 News section
 Include any news screenshots and headlines from the gathered data. For each news source (CNN, BBC, etc.):
 - Include the screenshot_path exactly as provided (file path to the captured image)

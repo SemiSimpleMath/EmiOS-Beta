@@ -29,6 +29,10 @@ launch_options:
       - --caps=vision
       # Persist browser profile (cookies, localStorage, site prefs) across sessions.
       - --user-data-dir=${REPO_ROOT}/data/playwright_profile
+      # Persist screenshots / artifacts to a stable path. Default is .playwright-mcp/
+      # in the MCP server's working dir, which is transient and gets recorded as
+      # a broken link in daily summaries. Force a project-relative persistent dir.
+      - --output-dir=${REPO_ROOT}/data/playwright_screenshots
 
 policy:
   # IMPORTANT: This server can perform real browser interactions.

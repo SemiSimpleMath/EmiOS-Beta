@@ -237,8 +237,11 @@ def _resolve_system_variables() -> dict[str, Any]:
       ${now}           — current UTC ISO datetime  (2026-04-02T14:30:00+00:00)
       ${now_local}     — current local ISO datetime (2026-04-02T09:30:00-05:00)
       ${today}         — today's date YYYY-MM-DD
-      ${hours_ago_N}   — ISO datetime N hours before now (e.g. ${hours_ago_10})
-      ${minutes_ago_N} — ISO datetime N minutes before now
+      ${hours_ago_N}       — ISO datetime N hours before now (e.g. ${hours_ago_10})
+      ${minutes_ago_N}     — ISO datetime N minutes before now
+      ${days_from_now_N}   — ISO datetime N days after now (e.g. ${days_from_now_7})
+      ${hours_from_now_N}  — ISO datetime N hours after now
+      ${minutes_from_now_N}— ISO datetime N minutes after now
     """
     from datetime import timedelta
     now_utc = datetime.now(timezone.utc)
@@ -288,18 +291,34 @@ def _substitute_args(args: dict[str, Any], values: dict[str, Any]) -> dict[str, 
 
 
 def _resolve_dynamic_time_vars(text: str) -> str:
-    """Resolve ${hours_ago_N} and ${minutes_ago_N} patterns in a string."""
+    """Resolve ${(hours|minutes)_ago_N} and ${(days|hours|minutes)_from_now_N}.
+
+    Backward variants are existing API. Forward variants were added when the
+    morning_briefing task started needing a "now + 7 days" placeholder for the
+    week-ahead calendar fetch.
+    """
     import re
     from datetime import timedelta
 
-    def _replace_time(match: re.Match) -> str:
-        unit = match.group(1)   # "hours" or "minutes"
+    def _replace_ago(match: re.Match) -> str:
+        unit = match.group(1)
         n = int(match.group(2))
         now_utc = datetime.now(timezone.utc)
-        if unit == "hours":
-            result = now_utc - timedelta(hours=n)
-        else:
-            result = now_utc - timedelta(minutes=n)
-        return result.isoformat()
+        delta = timedelta(hours=n) if unit == "hours" else timedelta(minutes=n)
+        return (now_utc - delta).isoformat()
 
-    return re.sub(r"\$\{(hours|minutes)_ago_(\d+)\}", _replace_time, text)
+    def _replace_from_now(match: re.Match) -> str:
+        unit = match.group(1)
+        n = int(match.group(2))
+        now_utc = datetime.now(timezone.utc)
+        if unit == "days":
+            delta = timedelta(days=n)
+        elif unit == "hours":
+            delta = timedelta(hours=n)
+        else:
+            delta = timedelta(minutes=n)
+        return (now_utc + delta).isoformat()
+
+    text = re.sub(r"\$\{(hours|minutes)_ago_(\d+)\}", _replace_ago, text)
+    text = re.sub(r"\$\{(days|hours|minutes)_from_now_(\d+)\}", _replace_from_now, text)
+    return text

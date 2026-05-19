@@ -1,6 +1,6 @@
 Current date and time: {{ date_time }}
 
-## Calendar
+## Today's expected schedule
 {{ resource_expected_calendar }}
 
 ## Weather
@@ -13,5 +13,10 @@ Current date and time: {{ date_time }}
 {{ task }}
 
 {{ information }}
+
+When you fill the schedule, today's expected schedule (above) is authoritative
+for today's blocks. The week-ahead calendar (in the gathered data) is the
+source for `upcoming_events` — include events from the next 7 days that fall
+AFTER today, with their dates.
 
 Compile all of the above into the daily summary format.

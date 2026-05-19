@@ -8,6 +8,10 @@ from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.lib.core_tools.manager_interface.manager_interface import ManagerInterface
 from app.assistant.manager_runtime.services.scope_adapter import build_system_scope_context
 from app.assistant.task_ir_runtime.task_ir_steps import TaskIRSteps
+from app.assistant.task_ir_runtime.task_ir_tool_sequence import (
+    _resolve_dynamic_time_vars,
+    _resolve_system_variables,
+)
 from app.assistant.task_ir_runtime.task_ir_validator import TaskIRValidator
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import ToolMessage, ToolResult
@@ -18,6 +22,22 @@ _MISSING = object()
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _resolve_instruction_vars(instruction: str) -> str:
+    """Substitute ${today}, ${now}, ${now_local}, ${hours_ago_N}, ${minutes_ago_N}
+    in an action step's instruction text. Mirrors the substitution semantics
+    that tool_sequence steps already get on their args, so action-driven steps
+    (which delegate prose to a manager) can reference the same dynamic
+    variables. Unknown placeholders are left untouched."""
+    if not instruction:
+        return instruction
+    text = _resolve_dynamic_time_vars(instruction)
+    for key, val in _resolve_system_variables().items():
+        placeholder = "${" + key + "}"
+        if placeholder in text:
+            text = text.replace(placeholder, str(val))
+    return text
 
 
 def _value_preview(value: Any, *, max_chars: int = 800) -> str:
@@ -63,6 +83,7 @@ class TaskIRActionExecutor:
             raise ValueError(f"Action step missing executor: {step.get('id')}")
         if not instruction:
             raise ValueError(f"Action step missing instruction: {step.get('id')}")
+        instruction = _resolve_instruction_vars(instruction)
         logger.info(
             "TASKIR ACTION START step_id=%s executor=%s title=%s",
             step_id,
