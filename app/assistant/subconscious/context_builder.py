@@ -238,43 +238,75 @@ def _build_recent_friction_signals(
         key=lambda kv: (-len(kv[1]), -len(kv[1]) if not kv[1] else 0),
     )
 
+    # Split: groups with count >= 2 get full display (these can become
+    # patterns). Singletons get a compact tail — they're informational
+    # but won't trigger the 3+ threshold; full quotes would just bloat
+    # the prompt without changing decisions.
+    multi_groups = [(k, v) for k, v in sorted_groups if len(v) >= 2]
+    singleton_groups = [(k, v) for k, v in sorted_groups if len(v) == 1]
+
     lines: List[str] = [
         f"Friction signals over last {days} days "
         f"({sum(len(v) for v in groups.values())} total across {len(groups)} subject/kind groups, "
         f"{bare_count} chat clusters without friction):",
         "",
     ]
-    for (subject, kind), occurrences in sorted_groups:
-        occurrences.sort(key=lambda o: o["created_at"], reverse=True)
-        count = len(occurrences)
-        intensities = [o["intensity"] for o in occurrences]
-        max_intensity = (
-            "high" if "high" in intensities
-            else "medium" if "medium" in intensities
-            else "low"
-        )
-        lines.append(
-            f"- subject={subject!r}  kind={kind}  count={count}  max_intensity={max_intensity}"
-        )
-        # Show up to 3 most-recent occurrences with quote + pod ref
-        for o in occurrences[:3]:
-            quote_preview = o["quote"] if o["quote"] else "(no quote)"
-            lines.append(
-                f"    • {o['created_at']}  [{o['intensity']}]  "
-                f"\"{quote_preview}\"  pod={o['pod_id']}"
+    if multi_groups:
+        lines.append("Groups with multiple signals (candidates for pattern_drift):")
+        for (subject, kind), occurrences in multi_groups:
+            occurrences.sort(key=lambda o: o["created_at"], reverse=True)
+            count = len(occurrences)
+            intensities = [o["intensity"] for o in occurrences]
+            max_intensity = (
+                "high" if "high" in intensities
+                else "medium" if "medium" in intensities
+                else "low"
             )
-        if count > 3:
-            lines.append(f"    ... and {count - 3} more")
+            lines.append(
+                f"- subject={subject!r}  kind={kind}  count={count}  max_intensity={max_intensity}"
+            )
+            # Up to 3 most-recent occurrences with quote + pod ref
+            for o in occurrences[:3]:
+                quote_preview = o["quote"] if o["quote"] else "(no quote)"
+                lines.append(
+                    f"    • {o['created_at']}  [{o['intensity']}]  "
+                    f"\"{quote_preview}\"  pod={o['pod_id']}"
+                )
+            if count > 3:
+                lines.append(f"    ... and {count - 3} more")
+    else:
+        lines.append("(no groups with >= 2 signals — nothing crosses the pattern_drift threshold yet)")
+
+    if singleton_groups:
+        lines.append("")
+        lines.append(
+            f"Plus {len(singleton_groups)} count=1 singletons (informational only, won't trigger patterns):"
+        )
+        # Short per-singleton: subject/kind + most-recent quote
+        for (subject, kind), occurrences in singleton_groups[:20]:
+            o = occurrences[0]
+            quote = (o["quote"] or "(no quote)")[:80]
+            lines.append(f"  • {subject!r}/{kind} ({o['intensity']}): \"{quote}\"")
+        if len(singleton_groups) > 20:
+            lines.append(f"  ... and {len(singleton_groups) - 20} more")
     return "\n".join(lines)
 
 
-def _build_recent_passing_mentions(*, now_utc: datetime, days: int = 7, limit: int = 30) -> str:
+_PASSING_MENTION_MIN_CHARS = 60     # skip fragments ("Yeah. 2006", "Haha jk")
+_PASSING_MENTION_MAX_CHARS = 220    # skip multi-paragraph dumps
+_PASSING_MENTION_ADMIN_PREFIXES = (
+    "trash all", "run task", "delete the", "find out ", "/", "!",
+)
+
+
+def _build_recent_passing_mentions(*, now_utc: datetime, days: int = 4, limit: int = 12) -> str:
     """Short user-authored utterances from the last N days that didn't cluster.
 
-    v0: query unified_log_2026 for short user messages, ordered by recency.
-    The "didn't cluster" filter is approximated by length < 200 chars; the
-    real filter would join against chat_cluster membership but that table
-    isn't queryable here without more plumbing.
+    Tighter than v0: friction-flavored mentions are already in the
+    friction_signals aggregate, so this surface mainly catches longer
+    informal observations that the classifier didn't pull into a cluster.
+    Filters: length 60-220 chars (drops fragments + paragraph dumps);
+    skips admin commands; max 12 messages over last 4 days.
     """
     try:
         from sqlalchemy import select, and_
@@ -293,7 +325,7 @@ def _build_recent_passing_mentions(*, now_utc: datetime, days: int = 7, limit: i
                     )
                 )
                 .order_by(UnifiedLog2026.timestamp.desc())
-                .limit(limit * 2)
+                .limit(limit * 4)
             )
             rows = session.execute(stmt).scalars().all()
         finally:
@@ -305,7 +337,11 @@ def _build_recent_passing_mentions(*, now_utc: datetime, days: int = 7, limit: i
     out: List[str] = []
     for r in rows:
         msg = (getattr(r, "message", "") or "").strip()
-        if not msg or len(msg) > 200:
+        n = len(msg)
+        if n < _PASSING_MENTION_MIN_CHARS or n > _PASSING_MENTION_MAX_CHARS:
+            continue
+        msg_low = msg.lower()
+        if msg_low.startswith(_PASSING_MENTION_ADMIN_PREFIXES):
             continue
         ts = getattr(r, "timestamp", None)
         ts_str = ts.isoformat() if ts else ""
@@ -500,8 +536,22 @@ def _build_exploration_outcomes(*, now_utc: datetime, days: int = 30) -> str:
     return "\n".join(lines)
 
 
-def _build_dayflow_recent(*, now_utc: datetime, hours: int = 48, limit: int = 25) -> str:
-    """Recent dayflow_item entries from unified_log."""
+_DAYFLOW_INTERNAL_ID_PREFIXES = ("action_log:", "action_dispatch:", "action_result:")
+_DAYFLOW_BOOKKEEPING_STATES = {"artifact"}  # intermediate chat snapshots, not signal
+
+
+def _build_dayflow_recent(*, now_utc: datetime, hours: int = 48, limit: int = 10) -> str:
+    """Recent dayflow_item entries from unified_log — filtered to signal-worthy rows.
+
+    Filters out internal bookkeeping:
+    - action_log:* / action_dispatch:* / action_result:* — dayflow's internal
+      mechanism, not user-facing signal.
+    - state=artifact — intermediate chat snapshots that already appear elsewhere
+      in passing_mentions / chat_clusters.
+
+    Keeps: items with numeric short_ids and terminal/active states
+    (new, dispatched, suppressed, closed, waiting, watching, etc.).
+    """
     try:
         from sqlalchemy import select, and_
         from app.assistant.database.db_handler import UnifiedLog2026
@@ -519,7 +569,7 @@ def _build_dayflow_recent(*, now_utc: datetime, hours: int = 48, limit: int = 25
                     )
                 )
                 .order_by(UnifiedLog2026.timestamp.desc())
-                .limit(limit)
+                .limit(limit * 4)
             )
             rows = session.execute(stmt).scalars().all()
         finally:
@@ -532,9 +582,8 @@ def _build_dayflow_recent(*, now_utc: datetime, hours: int = 48, limit: int = 25
         return "(no recent dayflow items)"
 
     out: List[str] = []
+    seen_short_ids: set = set()
     for r in rows:
-        ts = getattr(r, "timestamp", None)
-        ts_str = ts.isoformat() if ts else ""
         msg = (getattr(r, "message", "") or "").strip()
         meta = getattr(r, "metadata_json", None) or {}
         if isinstance(meta, str):
@@ -545,8 +594,28 @@ def _build_dayflow_recent(*, now_utc: datetime, hours: int = 48, limit: int = 25
         if not isinstance(meta, dict):
             meta = {}
         state = meta.get("state", "?")
-        short_id = meta.get("short_id") or meta.get("item_id") or "?"
-        out.append(f"- {ts_str} [{short_id}] state={state}: {msg[:200]}")
+        short_id = str(meta.get("short_id") or meta.get("item_id") or "")
+
+        # Skip dayflow's internal bookkeeping rows
+        if short_id.startswith(_DAYFLOW_INTERNAL_ID_PREFIXES):
+            continue
+        if state in _DAYFLOW_BOOKKEEPING_STATES:
+            continue
+        # Dedup by short_id — keep only the most-recent row per item
+        if short_id and short_id in seen_short_ids:
+            continue
+        if short_id:
+            seen_short_ids.add(short_id)
+
+        ts = getattr(r, "timestamp", None)
+        ts_str = ts.isoformat() if ts else ""
+        display_id = short_id or "?"
+        out.append(f"- {ts_str} [{display_id}] state={state}: {msg[:200]}")
+        if len(out) >= limit:
+            break
+
+    if not out:
+        return "(no signal-worthy dayflow items in window)"
     return "\n".join(out)
 
 
