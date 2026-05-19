@@ -1,0 +1,37 @@
+Current date and time: {{ date_time }}
+Day of week: {{ day_of_week }}
+
+## What's been eaten — today + last 7 days
+{{ diet_log_7d }}
+
+## Current kitchen inventory (with category and decay dates)
+{{ inventory_snapshot }}
+
+## Recipes the family cooks regularly
+{{ recipes_house }}
+
+## Dietary context for the household (medical, goals, preferences)
+{{ dietary_context }}
+
+## Already-planned meals (Food calendar, next 7 days)
+{{ food_calendar }}
+
+## Today's general calendar (affects meal timing — work blocks, family time, etc.)
+{{ general_calendar }}
+
+## Family roster (who's home / traveling this week)
+{{ family_roster }}
+
+## Concerns the noticer routed to you (subset of concerns_register where addressable_by includes meal_proposer)
+For each concern, the notes field may suggest what proposers should consider.
+Build proposals that ADDRESS these where applicable, and reference the
+concern_id in each proposal's `addresses_concern_ids`.
+{{ addressable_concerns }}
+
+## Fast-food / delivery count, last 7 days
+{{ fast_food_count_7d }}
+
+---
+
+Propose meals for the next 24-48 hours per your system prompt. Output an
+AgentForm (MealProposalSet).

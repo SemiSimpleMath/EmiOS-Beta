@@ -1,0 +1,32 @@
+name: meal_proposer
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.4-mini"
+  model_tier: "smart"
+
+# v0 (Phase 1a): no tools yet. Context is fully pre-injected via the
+# wrapping context_builder. Stage 2 research (web_manager calls for
+# new restaurants / recipes / sale prices) is Phase 1c.
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+accept_auto_skills: false
+
+user_context_items:
+  - date_time
+  - day_of_week
+  - diet_log_7d
+  - inventory_snapshot
+  - recipes_house
+  - dietary_context
+  - food_calendar
+  - general_calendar
+  - family_roster
+  - addressable_concerns
+  - fast_food_count_7d
+
+system_context_items:
+  - resource_user_data
+  - resource_meal_proposer_house_rules
