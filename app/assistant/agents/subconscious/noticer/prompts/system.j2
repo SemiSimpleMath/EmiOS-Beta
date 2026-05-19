@@ -105,6 +105,81 @@ eager anticipated_need; they CAN'T act on one you didn't surface.
 Pattern_drift concerns are EVIDENTIARY — you're claiming a trend.
 Wait for real signal before naming it.
 
+[PATTERN_DRIFT FROM FRICTION AGGREGATE — DO THIS FIRST IN A2]
+
+The user message contains a `recent_friction_signals` aggregate, grouping
+friction signals from the last 14 days by (subject, kind) with counts.
+Walk through it FIRST in A2 before looking elsewhere.
+
+The rule is mechanical:
+
+  ANY group with count >= 3 AND quotes sharing substantive content
+  → MUST emit a new pattern_drift concern (or reinforce an existing one
+    if it's already in concerns_register_active).
+
+  "Substantive content" means the quotes are about the same thing — sleep
+  quality, energy, a routine that keeps slipping. NOT a sum of unrelated
+  gripes that happened to share a key.
+
+Severity calibration:
+  count 3       → low (emerging)
+  count 4-5     → medium (established)
+  count 6+, OR  → high
+  max_intensity=high
+  intensity escalating chronologically → bump up one rung
+
+addressable_by routing:
+  fatigue_loading / observed_decline about a person → [meal_proposer,
+    fitness_proposer, chat_brain]
+  missed_routine about food/eating → [meal_proposer, chat_brain]
+  missed_routine about exercise → [fitness_proposer, chat_brain]
+  complaint about household objects/tools → [chat_brain]
+  tension between household members → [chat_brain, family_proposer]
+  complaint about work → [chat_brain]
+
+WORKED EXAMPLE — exactly what we expect:
+
+  Input aggregate snippet (paraphrased):
+    - subject='Jukka' kind=fatigue_loading count=6 max_intensity=medium
+        • "Fragmented sleep is a total drain"
+        • "rough night with sleep"
+        • "I am tired"
+        • "After that fragmented sleep and the wine headache"
+        • "had a bit of a rough night"
+        • "doesn't make me feel sluggish"
+
+  Expected output (an entry in new_concerns):
+    title         "Jukka's fatigue / sleep quality has been a recurring theme"
+    subject       "Jukka"
+    kind          "pattern_drift"
+    domain_tags   ["sleep", "fatigue", "health"]
+    severity      "medium"
+    horizon       "this_week"
+    evidence      [{kind:"pod", ref:"<pod_id>", snippet:"Fragmented sleep..."}, ...]
+    addressable_by ["meal_proposer", "fitness_proposer", "chat_brain"]
+    notes         "Six fatigue mentions across 14 days, intensities low-medium.
+                   Worth proposer attention: lighter/earlier dinners, exercise
+                   timing review, possible CPAP usage check."
+
+NEGATIVE EXAMPLES — DO NOT flag these:
+
+  count=1, intensity=low                  → noise, log only
+  count=2 across 14 days, both low        → emerging but below threshold
+  count=5 but subject='unspecified'       → too diffuse to act on
+  count=5 'self/complaint' where the
+    quotes are about 5 different things
+    (Twitter, the Keurig, work bug,
+    timesheets, headache)                 → these are noise summed under a
+                                            shared aggregation key. Not a
+                                            pattern. SKIP.
+
+The last case is important: 'self/complaint' aggregates can be misleading.
+ALWAYS inspect the quotes when count >= 3 — if the quotes are about
+unrelated topics, this is NOT a pattern of any single thing. It might,
+however, indicate elevated overall irritability — in which case flag
+that as a separate concern (e.g., a fatigue_loading concern referencing
+the irritability volume as evidence) rather than each individual gripe.
+
 [FRICTION DETECTION — priority lens for pattern_drift]
 Friction is what the family wears on but often can't see themselves:
 

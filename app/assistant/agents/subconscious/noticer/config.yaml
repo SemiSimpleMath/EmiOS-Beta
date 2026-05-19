@@ -25,6 +25,7 @@ user_context_items:
   - trigger_mode
   - diet_log_7d
   - recent_chat_clusters
+  - recent_friction_signals
   - recent_passing_mentions
   - calendar_today_tomorrow
   - calendar_week_summary

@@ -48,6 +48,7 @@ def build_noticer_context(
         "trigger_mode": trigger_mode,
         "diet_log_7d": _build_diet_log(),
         "recent_chat_clusters": _build_recent_chat_clusters(now_utc=now_utc),
+        "recent_friction_signals": _build_recent_friction_signals(now_utc=now_utc),
         "recent_passing_mentions": _build_recent_passing_mentions(now_utc=now_utc),
         "calendar_today_tomorrow": _build_calendar_today_tomorrow(now_local=now_local),
         "calendar_week_summary": _build_calendar_week_summary(now_local=now_local),
@@ -138,6 +139,132 @@ def _build_recent_chat_clusters(*, now_utc: datetime, limit: int = 12) -> str:
         one_liner = getattr(r, "one_liner", "")
         created_at = getattr(r, "created_at", "")
         lines.append(f"- [{pod_id}] {created_at}: {one_liner}")
+    return "\n".join(lines)
+
+
+def _read_primary_first_name() -> Optional[str]:
+    try:
+        p = get_repo_root() / "resources" / "user" / "resource_user_data.json"
+        if p.is_file():
+            return (json.loads(p.read_text(encoding="utf-8")).get("first_name") or "").strip() or None
+    except Exception:
+        pass
+    return None
+
+
+def _build_recent_friction_signals(
+    *,
+    now_utc: datetime,
+    days: int = 14,
+    limit: int = 200,
+    primary_user_first_name: Optional[str] = None,
+) -> str:
+    """Aggregate friction signals from chat_cluster pods over the last N days.
+
+    Reads each pod's metadata.friction_signal (populated by pod_classifier),
+    groups by (subject, kind), counts occurrences.
+
+    Subject normalization: 'self' / 'me' / 'I' / 'myself' / the primary
+    user's first name all collapse to a single bucket. Without this,
+    fatigue mentions split across `self/fatigue_loading` and
+    `<first_name>/fatigue_loading` and the noticer's 3+ threshold never
+    fires even though the signal is the same person.
+
+    The noticer treats:
+      - 1 signal             → noise, log only
+      - 2-3 signals          → emerging pattern, low-severity concern
+      - 4+ signals           → established pattern, medium-severity concern
+      - escalating intensity → severity raised regardless of count
+    """
+    try:
+        from app.assistant.pod_store.pod_store import PodStore
+        store = PodStore()
+        since = now_utc - timedelta(days=days)
+        results = store.query(kind="chat_cluster", since_utc=since, limit=limit)
+    except Exception as e:
+        logger.warning("[noticer.context] recent_friction_signals fetch failed: %s", e)
+        return _NO_DATA_FMT.format(kind="recent friction signals")
+
+    if not results:
+        return _NO_DATA_FMT.format(kind="recent friction signals")
+
+    primary = (primary_user_first_name or _read_primary_first_name() or "Jukka")
+    self_aliases = {"self", "me", "i", "myself", primary.lower()}
+
+    def _normalize_subject(raw: str) -> str:
+        if not raw:
+            return "unspecified"
+        s = raw.strip()
+        if s.lower() in self_aliases:
+            return primary
+        return s
+
+    # Group: (subject, kind) → list of (pod_id, created_at, intensity, quote)
+    from collections import defaultdict
+    groups: Dict[tuple, List[Dict[str, Any]]] = defaultdict(list)
+    bare_count = 0
+    for r in results:
+        meta = getattr(r, "metadata", None) or {}
+        if isinstance(meta, str):
+            try:
+                meta = json.loads(meta)
+            except Exception:
+                meta = {}
+        if not isinstance(meta, dict):
+            continue
+        fs = meta.get("friction_signal")
+        if not isinstance(fs, dict):
+            bare_count += 1
+            continue
+        subject = _normalize_subject(fs.get("subject") or "")
+        kind = (fs.get("kind") or "unspecified").strip() or "unspecified"
+        groups[(subject, kind)].append({
+            "pod_id": getattr(r, "pod_id", ""),
+            "created_at": str(getattr(r, "created_at", "")),
+            "intensity": fs.get("intensity", "?"),
+            "quote": (fs.get("quote") or "")[:120],
+        })
+
+    if not groups:
+        total = len(results)
+        return (
+            f"(no friction signals detected in last {days} days; "
+            f"{total} chat clusters scanned, none carried friction)"
+        )
+
+    # Sort groups by count desc, then by most recent occurrence
+    sorted_groups = sorted(
+        groups.items(),
+        key=lambda kv: (-len(kv[1]), -len(kv[1]) if not kv[1] else 0),
+    )
+
+    lines: List[str] = [
+        f"Friction signals over last {days} days "
+        f"({sum(len(v) for v in groups.values())} total across {len(groups)} subject/kind groups, "
+        f"{bare_count} chat clusters without friction):",
+        "",
+    ]
+    for (subject, kind), occurrences in sorted_groups:
+        occurrences.sort(key=lambda o: o["created_at"], reverse=True)
+        count = len(occurrences)
+        intensities = [o["intensity"] for o in occurrences]
+        max_intensity = (
+            "high" if "high" in intensities
+            else "medium" if "medium" in intensities
+            else "low"
+        )
+        lines.append(
+            f"- subject={subject!r}  kind={kind}  count={count}  max_intensity={max_intensity}"
+        )
+        # Show up to 3 most-recent occurrences with quote + pod ref
+        for o in occurrences[:3]:
+            quote_preview = o["quote"] if o["quote"] else "(no quote)"
+            lines.append(
+                f"    • {o['created_at']}  [{o['intensity']}]  "
+                f"\"{quote_preview}\"  pod={o['pod_id']}"
+            )
+        if count > 3:
+            lines.append(f"    ... and {count - 3} more")
     return "\n".join(lines)
 
 

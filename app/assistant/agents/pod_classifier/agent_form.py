@@ -1,5 +1,65 @@
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Literal, Optional
+
+
+FrictionIntensity = Literal["low", "medium", "high"]
+FrictionKind = Literal[
+    "complaint",              # explicit "this sucks" / "ugh" type
+    "observed_decline",       # parent noting someone else's worsening state
+    "missed_routine",         # a routine wasn't followed
+    "fatigue_loading",        # "tired again", "brutal week", exhaustion language
+    "normalized_workaround",  # mentioning a workaround as if it's just normal
+    "wistful",                # "we never have time for", "I wish we could"
+    "tension",                # interpersonal friction in the household
+]
+
+
+class FrictionSignal(BaseModel):
+    """The AFFECT layer of a burst — orthogonal to its topic tag.
+
+    A burst can be tagged `food` AND carry friction (complaining about food).
+    A burst can be tagged `work` AND carry fatigue. Friction is a separate
+    dimension; the noticer reads it to find patterns the user wears on but
+    doesn't surface explicitly.
+
+    Populated only when language genuinely conveys friction. Most bursts
+    have no friction — leave the field null in that case.
+    """
+
+    intensity: FrictionIntensity = Field(
+        description=(
+            "Strength. low=passing mention or mild grumble. medium=clearly "
+            "bothered but not alarmed. high=significant complaint, repeated "
+            "emphasis, or worry."
+        ),
+    )
+    kind: FrictionKind = Field(
+        description=(
+            "What kind. complaint=explicit grumble. observed_decline=worry "
+            "about someone else's state. missed_routine=a routine wasn't "
+            "followed. fatigue_loading=tired/exhausted language. "
+            "normalized_workaround=workaround treated as default. "
+            "wistful='we never have time for'. tension=interpersonal."
+        ),
+    )
+    subject: Optional[str] = Field(
+        default=None,
+        description=(
+            "Who or what the friction is about. Family member name "
+            "('Annika', 'Katy'), object/topic ('the dogs', 'work'), or "
+            "'self' when the speaker is talking about themselves. Null "
+            "if genuinely ambiguous."
+        ),
+    )
+    quote: Optional[str] = Field(
+        default=None,
+        max_length=160,
+        description=(
+            "The specific utterance carrying the friction, verbatim from "
+            "the burst. Short. Helps the noticer cite the real source. "
+            "Null if friction is diffuse across the burst."
+        ),
+    )
 
 
 class AgentForm(BaseModel):
@@ -8,6 +68,10 @@ class AgentForm(BaseModel):
     Given a burst of conversation and a tag vocabulary, decide which tags
     apply, write a one-line subject, and reorganize the burst into topic
     sections. No entity resolution here — that is a separate pass.
+
+    A burst may ALSO carry friction (negative affect about household life)
+    — populate `friction_signal` when it does. Topic tags + friction are
+    orthogonal; both can be present, or neither.
     """
 
     tags: List[str] = Field(
@@ -57,5 +121,17 @@ class AgentForm(BaseModel):
         description=(
             "Brief explanation of which tags were chosen and why. Used for "
             "debugging and for tuning the tag vocabulary."
+        ),
+    )
+    friction_signal: Optional[FrictionSignal] = Field(
+        default=None,
+        description=(
+            "OPTIONAL overlay capturing negative affect (friction) the burst "
+            "carries. Independent of topic tags — a burst can be tagged `food` "
+            "AND have friction (complaining about a meal). Populate only when "
+            "the language genuinely conveys friction (complaint, fatigue, "
+            "observed_decline of someone, missed_routine, normalized_workaround, "
+            "wistful tone, or interpersonal tension). Null for neutral, "
+            "positive, or technical bursts. See FrictionSignal docstring."
         ),
     )

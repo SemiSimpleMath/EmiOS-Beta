@@ -92,4 +92,82 @@ sections (list of strings)
   structure itself is the sectioning.
 - Do NOT include content from anywhere other than the burst itself.
 
+########## FRICTION SIGNAL — OPTIONAL OVERLAY ##########
+
+Tags label what a burst is ABOUT (food, work, schedule, ...). Some bursts
+ALSO carry negative affect — friction. Friction is independent of topic:
+a burst tagged `food` can be friction (complaining about a meal); a burst
+tagged `work` can be friction (fatigue from a brutal week). When the
+burst's language conveys friction, populate `friction_signal`. Otherwise
+leave it NULL.
+
+Most bursts have no friction — they are neutral, positive, or technical.
+DO NOT manufacture friction. The bar is: the language has to actually
+carry it. If you're unsure, leave the field null.
+
+When you do populate it, fill ALL four sub-fields (intensity, kind,
+subject, quote where possible):
+
+- intensity: low / medium / high
+    low    = passing grumble, mild observation
+    medium = clearly bothered, repeated emphasis
+    high   = significant complaint, alarm, sustained worry
+
+- kind: pick the one that fits best
+    complaint              "ugh", "this is so annoying", explicit grumble
+    observed_decline       a parent / partner noting someone else worsening
+                           ("Annika seemed off again", "Peter's grades dropped")
+    missed_routine         a routine wasn't followed
+                           ("skipped breakfast again", "didn't get out for a walk")
+    fatigue_loading        tired / exhausted / overloaded language
+                           ("I'm so tired", "brutal week", "wiped")
+    normalized_workaround  treating a workaround as default, signaling
+                           friction even when stated calmly
+                           ("we just eat in the car", "I haven't slept right
+                           in weeks")
+    wistful                "we never have time for", "I wish we could"
+    tension                interpersonal friction in the household
+                           ("Katy was short with me", "Peter slammed his door")
+
+- subject: who/what the friction is about — person name, object, or 'self'.
+    Person name when explicit: "Annika", "Katy", "Jukka".
+    Object/topic when applicable: "the dogs", "work", "this house".
+    "self" when the speaker is reflecting on themselves.
+    null only if genuinely ambiguous.
+
+- quote: the SPECIFIC utterance carrying the friction, verbatim, ≤160 chars.
+    Pull it from the burst — don't paraphrase. Helps the noticer cite source.
+    Null if friction is diffuse across multiple lines.
+
+Examples (illustrative, not exhaustive):
+
+  Burst: "ugh Annika skipped breakfast again, she's barely eating before school"
+  → friction_signal: {intensity: medium, kind: observed_decline,
+                      subject: "Annika", quote: "Annika skipped breakfast again"}
+
+  Burst: "today was brutal at work, I'm wiped"
+  → friction_signal: {intensity: medium, kind: fatigue_loading,
+                      subject: "self", quote: "today was brutal at work, I'm wiped"}
+
+  Burst: "we always end up eating in the car between Peter's rehearsals"
+  → friction_signal: {intensity: low, kind: normalized_workaround,
+                      subject: "household", quote: "we always end up eating in the car"}
+
+  Burst: "had açai for breakfast, picked up groceries"
+  → friction_signal: null  (neutral content, no negative affect)
+
+  Burst: "watched The Good, the Bad and the Ugly last night, loved it"
+  → friction_signal: null  (positive content)
+
+  Burst: "Annika skipped breakfast" (single mention, no emphasis)
+  → friction_signal: {intensity: low, kind: missed_routine,
+                      subject: "Annika", quote: "Annika skipped breakfast"}
+
+Note that the noticer aggregates friction signals across days. ONE low-
+intensity mention is fine to log — that's how patterns get noticed over
+time. Don't withhold low-intensity friction just because it seems minor;
+DO withhold when the burst is genuinely neutral.
+
+########## YOUR OUTPUT ##########
+
 Your output concerns only the burst under evaluation.

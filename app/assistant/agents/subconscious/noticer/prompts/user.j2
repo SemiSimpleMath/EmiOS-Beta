@@ -2,15 +2,50 @@ Current date and time: {{ date_time }}
 Day of week: {{ day_of_week }}
 Trigger mode: {{ trigger_mode }}
 
+============================================================
+PRIORITY DIRECTIVE — do this BEFORE writing summary or making judgment calls
+============================================================
+Below in `recent_friction_signals` you will see groups (subject, kind) with
+counts over the last 14 days.
+
+For EVERY group with count >= 3 whose quotes share substantive content
+(same underlying topic — sleep, fatigue, a routine, a relationship), you
+MUST emit a pattern_drift concern in new_concerns. This is not optional
+and not a judgment call.
+
+If a group has count >= 3 but the quotes are about wildly unrelated
+gripes (different objects/tools each time), skip THAT group but still
+process the rest.
+
+If a pattern_drift concern matching this signal already exists in
+concerns_register_active, add it to reinforced_concerns instead of
+new_concerns. Either way, you must produce SOMETHING for each
+qualifying group.
+
+After you've processed the friction aggregate, do the other Pass A and
+Pass B work normally.
+
+============================================================
+
 ## What was eaten — today + last 7 days
 {{ diet_log_7d }}
 
 ## Recent significant chat clusters (last 48h)
 {{ recent_chat_clusters }}
 
+## Recent friction signals (last 14 days, aggregated by subject + kind)
+The pod_classifier labels each chat burst with an optional friction_signal
+(intensity / kind / subject / quote). Below is the aggregation across the
+window. Use this as the PRIMARY input for pattern_drift detection: same
+(subject, kind) appearing 3+ times = pattern_drift concern; intensifying
+intensity over time = severity rises; new subject newly accumulating =
+emerging concern.
+{{ recent_friction_signals }}
+
 ## Recent passing chat mentions (last 7 days)
-These are short utterances that did not cluster into significance, but
-often carry the friction signal:
+Short utterances that did not cluster into significance. Useful as
+secondary evidence when the friction-signal aggregate already flagged a
+pattern — quote one of these to corroborate.
 {{ recent_passing_mentions }}
 
 ## Calendar — today + tomorrow (all calendars)

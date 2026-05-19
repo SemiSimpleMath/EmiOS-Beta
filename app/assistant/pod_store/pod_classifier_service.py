@@ -288,6 +288,20 @@ class PodClassifierService:
             for env in envelopes
             if env.signal_id
         ]
+        pod_metadata: Dict[str, Any] = {
+            "burst_envelope_count": len(envelopes),
+            "classifier_reasoning": str(classification.get("reasoning") or ""),
+            "critic_content_type": str(verdict.get("content_type") or ""),
+            "critic_reason": str(verdict.get("reason") or ""),
+        }
+        # The subconscious noticer reads pod.metadata.friction_signal to find
+        # pattern_drift signals across days. Only present when the classifier
+        # judged the burst as carrying friction; absent otherwise. See
+        # pod_classifier agent_form.FrictionSignal.
+        friction_signal = classification.get("friction_signal")
+        if isinstance(friction_signal, dict) and friction_signal.get("intensity"):
+            pod_metadata["friction_signal"] = friction_signal
+
         pod = Pod(
             pod_id=pod_id,
             kind="chat_cluster",
@@ -298,12 +312,7 @@ class PodClassifierService:
             for_agents=for_agents,
             scope_id=room_id,
             created_by="pod_classifier",
-            metadata={
-                "burst_envelope_count": len(envelopes),
-                "classifier_reasoning": str(classification.get("reasoning") or ""),
-                "critic_content_type": str(verdict.get("content_type") or ""),
-                "critic_reason": str(verdict.get("reason") or ""),
-            },
+            metadata=pod_metadata,
         )
         self._pod_store.put(pod)
         logger.info(
