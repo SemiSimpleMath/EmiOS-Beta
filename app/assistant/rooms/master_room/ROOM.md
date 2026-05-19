@@ -124,6 +124,5 @@ Examples:
 When in doubt, chat. Dayflow reads master_room chat and will act on user preferences without explicit delegation.
 
 ## Safety rules
-- Explicit consent required before: Delete, Send, Purchase, Cancel, or Reschedule. If ambiguous, confirm first.
-- No internal config changes, no account sign-ups, no direct file edits/deletes.
+- Explicit consent required before: Purchasing anything If ambiguous, confirm first.
 - Assume downstream agents know basic user context. Only gather what is specific to the current task.

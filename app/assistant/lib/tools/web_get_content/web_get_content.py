@@ -25,45 +25,44 @@ class WebGetContent(BaseTool):
     """Extract readable text content from the current browser page."""
 
     SERVER_ID = "npm/playwright-mcp"
-    MCP_RUN_CODE = "browser_run_code"
+    # playwright-mcp 2026 upgrade: browser_run_code → browser_evaluate
+    # (runs JS in page context, no Playwright `page` object available).
+    MCP_EVALUATE = "browser_evaluate"
 
     # JS that extracts clean text from the page body, removing scripts,
     # styles, nav, footer, and other non-content elements.
     _EXTRACT_JS = """
-async (page) => {
-  const result = await page.evaluate(() => {
-    // Remove noise elements before extracting text.
-    const removeSelectors = [
-      'script', 'style', 'noscript', 'iframe',
-      'nav', 'footer', 'header',
-      '[role="navigation"]', '[role="banner"]', '[role="contentinfo"]',
-      '[aria-hidden="true"]',
-      '.ad', '.advertisement', '.sponsored',
-    ];
-    const clone = document.body.cloneNode(true);
-    for (const sel of removeSelectors) {
-      for (const el of clone.querySelectorAll(sel)) {
-        el.remove();
-      }
+() => {
+  // Remove noise elements before extracting text.
+  const removeSelectors = [
+    'script', 'style', 'noscript', 'iframe',
+    'nav', 'footer', 'header',
+    '[role="navigation"]', '[role="banner"]', '[role="contentinfo"]',
+    '[aria-hidden="true"]',
+    '.ad', '.advertisement', '.sponsored',
+  ];
+  const clone = document.body.cloneNode(true);
+  for (const sel of removeSelectors) {
+    for (const el of clone.querySelectorAll(sel)) {
+      el.remove();
     }
+  }
 
-    // Extract text, collapse whitespace, limit length.
-    const raw = clone.innerText || clone.textContent || '';
-    const lines = raw.split('\\n')
-      .map(l => l.trim())
-      .filter(l => l.length > 0);
-    const text = lines.join('\\n');
+  // Extract text, collapse whitespace, limit length.
+  const raw = clone.innerText || clone.textContent || '';
+  const lines = raw.split('\\n')
+    .map(l => l.trim())
+    .filter(l => l.length > 0);
+  const text = lines.join('\\n');
 
-    return {
-      url: window.location.href,
-      title: document.title || '',
-      text: text.slice(0, MAX_CHARS),
-      truncated: text.length > MAX_CHARS,
-      char_count: text.length,
-      line_count: lines.length,
-    };
-  });
-  return result;
+  return {
+    url: window.location.href,
+    title: document.title || '',
+    text: text.slice(0, MAX_CHARS),
+    truncated: text.length > MAX_CHARS,
+    char_count: text.length,
+    line_count: lines.length,
+  };
 }
 """.strip()
 
@@ -95,8 +94,8 @@ async (page) => {
 
         call_resp = mcp_stdio_call_tool(
             server_entry=server_entry,
-            tool_name=self.MCP_RUN_CODE,
-            arguments={"code": js},
+            tool_name=self.MCP_EVALUATE,
+            arguments={"function": js},
             timeout_s=float(server_entry.get("policy", {}).get("call_timeout_seconds", 20)),
         )
         text_out, is_error, _ = format_mcp_tool_result_content(call_resp)
@@ -104,7 +103,7 @@ async (page) => {
         if is_error:
             return make_tool_error(
                 error_code="mcp_call_failed",
-                message=f"web_get_content error: browser_run_code failed: {text_out}",
+                message=f"web_get_content error: browser_evaluate failed: {text_out}",
                 abort_policy="abort_tool",
                 retryable=True,
                 details={"backend": "mcp", "server_id": self.SERVER_ID},

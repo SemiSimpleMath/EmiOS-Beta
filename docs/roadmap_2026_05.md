@@ -89,6 +89,41 @@ land in pods with declared privacy class, so a WHOOP biometric response
 gets `health.private` and only health-authority skills can read it. No
 competitor has this.
 
+## Moat-strengthening capability gap — wait-and-resume primitive
+
+**Added 2026-05-19 after the long-running-manager conversation.**
+
+Emi managers run their thinking loop synchronously to completion. There's
+no native "pause mid-flow and wait for an external event" primitive.
+Workflows that need to wait (booking confirmations, CI builds, calendar
+negotiations, webhook callbacks) must be hand-decomposed into two managers
+linked by a dayflow ticket.
+
+**This gap is competitively relevant:** LangChain, AutoGen, Hermes-Agent,
+OpenClaw all share it. Shipping a clean primitive is moat-extending, not
+moat-matching.
+
+**Recommended path A — Generalize dayflow tickets to `wake_on_event`** (small):
+- New ticket kind `wake_on_event(event_filter, resume_state, handler_agent, expire_at)`
+- Event hub matcher fires the wake ticket when matching events arrive
+- Reuses existing dayflow + ticket + scheduler infrastructure
+- Still requires hand-serialization of resume_state, but no LLM-loop changes
+- Solves: form-confirmation flows, CI chains, external webhooks, conditional polling
+
+**Future path B — Coroutine-based manager loop** (medium):
+- `wait_for(...)` becomes first-class control flow inside the agent loop
+- Live coroutine frame is the state — no serialization
+- Cleanest semantics; meaningful refactor across manager classes
+- Worth doing if Emi grows into multi-day persistent autonomous agents
+
+**Slotting:** Path A fits the existing capability-tier list as a *small*
+build (a few hours of Claude Code time) once the more foundational items
+(http_request follow-ups + skill packs) settle. Path B is a v2 architectural
+decision, not v1.
+
+See `[[project_wake_on_event_primitive]]` (memory) for the full design
+sketch, three implementation options, and use-case unlock list.
+
 ## Things NOT to build
 
 Confirmed during the audit walkthrough:

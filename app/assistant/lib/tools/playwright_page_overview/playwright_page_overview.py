@@ -26,7 +26,8 @@ class PlaywrightPageOverview(BaseTool):
     """
 
     SERVER_ID = "npm/playwright-mcp"
-    MCP_RUN_CODE = "browser_run_code"
+    # playwright-mcp 2026 upgrade: browser_run_code → browser_evaluate.
+    MCP_EVALUATE = "browser_evaluate"
 
     def __init__(self):
         super().__init__("playwright_page_overview")
@@ -175,11 +176,11 @@ class PlaywrightPageOverview(BaseTool):
         return default_note
 
     def _wrap_page_eval(self, expr: str) -> str:
+        # browser_evaluate runs the function in page (DOM) context — no
+        # Playwright `page` object is available. The wrapper is just `() => { return EXPR; }`.
         return (
-            "async (page) => {\n"
-            "  return await page.evaluate(() => {\n"
-            f"    return ({expr});\n"
-            "  });\n"
+            "() => {\n"
+            f"  return ({expr});\n"
             "}"
         )
 
@@ -187,31 +188,31 @@ class PlaywrightPageOverview(BaseTool):
         try:
             call_resp = mcp_stdio_call_tool(
                 server_entry=server_entry,
-                tool_name=self.MCP_RUN_CODE,
-                arguments={"code": self._wrap_page_eval(code)},
+                tool_name=self.MCP_EVALUATE,
+                arguments={"function": self._wrap_page_eval(code)},
                 timeout_s=float(server_entry.get("policy", {}).get("call_timeout_seconds", 20)),
             )
             text, is_error, _attachments = format_mcp_tool_result_content(call_resp)
             if is_error:
-                return f"browser_run_code error: {text or 'unknown error'}"
+                return f"browser_evaluate error: {text or 'unknown error'}"
             return None
         except Exception as e:
-            return f"browser_run_code error: {e}"
+            return f"browser_evaluate error: {e}"
 
     def _run_code_raw(self, server_entry: dict, code: str) -> tuple[Optional[str], Optional[str]]:
         try:
             call_resp = mcp_stdio_call_tool(
                 server_entry=server_entry,
-                tool_name=self.MCP_RUN_CODE,
-                arguments={"code": self._wrap_page_eval(code)},
+                tool_name=self.MCP_EVALUATE,
+                arguments={"function": self._wrap_page_eval(code)},
                 timeout_s=float(server_entry.get("policy", {}).get("call_timeout_seconds", 20)),
             )
             text, is_error, _attachments = format_mcp_tool_result_content(call_resp)
             if is_error:
-                return None, f"browser_run_code error: {text or 'unknown error'}"
+                return None, f"browser_evaluate error: {text or 'unknown error'}"
             return text, None
         except Exception as e:
-            return None, f"browser_run_code error: {e}"
+            return None, f"browser_evaluate error: {e}"
 
     def _parse_jsonish(self, raw: str | None) -> Optional[dict]:
         if not isinstance(raw, str) or not raw.strip():

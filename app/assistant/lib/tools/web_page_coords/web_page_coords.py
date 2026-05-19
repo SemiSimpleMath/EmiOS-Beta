@@ -46,7 +46,13 @@ class WebPageCoords(BaseTool):
 
     SERVER_ID = "npm/playwright-mcp"
     MCP_TOOL = "browser_take_screenshot"
-    MCP_RUN_CODE = "browser_run_code"
+    # playwright-mcp 2026 upgrade removed `browser_run_code` and replaced it
+    # with `browser_evaluate`. The new tool runs JS IN the page context
+    # (`() => { ... }`) instead of in the Playwright-side context
+    # (`async (page) => { ... }`). inject_marks.js was refactored to a pure
+    # DOM-side body that uses `q` and `MAX` from outer scope; the wrapper
+    # below provides those constants.
+    MCP_EVALUATE = "browser_evaluate"
     MAX_MARKS = 50
 
     def __init__(self):
@@ -55,7 +61,7 @@ class WebPageCoords(BaseTool):
     @staticmethod
     def _extract_jsonish(text: str) -> Any:
         """
-        Playwright MCP `browser_run_code` often returns markdown with fenced JSON.
+        Playwright MCP `browser_evaluate` often returns markdown with fenced JSON.
         Extract and parse it best-effort.
         """
         if not isinstance(text, str) or not text.strip():
@@ -114,53 +120,52 @@ class WebPageCoords(BaseTool):
         """
         Inject numbered overlay marks into the live page and return the full marks list.
 
-        The JS is loaded from inject_marks.js and executed via browser_run_code.
-        Variables q and MAX are passed as page.evaluate() arguments so no f-string
-        escaping is needed.
+        inject_marks.js is the function body — Python wraps it in `() => { ... }`
+        with `q` and `MAX` constants prepended so the body can reference them.
+        Runs via the `browser_evaluate` MCP tool which executes in the page
+        context (no Playwright-side `page` object available; the hover-probe
+        phase that needed `page.mouse.move` was dropped).
 
         Returns list of {id, x, y, label, rect} dicts — the Python caller uses this
         directly to resolve coords after vision picks mark ids, eliminating the
         second browser round-trip that _fetch_marks_by_ids used to require.
         """
-        wrapper = f"""
-async (page) => {{
-  const q = {_json.dumps(question or "")};
-  const MAX = {int(max_marks)};
-  const fn = {_INJECT_MARKS_JS};
-  return await fn(page);
-}}
-""".strip()
+        wrapper = (
+            "() => {\n"
+            f"  const q = {_json.dumps(question or '')};\n"
+            f"  const MAX = {int(max_marks)};\n"
+            f"{_INJECT_MARKS_JS}\n"
+            "}"
+        )
 
         text, is_error, _atts = self._mcp_call(
             server_entry=server_entry,
-            tool_name=self.MCP_RUN_CODE,
-            arguments={"code": wrapper},
+            tool_name=self.MCP_EVALUATE,
+            arguments={"function": wrapper},
         )
         if is_error:
-            raise RuntimeError(text or "browser_run_code returned isError")
+            raise RuntimeError(text or "browser_evaluate returned isError")
         parsed = self._extract_jsonish(text)
         if isinstance(parsed, list):
             return [m for m in parsed if isinstance(m, dict)]
         preview = (text or "")[:1200]
-        raise RuntimeError(f"browser_run_code marks parse failed — expected list. preview={preview!r}")
+        raise RuntimeError(f"browser_evaluate marks parse failed — expected list. preview={preview!r}")
 
     def _remove_marks_overlay(self, *, server_entry: dict) -> None:
         js = """
-async (page) => {
-  await page.evaluate(() => {
-    try {
-      if (window.__emi_marks_overlay) {
-        window.__emi_marks_overlay.remove();
-        window.__emi_marks_overlay = null;
-      }
-      window.__emi_marks_map = null;
-    } catch (e) {}
-  });
+() => {
+  try {
+    if (window.__emi_marks_overlay) {
+      window.__emi_marks_overlay.remove();
+      window.__emi_marks_overlay = null;
+    }
+    window.__emi_marks_map = null;
+  } catch (e) {}
   return true;
 }
 """.strip()
         try:
-            self._mcp_call(server_entry=server_entry, tool_name=self.MCP_RUN_CODE, arguments={"code": js})
+            self._mcp_call(server_entry=server_entry, tool_name=self.MCP_EVALUATE, arguments={"function": js})
         except Exception as e:
             logger.debug("[web_page_coords] overlay removal failed (non-fatal): %s", e)
 

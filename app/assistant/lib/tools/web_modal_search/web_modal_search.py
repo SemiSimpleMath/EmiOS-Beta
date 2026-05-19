@@ -18,8 +18,7 @@ logger = get_logger(__name__)
 # JS: find element containing query text inside [role="dialog"], scroll it into view.
 # Returns the matched text so we can confirm what was found.
 _JS_SEARCH_NEIGHBORHOOD = """
-async (page, query) => {
-  return await page.evaluate((q) => {
+(q) => {
     const norm = (s, n = 140) => {
       const v = String(s || "").replace(/\\s+/g, " ").trim();
       return v.length > n ? v.slice(0, n) : v;
@@ -163,8 +162,7 @@ async (page, query) => {
       scroller.scrollTop = Math.max(0, elTop - scroller.clientHeight / 2 + elRect.height / 2);
     }
 
-    return { error: null, matches: results };
-  }, query);
+  return { error: null, matches: results };
 }
 """.strip()
 
@@ -290,18 +288,25 @@ class WebModalSearch(BaseTool):
 
         timeout = float(server_entry.get("policy", {}).get("call_timeout_seconds", 20))
 
-        # Find the element, its row container, and nearby interactive elements
+        # Find the element, its row container, and nearby interactive elements.
+        # The JS body takes a `q` argument; we inline the query as a const.
+        wrapped_js = (
+            "() => {\n"
+            f"  const q = {json.dumps(query)};\n"
+            f"  return ({_JS_SEARCH_NEIGHBORHOOD})(q);\n"
+            "}"
+        )
         call_resp = mcp_stdio_call_tool(
             server_entry=server_entry,
-            tool_name="browser_run_code",
-            arguments={"code": f'async (page) => {{ const fn = {_JS_SEARCH_NEIGHBORHOOD}; return await fn(page, {json.dumps(query)}); }}'},
+            tool_name="browser_evaluate",
+            arguments={"function": wrapped_js},
             timeout_s=timeout,
         )
         text, is_error, _ = format_mcp_tool_result_content(call_resp)
         if is_error:
             return make_tool_error(
                 error_code="mcp_call_failed",
-                message=f"web_modal_search error: browser_run_code failed: {text}",
+                message=f"web_modal_search error: browser_evaluate failed: {text}",
                 abort_policy="abort_tool",
                 retryable=True,
                 details={"server_id": self.SERVER_ID},

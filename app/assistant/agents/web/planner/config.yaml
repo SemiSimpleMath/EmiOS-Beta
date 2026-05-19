@@ -19,6 +19,7 @@ allowed_nodes: [shared::writer, shared::mathematician]
 allowed_tools:
   - search_web
   - scrape_url
+  - http_request
   - web_get_content
   - peak_at_link
   - summarize_link

@@ -52,9 +52,9 @@ def probe_visible_dom_inputs(*, server_entry: dict[str, Any], max_items: int = 1
     """
     max_items = max(1, min(int(max_items or 12), 40))
     js = f"""
-async (page) => {{
-  return await page.evaluate((MAX_ITEMS) => {{
-    const norm = (s, n = 120) => {{
+() => {{
+  const MAX_ITEMS = {max_items};
+  const norm = (s, n = 120) => {{
       const v = String(s || "").replace(/\\s+/g, " ").trim();
       return v.length > n ? v.slice(0, n) : v;
     }};
@@ -124,13 +124,12 @@ async (page) => {{
       }});
     }}
     return out;
-  }}, {max_items});
 }}
 """.strip()
     call_resp = mcp_stdio_call_tool(
         server_entry=server_entry,
-        tool_name="browser_run_code",
-        arguments={"code": js},
+        tool_name="browser_evaluate",
+        arguments={"function": js},
         timeout_s=float(server_entry.get("policy", {}).get("call_timeout_seconds", 20)),
     )
     text, is_error, _attachments = format_mcp_tool_result_content(call_resp)

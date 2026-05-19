@@ -8,9 +8,14 @@ declared privacy class (response_pod_kind).
 Pod-reference encoding:
     datapod:<kind>:<id>            implicit projection 'full'
     datapod:<kind>:<id>/<proj>     explicit projection
-"""
-from __future__ import annotations
 
+NOTE on `from __future__ import annotations`: do NOT add it here. PEP 563
+turns nested model references into strings; OpenAI's `parse` API calls
+`model_json_schema()` at request time, which fails to resolve the string
+type back to the actual class (Pydantic 2 + OpenAI SDK incompatibility).
+Other tool_forms files in this repo follow the same convention — keep
+type hints concrete.
+"""
 from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel

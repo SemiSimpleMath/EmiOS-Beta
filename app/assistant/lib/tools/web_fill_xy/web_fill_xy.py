@@ -38,7 +38,13 @@ class WebFillXY(BaseTool):
     """
 
     SERVER_ID = "npm/playwright-mcp"
-    MCP_RUN_CODE = "browser_run_code"
+    # playwright-mcp 2026 upgrade: browser_run_code removed. We now compose
+    # the click + type + submit sequence from native MCP tools because
+    # browser_evaluate (the replacement) runs DOM-side and can't drive mouse
+    # or keyboard. Trade: 3 MCP round-trips instead of 1 big browser_run_code.
+    MCP_EVALUATE = "browser_evaluate"
+    MCP_MOUSE_CLICK_XY = "browser_mouse_click_xy"
+    MCP_PRESS_KEY = "browser_press_key"
     MCP_SNAPSHOT = "browser_snapshot"
 
     def __init__(self):
@@ -146,109 +152,110 @@ class WebFillXY(BaseTool):
             )
 
         t_json = json.dumps(text)
+        timeout_s = float(server_entry.get("policy", {}).get("call_timeout_seconds", 20))
+
+        # Phase 1: click at (x, y) to focus the target via the native MCP tool.
+        try:
+            click_resp = mcp_stdio_call_tool(
+                server_entry=server_entry,
+                tool_name=self.MCP_MOUSE_CLICK_XY,
+                arguments={"x": float(x), "y": float(y), "element": f"target at ({x},{y})"},
+                timeout_s=timeout_s,
+            )
+            _click_text, click_err, _ = format_mcp_tool_result_content(click_resp)
+            if click_err:
+                return make_tool_error(
+                    error_code="mcp_call_failed",
+                    message=f"web_fill_xy error: mouse click at ({x},{y}) failed: {_click_text}",
+                    abort_policy="abort_tool",
+                    retryable=True,
+                    details={"backend": "mcp", "mcp_tool_name": self.MCP_MOUSE_CLICK_XY},
+                )
+        except Exception as e:
+            return make_tool_error(
+                error_code="mcp_call_failed",
+                message=f"web_fill_xy error: mouse click at ({x},{y}) exception: {e}",
+                abort_policy="abort_tool", retryable=True,
+                details={"backend": "mcp", "mcp_tool_name": self.MCP_MOUSE_CLICK_XY},
+            )
+
+        # Phase 2: validate focused, optionally clear, set value, dispatch events.
         js = f"""
-async (page) => {{
-  const X = {float(x)};
-  const Y = {float(y)};
+() => {{
   const TEXT = {t_json};
-  const SUBMIT = {str(bool(submit)).lower()};
   const CLEAR_FIRST = {str(bool(clear_first)).lower()};
-  const DELAY = {80 if slowly else 0};
 
-  // Click to focus (atomic sequence).
-  await page.mouse.move(X, Y);
-  await page.mouse.down();
-  await page.mouse.up();
-  await page.waitForTimeout(60);
+  const el = document.activeElement;
+  if (!el) return {{ ok: false, reason: "no activeElement after click" }};
+  const tag = (el.tagName || "").toLowerCase();
+  const role = (el.getAttribute && el.getAttribute("role")) ? String(el.getAttribute("role")) : "";
+  const ariaLabel = (el.getAttribute && el.getAttribute("aria-label")) ? String(el.getAttribute("aria-label")) : "";
+  const placeholder = (el.getAttribute && el.getAttribute("placeholder")) ? String(el.getAttribute("placeholder")) : "";
+  const id = (el.id) ? String(el.id) : "";
+  const contentEditable = !!(el.isContentEditable);
+  const isBody = (tag === "body" || tag === "html");
+  const isInputLike = (tag === "input" || tag === "textarea" || tag === "select" || contentEditable || role === "textbox" || role === "combobox");
+  const info = {{ ok: !isBody, tag, role, ariaLabel, placeholder, id, contentEditable, isInputLike, isBody }};
 
-  // Read active element details from inside the page.
-  const info = await page.evaluate(() => {{
-    const el = document.activeElement;
-    if (!el) return {{ ok: false, reason: "no activeElement" }};
-    const tag = (el.tagName || "").toLowerCase();
-    const role = (el.getAttribute && el.getAttribute("role")) ? String(el.getAttribute("role")) : "";
-    const ariaLabel = (el.getAttribute && el.getAttribute("aria-label")) ? String(el.getAttribute("aria-label")) : "";
-    const placeholder = (el.getAttribute && el.getAttribute("placeholder")) ? String(el.getAttribute("placeholder")) : "";
-    const id = (el.id) ? String(el.id) : "";
-    const contentEditable = !!(el.isContentEditable);
-    const isBody = (tag === "body" || tag === "html");
-    const isInputLike = (tag === "input" || tag === "textarea" || tag === "select" || contentEditable || role === "textbox" || role === "combobox");
-    return {{ ok: !isBody, tag, role, ariaLabel, placeholder, id, contentEditable, isInputLike, isBody }};
-  }});
-
-  if (!info || info.ok !== true) {{
-    return {{ ok: false, reason: "activeElement is not usable", active: info || null }};
+  if (isBody) {{
+    return {{ ok: false, reason: "activeElement is not usable after click", active: info }};
   }}
 
-  if (!info.isInputLike) {{
-    // Still try to type, but report it loudly so callers can recover.
+  if (CLEAR_FIRST && (tag === "input" || tag === "textarea")) {{
+    el.value = "";
+    el.dispatchEvent(new Event("input", {{ bubbles: true }}));
+    el.dispatchEvent(new Event("change", {{ bubbles: true }}));
   }}
 
-  // Clear best-effort: try select-all + backspace on both Control and Meta (platform variance).
-  if (CLEAR_FIRST) {{
-    try {{
-      await page.keyboard.press("Control+A");
-      await page.keyboard.press("Backspace");
-    }} catch (e) {{}}
-    try {{
-      await page.keyboard.press("Meta+A");
-      await page.keyboard.press("Backspace");
-    }} catch (e) {{}}
-    // Also try DOM clear for plain inputs (frameworks sometimes need input/change).
-    try {{
-      await page.evaluate(() => {{
-        const el = document.activeElement;
-        if (!el) return;
-        const tag = (el.tagName || "").toLowerCase();
-        if (tag === "input" || tag === "textarea") {{
-          el.value = "";
-          el.dispatchEvent(new Event("input", {{ bubbles: true }}));
-          el.dispatchEvent(new Event("change", {{ bubbles: true }}));
-        }}
-      }});
-    }} catch (e) {{}}
+  if (tag === "input" || tag === "textarea") {{
+    el.value = TEXT;
+    el.dispatchEvent(new Event("input", {{ bubbles: true }}));
+    el.dispatchEvent(new Event("change", {{ bubbles: true }}));
+  }} else if (contentEditable) {{
+    el.textContent = TEXT;
+    el.dispatchEvent(new Event("input", {{ bubbles: true }}));
+  }} else {{
+    return {{ ok: false, reason: "activeElement is not input/textarea/contentEditable", active: info }};
   }}
 
-  await page.keyboard.type(TEXT, DELAY ? {{ delay: DELAY }} : undefined);
-  if (SUBMIT) {{
-    // Let autocomplete/input handlers settle before submitting.
-    await page.waitForTimeout(1000);
-    await page.keyboard.press("Enter");
-    // Give submit handlers/navigation a brief moment to start.
-    await page.waitForTimeout(220);
-  }}
+  const after = (tag === "input" || tag === "textarea")
+    ? {{ value: String(el.value || "") }}
+    : (contentEditable ? {{ value: String(el.innerText || "") }} : {{ value: null }});
 
-  // Confirm value (best-effort).
-  const after = await page.evaluate(() => {{
-    const el = document.activeElement;
-    if (!el) return {{ value: null }};
-    try {{
-      const tag = (el.tagName || "").toLowerCase();
-      if (tag === "input" || tag === "textarea") return {{ value: String(el.value || "") }};
-      if (el.isContentEditable) return {{ value: String(el.innerText || "") }};
-    }} catch (e) {{}}
-    return {{ value: null }};
-  }});
-
-  return {{ ok: true, x: X, y: Y, active: info, submit: SUBMIT, clear_first: CLEAR_FIRST, slowly: {str(bool(slowly)).lower()}, after }};
+  return {{ ok: true, x: {float(x)}, y: {float(y)}, active: info, clear_first: CLEAR_FIRST, after }};
 }}
 """.strip()
 
         call_resp = mcp_stdio_call_tool(
             server_entry=server_entry,
-            tool_name=self.MCP_RUN_CODE,
-            arguments={"code": js},
-            timeout_s=float(server_entry.get("policy", {}).get("call_timeout_seconds", 20)),
+            tool_name=self.MCP_EVALUATE,
+            arguments={"function": js},
+            timeout_s=timeout_s,
         )
         text_out, is_error, _attachments = format_mcp_tool_result_content(call_resp)
         if is_error:
             return make_tool_error(
                 error_code="mcp_call_failed",
-                message=f"web_fill_xy error: MCP browser_run_code returned isError: {text_out}",
+                message=f"web_fill_xy error: MCP browser_evaluate returned isError: {text_out}",
                 abort_policy="abort_tool",
                 retryable=True,
-                details={"backend": "mcp", "server_id": self.SERVER_ID, "mcp_tool_name": self.MCP_RUN_CODE},
+                details={"backend": "mcp", "server_id": self.SERVER_ID, "mcp_tool_name": self.MCP_EVALUATE},
             )
+
+        # Phase 3: Enter-submit via native MCP tool if requested.
+        if submit:
+            try:
+                press_resp = mcp_stdio_call_tool(
+                    server_entry=server_entry,
+                    tool_name=self.MCP_PRESS_KEY,
+                    arguments={"key": "Enter"},
+                    timeout_s=timeout_s,
+                )
+                _press_text, press_err, _ = format_mcp_tool_result_content(press_resp)
+                if press_err:
+                    logger.debug("[web_fill_xy] Enter press returned isError: %s", _press_text)
+            except Exception as e:
+                logger.debug("[web_fill_xy] Enter press exception (non-fatal): %s", e)
 
         parts = ["web_fill_xy:"]
         parts.append(f"- x: {float(x)}")

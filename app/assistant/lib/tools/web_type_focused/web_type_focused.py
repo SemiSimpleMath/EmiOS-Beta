@@ -36,7 +36,12 @@ class WebTypeFocused(BaseTool):
     """
 
     SERVER_ID = "npm/playwright-mcp"
-    MCP_RUN_CODE = "browser_run_code"
+    # playwright-mcp 2026 upgrade: browser_run_code → browser_evaluate.
+    # Since browser_evaluate runs in DOM context (no `page` object), we can't
+    # use page.keyboard.type. Instead set el.value + dispatch input/change
+    # events; for the Enter-submit case, use browser_press_key separately.
+    MCP_EVALUATE = "browser_evaluate"
+    MCP_PRESS_KEY = "browser_press_key"
     MCP_SNAPSHOT = "browser_snapshot"
 
     def __init__(self):
@@ -116,89 +121,82 @@ class WebTypeFocused(BaseTool):
             )
 
         t_json = json.dumps(text)
+        # Phase 1: validate focused element, optionally clear, set value, dispatch
+        # input/change events. All DOM-side so browser_evaluate handles it.
         js = f"""
-async (page) => {{
+() => {{
   const TEXT = {t_json};
-  const SUBMIT = {str(bool(submit)).lower()};
   const CLEAR_FIRST = {str(bool(clear_first)).lower()};
-  const DELAY = {80 if slowly else 0};
 
-  // Read active element details from inside the page.
-  const info = await page.evaluate(() => {{
-    const el = document.activeElement;
-    if (!el) return {{ ok: false, reason: "no activeElement" }};
-    const tag = (el.tagName || "").toLowerCase();
-    const role = (el.getAttribute && el.getAttribute("role")) ? String(el.getAttribute("role")) : "";
-    const ariaLabel = (el.getAttribute && el.getAttribute("aria-label")) ? String(el.getAttribute("aria-label")) : "";
-    const id = (el.id) ? String(el.id) : "";
-    const name = (el.getAttribute && el.getAttribute("name")) ? String(el.getAttribute("name")) : "";
-    const contentEditable = !!(el.isContentEditable);
-    const isBody = (tag === "body" || tag === "html");
-    const isInputLike = (tag === "input" || tag === "textarea" || tag === "select" || contentEditable);
-    return {{
-      ok: !isBody,
-      tag,
-      role,
-      ariaLabel,
-      id,
-      name,
-      contentEditable,
-      isInputLike,
-      isBody
-    }};
-  }});
+  const el = document.activeElement;
+  if (!el) return {{ ok: false, reason: "no activeElement" }};
+  const tag = (el.tagName || "").toLowerCase();
+  const role = (el.getAttribute && el.getAttribute("role")) ? String(el.getAttribute("role")) : "";
+  const ariaLabel = (el.getAttribute && el.getAttribute("aria-label")) ? String(el.getAttribute("aria-label")) : "";
+  const id = (el.id) ? String(el.id) : "";
+  const name = (el.getAttribute && el.getAttribute("name")) ? String(el.getAttribute("name")) : "";
+  const contentEditable = !!(el.isContentEditable);
+  const isBody = (tag === "body" || tag === "html");
+  const isInputLike = (tag === "input" || tag === "textarea" || tag === "select" || contentEditable);
+  const info = {{ ok: !isBody, tag, role, ariaLabel, id, name, contentEditable, isInputLike, isBody }};
 
-  if (!info || info.ok !== true) {{
-    return {{ ok: false, reason: "activeElement is not a usable input", active: info || null }};
+  if (isBody) {{
+    return {{ ok: false, reason: "activeElement is not a usable input", active: info }};
   }}
 
-  // Optionally clear input/textarea first (best-effort).
-  if (CLEAR_FIRST) {{
-    try {{
-      await page.evaluate(() => {{
-        const el = document.activeElement;
-        if (!el) return;
-        const tag = (el.tagName || "").toLowerCase();
-        if (tag === "input" || tag === "textarea") {{
-          el.value = "";
-          el.dispatchEvent(new Event("input", {{ bubbles: true }}));
-          el.dispatchEvent(new Event("change", {{ bubbles: true }}));
-        }}
-      }});
-    }} catch (e) {{
-      // ignore
-    }}
+  if (CLEAR_FIRST && (tag === "input" || tag === "textarea")) {{
+    el.value = "";
+    el.dispatchEvent(new Event("input", {{ bubbles: true }}));
+    el.dispatchEvent(new Event("change", {{ bubbles: true }}));
   }}
 
-  // Type into the currently focused element.
-  await page.keyboard.type(TEXT, DELAY ? {{ delay: DELAY }} : undefined);
-  if (SUBMIT) {{
-    // Let autocomplete/input handlers settle before submitting.
-    await page.waitForTimeout(1000);
-    await page.keyboard.press("Enter");
-    // Give submit handlers/navigation a brief moment to start.
-    await page.waitForTimeout(220);
+  if (tag === "input" || tag === "textarea") {{
+    el.value = TEXT;
+    el.dispatchEvent(new Event("input", {{ bubbles: true }}));
+    el.dispatchEvent(new Event("change", {{ bubbles: true }}));
+  }} else if (contentEditable) {{
+    el.textContent = TEXT;
+    el.dispatchEvent(new Event("input", {{ bubbles: true }}));
+  }} else {{
+    return {{ ok: false, reason: "activeElement is not input/textarea/contentEditable", active: info }};
   }}
 
-  return {{ ok: true, active: info, submit: SUBMIT, clear_first: CLEAR_FIRST, slowly: {str(bool(slowly)).lower()} }};
+  return {{ ok: true, active: info, clear_first: CLEAR_FIRST }};
 }}
 """.strip()
 
         call_resp = mcp_stdio_call_tool(
             server_entry=server_entry,
-            tool_name=self.MCP_RUN_CODE,
-            arguments={"code": js},
+            tool_name=self.MCP_EVALUATE,
+            arguments={"function": js},
             timeout_s=float(server_entry.get("policy", {}).get("call_timeout_seconds", 20)),
         )
         text_out, is_error, _attachments = format_mcp_tool_result_content(call_resp)
         if is_error:
             return make_tool_error(
                 error_code="mcp_call_failed",
-                message=f"web_type_focused error: MCP browser_run_code returned isError: {text_out}",
+                message=f"web_type_focused error: MCP browser_evaluate returned isError: {text_out}",
                 abort_policy="abort_tool",
                 retryable=True,
-                details={"backend": "mcp", "server_id": self.SERVER_ID, "mcp_tool_name": self.MCP_RUN_CODE},
+                details={"backend": "mcp", "server_id": self.SERVER_ID, "mcp_tool_name": self.MCP_EVALUATE},
             )
+
+        # Phase 2: if submit was requested, fire Enter via browser_press_key.
+        # We don't have page.waitForTimeout here; the agent should call
+        # web_modal_scan after if it needs to wait for submit-handler effects.
+        if submit:
+            try:
+                press_resp = mcp_stdio_call_tool(
+                    server_entry=server_entry,
+                    tool_name=self.MCP_PRESS_KEY,
+                    arguments={"key": "Enter"},
+                    timeout_s=float(server_entry.get("policy", {}).get("call_timeout_seconds", 20)),
+                )
+                _press_text, press_err, _ = format_mcp_tool_result_content(press_resp)
+                if press_err:
+                    logger.debug("[web_type_focused] Enter press returned isError: %s", _press_text)
+            except Exception as e:
+                logger.debug("[web_type_focused] Enter press exception (non-fatal): %s", e)
 
         parts = ["web_type_focused:"]
         parts.append(f"- text: {text[:120]!r}")

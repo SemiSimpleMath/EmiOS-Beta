@@ -636,6 +636,72 @@ def _embedding_similarity_pairs(all_node_ids: list[str]) -> list[tuple[str, str]
 
 # ── Phase 3: LLM confirmation ─────────────────────────────────────────────────
 
+# Triage is shipped to a nano-class model. Per-pair briefs can run 500-1500
+# tokens (descriptions + edge_sentences + shared_anchor). At ~1K tokens/pair,
+# 30 pairs/batch stays well under nano's context limit even with system prompt
+# + agent_form schema + response overhead. If `context_length_exceeded` errors
+# appear again, lower this. (Set in code, not config, since this is an
+# implementation detail of the triage call shape — not a tunable per
+# deployment.)
+TRIAGE_BATCH_SIZE = 30
+
+
+def _build_triage_brief(
+    pair_index_1based: int,
+    nid_a: str,
+    nid_b: str,
+    tier: str,
+    descriptors: dict[str, dict],
+    pair_anchor_context: dict[tuple[str, str], dict],
+) -> dict[str, Any]:
+    """Build one per-pair JSON brief for the triage LLM. Factored out of the
+    batching loop so each batch can call it with locally-numbered pair_index."""
+    da = descriptors.get(nid_a) or {}
+    db = descriptors.get(nid_b) or {}
+    entry: dict[str, Any] = {
+        "pair_index": pair_index_1based,
+        "tier": tier,
+        "a": {
+            "label": da.get("label"),
+            "node_type": da.get("node_type"),
+            "category": da.get("category"),
+            "aliases": da.get("aliases") or [],
+            "description": (da.get("description") or "")[:200],
+            "original_sentence": da.get("original_sentence") or "",
+            "edge_sentences": (da.get("edge_sentences") or [])[:3],
+        },
+        "b": {
+            "label": db.get("label"),
+            "node_type": db.get("node_type"),
+            "category": db.get("category"),
+            "aliases": db.get("aliases") or [],
+            "description": (db.get("description") or "")[:200],
+            "original_sentence": db.get("original_sentence") or "",
+            "edge_sentences": (db.get("edge_sentences") or [])[:3],
+        },
+    }
+    key = (min(nid_a, nid_b), max(nid_a, nid_b))
+    anchor_ctx = pair_anchor_context.get(key)
+    if anchor_ctx:
+        entry["shared_anchor"] = {
+            "anchor_label": anchor_ctx.get("anchor_label"),
+            "predicate_path": list(anchor_ctx.get("predicate_path") or []),
+            "a_edges": [
+                {"anchor_to_state": e.get("anchor_to_state_sentence"),
+                 "state_to_other": e.get("state_to_other_sentence"),
+                 "state_start_date": e.get("state_start_date")}
+                for e in (anchor_ctx.get("a_evidence") or [])
+            ],
+            "b_edges": [
+                {"anchor_to_state": e.get("anchor_to_state_sentence"),
+                 "state_to_other": e.get("state_to_other_sentence"),
+                 "state_start_date": e.get("state_start_date")}
+                for e in (anchor_ctx.get("b_evidence") or [])
+            ],
+        }
+    return entry
+
+
 def _triage_filter_pairs(
     pairs: list[tuple[str, str, str]],
     descriptors: dict[str, dict],
@@ -646,93 +712,88 @@ def _triage_filter_pairs(
     'uncertain' (forward to the heavy detector). Asymmetric trust — we trust
     the nano's NO (drop), but never its YES (it never emits 'merge').
 
-    Falls back to passing all pairs through if the triage agent fails.
+    Pairs are processed in batches of TRIAGE_BATCH_SIZE so the per-call prompt
+    stays under nano's context limit. A batch that fails (context overflow,
+    network error, etc.) is logged and its pairs pass through to the heavy
+    detector unfiltered — only that batch, not the entire set.
     """
     if not pairs:
         return pairs
+
+    # Sanity-check that the agent is registered before we start batching.
     try:
-        agent = DI.agent_factory.create_agent("kg_maintenance::duplicate_triage")
-        if agent is None:
+        probe_agent = DI.agent_factory.create_agent("kg_maintenance::duplicate_triage")
+        if probe_agent is None:
             logger.warning("[duplicate_scan] triage agent unavailable — skipping pre-filter")
             return pairs
     except Exception as exc:
         logger.warning("[duplicate_scan] triage agent create failed: %s — skipping pre-filter", exc)
         return pairs
 
-    # Build a compact per-pair brief.
-    brief_pairs = []
-    for idx, (nid_a, nid_b, tier) in enumerate(pairs):
-        da = descriptors.get(nid_a) or {}
-        db = descriptors.get(nid_b) or {}
-        entry: dict[str, Any] = {
-            "pair_index": idx + 1,
-            "tier": tier,
-            "a": {
-                "label": da.get("label"),
-                "node_type": da.get("node_type"),
-                "category": da.get("category"),
-                "aliases": da.get("aliases") or [],
-                "description": (da.get("description") or "")[:200],
-                "original_sentence": da.get("original_sentence") or "",
-                "edge_sentences": (da.get("edge_sentences") or [])[:3],
-            },
-            "b": {
-                "label": db.get("label"),
-                "node_type": db.get("node_type"),
-                "category": db.get("category"),
-                "aliases": db.get("aliases") or [],
-                "description": (db.get("description") or "")[:200],
-                "original_sentence": db.get("original_sentence") or "",
-                "edge_sentences": (db.get("edge_sentences") or [])[:3],
-            },
-        }
-        key = (min(nid_a, nid_b), max(nid_a, nid_b))
-        anchor_ctx = pair_anchor_context.get(key)
-        if anchor_ctx:
-            entry["shared_anchor"] = {
-                "anchor_label": anchor_ctx.get("anchor_label"),
-                "predicate_path": list(anchor_ctx.get("predicate_path") or []),
-                "a_edges": [
-                    {"anchor_to_state": e.get("anchor_to_state_sentence"),
-                     "state_to_other": e.get("state_to_other_sentence"),
-                     "state_start_date": e.get("state_start_date")}
-                    for e in (anchor_ctx.get("a_evidence") or [])
-                ],
-                "b_edges": [
-                    {"anchor_to_state": e.get("anchor_to_state_sentence"),
-                     "state_to_other": e.get("state_to_other_sentence"),
-                     "state_start_date": e.get("state_start_date")}
-                    for e in (anchor_ctx.get("b_evidence") or [])
-                ],
-            }
-        brief_pairs.append(entry)
+    distinct_indices: set[int] = set()  # global 0-based indices into `pairs`
+    n_batches = (len(pairs) + TRIAGE_BATCH_SIZE - 1) // TRIAGE_BATCH_SIZE
+    n_batches_failed = 0
 
-    try:
-        response = agent.action_handler(
-            Message(
-                agent_input={"pairs_batch": json.dumps(brief_pairs, ensure_ascii=False)},
-                scope_context=scope_context,
+    for batch_start in range(0, len(pairs), TRIAGE_BATCH_SIZE):
+        batch = pairs[batch_start:batch_start + TRIAGE_BATCH_SIZE]
+        # Build briefs with 1-based pair_index LOCAL to this batch. The agent
+        # echoes back the pair_index values it saw; we map local→global below.
+        # Local numbering avoids the agent getting confused when batch 2 starts
+        # at pair_index 31 (which doesn't match its 1-based prompt examples).
+        batch_briefs = [
+            _build_triage_brief(
+                pair_index_1based=local_idx + 1,
+                nid_a=nid_a, nid_b=nid_b, tier=tier,
+                descriptors=descriptors,
+                pair_anchor_context=pair_anchor_context,
             )
-        )
-    except Exception as exc:
-        logger.warning("[duplicate_scan] triage call failed: %s — passing all pairs through", exc)
-        return pairs
+            for local_idx, (nid_a, nid_b, tier) in enumerate(batch)
+        ]
 
-    data = response.data if response and hasattr(response, "data") else {}
-    verdicts_raw = (data.get("pairs") if isinstance(data, dict) else None) or []
-    distinct_indices: set[int] = set()
-    for v in verdicts_raw:
-        if not isinstance(v, dict):
-            continue
+        # Fresh agent instance per batch so blackboard state doesn't carry over.
         try:
-            idx = int(v.get("pair_index") or 0)
-        except (TypeError, ValueError):
+            batch_agent = DI.agent_factory.create_agent("kg_maintenance::duplicate_triage")
+            if batch_agent is None:
+                logger.warning(
+                    "[duplicate_scan] triage agent failed to instantiate for batch %d-%d — passing batch through",
+                    batch_start + 1, batch_start + len(batch),
+                )
+                n_batches_failed += 1
+                continue
+            response = batch_agent.action_handler(
+                Message(
+                    agent_input={"pairs_batch": json.dumps(batch_briefs, ensure_ascii=False)},
+                    scope_context=scope_context,
+                )
+            )
+        except Exception as exc:
+            logger.warning(
+                "[duplicate_scan] triage batch %d-%d failed: %s — passing batch through",
+                batch_start + 1, batch_start + len(batch), exc,
+            )
+            n_batches_failed += 1
             continue
-        verdict = str(v.get("verdict") or "").strip().lower()
-        if verdict == "distinct" and 1 <= idx <= len(pairs):
-            distinct_indices.add(idx - 1)
+
+        data = response.data if response and hasattr(response, "data") else {}
+        verdicts_raw = (data.get("pairs") if isinstance(data, dict) else None) or []
+        for v in verdicts_raw:
+            if not isinstance(v, dict):
+                continue
+            try:
+                local_idx_1based = int(v.get("pair_index") or 0)
+            except (TypeError, ValueError):
+                continue
+            verdict = str(v.get("verdict") or "").strip().lower()
+            if verdict == "distinct" and 1 <= local_idx_1based <= len(batch):
+                global_idx = batch_start + (local_idx_1based - 1)
+                distinct_indices.add(global_idx)
 
     survivors = [p for i, p in enumerate(pairs) if i not in distinct_indices]
+    if n_batches_failed:
+        logger.warning(
+            "[duplicate_scan] %d/%d triage batches failed — their pairs flow through unfiltered",
+            n_batches_failed, n_batches,
+        )
 
     # Persist the triage's distinct verdicts so future maintenance runs
     # short-circuit these same pairs at the `_add_pair` filter instead of

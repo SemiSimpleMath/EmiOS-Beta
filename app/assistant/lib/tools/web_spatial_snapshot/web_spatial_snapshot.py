@@ -32,7 +32,7 @@ class WebSpatialSnapshot(BaseTool):
     """
 
     SERVER_ID = "npm/playwright-mcp"
-    MCP_RUN_CODE = "browser_run_code"
+    MCP_EVALUATE = "browser_evaluate"
 
     def __init__(self):
         super().__init__("web_spatial_snapshot")
@@ -40,7 +40,7 @@ class WebSpatialSnapshot(BaseTool):
     @staticmethod
     def _extract_jsonish(text: str) -> Any:
         """
-        Playwright MCP `browser_run_code` often returns markdown with fenced JSON.
+        Playwright MCP `browser_evaluate` often returns markdown with fenced JSON.
         Extract + parse best-effort.
         """
         if not isinstance(text, str) or not text.strip():
@@ -127,18 +127,19 @@ class WebSpatialSnapshot(BaseTool):
                 details={"server_id": self.SERVER_ID},
             )
 
-        # IMPORTANT: `browser_run_code` runs Playwright code in Node context.
-        # Any access to `document/window` must happen inside `page.evaluate(...)`.
+        # `browser_evaluate` runs JS in the page (DOM) context. document/window
+        # are available directly; there is no Playwright `page` object.
         q_json = json.dumps(question or "")
         js = f"""
-async (page) => {{
+() => {{
   const q = {q_json};
   const RADIUS = {int(radius_px)};
   const MAX_ANCHORS = {int(max_anchors)};
   const MAX_TEXT = {int(max_text_candidates)};
   const PER_ANCHOR = {int(per_anchor_nearby)};
-
-  return await page.evaluate(({{ q, RADIUS, MAX_ANCHORS, MAX_TEXT, PER_ANCHOR }}) => {{
+  function norm(s) {{
+    return String(s || "").replace(/\\s+/g, " ").trim();
+  }}
     function norm(s) {{
       return String(s || "").replace(/\\s+/g, " ").trim();
     }}
@@ -307,23 +308,22 @@ async (page) => {{
       stats: {{ anchors_total: anchorsRaw.length, anchors_returned: enriched.length, text_candidates: textCands.length }},
       anchors: enriched
     }};
-  }}, {{ q, RADIUS, MAX_ANCHORS, MAX_TEXT, PER_ANCHOR }});
 }}
 """.strip()
 
         text, is_error, _attachments = self._mcp_call(
             server_entry=server_entry,
-            tool_name=self.MCP_RUN_CODE,
-            arguments={"code": js},
+            tool_name=self.MCP_EVALUATE,
+            arguments={"function": js},
         )
         if is_error:
             return make_tool_error(
-                error_code="mcp_browser_run_code_error",
-                message=f"web_spatial_snapshot error: MCP browser_run_code returned isError: {text}",
+                error_code="mcp_browser_evaluate_error",
+                message=f"web_spatial_snapshot error: MCP browser_evaluate returned isError: {text}",
                 abort_policy="abort_tool",
                 retryable=True,
                 user_visible=False,
-                details={"backend": "mcp", "server_id": self.SERVER_ID, "mcp_tool_name": self.MCP_RUN_CODE},
+                details={"backend": "mcp", "server_id": self.SERVER_ID, "mcp_tool_name": self.MCP_EVALUATE},
             )
 
         payload = self._extract_jsonish(text)
@@ -334,7 +334,7 @@ async (page) => {{
                 preview = preview[:1200] + "\n\n[truncated]"
             return make_tool_error(
                 error_code="mcp_json_parse_error",
-                message="web_spatial_snapshot error: Could not parse browser_run_code JSON payload.",
+                message="web_spatial_snapshot error: Could not parse browser_evaluate JSON payload.",
                 abort_policy="abort_tool",
                 retryable=True,
                 user_visible=False,

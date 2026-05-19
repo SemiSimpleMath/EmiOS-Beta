@@ -64,6 +64,7 @@ tools:
     - install_tool
     - search_web
     - scrape_url
+    - http_request
     - mcp::npm/server-google-maps::maps_distance_matrix
   except_tools: []
 
@@ -75,6 +76,7 @@ scope_contract:
       - install_tool
       - search_web
       - scrape_url
+      - http_request
       - mcp::npm/server-google-maps::maps_distance_matrix
     blocked_tools:
       - mcp::npm/playwright-mcp::browser_run_code

@@ -3,9 +3,12 @@
 Refreshes the access_token projection of an auth.oauth pod using its
 stored refresh_token. The agent never sees either token — courier-scoped
 fetch + POST + env-var update happens in the tool.
-"""
-from __future__ import annotations
 
+NOTE: do NOT add `from __future__ import annotations` here. PEP 563 turns
+nested model references into strings; OpenAI's `parse` API can't resolve
+them when generating the JSON schema. See http_request/tool_forms for the
+full explanation.
+"""
 from typing import Optional
 
 from pydantic import BaseModel

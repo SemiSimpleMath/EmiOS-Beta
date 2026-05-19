@@ -36,7 +36,9 @@ class WebFillRef(BaseTool):
 
     SERVER_ID = "npm/playwright-mcp"
     MCP_CLICK = "browser_click"
-    MCP_RUN_CODE = "browser_run_code"
+    # MCP_RUN_CODE removed 2026-05-19 — playwright-mcp dropped browser_run_code;
+    # this tool now uses browser_type directly (see execute()) so the constant
+    # was dead. browser_evaluate is available if any future JS path is needed.
     MCP_SNAPSHOT = "browser_snapshot"
 
     def __init__(self):

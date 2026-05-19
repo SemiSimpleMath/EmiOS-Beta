@@ -22,8 +22,7 @@ logger = get_logger(__name__)
 # Uses querySelectorAll which finds off-screen DOM elements (no scrolling needed).
 # For virtualized lists, scrolls the container via scrollTop and re-collects.
 _JS_MODAL_ELEMENTS = """
-async (page) => {
-  return await page.evaluate(() => {
+() => {
     const norm = (s, n = 140) => {
       const v = String(s || "").replace(/\\s+/g, " ").trim();
       return v.length > n ? v.slice(0, n) : v;
@@ -176,8 +175,7 @@ async (page) => {
       scroller.scrollTop = 0;
     }
 
-    return { error: null, elements: elements, scrollable: scrollable };
-  });
+  return { error: null, elements: elements, scrollable: scrollable };
 }
 """.strip()
 
@@ -306,15 +304,15 @@ class WebModalScan(BaseTool):
         # One JS call to extract all interactive elements from the modal
         call_resp = mcp_stdio_call_tool(
             server_entry=server_entry,
-            tool_name="browser_run_code",
-            arguments={"code": _JS_MODAL_ELEMENTS},
+            tool_name="browser_evaluate",
+            arguments={"function": _JS_MODAL_ELEMENTS},
             timeout_s=timeout,
         )
         text, is_error, _ = format_mcp_tool_result_content(call_resp)
         if is_error:
             return make_tool_error(
                 error_code="mcp_call_failed",
-                message=f"web_modal_scan error: browser_run_code failed: {text}",
+                message=f"web_modal_scan error: browser_evaluate failed: {text}",
                 abort_policy="abort_tool",
                 retryable=True,
                 details={"server_id": self.SERVER_ID},

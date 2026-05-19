@@ -1,6 +1,9 @@
-from __future__ import annotations
+# Do NOT add `from __future__ import annotations` — PEP 563 string-ifies
+# nested model references; OpenAI's structured-output `parse` API can't
+# resolve them at schema-generation time. See
+# http_request/tool_forms/tool_forms.py for the full explanation.
 
-from typing import Any
+from typing import Any, Optional, List, Dict
 
 from pydantic import BaseModel
 

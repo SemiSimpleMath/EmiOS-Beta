@@ -24,7 +24,7 @@ class PlaywrightPageStateNode(ControlNode):
     """
 
     SERVER_ID = "npm/playwright-mcp"
-    MCP_RUN_CODE = "browser_run_code"
+    MCP_EVALUATE = "browser_evaluate"
     MCP_MOVE_MOUSE = "browser_mouse_move_xy"
 
     def action_handler(self, message):  # noqa: ARG002
@@ -188,8 +188,7 @@ class PlaywrightPageStateNode(ControlNode):
 
     def _probe_ready_state(self, *, server_entry: dict[str, Any]) -> dict[str, Any]:
         js = """
-async (page) => {
-  return await page.evaluate(() => {
+() => {
     const rs = String(document.readyState || "");
     const hasBody = !!document.body;
     const href = String(location.href || "");
@@ -200,13 +199,12 @@ async (page) => {
       href: href,
       title: title
     };
-  });
 }
 """.strip()
         text = self._call_mcp_text(
             server_entry=server_entry,
-            tool_name=self.MCP_RUN_CODE,
-            arguments={"code": js},
+            tool_name=self.MCP_EVALUATE,
+            arguments={"function": js},
         )
         parsed = self._parse_jsonish(text)
         if not isinstance(parsed, dict):
@@ -215,8 +213,7 @@ async (page) => {
 
     def _detect_modal_state(self, server_entry: dict[str, Any]) -> dict[str, Any]:
         js = r"""
-async (page) => {
-  return await page.evaluate(() => {
+() => {
     const norm = (v, maxLen = 120) => {
       const s = String(v || "").replace(/\s+/g, " ").trim();
       return s.length > maxLen ? s.slice(0, maxLen) : s;
@@ -546,18 +543,17 @@ async (page) => {
         buttons: buttons.slice(0, 20),
       },
     };
-  });
 }
 """.strip()
         call_resp = mcp_stdio_call_tool(
             server_entry=server_entry,
-            tool_name=self.MCP_RUN_CODE,
-            arguments={"code": js},
+            tool_name=self.MCP_EVALUATE,
+            arguments={"function": js},
             timeout_s=float(server_entry.get("policy", {}).get("call_timeout_seconds", 20)),
         )
         text, is_error, _attachments = format_mcp_tool_result_content(call_resp)
         if is_error:
-            raise RuntimeError(f"[{self.name}] MCP tool {self.MCP_RUN_CODE} failed: {text}")
+            raise RuntimeError(f"[{self.name}] MCP tool {self.MCP_EVALUATE} failed: {text}")
 
         result = call_resp.get("result")
         if isinstance(result, dict):
@@ -636,27 +632,26 @@ async (page) => {
         return None
 
     def _run_js(self, *, server_entry: dict[str, Any], js: str) -> str:
-        """Call browser_run_code with the given JS snippet. Returns raw response text.
+        """Call browser_evaluate with the given JS snippet. Returns raw response text.
 
         Raises on MCP-level failure so the caller's broad except logs once.
         """
         timeout_s = float(server_entry.get("policy", {}).get("call_timeout_seconds", 20))
         resp = mcp_stdio_call_tool(
             server_entry=server_entry,
-            tool_name=self.MCP_RUN_CODE,
-            arguments={"code": js},
+            tool_name=self.MCP_EVALUATE,
+            arguments={"function": js},
             timeout_s=timeout_s,
         )
         text, is_error, _ = format_mcp_tool_result_content(resp)
         if is_error:
-            raise RuntimeError(f"browser_run_code failed: {text}")
+            raise RuntimeError(f"browser_evaluate failed: {text}")
         return text or ""
 
     def _get_page_scroll_state(self, server_entry: dict[str, Any]) -> dict[str, Any]:
         """Lightweight page scroll state — no modal detection overhead."""
         js = """
-async (page) => {
-  return await page.evaluate(() => {
+() => {
     const root = document.scrollingElement || document.documentElement || document.body;
     const scrollTop = Number(root.scrollTop || 0);
     const scrollHeight = Number(root.scrollHeight || 0);
@@ -671,7 +666,6 @@ async (page) => {
       atBottom: scrollTop >= (maxScrollTop - 1),
       progress: scrollable ? Number((scrollTop / Math.max(1, maxScrollTop)).toFixed(3)) : 1.0,
     };
-  });
 }"""
         try:
             raw = self._run_js(server_entry=server_entry, js=js)
