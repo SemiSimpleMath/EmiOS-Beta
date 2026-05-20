@@ -467,12 +467,22 @@ def render_v2_card_for_prompt_injection_level(
             parts.extend(fact_lines)
 
     if level >= 3:
+        # Contact data is stored as bullets (SECTION_TEMPLATES marks the
+        # section BULLETS; contact_section_builder writes bullets). The
+        # previous implementation read s_contact.intro_text and silently
+        # returned nothing because intro_text is always empty for contact.
         s_contact = by_name.get(CONTACT)
-        if s_contact and s_contact.intro_text:
-            parts.append("Contact:")
-            for line in s_contact.intro_text.splitlines():
-                if line.strip():
-                    parts.append(f"  {line.strip()}")
+        if s_contact:
+            contact_bullets = _bullets(s_contact)
+            if contact_bullets:
+                parts.append("Contact:")
+                for b in contact_bullets:
+                    parts.append(f"• {b}")
+            elif s_contact.intro_text:
+                parts.append("Contact:")
+                for line in s_contact.intro_text.splitlines():
+                    if line.strip():
+                        parts.append(f"  {line.strip()}")
 
     if level >= 4:
         rel_sections = ['connection_to_user', 'current_connections',
