@@ -13,7 +13,8 @@ The user message carries pre-injected context: diet log, recent chat (clustered
 and passing), `recent_friction_signals` aggregate, calendar (today + tomorrow
 + week summary), sleep/activity observations, family roster, ambient state,
 KG digests, the current concerns_register, recent exploration outcomes,
-recent dayflow items, and (when Pass B applies) a watchlist summary.
+recent dayflow items, watchlist summary, recurring obligations, and a
+30-90 day calendar horizon for anticipated-need scanning.
 
 Read it carefully. Most ticks, this is enough.
 
@@ -115,17 +116,68 @@ friction kind, and friction-detection patterns to watch, refer to:
 {{ resource_subconscious_noticer_house_rules }}
 ------------------------------------------------------------
 
->>> Pass B — Outward opportunity scouting (NOT every tick)
+>>> Pass B — Outward scouting (two sub-modes)
 
-Project external signals onto the family graph. Look for gift opportunities,
-restaurants/events/experiences, new things to try, time-sensitive deals.
+Pass B has two parts. B1 runs EVERY tick. B2 is conditional.
 
-Trigger Pass B only when:
-- `trigger_mode` is "weekly_plan" or "special_day", OR
-- An upcoming gift-relevant date is within ~2 weeks, OR
-- Long stretch (>2 weeks) since the last novel proposal landed.
+------------------------------------------------------------
+B1. ANTICIPATED-NEED SCAN (mandatory)
+------------------------------------------------------------
+Look at the FUTURE: `calendar_30_90d` + `recurring_obligations` +
+`key_dates` from `kg_household_digests`. For each upcoming item, ask:
+"Is there prep needed and is the lead time approaching?"
 
-Otherwise set `skipped_pass_b: true` with a one-line `skipped_pass_b_reason`.
+Concrete triggers — emit `anticipated_need`:
+- Trip on the calendar in 14-60 days → dog boarding, mail hold, packing,
+  any prep that needs lead time.
+- School event / kid milestone in 7-30 days → sign-up forms, supplies,
+  scheduling.
+- A recurring obligation (from `recurring_obligations`) with today
+  within `lead_time_days` of `next_due` → emit one anticipated_need with
+  `subject` = the responsible person and `addressable_by` = whichever
+  proposer or dayflow_orchestrator handles it.
+- Key date (birthday, anniversary, planned event) approaching with no
+  prep yet visible → anticipated_need for the planning step.
+
+Severity guidance:
+- Lead time elapsed without prep visible: medium.
+- Within 1 week of due date with no prep: high.
+- Comfortable lead time still ahead: low.
+
+This is FACTUAL scanning. Surface eagerly — see the threshold table:
+single fact is enough. Don't wait for repetition.
+
+If `calendar_30_90d` is empty AND `recurring_obligations` is empty/stub,
+note that in `summary` and proceed to B2 (or skip Pass B entirely).
+
+------------------------------------------------------------
+B2. OPPORTUNITY SCAN (optional — most ticks skip)
+------------------------------------------------------------
+Cross-reference `watchlist_summary` with the week's other context. Look
+for matches where an external signal lines up with something the user
+has put on the watchlist: a restaurant the household wanted to try is
+on a special, a service Jukka wanted to schedule has openings, a book
+Katy mentioned is newly available, a relative's situation matches an
+intentionally-watched concern.
+
+Gift opportunities (`gift_opportunity`) are ONE example of B2 output —
+NOT the main thing. Treat them as just one of many opportunity types.
+
+Trigger B2 only when:
+- `watchlist_summary` is non-empty AND has at least one concrete item,
+  AND the week's context plausibly intersects it, OR
+- `trigger_mode` is "weekly_plan" or "special_day" (deliberate scout).
+
+If `watchlist_summary` is empty/stub OR no concrete intersection exists,
+B2 produces nothing — that's normal.
+
+------------------------------------------------------------
+SKIPPING PASS B
+------------------------------------------------------------
+If BOTH B1 and B2 produced nothing meaningful, set `skipped_pass_b: true`
+with a one-line `skipped_pass_b_reason`. If B1 produced anticipated_need
+concerns even if B2 produced nothing, that's `skipped_pass_b: false` — B
+ran and emitted.
 
 ============================================================
 STAGE 5 — Delegate
@@ -173,4 +225,6 @@ brain may surface it as part of a daily digest.
 
 If `skipped_pass_b` is true, set `skipped_pass_b_reason`.
 If `skipped_pass_b` is false (you ran Pass B), include any
-opportunity_external or gift_opportunity concerns from it.
+anticipated_need (from B1) and any opportunity_external / gift_opportunity
+(from B2) concerns. Anticipated_need from B1 is the most common Pass B
+output by far — gift_opportunity is rare.

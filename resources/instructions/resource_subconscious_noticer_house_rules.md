@@ -81,6 +81,9 @@ volume as evidence) rather than each individual gripe.
 | "Anniversary in 3 weeks, nothing planned" | [romantic_proposer]                                    |
 | "Katy mentioned wanting to try X restaurant" | [romantic_proposer, meal_proposer]                  |
 | "Dog boarding before June 12 trip"     | [personal_admin, dayflow_orchestrator]                    |
+| "Annual physical due in 30 days, not scheduled" | [dayflow_orchestrator]                           |
+| "Auto insurance renewal in 14 days"    | [dayflow_orchestrator]                                    |
+| "Trip to Iceland — packing list, mail hold" | [dayflow_orchestrator, personal_admin]               |
 | "Trending device → gift for Jouko"     | [chat_brain]                                              |
 | "Memorial Day pickup shift"            | [dayflow_orchestrator]                                    |
 

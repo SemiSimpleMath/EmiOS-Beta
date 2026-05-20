@@ -61,6 +61,8 @@ def build_noticer_context(
         "exploration_outcomes_30d": _build_exploration_outcomes(now_utc=now_utc),
         "dayflow_recent": _build_dayflow_recent(now_utc=now_utc),
         "watchlist_summary": _build_watchlist_summary(),
+        "calendar_30_90d": _build_calendar_30_90d(now_local=now_local),
+        "recurring_obligations": _build_recurring_obligations(),
     }
 
 
@@ -368,6 +370,15 @@ def _build_calendar_week_summary(*, now_local: datetime) -> str:
     return _fetch_calendar_text(start, end, label="week ahead")
 
 
+def _build_calendar_30_90d(*, now_local: datetime) -> str:
+    """Days 8-90 forward — the horizon Pass B (anticipated_need scouting)
+    reads. Trips, school events, family travel, scheduled appointments
+    far enough out that prep matters but close enough to act on."""
+    start = (now_local + timedelta(days=8)).replace(hour=0, minute=0, second=0, microsecond=0)
+    end = start + timedelta(days=82)
+    return _fetch_calendar_text(start, end, label="30-90 day horizon")
+
+
 def _fetch_calendar_text(start_local: datetime, end_local: datetime, *, label: str) -> str:
     """Invoke the get_calendar_events tool and format the result."""
     try:
@@ -620,8 +631,47 @@ def _build_dayflow_recent(*, now_utc: datetime, hours: int = 48, limit: int = 10
 
 
 def _build_watchlist_summary() -> str:
-    """Pass B only. v0: not yet wired. Will read resource_subconscious_watchlist.md later."""
-    return "(watchlist not yet configured — Pass B should be skipped this tick)"
+    """Pass B input. Reads the user-curated watchlist markdown verbatim.
+
+    The watchlist lists things Jukka wants surfaced when external signals
+    align: restaurants to try, books to track, family members to keep
+    tabs on, trips planned, etc. The noticer scans this against the
+    week's other context (calendar, KG, chat) for matches.
+
+    Returns the file's content if present, or a clearly-marked fallback
+    so Pass B knows nothing's configured."""
+    path = get_repo_root() / "resources" / "subconscious" / "resource_subconscious_watchlist.md"
+    if not path.is_file():
+        return "(no watchlist file — Pass B's external scouting has nothing curated to watch)"
+    try:
+        text = path.read_text(encoding="utf-8").strip()
+    except Exception as e:
+        logger.warning("[noticer.context] watchlist read failed: %s", e)
+        return "(error reading watchlist)"
+    if not text:
+        return "(watchlist file is empty — Pass B should focus on anticipated_need scanning)"
+    return text
+
+
+def _build_recurring_obligations() -> str:
+    """Pass B input. Reads the recurring-obligations resource verbatim.
+
+    Lists predictable due-date items (annual physical, insurance renewal,
+    car service, etc.) with cadence + next_due + lead_time. The noticer
+    surfaces an anticipated_need when today is within lead_time of next_due.
+
+    Returns the file's content if present, or a clearly-marked fallback."""
+    path = get_repo_root() / "resources" / "subconscious" / "resource_recurring_obligations.md"
+    if not path.is_file():
+        return "(no recurring obligations file — Pass B's anticipated_need scanning has nothing curated)"
+    try:
+        text = path.read_text(encoding="utf-8").strip()
+    except Exception as e:
+        logger.warning("[noticer.context] recurring obligations read failed: %s", e)
+        return "(error reading recurring obligations)"
+    if not text:
+        return "(recurring obligations file is empty)"
+    return text
 
 
 def build_weekly_schedule_block() -> str:

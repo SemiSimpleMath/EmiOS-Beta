@@ -54,6 +54,12 @@ pattern — quote one of these to corroborate.
 ## Calendar — week-ahead summary
 {{ calendar_week_summary }}
 
+## Calendar — 30-90 day horizon (anticipated_need scanning)
+Things far enough out that prep matters but close enough to act on.
+Trips, appointments, school events, family travel. Pass B (B1) uses
+this as the primary input for anticipated_need concerns.
+{{ calendar_30_90d }}
+
 ## Sleep observations (last 7 days)
 {{ sleep_log_7d }}
 
@@ -81,7 +87,16 @@ KG digest above.
 ## Recent dayflow items (last 48h)
 {{ dayflow_recent }}
 
-## Watchlist sources (Pass B only)
+## Recurring obligations (Pass B — anticipated_need scanning)
+Predictable due-date items (physicals, insurance, car service, etc.).
+When today is within lead_time_days of next_due, surface an
+anticipated_need concern.
+{{ recurring_obligations }}
+
+## Watchlist sources (Pass B — opportunity scanning)
+User-curated things to keep an eye out for: restaurants, products,
+books, family members worth checking on. Pass B (B2) cross-references
+this with the week's other context for opportunity_external concerns.
 {{ watchlist_summary }}
 
 ---

@@ -38,6 +38,8 @@ user_context_items:
   - exploration_outcomes_30d
   - dayflow_recent
   - watchlist_summary
+  - calendar_30_90d
+  - recurring_obligations
 
 system_context_items:
   - resource_user_data
