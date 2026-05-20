@@ -188,12 +188,32 @@ class PodStore:
                     # from an Entity node matching the label. Both pod_store
                     # and kg_*_metadata live in emi.db so a cross-table
                     # subquery on the same engine is fine.
+                    #
+                    # Label match is alias-aware: exact case-insensitive
+                    # label first, then a JSON-LIKE fallback against the
+                    # node's `aliases` column. This handles the case where
+                    # an agent searches with the full name ("Jukka Virtanen")
+                    # but the KG entity is labeled with just the first name
+                    # ("Jukka") — the full name lives in aliases.
+                    from sqlalchemy import func
                     from app.assistant.kg.db.knowledge_graph_db import Edge, Node
+                    label_lower = str(linked_to_entity).strip().lower()
+                    alias_needle = f'%"{label_lower}"%'
                     pod_id_subq = (
                         session.query(Edge.target_id)
                         .join(Node, Node.id == Edge.source_id)
-                        .filter(Node.label == linked_to_entity)
                         .filter(Node.node_type == "Entity")
+                        .filter(
+                            or_(
+                                func.lower(Node.label) == label_lower,
+                                func.lower(
+                                    func.coalesce(
+                                        func.cast(Node.aliases, type_=__import__("sqlalchemy").String),
+                                        "",
+                                    )
+                                ).like(alias_needle),
+                            )
+                        )
                     )
                     if linked_via:
                         pod_id_subq = pod_id_subq.filter(
