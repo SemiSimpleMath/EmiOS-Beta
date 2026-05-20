@@ -21,3 +21,7 @@ user_context_items:
 - resource_dayflow_routine
 - health_status_summary
 - location_summary
+- entertainment_beliefs
+- entertainment_bio
+- previous_assessment
+- recent_entertainment_history
