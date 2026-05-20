@@ -16,12 +16,17 @@
       },
       "post_handlers": [],
       "pod_policy": {
-        "conditions": [
-          { "field": "is_significant", "equals": true }
-        ],
-        "source_kind": "ring_doorbell_significant",
+        "skip_if_category_in": ["car_by", "wind"],
+        "source_kind": "ring_doorbell_event",
         "one_liner_field": "caption",
         "body_field": "caption"
+      },
+      "escalation_policy": {
+        "per_category": {
+          "emergency": ["chat_alert", "dayflow_ticket"],
+          "stranger_lingering": ["chat_alert"],
+          "unknown": ["chat_alert"]
+        }
       }
     },
     {

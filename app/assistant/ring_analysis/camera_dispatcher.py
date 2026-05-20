@@ -73,7 +73,9 @@ def _on_camera_event(message: Message) -> None:
             logger.error("[camera_dispatcher] failed to create analyzer agent: %s", analyzer_name)
             return
         result = agent.action_handler(Message(agent_input=agent_input))
-        data = getattr(result, "data", None)
+        # Agent subclasses differ: Agent wraps output in something with .data,
+        # OneShotAgent returns the structured dict directly. Handle both.
+        data = result if isinstance(result, dict) else getattr(result, "data", None)
         if not isinstance(data, dict):
             logger.warning("[%s] no structured data for %s", analyzer_name, target_jpeg.name)
             return
@@ -89,20 +91,31 @@ def _on_camera_event(message: Message) -> None:
             "result": data,
         }, indent=2, default=str), encoding="utf-8")
 
-        # 5. Evaluate pod policy.
+        # 5. Evaluate pod policy → mint pod (or skip).
         pod_policy = camera.get("pod_policy") or {}
+        pod_id: Optional[str] = None
         if _pod_policy_matches(pod_policy, data):
-            _mint_camera_pod(camera, target_jpeg, data, captured_at_utc, analyzer_name)
+            pod_id = _mint_camera_pod(camera, target_jpeg, data, captured_at_utc, analyzer_name)
 
-        # 6. Run any post-handlers (named functions in camera_post_handlers.py).
+        # 6. Evaluate escalation policy → fire configured surfaces.
+        # Categories not listed in escalation_policy.per_category get nothing
+        # (log-only). Surfaces today: 'chat_alert', 'dayflow_ticket'.
+        fired_surfaces = _fire_escalation_surfaces(
+            camera=camera, data=data, target_jpeg=target_jpeg,
+            captured_at_utc=captured_at_utc, pod_id=pod_id,
+        )
+
+        # 7. Run any post-handlers (named functions in camera_post_handlers.py).
         for handler_name in (camera.get("post_handlers") or []):
             _run_post_handler(handler_name, camera=camera, jpeg=target_jpeg, sidecar=sidecar,
                               data=data, agent_input=agent_input)
 
         logger.info(
-            "[%s] analyzed %s → pod=%s",
+            "[%s] analyzed %s category=%s pod=%s escalations=%s",
             analyzer_name, target_jpeg.name,
-            "minted" if _pod_policy_matches(pod_policy, data) else "skipped",
+            data.get("category", "?"),
+            "minted" if pod_id else "skipped",
+            ",".join(fired_surfaces) if fired_surfaces else "none",
         )
     except Exception as e:
         logger.error("[camera_dispatcher] crash: %s", e, exc_info=True)
@@ -263,9 +276,20 @@ def _previous_day(date_str: str) -> str:
 def _pod_policy_matches(policy: Dict[str, Any], data: Dict[str, Any]) -> bool:
     if not policy:
         return False
+    # Skip rule: if data.category is in the skip list, don't mint regardless
+    # of other conditions. Used to suppress noisy categories (car_by, wind)
+    # without throwing away the analyzer output.
+    skip_categories = policy.get("skip_if_category_in") or []
+    if skip_categories:
+        cat = str(data.get("category") or "").strip()
+        if cat in skip_categories:
+            return False
     conditions = policy.get("conditions") or []
     if not conditions:
-        return False
+        # No explicit conditions + skip rule didn't fire → mint by default.
+        # (Empty policy still returns False above; this path requires the
+        # camera config to opt in by declaring pod_policy with skip rule.)
+        return bool(skip_categories) or bool(policy.get("source_kind"))
     for cond in conditions:
         field = cond.get("field")
         if not field:
@@ -292,7 +316,7 @@ def _pod_policy_matches(policy: Dict[str, Any], data: Dict[str, Any]) -> bool:
 def _mint_camera_pod(
     camera: Dict[str, Any], jpeg: Path, data: Dict[str, Any],
     captured_at_utc: str, analyzer: str,
-) -> None:
+) -> Optional[str]:
     try:
         from app.assistant.pod_store.image_ingest import ingest_image_file
         from app.assistant.pod_store.pod_store import PodStore
@@ -347,11 +371,154 @@ def _mint_camera_pod(
             "[%s] minted pod %s source_kind=%s",
             analyzer, pod.pod_id, source_kind,
         )
+        return pod.pod_id
     except Exception as e:
         logger.error(
             "[camera_dispatcher] pod minting failed for %s: %s",
             jpeg.name, e, exc_info=True,
         )
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Escalation policy
+# ---------------------------------------------------------------------------
+
+def _fire_escalation_surfaces(
+    *,
+    camera: Dict[str, Any],
+    data: Dict[str, Any],
+    target_jpeg: Path,
+    captured_at_utc: str,
+    pod_id: Optional[str],
+) -> List[str]:
+    """Look up the analyzer's category in escalation_policy.per_category and
+    fire each listed surface. Returns the list of surfaces successfully fired."""
+    policy = camera.get("escalation_policy") or {}
+    per_category = policy.get("per_category") or {}
+    if not per_category:
+        return []
+    category = str(data.get("category") or "").strip()
+    surfaces = list(per_category.get(category) or [])
+    if not surfaces:
+        return []
+
+    fired: List[str] = []
+    for surface in surfaces:
+        try:
+            if surface == "chat_alert":
+                if _fire_chat_alert(camera, data, target_jpeg, captured_at_utc, pod_id):
+                    fired.append(surface)
+            elif surface == "dayflow_ticket":
+                if _fire_dayflow_ticket(camera, data, target_jpeg, captured_at_utc, pod_id):
+                    fired.append(surface)
+            else:
+                logger.warning("[camera_dispatcher] unknown escalation surface: %s", surface)
+        except Exception as e:
+            logger.error(
+                "[camera_dispatcher] escalation surface %s crashed: %s",
+                surface, e, exc_info=True,
+            )
+    return fired
+
+
+def _fire_chat_alert(
+    camera: Dict[str, Any],
+    data: Dict[str, Any],
+    target_jpeg: Path,
+    captured_at_utc: str,
+    pod_id: Optional[str],
+) -> bool:
+    """Emit a master_room chat message announcing the door event."""
+    try:
+        publisher = getattr(DI, "outbound_chat_publisher", None)
+        if publisher is None:
+            logger.warning("[camera_dispatcher] outbound_chat_publisher unavailable; skipping chat_alert")
+            return False
+
+        camera_name = camera.get("name") or camera.get("id") or "camera"
+        category = data.get("category") or "?"
+        caption = (data.get("caption") or "").strip()
+        importance = data.get("importance")
+        text_parts = [f"[{camera_name}] {category}: {caption}"]
+        if importance is not None:
+            text_parts.append(f"(importance {importance})")
+        if pod_id:
+            text_parts.append(f"pod: {pod_id}")
+        text = " ".join(text_parts)
+
+        reply_to = {"type": "socketio", "room_id": "master_room"}
+        return bool(publisher.publish(
+            sender=camera_name,
+            text=text,
+            reply_to=reply_to,
+            sub_data_type=["camera_alert"],
+        ))
+    except Exception as e:
+        logger.error("[camera_dispatcher] chat_alert failed: %s", e, exc_info=True)
+        return False
+
+
+def _fire_dayflow_ticket(
+    camera: Dict[str, Any],
+    data: Dict[str, Any],
+    target_jpeg: Path,
+    captured_at_utc: str,
+    pod_id: Optional[str],
+) -> bool:
+    """Create a dayflow ticket for high-stakes door events."""
+    try:
+        from app.assistant.utils.pydantic_classes import ToolMessage
+
+        cls = DI.tool_registry.get_tool_class("create_dayflow_ticket")
+        if cls is None:
+            logger.warning("[camera_dispatcher] create_dayflow_ticket tool unavailable; skipping dayflow escalation")
+            return False
+        tool = cls()
+        camera_name = camera.get("name") or camera.get("id") or "Camera"
+        category = data.get("category") or "?"
+        caption = (data.get("caption") or "").strip()
+        sig_reason = (data.get("significance_reason") or "").strip()
+        importance = data.get("importance")
+
+        message_lines = [caption or "(no caption)"]
+        if sig_reason:
+            message_lines.append(f"Significance: {sig_reason}")
+        if importance is not None:
+            message_lines.append(f"Importance: {importance}/10")
+        if pod_id:
+            message_lines.append(f"Snapshot pod: {pod_id}")
+        message_lines.append(f"Captured: {captured_at_utc}")
+
+        title = f"{camera_name}: {category}"
+        tm = ToolMessage(
+            tool_name="create_dayflow_ticket",
+            tool_data={
+                "arguments": {
+                    "ticket_kind": "info",
+                    "suggestion_type": "camera_event",
+                    "title": title[:120],
+                    "message": "\n".join(message_lines)[:600],
+                    "trigger_context": {
+                        "camera_id": camera.get("id"),
+                        "camera_name": camera_name,
+                        "category": category,
+                        "captured_at_utc": captured_at_utc,
+                        "pod_id": pod_id,
+                    },
+                    "trigger_reason": f"camera_event_{category}",
+                    "valid_hours": 4,
+                },
+            },
+        )
+        result = tool.execute(tm)
+        ok = getattr(result, "result_type", "") in {"create_dayflow_ticket", "tool_result"} or (
+            isinstance(getattr(result, "data", None), dict) and not getattr(result, "data").get("error_code")
+        )
+        return bool(ok)
+    except Exception as e:
+        logger.error("[camera_dispatcher] dayflow_ticket failed: %s", e, exc_info=True)
+        return False
 
 
 # ---------------------------------------------------------------------------

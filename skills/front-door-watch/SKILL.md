@@ -42,3 +42,30 @@ view of the porch, the front walkway, and the street beyond.
   this is routine.
 - Treat anything you cannot see clearly (dark frames, obstructed views)
   as low-importance and say so in the caption rather than guessing.
+
+## Category rubric
+
+After captioning, classify the frame into ONE category. Categories drive
+downstream escalation — pick the closest match, not the most cautious one.
+Use `unknown` ONLY when the frame genuinely doesn't fit any other
+category (NOT as a hedge when you're unsure between two).
+
+| Category | What it looks like |
+|---|---|
+| `food_delivery` | DoorDash / Uber Eats / Grubhub / Postmates driver, often with a thermal bag. Brief approach, drop, leave. |
+| `package_delivery` | Amazon, UPS, FedEx, USPS, DHL driver. Carrying box(es). Brief porch interaction. |
+| `household_out_with_dogs` | Recognizable family member leaving (or returning) with one or both dogs (Bonnie, Clyde). |
+| `kids_leaving` | Peter or Annika departing — school morning, going to play, biking off. |
+| `family_arriving` | Jukka, Katy, or kids returning home (no dogs leading). Driveway → door direction. |
+| `car_by` | Vehicle passing on the street with no one approaching. No human action toward the house. |
+| `wind` | Foliage/branches/leaves/shadows moving with no person or vehicle present. False-positive motion trigger. |
+| `stranger_lingering` | Unfamiliar person on/near the porch for longer than a normal delivery, no obvious purpose. Between `unknown` and `emergency`. |
+| `unknown` | Genuinely ambiguous: dark frame, partial view, person partly visible, frame too unclear to categorize. |
+| `emergency` | Active attempt at forced entry, visible weapon, multiple unfamiliar people at unusual hours, anything urgently warranting attention. |
+
+### Common-mistake notes
+
+- A normal delivery driver lingering 5-10 seconds is NOT `stranger_lingering` — they're doing their job. Use the delivery category.
+- Pets walking past on the sidewalk with their owners → `car_by` is wrong; if no movement toward the house at all and no person interacts with the door area, prefer `wind` (background motion) or `unknown` (genuinely uncertain).
+- Mail truck driving past without stopping → `car_by`, not `package_delivery`.
+- Family member returning with groceries → `family_arriving`, not `package_delivery`.
