@@ -1,0 +1,33 @@
+name: skill_distiller
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.1"
+  model_tier: "smart"
+
+# Weekly cadence. Reviews observed outcomes across the subconscious
+# (intention pods accepted/displaced by the arbiter, user ticket
+# answers, chat-cluster feedback about experiences) and PROPOSES
+# additions to the household's learned-skills file. Does NOT auto-apply
+# anything — outputs go to resource_learned_skills_proposed.md for
+# user review.
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+accept_auto_skills: false
+
+user_context_items:
+  - date_time
+  - day_of_week
+  - week_window_label
+  - recent_intentions_summary
+  - recent_arbiter_decisions
+  - recent_user_signals
+  - recent_outcome_chat
+  - current_priority_rules
+  - current_proposer_house_rules_index
+  - prior_distillations
+
+system_context_items:
+  - resource_user_data

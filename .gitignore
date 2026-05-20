@@ -228,6 +228,7 @@ resources/user/.setup_draft.json
 resources/subconscious/resource_concerns_register.json
 resources/subconscious/resource_subconscious_watchlist.md
 resources/subconscious/resource_recurring_obligations.md
+resources/subconscious/resource_learned_skills_proposed.md
 resources/subconscious/resource_subconscious_tick_log.jsonl
 resources/subconscious/resource_digest_state.json
 resources/subconscious/resource_grocery_inventory.json

@@ -1,0 +1,46 @@
+Current date and time: {{ date_time }}
+Day of week: {{ day_of_week }}
+Window covered: {{ week_window_label }}
+
+## Recent intentions (last 7 days, all proposers)
+Every intention.* pod minted this window. Grouped by domain. Look for
+patterns the proposers leaned toward.
+{{ recent_intentions_summary }}
+
+## Recent arbiter decisions
+For each plan.weekly_schedule pod in the window: anchored items,
+displaced items + reasoning, conflicts punted to user. The arbiter's
+choices are signal about household priorities.
+{{ recent_arbiter_decisions }}
+
+## Recent user signals
+User-facing tickets answered this window, plus any user-driven changes
+to canonical rule files. Direct preference signal.
+{{ recent_user_signals }}
+
+## Recent outcome chat clusters
+Chat clusters this week that mention experiences with proposed meals,
+workouts, dates, or scheduled items — feedback signal. Look for
+appreciation OR dissatisfaction language.
+{{ recent_outcome_chat }}
+
+## Current priority_rules (what the arbiter consults today)
+For reference only. New proposals should not duplicate; refinements
+should `related_existing_rule` quote what they're touching.
+{{ current_priority_rules }}
+
+## Index of current proposer house_rules
+Just file paths + section headings so you know where things live.
+Reading the full text isn't necessary for proposing additions.
+{{ current_proposer_house_rules_index }}
+
+## Prior distillations
+Past skill_distiller runs' proposals. Don't repeat unless new evidence
+sharpens.
+{{ prior_distillations }}
+
+---
+
+Distill the week. Propose conservatively — two evidence items minimum,
+specific why_now, no hallucinated refs. Skip hypotheses with thin
+evidence and record the skip. Output an AgentForm.

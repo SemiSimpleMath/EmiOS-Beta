@@ -63,6 +63,7 @@ def build_noticer_context(
         "watchlist_summary": _build_watchlist_summary(),
         "calendar_30_90d": _build_calendar_30_90d(now_local=now_local),
         "recurring_obligations": _build_recurring_obligations(),
+        "family_graph_digest": _build_family_graph_digest(),
     }
 
 
@@ -651,6 +652,110 @@ def _build_watchlist_summary() -> str:
     if not text:
         return "(watchlist file is empty — Pass B should focus on anticipated_need scanning)"
     return text
+
+
+def _build_family_graph_digest() -> str:
+    """Pass B input. Reads KG entity cards for important_people who are
+    NOT part of the household (extended family, close friends). Surfaces:
+    - upcoming birthdays within 90 days (one-shot date math)
+    - per-person KG description (relationship, recent state, notable facts)
+    - flagged "recent mention" if their name appeared in chat clusters
+      in the last 14 days
+
+    This is the v0 of family-graph projection (Phase 4b). When the
+    underlying KG grows richer state-change tracking, this builder will
+    naturally surface more.
+
+    Returns a markdown block ready for direct interpolation. Empty/missing
+    data falls back gracefully — the noticer's prompt handles partial
+    context."""
+    from datetime import date, timedelta as _td
+
+    try:
+        user_data_path = get_repo_root() / "resources" / "user" / "resource_user_data.json"
+        if not user_data_path.is_file():
+            return "(no resource_user_data.json — no family graph to project)"
+        user_data = json.loads(user_data_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.warning("[noticer.context] user_data read failed for family_graph: %s", e)
+        return "(error reading user_data)"
+
+    important_people = user_data.get("important_people") or []
+    if not important_people:
+        return "(no important_people in user_data — family graph is empty)"
+
+    # Household = self + spouse/partner + children (already covered by
+    # kg_household_digests). Family graph = the REST.
+    household_relationships = {
+        "wife", "husband", "spouse", "partner",
+        "son", "daughter", "child", "kid",
+    }
+    extended = [
+        p for p in important_people
+        if isinstance(p, dict)
+        and (p.get("relationship") or "").strip().lower() not in household_relationships
+    ]
+    if not extended:
+        return "(no extended family/friends in important_people — only household members listed)"
+
+    today = date.today()
+    horizon = today + _td(days=90)
+
+    sections: List[str] = []
+    for person in extended:
+        name = (person.get("name") or "").strip()
+        if not name:
+            continue
+        relationship = (person.get("relationship") or "").strip() or "unspecified"
+        bd = person.get("birthdate")
+        section = [f"### {name} ({relationship})"]
+
+        # Upcoming birthday within 90 days
+        if bd:
+            try:
+                original = datetime.strptime(str(bd), "%Y-%m-%d").date()
+                candidate = original.replace(year=today.year)
+                if candidate < today:
+                    candidate = candidate.replace(year=today.year + 1)
+                if candidate <= horizon:
+                    days_away = (candidate - today).days
+                    section.append(
+                        f"- **Upcoming birthday:** {candidate.isoformat()} ({days_away}d away)"
+                    )
+            except (ValueError, TypeError):
+                pass
+
+        # KG digest — reuses the household-digest helper
+        digest = _kg_digest_for(name).strip()
+        if digest and not digest.startswith("(no KG"):
+            # Truncate aggressively — this is a digest, not a full card
+            short = digest[:600]
+            if len(digest) > 600:
+                short += " …"
+            section.append(f"- KG snapshot: {short}")
+
+        # Recent chat-cluster mention check
+        try:
+            from app.assistant.pod_store.pod_store import PodStore
+            store = PodStore()
+            hits = store.query(kind="chat_cluster", query=name, since="14d", limit=3)
+            if hits:
+                section.append(f"- **Recently mentioned** in {len(hits)} chat cluster(s) over last 14 days:")
+                for h in hits:
+                    snippet = (h.one_liner or "").replace("\n", " ")[:160]
+                    section.append(f"  - {h.pod_id}: {snippet}")
+        except Exception as e:
+            logger.debug("[noticer.context] family_graph mention check failed for %s: %s", name, e)
+
+        if len(section) > 1:  # has more than just the header
+            sections.append("\n".join(section))
+
+    if not sections:
+        return (
+            "(family graph has people but no current signals — no upcoming "
+            "birthdays, no KG descriptions, no recent mentions in chat)"
+        )
+    return "\n\n".join(sections)
 
 
 def _build_recurring_obligations() -> str:

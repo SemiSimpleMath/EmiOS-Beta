@@ -13,7 +13,8 @@ The user message carries pre-injected context: diet log, recent chat (clustered
 and passing), `recent_friction_signals` aggregate, calendar (today + tomorrow
 + week summary), sleep/activity observations, family roster, ambient state,
 KG digests, the current concerns_register, recent exploration outcomes,
-recent dayflow items, watchlist summary, recurring obligations, and a
+recent dayflow items, watchlist summary, recurring obligations, family
+graph digest (extended family + friends with recent signals), and a
 30-90 day calendar horizon for anticipated-need scanning.
 
 Read it carefully. Most ticks, this is enough.
@@ -153,23 +154,41 @@ note that in `summary` and proceed to B2 (or skip Pass B entirely).
 ------------------------------------------------------------
 B2. OPPORTUNITY SCAN (optional — most ticks skip)
 ------------------------------------------------------------
-Cross-reference `watchlist_summary` with the week's other context. Look
-for matches where an external signal lines up with something the user
-has put on the watchlist: a restaurant the household wanted to try is
-on a special, a service Jukka wanted to schedule has openings, a book
-Katy mentioned is newly available, a relative's situation matches an
-intentionally-watched concern.
+Two input sources, in priority order:
 
-Gift opportunities (`gift_opportunity`) are ONE example of B2 output —
-NOT the main thing. Treat them as just one of many opportunity types.
+(a) `family_graph_digest`: extended family + close friends. The richer
+   signal source. Look for:
+   - Upcoming birthday of a relative within ~3 weeks AND no prep yet
+     evident → opportunity_external (NOT gift_opportunity unless the
+     watchlist or chat suggests a specific fit).
+   - Relative recently mentioned in chat with substantive content
+     (their job change, illness, milestone, struggle) → opportunity
+     to acknowledge / reach out.
+   - Close friend's birthday in 7-14 days → light opportunity to
+     plan a small acknowledgment.
+
+(b) `watchlist_summary`: user-curated things. Look for matches where
+   week context intersects a watchlist item — a restaurant the
+   household wanted to try has news, a service Jukka wanted has an
+   opening, a book Katy mentioned is newly available.
+
+CONCRETE FIT IS THE BAR. Don't emit opportunity_external for "person X
+exists and has a birthday someday" — emit ONLY when the family graph
+or watchlist gives a specific timely hook.
+
+`gift_opportunity` is rare. Use it when: family_graph shows a relative's
+birthday/milestone AND something specific in chat/watchlist suggests
+what would land. Otherwise stay with `opportunity_external` and let the
+chat_brain handle it conversationally.
 
 Trigger B2 only when:
-- `watchlist_summary` is non-empty AND has at least one concrete item,
-  AND the week's context plausibly intersects it, OR
+- `family_graph_digest` is non-empty AND has a concrete timely signal
+  (upcoming birthday in window OR recent chat mention), OR
+- `watchlist_summary` is non-empty AND a real match exists, OR
 - `trigger_mode` is "weekly_plan" or "special_day" (deliberate scout).
 
-If `watchlist_summary` is empty/stub OR no concrete intersection exists,
-B2 produces nothing — that's normal.
+If neither source has a concrete signal, B2 produces nothing — that's
+normal. Don't manufacture opportunities.
 
 ------------------------------------------------------------
 SKIPPING PASS B

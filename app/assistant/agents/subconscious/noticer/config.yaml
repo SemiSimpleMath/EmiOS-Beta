@@ -40,6 +40,7 @@ user_context_items:
   - watchlist_summary
   - calendar_30_90d
   - recurring_obligations
+  - family_graph_digest
 
 system_context_items:
   - resource_user_data
