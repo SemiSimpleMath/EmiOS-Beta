@@ -26,6 +26,7 @@ from .task_graph_route import task_graph_bp
 from .kg_maintenance import kg_maintenance_bp
 from .smart_home_bridge import smart_home_bridge_bp
 from .insights import insights_bp
+from .meals import meals_bp
 
 # KG/Graph Visualizer routes
 try:

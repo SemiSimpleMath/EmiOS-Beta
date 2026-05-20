@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meals — {{ assistant_name }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/meals.css') }}?v={{ static_v }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="meals-container">
+        <header class="meals-header">
+            <h1><i class="fas fa-utensils"></i> Meals</h1>
+            <a href="/chat_bot" class="back-link"><i class="fas fa-arrow-left"></i> Back to Chat</a>
+        </header>
+
+        {% if plan %}
+        <section class="meals-plan-section">
+            <div class="meals-section-head">
+                <h2>This week's plan</h2>
+                <span class="meals-week-label">Week of {{ plan.week_start_date }}</span>
+            </div>
+
+            {% if plan.theme %}
+            <div class="meals-theme">
+                <span class="meals-label">Theme</span>
+                <p>{{ plan.theme }}</p>
+            </div>
+            {% endif %}
+
+            {% if plan.anchors %}
+            <div class="meals-anchors">
+                <span class="meals-label">Anchor meals</span>
+                <ul>
+                    {% for a in plan.anchors %}<li>{{ a }}</li>{% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+
+            <div class="meals-grid">
+                {% set ns = namespace(prev_date='') %}
+                {% for slot in plan.slots %}
+                    {% if slot.date != ns.prev_date %}
+                        {% if ns.prev_date %}</div>{% endif %}
+                        <div class="meals-day">
+                            <div class="meals-day-header">{{ slot.day_of_week }} <span class="meals-day-date">{{ slot.date }}</span></div>
+                        {% set ns.prev_date = slot.date %}
+                    {% endif %}
+                    <div class="meals-slot meals-slot-{{ slot.slot_type }}">
+                        <span class="meals-window">{{ slot.meal_window }}</span>
+                        <span class="meals-slot-type">{{ slot.slot_type }}</span>
+                        {% if slot.anchor_dish %}<span class="meals-dish">{{ slot.anchor_dish }}</span>{% endif %}
+                        {% if slot.leftover_from_date %}<span class="meals-note">from {{ slot.leftover_from_date }}</span>{% endif %}
+                        {% if slot.notes %}<span class="meals-note">{{ slot.notes }}</span>{% endif %}
+                    </div>
+                {% endfor %}
+                {% if plan.slots %}</div>{% endif %}
+            </div>
+
+            {% if plan.addressed_concern_ids %}
+            <div class="meals-concerns">
+                <span class="meals-label">Addresses concerns</span>
+                <ul>
+                    {% for cid in plan.addressed_concern_ids %}<li>{{ cid }}</li>{% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+
+            <div class="meals-meta-line">
+                <span>Generated {{ plan.produced_at_utc }}</span>
+                <span class="meals-pod-id">{{ plan.pod_id }}</span>
+            </div>
+        </section>
+
+        <section class="meals-shopping-section">
+            <h2>Shopping needs</h2>
+            {% if shopping_text %}
+                <pre class="meals-shopping-text">{{ shopping_text }}</pre>
+                <div class="meals-shopping-meta">
+                    {% if weekly_doc_present %}<span class="meals-pill meals-pill-doc">weekly list from doc</span>{% endif %}
+                    {% if ad_hoc_count %}<span class="meals-pill meals-pill-adhoc">{{ ad_hoc_count }} ad-hoc</span>{% endif %}
+                </div>
+            {% else %}
+                <p class="meals-empty">No shopping list yet — the weekly planner builds this when it runs.</p>
+            {% endif %}
+        </section>
+
+        <section class="meals-actions">
+            <h2>Send to {{ recipient_name }}</h2>
+            <p class="meals-recipient">
+                Will email <code>{{ recipient_email }}</code> the weekly plan + shopping needs above.
+                Mints a <code>delivery.email</code> audit pod when sent.
+            </p>
+            <button id="send-katy-btn" class="meals-send-btn">
+                <i class="fas fa-paper-plane"></i> Send to {{ recipient_name }}
+            </button>
+            <div id="send-status" class="meals-send-status" hidden></div>
+        </section>
+
+        {% else %}
+        <section class="meals-empty-state">
+            <h2>No weekly meal plan yet</h2>
+            <p>The weekly meal planner hasn't run, or its output isn't a <code>plan.weekly_meals</code> pod yet.</p>
+            <p>Run it via:</p>
+            <pre>.venv\Scripts\python.exe -m app.assistant.subconscious.run_weekly_meal_planner</pre>
+        </section>
+        {% endif %}
+    </div>
+
+    <script>
+    (function () {
+        const btn = document.getElementById('send-katy-btn');
+        const statusEl = document.getElementById('send-status');
+        if (!btn || !statusEl) return;
+        btn.addEventListener('click', async () => {
+            btn.disabled = true;
+            statusEl.hidden = false;
+            statusEl.className = 'meals-send-status meals-send-pending';
+            statusEl.textContent = 'Sending...';
+            try {
+                const resp = await fetch('/meals/send-to-katy', { method: 'POST' });
+                const data = await resp.json();
+                if (data.status === 'ok') {
+                    statusEl.className = 'meals-send-status meals-send-ok';
+                    statusEl.textContent = data.message + ' (delivery pod: ' + (data.delivery_pod_id || 'n/a') + ')';
+                } else {
+                    statusEl.className = 'meals-send-status meals-send-err';
+                    statusEl.textContent = 'Failed: ' + (data.message || 'unknown error');
+                }
+            } catch (e) {
+                statusEl.className = 'meals-send-status meals-send-err';
+                statusEl.textContent = 'Network error: ' + e.message;
+            } finally {
+                btn.disabled = false;
+            }
+        });
+    })();
+    </script>
+</body>
+</html>

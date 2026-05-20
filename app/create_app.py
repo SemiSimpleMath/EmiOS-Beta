@@ -187,6 +187,8 @@ def create_app(config_class="config.DevelopmentConfig"):
     app.register_blueprint(dev_wiki_bp)
     app.register_blueprint(smart_home_bridge_bp)
     app.register_blueprint(insights_bp)
+    from app.routes.meals import meals_bp
+    app.register_blueprint(meals_bp)
     from app.routes.task_graph_route import task_graph_bp
     app.register_blueprint(task_graph_bp)
     from app.routes.doc_route import doc_bp

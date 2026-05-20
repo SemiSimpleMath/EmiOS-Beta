@@ -1,0 +1,249 @@
+/* /meals page — weekly meal plan + Send to Katy */
+
+body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #f6f7fa;
+    color: #1f2330;
+}
+
+.meals-container {
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 24px 32px 64px;
+}
+
+.meals-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 28px;
+}
+
+.meals-header h1 {
+    margin: 0;
+    font-size: 28px;
+    color: #2d3748;
+}
+
+.meals-header h1 i {
+    color: #d97706;
+    margin-right: 10px;
+}
+
+.back-link {
+    color: #4a5568;
+    text-decoration: none;
+    font-size: 14px;
+}
+.back-link:hover { color: #1a202c; }
+
+.meals-plan-section,
+.meals-shopping-section,
+.meals-actions,
+.meals-empty-state {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 20px 24px;
+    margin-bottom: 22px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.meals-section-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 14px;
+}
+
+.meals-section-head h2,
+.meals-shopping-section h2,
+.meals-actions h2,
+.meals-empty-state h2 {
+    margin: 0 0 10px 0;
+    font-size: 18px;
+    color: #2d3748;
+}
+
+.meals-week-label {
+    color: #718096;
+    font-size: 14px;
+}
+
+.meals-label {
+    display: inline-block;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 11px;
+    color: #718096;
+    margin-bottom: 4px;
+}
+
+.meals-theme {
+    margin-bottom: 12px;
+}
+.meals-theme p {
+    margin: 0;
+    color: #1f2330;
+    font-size: 15px;
+    line-height: 1.5;
+}
+
+.meals-anchors ul,
+.meals-concerns ul {
+    margin: 4px 0 12px 0;
+    padding-left: 20px;
+}
+.meals-anchors li { color: #1f2330; }
+.meals-concerns li { color: #4a5568; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+
+.meals-grid {
+    margin-top: 16px;
+}
+
+.meals-day {
+    border-top: 1px solid #edf2f7;
+    padding: 10px 0 8px 0;
+}
+.meals-day:first-child { border-top: 1px solid #cbd5e0; }
+
+.meals-day-header {
+    font-weight: 600;
+    color: #2d3748;
+    margin-bottom: 6px;
+}
+.meals-day-date {
+    color: #a0aec0;
+    font-weight: 400;
+    font-size: 13px;
+    margin-left: 8px;
+}
+
+.meals-slot {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 3px 8px;
+    margin: 2px 0;
+    border-left: 3px solid transparent;
+    border-radius: 0 4px 4px 0;
+    font-size: 14px;
+}
+.meals-slot-anchor   { border-left-color: #d97706; background: #fff7ed; }
+.meals-slot-leftover { border-left-color: #6b7280; background: #f9fafb; }
+.meals-slot-flex     { border-left-color: #3b82f6; background: #eff6ff; }
+.meals-slot-novel_try { border-left-color: #8b5cf6; background: #f5f3ff; }
+.meals-slot-skip     { border-left-color: #e2e8f0; background: #fafafa; color: #a0aec0; }
+
+.meals-window {
+    text-transform: capitalize;
+    color: #2d3748;
+    font-weight: 500;
+    min-width: 70px;
+}
+.meals-slot-type {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #718096;
+    min-width: 70px;
+}
+.meals-dish {
+    color: #1f2330;
+}
+.meals-note {
+    color: #718096;
+    font-style: italic;
+    font-size: 13px;
+}
+
+.meals-meta-line {
+    margin-top: 14px;
+    display: flex;
+    justify-content: space-between;
+    color: #a0aec0;
+    font-size: 12px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.meals-shopping-text {
+    background: #f7fafc;
+    border: 1px solid #edf2f7;
+    border-radius: 6px;
+    padding: 12px 14px;
+    margin: 0;
+    white-space: pre-wrap;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 13px;
+    color: #2d3748;
+}
+
+.meals-shopping-meta {
+    margin-top: 10px;
+    display: flex;
+    gap: 8px;
+}
+.meals-pill {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.meals-pill-doc   { background: #e0e7ff; color: #3730a3; }
+.meals-pill-adhoc { background: #fef3c7; color: #92400e; }
+
+.meals-empty {
+    color: #718096;
+    font-style: italic;
+    margin: 0;
+}
+
+.meals-recipient {
+    color: #4a5568;
+    font-size: 14px;
+    margin: 0 0 14px 0;
+}
+.meals-recipient code {
+    background: #edf2f7;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 13px;
+}
+
+.meals-send-btn {
+    background: #d97706;
+    color: white;
+    border: none;
+    padding: 10px 22px;
+    border-radius: 6px;
+    font-size: 15px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: background 0.15s;
+}
+.meals-send-btn:hover:not(:disabled) { background: #b45309; }
+.meals-send-btn:disabled { background: #d1d5db; cursor: wait; }
+
+.meals-send-status {
+    margin-top: 14px;
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-size: 14px;
+}
+.meals-send-pending { background: #f1f5f9; color: #475569; }
+.meals-send-ok      { background: #dcfce7; color: #166534; }
+.meals-send-err     { background: #fee2e2; color: #991b1b; }
+
+.meals-empty-state pre {
+    background: #1a202c;
+    color: #e2e8f0;
+    padding: 12px 14px;
+    border-radius: 6px;
+    overflow-x: auto;
+    font-size: 13px;
+}
