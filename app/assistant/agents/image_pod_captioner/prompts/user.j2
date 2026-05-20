@@ -1,0 +1,19 @@
+Current date and time: {{ date_time }}
+
+## The image
+Filename: {{ image_filename }}
+
+The image itself is provided as a multimodal input. Look at it.
+
+[emi_image: {{ image }}]
+
+## Trigger message (what the user wrote when they attached this image)
+{{ trigger_message }}
+
+## Surrounding chat (the few messages before/around)
+{{ chat_context_block }}
+
+---
+
+Caption this image. Bind the visual to the user's words. Output a
+strict AgentForm.

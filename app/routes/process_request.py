@@ -185,6 +185,29 @@ def handle_normal_processing(text, socket_id, speaking_mode, timer_id, request_i
                 attachment_record["pod_id"] = pod.pod_id
                 logger.info("[process_request] minted image pod %s for request_id=%s",
                             pod.pod_id, request_id)
+
+                # Async enrichment: scene_analyzer-equivalent runs vision +
+                # surrounding chat → writes one_liner/body/tags back to the
+                # pod. Non-blocking so the chat turn doesn't wait on the
+                # vision LLM. The pod is searchable+queryable within seconds.
+                try:
+                    from app.assistant.pod_store.image_pod_enrichment import enrich_image_pod
+                    from app.assistant.runtime import start_monitored_thread as _start_thread
+                    _start_thread(
+                        owner="process_request",
+                        name=f"image-pod-enrich-{pod.pod_id[:24]}",
+                        target=enrich_image_pod,
+                        kwargs={
+                            "pod_id": pod.pod_id,
+                            "trigger_message": text or "",
+                            "chat_room_id": target_room,
+                        },
+                    )
+                except Exception as enrich_err:
+                    logger.warning(
+                        "[process_request] failed to spawn image-pod enrichment: %s",
+                        enrich_err,
+                    )
             except Exception as e:
                 logger.warning("[process_request] image_ingest failed: %s — chat will use legacy path marker", e)
                 logger.debug("image_ingest failure details", exc_info=True)
