@@ -33,7 +33,7 @@
         {% for day in grouped %}
         <section class="sub-day">
             <h2 class="sub-day-header">{{ day.date }}</h2>
-            {% for item in day.items %}
+            {% for item in day.intentions %}
             <div class="sub-item sub-item-{{ item.domain }}" data-pod-id="{{ item.pod_id }}">
                 <div class="sub-item-head">
                     <span class="sub-domain sub-domain-{{ item.domain }}">{{ item.domain }}</span>

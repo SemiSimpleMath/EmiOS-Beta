@@ -31,7 +31,7 @@ def subconscious_page():
     for row in rows:
         by_date.setdefault(row["date"], []).append(row)
     grouped = [
-        {"date": d, "items": by_date[d]}
+        {"date": d, "intentions": by_date[d]}
         for d in sorted(by_date.keys())
     ]
     return render_template(
