@@ -26,10 +26,22 @@ from app.assistant.utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 
-def apply_meal_proposer_output(output: Dict[str, Any]) -> Dict[str, Any]:
-    """Mint pods for each proposal + shopping_run + (optional) summary pod.
+def apply_daily_meal_proposer_output(output: Dict[str, Any]) -> Dict[str, Any]:
+    """Persist a daily_meal_proposer run: intention.meal pods per proposal
+    + small ShoppingRun pod (if any) + meal_set summary pod."""
+    return _apply_meal_proposer_output(output, agent_name="daily_meal_proposer")
 
-    Returns a summary dict for the runner to print.
+
+# Legacy alias kept for any straggling callers; prefer the named function.
+apply_meal_proposer_output = apply_daily_meal_proposer_output
+
+
+def _apply_meal_proposer_output(output: Dict[str, Any], *, agent_name: str) -> Dict[str, Any]:
+    """Shared persistence for the per-meal proposer (today, daily). Mints
+    intention.meal pods + optional intention.shopping pod + summary set pod.
+
+    NOTE: This does NOT handle weekly_shopping_list — that's part of the
+    weekly_meal_planner pipeline; see apply_weekly_meal_planner_output.
     """
     store = PodStore()
     now_utc_iso = datetime.now(timezone.utc).isoformat()
@@ -45,7 +57,7 @@ def apply_meal_proposer_output(output: Dict[str, Any]) -> Dict[str, Any]:
 
     # 1. One pod per proposal
     for prop in proposals:
-        pod_id = _mint_intention_meal_pod(store, prop, now_utc_iso)
+        pod_id = _mint_intention_meal_pod(store, prop, now_utc_iso, agent_name=agent_name)
         if pod_id:
             proposal_pod_ids.append(pod_id)
 
@@ -62,6 +74,7 @@ def apply_meal_proposer_output(output: Dict[str, Any]) -> Dict[str, Any]:
         free_form_thinking=free_form_thinking,
         skipped_meals=skipped_meals,
         now_utc_iso=now_utc_iso,
+        agent_name=agent_name,
     )
 
     return {
@@ -74,10 +87,177 @@ def apply_meal_proposer_output(output: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def apply_weekly_meal_planner_output(output: Dict[str, Any]) -> Dict[str, Any]:
+    """Persist a weekly_meal_planner run: mint a plan.weekly_meals pod
+    (the strategic 7-day skeleton) + create/replace the agent's weekly
+    shopping list Google Doc."""
+    store = PodStore()
+    now_utc_iso = datetime.now(timezone.utc).isoformat()
+
+    weekly_plan = output.get("weekly_plan") or {}
+    weekly_list = output.get("weekly_shopping_list") or {}
+    free_form_thinking = (output.get("free_form_thinking") or "").strip()
+    addressed_concern_ids = output.get("addressed_concern_ids") or []
+
+    plan_pod_id = _mint_weekly_plan_pod(
+        store=store,
+        weekly_plan=weekly_plan,
+        addressed_concern_ids=addressed_concern_ids,
+        free_form_thinking=free_form_thinking,
+        now_utc_iso=now_utc_iso,
+    )
+
+    weekly_action = (weekly_list.get("action") or "none").lower()
+    weekly_result = (
+        _apply_weekly_shopping_list(weekly_list)
+        if weekly_action in {"create", "replace"}
+        else {"action": "none"}
+    )
+
+    return {
+        "plan_pod_id": plan_pod_id,
+        "slot_count": len((weekly_plan.get("slots") or [])),
+        "anchor_meals": weekly_plan.get("anchor_meals") or [],
+        "weekly_list": weekly_result,
+        "addressed_concern_ids": addressed_concern_ids,
+    }
+
+
+def _apply_weekly_shopping_list(weekly_list: Dict[str, Any]) -> Dict[str, Any]:
+    """Materialize the agent's weekly shopping list: create_google_doc on
+    first run (bootstraps state), edit_google_doc thereafter. Updates the
+    weekly_doc_state on success.
+    """
+    from app.assistant.ServiceLocator.service_locator import DI
+    from app.assistant.subconscious.meal_context_builder import (
+        load_weekly_doc_state,
+        save_weekly_doc_state,
+    )
+    from app.assistant.utils.pydantic_classes import ToolMessage
+
+    action = (weekly_list.get("action") or "").lower()
+    body = (weekly_list.get("body_markdown") or "").strip()
+    week_start = weekly_list.get("week_start_date")
+    if action not in {"create", "replace"} or not body:
+        return {"action": "none", "reason": "empty_body_or_invalid_action"}
+
+    state = load_weekly_doc_state()
+    now_utc_iso = datetime.now(timezone.utc).isoformat()
+
+    if action == "create":
+        if state.get("doc_id"):
+            logger.warning(
+                "[meal_persist] weekly_list action=create but state already has doc_id=%s — "
+                "treating as replace instead.", state["doc_id"],
+            )
+            action = "replace"
+
+    if action == "create":
+        title = f"Emi weekly shopping list (started {week_start or now_utc_iso[:10]})"
+        try:
+            cls = DI.tool_registry.get_tool_class("create_google_doc")
+            if cls is None:
+                return {"action": action, "status": "tool_unavailable", "tool": "create_google_doc"}
+            tool = cls()
+            tm = ToolMessage(
+                tool_name="create_google_doc",
+                tool_data={"arguments": {"title": title, "body": body}},
+            )
+            result = tool.execute(tm)
+            data = getattr(result, "data", None) or {}
+            doc_id = data.get("document_id") or data.get("doc_id")
+            if not doc_id:
+                return {"action": action, "status": "create_returned_no_doc_id", "raw": str(data)[:240]}
+            state.update({
+                "doc_id": doc_id,
+                "doc_title": title,
+                "last_built_week_start": week_start,
+                "last_edit_at_utc": now_utc_iso,
+            })
+            save_weekly_doc_state(state)
+            return {"action": "create", "status": "ok", "doc_id": doc_id, "title": title}
+        except Exception as e:
+            logger.exception("[meal_persist] create_google_doc failed")
+            return {"action": action, "status": "exception", "error": str(e)[:240]}
+
+    # action == "replace"
+    # edit_google_doc is diff-based: find/replace. To overwrite the whole
+    # body, we first read the current body, then diff-replace the entire
+    # current body with the new body.
+    doc_id = state.get("doc_id")
+    if not doc_id:
+        return {"action": action, "status": "no_doc_id_in_state"}
+    try:
+        # 1. Read current body
+        get_cls = DI.tool_registry.get_tool_class("get_google_doc")
+        if get_cls is None:
+            return {"action": action, "status": "get_tool_unavailable"}
+        get_tool = get_cls()
+        get_tm = ToolMessage(
+            tool_name="get_google_doc",
+            tool_data={
+                "arguments": {"document_id": doc_id, "include_body": True, "max_chars": 100000},
+            },
+        )
+        get_result = get_tool.execute(get_tm)
+        get_data = getattr(get_result, "data", None) or {}
+        current_body = (get_data.get("body") or "").rstrip()
+        if not current_body:
+            # Empty doc — append the new body instead of diff (find="" is ambiguous)
+            edit_cls = DI.tool_registry.get_tool_class("edit_google_doc")
+            edit_tool = edit_cls()
+            edit_tm = ToolMessage(
+                tool_name="edit_google_doc",
+                tool_data={
+                    "arguments": {"document_id": doc_id, "operation": "append", "text": body},
+                },
+            )
+            edit_result = edit_tool.execute(edit_tm)
+            edit_data = getattr(edit_result, "data", None) or {}
+            status = "ok_via_append" if not edit_data.get("error_code") else "edit_failed"
+        else:
+            # 2. Diff-replace current body with new body
+            edit_cls = DI.tool_registry.get_tool_class("edit_google_doc")
+            edit_tool = edit_cls()
+            edit_tm = ToolMessage(
+                tool_name="edit_google_doc",
+                tool_data={
+                    "arguments": {
+                        "document_id": doc_id,
+                        "operation": "diff",
+                        "find": current_body,
+                        "replace_with": body,
+                    },
+                },
+            )
+            edit_result = edit_tool.execute(edit_tm)
+            edit_data = getattr(edit_result, "data", None) or {}
+            status = "ok" if not edit_data.get("error_code") else "edit_failed"
+
+        ok = status.startswith("ok")
+        if ok:
+            state.update({
+                "last_built_week_start": week_start or state.get("last_built_week_start"),
+                "last_edit_at_utc": now_utc_iso,
+            })
+            save_weekly_doc_state(state)
+        return {
+            "action": "replace",
+            "status": status,
+            "doc_id": doc_id,
+            "edit_data_preview": str(edit_data)[:200],
+        }
+    except Exception as e:
+        logger.exception("[meal_persist] edit_google_doc failed")
+        return {"action": action, "status": "exception", "error": str(e)[:240]}
+
+
 def _mint_intention_meal_pod(
     store: PodStore,
     proposal: Dict[str, Any],
     now_utc_iso: str,
+    *,
+    agent_name: str = "meal_proposer",
 ) -> Optional[str]:
     """One pod per proposed meal."""
     try:
@@ -144,7 +324,7 @@ def _mint_intention_meal_pod(
             source_refs=[],
             for_agents=[],
             scope_id=None,
-            created_by="meal_proposer",
+            created_by=agent_name,
             metadata={
                 "proposed_at_utc": now_utc_iso,
                 "actors": actors,
@@ -195,7 +375,7 @@ def _mint_intention_shopping_pod(
             source_refs=[],
             for_agents=[],
             scope_id=None,
-            created_by="meal_proposer",
+            created_by=agent_name,
             metadata={
                 "proposed_at_utc": now_utc_iso,
                 "suggested_date": suggested,
@@ -218,6 +398,7 @@ def _mint_intention_meal_set_pod(
     free_form_thinking: str,
     skipped_meals: List[str],
     now_utc_iso: str,
+    agent_name: str = "meal_proposer",
 ) -> Optional[str]:
     """One pod per meal_proposer run — captures narrative + advisory +
     references to all the per-meal/shopping pods. The digest reads this."""
@@ -262,7 +443,7 @@ def _mint_intention_meal_set_pod(
             source_refs=[],  # see note on intention.meal — same constraint
             for_agents=[],
             scope_id=None,
-            created_by="meal_proposer",
+            created_by=agent_name,
             metadata={
                 "proposed_at_utc": now_utc_iso,
                 "proposal_pod_ids": proposal_pod_ids,
@@ -275,4 +456,91 @@ def _mint_intention_meal_set_pod(
         return pod_id
     except Exception as e:
         logger.warning("[meal_persist] mint intention.meal_set failed: %s", e)
+        return None
+
+
+def _mint_weekly_plan_pod(
+    *,
+    store: PodStore,
+    weekly_plan: Dict[str, Any],
+    addressed_concern_ids: List[str],
+    free_form_thinking: str,
+    now_utc_iso: str,
+) -> Optional[str]:
+    """Mint the plan.weekly_meals pod that the daily_meal_proposer reads.
+
+    Body is a human-readable markdown rendering of the 7-day slot grid +
+    anchors + theme. Metadata carries the structured slot list for
+    programmatic readers.
+    """
+    try:
+        pod_id = f"datapod:plan.weekly_meals:{uuid.uuid4().hex[:24]}"
+        week_start = weekly_plan.get("week_start_date") or "?"
+        anchors = weekly_plan.get("anchor_meals") or []
+        slots = weekly_plan.get("slots") or []
+        theme = (weekly_plan.get("week_theme") or "").strip()
+
+        one_liner = f"Week of {week_start} — {len(slots)} slots, anchors: {', '.join(anchors[:3])}"
+
+        body_parts = [
+            f"# Weekly meal plan — week of {week_start}",
+            "",
+            f"**Theme:** {theme}" if theme else "",
+            "",
+            "**Anchor meals:** " + (", ".join(anchors) if anchors else "(none)"),
+            "",
+            "## Slots",
+        ]
+        # Group slots by date for readability
+        by_date: Dict[str, List[Dict[str, Any]]] = {}
+        for slot in slots:
+            d = slot.get("date") or "?"
+            by_date.setdefault(d, []).append(slot)
+        for date in sorted(by_date.keys()):
+            dow = by_date[date][0].get("day_of_week", "?")
+            body_parts.append(f"### {date} ({dow})")
+            for slot in by_date[date]:
+                window = slot.get("meal_window", "?")
+                slot_type = slot.get("slot_type", "?")
+                anchor_dish = slot.get("anchor_dish")
+                leftover_from = slot.get("leftover_from_date")
+                notes = (slot.get("notes") or "").strip()
+                tail_parts = []
+                if anchor_dish:
+                    tail_parts.append(f"dish: {anchor_dish}")
+                if leftover_from:
+                    tail_parts.append(f"from: {leftover_from}")
+                if notes:
+                    tail_parts.append(notes)
+                tail = " — " + " | ".join(tail_parts) if tail_parts else ""
+                body_parts.append(f"- **{window}** [{slot_type}]{tail}")
+            body_parts.append("")
+
+        if addressed_concern_ids:
+            body_parts += ["## Addresses concerns", *[f"- {cid}" for cid in addressed_concern_ids], ""]
+        if free_form_thinking:
+            body_parts += ["## Thinking", free_form_thinking]
+
+        pod = Pod(
+            pod_id=pod_id,
+            kind="plan.weekly_meals",
+            tags=["plan", "weekly_meals"],
+            one_liner=one_liner,
+            body="\n".join([p for p in body_parts if p is not None]),
+            source_refs=[],
+            for_agents=["daily_meal_proposer"],
+            scope_id=None,
+            created_by="weekly_meal_planner",
+            metadata={
+                "produced_at_utc": now_utc_iso,
+                "week_start_date": week_start,
+                "anchor_meals": anchors,
+                "slots": slots,
+                "addressed_concern_ids": addressed_concern_ids,
+            },
+        )
+        store.put(pod)
+        return pod_id
+    except Exception as e:
+        logger.warning("[meal_persist] mint plan.weekly_meals failed: %s", e)
         return None

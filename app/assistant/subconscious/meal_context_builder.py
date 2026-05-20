@@ -34,8 +34,30 @@ from app.assistant.utils.time_utils import get_local_time
 logger = get_logger(__name__)
 
 
-def build_meal_proposer_context() -> Dict[str, str]:
-    """Assemble the context dict for one meal_proposer run."""
+def build_weekly_meal_planner_context() -> Dict[str, str]:
+    """Context for weekly_meal_planner (strategic, full-week)."""
+    now_local = get_local_time()
+    household_members = _resolve_household_members()
+
+    return {
+        "date_time": now_local.strftime("%Y-%m-%d %H:%M %Z"),
+        "day_of_week": now_local.strftime("%A"),
+        "week_start_date": _compute_week_start_date(now_local),
+        "diet_log_7d": _build_diet_log(),
+        "inventory_snapshot": _build_inventory_snapshot(),
+        "recipes_house": _build_recipes_house_reference(),
+        "dietary_context": _build_dietary_context(household_members),
+        "food_calendar": _build_food_calendar(now_local=now_local),
+        "family_roster": _build_family_roster(household_members),
+        "addressable_concerns": _build_addressable_concerns(),
+        "fast_food_count_7d": _build_fast_food_count(),
+        "ralphs_standing_list": _build_ralphs_standing_list(),
+        "agent_weekly_list_state": _build_agent_weekly_list_state(),
+    }
+
+
+def build_daily_meal_proposer_context() -> Dict[str, str]:
+    """Context for daily_meal_proposer (tactical, 24-48h)."""
     now_local = get_local_time()
     household_members = _resolve_household_members()
 
@@ -51,6 +73,8 @@ def build_meal_proposer_context() -> Dict[str, str]:
         "family_roster": _build_family_roster(household_members),
         "addressable_concerns": _build_addressable_concerns(),
         "fast_food_count_7d": _build_fast_food_count(),
+        "latest_weekly_plan": _build_latest_weekly_plan(),
+        "ralphs_standing_list": _build_ralphs_standing_list(),
     }
 
 
@@ -220,3 +244,150 @@ def _build_fast_food_count() -> str:
     keywords = ("delivery", "doordash", "uber eats", "restaurant", "fast food", "mcd", "takeout")
     count = sum(1 for k in keywords if k in text)
     return f"{count} (rough scan; structured fast-food tagging is Phase 1b)"
+
+
+# ── Phase 1c.1: external lists (Ralphs standing + agent's weekly) ─────────
+
+
+_EXTERNAL_LISTS_REL = "resources/subconscious/resource_meal_proposer_external_lists.json"
+_WEEKLY_DOC_STATE_REL = "resources/subconscious/resource_meal_proposer_weekly_doc_state.json"
+
+
+def _load_external_lists() -> Dict[str, Any]:
+    path = get_repo_root() / _EXTERNAL_LISTS_REL
+    if not path.is_file():
+        return {"lists": []}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.warning("[meal_context] external_lists parse failed: %s", e)
+        return {"lists": []}
+
+
+def load_weekly_doc_state() -> Dict[str, Any]:
+    """Public — also used by meal_persist."""
+    path = get_repo_root() / _WEEKLY_DOC_STATE_REL
+    if not path.is_file():
+        return {"doc_id": None, "doc_title": None, "last_built_week_start": None, "last_edit_at_utc": None}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.warning("[meal_context] weekly_doc_state parse failed: %s", e)
+        return {"doc_id": None, "doc_title": None, "last_built_week_start": None, "last_edit_at_utc": None}
+
+
+def save_weekly_doc_state(state: Dict[str, Any]) -> None:
+    path = get_repo_root() / _WEEKLY_DOC_STATE_REL
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _build_ralphs_standing_list() -> str:
+    """Read the Ralphs doc (Jukka's standing list of staples) via
+    get_google_doc tool. Read-only — the proposer never edits this list."""
+    lists = _load_external_lists().get("lists") or []
+    ralphs = next((l for l in lists if (l.get("name") or "").lower() == "ralphs"), None)
+    if not ralphs:
+        return "(no Ralphs list configured in resource_meal_proposer_external_lists.json)"
+    doc_id = ralphs.get("doc_id")
+    if not doc_id or "REPLACE_WITH_REAL" in str(doc_id):
+        return "(Ralphs doc_id not set in config; placeholder still in place)"
+
+    body = _fetch_google_doc_body(doc_id)
+    if body is None:
+        return f"(Ralphs doc {doc_id} could not be read — google auth issue?)"
+
+    return (
+        "Jukka's standing Ralphs list (READ-ONLY, these items are staples he "
+        "always buys — treat them as 'about to be acquired' and DON'T include "
+        "them in your weekly shopping list or shopping_run):\n\n"
+        f"{body.strip() or '(doc is empty)'}"
+    )
+
+
+def _build_agent_weekly_list_state() -> str:
+    """Read the agent's own per-week shopping list (if it exists) via
+    get_google_doc tool. Used so weekly_plan ticks can see the current state
+    before replacing it, and daily ticks can read what's already there."""
+    state = load_weekly_doc_state()
+    doc_id = state.get("doc_id")
+    last_built = state.get("last_built_week_start")
+    if not doc_id:
+        return (
+            "(No agent weekly list doc yet — this is bootstrap. On the next "
+            "weekly_plan tick, set weekly_shopping_list.action='create' and "
+            "provide body_markdown + week_start_date; persist will create the "
+            "doc and store its id.)"
+        )
+
+    body = _fetch_google_doc_body(doc_id)
+    if body is None:
+        return f"(agent weekly list doc {doc_id} could not be read)"
+
+    return (
+        f"Agent's current weekly shopping list doc (doc_id={doc_id}, "
+        f"last_built_week_start={last_built}):\n\n"
+        f"{body.strip() or '(doc is empty)'}"
+    )
+
+
+def _fetch_google_doc_body(doc_id: str, *, max_chars: int = 8000) -> Optional[str]:
+    """Single shared fetcher. Uses the get_google_doc tool via ToolRegistry."""
+    try:
+        from app.assistant.ServiceLocator.service_locator import DI
+        from app.assistant.utils.pydantic_classes import ToolMessage
+
+        cls = DI.tool_registry.get_tool_class("get_google_doc")
+        if cls is None:
+            logger.warning("[meal_context] get_google_doc tool unavailable")
+            return None
+        tool = cls()
+        tm = ToolMessage(
+            tool_name="get_google_doc",
+            tool_data={
+                "arguments": {
+                    "document_id": doc_id,
+                    "include_body": True,
+                    "max_chars": max_chars,
+                },
+            },
+        )
+        result = tool.execute(tm)
+        data = getattr(result, "data", None) or {}
+        body = data.get("body")
+        if body is None:
+            return None
+        return str(body)
+    except Exception as e:
+        logger.warning("[meal_context] fetch google doc %s failed: %s", doc_id, e)
+        return None
+
+
+# ── Phase 1c.2: helpers for the weekly/daily split ────────────────────────
+
+
+def _compute_week_start_date(now_local: datetime) -> str:
+    """ISO date of the Monday on or before now_local."""
+    days_since_monday = now_local.weekday()  # Monday = 0
+    monday = (now_local - timedelta(days=days_since_monday)).date()
+    return monday.isoformat()
+
+
+def _build_latest_weekly_plan() -> str:
+    """Read the most recent plan.weekly_meals pod (from weekly_meal_planner).
+    The daily proposer reads this to know which slots are anchor/leftover/flex
+    for the next 24-48h. Falls back gracefully when no plan exists."""
+    try:
+        from app.assistant.pod_store.pod_store import PodStore
+        store = PodStore()
+        since = datetime.now(timezone.utc) - timedelta(days=10)
+        results = store.query(kind="plan.weekly_meals", since_utc=since, limit=5)
+    except Exception as e:
+        logger.warning("[meal_context] weekly plan fetch failed: %s", e)
+        return "(no weekly plan available — propose from inventory + recipes + concerns; set fills_weekly_plan_slot=null)"
+
+    if not results:
+        return "(no weekly plan pod exists yet — run weekly_meal_planner first; propose from inventory + recipes + concerns; set fills_weekly_plan_slot=null)"
+
+    latest = results[0]
+    return f"{latest.one_liner}\n\n{latest.body}"

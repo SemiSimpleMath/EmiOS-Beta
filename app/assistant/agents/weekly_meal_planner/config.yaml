@@ -1,4 +1,4 @@
-name: meal_proposer
+name: weekly_meal_planner
 class_name: Agent
 action_required: false
 llm_params:
@@ -6,9 +6,9 @@ llm_params:
   engine: "gpt-5.4-mini"
   model_tier: "smart"
 
-# v0 (Phase 1a): no tools yet. Context is fully pre-injected via the
-# wrapping context_builder. Stage 2 research (web_manager calls for
-# new restaurants / recipes / sale prices) is Phase 1c.
+# Single-shot strategic planner. Pre-fetched context (inventory + Ralphs +
+# concerns + recipes_house + family roster) is enough; the persist layer
+# handles google_docs side effects (create/replace the weekly shopping doc).
 allowed_tools: []
 except_tools: []
 allowed_nodes: []
@@ -17,15 +17,17 @@ accept_auto_skills: false
 user_context_items:
   - date_time
   - day_of_week
+  - week_start_date
   - diet_log_7d
   - inventory_snapshot
   - recipes_house
   - dietary_context
   - food_calendar
-  - general_calendar
   - family_roster
   - addressable_concerns
   - fast_food_count_7d
+  - ralphs_standing_list
+  - agent_weekly_list_state
 
 system_context_items:
   - resource_user_data

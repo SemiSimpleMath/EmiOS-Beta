@@ -1,0 +1,42 @@
+Current date and time: {{ date_time }}
+Day of week: {{ day_of_week }}
+
+## Latest weekly plan (from weekly_meal_planner)
+This is the strategic skeleton — slot types per day. Turn the relevant
+slots for the next 24-48h into specific dishes.
+{{ latest_weekly_plan }}
+
+## What's been eaten — last 7 days
+{{ diet_log_7d }}
+
+## Current kitchen inventory (USE SOON items get priority)
+{{ inventory_snapshot }}
+
+## Recipes the family cooks regularly
+{{ recipes_house }}
+
+## Dietary context
+{{ dietary_context }}
+
+## Already-planned meals (Food calendar, next 7 days)
+{{ food_calendar }}
+
+## Today's general calendar (work, family time, etc. — affects meal timing)
+{{ general_calendar }}
+
+## Family roster (who's home for which meals)
+{{ family_roster }}
+
+## Concerns routed to meal_proposer
+{{ addressable_concerns }}
+
+## Fast-food count, last 7 days
+{{ fast_food_count_7d }}
+
+## Jukka's standing Ralphs list (read-only context)
+{{ ralphs_standing_list }}
+
+---
+
+Propose concrete meals for the next 24-48h per the weekly plan + today's
+reality. Output an AgentForm.

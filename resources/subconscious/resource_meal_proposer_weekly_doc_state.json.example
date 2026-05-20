@@ -1,0 +1,8 @@
+{
+  "_doc": "Tracks the agent's own per-week shopping list Google Doc. Bootstrap: on the first weekly_plan tick when doc_id is null, meal_persist creates a new doc and stores the id here. Subsequent weekly ticks edit the same doc.",
+  "schema_version": 1,
+  "doc_id": null,
+  "doc_title": null,
+  "last_built_week_start": null,
+  "last_edit_at_utc": null
+}

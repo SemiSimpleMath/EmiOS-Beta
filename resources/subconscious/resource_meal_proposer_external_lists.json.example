@@ -1,0 +1,14 @@
+{
+  "_doc": "External shopping/meal-related documents the meal_proposer can fetch on demand via the get_google_doc tool. Used when the proposer is about to emit a shopping_run — it should first consider what's already on the user's existing lists to avoid duplicates.",
+  "schema_version": 1,
+  "lists": [
+    {
+      "name": "Ralphs",
+      "purpose": "user's running grocery list for Ralphs (their primary supermarket)",
+      "doc_id": "REPLACE_WITH_REAL_DOC_ID",
+      "doc_title_hint": "doc_draft_XXXXX",
+      "fetch_when": "before emitting any shopping_run — items already on Ralphs are about to be acquired; treat them as pending inventory",
+      "edit_allowed": false
+    }
+  ]
+}
