@@ -1,0 +1,16 @@
+Current date and time: {{ date_time }}
+
+## Recent user messages to scan
+Each line: [chat_msg_id] timestamp: message
+{{ recent_user_messages }}
+
+## Active shopping intentions (intention.shopping pods that haven't been applied to inventory yet)
+{{ active_shopping_intentions }}
+
+## Active meal intentions (intention.meal pods that haven't been applied to inventory yet)
+{{ active_meal_intentions }}
+
+---
+
+Scan the user messages for grocery intents per your system prompt.
+Output an AgentForm.

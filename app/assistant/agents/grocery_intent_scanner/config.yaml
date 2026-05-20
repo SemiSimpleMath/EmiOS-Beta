@@ -1,0 +1,21 @@
+name: grocery_intent_scanner
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5-mini"
+  model_tier: "mini"
+
+# Cheap classifier — no tools, single pass over recent chat + active pods.
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+accept_auto_skills: false
+
+user_context_items:
+  - date_time
+  - recent_user_messages
+  - active_shopping_intentions
+  - active_meal_intentions
+
+system_context_items: []

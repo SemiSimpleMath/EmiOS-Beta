@@ -228,6 +228,8 @@ resources/user/.setup_draft.json
 resources/subconscious/resource_concerns_register.json
 resources/subconscious/resource_subconscious_tick_log.jsonl
 resources/subconscious/resource_digest_state.json
+resources/subconscious/resource_grocery_inventory.json
+resources/subconscious/resource_grocery_sync_state.json
 app/subconscious_digests/
 
 # Identity images (profile photos of user / family / pets / places)

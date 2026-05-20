@@ -58,32 +58,21 @@ def build_meal_proposer_context() -> Dict[str, str]:
 
 
 def _build_inventory_snapshot() -> str:
-    """Read resource_grocery_inventory.json — empty in Phase 1a.
+    """Render current grocery inventory via grocery_inventory.render_inventory_summary.
 
-    Phase 1b wires the chat handlers for "I did groceries" / "I had X" to
-    update this state file. For now, return an empty stub and let the
-    proposer propose from-scratch shopping for whatever it wants.
+    State is populated by run_grocery_sync (Phase 1b): the scanner agent
+    detects "I did groceries" / "I had the salmon" / "we ran out of X" in
+    recent chat and applies the corresponding intention.shopping or
+    intention.meal pod's items to inventory, plus daily decay.
+
+    Returns a markdown summary grouped by category with USE-SOON callouts.
     """
-    path = get_repo_root() / "resources" / "subconscious" / "resource_grocery_inventory.json"
-    if not path.is_file():
-        return "(empty — inventory tracking not yet active; the proposer should assume nothing is on hand and emit a shopping_run for any proposal needing ingredients)"
+    from app.assistant.subconscious.grocery_inventory import render_inventory_summary
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        return render_inventory_summary()
     except Exception as e:
-        logger.warning("[meal_context] inventory parse failed: %s", e)
+        logger.warning("[meal_context] inventory render failed: %s", e)
         return "(error reading inventory)"
-
-    items = data.get("items") or []
-    if not items:
-        return "(inventory currently empty)"
-
-    lines = ["Current inventory:"]
-    for item in items:
-        name = item.get("name", "?")
-        category = item.get("category", "?")
-        decay = item.get("decay_at", "?")
-        lines.append(f"- {name} ({category}) — decays {decay}")
-    return "\n".join(lines)
 
 
 def _build_recipes_house_reference() -> str:

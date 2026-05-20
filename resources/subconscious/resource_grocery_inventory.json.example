@@ -1,0 +1,7 @@
+{
+  "_doc": "Grocery inventory state. Mutated by run_grocery_sync (via grocery_intent_scanner): adds items when user confirms a shopping trip, removes items when user confirms a meal was eaten. Daily decay moves past-expiry items to history. Per-category default decay: fresh_fish 3d, fresh_meat 4d, fresh_produce 7d, dairy 10d, bread 5d, frozen 60d, pantry 180d.",
+  "schema_version": 1,
+  "last_updated_utc": null,
+  "items": [],
+  "history": []
+}
