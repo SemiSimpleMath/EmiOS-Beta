@@ -60,24 +60,29 @@ volume as evidence) rather than each individual gripe.
 
 ## addressable_by routing for friction-derived pattern_drift
 
-| Friction kind on subject                          | Route to                                            |
-|---------------------------------------------------|-----------------------------------------------------|
-| fatigue_loading / observed_decline about a person | [meal_proposer, wellness_proposer, chat_brain]       |
-| missed_routine about food/eating                  | [meal_proposer, chat_brain]                         |
-| missed_routine about exercise                     | [wellness_proposer, chat_brain]                      |
-| complaint about household objects / tools         | [chat_brain]                                        |
-| tension between household members                 | [chat_brain, family_proposer]                       |
-| complaint about work                              | [chat_brain]                                        |
+| Friction kind on subject                          | Route to                                                       |
+|---------------------------------------------------|----------------------------------------------------------------|
+| fatigue_loading / observed_decline about a person | [meal_proposer, wellness_proposer, chat_brain]                 |
+| missed_routine about food/eating                  | [meal_proposer, chat_brain]                                    |
+| missed_routine about exercise                     | [wellness_proposer, chat_brain]                                |
+| complaint about household objects / tools         | [chat_brain]                                                   |
+| tension between Jukka and Katy specifically       | [romantic_proposer, chat_brain]                                |
+| tension between household members (general)       | [chat_brain, family_proposer]                                  |
+| Katy stress / hard week mention                   | [romantic_proposer, chat_brain]                                |
+| quality time drift (last date night was >Nweeks)  | [romantic_proposer]                                            |
+| complaint about work                              | [chat_brain]                                                   |
 
 ## Other addressable_by examples
 
-| Concern                                | Route to                                        |
-|----------------------------------------|-------------------------------------------------|
-| "Annika skipping breakfast"            | [meal_proposer]                                 |
-| "Jukka sleep degraded"                 | [meal_proposer, wellness_proposer, chat_brain]   |
-| "Dog boarding before June 12 trip"     | [personal_admin, dayflow_orchestrator]          |
-| "Trending device → gift for Jouko"     | [chat_brain]                                    |
-| "Memorial Day pickup shift"            | [dayflow_orchestrator]                          |
+| Concern                                | Route to                                                  |
+|----------------------------------------|-----------------------------------------------------------|
+| "Annika skipping breakfast"            | [meal_proposer]                                           |
+| "Jukka sleep degraded"                 | [meal_proposer, wellness_proposer, chat_brain]            |
+| "Anniversary in 3 weeks, nothing planned" | [romantic_proposer]                                    |
+| "Katy mentioned wanting to try X restaurant" | [romantic_proposer, meal_proposer]                  |
+| "Dog boarding before June 12 trip"     | [personal_admin, dayflow_orchestrator]                    |
+| "Trending device → gift for Jouko"     | [chat_brain]                                              |
+| "Memorial Day pickup shift"            | [dayflow_orchestrator]                                    |
 
 ## Friction detection — concrete patterns to watch for
 

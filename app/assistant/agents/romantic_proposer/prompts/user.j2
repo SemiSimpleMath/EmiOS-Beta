@@ -1,0 +1,43 @@
+Current date and time: {{ date_time }}
+Day of week: {{ day_of_week }}
+
+## Recent relationship signals (last 30 days)
+What's actually happened — past dates, gestures, conflicts, quality
+time. Used to calibrate next-step + avoid repeats.
+{{ relationship_signal_30d }}
+
+## Key dates (anniversary, birthdays, etc.)
+Anchors. If a date is within ~4 weeks, anniversary_prep proposals are
+expected. Otherwise just keep them in mind.
+{{ key_dates }}
+
+## Already-planned meals (Food calendar, next 14 days)
+Don't propose a date night out on a night when family dinner is
+already calendared. Friday Night Meats is family-anchored — don't bump.
+{{ food_calendar }}
+
+## Already-planned wellness (Wellness calendar, next 14 days)
+Don't double-book against workout time.
+{{ wellness_calendar }}
+
+## General calendar (work + family events, next 7 days)
+Busy work weeks → bias toward small_gesture + quality_time, NOT
+high-friction proposals.
+{{ general_calendar }}
+
+## Family roster (who's home / who's traveling)
+{{ family_roster }}
+
+## Concerns routed to romantic_proposer
+Most likely: quality-time drift, Katy stress, anniversary approaching.
+{{ addressable_concerns }}
+
+## Recent romantic intentions (don't repeat unless intentionally routine)
+{{ recent_romantic_intentions }}
+
+---
+
+Propose small, calibrated relationship intentions for the next 7-14
+days. Address routed concerns. Anchor on key_dates. Bias small +
+familiar. Output an AgentForm. 0 proposals + skipped_today is a
+valid answer when signal is thin.
