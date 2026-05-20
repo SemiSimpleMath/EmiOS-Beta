@@ -280,6 +280,14 @@ class RoutineManager:
             if not folder.is_dir():
                 continue
             for f in sorted(folder.glob("*.json")):
+                # Skip derived-artifact siblings that share the routine
+                # directory but aren't routine configs. The conventional
+                # suffix is `<name>.compiled.json` (task_compile_manager
+                # output — consumed by task_ir_runtime, not us). Filename
+                # convention is the signal; routine configs are bare
+                # `<name>.json` directly under public/ or private/.
+                if f.name.endswith(".compiled.json"):
+                    continue
                 entry = read_json_file(f)
                 if not isinstance(entry, dict):
                     logger.warning("[routine_manager] %s did not parse as a dict; skipping", f)
