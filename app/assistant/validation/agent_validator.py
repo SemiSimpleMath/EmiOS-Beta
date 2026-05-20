@@ -1,7 +1,7 @@
 import re
 from pathlib import Path
 import yaml
-from jinja2 import Environment, meta as jinja_meta
+from jinja2 import Environment, meta as jinja_meta, nodes as jinja_nodes
 from app.assistant.agent_registry.agent_registry import AgentRegistry
 from app.assistant.utils.logging_config import get_logger
 
@@ -191,6 +191,27 @@ def _check_undeclared_template_vars(registry: AgentRegistry):
                 )
                 return
             referenced = jinja_meta.find_undeclared_variables(ast)
+            # jinja_meta.find_undeclared_variables only excludes assignments at
+            # the top-level of the template. {% set X = ... %} inside a loop
+            # or conditional still appears in `referenced`. Walk the AST and
+            # collect every Name used as the LHS of any Assign / AssignBlock
+            # node so locally-set vars don't trigger false-positive warnings.
+            locally_set: set = set()
+            for node in ast.find_all((jinja_nodes.Assign, jinja_nodes.AssignBlock)):
+                target = getattr(node, "target", None)
+                if isinstance(target, jinja_nodes.Name):
+                    locally_set.add(target.name)
+                elif isinstance(target, jinja_nodes.Tuple):
+                    # {% set a, b = ... %} — pull each Name from the tuple
+                    for item in getattr(target, "items", []) or []:
+                        if isinstance(item, jinja_nodes.Name):
+                            locally_set.add(item.name)
+            # Also collect names introduced by {% with X = ... %} blocks
+            for node in ast.find_all(jinja_nodes.With):
+                for tnode in getattr(node, "targets", []) or []:
+                    if isinstance(tnode, jinja_nodes.Name):
+                        locally_set.add(tnode.name)
+
             declared = set(config.get(context_key) or [])
             # A declared field SATISFIES itself OR its parent (per SUB_COMPONENT_MAP).
             satisfied: set = set()
@@ -200,7 +221,7 @@ def _check_undeclared_template_vars(registry: AgentRegistry):
                 if parent:
                     satisfied.add(parent)
 
-            missing = referenced - satisfied - _FRAMEWORK_BUILTINS
+            missing = referenced - satisfied - _FRAMEWORK_BUILTINS - locally_set
             for var in sorted(missing):
                 logger.warning(
                     "%s: %s.j2 references {{ %s }} but %s does NOT declare it. "
