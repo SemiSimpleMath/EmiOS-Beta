@@ -49,12 +49,23 @@ class EntityInjector:
     def get_injection_keys() -> set[str]:
         return set(ENTITY_INJECTION_KEYS)
 
-    def format_entity_cards_leveled(self, entities: List[str], *, level: int = 1) -> str:
+    def format_entity_cards_leveled(
+        self,
+        entities: List[str],
+        *,
+        level: int = 1,
+        sections: list[str] | None = None,
+    ) -> str:
         """Render detected entities using the view-level system.
 
         Reads entirely through ``get_entity_card_for_prompt_injection_level``
         which is backed by entity_card_v2. Returns empty for entities without
         an active v2 card.
+
+        When `sections` is provided it overrides `level`: render exactly the
+        named card sections (in order). Used by agents whose context budget
+        should be narrower than any whole level — e.g. personal_admin wants
+        only level_0 + contact, not the L3 superset.
         """
         if not entities:
             return ""
@@ -62,7 +73,9 @@ class EntityInjector:
         blocks: list[str] = []
         try:
             for name in entities:
-                rendered = get_entity_card_for_prompt_injection_level(session, name, level=level)
+                rendered = get_entity_card_for_prompt_injection_level(
+                    session, name, level=level, sections=sections,
+                )
                 if rendered:
                     blocks.append(rendered)
         finally:
@@ -124,6 +137,17 @@ class EntityInjector:
             # entity_key_facts as individual keys) was removed when v1 was
             # retired — no production agents requested those keys.
             card_level = int((agent.config or {}).get("entity_card_level", 1))
+            # entity_card_sections, when set, overrides the level for the
+            # `entity_card` key only. Per-level aliases (entity_level_0,
+            # entity_summary, ...) keep their fixed semantics so an agent that
+            # asks for entity_summary still gets a summary even if its
+            # entity_card has been narrowed to level_0 + contact.
+            raw_sections = (agent.config or {}).get("entity_card_sections")
+            card_sections: list[str] | None = (
+                [str(x) for x in raw_sections if isinstance(x, str) and x.strip()]
+                if isinstance(raw_sections, list) and raw_sections
+                else None
+            )
             level_by_key = {
                 "entity_level_0": 0,
                 "entity_summary": 1,
@@ -136,8 +160,9 @@ class EntityInjector:
             }
             for key in entity_injection_keys:
                 level = level_by_key.get(key, card_level)
+                use_sections = card_sections if key == "entity_card" else None
                 final_context[key] = self.format_entity_cards_leveled(
-                    final_entities, level=level,
+                    final_entities, level=level, sections=use_sections,
                 )
             return template.render(**final_context).replace("\n\n", "\n")
         except Exception as e:

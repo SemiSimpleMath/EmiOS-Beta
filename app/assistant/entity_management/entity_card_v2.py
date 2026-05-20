@@ -320,7 +320,7 @@ def bullet_cap_for_section(section_name: str) -> int:
 # --- Prompt-injection renderer ---------------------------------------------
 
 def render_v2_card_for_prompt_injection_level(
-    session, entity_name: str, *, level: int = 1,
+    session, entity_name: str, *, level: int = 1, sections: list[str] | None = None,
 ) -> str:
     """Look up a v2 card by entity_name and render to text at the given level.
 
@@ -332,6 +332,15 @@ def render_v2_card_for_prompt_injection_level(
       L2 — L1 + bullet sections that describe what they are/do
       L3 — L2 + contact section
       L4 — L3 + relationships + aliases
+
+    When `sections` is provided it overrides `level`: render exactly the
+    listed sections in their natural order. Use this when an agent needs a
+    non-superset slice (e.g. personal_admin wants `level_0` + `contact` but
+    not the middle facts/summary that L3 would pull in). Section names match
+    SECTION_TEMPLATES keys: 'level_0', 'summary', 'alias', 'contact',
+    'connection_to_user', 'where_they_are', 'what_they_do', 'notes',
+    'current_connections', 'general_facts', 'location', 'characteristics',
+    'content_summary', 'connections', 'definition', 'relevance'.
 
     Lookup is by card_title directly — no KG node detour — so non-kg
     cards (user-authored, entity_node_id IS NULL) are first-class.
@@ -364,13 +373,13 @@ def render_v2_card_for_prompt_injection_level(
         )
     card = matches[0]
 
-    sections = (
+    all_sections = (
         session.query(EntityCardSection)
         .filter(EntityCardSection.card_id == card.id)
         .order_by(EntityCardSection.position)
         .all()
     )
-    by_name = {s.section_name: s for s in sections}
+    by_name = {s.section_name: s for s in all_sections}
 
     def _bullets(s: EntityCardSection) -> list[str]:
         if s is None:
@@ -380,6 +389,55 @@ def render_v2_card_for_prompt_injection_level(
             .filter(EntityCardBullet.section_id == s.id)
             .order_by(EntityCardBullet.position).all()
         ]
+
+    # Explicit section-list override — render exactly the requested
+    # sections and skip the level-based bundles. Section kind comes from
+    # SECTION_TEMPLATES (BULLETS vs intro-text). LEVEL_0 is always
+    # intro-text and rendered without a label since it is the entity's
+    # tagline. SUMMARY / ALIAS / CONTACT are also intro-text-typed in
+    # the templates — but in practice contact data lives in bullets
+    # (see contact_section_builder), so we render contact as bullets
+    # when bullets exist and fall back to intro_text otherwise.
+    if sections:
+        parts: list[str] = [f"{entity_name} ({card.entity_type})"]
+        bullet_set = {'connection_to_user', 'where_they_are', 'what_they_do',
+                      'notes', 'current_connections', 'general_facts',
+                      'location', 'characteristics', 'content_summary',
+                      'connections', 'definition', 'relevance'}
+        for sn in sections:
+            s = by_name.get(sn)
+            if s is None:
+                continue
+            if sn == LEVEL_0:
+                if s.intro_text:
+                    parts.append(s.intro_text.strip())
+                continue
+            if sn == CONTACT:
+                # Contact data is bullets in practice. Use them when
+                # present; only fall back to intro_text if bullets empty.
+                lines = [f"• {b}" for b in _bullets(s)]
+                if lines:
+                    parts.append("Contact:")
+                    parts.extend(lines)
+                elif s.intro_text:
+                    parts.append("Contact:")
+                    for line in s.intro_text.splitlines():
+                        if line.strip():
+                            parts.append(f"  {line.strip()}")
+                continue
+            if sn in bullet_set:
+                lines = [f"• {b}" for b in _bullets(s)]
+                if lines:
+                    parts.append(f"{sn}:")
+                    parts.extend(lines)
+                continue
+            # SUMMARY / ALIAS / anything else: intro_text-typed.
+            if s.intro_text:
+                parts.append(f"{sn}:")
+                for line in s.intro_text.splitlines():
+                    if line.strip():
+                        parts.append(f"  {line.strip()}")
+        return "\n".join(parts).strip() if len(parts) > 1 else ""
 
     # L0 — bare one-liner
     if level == 0:

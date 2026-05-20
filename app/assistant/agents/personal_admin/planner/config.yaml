@@ -45,7 +45,15 @@ allowed_tools:
 except_tools: []
 allowed_nodes: [personal_admin::final_answer]
 entity_scan_keys: [incoming_message, task, information, recent_history]
+# personal_admin's job is email/calendar/todo/reminders. For each entity it
+# only needs the name (level_0) + how to reach them (contact). The L3
+# superset would also pull in life-context facts (where_they_are,
+# what_they_do, notes) which are irrelevant for routing email or scheduling
+# events. `entity_card_sections` overrides the level for the entity_card key.
 entity_card_level: 3
+entity_card_sections:
+  - level_0
+  - contact
 
 user_context_items:
   - date_time
