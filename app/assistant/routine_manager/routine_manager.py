@@ -67,8 +67,13 @@ class RoutineRunState:
     # from on_error.backoff after each failure so retries don't hammer.
     next_attempt_after_utc: Optional[str] = None
     # Sticky reason text for why the routine is currently auto-disabled.
-    # Cleared when the user re-enables via the admin UI.
+    # Cleared when the user re-enables via the admin UI OR an auto-recovery
+    # probe succeeds (see _maybe_recover_from_auto_disable).
     auto_disabled_reason: Optional[str] = None
+    # ISO timestamp set when _disable_routine_in_status fires AND each time a
+    # probe attempt fails. Used by the probe scheduler to space retries by
+    # on_error.auto_retry_after_seconds.
+    auto_disabled_at_utc: Optional[str] = None
 
 
 @dataclass
@@ -184,8 +189,19 @@ class RoutineManager:
 
         for routine in routines:
             if not routine.enabled:
-                logger.info("Routine skipped: %s (disabled)", routine.routine_id)
-                continue
+                # Auto-recovery probe: if the routine was auto-disabled (not
+                # manually disabled by user) AND on_error.auto_retry_after_seconds
+                # has elapsed since the disable timestamp, allow ONE probe
+                # attempt this tick. Success will clear the disable; failure
+                # pushes auto_disabled_at_utc forward for the next probe.
+                probe_entry = self._get_state_entry(routine.routine_id)
+                if not self._is_probe_due(routine, probe_entry, now_utc):
+                    logger.info("Routine skipped: %s (disabled)", routine.routine_id)
+                    continue
+                logger.info(
+                    "[routine_manager] PROBE attempt: %s (auto-recovery)",
+                    routine.routine_id,
+                )
             # Event-triggered routines fire on event_hub publish, not on the
             # polling refresh tick. Skip them here so _should_run isn't called
             # against them and they don't fight the time-policy machinery.
@@ -461,6 +477,12 @@ class RoutineManager:
                 "backoff_base_seconds": int(raw_on_error.get("backoff_base_seconds", 60)),
                 "backoff_max_seconds": int(raw_on_error.get("backoff_max_seconds", 3600)),
                 "then": str(raw_on_error.get("then", "disable_with_ticket")).strip().lower(),
+                # 0 = no auto-recovery (disabled stays disabled until user toggles
+                # in /routines). >0 = probe interval in seconds; after this much
+                # time since auto_disabled_at_utc, the routine gets ONE attempt;
+                # success clears the disable, failure pushes auto_disabled_at_utc
+                # forward so the next probe waits another interval.
+                "auto_retry_after_seconds": int(raw_on_error.get("auto_retry_after_seconds", 0)),
             }
             if on_error["then"] not in ("disable_with_ticket", "log_only"):
                 raise ValueError(
@@ -600,6 +622,7 @@ class RoutineManager:
             consecutive_failures=int(data.get("consecutive_failures") or 0),
             next_attempt_after_utc=data.get("next_attempt_after_utc"),
             auto_disabled_reason=data.get("auto_disabled_reason"),
+            auto_disabled_at_utc=data.get("auto_disabled_at_utc"),
         )
 
     def _update_state_entry(self, routine_id: str, entry: RoutineRunState) -> None:
@@ -619,7 +642,7 @@ class RoutineManager:
                     "last_finished_utc", "last_duration_s", "last_target_date",
                     "last_runner", "last_status", "last_error", "run_count",
                     "consecutive_failures", "next_attempt_after_utc",
-                    "auto_disabled_reason",
+                    "auto_disabled_reason", "auto_disabled_at_utc",
                 }:
                     preserved[k] = v
         routines[routine_id] = {
@@ -637,6 +660,7 @@ class RoutineManager:
             "consecutive_failures": entry.consecutive_failures,
             "next_attempt_after_utc": entry.next_attempt_after_utc,
             "auto_disabled_reason": entry.auto_disabled_reason,
+            "auto_disabled_at_utc": entry.auto_disabled_at_utc,
         }
 
     def _should_run(
@@ -957,6 +981,105 @@ class RoutineManager:
         )
         decision_log.record(
             routine_id=routine_id, event="auto_disabled", reason=reason,
+        )
+
+    def _is_probe_due(
+        self,
+        routine: RoutineConfig,
+        entry: RoutineRunState,
+        now_utc: datetime,
+    ) -> bool:
+        """True iff this auto-disabled routine should attempt an auto-recovery
+        probe this tick. Requires (a) auto_disabled_reason actually set (so
+        a user-toggled disable doesn't auto-recover), (b) on_error.auto_retry_after_seconds > 0,
+        (c) enough time elapsed since auto_disabled_at_utc."""
+        if not entry.auto_disabled_reason:
+            return False
+        retry_after = int((routine.on_error or {}).get("auto_retry_after_seconds") or 0)
+        if retry_after <= 0:
+            return False
+        if not entry.auto_disabled_at_utc:
+            # Disabled but no timestamp — odd state; allow the first probe so
+            # the routine doesn't get stuck.
+            return True
+        try:
+            disabled_at = datetime.fromisoformat(
+                entry.auto_disabled_at_utc.replace("Z", "+00:00")
+            )
+        except (ValueError, AttributeError):
+            return True
+        if disabled_at.tzinfo is None:
+            disabled_at = disabled_at.replace(tzinfo=timezone.utc)
+        elapsed = (now_utc - disabled_at).total_seconds()
+        return elapsed >= retry_after
+
+    def _clear_auto_disable_in_status(self, routine_id: str, run_id: str) -> None:
+        """Probe succeeded — flip enabled=true and clear auto_disabled fields."""
+        from app.assistant.utils.path_utils import get_resources_dir
+        path = Path(get_resources_dir()) / "resource_routine_status.json"
+        with self._state_lock:
+            data: Dict[str, Any] = {}
+            if path.exists():
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                except Exception:
+                    data = {}
+            routines = data.setdefault("routines", {})
+            if not isinstance(routines, dict):
+                routines = {}
+                data["routines"] = routines
+            entry = routines.get(routine_id) if isinstance(routines.get(routine_id), dict) else {}
+            entry["enabled"] = True
+            entry["auto_disabled_reason"] = None
+            entry["auto_disabled_at_utc"] = None
+            entry["consecutive_failures"] = 0
+            routines[routine_id] = entry
+            tmp = path.with_suffix(path.suffix + ".tmp")
+            with tmp.open("w", encoding="utf-8", newline="\n") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+                f.write("\n")
+                f.flush()
+            tmp.replace(path)
+        logger.warning(
+            "[routine_manager] AUTO-RECOVERED routine %s after successful probe (run_id=%s)",
+            routine_id, run_id,
+        )
+        decision_log.record(
+            routine_id=routine_id, event="auto_recovered",
+            reason="probe attempt succeeded after auto-disable",
+        )
+
+    def _bump_probe_timestamp_in_status(
+        self, routine_id: str, now_utc: datetime,
+    ) -> None:
+        """Probe failed — push auto_disabled_at_utc forward so the next probe
+        waits another auto_retry_after_seconds. Keeps the routine disabled,
+        no new ticket fired."""
+        from app.assistant.utils.path_utils import get_resources_dir
+        path = Path(get_resources_dir()) / "resource_routine_status.json"
+        with self._state_lock:
+            data: Dict[str, Any] = {}
+            if path.exists():
+                try:
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                except Exception:
+                    data = {}
+            routines = data.setdefault("routines", {})
+            if not isinstance(routines, dict):
+                routines = {}
+                data["routines"] = routines
+            entry = routines.get(routine_id) if isinstance(routines.get(routine_id), dict) else {}
+            entry["auto_disabled_at_utc"] = now_utc.isoformat()
+            routines[routine_id] = entry
+            tmp = path.with_suffix(path.suffix + ".tmp")
+            with tmp.open("w", encoding="utf-8", newline="\n") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+                f.write("\n")
+                f.flush()
+            tmp.replace(path)
+        logger.info(
+            "[routine_manager] probe failed for %s; next probe in auto_retry_after_seconds",
+            routine_id,
         )
 
     def _surface_auto_disable_ticket(
@@ -1312,6 +1435,12 @@ class RoutineManager:
                     finished_at_utc=finished_at_utc,
                 ),
             )
+            # Was this run a probe attempt? If the entry still carries an
+            # auto_disabled_reason at finalize, the routine was disabled when
+            # we started — this was a recovery probe (only allowed by the run
+            # loop's _is_probe_due check). Handle the two probe outcomes here
+            # so we don't re-fire the disable-with-ticket path on probe failure.
+            was_probe = bool(updated_entry.auto_disabled_reason)
             if succeeded:
                 decision_log.record(
                     routine_id=routine.routine_id, event="succeeded",
@@ -1325,6 +1454,8 @@ class RoutineManager:
                     run_id,
                     duration_s,
                 )
+                if was_probe:
+                    self._clear_auto_disable_in_status(routine.routine_id, run_id)
             else:
                 decision_log.record(
                     routine_id=routine.routine_id, event="failed",
@@ -1339,10 +1470,16 @@ class RoutineManager:
                     duration_s,
                     error,
                 )
-                # Hit the auto-disable threshold? Flip enabled=false in the
-                # status file and surface a ticket. log_only mode skips
-                # the disable + ticket but still logs.
-                self._maybe_auto_disable_after_failure(routine, updated_entry, error)
+                if was_probe:
+                    # Already disabled; just push the next probe forward. No
+                    # new ticket — the user already got one when this routine
+                    # was originally auto-disabled.
+                    self._bump_probe_timestamp_in_status(routine.routine_id, finished_at_utc)
+                else:
+                    # Hit the auto-disable threshold? Flip enabled=false in
+                    # the status file and surface a ticket. log_only mode
+                    # skips the disable + ticket but still logs.
+                    self._maybe_auto_disable_after_failure(routine, updated_entry, error)
 
     def _capacity_alert_cooldown_seconds(self, config: Dict[str, Any]) -> int:
         value = int(config.get("capacity_alert_cooldown_seconds") or self._DEFAULT_ALERT_COOLDOWN_SECONDS)
