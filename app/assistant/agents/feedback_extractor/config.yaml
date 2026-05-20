@@ -1,0 +1,25 @@
+name: feedback_extractor
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.1"
+  model_tier: "smart"
+
+# Reads unprocessed user feedback.comment pods + their target pods (the
+# intentions the user was commenting on) and extracts belief updates
+# for the household belief store. Smart tier — interpreting user intent
+# from short comments is judgment work, not boilerplate. No tools.
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+accept_auto_skills: false
+
+user_context_items:
+  - date_time
+  - day_of_week
+  - unprocessed_comments_block
+  - recent_existing_beliefs
+
+system_context_items:
+  - resource_user_data

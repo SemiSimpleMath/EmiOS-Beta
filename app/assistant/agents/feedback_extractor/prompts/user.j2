@@ -1,0 +1,19 @@
+Current date and time: {{ date_time }}
+Day of week: {{ day_of_week }}
+
+## Unprocessed user comments
+Each entry shows the comment text, the target pod it was attached to,
+and the target pod's summary so you know what the user was commenting on.
+{{ unprocessed_comments_block }}
+
+## Recent existing beliefs (for key reuse)
+A sample of beliefs already in the store for the relevant domains.
+USE THESE belief_keys when a comment reinforces or contradicts an
+existing belief — don't invent a new key for the same preference.
+{{ recent_existing_beliefs }}
+
+---
+
+Extract belief updates from the unprocessed comments per the rules in
+your system prompt. When a comment doesn't yield a clear extraction,
+record it in skipped with a one-line reason. Output an AgentForm.
