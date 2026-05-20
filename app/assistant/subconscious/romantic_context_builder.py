@@ -19,6 +19,7 @@ from app.assistant.subconscious.context_builder import (
     _build_calendar_today_tomorrow,
     _build_family_roster,
     _resolve_household_members,
+    build_weekly_schedule_block,
     _NO_DATA_FMT,
 )
 from app.assistant.utils.logging_config import get_logger
@@ -44,6 +45,7 @@ def build_romantic_proposer_context() -> Dict[str, str]:
         "addressable_concerns": _build_addressable_concerns(),
         "recent_romantic_intentions": _build_recent_romantic_intentions(),
         "key_dates": _build_key_dates(now_local=now_local),
+        "weekly_schedule": build_weekly_schedule_block(),
     }
 
 

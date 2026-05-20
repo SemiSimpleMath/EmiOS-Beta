@@ -18,6 +18,7 @@ from app.assistant.subconscious.context_builder import (
     _build_calendar_today_tomorrow,
     _build_family_roster,
     _resolve_household_members,
+    build_weekly_schedule_block,
     _NO_DATA_FMT,
 )
 from app.assistant.utils.logging_config import get_logger
@@ -41,6 +42,7 @@ def build_wellness_proposer_context() -> Dict[str, str]:
         "family_roster": _build_family_roster(household_members),
         "addressable_concerns": _build_addressable_concerns(),
         "recent_wellness_intentions": _build_recent_wellness_intentions(),
+        "weekly_schedule": build_weekly_schedule_block(),
     }
 
 

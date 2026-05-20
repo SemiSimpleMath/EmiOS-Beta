@@ -27,6 +27,7 @@ user_context_items:
   - fast_food_count_7d
   - latest_weekly_plan
   - ralphs_standing_list
+  - weekly_schedule
 
 system_context_items:
   - resource_user_data

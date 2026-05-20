@@ -1,0 +1,32 @@
+name: scheduler_arbiter
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.1"
+  model_tier: "smart"
+
+# The subconscious's single weekly scheduler. Reads all intention.*
+# proposals from meal / wellness / romantic for the next 14 days,
+# resolves conflicts using priority rules as guidance + LLM judgment
+# in context, and emits the authoritative plan.weekly_schedule pod
+# that proposers honor on their next run. Smart tier — this is a
+# judgment call, not boilerplate. No tools for v0.
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+accept_auto_skills: false
+
+user_context_items:
+  - date_time
+  - day_of_week
+  - week_start_date
+  - candidate_intentions
+  - existing_schedule
+  - key_dates
+  - family_roster
+  - household_calendar
+
+system_context_items:
+  - resource_user_data
+  - resource_scheduler_priority_rules

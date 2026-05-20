@@ -25,6 +25,7 @@ from app.assistant.subconscious.context_builder import (
     _build_family_roster,
     _build_kg_household_digests,
     _resolve_household_members,
+    build_weekly_schedule_block,
     _NO_DATA_FMT,
 )
 from app.assistant.utils.logging_config import get_logger
@@ -75,6 +76,7 @@ def build_daily_meal_proposer_context() -> Dict[str, str]:
         "fast_food_count_7d": _build_fast_food_count(),
         "latest_weekly_plan": _build_latest_weekly_plan(),
         "ralphs_standing_list": _build_ralphs_standing_list(),
+        "weekly_schedule": build_weekly_schedule_block(),
     }
 
 

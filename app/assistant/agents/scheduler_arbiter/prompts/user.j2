@@ -1,0 +1,33 @@
+Current date and time: {{ date_time }}
+Day of week: {{ day_of_week }}
+Week start (ISO Monday): {{ week_start_date }}
+
+## Candidate intentions (next 14 days, from all proposers)
+Every fresh intention.* pod. Resolve conflicts, accept the non-conflicting,
+emit a single coherent schedule.
+{{ candidate_intentions }}
+
+## Existing weekly schedule (last arbiter run, if any)
+Reference only — your new output supersedes this. Useful for noting what
+was committed previously.
+{{ existing_schedule }}
+
+## Key dates (anniversary, birthdays, anchor events)
+Hard precedence anchors. Anything in their +/- window deserves a careful
+look.
+{{ key_dates }}
+
+## Family roster (who's home / traveling)
+Affects whether a proposal is even viable.
+{{ family_roster }}
+
+## Household calendar (Google Calendar, next 14 days)
+HARD CONSTRAINTS — these events already exist; the user put them there.
+Any intention that conflicts with these LOSES.
+{{ household_calendar }}
+
+---
+
+Produce the authoritative weekly schedule. Mark anchors with is_anchor=true.
+Trace accepted items to their source_intention_pod_id. Resolve conflicts
+explicitly; punt the hard ones to the user. Output an AgentForm.

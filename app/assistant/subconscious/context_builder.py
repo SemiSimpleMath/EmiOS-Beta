@@ -622,3 +622,29 @@ def _build_dayflow_recent(*, now_utc: datetime, hours: int = 48, limit: int = 10
 def _build_watchlist_summary() -> str:
     """Pass B only. v0: not yet wired. Will read resource_subconscious_watchlist.md later."""
     return "(watchlist not yet configured — Pass B should be skipped this tick)"
+
+
+def build_weekly_schedule_block() -> str:
+    """Render the latest plan.weekly_schedule pod for proposer context.
+
+    The scheduler_arbiter is the sole producer of plan.weekly_schedule pods.
+    Every proposer (meal, wellness, romantic) reads this block and treats
+    its `is_anchor` items as LOCKED constraints. Non-anchor items are
+    scheduled-but-flex (the proposer can move them if context warrants).
+
+    Returns a multi-line block ready for direct interpolation into a
+    proposer's user.j2. Falls back gracefully when no schedule has been
+    generated yet (first run / arbiter never invoked)."""
+    try:
+        from app.assistant.pod_store.pod_store import PodStore
+        store = PodStore()
+        results = store.query(kind="plan.weekly_schedule", since="10d", limit=1)
+    except Exception as e:
+        logger.warning("[context_builder] weekly_schedule fetch failed: %s", e)
+        return "(no weekly schedule readable — plan independently and let scheduler_arbiter resolve)"
+
+    if not results:
+        return "(no weekly schedule exists yet — first arbiter run hasn't happened. Plan independently; arbiter resolves conflicts after.)"
+
+    latest = results[0]
+    return f"{latest.one_liner}\n\n{latest.body}"
