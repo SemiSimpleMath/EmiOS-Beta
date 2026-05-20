@@ -28,6 +28,7 @@ from .smart_home_bridge import smart_home_bridge_bp
 from .insights import insights_bp
 from .meals import meals_bp
 from .subconscious import subconscious_bp
+from .pod_api import pod_api_bp
 
 # KG/Graph Visualizer routes
 try:

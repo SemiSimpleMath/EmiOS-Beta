@@ -191,6 +191,8 @@ def create_app(config_class="config.DevelopmentConfig"):
     app.register_blueprint(meals_bp)
     from app.routes.subconscious import subconscious_bp
     app.register_blueprint(subconscious_bp)
+    from app.routes.pod_api import pod_api_bp
+    app.register_blueprint(pod_api_bp)
     from app.routes.task_graph_route import task_graph_bp
     app.register_blueprint(task_graph_bp)
     from app.routes.doc_route import doc_bp

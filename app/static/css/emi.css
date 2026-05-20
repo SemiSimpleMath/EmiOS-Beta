@@ -1261,3 +1261,22 @@ footer.shrink:hover {
   border: 1px solid rgba(0,0,0,0.15);
   margin-top: 0.5rem;
 }
+
+/* Inline-rendered image pods (datapod:image:...) — chat_render.js
+   replaces any image-pod URI in bot/user message text with one of
+   these <img> tags pointing at /api/pods/<id>/image. */
+.chat-pod-image-link {
+  display: inline-block;
+  text-decoration: none;
+  margin: 0.25rem 0;
+}
+.chat-pod-image {
+  display: block;
+  max-width: 320px;
+  max-height: 320px;
+  width: auto;
+  height: auto;
+  border-radius: 8px;
+  border: 1px solid rgba(0,0,0,0.15);
+  cursor: zoom-in;
+}
