@@ -41,7 +41,23 @@
                 {% set ns = namespace(prev_date='') %}
                 {% for slot in plan.slots %}
                     {% if slot.date != ns.prev_date %}
-                        {% if ns.prev_date %}</div>{% endif %}
+                        {% if ns.prev_date %}
+                            {# close per-day comments for the previous date #}
+                            {% set prev_comments = plan_comments_by_scope.get(ns.prev_date, []) %}
+                            {% if prev_comments %}
+                            <div class="meals-day-comments">
+                                <span class="meals-comments-label">Comments ({{ prev_comments|length }})</span>
+                                {% for c in prev_comments %}
+                                <div class="meals-comment"><span class="meals-comment-ts">{{ c.submitted_at_utc }}</span><span class="meals-comment-text">{{ c.text }}</span></div>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
+                            <div class="meals-day-comment-form" data-pod-id="{{ plan.pod_id }}" data-scope="{{ ns.prev_date }}">
+                                <textarea class="meals-comment-input" placeholder="Comment on {{ ns.prev_date }} — '{{ ns.prev_date }} dinner was great', 'skip Friday Night Meats this week', etc." rows="2"></textarea>
+                                <button class="meals-comment-submit">Submit</button>
+                                <div class="meals-comment-status" hidden></div>
+                            </div>
+                        </div>{% endif %}
                         <div class="meals-day">
                             <div class="meals-day-header">{{ slot.day_of_week }} <span class="meals-day-date">{{ slot.date }}</span></div>
                         {% set ns.prev_date = slot.date %}
@@ -54,7 +70,36 @@
                         {% if slot.notes %}<span class="meals-note">{{ slot.notes }}</span>{% endif %}
                     </div>
                 {% endfor %}
-                {% if plan.slots %}</div>{% endif %}
+                {% if plan.slots %}
+                    {% set last_comments = plan_comments_by_scope.get(ns.prev_date, []) %}
+                    {% if last_comments %}
+                    <div class="meals-day-comments">
+                        <span class="meals-comments-label">Comments ({{ last_comments|length }})</span>
+                        {% for c in last_comments %}
+                        <div class="meals-comment"><span class="meals-comment-ts">{{ c.submitted_at_utc }}</span><span class="meals-comment-text">{{ c.text }}</span></div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                    <div class="meals-day-comment-form" data-pod-id="{{ plan.pod_id }}" data-scope="{{ ns.prev_date }}">
+                        <textarea class="meals-comment-input" placeholder="Comment on {{ ns.prev_date }}" rows="2"></textarea>
+                        <button class="meals-comment-submit">Submit</button>
+                        <div class="meals-comment-status" hidden></div>
+                    </div>
+                </div>{% endif %}
+            </div>
+
+            <div class="meals-week-comment-block">
+                <span class="meals-comments-label">Comments on this week (whole-plan)</span>
+                {% if plan_comments_section %}
+                {% for c in plan_comments_section %}
+                <div class="meals-comment"><span class="meals-comment-ts">{{ c.submitted_at_utc }}</span><span class="meals-comment-text">{{ c.text }}</span></div>
+                {% endfor %}
+                {% endif %}
+                <div class="meals-day-comment-form" data-pod-id="{{ plan.pod_id }}" data-scope="">
+                    <textarea class="meals-comment-input" placeholder="Comment on the week as a whole — calibration, redirection, what worked." rows="2"></textarea>
+                    <button class="meals-comment-submit">Submit</button>
+                    <div class="meals-comment-status" hidden></div>
+                </div>
             </div>
 
             {% if plan.addressed_concern_ids %}
@@ -79,6 +124,12 @@
                 <div class="meals-shopping-meta">
                     {% if weekly_doc_present %}<span class="meals-pill meals-pill-doc">weekly list from doc</span>{% endif %}
                     {% if ad_hoc_count %}<span class="meals-pill meals-pill-adhoc">{{ ad_hoc_count }} ad-hoc</span>{% endif %}
+                </div>
+
+                <div class="meals-day-comment-form" data-pod-id="{{ plan.pod_id }}" data-scope="shopping">
+                    <textarea class="meals-comment-input" placeholder="Comment on the shopping list — 'we already have eggs', 'try thai ingredients next week', etc." rows="2"></textarea>
+                    <button class="meals-comment-submit">Submit</button>
+                    <div class="meals-comment-status" hidden></div>
                 </div>
             {% else %}
                 <p class="meals-empty">No shopping list yet — the weekly planner builds this when it runs.</p>
@@ -108,6 +159,51 @@
     </div>
 
     <script>
+    // Comment submission handler — shared by every comment form on this page.
+    (function () {
+        document.querySelectorAll('.meals-day-comment-form').forEach((form) => {
+            const podId = form.dataset.podId;
+            const scope = form.dataset.scope || null;
+            const input = form.querySelector('.meals-comment-input');
+            const submit = form.querySelector('.meals-comment-submit');
+            const status = form.querySelector('.meals-comment-status');
+            submit.addEventListener('click', async () => {
+                const text = (input.value || '').trim();
+                if (!text) {
+                    status.hidden = false;
+                    status.className = 'meals-comment-status meals-status-err';
+                    status.textContent = 'Type a comment first.';
+                    return;
+                }
+                submit.disabled = true;
+                status.hidden = false;
+                status.className = 'meals-comment-status meals-status-pending';
+                status.textContent = 'Submitting...';
+                try {
+                    const resp = await fetch('/subconscious/comment', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({target_pod_id: podId, text, target_scope: scope}),
+                    });
+                    const data = await resp.json();
+                    if (data.status === 'ok') {
+                        status.className = 'meals-comment-status meals-status-ok';
+                        status.textContent = 'Saved.';
+                        input.value = '';
+                    } else {
+                        status.className = 'meals-comment-status meals-status-err';
+                        status.textContent = 'Failed: ' + (data.message || 'unknown error');
+                    }
+                } catch (e) {
+                    status.className = 'meals-comment-status meals-status-err';
+                    status.textContent = 'Network error: ' + e.message;
+                } finally {
+                    submit.disabled = false;
+                }
+            });
+        });
+    })();
+
     (function () {
         const btn = document.getElementById('send-katy-btn');
         const statusEl = document.getElementById('send-status');

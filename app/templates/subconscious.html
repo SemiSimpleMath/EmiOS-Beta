@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Subconscious — {{ assistant_name }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/subconscious.css') }}?v={{ static_v }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="sub-container">
+        <header class="sub-header">
+            <h1><i class="fas fa-brain"></i> Subconscious suggestions</h1>
+            <a href="/chat_bot" class="back-link"><i class="fas fa-arrow-left"></i> Back to Chat</a>
+        </header>
+
+        <p class="sub-intro">
+            Every proposal the subconscious has minted for the next 14 days,
+            grouped by date. Write a comment on anything — vetoes, calibration,
+            redirection ("less of X, more of Y"), positive signal. Comments
+            become beliefs the system learns from.
+        </p>
+
+        {% if item_count == 0 %}
+        <section class="sub-empty">
+            <h2>No intentions in the next 14 days</h2>
+            <p>The proposers haven't run yet, or there's nothing scheduled.
+            Comments will show up here as proposals arrive.</p>
+        </section>
+        {% else %}
+        <p class="sub-count"><strong>{{ item_count }}</strong> intention(s) across {{ grouped|length }} day(s)</p>
+
+        {% for day in grouped %}
+        <section class="sub-day">
+            <h2 class="sub-day-header">{{ day.date }}</h2>
+            {% for item in day.items %}
+            <div class="sub-item sub-item-{{ item.domain }}" data-pod-id="{{ item.pod_id }}">
+                <div class="sub-item-head">
+                    <span class="sub-domain sub-domain-{{ item.domain }}">{{ item.domain }}</span>
+                    <span class="sub-subkind">{{ item.subkind }}</span>
+                    {% if item.proposed_start_local %}
+                    <span class="sub-time">{{ item.proposed_start_local }}</span>
+                    {% endif %}
+                    {% if item.duration_minutes %}
+                    <span class="sub-duration">{{ item.duration_minutes }} min</span>
+                    {% endif %}
+                    {% if item.intensity %}
+                    <span class="sub-intensity sub-intensity-{{ item.intensity }}">{{ item.intensity }}</span>
+                    {% endif %}
+                    {% if item.cost_estimate_usd is not none and item.cost_estimate_usd > 0 %}
+                    <span class="sub-cost">${{ item.cost_estimate_usd }}</span>
+                    {% endif %}
+                </div>
+                <p class="sub-summary">{{ item.summary }}</p>
+                <div class="sub-meta">
+                    {% if item.actors %}<span>{{ item.actors|join(', ') }}</span>{% endif %}
+                    {% if item.source %}<span class="sub-source">{{ item.source }}</span>{% endif %}
+                    {% if item.confidence %}<span class="sub-conf">conf: {{ item.confidence }}</span>{% endif %}
+                    {% if item.novelty and item.novelty != 'familiar' %}<span class="sub-nov">{{ item.novelty }}</span>{% endif %}
+                </div>
+
+                {% if item.comments %}
+                <div class="sub-comments-list">
+                    <span class="sub-comments-label">Comments ({{ item.comments_count }})</span>
+                    {% for c in item.comments %}
+                    <div class="sub-comment">
+                        <span class="sub-comment-ts">{{ c.submitted_at_utc }}</span>
+                        {% if c.target_scope %}<span class="sub-comment-scope">{{ c.target_scope }}</span>{% endif %}
+                        <span class="sub-comment-text">{{ c.text }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+
+                <div class="sub-comment-form">
+                    <textarea
+                      class="sub-comment-input"
+                      placeholder="Add a comment — veto, calibration, redirection, positive note. The system reads these to learn what you want."
+                      data-pod-id="{{ item.pod_id }}"
+                      rows="2"></textarea>
+                    <button class="sub-comment-submit" data-pod-id="{{ item.pod_id }}">
+                        <i class="fas fa-paper-plane"></i> Submit
+                    </button>
+                </div>
+                <div class="sub-comment-status" hidden></div>
+            </div>
+            {% endfor %}
+        </section>
+        {% endfor %}
+        {% endif %}
+    </div>
+
+    <script>
+    (function () {
+        const buttons = document.querySelectorAll('.sub-comment-submit');
+        buttons.forEach((btn) => {
+            btn.addEventListener('click', async () => {
+                const podId = btn.dataset.podId;
+                const item = btn.closest('.sub-item');
+                const input = item.querySelector('.sub-comment-input');
+                const status = item.querySelector('.sub-comment-status');
+                const text = (input.value || '').trim();
+                if (!text) {
+                    status.hidden = false;
+                    status.className = 'sub-comment-status sub-status-err';
+                    status.textContent = 'Type a comment first.';
+                    return;
+                }
+                btn.disabled = true;
+                status.hidden = false;
+                status.className = 'sub-comment-status sub-status-pending';
+                status.textContent = 'Submitting...';
+                try {
+                    const resp = await fetch('/subconscious/comment', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ target_pod_id: podId, text }),
+                    });
+                    const data = await resp.json();
+                    if (data.status === 'ok') {
+                        status.className = 'sub-comment-status sub-status-ok';
+                        status.textContent = 'Saved — the system will incorporate this on the next belief tick.';
+                        input.value = '';
+                        // Re-render comments list inline
+                        rerenderComments(item, data.comments || []);
+                    } else {
+                        status.className = 'sub-comment-status sub-status-err';
+                        status.textContent = 'Failed: ' + (data.message || 'unknown error');
+                    }
+                } catch (e) {
+                    status.className = 'sub-comment-status sub-status-err';
+                    status.textContent = 'Network error: ' + e.message;
+                } finally {
+                    btn.disabled = false;
+                }
+            });
+        });
+
+        function rerenderComments(item, comments) {
+            let list = item.querySelector('.sub-comments-list');
+            if (!comments.length) return;
+            if (!list) {
+                list = document.createElement('div');
+                list.className = 'sub-comments-list';
+                const label = document.createElement('span');
+                label.className = 'sub-comments-label';
+                list.appendChild(label);
+                item.insertBefore(list, item.querySelector('.sub-comment-form'));
+            }
+            // Replace content
+            list.innerHTML = '';
+            const label = document.createElement('span');
+            label.className = 'sub-comments-label';
+            label.textContent = 'Comments (' + comments.length + ')';
+            list.appendChild(label);
+            for (const c of comments) {
+                const div = document.createElement('div');
+                div.className = 'sub-comment';
+                const ts = document.createElement('span');
+                ts.className = 'sub-comment-ts';
+                ts.textContent = c.submitted_at_utc || '';
+                div.appendChild(ts);
+                if (c.target_scope) {
+                    const sc = document.createElement('span');
+                    sc.className = 'sub-comment-scope';
+                    sc.textContent = c.target_scope;
+                    div.appendChild(sc);
+                }
+                const txt = document.createElement('span');
+                txt.className = 'sub-comment-text';
+                txt.textContent = c.text || '';
+                div.appendChild(txt);
+                list.appendChild(div);
+            }
+        }
+    })();
+    </script>
+</body>
+</html>

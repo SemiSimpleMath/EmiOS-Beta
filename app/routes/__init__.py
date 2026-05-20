@@ -27,6 +27,7 @@ from .kg_maintenance import kg_maintenance_bp
 from .smart_home_bridge import smart_home_bridge_bp
 from .insights import insights_bp
 from .meals import meals_bp
+from .subconscious import subconscious_bp
 
 # KG/Graph Visualizer routes
 try:

@@ -239,6 +239,88 @@ body {
 .meals-send-ok      { background: #dcfce7; color: #166534; }
 .meals-send-err     { background: #fee2e2; color: #991b1b; }
 
+/* Per-day + per-section comment forms (feedback surface) */
+.meals-day-comments {
+    margin: 8px 0 4px 0;
+    padding: 8px 12px;
+    background: #f8fafc;
+    border-radius: 6px;
+    border: 1px solid #edf2f7;
+}
+.meals-week-comment-block {
+    margin-top: 18px;
+    padding: 12px 14px;
+    background: #fafafa;
+    border: 1px solid #edf2f7;
+    border-radius: 8px;
+}
+.meals-comments-label {
+    display: block;
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    color: #718096;
+    margin-bottom: 4px;
+}
+.meals-comment {
+    padding: 4px 0;
+    border-top: 1px solid #edf2f7;
+    font-size: 13px;
+    line-height: 1.5;
+}
+.meals-comment:first-of-type { border-top: none; }
+.meals-comment-ts {
+    color: #a0aec0;
+    font-size: 11px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    margin-right: 8px;
+}
+.meals-comment-text { color: #1f2330; }
+
+.meals-day-comment-form {
+    display: flex;
+    gap: 8px;
+    margin: 8px 0 12px 0;
+    align-items: flex-start;
+}
+.meals-comment-input {
+    flex: 1;
+    border: 1px solid #cbd5e0;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 13px;
+    font-family: inherit;
+    resize: vertical;
+    min-height: 34px;
+}
+.meals-comment-input:focus {
+    outline: none;
+    border-color: #d97706;
+    box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.15);
+}
+.meals-comment-submit {
+    background: #d97706;
+    color: white;
+    border: none;
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    align-self: flex-start;
+}
+.meals-comment-submit:hover:not(:disabled) { background: #b45309; }
+.meals-comment-submit:disabled { background: #d1d5db; cursor: wait; }
+
+.meals-comment-status {
+    margin-left: 4px;
+    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: 4px;
+}
+.meals-status-pending { background: #f1f5f9; color: #475569; }
+.meals-status-ok      { background: #dcfce7; color: #166534; }
+.meals-status-err     { background: #fee2e2; color: #991b1b; }
+
 .meals-empty-state pre {
     background: #1a202c;
     color: #e2e8f0;

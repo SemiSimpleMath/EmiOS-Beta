@@ -106,14 +106,18 @@ def build_shopping_text(*, doc_body: Optional[str], ad_hoc_pods: List[Pod]) -> s
 
 def build_page_view_model() -> Dict[str, Any]:
     """Everything the /meals template needs to render: the latest plan
-    pod's structured slots, the consolidated shopping text, and the
-    target recipient. Empty values when nothing has been generated yet."""
+    pod's structured slots, the consolidated shopping text, the target
+    recipient, AND any feedback comments attached to the plan pod (so
+    the user can see their past comments inline)."""
+    from app.assistant.subconscious.feedback_service import fetch_comments_for
+
     plan_pod = load_latest_weekly_plan_pod()
     doc_body = fetch_weekly_shopping_doc_body()
     ad_hoc_pods = load_recent_intention_shopping_pods()
     shopping_text = build_shopping_text(doc_body=doc_body, ad_hoc_pods=ad_hoc_pods)
 
     plan_view: Optional[Dict[str, Any]] = None
+    plan_comments: list = []
     if plan_pod is not None:
         meta = plan_pod.metadata or {}
         plan_view = {
@@ -125,9 +129,24 @@ def build_page_view_model() -> Dict[str, Any]:
             "theme": _extract_theme(plan_pod.body or ""),
             "addressed_concern_ids": list(meta.get("addressed_concern_ids") or []),
         }
+        plan_comments = fetch_comments_for(plan_pod.pod_id, limit=20)
+
+    # Group plan comments by target_scope (date) so per-day comment lists
+    # render alongside each day in the grid. Comments with scope=None
+    # appear at the section-level.
+    plan_comments_by_scope: Dict[str, list] = {}
+    plan_comments_section: list = []
+    for c in plan_comments:
+        scope = c.get("target_scope")
+        if scope:
+            plan_comments_by_scope.setdefault(str(scope), []).append(c)
+        else:
+            plan_comments_section.append(c)
 
     return {
         "plan": plan_view,
+        "plan_comments_by_scope": plan_comments_by_scope,
+        "plan_comments_section": plan_comments_section,
         "shopping_text": shopping_text,
         "weekly_doc_present": bool(doc_body),
         "ad_hoc_count": len(consolidate_intention_shopping(ad_hoc_pods)),
