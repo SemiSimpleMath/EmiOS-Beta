@@ -1,0 +1,32 @@
+Current date and time: {{ date_time }}
+Day of week: {{ day_of_week }}
+
+## Activity log — last 7 days
+What's actually been done. Sleep debt + hard sessions here = bias
+toward recovery.
+{{ activity_log_7d }}
+
+## Sleep log — last 7 days
+Dominant input. Short nights compound; protect recovery.
+{{ sleep_log_7d }}
+
+## Already-scheduled wellness events (next 7 days)
+Don't double-book. Build around these.
+{{ wellness_calendar }}
+
+## Today's general calendar (work, family time, etc. — affects timing)
+{{ general_calendar }}
+
+## Family roster (who's home / available for shared activities)
+{{ family_roster }}
+
+## Concerns routed to wellness_proposer
+{{ addressable_concerns }}
+
+## Recent wellness intentions (don't repeat unless intentionally routine)
+{{ recent_wellness_intentions }}
+
+---
+
+Propose concrete wellness intentions for the next 24-48h. Address routed
+concerns. Adapt to sleep + activity reality. Output an AgentForm.

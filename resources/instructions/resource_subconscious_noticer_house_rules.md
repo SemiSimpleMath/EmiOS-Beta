@@ -33,7 +33,7 @@ domain_tags   ["sleep", "fatigue", "health"]
 severity      "medium"
 horizon       "this_week"
 evidence      [{kind:"pod", ref:"<pod_id>", snippet:"Fragmented sleep..."}, ...]
-addressable_by ["meal_proposer", "fitness_proposer", "chat_brain"]
+addressable_by ["meal_proposer", "wellness_proposer", "chat_brain"]
 notes         "Six fatigue mentions across 14 days, intensities low-medium.
                Worth proposer attention: lighter/earlier dinners, exercise
                timing review, possible CPAP usage check."
@@ -62,9 +62,9 @@ volume as evidence) rather than each individual gripe.
 
 | Friction kind on subject                          | Route to                                            |
 |---------------------------------------------------|-----------------------------------------------------|
-| fatigue_loading / observed_decline about a person | [meal_proposer, fitness_proposer, chat_brain]       |
+| fatigue_loading / observed_decline about a person | [meal_proposer, wellness_proposer, chat_brain]       |
 | missed_routine about food/eating                  | [meal_proposer, chat_brain]                         |
-| missed_routine about exercise                     | [fitness_proposer, chat_brain]                      |
+| missed_routine about exercise                     | [wellness_proposer, chat_brain]                      |
 | complaint about household objects / tools         | [chat_brain]                                        |
 | tension between household members                 | [chat_brain, family_proposer]                       |
 | complaint about work                              | [chat_brain]                                        |
@@ -74,7 +74,7 @@ volume as evidence) rather than each individual gripe.
 | Concern                                | Route to                                        |
 |----------------------------------------|-------------------------------------------------|
 | "Annika skipping breakfast"            | [meal_proposer]                                 |
-| "Jukka sleep degraded"                 | [meal_proposer, fitness_proposer, chat_brain]   |
+| "Jukka sleep degraded"                 | [meal_proposer, wellness_proposer, chat_brain]   |
 | "Dog boarding before June 12 trip"     | [personal_admin, dayflow_orchestrator]          |
 | "Trending device → gift for Jouko"     | [chat_brain]                                    |
 | "Memorial Day pickup shift"            | [dayflow_orchestrator]                          |

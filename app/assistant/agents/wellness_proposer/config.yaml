@@ -1,0 +1,31 @@
+name: wellness_proposer
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5-mini"
+  model_tier: "mini"
+
+# Single daily wellness brain — workouts, sleep routines, recovery,
+# hydration, mobility breaks, meditation. No weekly planner split for
+# v0; daily proposer + future weekly cycle if/when training
+# periodization needs it. No tools.
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+accept_auto_skills: false
+
+user_context_items:
+  - date_time
+  - day_of_week
+  - activity_log_7d
+  - sleep_log_7d
+  - wellness_calendar
+  - general_calendar
+  - family_roster
+  - addressable_concerns
+  - recent_wellness_intentions
+
+system_context_items:
+  - resource_user_data
+  - resource_wellness_proposer_house_rules
