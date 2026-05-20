@@ -1,10 +1,32 @@
 import re
 from pathlib import Path
 import yaml
+from jinja2 import Environment, meta as jinja_meta
 from app.assistant.agent_registry.agent_registry import AgentRegistry
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+
+# Framework-provided template vars that do NOT need to be declared in
+# user_context_items / system_context_items. These are auto-injected by
+# the prompt builder or the agent runtime regardless of agent config.
+#
+# Keep this list MINIMAL — when in doubt, force agents to declare. The
+# whole point of this check is catching "var referenced but not declared,"
+# so a permissive allowlist defeats the purpose.
+_FRAMEWORK_BUILTINS = {
+    # Loop / control-flow locals — Jinja's meta module excludes loop vars
+    # from undeclared_variables already, but list these as a belt-and-braces
+    # safety net for anything weird in Jinja's parser.
+    "loop", "super", "self", "varargs", "kwargs",
+    # Common framework-injected items some agents reference without declaring
+    # (TODO: audit whether these SHOULD be declared and remove from this
+    # allowlist if they're framework-provided). For now, surfacing the
+    # warnings against this baseline tells us where the real gaps are.
+    "skills",  # context_injector renders matched skills as a block
+}
+
 
 def validate_all(agent_registry: AgentRegistry):
     logger.info("Running agent registry validation...")
@@ -12,6 +34,7 @@ def validate_all(agent_registry: AgentRegistry):
     _check_namespace_consistency()
     _check_prompt_integrity(agent_registry)
     _check_context_usage(agent_registry)
+    _check_undeclared_template_vars(agent_registry)
     _check_llm_params_contract(agent_registry)
     _check_manager_configs(set(agent_registry.list_agents()), agent_registry)
 
@@ -119,6 +142,77 @@ def _check_context_usage(registry: AgentRegistry):
 
         if "user" in prompts:
             check_usage("user_context_items", prompts["user"], "user")
+
+
+def _check_undeclared_template_vars(registry: AgentRegistry):
+    """Detect variables referenced in user.j2 / system.j2 that are NOT
+    declared in user_context_items / system_context_items.
+
+    The reverse direction (declared but not used) is already covered by
+    _check_context_usage. This one catches the case where a prompt
+    references {{ X }} but nothing populates X — exactly the failure
+    that made wiki_inclusion_critic render with empty placeholders for
+    3,699 calls per session.
+
+    Inverts the SUB_COMPONENT_MAP: if user.j2 references the PARENT
+    ('entity_info'), then having any of its children ('entity_summary',
+    'entity_metadata') declared in user_context_items counts as
+    satisfying the dependency.
+    """
+    # Same parent/child relationships as _check_context_usage uses.
+    SUB_COMPONENT_MAP = {
+        'entity_summary': 'entity_info',
+        'entity_metadata': 'entity_info',
+    }
+    # Inverted: parent → set of children that declare it.
+    parent_to_children: dict = {}
+    for child, parent in SUB_COMPONENT_MAP.items():
+        parent_to_children.setdefault(parent, set()).add(child)
+
+    env = Environment()
+
+    for agent_name, config in registry.configs.items():
+        if config.get("type") == "control_node":
+            continue
+        if config.get("class_name") == "Delegator":
+            continue
+
+        prompts = config.get("prompts", {}) or {}
+
+        def check_one(prompt_text: str, prompt_name: str, context_key: str) -> None:
+            if not prompt_text:
+                return
+            try:
+                ast = env.parse(prompt_text)
+            except Exception as e:
+                logger.warning(
+                    "%s: %s.j2 failed to parse for var extraction: %s",
+                    agent_name, prompt_name, e,
+                )
+                return
+            referenced = jinja_meta.find_undeclared_variables(ast)
+            declared = set(config.get(context_key) or [])
+            # A declared field SATISFIES itself OR its parent (per SUB_COMPONENT_MAP).
+            satisfied: set = set()
+            for field in declared:
+                satisfied.add(field)
+                parent = SUB_COMPONENT_MAP.get(field)
+                if parent:
+                    satisfied.add(parent)
+
+            missing = referenced - satisfied - _FRAMEWORK_BUILTINS
+            for var in sorted(missing):
+                logger.warning(
+                    "%s: %s.j2 references {{ %s }} but %s does NOT declare it. "
+                    "Template will render with an empty/Undefined value. "
+                    "Add '%s' to %s in config.yaml.",
+                    agent_name, prompt_name, var, context_key, var, context_key,
+                )
+
+        if "user" in prompts:
+            check_one(prompts["user"], "user", "user_context_items")
+        if "system" in prompts:
+            check_one(prompts["system"], "system", "system_context_items")
 
 
 def _check_manager_configs(agent_names, registry):
