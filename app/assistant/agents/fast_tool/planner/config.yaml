@@ -38,3 +38,4 @@ system_context_items:
   - task
   - resource_user_data
   - resource_assistant_data
+  - date_time

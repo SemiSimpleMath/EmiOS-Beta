@@ -43,3 +43,4 @@ system_context_items:
   - room_safety
   - room_facts
   - room_participant_facts
+  - date_time

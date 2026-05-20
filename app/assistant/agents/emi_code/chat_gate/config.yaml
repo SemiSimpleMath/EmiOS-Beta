@@ -16,6 +16,8 @@ user_context_items:
   - date_time
   - task
   - recent_history
+  - current_speaker_name
+  - room_contact_name
 
 system_context_items:
   - room_identity

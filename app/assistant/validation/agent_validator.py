@@ -12,19 +12,27 @@ logger = get_logger(__name__)
 # user_context_items / system_context_items. These are auto-injected by
 # the prompt builder or the agent runtime regardless of agent config.
 #
-# Keep this list MINIMAL — when in doubt, force agents to declare. The
-# whole point of this check is catching "var referenced but not declared,"
-# so a permissive allowlist defeats the purpose.
+# Anchor: app/assistant/agent_runtime/services/context_injector.py
+# in generate_injections_block. The dict literal there is the authority —
+# any key always-added there (or conditionally always-added when the
+# templated path would resolve) is a builtin and templates can rely on it.
 _FRAMEWORK_BUILTINS = {
     # Loop / control-flow locals — Jinja's meta module excludes loop vars
     # from undeclared_variables already, but list these as a belt-and-braces
     # safety net for anything weird in Jinja's parser.
     "loop", "super", "self", "varargs", "kwargs",
-    # Common framework-injected items some agents reference without declaring
-    # (TODO: audit whether these SHOULD be declared and remove from this
-    # allowlist if they're framework-provided). For now, surfacing the
-    # warnings against this baseline tells us where the real gaps are.
-    "skills",  # context_injector renders matched skills as a block
+    # context_injector.generate_injections_block always-populates these
+    # keys onto the render context regardless of agent config:
+    "date_time",
+    "day_of_week",
+    "action_count",
+    "room_contact_name",
+    "current_speaker_name",
+    "skills",
+    # Conditionally populated by context_injector — agents that don't
+    # need them just get empty values, but they're never Undefined:
+    "_keyword_injected_resources",  # keyword_resource_injection path
+    "entity_info",                  # set when entity_keys present
 }
 
 

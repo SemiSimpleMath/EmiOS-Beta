@@ -34,6 +34,8 @@ system_context_items:
   - task
   - resource_kg_node_reading
   - action_count
+  - date_time
+  - max_action_count
 
 # Same triage doctrine as kg_resolution::planner: three-bucket triage,
 # data-quality sanity check, stop-early convergence, provenance JOIN

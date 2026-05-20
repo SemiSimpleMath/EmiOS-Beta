@@ -17,3 +17,11 @@ user_context_items:
   - task_compile_contract
   - phase_i_atoms
   - critic_feedback
+
+system_context_items:
+  - compile_seed
+  - information
+  - phase_i_atoms
+  - task
+  - task_compile_contract
+  - task_compile_manager_catalog

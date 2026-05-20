@@ -29,3 +29,4 @@ system_context_items:
   - resource_assistant_data
   - tool_descriptions
   - room_participant_facts
+  - date_time

@@ -20,6 +20,7 @@ user_context_items:
   - manager_loop_count
   - planned_tool_name
   - planned_tool_arguments
+  - resource_user_data
 
 system_context_items:
   - tool_descriptions

@@ -41,6 +41,8 @@ system_context_items:
   - task
   - resource_kg_node_reading
   - action_count
+  - date_time
+  - max_action_count
 
 # kg-conflict-triage is the combined doctrine + playbook. Absorbs what
 # used to be 3 separate resource files (kg_principles, wiki_principles,

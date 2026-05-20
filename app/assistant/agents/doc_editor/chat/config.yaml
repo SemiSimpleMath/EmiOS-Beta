@@ -19,4 +19,6 @@ user_context_items:
   - doc_markdown_last_emitted
   - recent_history
 
-system_context_items: []
+system_context_items:
+  - date_time
+  - doc_type

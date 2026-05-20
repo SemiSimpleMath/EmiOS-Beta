@@ -25,6 +25,7 @@ system_context_items:
   - resource_user_data
   - tool_descriptions
   - task
+  - date_time
 
 prompt_debug:
   system: true

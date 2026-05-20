@@ -28,6 +28,10 @@ user_context_items:
   - recent_history
   - checklist
   - action_count
+  - accumulated_notes
+  - playwright_modal_form_state
+  - playwright_status
+  - progress_report
 
 system_context_items:
   - has_spec_steps

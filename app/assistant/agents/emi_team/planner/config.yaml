@@ -29,6 +29,7 @@ system_context_items:
   - tool_descriptions
   - allowed_nodes
   - task
+  - date_time
 
 skills:
   - critic-handling

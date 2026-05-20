@@ -59,6 +59,9 @@ user_context_items:
 system_context_items:
   - tool_descriptions
   - resource_personal_admin_user_prefs
+  - date_time
+  - allowed_nodes
+  - task
 
 # Skill resources injected into the system prompt only when the task or
 # inbound message contains a matching keyword. Saves prompt budget on

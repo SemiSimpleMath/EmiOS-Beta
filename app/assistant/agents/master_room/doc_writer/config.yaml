@@ -17,4 +17,8 @@ user_context_items:
   - doc_markdown_last_emitted
   - recent_exchanges
 
-system_context_items: []
+system_context_items:
+  - date_time
+
+system_context_items:
+  - doc_type

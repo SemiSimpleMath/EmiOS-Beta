@@ -31,6 +31,7 @@ user_context_items:
   - recent_action_selector_actions
   - recent_changes
   - entity_card
+  - recent_dispatch_results
 
 system_context_items:
   - resource_user_data

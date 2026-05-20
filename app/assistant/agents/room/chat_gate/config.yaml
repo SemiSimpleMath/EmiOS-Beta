@@ -36,6 +36,7 @@ system_context_items:
   - room_safety
   - room_facts
   - room_participant_facts
+  - date_time
 
 # Skills (agentskills.io SKILL.md format). Loaded by SkillRegistry,
 # exposed in templates via {{ skills["<name>"] }}.

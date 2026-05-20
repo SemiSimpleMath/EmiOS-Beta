@@ -45,10 +45,12 @@ user_context_items:
   - recent_history
   - checklist
   - action_count
+  - progress_report
 
 system_context_items:
   - tool_descriptions
   - allowed_nodes
+  - system_wide_task
 
 skills:
   - critic-handling

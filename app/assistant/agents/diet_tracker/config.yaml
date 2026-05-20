@@ -10,6 +10,7 @@ except_tools: []
 
 system_context_items:
   - resource_user_data
+  - date_time
 
 user_context_items:
   - date_time

@@ -15,3 +15,5 @@ user_context_items:
 system_context_items:
   - resource_user_data
   - resource_assistant_data
+  - date_time
+  - domain

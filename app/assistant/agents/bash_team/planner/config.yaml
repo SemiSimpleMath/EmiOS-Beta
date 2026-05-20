@@ -29,11 +29,16 @@ user_context_items:
   - checklist
   - progress_report
   - action_count
+  - entity_card
+  - referenced_pods_block
+  - task_includes
+  - task_resource_context
 
 system_context_items:
   - tool_descriptions
   - allowed_nodes
   - task
+  - date_time
 
 # Skills (agentskills.io SKILL.md format). filesystem-layout always loads
 # (it's foundational for run_shell). pod-finder etc. auto-attach when the
