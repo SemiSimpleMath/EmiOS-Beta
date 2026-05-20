@@ -1,0 +1,30 @@
+{
+  "id": "feedback_extractor_daily",
+  "enabled": true,
+  "name": "Feedback extractor — daily drain of user comments → beliefs",
+  "runner": "function",
+  "spec": {
+    "function_name": "feedback_extractor_run"
+  },
+  "run_policy": {
+    "type": "interval",
+    "min_interval_seconds": 86400
+  },
+  "trigger": {
+    "type": "time",
+    "active_window": {
+      "from": "04:00",
+      "to": "05:00",
+      "local": true
+    }
+  },
+  "max_run_seconds": 300,
+  "on_error": {
+    "max_failures": 3,
+    "backoff_base_seconds": 300,
+    "backoff_max_seconds": 3600,
+    "then": "disable_with_ticket",
+    "auto_retry_after_seconds": 3600
+  },
+  "notes": "Daily drain of unprocessed feedback.comment pods into the belief store. Fires once in the 04:00-05:00 local window — early enough that the morning's belief snapshot reflects yesterday's user comments. Reads queue via list_recent_unprocessed_comments; LLM extracts belief updates; BeliefStore.upsert_belief writes them; comment pods get marked processed_at_utc. Fast-paths and returns early when the queue is empty (no LLM call). on_error.auto_retry_after_seconds=3600 lets the routine self-heal if a transient failure (DB lock, LLM hiccup) disables it."
+}
