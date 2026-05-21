@@ -198,6 +198,9 @@ CRITICAL:
 ASSISTANT TEXT IS ONLY PROVIDED FOR CONTEXT. DO NOT GENERATE ENTITIES EDGES OR ATTRIBUTE ANYTHING ASSISTANT SAYS AS EVIDENCE USER HAS DONE THE THINGS ASSISTANT SAYS OR BELIEVES THINGS ASSISTANT SAYS.
 YOU ARE ONLY TO USE ASSISTANT TEXT AS CONTEXT. NODES AND EDGES ONLY COME FROM USER STATEMENTES!
 
+## DIALOGUE READING
+No sentence stands in isolation — read each user line against the whole window before deciding what it claims. Sarcasm, hypotheticals, rhetorical concessions, and echoes of the assistant are not positive claims. When intent is too ambiguous to be confident, do not extract. When the user contradicts an earlier line, extract the later one.
+
 ## POD URI HANDLING — attached media / artifacts as edge targets
 
 A sentence may contain a token of the shape `datapod:<kind>:<id>`
