@@ -1,31 +1,53 @@
 {{ date_time }} ({{ day_of_week }}). Planning the week beginning {{ week_start_date }}.
 
-## In the kitchen now
-{{ inventory_snapshot }}
+## Distilled meal context (from meal_context_distiller)
 
-## Per-person dietary signals (KG, all regulars)
-{{ dietary_context }}
+{% if meal_context %}
+**Summary:** {{ meal_context.horizon_summary or "(no summary)" }}
 
-## Food-domain beliefs (BeliefStore)
-{{ food_beliefs }}
+**Relevant beliefs (already filtered for this week):**
+{% for b in (meal_context.relevant_beliefs or []) %}
+- {{ b }}
+{% endfor %}
 
-## General calendar — next 7 days
-{{ general_calendar_week }}
+**Horizon-wide concerns:**
+{{ meal_context.horizon_wide_concerns or "(none)" }}
 
-## Household roster
-{{ family_roster }}
+**Inventory pressures:**
+{{ meal_context.inventory_pressures or "(none)" }}
 
-## Concerns from the noticer
-{{ addressable_concerns }}
+**Per-day notes:**
+{% for d in (meal_context.days or []) %}
+- {{ d.date }} ({{ d.day_of_week }}):
+{%- if d.audience_notes %}
+    audience: {{ d.audience_notes }}
+{%- endif %}
+{%- if d.events_or_constraints %}
+    events: {{ d.events_or_constraints }}
+{%- endif %}
+{%- if d.notes %}
+    notes: {{ d.notes }}
+{%- endif %}
+{%- if not (d.audience_notes or d.events_or_constraints or d.notes) %}
+    (default audience, no notable events)
+{%- endif %}
+{% endfor %}
+
+**Additional considerations:**
+{{ meal_context.additional_notes or "(none)" }}
+{% else %}
+(no distilled meal context available)
+{% endif %}
 
 {% if recent_history %}
 ## Your prior cycles this run (research findings if any)
 {{ recent_history }}
 {% endif %}
 
-Action count: {{ action_count }} (cap: 3 research calls per planning run).
+Action count: {{ action_count }} (cap: 3 research calls).
 
 ---
 
-Decide: gap genuinely needs research, or seed is enough? Bias toward
-return_control.
+Decide: does the distilled bundle have a real gap that warrants calling
+meal_research_manager (e.g. a guest with no dietary profile, an
+unfamiliar restaurant mentioned in a day's notes)? If no, return_control.

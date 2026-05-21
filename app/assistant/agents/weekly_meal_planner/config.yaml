@@ -15,18 +15,18 @@ allowed_nodes: []
 accept_auto_skills: false
 
 user_context_items:
+  # Timing
   - date_time
   - day_of_week
   - week_start_date
-  - diet_log_7d
+  # The distilled context bundle from meal_context_distiller —
+  # carries: horizon_summary, relevant_beliefs (filtered),
+  # horizon_wide_concerns, inventory_pressures, per-day notes,
+  # additional considerations. Plus anything the
+  # weekly_meal_planning::planner researched lands in recent_history.
+  - meal_context
+  # Shopping-list mechanics (raw data — not LLM-distillable)
   - inventory_snapshot
-  - recipes_house
-  - dietary_context
-  - food_beliefs
-  - general_calendar_week
-  - family_roster
-  - addressable_concerns
-  - fast_food_count_7d
   - ralphs_standing_list
   - agent_weekly_list_state
 

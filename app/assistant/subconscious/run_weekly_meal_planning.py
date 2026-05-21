@@ -1,16 +1,24 @@
-"""CLI to run weekly_meal_planning_manager + persist the output.
+"""CLI to run the weekly meal planning chain end-to-end.
 
-Architecture today:
-  1. (Optional, separate step) meal_context_distiller runs first to
-     produce a focused per-day context. NOT wired into this runner yet
-     — that's the next iteration. For now the manager reads the full
-     seed directly.
-  2. weekly_meal_planning_manager:
-       delegator → weekly_meal_planning::planner (decide research vs
-       proceed, biased toward proceed) → maybe call
-       meal_research_manager → weekly_meal_planner (produce structured
-       WeeklyMealPlan) → exit.
-  3. meal_persist writes the plan pod + updates the weekly shopping doc.
+Two-stage:
+  Stage 1 — meal_context_distiller runs first. Reads the full seed
+    (beliefs + concerns + calendar + roster + inventory), emits a
+    structured per-day bundle: horizon_summary + relevant_beliefs +
+    horizon_wide_concerns + inventory_pressures + days[] +
+    additional_notes.
+
+  Stage 2 — weekly_meal_planning_manager runs:
+    delegator
+      -> weekly_meal_planning::planner (reads meal_context; decides if
+         it needs meal_research_manager for a gap; usually returns
+         control immediately)
+      -> [optional] meal_research_manager tool calls
+      -> weekly_meal_planner (reads meal_context + shopping mechanics,
+         produces WeeklyMealPlan + WeeklyShoppingList)
+      -> manager_exit
+
+  Stage 3 — meal_persist writes the plan pod + updates the weekly
+  shopping doc.
 
 Usage:
     .venv/Scripts/python.exe -m app.assistant.subconscious.run_weekly_meal_planning
@@ -58,51 +66,95 @@ logger = get_logger(__name__)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run weekly_meal_planning_manager.")
-    parser.add_argument("--no-persist", action="store_true", help="Run manager but don't mint pods or write doc.")
+    parser = argparse.ArgumentParser(description="Run the weekly meal planning chain.")
+    parser.add_argument("--no-persist", action="store_true", help="Run distiller + manager but don't mint pods or write doc.")
     parser.add_argument("--week-start", type=str, default=None, help="Override week_start_date (YYYY-MM-DD).")
     args = parser.parse_args()
 
     print("=" * 70)
-    print(f"WEEKLY MEAL PLANNING")
+    print(f"WEEKLY MEAL PLANNING (distiller -> planning manager -> persist)")
     print(f"started_at_utc: {datetime.now(timezone.utc).isoformat()}")
     print("=" * 70)
 
-    print("\n[1/4] Building seed context...")
-    context = build_weekly_meal_planner_context()
+    # ─── Seed ─────────────────────────────────────────────────────────
+    print("\n[1/5] Building seed context...")
+    seed = build_weekly_meal_planner_context()
     if args.week_start:
-        context["week_start_date"] = args.week_start
+        seed["week_start_date"] = args.week_start
         print(f"        week_start_date overridden to {args.week_start}")
+    seed["horizon_days"] = "7"
 
-    print("\n[2/4] Invoking weekly_meal_planning_manager...")
+    # ─── Stage 1: distiller ───────────────────────────────────────────
+    print("\n[2/5] Invoking meal_context_distiller...")
+    distiller = DI.agent_factory.create_agent("meal_context_distiller")
+    if distiller is None:
+        print("ERROR: failed to create meal_context_distiller.")
+        sys.exit(1)
+    distiller_scope = ScopeContext(
+        scope_id="subconscious::meal_context_distiller",
+        owner_id="system",
+        actor_id="run_weekly_meal_planning",
+        surface="internal",
+        resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
+    )
+    try:
+        distiller_result = distiller.action_handler(
+            Message(agent_input=seed, scope_context=distiller_scope)
+        )
+    except Exception as e:
+        print(f"ERROR: distiller raised: {type(e).__name__}: {e}")
+        logger.exception("meal_context_distiller raised")
+        sys.exit(2)
+    meal_context: Dict[str, Any] = (
+        distiller_result.data if isinstance(getattr(distiller_result, "data", None), dict) else {}
+    )
+    print(f"        summary: {meal_context.get('horizon_summary', '')[:200]}")
+    print(f"        relevant_beliefs: {len(meal_context.get('relevant_beliefs') or [])}")
+    print(f"        days: {len(meal_context.get('days') or [])}")
+
+    # ─── Stage 2: planning manager ────────────────────────────────────
+    print("\n[3/5] Invoking weekly_meal_planning_manager...")
     _ensure_manager_runtime_registered()
     manager = DI.multi_agent_manager_factory.create_manager("weekly_meal_planning_manager")
     if manager is None:
         print("ERROR: failed to create weekly_meal_planning_manager.")
-        sys.exit(1)
-    scope = ScopeContext(
+        sys.exit(3)
+    mgr_scope = ScopeContext(
         scope_id="subconscious::weekly_meal_planning_manager",
         owner_id="system",
         actor_id="run_weekly_meal_planning",
         surface="internal",
         resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
     )
-    # Seed the manager's shared blackboard so both the planning::planner
-    # and the downstream weekly_meal_planner can resolve user_context_items.
+    # Manager-stage context: distilled meal_context + timing + shopping
+    # mechanics. NOT the raw seed — the distiller already culled.
+    manager_context: Dict[str, Any] = {
+        "date_time": seed.get("date_time"),
+        "day_of_week": seed.get("day_of_week"),
+        "week_start_date": seed.get("week_start_date"),
+        "meal_context": meal_context,
+        # Shopping-list mechanics — raw, weekly_meal_planner uses these
+        # to compute the WeeklyShoppingList.
+        "inventory_snapshot": seed.get("inventory_snapshot"),
+        "ralphs_standing_list": seed.get("ralphs_standing_list"),
+        "agent_weekly_list_state": seed.get("agent_weekly_list_state"),
+    }
+    # Seed the manager's shared blackboard so both planning::planner and
+    # weekly_meal_planner can resolve their user_context_items from it.
     bb = manager.blackboard
-    for k, v in context.items():
+    for k, v in manager_context.items():
         bb.update_state_value(k, v)
-    msg = Message(agent_input=context, scope_context=scope)
+    mgr_msg = Message(agent_input=manager_context, scope_context=mgr_scope)
     try:
-        DI.manager_invoker.invoke(manager, msg)
+        DI.manager_invoker.invoke(manager, mgr_msg)
     except Exception as e:
         print(f"ERROR: manager raised: {type(e).__name__}: {e}")
         logger.exception("weekly_meal_planning_manager raised")
-        sys.exit(2)
+        sys.exit(4)
 
     output = _recover_weekly_meal_planner_output(manager)
 
-    print("\n[3/4] Output:")
+    print("\n[4/5] Output:")
     plan = output.get("weekly_plan") or {}
     print(f"      week_start_date: {plan.get('week_start_date')}")
     print(f"      theme: {plan.get('week_theme', '')[:200]}")
@@ -117,12 +169,12 @@ def main():
     print(f"      weekly_shopping_list: action={weekly_list.get('action')} week_start={weekly_list.get('week_start_date')}")
 
     if args.no_persist:
-        print("\n[4/4] --no-persist set; not minting pods or writing doc.")
+        print("\n[5/5] --no-persist set; not minting pods or writing doc.")
         return
     if not output:
-        print("\n[4/4] No output recovered; skipping persist.")
+        print("\n[5/5] No output recovered; skipping persist.")
         return
-    print("\n[4/4] Persisting plan pod + updating weekly shopping doc...")
+    print("\n[5/5] Persisting plan pod + updating weekly shopping doc...")
     persist_summary = apply_weekly_meal_planner_output(output)
     for k, v in persist_summary.items():
         if isinstance(v, list):

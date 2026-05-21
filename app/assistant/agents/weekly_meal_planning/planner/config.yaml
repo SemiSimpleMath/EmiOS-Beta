@@ -14,17 +14,16 @@ allowed_tools: []     # populated by the manager-level tools list
 except_tools: []
 allowed_nodes: [return_control]
 
-# Reads the same seed weekly_meal_planner sees, so it can judge gaps.
+# Reads the distilled meal_context (produced by meal_context_distiller
+# upstream) — not the raw seed. The distiller has already done the
+# relevance work; this planner only judges whether the bundle has any
+# obvious gap that warrants a meal_research_manager call (typically:
+# an audience member with no dietary profile, e.g. Marika visiting).
 user_context_items:
   - date_time
   - day_of_week
   - week_start_date
-  - inventory_snapshot
-  - dietary_context
-  - food_beliefs
-  - general_calendar_week
-  - family_roster
-  - addressable_concerns
+  - meal_context
   - recent_history
   - action_count
 
