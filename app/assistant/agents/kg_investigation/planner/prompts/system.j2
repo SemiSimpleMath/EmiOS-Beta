@@ -28,16 +28,21 @@ results; the summarizer charges by the row.
 KG (live):
 - `kg_node_metadata(id, label, node_type, category, aliases, description, original_sentence, start_date, end_date, importance, pagerank_score, source, created_at, updated_at, locked_by_user_at)`
 - `kg_edge_metadata(id, source_id, target_id, relationship_type, sentence, source, created_at, updated_at)`
-- `kg_node_evidence(id, node_id, source_table, source_id, source_text, derived_sentence, message_timestamp, window_id, merge_action, created_at)`
-  - `source_id` is the FK into whichever table `source_table` names. When `source_table='claim_proposal'`, `source_id` is the proposal id — use that to join `claim_proposal_evidence` (NOT a column called `claim_proposal_id`).
+- `kg_node_evidence(id, node_id, source_text, derived_sentence, message_timestamp, window_id, merge_action, created_at)`
+  - `source_text` is a frozen raw-text snapshot from the time of extraction.
+  - `window_id` is the canonical pointer to the source conversation; walk it to recover full context.
 
-Source provenance walk (the JOIN ladder for "what did the user actually say?"):
-- `kg_node_evidence` → `claim_proposal_evidence(proposal_id, window_id, unified_log_id, raw_text, observed_at, extractor_agent_name)`
-  ON `kg_node_evidence.source_id = claim_proposal_evidence.proposal_id` (with `kg_node_evidence.source_table = 'claim_proposal'`)
-- `claim_proposal_evidence` → `unified_log_2026(id, timestamp, role, speaker_name, message, room_id, source)`
-  ON `claim_proposal_evidence.unified_log_id = unified_log_2026.id`
+Source provenance walk ("what did the user actually say?") — window-level only:
+- `kg_node_evidence.window_id` → `kg_window_message(window_id, unified_log_id, item_order)`
+  → `unified_log_2026(id, timestamp, role, speaker_name, message, room_id, source)`
+  Walk ALL messages in the window. The specific message a claim came from
+  is not stored per-claim — read the whole window to see the conversation
+  context. (Historically `claim_proposal_evidence.unified_log_id` and
+  `kg_node_evidence.source_id` claimed to be per-claim source pointers but
+  always pointed at the first user message of the window regardless of
+  which claim — those fields are now always NULL.)
 
-Window tables (when you need the conversation context):
+Window tables:
 - `kg_window(id, start_unified_log_id, end_unified_log_id, message_count, summary)`
 - `kg_window_message(window_id, unified_log_id, item_order)`
 

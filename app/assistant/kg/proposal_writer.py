@@ -465,6 +465,12 @@ def write_one_proposal_group(
         ))
         stats["edges_written"] = stats.get("edges_written", 0) + 1
 
+    # `unified_log_id` is deliberately NOT set. The anchor's unified_log_id
+    # was the FIRST user message in the window — not the actual source of any
+    # particular claim. Multi-topic windows produced misattributions that
+    # downstream consumers silently treated as truth. Provenance is now
+    # window-level only: walk window_id -> kg_window_message -> unified_log_2026
+    # to see all messages that produced this proposal's facts.
     session.add(ClaimProposalEvidence(
         proposal_id=proposal.id,
         source_type="chat",
@@ -475,7 +481,7 @@ def write_one_proposal_group(
         window_id=window_id,
         projection_id=projection_id,
         enrichment_id=enrichment_id,
-        unified_log_id=anchor.get("unified_log_id"),
+        unified_log_id=None,
         raw_text=anchor.get("raw_text") or rep_sentence,
         extractor_agent_name=extractor_agent_name,
         extractor_model=extractor_model,

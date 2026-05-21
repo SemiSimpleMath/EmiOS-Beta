@@ -1403,11 +1403,13 @@ def _write_node_evidence(
     "created" when this proposal materialized a fresh kg_node row, and
     "confirmed" when it matched an existing one (reinforcement).
 
-    Provenance fields are sourced from claim_proposal_evidence so the
-    chain `kg_node_evidence → unified_log_id` resolves to the original
-    chat message. Without this writer the entire post-rebuild cohort
-    has empty evidence and the kg_node_viewer + node_merger LLM cannot
-    see source context.
+    Provenance is window-level only (window_id). The legacy source_table
+    / source_id pair was copied from claim_proposal_evidence.unified_log_id
+    which was itself the first user message of the window — not the actual
+    source of any particular claim. Multi-topic windows produced
+    misattributions that downstream consumers silently treated as truth.
+    Source context now comes from walking window_id -> kg_window_message
+    -> unified_log_2026.
     """
     try:
         from app.assistant.database.kg_chat_projection import KGNodeEvidence
@@ -1418,8 +1420,8 @@ def _write_node_evidence(
     ev = _earliest_proposal_evidence(session, proposal.id)
     session.add(KGNodeEvidence(
         node_id=node_id,
-        source_table="unified_log_2026" if (ev and ev.unified_log_id) else None,
-        source_id=(ev.unified_log_id if ev else None),
+        source_table=None,
+        source_id=None,
         source_text=(ev.raw_text if ev else None),
         derived_sentence=(proposal_node.sentence or None),
         message_timestamp=(ev.observed_at if ev else None),
@@ -1453,8 +1455,8 @@ def _write_edge_evidence(
     ev = _earliest_proposal_evidence(session, proposal.id)
     session.add(KGEdgeEvidence(
         edge_id=edge_id,
-        source_table="unified_log_2026" if (ev and ev.unified_log_id) else None,
-        source_id=(ev.unified_log_id if ev else None),
+        source_table=None,
+        source_id=None,
         source_text=(ev.raw_text if ev else None),
         derived_sentence=proposal_edge.sentence,
         message_timestamp=(ev.observed_at if ev else None),

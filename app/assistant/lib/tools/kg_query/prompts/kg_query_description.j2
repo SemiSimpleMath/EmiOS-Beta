@@ -23,8 +23,11 @@ Schema cheatsheet (read-only):
     is a common cause. Use it BEFORE retrying with guessed names.
 - kg_edge_metadata(id, source_id, target_id, relationship_type, sentence,
   window_id, source, created_at)
-- kg_node_evidence(id, node_id, source_table, source_id, derived_sentence,
+- kg_node_evidence(id, node_id, source_text, derived_sentence,
   message_timestamp, window_id, merge_action, created_at)
+  * For source provenance walk window_id -> kg_window_message ->
+    unified_log_2026 to see the full conversation. Per-claim source-line
+    pointers are not stored; read the whole window for context.
 - kg_window(id, start_unified_log_id, end_unified_log_id, start_timestamp,
   end_timestamp, message_count, summary, standalone)
 - kg_window_message(window_id, unified_log_id, item_order)
@@ -37,7 +40,7 @@ Schema cheatsheet (read-only):
 - claim_proposal_edge(id, proposal_id, source_node_id, target_node_id,
   predicate, sentence)
 - claim_proposal_evidence(id, proposal_id, window_id, enrichment_id,
-  unified_log_id, raw_text, observed_at)
+  raw_text, observed_at)
 - entity_cards(id, entity_name, source_node_id, summary, key_facts,
   aliases, updated_at)
 - pod_store(pod_id, kind, tags_json, one_liner, body, source_refs_json,
