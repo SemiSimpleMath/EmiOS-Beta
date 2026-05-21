@@ -89,12 +89,25 @@ def _resolve_entity_like(session, label: str) -> Optional[Node]:
     State/Event resolution goes through the separate relationship-like
     path (Jaccard participant overlap + LLM merger). Property goes
     through `_resolve_property` (subject-scoped match).
+
+    Disambiguation precedence: if a Disambiguation node exists at this
+    label, follow its `disambiguates_to` edge to the canonical FIRST
+    (provided the canonical is an entity-like type). This lets a
+    learned correction persist — once any pass has decided "label X
+    really means canonical Y," subsequent proposals at label X bind to
+    Y without re-deriving the call.
     """
     if not label:
         return None
     label_lower = label.lower().strip()
     if not label_lower:
         return None
+
+    # Disambiguation FIRST — learned correction beats default resolution.
+    from app.assistant.kg.disambiguation import resolve_through_disambiguation
+    redirected = resolve_through_disambiguation(session, label)
+    if redirected is not None and (redirected.node_type or "") in _ENTITY_LIKE_MATCH_TYPES:
+        return redirected
 
     hit = (
         session.query(Node)
@@ -115,6 +128,47 @@ def _resolve_entity_like(session, label: str) -> Optional[Node]:
         .order_by(Node.locked_by_user_at.desc().nulls_last(),
                   Node.pagerank_score.desc().nulls_last())
         .first()
+    )
+
+
+def _park_on_disambiguation_if_present(
+    session, new_node, proposal_id: str,
+) -> None:
+    """If a Disambiguation node exists at the new node's label, park
+    the new node on it via `pending_resolution`.
+
+    Called right after the promoter creates a fresh node (the resolver
+    didn't find a clean match). The created node is correct as data —
+    we don't lose it — but the parking edge flags it for the next
+    maintenance sweep, which can route via investigator (merge into
+    canonical, mint as legitimate sibling, or split into a new concept).
+
+    The node's own resolver already consulted the Disambiguation; if
+    that path matched, the node would have been merged into the
+    canonical and this function would not run. So reaching here means
+    the resolver couldn't bind cleanly DESPITE a Disambiguation
+    existing — which is exactly the "park for review" case.
+    """
+    label = (new_node.label or "").strip()
+    if not label:
+        return
+    from app.assistant.kg.disambiguation import (
+        find_disambiguation, park_node_on_disambiguation,
+    )
+    dis = find_disambiguation(session, label)
+    if dis is None or str(dis.id) == str(new_node.id):
+        return
+    park_node_on_disambiguation(
+        session,
+        new_node_id=str(new_node.id),
+        disambiguation_node_id=str(dis.id),
+        reason=(
+            f"Promoter created a fresh {new_node.node_type} at label "
+            f"{label!r} despite an existing Disambiguation; the "
+            f"resolver could not bind cleanly to the canonical "
+            f"(type mismatch or ambiguous identity). Proposal "
+            f"{proposal_id[:8]}."
+        ),
     )
 
 
@@ -2091,6 +2145,7 @@ def _evaluate_and_apply(
                     proposal_node=pn,
                     merge_action="created",
                 )
+                _park_on_disambiguation_if_present(session, new, proposal.id)
                 dec.node_outcomes.append(_NodeOutcome(
                     pn.id, "created_new", new.id,
                     f"created {pn.node_type} {pn.label!r} as {new.id[:8]}",
@@ -2148,6 +2203,7 @@ def _evaluate_and_apply(
                     proposal_node=pn,
                     merge_action="created",
                 )
+                _park_on_disambiguation_if_present(session, new, proposal.id)
                 ttl_blurb = ""
                 if isinstance(new.attributes, dict) and "ttl" in new.attributes:
                     t = new.attributes["ttl"]
