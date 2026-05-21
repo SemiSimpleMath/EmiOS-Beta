@@ -1,16 +1,20 @@
 """Output schema for weekly_meal_planner.
 
 Strategic planning of the week's meal rhythm. Outputs:
-- WeeklyMealPlan: 7-day grid of meal-window SLOT TYPES (anchor / leftover /
-  flex / novel_try / skip) — not specific dishes; the daily proposer
-  decides what dish goes in each slot.
+- WeeklyMealPlan: 7-day grid where every dinner AND every lunch carries
+  a concrete dish (anchor / planned / leftover). Breakfast can be flex
+  (free choice — cereal, fruit, etc.) or skip (Jukka's IF window).
 - WeeklyShoppingList: ingredients across the week minus inventory minus
   Ralphs staples. The persist step writes/replaces a Google Doc.
-- Anchor meals: the 1-3 specific dishes the week is built around (e.g.,
-  "Friday Night Meats", "Sunday roast", "Tuesday salmon").
+- Anchor meals: the 1-3 SIGNATURE dishes the week is built around (e.g.,
+  "Friday Night Meats", "Sunday roast", "Tuesday salmon"). The other
+  planned dinners are normal weeknight dishes — still chosen at plan
+  time, just not in the anchor list.
 
-The daily proposer reads the most recent plan.weekly_meals pod as context
-and turns the day's slots into actual dishes.
+Lunches and non-anchor dinners use slot_type='planned' with a dish
+filled in. There is NO downstream "fill the rest in day-of" step for
+these — the user's mental model is that they want every dinner and
+lunch decided when the week is laid out, so they can shop accordingly.
 """
 from typing import List, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
@@ -18,11 +22,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 MealWindow = Literal["breakfast", "lunch", "dinner", "snack"]
 SlotType = Literal[
-    "anchor",       # The week's planned dish for this slot (named in anchor_meals)
-    "leftover",     # Eat leftovers from a previous anchor; no new cooking
-    "flex",         # Day-of decision; daily proposer picks
-    "novel_try",    # Intentional novelty attempt; daily proposer picks
-    "skip",         # Intentionally skipped (e.g., IF window for breakfast)
+    "anchor",       # Week's signature dish for this slot (named in anchor_meals)
+    "planned",      # A specific planned dish (default for non-anchor dinners + lunches)
+    "leftover",     # Eat leftovers from a previous slot; no new cooking
+    "flex",         # BREAKFAST ONLY — household eats cereal/fruit/whatever ad hoc
+    "skip",         # BREAKFAST ONLY — intentionally skipped (IF window)
 ]
 WeeklyListAction = Literal["none", "create", "replace"]
 
@@ -34,26 +38,32 @@ class SlotPlan(BaseModel):
     day_of_week: str = Field(description="'Monday', 'Tuesday', etc.")
     meal_window: MealWindow
     slot_type: SlotType
-    anchor_dish: Optional[str] = Field(
+    dish: Optional[str] = Field(
         default=None,
         max_length=200,
         description=(
-            "Required when slot_type='anchor'. The specific dish name. "
-            "Should match one of the items in `anchor_meals`. "
-            "Null for other slot types — daily proposer fills those."
+            "The specific dish for this slot. REQUIRED when slot_type is "
+            "'anchor', 'planned', or 'leftover'. For 'anchor', must match "
+            "an item in `anchor_meals`. For 'leftover', repeat the original "
+            "dish name (e.g., 'leftovers from Lemon salmon'). "
+            "Null only when slot_type is 'flex' or 'skip' — both of which "
+            "are BREAKFAST ONLY."
         ),
     )
     leftover_from_date: Optional[str] = Field(
         default=None,
         description=(
-            "Required when slot_type='leftover'. ISO date of the anchor "
-            "meal whose leftovers fill this slot."
+            "Required when slot_type='leftover'. ISO date of the slot "
+            "whose leftovers fill this slot (usually previous day's dinner)."
         ),
     )
     notes: Optional[str] = Field(
         default=None,
         max_length=200,
-        description="Optional context for the daily proposer when filling flex/novel_try slots.",
+        description=(
+            "Optional 1-line context: why this dish, prep timing, "
+            "kid-friendly tweaks, etc."
+        ),
     )
 
 

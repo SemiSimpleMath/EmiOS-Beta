@@ -95,14 +95,14 @@ def render_weekly_meal_email(
 def _format_slot_line(slot: dict) -> str:
     window = slot.get("meal_window") or "?"
     slot_type = slot.get("slot_type") or "?"
-    anchor_dish = (slot.get("anchor_dish") or "").strip()
+    dish = (slot.get("dish") or "").strip()
     leftover_from = (slot.get("leftover_from_date") or "").strip()
     notes = (slot.get("notes") or "").strip()
 
     head = f"{window:>9}: {slot_type}"
     tail_parts: List[str] = []
-    if anchor_dish:
-        tail_parts.append(anchor_dish)
+    if dish:
+        tail_parts.append(dish)
     if leftover_from:
         tail_parts.append(f"leftover from {leftover_from}")
     if notes:

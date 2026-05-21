@@ -98,6 +98,8 @@ def apply_weekly_meal_planner_output(output: Dict[str, Any]) -> Dict[str, Any]:
     weekly_list = output.get("weekly_shopping_list") or {}
     free_form_thinking = (output.get("free_form_thinking") or "").strip()
 
+    _coerce_invalid_slot_types(weekly_plan)
+
     plan_pod_id = _mint_weekly_plan_pod(
         store=store,
         weekly_plan=weekly_plan,
@@ -118,6 +120,39 @@ def apply_weekly_meal_planner_output(output: Dict[str, Any]) -> Dict[str, Any]:
         "anchor_meals": weekly_plan.get("anchor_meals") or [],
         "weekly_list": weekly_result,
     }
+
+
+def _coerce_invalid_slot_types(weekly_plan: Dict[str, Any]) -> None:
+    """Safety net: per the schema, slot_type='flex'/'skip' are breakfast-
+    only. If the model emits one on a lunch or dinner with a dish set,
+    promote to 'planned' rather than letting an ambiguous slot through.
+    If it emits flex/skip on a lunch/dinner with NO dish, log it but
+    leave alone (rendering will show the gap so the user can spot it).
+    """
+    slots = weekly_plan.get("slots") or []
+    promoted = 0
+    for slot in slots:
+        meal_window = (slot.get("meal_window") or "").lower()
+        if meal_window not in {"lunch", "dinner"}:
+            continue
+        slot_type = (slot.get("slot_type") or "").lower()
+        if slot_type not in {"flex", "skip"}:
+            continue
+        dish = (slot.get("dish") or "").strip()
+        if dish:
+            slot["slot_type"] = "planned"
+            promoted += 1
+        else:
+            logger.warning(
+                "[meal_persist] %s on %s tagged '%s' with no dish — "
+                "leaving as-is; please correct the planner prompt",
+                meal_window, slot.get("date", "?"), slot_type,
+            )
+    if promoted:
+        logger.info(
+            "[meal_persist] coerced %d lunch/dinner slot(s) from flex/skip → planned",
+            promoted,
+        )
 
 
 def _apply_weekly_shopping_list(weekly_list: Dict[str, Any]) -> Dict[str, Any]:
@@ -496,12 +531,12 @@ def _mint_weekly_plan_pod(
             for slot in by_date[date]:
                 window = slot.get("meal_window", "?")
                 slot_type = slot.get("slot_type", "?")
-                anchor_dish = slot.get("anchor_dish")
+                dish = slot.get("dish")
                 leftover_from = slot.get("leftover_from_date")
                 notes = (slot.get("notes") or "").strip()
                 tail_parts = []
-                if anchor_dish:
-                    tail_parts.append(f"dish: {anchor_dish}")
+                if dish:
+                    tail_parts.append(f"dish: {dish}")
                 if leftover_from:
                     tail_parts.append(f"from: {leftover_from}")
                 if notes:

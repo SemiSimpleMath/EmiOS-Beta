@@ -86,7 +86,7 @@
                     <div class="meals-slot meals-slot-{{ slot.slot_type }}">
                         <span class="meals-window">{{ slot.meal_window }}</span>
                         <span class="meals-slot-type">{{ slot.slot_type }}</span>
-                        {% if slot.anchor_dish %}<span class="meals-dish">{{ slot.anchor_dish }}</span>{% endif %}
+                        {% if slot.dish %}<span class="meals-dish">{{ slot.dish }}</span>{% endif %}
                         {% if slot.leftover_from_date %}<span class="meals-note">from {{ slot.leftover_from_date }}</span>{% endif %}
                         {% if slot.notes %}<span class="meals-note">{{ slot.notes }}</span>{% endif %}
                     </div>
