@@ -1,0 +1,12 @@
+name: kg_maintenance::series_link_triage
+class_name: Agent
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.4-nano"
+  model_tier: "nano"
+allowed_tools: []
+except_tools: []
+user_context_items:
+  - clusters_batch
+system_context_items: []
+type: agent

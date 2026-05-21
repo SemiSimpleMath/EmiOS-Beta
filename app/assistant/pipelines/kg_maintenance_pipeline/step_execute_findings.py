@@ -327,12 +327,122 @@ def _delete_node_embedding(node_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Series-link execution (link per-occurrence Events to parent Entity)
+# ---------------------------------------------------------------------------
+
+def _execute_series_link(finding: dict) -> dict:
+    """Mint an instance_of edge from a per-occurrence Event to its parent
+    Entity. If the parent Entity doesn't exist yet
+    (evidence.entity_already_exists is False), create it at canonical_label
+    first.
+
+    Idempotent: a re-run that finds the edge already present returns success
+    without minting a duplicate.
+
+    Currently MANUAL-ONLY (not in AUTO_EXECUTE_TYPES). The user reviews each
+    cluster via the maintenance UI and clicks execute. Auto-exec is gated
+    until we've seen enough series-link findings land cleanly to trust it.
+    """
+    from app.assistant.kg.db.knowledge_graph_db import Node, Edge
+
+    evidence = finding.get("evidence") or {}
+    action = (evidence.get("action") or "").strip()
+    canonical_label = (evidence.get("canonical_label") or "").strip()
+    if not canonical_label:
+        return {"executed": False, "detail": "evidence missing canonical_label"}
+
+    primary_id = finding["primary_node_id"]
+    event_id = finding.get("secondary_node_id")
+    if not event_id:
+        return {"executed": False, "detail": "finding has no secondary_node_id"}
+
+    session = get_session()
+    try:
+        event_node = session.query(Node).filter_by(id=event_id).first()
+        if event_node is None:
+            return {"executed": True, "detail": f"Event {event_id[:8]} already deleted"}
+
+        if action == "link_events_to_entity":
+            entity_node = session.query(Node).filter_by(id=primary_id).first()
+            if entity_node is None:
+                return {
+                    "executed": False,
+                    "detail": f"Parent Entity {primary_id[:8]} no longer exists",
+                }
+        elif action == "create_parent_entity_and_link":
+            entity_node = (
+                session.query(Node)
+                .filter(Node.node_type == "Entity")
+                .filter(Node.label == canonical_label)
+                .first()
+            )
+            if entity_node is None:
+                cluster_size = len(evidence.get("all_event_ids") or [])
+                entity_node = Node(
+                    id=str(uuid.uuid4()),
+                    label=canonical_label,
+                    node_type="Entity",
+                    original_sentence=(
+                        f"Parent concept derived from {cluster_size} Event "
+                        f"instances via series_link."
+                    ),
+                )
+                session.add(entity_node)
+                session.flush()
+        else:
+            return {"executed": False, "detail": f"Unknown action {action!r}"}
+
+        existing = (
+            session.query(Edge)
+            .filter(Edge.source_id == event_node.id)
+            .filter(Edge.target_id == entity_node.id)
+            .filter(Edge.relationship_type == "instance_of")
+            .first()
+        )
+        if existing is not None:
+            return {
+                "executed": True,
+                "detail": (
+                    f"instance_of edge already exists "
+                    f"({event_id[:8]} -> {entity_node.id[:8]})"
+                ),
+            }
+
+        new_edge = Edge(
+            id=str(uuid.uuid4()),
+            source_id=event_node.id,
+            target_id=entity_node.id,
+            relationship_type="instance_of",
+            sentence=(
+                f"Event {(event_node.label or '?')!r} ({event_id[:8]}) is an "
+                f"instance of the recurring {canonical_label!r} series."
+            ),
+        )
+        session.add(new_edge)
+        session.commit()
+
+        return {
+            "executed": True,
+            "detail": (
+                f"Linked Event {event_id[:8]} -> Entity {entity_node.id[:8]} "
+                f"via instance_of"
+            ),
+        }
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+# ---------------------------------------------------------------------------
 # Finding-level dispatcher
 # ---------------------------------------------------------------------------
 
 _EXECUTORS = {
     "orphan_node": _execute_orphan,
     "duplicate_node": _execute_duplicate,
+    "event_series_link": _execute_series_link,
 }
 
 
