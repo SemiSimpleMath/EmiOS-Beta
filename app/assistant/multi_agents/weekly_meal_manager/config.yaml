@@ -1,0 +1,72 @@
+name: weekly_meal_manager
+class_name: MultiAgentManager
+description: >
+  Weekly meal planning manager. Wraps the existing single-shot
+  weekly_meal_planner in a two-phase loop: a context_planner first
+  reasons over the seeded context, gathers extra signals via tools
+  where gaps exist, then returns control to weekly_meal_planner
+  which decides the actual 7-day meal grid.
+
+  Mirrors the per-proposer manager pattern landed 2026-05-20 — same
+  shape will repeat for daily_meal_manager, wellness_meal_manager,
+  romantic_meal_manager, etc.
+max_cycles: 40
+role_bindings:
+  delegator: weekly_meal::delegator
+  tool_selector: shared::tool_selector
+
+agents:
+  - name: weekly_meal::delegator
+    class: Delegator
+  - name: weekly_meal::context_planner
+    class: Planner
+  - name: weekly_meal_planner
+    class: Agent
+  - name: shared::tool_arguments
+    class: Agent
+
+control_nodes:
+  - name: tool_caller
+    class: ToolCaller
+  - name: tool_result_handler
+    class: ToolResultHandler
+  - name: return_control
+    class: ReturnControlNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+  - name: graceful_exit_control_node
+    class: GracefulExitControlNode
+
+# Curated tool palette — per [[feedback_curated_allowed_tools]]:
+# `allowed_tools: all` (149 tools) causes hallucinated tool names + missed
+# obvious choices. Keep it tight for the food domain.
+#
+# Cold-start week note: context_planner can probably return control
+# immediately without using any of these — the seed is rich. The tools
+# are here for when audience/situation deviates from default and the
+# planner needs to fill a gap.
+tools:
+  allowed_tools:
+    - ask_kg          # per-person dietary, who-is-who, location history
+    - pod_search      # past meal pods (none in cold start), feedback
+    - pod_fetch       # open pods the planner finds via pod_search
+    - read_skill      # meal-domain skills (recipes, household routines)
+    - find_tool       # discovery only — should be rare
+  except_tools: []
+
+flow_config:
+  state_map:
+    # Initial: delegator → context_planner
+    "weekly_meal::delegator": "weekly_meal::context_planner"
+    # Tool-call loop is default (planner → tool_arguments → tool_caller →
+    # tool_result_handler → planner). Only the explicit hops need
+    # listing here.
+    "shared::tool_arguments": "tool_caller"
+    # When context_planner says "I have enough" (return_control), hand
+    # the gathered context off to the actual weekly_meal_planner.
+    "weekly_meal::context_planner_return_control": "weekly_meal_planner"
+    # weekly_meal_planner emits the structured WeeklyMealPlan — that's
+    # the manager's final answer. Exit.
+    "weekly_meal_planner": "manager_exit_node"
+    "graceful_exit": "graceful_exit_control_node"
+    "graceful_exit_control_node": "manager_exit_node"

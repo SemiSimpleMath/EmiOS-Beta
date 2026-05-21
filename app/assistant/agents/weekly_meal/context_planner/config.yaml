@@ -1,0 +1,41 @@
+name: weekly_meal::context_planner
+class_name: Planner
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.4-mini"
+  model_tier: "smart"
+
+# Context-gather planner for weekly_meal_manager. Reads the seeded
+# context (built by build_weekly_meal_planner_context), reasons about
+# whether additional signals are needed for the week ahead, fetches via
+# tools where genuine gaps exist, returns control to weekly_meal_planner
+# when the bundle is ready.
+#
+# Tool palette is the manager-level set; not narrowed further here.
+allowed_tools: []
+except_tools: []
+allowed_nodes: [return_control]
+accept_auto_skills: false
+
+# Read the seed once; reasoning happens against recent_history each cycle.
+user_context_items:
+  - date_time
+  - day_of_week
+  - week_start_date
+  - inventory_snapshot
+  - recipes_house
+  - dietary_context
+  - food_calendar
+  - family_roster
+  - addressable_concerns
+  - fast_food_count_7d
+  - ralphs_standing_list
+  - recent_history
+  - action_count
+
+system_context_items:
+  - tool_descriptions
+  - allowed_nodes
+  - resource_user_data
+  - resource_assistant_data
+  - resource_meal_proposer_house_rules

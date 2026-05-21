@@ -1,0 +1,43 @@
+Today: {{ date_time }} ({{ day_of_week }})
+Planning the week beginning: {{ week_start_date }}
+
+## Seed context (already loaded for you and the downstream planner)
+
+### Inventory snapshot
+{{ inventory_snapshot }}
+
+### Recipes vocabulary (recipes_house)
+{{ recipes_house }}
+
+### Per-person dietary signals (from KG, all regulars)
+{{ dietary_context }}
+
+### Food calendar — pre-planned meals next 7 days
+{{ food_calendar }}
+
+### Family roster
+{{ family_roster }}
+
+### Concerns surfaced by the noticer (addressable by meal_proposer)
+{{ addressable_concerns }}
+
+### Fast-food count, last 7 days
+{{ fast_food_count_7d }}
+
+### Standing grocery list (Ralphs)
+{{ ralphs_standing_list }}
+
+## Your reasoning so far
+{% if recent_history %}
+{{ recent_history }}
+{% else %}
+(fresh start — no prior cycles)
+{% endif %}
+
+Action count so far: {{ action_count }}
+
+---
+
+Decide: is there a real gap that needs a tool call before
+weekly_meal_planner can plan well? If not (cold-start week, default
+audience, no precedent to consult), return control.
