@@ -345,9 +345,17 @@ def _execute_series_link(finding: dict) -> dict:
     """
     from app.assistant.kg.db.knowledge_graph_db import Node, Edge
 
-    evidence = finding.get("evidence") or {}
+    evidence = finding.get("evidence_json") or {}
     action = (evidence.get("action") or "").strip()
-    canonical_label = (evidence.get("canonical_label") or "").strip()
+    # Prefer the investigator's refined canonical_label when present —
+    # the investigator pass often improves the triage's proposal with
+    # concept-level specifics (participants, location, etc.). Fall back
+    # to the triage's label when the investigator hasn't run.
+    report = finding.get("investigation_report_json") or {}
+    canonical_label = (
+        (report.get("canonical_label") or "").strip()
+        or (evidence.get("canonical_label") or "").strip()
+    )
     if not canonical_label:
         return {"executed": False, "detail": "evidence missing canonical_label"}
 
