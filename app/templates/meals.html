@@ -154,7 +154,7 @@
                 Will email <code>{{ recipient_email }}</code> the weekly plan + shopping needs above.
                 Mints a <code>delivery.email</code> audit pod when sent.
             </p>
-            <button id="send-katy-btn" class="meals-send-btn">
+            <button id="send-katy-btn" class="meals-send-btn" data-week-start="{{ plan.week_start_date }}">
                 <i class="fas fa-paper-plane"></i> Send to {{ recipient_name }}
             </button>
             <div id="send-status" class="meals-send-status" hidden></div>
@@ -267,12 +267,17 @@
         const statusEl = document.getElementById('send-status');
         if (!btn || !statusEl) return;
         btn.addEventListener('click', async () => {
+            const weekStart = btn.dataset.weekStart || '';
             btn.disabled = true;
             statusEl.hidden = false;
             statusEl.className = 'meals-send-status meals-send-pending';
             statusEl.textContent = 'Sending...';
             try {
-                const resp = await fetch('/meals/send-to-katy', { method: 'POST' });
+                const resp = await fetch('/meals/send-to-katy', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({week_start: weekStart}),
+                });
                 const data = await resp.json();
                 if (data.status === 'ok') {
                     statusEl.className = 'meals-send-status meals-send-ok';

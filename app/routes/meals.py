@@ -37,7 +37,9 @@ def meals_page():
 
 @meals_bp.route("/meals/send-to-katy", methods=["POST"])
 def send_to_katy():
-    result = send_meal_plan_email()
+    payload = request.get_json(silent=True) or request.form or {}
+    week_start = str(payload.get("week_start") or "").strip() or None
+    result = send_meal_plan_email(week_start=week_start)
     http_status = 200 if result.get("status") == "ok" else 400
     return jsonify(result), http_status
 

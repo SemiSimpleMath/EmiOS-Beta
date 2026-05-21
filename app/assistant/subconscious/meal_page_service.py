@@ -362,21 +362,33 @@ def send_meal_plan_email(
     *,
     to: Optional[str] = None,
     recipient_name: Optional[str] = None,
+    week_start: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Send the latest weekly meal plan email to `to` (defaults to Katy).
-    Mints a delivery.email audit pod on success.
+    """Send a weekly meal plan email to `to` (defaults to Katy).
 
-    Returns a dict with status + details for the route layer to JSON-ify.
+    When ``week_start`` is given, sends the plan for that week (so the
+    "Send to Katy" button on /meals respects whatever week the user
+    has navigated to). When omitted, falls back to the latest plan.
+    Mints a delivery.email audit pod on success.
     """
     recipient = (to or KATY_EMAIL).strip()
     name = (recipient_name or KATY_DISPLAY_NAME).strip() or recipient
 
-    plan_pod = load_latest_weekly_plan_pod()
-    if plan_pod is None:
-        return {
-            "status": "no_plan",
-            "message": "No weekly meal plan exists yet. Run the weekly planner first.",
-        }
+    if week_start:
+        parsed = _parse_week_start(week_start)
+        plan_pod = load_plan_pod_for_week(parsed.isoformat()) if parsed else None
+        if plan_pod is None:
+            return {
+                "status": "no_plan",
+                "message": f"No weekly meal plan exists for week of {week_start}.",
+            }
+    else:
+        plan_pod = load_latest_weekly_plan_pod()
+        if plan_pod is None:
+            return {
+                "status": "no_plan",
+                "message": "No weekly meal plan exists yet. Run the weekly planner first.",
+            }
 
     doc_body = fetch_weekly_shopping_doc_body()
     ad_hoc_pods = load_recent_intention_shopping_pods()
