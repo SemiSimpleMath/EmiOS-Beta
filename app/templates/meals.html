@@ -14,10 +14,31 @@
             <a href="/chat_bot" class="back-link"><i class="fas fa-arrow-left"></i> Back to Chat</a>
         </header>
 
+        <nav class="meals-week-nav" data-viewing-week="{{ nav.viewing_week_iso }}">
+            <a class="meals-week-nav-arrow{% if not nav.prev_has_plan %} meals-week-nav-empty{% endif %}"
+               href="/meals?week={{ nav.prev_week_iso }}"
+               title="Week of {{ nav.prev_week_iso }}{% if not nav.prev_has_plan %} (no plan){% endif %}">
+                <i class="fas fa-chevron-left"></i>
+                <span>{{ nav.prev_week_iso }}</span>
+            </a>
+            <div class="meals-week-nav-center">
+                <span class="meals-week-nav-label">Week of {{ nav.viewing_week_iso }}</span>
+                {% if not nav.is_current_week %}
+                <a class="meals-week-nav-today" href="/meals?week={{ nav.today_week_iso }}">Jump to current week</a>
+                {% endif %}
+            </div>
+            <a class="meals-week-nav-arrow{% if not nav.next_has_plan %} meals-week-nav-empty{% endif %}"
+               href="/meals?week={{ nav.next_week_iso }}"
+               title="Week of {{ nav.next_week_iso }}{% if not nav.next_has_plan %} (no plan){% endif %}">
+                <span>{{ nav.next_week_iso }}</span>
+                <i class="fas fa-chevron-right"></i>
+            </a>
+        </nav>
+
         {% if plan %}
         <section class="meals-plan-section">
             <div class="meals-section-head">
-                <h2>This week's plan</h2>
+                <h2>Weekly plan</h2>
                 <span class="meals-week-label">Week of {{ plan.week_start_date }}</span>
             </div>
 
@@ -141,10 +162,16 @@
 
         {% else %}
         <section class="meals-empty-state">
-            <h2>No weekly meal plan yet</h2>
-            <p>The weekly meal planner hasn't run, or its output isn't a <code>plan.weekly_meals</code> pod yet.</p>
-            <p>Run it via:</p>
-            <pre>.venv\Scripts\python.exe -m app.assistant.subconscious.run_weekly_meal_planner</pre>
+            <h2>No plan for week of {{ viewing_week }}</h2>
+            <p>The weekly meal planner hasn't run for this week yet.</p>
+            <button id="generate-plan-btn" class="meals-send-btn" data-week-start="{{ viewing_week }}">
+                <i class="fas fa-magic"></i> Generate plan for this week
+            </button>
+            <div id="generate-status" class="meals-send-status" hidden></div>
+            <p class="meals-empty-fineprint">
+                Runs the distiller + planning manager + meal planner chain, then mints a
+                <code>plan.weekly_meals</code> pod. Takes 30-60 seconds.
+            </p>
         </section>
         {% endif %}
     </div>
@@ -192,6 +219,46 @@
                     submit.disabled = false;
                 }
             });
+        });
+    })();
+
+    (function () {
+        const btn = document.getElementById('generate-plan-btn');
+        const statusEl = document.getElementById('generate-status');
+        if (!btn || !statusEl) return;
+        btn.addEventListener('click', async () => {
+            const weekStart = btn.dataset.weekStart;
+            if (!weekStart) {
+                statusEl.hidden = false;
+                statusEl.className = 'meals-send-status meals-send-err';
+                statusEl.textContent = 'Missing week_start.';
+                return;
+            }
+            btn.disabled = true;
+            statusEl.hidden = false;
+            statusEl.className = 'meals-send-status meals-send-pending';
+            statusEl.textContent = 'Generating plan (30-60s)...';
+            try {
+                const resp = await fetch('/meals/generate', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({week_start: weekStart}),
+                });
+                const data = await resp.json();
+                if (data.status === 'ok') {
+                    statusEl.className = 'meals-send-status meals-send-ok';
+                    statusEl.textContent = 'Plan generated. Reloading...';
+                    window.location.href = '/meals?week=' + encodeURIComponent(weekStart);
+                } else {
+                    statusEl.className = 'meals-send-status meals-send-err';
+                    statusEl.textContent = 'Failed: ' + (data.message || 'unknown error');
+                    btn.disabled = false;
+                }
+            } catch (e) {
+                statusEl.className = 'meals-send-status meals-send-err';
+                statusEl.textContent = 'Network error: ' + e.message;
+                btn.disabled = false;
+            }
         });
     })();
 

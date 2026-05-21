@@ -71,6 +71,73 @@ body {
     font-size: 14px;
 }
 
+/* Week navigation chrome */
+.meals-week-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 10px 16px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.meals-week-nav-arrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    color: #2d3748;
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 500;
+    background: #edf2f7;
+    transition: background 0.15s ease;
+}
+.meals-week-nav-arrow:hover { background: #e2e8f0; }
+.meals-week-nav-empty {
+    color: #a0aec0;
+    background: transparent;
+    border: 1px dashed #cbd5e0;
+}
+.meals-week-nav-empty:hover { background: #f7fafc; }
+
+.meals-week-nav-center {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    flex: 1;
+    text-align: center;
+}
+.meals-week-nav-label {
+    color: #1f2330;
+    font-weight: 600;
+    font-size: 15px;
+}
+.meals-week-nav-today {
+    color: #4a5568;
+    text-decoration: none;
+    font-size: 12px;
+}
+.meals-week-nav-today:hover { color: #1a202c; text-decoration: underline; }
+
+.meals-empty-fineprint {
+    color: #718096;
+    font-size: 13px;
+    margin: 12px 0 0 0;
+}
+.meals-empty-fineprint code {
+    background: #f7fafc;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 12px;
+}
+
 .meals-label {
     display: inline-block;
     text-transform: uppercase;

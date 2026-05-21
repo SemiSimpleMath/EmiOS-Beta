@@ -10,7 +10,7 @@ The route layer (app/routes/meals.py) is a thin wrapper around this.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from app.assistant.pod_store.contracts import Pod
@@ -37,6 +37,41 @@ def load_latest_weekly_plan_pod() -> Optional[Pod]:
     store = PodStore()
     results = store.query(kind="plan.weekly_meals", limit=1)
     return results[0] if results else None
+
+
+def monday_of(d: date) -> date:
+    """Monday of the ISO week containing ``d``. ``d.weekday()`` returns
+    0 for Monday, so this works without further casing."""
+    return d - timedelta(days=d.weekday())
+
+
+def load_plan_pod_for_week(week_start: str) -> Optional[Pod]:
+    """Most recent plan pod whose metadata.week_start_date matches.
+
+    The planner may have run multiple times for the same week; the
+    newest produced_at_utc wins (matches PodStore ordering)."""
+    store = PodStore()
+    # Pull a generous window so we don't miss a plan written a few weeks
+    # before the user navigates back to it.
+    candidates = store.query(kind="plan.weekly_meals", since="365d", limit=200)
+    for p in candidates:
+        if str((p.metadata or {}).get("week_start_date") or "") == week_start:
+            return p
+    return None
+
+
+def list_existing_plan_week_starts() -> List[str]:
+    """Sorted set of every week_start_date that has at least one plan
+    pod. Used to drive the prev/next navigation chrome — the arrow is
+    live to weeks with plans, otherwise points at the empty state with
+    a Generate button."""
+    store = PodStore()
+    candidates = store.query(kind="plan.weekly_meals", since="365d", limit=500)
+    starts = {
+        str((p.metadata or {}).get("week_start_date") or "")
+        for p in candidates
+    }
+    return sorted(s for s in starts if s)
 
 
 def load_recent_intention_shopping_pods(*, days: int = 14) -> List[Pod]:
@@ -104,14 +139,33 @@ def build_shopping_text(*, doc_body: Optional[str], ad_hoc_pods: List[Pod]) -> s
     return "\n".join(sections).strip()
 
 
-def build_page_view_model() -> Dict[str, Any]:
-    """Everything the /meals template needs to render: the latest plan
-    pod's structured slots, the consolidated shopping text, the target
-    recipient, AND any feedback comments attached to the plan pod (so
-    the user can see their past comments inline)."""
+def build_page_view_model(week_start: Optional[str] = None) -> Dict[str, Any]:
+    """Everything the /meals template needs to render.
+
+    Selection precedence for which week to display:
+      1. Explicit ``week_start`` query param, if given.
+      2. Latest plan pod that exists (so first-time visitors land on
+         real content), if any.
+      3. Monday of today (empty state with a Generate button).
+    """
     from app.assistant.subconscious.feedback_service import fetch_comments_for
 
-    plan_pod = load_latest_weekly_plan_pod()
+    today = date.today()
+    if week_start:
+        viewing_week = _parse_week_start(week_start) or monday_of(today)
+    else:
+        latest = load_latest_weekly_plan_pod()
+        if latest is not None:
+            viewing_week = (
+                _parse_week_start(str((latest.metadata or {}).get("week_start_date") or ""))
+                or monday_of(today)
+            )
+        else:
+            viewing_week = monday_of(today)
+
+    viewing_week_iso = viewing_week.isoformat()
+    plan_pod = load_plan_pod_for_week(viewing_week_iso)
+
     doc_body = fetch_weekly_shopping_doc_body()
     ad_hoc_pods = load_recent_intention_shopping_pods()
     shopping_text = build_shopping_text(doc_body=doc_body, ad_hoc_pods=ad_hoc_pods)
@@ -130,9 +184,6 @@ def build_page_view_model() -> Dict[str, Any]:
         }
         plan_comments = fetch_comments_for(plan_pod.pod_id, limit=20)
 
-    # Group plan comments by target_scope (date) so per-day comment lists
-    # render alongside each day in the grid. Comments with scope=None
-    # appear at the section-level.
     plan_comments_by_scope: Dict[str, list] = {}
     plan_comments_section: list = []
     for c in plan_comments:
@@ -141,6 +192,8 @@ def build_page_view_model() -> Dict[str, Any]:
             plan_comments_by_scope.setdefault(str(scope), []).append(c)
         else:
             plan_comments_section.append(c)
+
+    nav = _build_week_nav(viewing_week, today=today)
 
     return {
         "plan": plan_view,
@@ -151,6 +204,157 @@ def build_page_view_model() -> Dict[str, Any]:
         "ad_hoc_count": len(consolidate_intention_shopping(ad_hoc_pods)),
         "recipient_email": KATY_EMAIL,
         "recipient_name": KATY_DISPLAY_NAME,
+        "viewing_week": viewing_week_iso,
+        "nav": nav,
+    }
+
+
+def _parse_week_start(s: str) -> Optional[date]:
+    try:
+        d = datetime.strptime(s, "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return None
+    # Snap to Monday so a misuse like ?week=2026-05-26 still resolves
+    # to the same week the planner would have minted under.
+    return monday_of(d)
+
+
+def _build_week_nav(viewing_week: date, *, today: date) -> Dict[str, Any]:
+    """Compute the prev/next week ISO dates plus convenience flags for
+    rendering navigation in the template."""
+    prev_week = viewing_week - timedelta(days=7)
+    next_week = viewing_week + timedelta(days=7)
+    today_week = monday_of(today)
+    existing_weeks = set(list_existing_plan_week_starts())
+    return {
+        "viewing_week_iso": viewing_week.isoformat(),
+        "prev_week_iso": prev_week.isoformat(),
+        "next_week_iso": next_week.isoformat(),
+        "today_week_iso": today_week.isoformat(),
+        "is_current_week": viewing_week == today_week,
+        "prev_has_plan": prev_week.isoformat() in existing_weeks,
+        "next_has_plan": next_week.isoformat() in existing_weeks,
+    }
+
+
+def generate_plan_for_week(week_start: str) -> Dict[str, Any]:
+    """Run the weekly meal planning chain for ``week_start`` and persist.
+
+    Returns ``{status: ok|error, week_start, plan_pod_id?, message?}``.
+    Wraps the same code path the CLI runner uses so the button on the
+    /meals empty state produces an identical pod.
+    """
+    parsed = _parse_week_start(week_start)
+    if parsed is None:
+        return {"status": "error", "message": f"Invalid week_start: {week_start!r}"}
+    week_iso = parsed.isoformat()
+
+    try:
+        from app.assistant.ServiceLocator.service_locator import DI, ServiceLocator
+        from app.assistant.subconscious.meal_context_builder import (
+            build_weekly_meal_planner_context,
+        )
+        from app.assistant.subconscious.meal_persist import (
+            apply_weekly_meal_planner_output,
+        )
+        from app.assistant.utils.pydantic_classes import (
+            Message,
+            ScopeContext,
+            ScopeResourcePolicy,
+        )
+    except Exception as e:
+        logger.exception("[meal_page_service] generate import failed")
+        return {"status": "error", "message": f"import failed: {type(e).__name__}: {e}"}
+
+    if not hasattr(DI, "mam_instance_manager") or DI.mam_instance_manager is None:
+        from app.assistant.manager_runtime.mam_instance_manager import (
+            MAMInstanceManager,
+        )
+        ServiceLocator.register(
+            "mam_instance_manager",
+            MAMInstanceManager(resource_manager=getattr(DI, "resource_manager", None)),
+        )
+
+    seed = build_weekly_meal_planner_context()
+    seed["week_start_date"] = week_iso
+    seed["horizon_days"] = "7"
+
+    distiller = DI.agent_factory.create_agent("meal_context_distiller")
+    if distiller is None:
+        return {"status": "error", "message": "meal_context_distiller unavailable"}
+    distiller_scope = ScopeContext(
+        scope_id="subconscious::meal_context_distiller",
+        owner_id="system",
+        actor_id="meal_page_service",
+        surface="internal",
+        resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
+    )
+    try:
+        distiller_result = distiller.action_handler(
+            Message(agent_input=seed, scope_context=distiller_scope)
+        )
+    except Exception as e:
+        logger.exception("[meal_page_service] distiller raised")
+        return {"status": "error", "message": f"distiller raised: {type(e).__name__}: {e}"}
+    meal_context: Dict[str, Any] = (
+        distiller_result.data
+        if isinstance(getattr(distiller_result, "data", None), dict)
+        else {}
+    )
+
+    manager = DI.multi_agent_manager_factory.create_manager(
+        "weekly_meal_planning_manager"
+    )
+    if manager is None:
+        return {"status": "error", "message": "weekly_meal_planning_manager unavailable"}
+    mgr_scope = ScopeContext(
+        scope_id="subconscious::weekly_meal_planning_manager",
+        owner_id="system",
+        actor_id="meal_page_service",
+        surface="internal",
+        resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
+    )
+    manager_context: Dict[str, Any] = {
+        "date_time": seed.get("date_time"),
+        "day_of_week": seed.get("day_of_week"),
+        "week_start_date": week_iso,
+        "meal_context": meal_context,
+        "inventory_snapshot": seed.get("inventory_snapshot"),
+        "ralphs_standing_list": seed.get("ralphs_standing_list"),
+        "agent_weekly_list_state": seed.get("agent_weekly_list_state"),
+    }
+    bb = manager.blackboard
+    for k, v in manager_context.items():
+        bb.update_state_value(k, v)
+    try:
+        DI.manager_invoker.invoke(
+            manager, Message(agent_input=manager_context, scope_context=mgr_scope)
+        )
+    except Exception as e:
+        logger.exception("[meal_page_service] manager raised")
+        return {"status": "error", "message": f"manager raised: {type(e).__name__}: {e}"}
+
+    output: Dict[str, Any] = {}
+    try:
+        for m in bb.get_messages():
+            if str(getattr(m, "sender", "") or "") == "weekly_meal_planner":
+                data = getattr(m, "data", None) or {}
+                if isinstance(data, dict) and data:
+                    output = data
+                    break
+    except Exception as e:
+        logger.warning("[meal_page_service] blackboard read failed: %s", e)
+
+    if not output:
+        return {"status": "error", "message": "planner produced no output"}
+
+    summary = apply_weekly_meal_planner_output(output)
+    plan_pod_id = summary.get("plan_pod_id") or ""
+    return {
+        "status": "ok",
+        "week_start": week_iso,
+        "plan_pod_id": plan_pod_id,
+        "summary": summary,
     }
 
 
