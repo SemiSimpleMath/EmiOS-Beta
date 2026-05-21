@@ -39,3 +39,4 @@ system_context_items:
   - resource_user_data
   - resource_assistant_data
   - resource_meal_proposer_house_rules
+  - resource_subconscious_context_planner
