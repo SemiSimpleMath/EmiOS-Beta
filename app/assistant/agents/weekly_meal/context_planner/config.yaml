@@ -23,15 +23,22 @@ user_context_items:
   - day_of_week
   - week_start_date
   - inventory_snapshot
-  - recipes_house
+  - diet_log_7d
   - dietary_context
   - food_calendar
   - family_roster
   - addressable_concerns
   - fast_food_count_7d
-  - ralphs_standing_list
   - recent_history
   - action_count
+# Dropped:
+#   - recipes_house: a 122-char stub that just redirects to
+#     resource_meal_proposer_house_rules (loaded in system_context_items
+#     below). The redirect was prompt noise.
+#   - ralphs_standing_list: staples Jukka always buys at Ralphs. That's
+#     shopping-list-generation input, used by weekly_meal_planner when
+#     it emits WeeklyShoppingList. Not relevant to meal-decision-time
+#     reasoning; belongs only downstream.
 
 system_context_items:
   - tool_descriptions
