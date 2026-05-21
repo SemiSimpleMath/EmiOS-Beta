@@ -36,7 +36,16 @@ logger = get_logger(__name__)
 
 
 def build_weekly_meal_planner_context() -> Dict[str, str]:
-    """Context for weekly_meal_planner (strategic, full-week)."""
+    """Context for weekly_meal_planner (strategic, full-week).
+
+    Note on the calendar slot: `general_calendar_week` covers the next
+    7 days from non-Food calendars (travel, visitors, work, family
+    events). The OLD `food_calendar` (already-planned Food calendar
+    entries) was dropped — we're planning 7 days INTO THE FUTURE, so
+    there's nothing useful in already-planned meals to constrain
+    against. Audience signals (e.g. "Marika visits Tuesday") come
+    from general_calendar_week.
+    """
     now_local = get_local_time()
     household_members = _resolve_household_members()
 
@@ -49,7 +58,7 @@ def build_weekly_meal_planner_context() -> Dict[str, str]:
         "recipes_house": _build_recipes_house_reference(),
         "dietary_context": _build_dietary_context(household_members),
         "food_beliefs": _build_food_beliefs(),
-        "food_calendar": _build_food_calendar(now_local=now_local),
+        "general_calendar_week": _build_calendar_week_summary(now_local=now_local),
         "family_roster": _build_family_roster(household_members),
         "addressable_concerns": _build_addressable_concerns(),
         "fast_food_count_7d": _build_fast_food_count(),
@@ -257,41 +266,39 @@ def _build_dietary_context(household_members: List[str]) -> str:
         return "(error reading dietary context)"
 
 
-# Whole-word food vocabulary for filtering belief statements. Bare short
-# tokens ("eat", "ate") would over-match against words like "great" /
-# "participates"; keep entries distinctive enough that word-boundary regex
-# is safe.
-import re as _re
-_FOOD_BELIEF_RE = _re.compile(
-    r'\b(food|meal|meals|eat|eats|eaten|eating|ate|diet|drink|drinks|drank|'
-    r'breakfast|lunch|dinner|snack|recipe|recipes|cook|cooks|cooking|cooked|'
-    r'kitchen|allerg|allergic|cuisine|grocery|grocer|inventory|chicken|salmon|'
-    r'beef|pork|lamb|fish|pasta|rice|vegetable|fruit|cheese|burrito|burritos|'
-    r'tortilla|sushi|sandwich|taco|tacos|pizza|carb|carbs|protein|sugar|salt|'
-    r'fasting|intermittent|lactose|gluten|gerd|diabetic|ralphs|wine|coffee|'
-    r'caffeine|hydration|nutrition|takeout|chipotle|carl|doordash|trader)\b',
-    _re.IGNORECASE,
-)
+# Food-domain belief_key prefixes. belief_updater (in the belief_engine
+# pipeline) assigns these slugs at write time — first dot-segment is
+# the domain the LLM classified the belief into. Filter is structural:
+# match on prefix, not on prose. No regex on statements.
+#
+# If a new food-relevant prefix shows up in real data, add it here.
+# The list grows by observation, not speculation.
 _FOOD_BELIEF_KEY_PREFIXES = (
-    'food.', 'meal.', 'diet.', 'kitchen.', 'cooking.', 'grocery.',
-    'eat', 'health.nutrition', 'health.hydration', 'health.weight',
-    'routine.friday_night_meats', 'social.friday_night_meats',
-    'routine.family_time', 'routine.work.lunch',
+    "food.",
+    "meal.",
+    "diet.",
+    "kitchen.",
+    "cooking.",
+    "grocery.",
+    "health.nutrition.",
+    "health.hydration.",
+    "health.weight.",
+    "health.alcohol.",
+    "routine.friday_night_meats.",
+    "social.friday_night_meats.",
 )
 
 
 def _build_food_beliefs() -> str:
-    """Pull food-relevant beliefs from BeliefStore (user_beliefs table).
+    """Pull food-domain beliefs from BeliefStore (user_beliefs table).
 
-    Filter: active status + food-relevant by either belief_key prefix or
-    whole-word match on the statement.
+    Filter is structural: belief_key starts with one of the food-domain
+    prefixes that belief_engine.belief_updater already assigned at
+    write time. First dot-segment of belief_key is the domain the
+    writing LLM classified into; we just match prefix.
+
     Order: by current_net_weight DESC (most-supported first).
     Top N=30 shown; runaway count surfaced past that.
-
-    The `domain` column on user_beliefs isn't reliably populated today
-    (most rows are tagged 'general'), so we filter by belief_key prefix
-    + statement keyword match instead. If a real `domain='food'` tagging
-    pass lands later, the upstream WHERE clause can simplify.
     """
     from app.models.base import get_session
     from sqlalchemy import text as sql_text
@@ -315,10 +322,10 @@ def _build_food_beliefs() -> str:
         food = []
         for r in rows:
             key = r[0] or ''
-            stmt = r[1] or ''
-            weight = r[2] if r[2] is not None else 0.0
-            conf = r[3]
-            if any(p in key for p in _FOOD_BELIEF_KEY_PREFIXES) or _FOOD_BELIEF_RE.search(stmt):
+            if any(key.startswith(p) for p in _FOOD_BELIEF_KEY_PREFIXES):
+                stmt = r[1] or ''
+                weight = r[2] if r[2] is not None else 0.0
+                conf = r[3]
                 food.append((key, stmt, weight, conf))
 
         if not food:

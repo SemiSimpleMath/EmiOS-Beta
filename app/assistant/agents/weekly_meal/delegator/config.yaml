@@ -1,8 +1,0 @@
-name: weekly_meal::delegator
-class_name: Delegator
-llm_params:
-  llm_provider: "openai"
-  engine: "gpt-5-mini"
-  model_tier: "mini"
-
-allowed_tools: []

@@ -23,7 +23,7 @@ user_context_items:
   - recipes_house
   - dietary_context
   - food_beliefs
-  - food_calendar
+  - general_calendar_week
   - family_roster
   - addressable_concerns
   - fast_food_count_7d

@@ -1,0 +1,31 @@
+{{ date_time }} ({{ day_of_week }}).
+Planning horizon: {{ horizon_days }} day(s) starting {{ week_start_date }}.
+
+## What was eaten last 7 days
+{{ diet_log_7d }}
+
+## In the kitchen now
+{{ inventory_snapshot }}
+
+## Per-person dietary signals (KG)
+{{ dietary_context }}
+
+## Food-domain beliefs (BeliefStore)
+{{ food_beliefs }}
+
+## General calendar — next 7 days
+{{ general_calendar_week }}
+
+## Household roster
+{{ family_roster }}
+
+## Concerns from the noticer (addressable_by meal_proposer)
+{{ addressable_concerns }}
+
+## Fast-food count, last 7 days
+{{ fast_food_count_7d }}
+
+---
+
+Reorganize into the structured AgentForm. One DayContext per day in
+the horizon ({{ horizon_days }} day(s)), starting {{ week_start_date }}.

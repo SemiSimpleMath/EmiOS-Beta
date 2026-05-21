@@ -1,0 +1,38 @@
+name: meal_context_distiller
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5-mini"
+  model_tier: "mini"
+
+# Cheap LLM step. Runs every meal-planning cycle. Reorganizes the seed
+# (beliefs + concerns + calendar + roster) into a per-day structure
+# the meal_planner can scan directly. Does NOT fetch anything new;
+# does NOT decide meals. Pure restructuring + relevance picking.
+#
+# Daily vs weekly: same agent, prompt-tunes via horizon_days
+# (user_context_items provide enough info that one prompt handles both).
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+accept_auto_skills: false
+
+user_context_items:
+  - date_time
+  - day_of_week
+  - week_start_date
+  - horizon_days        # 2 for daily, 7 for weekly — supplied by caller
+  - diet_log_7d
+  - inventory_snapshot
+  - dietary_context
+  - food_beliefs
+  - general_calendar_week
+  - family_roster
+  - addressable_concerns
+  - fast_food_count_7d
+
+system_context_items:
+  - resource_user_data
+  - resource_assistant_data
+  - resource_meal_proposer_house_rules
