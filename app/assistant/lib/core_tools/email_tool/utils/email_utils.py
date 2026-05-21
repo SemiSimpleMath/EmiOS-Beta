@@ -7,7 +7,11 @@ from email import message_from_string
 
 from app.assistant.lib.core_tools.email_tool.utils.gmail_api_client import GmailAPIClient
 from app.assistant.lib.core_tools.email_tool.utils.email_processor import EmailProcessor
-from app.assistant.utils.pydantic_classes import Message
+from app.assistant.utils.pydantic_classes import (
+    Message,
+    ScopeContext,
+    ScopeResourcePolicy,
+)
 from app.assistant.event_repository.event_repository import EventRepositoryManager
 from app.assistant.ServiceLocator.service_locator import DI
 from sqlalchemy import select
@@ -18,6 +22,19 @@ from app.assistant.utils.logging_config import get_logger
 from app.models.base import get_session
 
 logger = get_logger(__name__)
+
+
+# Scope for the email_parser agent when invoked from the email ingest /
+# triage paths. These calls are background work (no chain room, no
+# upstream manager), so we mint a system-actor scope that lets the
+# agent resolve its declared resources (resource_email_user_prefs).
+_EMAIL_PARSER_SCOPE = ScopeContext(
+    scope_id="email_tool::email_parser",
+    owner_id="system",
+    actor_id="email_tool",
+    surface="internal",
+    resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
+)
 
 class EmailUtils:
     """Handles email fetching, processing, and storing using Gmail API."""
@@ -202,7 +219,7 @@ class EmailUtils:
                 email_message = message_from_string(full_email["raw_email"])
                 email_body = EmailProcessor.extract_email_body(email_message)
 
-                agent_msg = Message(agent_input=email_body)
+                agent_msg = Message(agent_input=email_body, scope_context=_EMAIL_PARSER_SCOPE)
                 result_data = summary_agent.action_handler(agent_msg)
                 summary_data = result_data.data if hasattr(result_data, "data") else result_data
 
@@ -418,10 +435,10 @@ class EmailUtils:
             email_message = message_from_string(full_email["raw_email"])
             email_body = EmailProcessor.extract_email_body(email_message)
 
-            agent_msg = Message(agent_input=email_body)
+            agent_msg = Message(agent_input=email_body, scope_context=_EMAIL_PARSER_SCOPE)
             result_data = summary_agent.action_handler(agent_msg)
             summary_data = result_data.data if hasattr(result_data, "data") else result_data
-            
+
             logger.debug(f"📧 Processed email {idx+1}/{len(filtered_emails)}")
 
             email_data = {
@@ -597,7 +614,7 @@ class EmailUtils:
             email_message = message_from_string(full_email["raw_email"])
             email_body = EmailProcessor.extract_email_body(email_message)
 
-            agent_result = summary_agent.action_handler(Message(agent_input=email_body))
+            agent_result = summary_agent.action_handler(Message(agent_input=email_body, scope_context=_EMAIL_PARSER_SCOPE))
             summary_data = agent_result.data if hasattr(agent_result, "data") else agent_result
 
             email_data = {
