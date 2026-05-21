@@ -45,6 +45,14 @@ busy weeks, or when kids are picky.
 - Frozen pizza
 - Hot dogs (kids love)
 
+### Friday Night Meats is NOT food
+
+"Friday Night Meats" (FNM) is a recurring family/friends Zoom social
+that happens every Friday 8-10pm. The misspelled "Meats" is a Bob's
+Burgers reference. It has nothing to do with what's for dinner. The
+planner should NOT treat FNM as a meal slot, an anchor, or a dish.
+Friday dinner is independently planned — usually pizza, per section 5.
+
 ### Notes on cook variety
 
 - Jukka cooks all of the above; Katy generally doesn't cook dinner.
