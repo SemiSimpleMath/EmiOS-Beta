@@ -14,7 +14,7 @@ None
 
 ########## TASK CONTEXT (ACTIONABLE) ##########
 {%- if actionable_items %}
-{%- for item in actionable_items[:20] %}
+{%- for item in actionable_items %}
 - {% if item.get("plan_id") %}[{{ item.get("plan_id") }}] {% endif %}{{ item.get("summary","") }}
   id: {{ item.get("short_id", item.get("item_id","")) }}
 {%- endfor %}
@@ -24,7 +24,7 @@ None
 
 ########## ACTIVE PLANS ##########
 {%- if active_plan_synopses %}
-{%- for p in active_plan_synopses[:10] %}
+{%- for p in active_plan_synopses %}
 - [{{ p.get("plan_id","") }}] {{ p.get("objective","") }}
 {%- endfor %}
 {%- else %}
@@ -34,7 +34,7 @@ None
 ########## TICKET RESPONSES (recent context) ##########
 {%- if recent_responded_tickets and recent_responded_tickets.get("accepted") %}
 Accepted:
-{%- for t in recent_responded_tickets.accepted[:5] %}
+{%- for t in recent_responded_tickets.accepted %}
 - {{ t.get("title","") }}{% if t.get("user_comment","") %} - "{{ t.get("user_comment") }}"{% endif %}
 {%- endfor %}
 {%- endif %}

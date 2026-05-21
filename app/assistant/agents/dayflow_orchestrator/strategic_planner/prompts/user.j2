@@ -65,7 +65,7 @@ I dispatched **{{ r.task_id }}** to `{{ r.dispatched_to }}`{% if r.dispatched_to
 
 ########## RECENT NUDGES SENT (do not duplicate; give them air to land) ##########
 *The action_selector already pushed these to the user in the recent window. Don't generate a new task that would re-send the same intent — wait for response or for a real change in context.*
-{%- for a in recent_action_selector_actions[-15:] %}
+{%- for a in recent_action_selector_actions %}
 - [{{ a.time_local }}] {{ a.summary }}{% if a.plan_id %} (plan: {{ a.plan_id }}){% endif %}{% if a.task_id %} (task: {{ a.task_id }}){% endif %}
 {%- endfor %}
 {%- endif %}
@@ -82,7 +82,7 @@ I dispatched **{{ r.task_id }}** to `{{ r.dispatched_to }}`{% if r.dispatched_to
 {%- if meta.get("state","") in ["artifact", "needs_planning", "new"] and not meta.get("plan_id") and meta.get("item_id","") not in seen_art_ids %}{% if all_artifacts.append(ex) %}{% endif %}{% endif %}
 {%- endfor %}
 {%- if all_artifacts %}
-{%- for m in all_artifacts[:40] %}
+{%- for m in all_artifacts %}
 {%- set meta = m.get("metadata", {}) %}
 {%- if meta.get("source_type","") == "email" %}
 - Email{% if meta.get("created_at_local") %} received {{ meta.get("created_at_local") }}{% endif %} from {{ meta.get("email_sender","Unknown") }}: "{{ meta.get("email_subject", meta.get("summary","")) }}"{% if meta.get("email_summary") %} — {{ meta.get("email_summary") }}{% endif %}{% if meta.get("importance","") not in ["medium", ""] %} — {{ meta.get("importance") }}{% endif %}
@@ -163,13 +163,13 @@ No active plans.
 {%- if non_plan_open %}
 
 ########## NON-PLAN OPEN TASKS ##########
-{{ task_block(non_plan_open, "Open Tasks", 30) }}
+{{ task_block(non_plan_open, "Open Tasks") }}
 {%- endif %}
 
 {%- if active_tickets %}
 
 ########## ACTIVE TICKETS (pending user response) ##########
-{%- for t in active_tickets[:20] %}
+{%- for t in active_tickets %}
 - [{{ t.get("suggestion_type","") }}] {{ t.get("title","") }}
   {{ t.get("message","") }}{% if t.get("snooze_until_local","") %}
   snoozed until {{ t.get("snooze_until_local") }}{% endif %}{% if t.get("acted_on_item_ids") %}
@@ -192,7 +192,7 @@ No active plans.
 ########## TICKET RESPONSES (user directives — obey these) ##########
 {%- for category, label in [("accepted", "ACCEPTED"), ("declined", "DECLINED"), ("snoozed", "SNOOZED")] %}
 {%- if recent_responded_tickets.get(category) %}
-{%- for t in recent_responded_tickets.get(category)[:10] %}
+{%- for t in recent_responded_tickets.get(category) %}
 - [{{ t.get("responded_at_local","") }}] {{ label }}: {{ t.get("title","") }}
   {{ t.get("message","") }}{% if t.get("user_comment") %}
   user: "{{ t.get("user_comment") }}"{% endif %}{% if t.get("acted_on_item_ids") %}
@@ -215,13 +215,13 @@ No active plans.
 {%- if non_plan_closed %}
 
 ########## NON-PLAN CLOSED TASKS ##########
-{{ task_block(non_plan_closed, "Closed Tasks", 15) }}
+{{ task_block(non_plan_closed, "Closed Tasks") }}
 {%- endif %}
 
 {%- if recent_dayflow_chat_history %}
 
 ########## CHAT HISTORY ##########
-{%- for c in recent_dayflow_chat_history[-20:] %}
+{%- for c in recent_dayflow_chat_history %}
 - [{{ c.get("time_local","") }}] {{ c.get("summary","") }}
 {%- endfor %}
 {%- endif %}

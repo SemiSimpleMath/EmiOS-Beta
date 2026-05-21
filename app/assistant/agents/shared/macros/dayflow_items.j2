@@ -5,7 +5,11 @@
     {% from "shared/macros/dayflow_items.j2" import task_line, task_block %}
 
   task_line(meta)  — single item, one line + detail lines
-  task_block(items, title, limit) — grouped section with header
+  task_block(items, title, [limit-ignored]) — grouped section with
+    header; renders EVERY item. The `limit` argument is accepted
+    only for backwards compat with existing call sites; it is now
+    ignored. Decision/auditor agents must see the full state so
+    runaway is visible — drop arguments at next sweep.
 #}
 
 
@@ -39,10 +43,10 @@
 {%- endmacro %}
 
 
-{% macro task_block(items, title, limit=40) -%}
+{% macro task_block(items, title, limit=None) -%}
 {% if items %}
 +++++ {{ title }} +++++
-{% for ex in items[:limit] %}
+{% for ex in items %}
 {% set meta = ex.get("metadata", {}) %}
 {{ task_line(meta) }}
 {% endfor %}

@@ -11,7 +11,7 @@ No schedule available.
 
 ########## NEW POTENTIAL ARTIFACTS ##########
 {%- if eligible_items_now %}
-{%- for m in (eligible_items_now or [])[:80] %}
+{%- for m in (eligible_items_now or []) %}
 {%- set meta = m.get("metadata", {}) %}
 {%- if meta.get("source_type","") == "email" %}
 - {% if meta.get("is_update") %}[UPDATE: {{ meta.get("update_changed_fields", [])|join(", ") }}] {% endif %}Email{% if meta.get("created_at_local") %} received {{ meta.get("created_at_local") }}{% endif %} from {{ meta.get("email_sender","Unknown") }}: "{{ meta.get("email_subject", meta.get("summary","")) }}"{% if meta.get("email_summary") %} — {{ meta.get("email_summary") }}{% endif %}{% if meta.get("importance","") not in ["medium", ""] %} — {{ meta.get("importance") }}{% endif %}
@@ -28,7 +28,7 @@ None
 ########## EXISTING CONTEXT (for duplicate checking) ##########
 ##### Active Plans
 {%- if active_plan_synopses %}
-{%- for p in active_plan_synopses[:20] %}
+{%- for p in active_plan_synopses %}
 - [{{ p.get("plan_id","") }}] {{ p.get("objective","") }}
   {{ p.get("synopsis","") }}
 {%- endfor %}
@@ -43,7 +43,7 @@ None
 {%- if m.get("state","") in ["important_open", "actionable"] %}{% if active_tasks.append(ex) %}{% endif %}{%- endif %}
 {%- endfor %}
 {%- if active_tasks %}
-{%- for ex in active_tasks[:60] %}
+{%- for ex in active_tasks %}
 {%- set meta = ex.get("metadata", {}) %}
 {{ task_line(meta) }}
 {%- endfor %}
@@ -58,7 +58,7 @@ None
 {%- if m.get("state","") in ["waiting", "watching"] %}{% if waiting.append(ex) %}{% endif %}{%- endif %}
 {%- endfor %}
 {%- if waiting %}
-{%- for ex in waiting[:60] %}
+{%- for ex in waiting %}
 {%- set meta = ex.get("metadata", {}) %}
 {{ task_line(meta) }}
 {%- endfor %}
@@ -68,7 +68,7 @@ None
 
 ##### Recently Completed
 {%- if recently_completed_items %}
-{%- for ex in (recently_completed_items or [])[:40] %}
+{%- for ex in (recently_completed_items or []) %}
 {%- set meta = ex.get("metadata", {}) %}
 {{ task_line(meta) }}
 {%- endfor %}

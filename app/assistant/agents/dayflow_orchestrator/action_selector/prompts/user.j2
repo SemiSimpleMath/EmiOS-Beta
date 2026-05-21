@@ -8,13 +8,13 @@
 {% endif %}
 {% if resource_expected_calendar and resource_expected_calendar.expected_schedule %}
 **Upcoming schedule:**
-{% for entry in resource_expected_calendar.expected_schedule[:5] %}
+{% for entry in resource_expected_calendar.expected_schedule %}
 - {{ entry.title }} {{ entry.start_local }}{% if entry.end_local %} - {{ entry.end_local }}{% endif %} ({{ entry.status }})
 {% endfor %}
 {% endif %}
 
 ++++++++++++++++++++++++++ ACTIONABLE ITEMS — PICK ONE +++++++++++++++++++++++++++++
-{% for item in actionable_items[:10] %}
+{% for item in actionable_items %}
 - task: {{ item.get("short_id", item.get("item_id","")) }}{% if item.get("plan_id") %} | plan: {{ item.get("plan_id") }}{% endif %}{% if item.get("importance","") not in ["medium", ""] %} | {{ item.get("importance") }}{% endif %}
 
   {{ item.get("summary","") }}{% if item.get("scheduled_start_local","") %}

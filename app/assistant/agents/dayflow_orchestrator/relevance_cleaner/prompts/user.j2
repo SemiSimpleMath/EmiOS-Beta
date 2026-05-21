@@ -32,13 +32,13 @@ No plans.
 {%- endif %}
 {%- endfor %}
 
-{{ task_block(actionable, "Actionable Tasks", 30) }}
-{{ task_block(dispatched, "Dispatched Tasks", 20) }}
-{{ task_block(waiting, "Waiting Tasks (review for stale reactivation — close any whose reactivate_at_utc has long passed)", 30) }}
+{{ task_block(actionable, "Actionable Tasks") }}
+{{ task_block(dispatched, "Dispatched Tasks") }}
+{{ task_block(waiting, "Waiting Tasks (review for stale reactivation — close any whose reactivate_at_utc has long passed)") }}
 {%- if closed_items %}
 
 +++++ Closed Items (review for suppression) +++++
-{%- for ex in closed_items[:60] %}
+{%- for ex in closed_items %}
 {%- set meta = ex.get("metadata", {}) %}
 - task: {{ meta.get("short_id", "") }}
   {%- if meta.get("plan_id") %} | plan: {{ meta.get("plan_id") }}{% endif %}
@@ -49,7 +49,7 @@ No plans.
 {%- endfor %}
 {%- endif %}
 
-{{ task_block(other, "Other Items (review for cleanup)", 30) }}
+{{ task_block(other, "Other Items (review for cleanup)") }}
 {%- endif %}
 
 {# Action log removed — the cleaner only needs tracked items, not dispatch history.

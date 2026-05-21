@@ -30,7 +30,7 @@
 {%- if recent_dayflow_chat_history %}
 
 ##### Recent User Chat
-{%- for c in recent_dayflow_chat_history[-10:] %}
+{%- for c in recent_dayflow_chat_history %}
 - [{{ c.get("time_local","") }}] {{ c.get("summary","") }}
 {%- endfor %}
 {%- endif %}
@@ -40,13 +40,13 @@
 
 ##### Recent Ticket Responses
 {%- if recent_responded_tickets.accepted %}
-Accepted: {% for t in recent_responded_tickets.accepted[:5] %}{{ t.get("title","") }}{% if not loop.last %}, {% endif %}{% endfor %}
+Accepted: {% for t in recent_responded_tickets.accepted %}{{ t.get("title","") }}{% if not loop.last %}, {% endif %}{% endfor %}
 {%- endif %}
 {%- if recent_responded_tickets.declined %}
-Declined: {% for t in recent_responded_tickets.declined[:5] %}{{ t.get("title","") }}{% if not loop.last %}, {% endif %}{% endfor %}
+Declined: {% for t in recent_responded_tickets.declined %}{{ t.get("title","") }}{% if not loop.last %}, {% endif %}{% endfor %}
 {%- endif %}
 {%- if recent_responded_tickets.snoozed %}
-Snoozed: {% for t in recent_responded_tickets.snoozed[:5] %}{{ t.get("title","") }}{% if not loop.last %}, {% endif %}{% endfor %}
+Snoozed: {% for t in recent_responded_tickets.snoozed %}{{ t.get("title","") }}{% if not loop.last %}, {% endif %}{% endfor %}
 {%- endif %}
 {%- endif %}
 {%- endif %}
@@ -66,7 +66,7 @@ Snoozed: {% for t in recent_responded_tickets.snoozed[:5] %}{{ t.get("title","")
 {%- if active_plan_synopses %}
 
 ##### Active Plans
-{%- for p in active_plan_synopses[:20] %}
+{%- for p in active_plan_synopses %}
 - plan: {{ p.get("plan_id","") }}
   {{ p.get("objective","") }}
   {{ p.get("synopsis","") }}
