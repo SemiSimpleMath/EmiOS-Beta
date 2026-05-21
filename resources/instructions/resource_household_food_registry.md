@@ -4,128 +4,160 @@ The canonical list of what this household actually eats. Every weekly
 meal plan should LEAN HEAVILY on this list — these are the dishes,
 fast food, takeout, and restaurants the family knows and accepts.
 
-The planner can occasionally propose something new (novel_try slot,
+The planner can occasionally propose something new (novelty slot,
 ~1 per week max) but the bulk of every week comes from here.
 
-This file grows by hand for now — Jukka edits it directly. Future
-work: a "Promote to baseline" button on `/meals` that adds an
-accepted dish to one of these sections after it gets positive feedback.
+This file is hand-edited by Jukka. Future work: a "Promote to baseline"
+button on `/meals` that adds an accepted novelty dish/venue here after
+positive feedback.
 
 ---
 
-## 1. Home-cooked dishes (the baseline)
+## 1. Home-cooked dishes
 
-Dishes the family cooks regularly at home. The planner picks dinners
-and weekend lunches from here unless there's a specific reason to
-deviate.
+Jukka does the cooking. This is the COMPLETE list of dishes he makes
+— the planner should pick `home_cook` slots from here ONLY. If a
+desired dish isn't on this list, use `slot_type=novelty` instead.
 
-### Comfort food (the always-works subset — high reliability)
+- Salmon
+- Fettuccine alfredo with meatballs *(needs a Trader Joe's run — TJ
+  trip every 2-4 weeks; buy enough to make this dish 2 times per trip)*
+- Hot dogs
+- Pork chops
+- Farfalle with sausage and alfredo sauce
+- Fish sticks
+- Sausages
+- Orange chicken
+- Fish and chips
+- Frozen pizza
+- Lasagna (heat store-bought)
+- Noodle casserole *(rarely)*
 
-These are the dishes that everyone in the household accepts without
-complaint. Use these when the week needs an easy win — fatigue, busy
-day, kids being picky.
+### Comfort food subset (always reliable)
 
-- Friday Night Meats — burgers (the recurring Friday tradition)
-- Roast chicken with carrots and potatoes
-- Pasta carbonara
-- Tacos (ground beef or chicken)
-- Stir-fry (chicken + bell peppers + rice)
-- Chicken tenders with oven potatoes
-- Grilled cheese with tomato soup
+The home-cook items that always work — pick these on fatigue weeks,
+busy weeks, or when kids are picky.
 
-### Regular rotation (good but slightly less universal)
+- Salmon
+- Fettuccine alfredo with meatballs
+- Pork chops
+- Farfalle with sausage and alfredo sauce
+- Frozen pizza
+- Hot dogs (kids love)
 
-- Lemon-garlic salmon with broccoli and rice
-- Sheet-pan chicken with roasted vegetables
-- Chili
-- Pasta with marinara
-- Sushi-style rice bowls (at home)
-- Ham fried rice with carrots
-- Cheese omelets
-- Breakfast burritos (eggs + bacon + cheese in tortilla)
+### Notes on cook variety
 
-### Lunch staples
-
-Weekday lunches are usually leftovers from the night before, but when
-a fresh lunch is needed:
-
-- Ham-and-avocado sandwiches with cucumber
-- Brie-avocado-cucumber sourdough sandwiches
-- Bagels with cream cheese and berries
-- Turkey-avocado wrap
-- (Add more as you confirm what lands.)
-
-### Breakfast (when "planned", not flex)
-
-Most mornings are flex (cereal, fruit, yogurt). When a planned
-breakfast lands:
-
-- Sunday pancakes
-- Overnight oats
-- Eggs + toast
+- Jukka cooks all of the above; Katy generally doesn't cook dinner.
+- "Fettuccine alfredo with meatballs" and "Farfalle with sausage and
+  alfredo sauce" share ingredients but are distinct dishes — don't
+  treat them as duplicates.
+- "Frozen pizza" and "Lasagna (heat store-bought)" are heat-up,
+  not real cooks — easy weeknight fallbacks.
 
 ---
 
-## 2. Fast food we do
+## 2. Fast food
 
-The places the household actually orders from when ordering out. The
-planner uses `slot_type=fast_food` and puts the venue here.
-
-CADENCE: at most ~1 fast-food slot per week, less if the past 4 weeks
-show a rising trend. The planner reads `recent_planned_meals` to
-gauge frequency.
-
-- (TBD — Jukka to fill in: In-N-Out? Chipotle? McDonald's? Habit
-  Burger? etc.)
-- (TBD — preferred order at each one if helpful)
+- Wendy's
+- McDonald's (sometimes breakfast)
 
 ---
 
 ## 3. Takeout / delivery
 
-Restaurants the household orders pickup or delivery from. Distinct
-from "dine out" — these are nights the food comes home.
+Sit-down restaurant pickup AND fast-food-chain pickup both live here —
+the household orders from all of these rather than dining in. The
+planner uses `slot_type=takeout` for everything in this section.
 
-CADENCE: ~1-2 per month typically.
-
-- (TBD — Jukka to fill in)
+- **China Palace** — the big one. When ordered, usually covers 2-3
+  days of leftovers. If China Palace is on the plan, the following
+  1-2 dinners should be `leftover` from it.
+- Islands (burgers, occasionally)
+- The Melt
+- Rubio's
+- Panda Express *(~once a month — a real cadence pin, not just
+  "occasionally")*
+- **In-N-Out** *(favorite)*
+- **Chick-fil-A** *(favorite)*
+- **Del Taco** *(favorite)*
+- **Taco Bell** *(favorite)*
+- Carl's Jr *(sometimes)*
+- Insomnia Cookies *(dessert / treat, not a main meal — don't
+  schedule as a dinner slot)*
+- Jamba Juice *(drink/snack — not a meal slot)*
+- Starbucks *(drink/snack — not a meal slot)*
 
 ---
 
 ## 4. Dine-out restaurants
 
-Restaurants the household actually visits (sit-down meals). The
-planner uses `slot_type=dine_out` when it proposes one.
-
-CADENCE: ~1-2 per month typically, more if it's a special occasion.
-
-- (TBD — Jukka to fill in: local favorites, Friday Night Meats venue
-  if it's ever out, anniversary spots, etc.)
+- Sushi place *(Jukka loves it — good Friday or weekend dinner pick)*
+- Thai dinner place *(Katy-friendly thai — works for family dinner)*
+- Thai Spice *(Jukka's lunch place — different from the family thai
+  dinner spot)*
+- **Corner Bakery** *(Saturday or Sunday breakfast — established
+  weekend pattern, ~1 per weekend typical)*
+- Olive Garden
+- Mimi's (occasionally)
+- The Poached Kitchen *(takeout-ish but high-end; reserve for special
+  occasions)*
+- Ruth's Chris *(rare — special occasions only; usually pickup)*
 
 ---
 
-## 5. What NOT to propose
+## 5. Weekly patterns (recurring)
 
-Things that have been tried and rejected, OR that fall outside the
-household's diet patterns. Add to this list as we learn from feedback.
+These are the rhythms the planner should respect WITHOUT being told
+each week:
+
+- **Friday dinner: pizza** — typically frozen pizza at home OR pizza
+  delivery. Planner picks based on the week (delivery if Friday is
+  busy, frozen if a quieter at-home night).
+- **Weekend breakfast: Corner Bakery** — Saturday OR Sunday, ~once
+  per weekend. Use `slot_type=dine_out` with `dish="Corner Bakery"`.
+- **Eat-out cadence: 2-3 times per week** total across fast_food +
+  takeout + dine_out. This household genuinely likes eating out and
+  the planner should reflect that — DON'T undershoot.
+- **China Palace cascade**: a China Palace order produces 2-3 days
+  of leftovers. Schedule the leftover slots explicitly.
+- **TJ supply window**: the fettuccine-alfredo-with-meatballs dish
+  needs a Trader Joe's trip. TJ runs happen every 2-4 weeks and stock
+  enough for 2 batches of the dish. Don't schedule fettuccine alfredo
+  unless TJ ingredients are reasonably current.
+
+---
+
+## 6. What NOT to propose
+
+Things tried and rejected, OR outside the household's diet patterns.
 
 - Onions in any quantity for Katy
 - Zucchini for the kids (Peter + Annika won't eat it)
 - Heavy egg-based dishes for the kids (only Jukka + Katy like eggs)
 - Tomato-heavy evening dishes for Jukka (GERD)
-- Complex weekday breakfasts (no time to cook on weekdays)
-- (Add more as we observe what doesn't work.)
+- Complex weekday breakfasts (no time to cook on weekdays — flex it)
+- Inventing a home-cooked dish that's not on the section-1 list
+  (use `novelty` instead and own that it's experimental)
+- Naming a restaurant that's not on sections 2-4 (use `novelty` for
+  trying a new place)
 
 ---
 
-## 6. Notes on variety + health
+## 7. Health + variety notes
 
-- Spread fast food + takeout + dine_out across the month — don't bunch.
-- Avoid repeating any specific dish within 14 days when possible.
-- When the recent_planned_meals window shows lots of fast food /
-  takeout, the planner should bias toward healthier home-cook options
-  this week AND can call this out in the week_theme.
-- Jukka is calorie-restricting (not actively IF right now). Bias
-  dinners lighter when possible without making them boring.
-- Jukka has a fatigue pattern — easier weeknight cooks help.
-- Kids are growing — protein + veg is fine even when dinners are light.
+- **Spread eating-out across the week.** 2-3 ordering-out slots per
+  week is the target; don't bunch them on consecutive nights.
+- **Avoid repeating any specific dish or venue within 14 days** when
+  possible. If "Pork chops" was last Tuesday, pick something else
+  this week.
+- **Healthier nudge when warranted.** If the past 4 weeks show 12+
+  fast-food/takeout/dine-out slots (well above the ~10 target), bias
+  this week to the home-cook end and call it out in the theme.
+- **Calorie restriction** for Jukka is active but he's NOT
+  intermittent fasting right now — breakfasts are still flex (cereal
+  etc.), just portion-aware on dinners.
+- **Fatigue pattern**: when concerns flag fatigue, lean into the
+  comfort-food subset (section 1) — these are the no-friction picks.
+- **Kids' protein**: even on lighter dinner nights, make sure Peter
+  and Annika get protein. Hot dogs, sausages, fish sticks, orange
+  chicken are easy wins here.

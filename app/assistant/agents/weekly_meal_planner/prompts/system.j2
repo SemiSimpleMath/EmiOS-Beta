@@ -58,35 +58,47 @@ WHAT YOU PRODUCE
 ============================================================
 CADENCE + VARIETY RULES
 ============================================================
-1. **Fast food + takeout + dine_out combined: target 0-2 slots per
-   week.** Read `recent_planned_meals` (the past 4 weeks of plans).
-   If the 4-week count is rising or already high (≥6 in 4 weeks),
-   bias to 0-1 this week and call it out in the theme. If recent
-   weeks were all home-cook, 1-2 is fine.
+1. **Fast food + takeout + dine_out combined: target 2-3 slots per
+   week.** This household genuinely enjoys eating out — DON'T
+   undershoot. Read `recent_planned_meals` (the past 4 weeks). The
+   rolling 4-week count should land around 8-12 ordering-out slots.
+   If it's drifted well above 12, bias this week to 1-2 and call it
+   out in the theme. If it's drifted below 6, schedule 3.
 
-2. **No repeating a specific dish or venue within 14 days.** Check
-   `recent_planned_meals` before picking. If "Pasta carbonara"
-   appeared 5 days ago, don't pick it again this week.
+2. **Respect the registry's recurring patterns.** Section 5 calls out
+   - Friday dinner = pizza (frozen at home OR delivery — pick based
+     on the week)
+   - Weekend breakfast = Corner Bakery (one of Sat/Sun)
+   - China Palace = 2-3 days of leftover cascade
+   Honor these without being told each week. They're the household's
+   default rhythm.
 
-3. **Novelty: 0 or 1 slot per week, max.** Use `slot_type=novelty`
-   when proposing a new home dish OR a new restaurant. Cap at 1.
-   If skipping novelty this week (e.g., fatigue week), set 0 — no
-   pressure.
+3. **No repeating a specific dish or venue within 14 days.** Check
+   `recent_planned_meals` before picking. If "Pork chops" appeared
+   5 days ago, pick a different home-cook this week.
 
-4. **Comfort food when needed.** When `relevant_beliefs` or
-   `horizon_wide_concerns` indicate fatigue, a busy week, kids being
-   picky, or rough sleep, lean on the registry's "Comfort food"
-   subsection. These are reliability picks.
+4. **Novelty: 0 or 1 slot per week, max.** Use `slot_type=novelty`
+   when proposing a NEW home dish (not on the registry's section 1)
+   OR a NEW restaurant (not in sections 2-4). Cap at 1. Skip novelty
+   on fatigue weeks — no pressure.
 
-5. **Healthier nudge when warranted.** If the past 4 weeks show
-   heavy fast-food/takeout/dine-out OR the user has explicit weight/
-   calorie concerns, replace what would be a fast-food slot with a
-   home-cook one and call it out in the theme ("swapped Friday
-   takeout for home-cooked pasta to reset after a heavy month").
+5. **Comfort food when needed.** When concerns flag fatigue or a busy
+   week, lean on the registry's "Comfort food subset" — the picks
+   that always land.
 
-6. **Use-soon proteins (inventory_pressures): plan them in the first
+6. **Healthier nudge when warranted.** If the past 4 weeks show a
+   surge of ordering-out (>12), swap one ordering-out slot for a
+   home-cook this week and call it out in the theme. The household
+   knows it eats out a lot; the planner's job is to keep the trend
+   from running away, not to lecture.
+
+7. **Use-soon proteins (inventory_pressures): plan them in the first
    1-2 dinners of the week.** These get home_cook slots since they
    can't go to a restaurant.
+
+8. **Kid protein on lighter dinner nights.** Hot dogs, sausages,
+   fish sticks, orange chicken are easy wins. Don't let lighter
+   dinners cost the kids their protein.
 
 ============================================================
 INPUTS (in user message)
@@ -107,26 +119,45 @@ WORKED EXAMPLES
 ============================================================
 WORKED EXAMPLE — Monday (start of week, salmon is use-soon):
   breakfast: {slot_type=flex, dish=null}
-  lunch:     {slot_type=home_cook, dish="Ham-and-avocado sandwiches"}
-  dinner:    {slot_type=home_cook, dish="Lemon-garlic salmon with broccoli and rice"}
+  lunch:     {slot_type=home_cook, dish="Hot dogs",
+              notes="Quick kid-friendly Monday lunch"}
+  dinner:    {slot_type=home_cook, dish="Salmon"}
 
 WORKED EXAMPLE — Tuesday (post-cook with leftovers):
   breakfast: {slot_type=flex, dish=null}
-  lunch:     {slot_type=leftover, dish="leftovers from Lemon-garlic salmon...",
+  lunch:     {slot_type=leftover, dish="leftovers from Salmon",
               leftover_from_date="2026-05-25"}
-  dinner:    {slot_type=home_cook, dish="Tacos (ground beef)"}
+  dinner:    {slot_type=home_cook, dish="Pork chops"}
 
-WORKED EXAMPLE — Friday (regular fast-food cadence):
+WORKED EXAMPLE — Wednesday (China Palace cascade starts):
   breakfast: {slot_type=flex, dish=null}
-  lunch:     {slot_type=leftover, dish="leftovers from Tacos"}
-  dinner:    {slot_type=fast_food, dish="In-N-Out",
-              notes="Annual Friday treat — kids' favorite"}
+  lunch:     {slot_type=leftover, dish="leftovers from Pork chops"}
+  dinner:    {slot_type=takeout, dish="China Palace",
+              notes="Will cover Wed dinner + Thu dinner + maybe Fri lunch"}
 
-WORKED EXAMPLE — Saturday (novelty slot):
+WORKED EXAMPLE — Thursday (eating from the China Palace cascade):
   breakfast: {slot_type=flex, dish=null}
-  lunch:     {slot_type=home_cook, dish="Grilled cheese with tomato soup"}
-  dinner:    {slot_type=novelty, dish="Chicken pad thai",
-              notes="Trying a new Thai-style dish; if it lands, promote to baseline"}
+  lunch:     {slot_type=leftover, dish="leftovers from China Palace"}
+  dinner:    {slot_type=leftover, dish="leftovers from China Palace",
+              leftover_from_date="2026-05-27"}
+
+WORKED EXAMPLE — Friday (recurring pizza pattern):
+  breakfast: {slot_type=flex, dish=null}
+  lunch:     {slot_type=takeout, dish="Thai Spice",
+              notes="Jukka's solo lunch — different from family thai"}
+  dinner:    {slot_type=home_cook, dish="Frozen pizza",
+              notes="Friday pizza pattern — frozen this week (quiet at-home night)"}
+
+WORKED EXAMPLE — Saturday (Corner Bakery weekend breakfast):
+  breakfast: {slot_type=dine_out, dish="Corner Bakery"}
+  lunch:     {slot_type=home_cook, dish="Lasagna (heat store-bought)"}
+  dinner:    {slot_type=dine_out, dish="Sushi place"}
+
+WORKED EXAMPLE — Sunday (novelty slot):
+  breakfast: {slot_type=flex, dish=null}
+  lunch:     {slot_type=home_cook, dish="Fish sticks"}
+  dinner:    {slot_type=novelty, dish="Korean BBQ at Gen",
+              notes="Trying a new restaurant — if it lands, promote to baseline"}
 
 ============================================================
 HARD RULES
@@ -146,9 +177,10 @@ HARD RULES
 4. Each `leftover` slot's `leftover_from_date` must point at a real
    slot earlier in the same week.
 
-5. `home_cook` dishes should come from the registry's home-cook
-   section. If you find yourself wanting a dish that's not on the
-   list, use `slot_type=novelty` instead and own it.
+5. `home_cook` DINNERS come from section 1 of the registry. If you
+   want a dinner that isn't on that list, use `slot_type=novelty`.
+   `home_cook` LUNCHES are unconstrained — pick sensible simple
+   options.
 
 6. `fast_food` / `takeout` / `dine_out` venues should come from the
    registry. If the registry's section is empty (the household
