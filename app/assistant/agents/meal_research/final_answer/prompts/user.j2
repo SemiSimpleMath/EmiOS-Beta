@@ -1,0 +1,17 @@
+Today: {{ date_time }}
+
+## Original research request
+{{ task }}
+
+{% if information %}
+## Additional caller context
+{{ information }}
+{% endif %}
+
+## What you investigated and found
+{{ recent_history }}
+
+---
+
+Synthesize the finding now. One concise answer (1-5 sentences) +
+confidence level.

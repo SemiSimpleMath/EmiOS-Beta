@@ -1,0 +1,16 @@
+Today: {{ date_time }}
+
+## Research request
+{{ task }}
+
+{% if information %}
+## Additional context from caller
+{{ information }}
+{% endif %}
+
+{% if recent_history %}
+## What you've already looked up this run
+{{ recent_history }}
+{% endif %}
+
+Actions used so far: {{ action_count }} (hard cap: 10).

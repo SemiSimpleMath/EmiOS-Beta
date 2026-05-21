@@ -1,0 +1,31 @@
+{{ date_time }} ({{ day_of_week }}). Planning the week beginning {{ week_start_date }}.
+
+## In the kitchen now
+{{ inventory_snapshot }}
+
+## Per-person dietary signals (KG, all regulars)
+{{ dietary_context }}
+
+## Food-domain beliefs (BeliefStore)
+{{ food_beliefs }}
+
+## General calendar — next 7 days
+{{ general_calendar_week }}
+
+## Household roster
+{{ family_roster }}
+
+## Concerns from the noticer
+{{ addressable_concerns }}
+
+{% if recent_history %}
+## Your prior cycles this run (research findings if any)
+{{ recent_history }}
+{% endif %}
+
+Action count: {{ action_count }} (cap: 3 research calls per planning run).
+
+---
+
+Decide: gap genuinely needs research, or seed is enough? Bias toward
+return_control.

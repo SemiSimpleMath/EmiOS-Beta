@@ -1,0 +1,35 @@
+name: weekly_meal_planning::planner
+class_name: Planner
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5-mini"
+  model_tier: "mini"
+
+# Cheap. Most cycles this agent runs one cycle and immediately returns
+# control. Only when it spots a real gap (unfamiliar audience member,
+# restaurant lookup needed) does it call meal_research_manager. Mini
+# tier is fine for that judgment.
+
+allowed_tools: []     # populated by the manager-level tools list
+except_tools: []
+allowed_nodes: [return_control]
+
+# Reads the same seed weekly_meal_planner sees, so it can judge gaps.
+user_context_items:
+  - date_time
+  - day_of_week
+  - week_start_date
+  - inventory_snapshot
+  - dietary_context
+  - food_beliefs
+  - general_calendar_week
+  - family_roster
+  - addressable_concerns
+  - recent_history
+  - action_count
+
+system_context_items:
+  - tool_descriptions
+  - allowed_nodes
+  - resource_user_data
+  - resource_assistant_data

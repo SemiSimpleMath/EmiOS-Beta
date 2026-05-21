@@ -1,0 +1,64 @@
+name: weekly_meal_planning_manager
+class_name: MultiAgentManager
+description: >
+  Weekly meal planning manager. Wraps the existing weekly_meal_planner
+  in a small tool-calling loop so it can invoke meal_research_manager
+  on-demand when it spots a gap (unfamiliar audience member, restaurant
+  it has no record of, etc.).
+
+  Most cycles: planner returns control immediately without calling
+  research; weekly_meal_planner produces the WeeklyMealPlan from the
+  pre-distilled seed. Sometimes: planner notices a gap, calls
+  meal_research_manager, reads the finding back, then returns control.
+
+  Distinct from yesterday's scrapped weekly_meal_manager (which had a
+  context_planner pre-step that always ran). This manager's planner
+  step is BIASED toward immediate return_control; tool calls are
+  exception, not default.
+max_cycles: 30
+
+role_bindings:
+  delegator: weekly_meal_planning::delegator
+  tool_selector: shared::tool_selector
+
+agents:
+  - name: weekly_meal_planning::delegator
+    class: Delegator
+  - name: weekly_meal_planning::planner
+    class: Planner
+  - name: weekly_meal_planner
+    class: Agent
+  - name: shared::tool_arguments
+    class: Agent
+
+control_nodes:
+  - name: tool_caller
+    class: ToolCaller
+  - name: tool_result_handler
+    class: ToolResultHandler
+  - name: return_control
+    class: ReturnControlNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+  - name: graceful_exit_control_node
+    class: GracefulExitControlNode
+
+# Only the research manager — nothing else. The planner's job is "do
+# I need to look something up before planning?" — if yes, call research;
+# if no, hand off to weekly_meal_planner.
+tools:
+  allowed_tools:
+    - meal_research_manager
+  except_tools: []
+
+flow_config:
+  state_map:
+    "weekly_meal_planning::delegator": "weekly_meal_planning::planner"
+    "shared::tool_arguments": "tool_caller"
+    # When the planner says "ready to plan" (return_control), hand off
+    # to weekly_meal_planner — it produces the structured WeeklyMealPlan
+    # as the manager's final answer.
+    "weekly_meal_planning::planner_return_control": "weekly_meal_planner"
+    "weekly_meal_planner": "manager_exit_node"
+    "graceful_exit": "graceful_exit_control_node"
+    "graceful_exit_control_node": "manager_exit_node"

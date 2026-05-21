@@ -1,0 +1,27 @@
+name: meal_research::planner
+class_name: Planner
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.4-mini"
+  model_tier: "smart"
+
+# Smart tier — research questions need real reasoning ("Marika is
+# Katy's sister; need her dietary State edges and any feedback pods
+# about prior meals with her").
+
+allowed_tools: []     # populated by manager-level tools list
+except_tools: []
+allowed_nodes: [return_control]
+
+user_context_items:
+  - date_time
+  - task
+  - information
+  - recent_history
+  - action_count
+
+system_context_items:
+  - tool_descriptions
+  - allowed_nodes
+  - resource_user_data
+  - resource_assistant_data

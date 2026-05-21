@@ -1,0 +1,62 @@
+name: meal_research_manager
+class_name: MultiAgentManager
+description: >
+  Meal-domain research manager. Invoked by the weekly or daily meal
+  planner when it spots a gap that requires looking something up —
+  an unfamiliar audience member's dietary profile, a restaurant the
+  family hasn't tried, situational context the seed didn't carry.
+
+  The planner does NOT call this every cycle — only on-demand when
+  the meal_context_distiller's output didn't give it what it needed.
+  Most cycles complete without ever invoking it.
+
+  Output is a free-form research finding the calling planner reads
+  back through the tool_result and folds into its decision.
+max_cycles: 30
+
+role_bindings:
+  delegator: meal_research::delegator
+  tool_selector: shared::tool_selector
+
+agents:
+  - name: meal_research::delegator
+    class: Delegator
+  - name: meal_research::planner
+    class: Planner
+  - name: meal_research::final_answer
+    class: Agent
+  - name: shared::tool_arguments
+    class: Agent
+
+control_nodes:
+  - name: tool_caller
+    class: ToolCaller
+  - name: tool_result_handler
+    class: ToolResultHandler
+  - name: return_control
+    class: ReturnControlNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+  - name: graceful_exit_control_node
+    class: GracefulExitControlNode
+
+# Curated palette per the curated_allowed_tools principle. Web tools
+# omitted on purpose — weekly research stays at the KG-and-pods level.
+# Add web_manager later if/when restaurant lookups become real value.
+tools:
+  allowed_tools:
+    - ask_kg          # the workhorse — KG queries for entities, locations, recipes
+    - pod_search      # past pods (intentions, feedback, etc.)
+    - pod_fetch       # open pods worth reading
+    - read_skill      # domain-specific skill resources
+    - find_tool       # discovery only
+  except_tools: []
+
+flow_config:
+  state_map:
+    "meal_research::delegator": "meal_research::planner"
+    "shared::tool_arguments": "tool_caller"
+    "meal_research::planner_return_control": "meal_research::final_answer"
+    "meal_research::final_answer": "manager_exit_node"
+    "graceful_exit": "graceful_exit_control_node"
+    "graceful_exit_control_node": "manager_exit_node"
