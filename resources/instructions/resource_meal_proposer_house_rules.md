@@ -15,7 +15,6 @@ These are dishes the family cooks regularly. The proposer should prefer
 these (novelty="familiar") for most meals.
 
 - Salmon + roasted broccoli + rice
-- Friday Night Meats (steak / lamb / etc. — recurring Friday tradition)
 - Pasta carbonara
 - Tacos (ground beef or chicken)
 - Roast chicken + roasted veg
@@ -65,7 +64,7 @@ addresses_concern_ids: ["<the fatigue concern's id>"]
 
 Notice:
 - proposed_start_local is EARLIER than the default 18:30 family dinner
-- dish is lighter than carbonara or Friday Night Meats
+- dish is lighter than carbonara or tacos
 - reasoning explicitly ties to the concern
 - addresses_concern_ids references the concern
 
