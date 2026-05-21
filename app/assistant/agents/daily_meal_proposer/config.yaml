@@ -20,6 +20,7 @@ user_context_items:
   - inventory_snapshot
   - recipes_house
   - dietary_context
+  - food_beliefs
   - food_calendar
   - general_calendar
   - family_roster

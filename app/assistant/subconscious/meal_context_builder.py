@@ -48,6 +48,7 @@ def build_weekly_meal_planner_context() -> Dict[str, str]:
         "inventory_snapshot": _build_inventory_snapshot(),
         "recipes_house": _build_recipes_house_reference(),
         "dietary_context": _build_dietary_context(household_members),
+        "food_beliefs": _build_food_beliefs(),
         "food_calendar": _build_food_calendar(now_local=now_local),
         "family_roster": _build_family_roster(household_members),
         "addressable_concerns": _build_addressable_concerns(),
@@ -69,6 +70,7 @@ def build_daily_meal_proposer_context() -> Dict[str, str]:
         "inventory_snapshot": _build_inventory_snapshot(),
         "recipes_house": _build_recipes_house_reference(),
         "dietary_context": _build_dietary_context(household_members),
+        "food_beliefs": _build_food_beliefs(),
         "food_calendar": _build_food_calendar(now_local=now_local),
         "general_calendar": _build_calendar_today_tomorrow(now_local=now_local),
         "family_roster": _build_family_roster(household_members),
@@ -253,6 +255,89 @@ def _build_dietary_context(household_members: List[str]) -> str:
     except Exception as e:
         logger.warning("[meal_context] dietary_context build failed: %s", e)
         return "(error reading dietary context)"
+
+
+# Whole-word food vocabulary for filtering belief statements. Bare short
+# tokens ("eat", "ate") would over-match against words like "great" /
+# "participates"; keep entries distinctive enough that word-boundary regex
+# is safe.
+import re as _re
+_FOOD_BELIEF_RE = _re.compile(
+    r'\b(food|meal|meals|eat|eats|eaten|eating|ate|diet|drink|drinks|drank|'
+    r'breakfast|lunch|dinner|snack|recipe|recipes|cook|cooks|cooking|cooked|'
+    r'kitchen|allerg|allergic|cuisine|grocery|grocer|inventory|chicken|salmon|'
+    r'beef|pork|lamb|fish|pasta|rice|vegetable|fruit|cheese|burrito|burritos|'
+    r'tortilla|sushi|sandwich|taco|tacos|pizza|carb|carbs|protein|sugar|salt|'
+    r'fasting|intermittent|lactose|gluten|gerd|diabetic|ralphs|wine|coffee|'
+    r'caffeine|hydration|nutrition|takeout|chipotle|carl|doordash|trader)\b',
+    _re.IGNORECASE,
+)
+_FOOD_BELIEF_KEY_PREFIXES = (
+    'food.', 'meal.', 'diet.', 'kitchen.', 'cooking.', 'grocery.',
+    'eat', 'health.nutrition', 'health.hydration', 'health.weight',
+    'routine.friday_night_meats', 'social.friday_night_meats',
+    'routine.family_time', 'routine.work.lunch',
+)
+
+
+def _build_food_beliefs() -> str:
+    """Pull food-relevant beliefs from BeliefStore (user_beliefs table).
+
+    Filter: active status + food-relevant by either belief_key prefix or
+    whole-word match on the statement.
+    Order: by current_net_weight DESC (most-supported first).
+    Top N=30 shown; runaway count surfaced past that.
+
+    The `domain` column on user_beliefs isn't reliably populated today
+    (most rows are tagged 'general'), so we filter by belief_key prefix
+    + statement keyword match instead. If a real `domain='food'` tagging
+    pass lands later, the upstream WHERE clause can simplify.
+    """
+    from app.models.base import get_session
+    from sqlalchemy import text as sql_text
+
+    RUNAWAY_THRESHOLD = 30
+
+    try:
+        session = get_session()
+        try:
+            rows = session.execute(sql_text("""
+                SELECT belief_key, statement, current_net_weight, confidence
+                FROM user_beliefs
+                WHERE status IN ('active','high_confidence','medium_confidence','low_confidence')
+                   OR status IS NULL
+                ORDER BY current_net_weight DESC
+                LIMIT 500
+            """)).fetchall()
+        finally:
+            session.close()
+
+        food = []
+        for r in rows:
+            key = r[0] or ''
+            stmt = r[1] or ''
+            weight = r[2] if r[2] is not None else 0.0
+            conf = r[3]
+            if any(p in key for p in _FOOD_BELIEF_KEY_PREFIXES) or _FOOD_BELIEF_RE.search(stmt):
+                food.append((key, stmt, weight, conf))
+
+        if not food:
+            return "(no food-relevant beliefs in store yet)"
+
+        lines = ["Food-relevant beliefs (from BeliefStore, sorted by net_weight desc):"]
+        for key, stmt, weight, conf in food[:RUNAWAY_THRESHOLD]:
+            lines.append(f"- [{key}] (net={weight:.1f}, conf={conf or 'n/a'})")
+            lines.append(f"  {stmt}")
+        if len(food) > RUNAWAY_THRESHOLD:
+            lines.append(
+                f"- (… plus {len(food) - RUNAWAY_THRESHOLD} more food-relevant beliefs "
+                f"not shown — runaway signal density; consider tightening filter or "
+                f"adding a real domain='food' tag at write time)"
+            )
+        return "\n".join(lines)
+    except Exception as e:
+        logger.warning("[meal_context] food_beliefs build failed: %s", e)
+        return "(error reading food beliefs)"
 
 
 def _build_food_calendar(*, now_local: datetime) -> str:

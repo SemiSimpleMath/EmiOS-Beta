@@ -25,6 +25,7 @@ user_context_items:
   - inventory_snapshot
   - diet_log_7d
   - dietary_context
+  - food_beliefs
   - food_calendar
   - family_roster
   - addressable_concerns
