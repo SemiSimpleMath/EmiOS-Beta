@@ -403,9 +403,13 @@ def _build_addressable_concerns() -> str:
 
     lines: List[str] = []
     for c in matched:
+        # No concern_id in the rendered text — concern_ids are noticer-
+        # internal bookkeeping (lifecycle: active/addressing/resolved/
+        # dormant). Proposers describe concerns in prose; the noticer
+        # matches semantically at next tick. No UUID linkage.
         lines.append(
             f"[{c.get('severity', '?')}/{c.get('horizon', '?')}] "
-            f"{c.get('concern_id', '?')} — {c.get('title', '(untitled)')}"
+            f"{c.get('title', '(untitled)')}"
         )
         lines.append(f"  subject: {c.get('subject') or 'household'}")
         lines.append(f"  kind: {c.get('kind', '?')}")

@@ -59,14 +59,13 @@ reasoning: "Lighter than usual + earlier serving time to support Jukka's
   sleep concern. Familiar recipe, all ingredients in inventory."
 confidence: "high"
 novelty: "familiar"
-addresses_concern_ids: ["<the fatigue concern's id>"]
 ```
 
 Notice:
 - proposed_start_local is EARLIER than the default 18:30 family dinner
 - dish is lighter than carbonara or tacos
-- reasoning explicitly ties to the concern
-- addresses_concern_ids references the concern
+- reasoning explicitly names the concern in prose ("supports the
+  fatigue pattern" / "responds to Jukka's recurring tiredness")
 
 ## Family-roster awareness
 

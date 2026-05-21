@@ -102,15 +102,6 @@
                 </div>
             </div>
 
-            {% if plan.addressed_concern_ids %}
-            <div class="meals-concerns">
-                <span class="meals-label">Addresses concerns</span>
-                <ul>
-                    {% for cid in plan.addressed_concern_ids %}<li>{{ cid }}</li>{% endfor %}
-                </ul>
-            </div>
-            {% endif %}
-
             <div class="meals-meta-line">
                 <span>Generated {{ plan.produced_at_utc }}</span>
                 <span class="meals-pod-id">{{ plan.pod_id }}</span>

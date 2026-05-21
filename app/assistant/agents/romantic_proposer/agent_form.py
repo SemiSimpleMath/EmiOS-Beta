@@ -77,7 +77,6 @@ class RomanticProposal(BaseModel):
         default=None, max_length=300,
         description="Required when novelty='novel'. Why try this new thing now?",
     )
-    addresses_concern_ids: List[str] = Field(default_factory=list)
     reasoning: str = Field(max_length=400)
 
 

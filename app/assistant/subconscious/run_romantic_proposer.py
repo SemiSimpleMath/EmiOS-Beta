@@ -106,9 +106,6 @@ def main():
             print(f"          requires_babysitter: yes")
         if p.get("advance_required_days"):
             print(f"          advance: {p.get('advance_required_days')} days")
-        addresses = p.get("addresses_concern_ids") or []
-        if addresses:
-            print(f"          addresses concerns: {', '.join(addresses)}")
         reasoning = (p.get("reasoning") or "").strip()
         if reasoning:
             print(f"          reasoning: {reasoning[:240]}")

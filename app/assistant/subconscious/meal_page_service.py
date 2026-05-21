@@ -127,7 +127,6 @@ def build_page_view_model() -> Dict[str, Any]:
             "slots": list(meta.get("slots") or []),
             "produced_at_utc": meta.get("produced_at_utc") or "",
             "theme": _extract_theme(plan_pod.body or ""),
-            "addressed_concern_ids": list(meta.get("addressed_concern_ids") or []),
         }
         plan_comments = fetch_comments_for(plan_pod.pod_id, limit=20)
 

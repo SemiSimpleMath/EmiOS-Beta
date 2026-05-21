@@ -58,7 +58,7 @@ ADAPTING TO REALITY
 - family_roster: if Jukka's solo, propose solo workouts. If family
   available, family walks/bike rides are higher-value novelty options.
 - addressable_concerns: concerns routed to wellness_proposer. Address
-  them via addresses_concern_ids — don't ignore.
+  them — describe in reasoning prose how the proposal responds to them.
 - recent_wellness_intentions: don't propose the same thing two days in a
   row unless it's a deliberately repeated routine.
 
@@ -87,8 +87,8 @@ HARD RULES
    average for the last 3 nights, OR when activity_log_7d shows a hard
    session in the last 36 hours. Active recovery is the right answer.
 
-3. Set fills_concern explicitly via addresses_concern_ids when applicable.
-   A proposal that doesn't address any concern is fine (routine_maintenance)
+3. If a proposal responds to a concern, name it in `reasoning`. A
+   proposal that doesn't address any concern is fine (routine_maintenance)
    — just be honest about source.
 
 4. Be honest about confidence. "Jukka usually rides Tuesday mornings"
@@ -105,6 +105,5 @@ HARD RULES
 OUTPUT
 ============================================================
 A strict AgentForm. Each WellnessProposal must have kind, actors, date,
-summary, source, confidence, novelty, reasoning. Concern-addressing
-proposals MUST set addresses_concern_ids. Novel proposals MUST set
-novelty_rationale.
+summary, source, confidence, novelty, reasoning. Novel proposals MUST
+set novelty_rationale.

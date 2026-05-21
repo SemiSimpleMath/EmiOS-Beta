@@ -182,9 +182,10 @@ def _build_addressable_concerns() -> str:
 
     lines: List[str] = []
     for c in matched:
+        # No concern_id — noticer-internal bookkeeping; proposers see prose only.
         lines.append(
             f"[{c.get('severity', '?')}/{c.get('horizon', '?')}] "
-            f"{c.get('concern_id', '?')} — {c.get('title', '(untitled)')}"
+            f"{c.get('title', '(untitled)')}"
         )
         lines.append(f"  subject: {c.get('subject') or 'household'}")
         lines.append(f"  kind: {c.get('kind', '?')}")

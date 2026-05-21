@@ -75,7 +75,6 @@ def _mint_intention_wellness_pod(
         source = proposal.get("source") or "?"
         confidence = proposal.get("confidence") or "?"
         novelty = proposal.get("novelty") or "?"
-        addresses = proposal.get("addresses_concern_ids") or []
         workout_type = proposal.get("workout_type")
         intensity = proposal.get("intensity")
         equipment = proposal.get("equipment_used") or []
@@ -143,7 +142,6 @@ def _mint_intention_wellness_pod(
                 "duration_minutes": duration,
                 "equipment_used": equipment,
                 "proposed_start_local": start_local,
-                "addresses_concern_ids": addresses,
             },
         )
         store.put(pod)

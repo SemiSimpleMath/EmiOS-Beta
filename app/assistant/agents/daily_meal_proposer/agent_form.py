@@ -45,7 +45,6 @@ class MealProposal(BaseModel):
     confidence: Confidence
     novelty: Novelty
     novelty_rationale: Optional[str] = Field(default=None, max_length=300)
-    addresses_concern_ids: List[str] = Field(default_factory=list)
     fills_weekly_plan_slot: Optional[str] = Field(
         default=None,
         max_length=120,

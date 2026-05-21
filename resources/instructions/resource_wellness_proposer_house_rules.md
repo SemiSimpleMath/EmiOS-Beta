@@ -78,7 +78,6 @@ summary: "Wind down 9:30pm: screens off, dim lights, read."
 source: "concern_addressing"
 confidence: "high"
 novelty: "familiar"
-addresses_concern_ids: ["<the fatigue concern's id>"]
 reasoning: "Fatigue concern + late screen exposure pattern. Sleep is the
   dominant lever; a wind-down routine before the 10:30 bedtime helps."
 ```
@@ -97,7 +96,6 @@ source: "concern_addressing"
 confidence: "high"
 novelty: "familiar"
 equipment_used: []
-addresses_concern_ids: ["<the fatigue concern's id>"]
 reasoning: "Light movement supports recovery without adding load.
   Outdoor + daylight also helps the sleep concern via circadian effect."
 ```

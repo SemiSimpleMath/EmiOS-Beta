@@ -97,12 +97,10 @@ def apply_weekly_meal_planner_output(output: Dict[str, Any]) -> Dict[str, Any]:
     weekly_plan = output.get("weekly_plan") or {}
     weekly_list = output.get("weekly_shopping_list") or {}
     free_form_thinking = (output.get("free_form_thinking") or "").strip()
-    addressed_concern_ids = output.get("addressed_concern_ids") or []
 
     plan_pod_id = _mint_weekly_plan_pod(
         store=store,
         weekly_plan=weekly_plan,
-        addressed_concern_ids=addressed_concern_ids,
         free_form_thinking=free_form_thinking,
         now_utc_iso=now_utc_iso,
     )
@@ -119,7 +117,6 @@ def apply_weekly_meal_planner_output(output: Dict[str, Any]) -> Dict[str, Any]:
         "slot_count": len((weekly_plan.get("slots") or [])),
         "anchor_meals": weekly_plan.get("anchor_meals") or [],
         "weekly_list": weekly_result,
-        "addressed_concern_ids": addressed_concern_ids,
     }
 
 
@@ -269,7 +266,6 @@ def _mint_intention_meal_pod(
         source = proposal.get("source") or "?"
         novelty = proposal.get("novelty") or "?"
         confidence = proposal.get("confidence") or "?"
-        addresses = proposal.get("addresses_concern_ids") or []
 
         one_liner = f"{meal_window} {date} ({source}, {novelty}): {dish}"
         body_parts = [
@@ -334,7 +330,6 @@ def _mint_intention_meal_pod(
                 "source": source,
                 "novelty": novelty,
                 "confidence": confidence,
-                "addresses_concern_ids": addresses,
                 "needs_shopping": needs,
                 "primary_ingredients": ingredients,
             },
@@ -463,7 +458,6 @@ def _mint_weekly_plan_pod(
     *,
     store: PodStore,
     weekly_plan: Dict[str, Any],
-    addressed_concern_ids: List[str],
     free_form_thinking: str,
     now_utc_iso: str,
 ) -> Optional[str]:
@@ -516,8 +510,6 @@ def _mint_weekly_plan_pod(
                 body_parts.append(f"- **{window}** [{slot_type}]{tail}")
             body_parts.append("")
 
-        if addressed_concern_ids:
-            body_parts += ["## Addresses concerns", *[f"- {cid}" for cid in addressed_concern_ids], ""]
         if free_form_thinking:
             body_parts += ["## Thinking", free_form_thinking]
 
@@ -536,7 +528,6 @@ def _mint_weekly_plan_pod(
                 "week_start_date": week_start,
                 "anchor_meals": anchors,
                 "slots": slots,
-                "addressed_concern_ids": addressed_concern_ids,
             },
         )
         store.put(pod)

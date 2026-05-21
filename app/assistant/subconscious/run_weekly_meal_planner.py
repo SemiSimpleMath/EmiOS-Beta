@@ -98,7 +98,6 @@ def main():
     types = Counter(s.get("slot_type") for s in slots)
     for t, n in types.most_common():
         print(f"        {t}: {n}")
-    print(f"      addressed_concern_ids: {output.get('addressed_concern_ids') or []}")
     weekly_list = output.get("weekly_shopping_list") or {}
     print(f"      weekly_shopping_list: action={weekly_list.get('action')} week_start={weekly_list.get('week_start_date')}")
     body = (weekly_list.get("body_markdown") or "").strip()

@@ -120,14 +120,6 @@ class AgentForm(BaseModel):
     model_config = ConfigDict(extra="forbid")
     weekly_plan: WeeklyMealPlan
     weekly_shopping_list: WeeklyShoppingList
-    addressed_concern_ids: List[str] = Field(
-        default_factory=list,
-        description=(
-            "Concern_ids from concerns_register that this week's plan addresses. "
-            "e.g., a week shape biased toward lighter dinners addresses Jukka's "
-            "fatigue concern."
-        ),
-    )
     free_form_thinking: str = Field(
         max_length=1000,
         description=(

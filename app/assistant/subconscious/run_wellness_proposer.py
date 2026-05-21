@@ -106,9 +106,6 @@ def main():
         equipment = p.get("equipment_used") or []
         if equipment:
             print(f"          equipment: {', '.join(equipment)}")
-        addresses = p.get("addresses_concern_ids") or []
-        if addresses:
-            print(f"          addresses concerns: {', '.join(addresses)}")
         reasoning = (p.get("reasoning") or "").strip()
         if reasoning:
             print(f"          reasoning: {reasoning[:220]}")

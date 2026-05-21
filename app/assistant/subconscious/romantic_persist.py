@@ -68,7 +68,6 @@ def _mint_intention_romantic_pod(
         source = proposal.get("source") or "?"
         confidence = proposal.get("confidence") or "?"
         novelty = proposal.get("novelty") or "?"
-        addresses = proposal.get("addresses_concern_ids") or []
         cost = proposal.get("cost_estimate_usd")
         babysitter = bool(proposal.get("requires_babysitter"))
         advance_days = proposal.get("advance_required_days")
@@ -136,7 +135,6 @@ def _mint_intention_romantic_pod(
                 "advance_required_days": advance_days,
                 "duration_minutes": duration,
                 "proposed_start_local": start_local,
-                "addresses_concern_ids": addresses,
             },
         )
         store.put(pod)

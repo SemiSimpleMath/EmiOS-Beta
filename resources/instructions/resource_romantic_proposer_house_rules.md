@@ -64,7 +64,6 @@ novelty: "familiar"
 cost_estimate_usd: 6
 requires_babysitter: false
 advance_required_days: 0
-addresses_concern_ids: ["<the Katy-stress concern's id>"]
 reasoning: "Concern: Katy had a tough week. Small, low-friction gesture
   that fits a routine moment (morning ride return). Familiar = signals
   attentiveness without performance."
@@ -91,7 +90,6 @@ novelty: "familiar"
 cost_estimate_usd: 250
 requires_babysitter: true
 advance_required_days: 14
-addresses_concern_ids: []
 reasoning: "Anniversary in 3 weeks. Restaurants book up — secure the
   reservation now. Concrete next step Jukka takes today, not a vague
   'plan something.'"

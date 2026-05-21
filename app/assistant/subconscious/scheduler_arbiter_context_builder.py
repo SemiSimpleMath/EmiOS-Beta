@@ -126,8 +126,6 @@ def _build_candidate_intentions(*, now_local: datetime) -> str:
             lines.append(f"  est_cost_usd: {meta.get('cost_estimate_usd')}")
         if meta.get("intensity"):
             lines.append(f"  intensity: {meta.get('intensity')}")
-        if meta.get("addresses_concern_ids"):
-            lines.append(f"  addresses: {', '.join(meta.get('addresses_concern_ids') or [])}")
         lines.append("")
     if out_of_window:
         lines.append(f"({out_of_window} more intentions outside the 14-day window — not considered)")
