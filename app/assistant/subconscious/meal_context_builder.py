@@ -62,6 +62,7 @@ def build_weekly_meal_planner_context() -> Dict[str, str]:
         "family_roster": _build_family_roster(household_members),
         "addressable_concerns": _build_addressable_concerns(),
         "fast_food_count_7d": _build_fast_food_count(),
+        "recent_planned_meals": _build_recent_planned_meals(),
         "ralphs_standing_list": _build_ralphs_standing_list(),
         "agent_weekly_list_state": _build_agent_weekly_list_state(),
     }
@@ -423,6 +424,66 @@ def _build_addressable_concerns() -> str:
             lines.append(f"  co-addressable: {', '.join(co)}")
         lines.append("")
     return "\n".join(lines).rstrip()
+
+
+def _build_recent_planned_meals() -> str:
+    """Compact summary of the past 4 weeks of weekly meal plan pods.
+
+    Drives variety + cadence rules: the planner reads this to (a)
+    avoid repeating a dish within 14 days, and (b) keep the
+    fast_food / takeout / dine_out count reasonable across the
+    rolling month.
+
+    Renders as: per-week block with one line per non-flex/skip slot
+    showing date, window, slot_type, dish. Plus a trailing count
+    summary across the whole 4-week window.
+
+    First-run / no plans yet -> a short hint line.
+    """
+    from collections import Counter
+    from app.assistant.pod_store.pod_store import PodStore
+
+    try:
+        store = PodStore()
+        pods = store.query(kind="plan.weekly_meals", since="28d", limit=8)
+    except Exception as e:
+        logger.warning("[meal_context] recent_planned_meals fetch failed: %s", e)
+        return "(error reading recent plans — proceed without variety/cadence check)"
+
+    if not pods:
+        return "(no prior plan pods in the last 4 weeks — first plan, so no variety/cadence history yet)"
+
+    # Sort by week_start ascending (oldest first) for readability.
+    def _week_key(p) -> str:
+        return str((p.metadata or {}).get("week_start_date") or "")
+    pods_sorted = sorted(pods, key=_week_key)
+
+    out: List[str] = []
+    type_counts: Counter = Counter()
+    for p in pods_sorted:
+        meta = p.metadata or {}
+        ws = meta.get("week_start_date") or "?"
+        slots = meta.get("slots") or []
+        out.append(f"### Week of {ws}")
+        for s in slots:
+            st = (s.get("slot_type") or "").lower()
+            if st in {"flex", "skip"}:
+                continue
+            dish = (s.get("dish") or "").strip()
+            window = s.get("meal_window") or "?"
+            date = s.get("date") or "?"
+            if not dish:
+                continue
+            out.append(f"- {date} {window}: [{st}] {dish}")
+            type_counts[st] += 1
+        out.append("")
+
+    out.append("### 4-week totals by slot_type")
+    for st in ("home_cook", "fast_food", "takeout", "dine_out", "novelty", "leftover"):
+        n = type_counts.get(st, 0)
+        out.append(f"- {st}: {n}")
+
+    return "\n".join(out).rstrip()
 
 
 def _build_fast_food_count() -> str:

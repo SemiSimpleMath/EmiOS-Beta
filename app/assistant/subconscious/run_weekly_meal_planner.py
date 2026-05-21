@@ -90,8 +90,6 @@ def main():
     plan = output.get("weekly_plan") or {}
     print(f"      week_start_date: {plan.get('week_start_date')}")
     print(f"      theme: {plan.get('week_theme', '')[:200]}")
-    anchors = plan.get("anchor_meals") or []
-    print(f"      anchor_meals ({len(anchors)}): {', '.join(anchors)}")
     slots = plan.get("slots") or []
     print(f"      slots ({len(slots)}):")
     from collections import Counter

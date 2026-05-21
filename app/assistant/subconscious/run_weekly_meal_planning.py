@@ -133,6 +133,8 @@ def main():
         "day_of_week": seed.get("day_of_week"),
         "week_start_date": seed.get("week_start_date"),
         "meal_context": meal_context,
+        # 4-week plan history (drives variety + cadence)
+        "recent_planned_meals": seed.get("recent_planned_meals"),
         # Shopping-list mechanics — raw, weekly_meal_planner uses these
         # to compute the WeeklyShoppingList.
         "inventory_snapshot": seed.get("inventory_snapshot"),
@@ -158,8 +160,6 @@ def main():
     plan = output.get("weekly_plan") or {}
     print(f"      week_start_date: {plan.get('week_start_date')}")
     print(f"      theme: {plan.get('week_theme', '')[:200]}")
-    anchors = plan.get("anchor_meals") or []
-    print(f"      anchor_meals ({len(anchors)}): {', '.join(anchors)}")
     slots = plan.get("slots") or []
     from collections import Counter
     types = Counter(s.get("slot_type") for s in slots)

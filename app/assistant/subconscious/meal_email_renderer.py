@@ -37,7 +37,6 @@ def render_weekly_meal_email(
 
     meta = plan_pod.metadata or {}
     week_start = meta.get("week_start_date") or "?"
-    anchors: List[str] = list(meta.get("anchor_meals") or [])
     slots: List[dict] = list(meta.get("slots") or [])
 
     theme = _extract_theme_from_body(plan_pod.body or "")
@@ -52,12 +51,6 @@ def render_weekly_meal_email(
         lines.append("Theme")
         lines.append("-----")
         lines.append(_wrap_paragraph(theme, indent=2))
-        lines.append("")
-    if anchors:
-        lines.append("Anchor meals this week")
-        lines.append("----------------------")
-        for a in anchors:
-            lines.append(f"  - {a}")
         lines.append("")
 
     lines.append("Plan by day")

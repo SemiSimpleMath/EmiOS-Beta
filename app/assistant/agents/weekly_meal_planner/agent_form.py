@@ -1,20 +1,24 @@
 """Output schema for weekly_meal_planner.
 
 Strategic planning of the week's meal rhythm. Outputs:
-- WeeklyMealPlan: 7-day grid where every dinner AND every lunch carries
-  a concrete dish (anchor / planned / leftover). Breakfast can be flex
-  (free choice — cereal, fruit, etc.) or skip (Jukka's IF window).
-- WeeklyShoppingList: ingredients across the week minus inventory minus
-  Ralphs staples. The persist step writes/replaces a Google Doc.
-- Anchor meals: the 1-3 SIGNATURE dishes the week is built around (e.g.,
-  "Friday Night Meats", "Sunday roast", "Tuesday salmon"). The other
-  planned dinners are normal weeknight dishes — still chosen at plan
-  time, just not in the anchor list.
+- WeeklyMealPlan: 7-day grid where every dinner and every lunch carries
+  a concrete dish, categorized by where the meal comes from (home cook,
+  fast food, takeout, dine-out, leftover, novelty). Breakfast stays
+  free-choice or skipped (IF).
+- WeeklyShoppingList: ingredients for the home-cook + novelty slots
+  across the week, minus inventory and minus the Ralphs standing list.
 
-Lunches and non-anchor dinners use slot_type='planned' with a dish
-filled in. There is NO downstream "fill the rest in day-of" step for
-these — the user's mental model is that they want every dinner and
-lunch decided when the week is laid out, so they can shop accordingly.
+The planner draws dishes/venues from the household_food_registry
+(`resource_household_food_registry`). Most slots reuse known items
+from the registry; at most one slot per week may be a `novelty` —
+a new home dish or a new restaurant to try.
+
+Lunches default to leftover from the previous night's dinner. Sat/Sun
+lunches typically need a fresh planned dish if Friday/Saturday dinner
+didn't produce usable leftovers.
+
+There is NO downstream "fill the rest in day-of" step. Every dinner
+and every lunch is decided here so the user can shop accordingly.
 """
 from typing import List, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
@@ -22,11 +26,14 @@ from pydantic import BaseModel, ConfigDict, Field
 
 MealWindow = Literal["breakfast", "lunch", "dinner", "snack"]
 SlotType = Literal[
-    "anchor",       # Week's signature dish for this slot (named in anchor_meals)
-    "planned",      # A specific planned dish (default for non-anchor dinners + lunches)
-    "leftover",     # Eat leftovers from a previous slot; no new cooking
-    "flex",         # BREAKFAST ONLY — household eats cereal/fruit/whatever ad hoc
-    "skip",         # BREAKFAST ONLY — intentionally skipped (IF window)
+    "home_cook",   # A dish cooked at home — picked from the registry's home-cook section
+    "fast_food",   # Fast-food order — venue named in `dish` (e.g., "In-N-Out")
+    "takeout",     # Restaurant pickup/delivery — venue named in `dish`
+    "dine_out",    # Sit-down restaurant — venue named in `dish`
+    "leftover",    # Eat leftovers from a previous slot this week
+    "novelty",     # A new dish or restaurant being tried — capped at 1/week
+    "flex",        # BREAKFAST ONLY — household eats cereal/fruit/whatever ad hoc
+    "skip",        # BREAKFAST ONLY — intentionally skipped (IF window)
 ]
 WeeklyListAction = Literal["none", "create", "replace"]
 
@@ -42,10 +49,14 @@ class SlotPlan(BaseModel):
         default=None,
         max_length=200,
         description=(
-            "The specific dish for this slot. REQUIRED when slot_type is "
-            "'anchor', 'planned', or 'leftover'. For 'anchor', must match "
-            "an item in `anchor_meals`. For 'leftover', repeat the original "
-            "dish name (e.g., 'leftovers from Lemon salmon'). "
+            "The specific dish (for home_cook / novelty / leftover) OR the "
+            "venue (for fast_food / takeout / dine_out). "
+            "REQUIRED for everything except flex / skip. "
+            "For home_cook, should match a dish in the registry's home-cook "
+            "section. For leftover, repeat the source dish "
+            "(e.g., 'leftovers from Lemon salmon'). For fast_food/takeout/"
+            "dine_out, name the venue (e.g., 'In-N-Out' or 'Chipotle'); "
+            "specific menu items can go in `notes` if useful. "
             "Null only when slot_type is 'flex' or 'skip' — both of which "
             "are BREAKFAST ONLY."
         ),
@@ -68,32 +79,25 @@ class SlotPlan(BaseModel):
 
 
 class WeeklyMealPlan(BaseModel):
-    """The 7-day skeleton — meal windows × slot types."""
+    """The 7-day skeleton — every meal window × slot types."""
     model_config = ConfigDict(extra="forbid")
     week_start_date: str = Field(description="ISO date for Monday of this week.")
     week_theme: str = Field(
-        max_length=300,
+        max_length=400,
         description=(
-            "1-2 sentences describing the week's overall shape. e.g., "
-            "'Lean week — Jukka has been tired; minimize heavy evening "
-            "meals and lean on familiar anchors. Katy traveling Thursday "
-            "so kid-friendly dinners those nights.'"
-        ),
-    )
-    anchor_meals: List[str] = Field(
-        description=(
-            "1-3 specific dishes the week is built around. These appear in "
-            "SlotPlan entries with slot_type='anchor'. e.g., "
-            "['Salmon + roasted broccoli', 'Roast chicken', "
-            "'Friday Night Meats — ribeye']."
+            "2-3 sentences describing the week's overall shape: notable "
+            "dishes, the fast-food/takeout count (and why), any health or "
+            "fatigue considerations driving choices, and any novelty for "
+            "the week. e.g., 'Lighter week — Jukka has been tired, so "
+            "weeknight cooks are simple. One takeout slot Friday because "
+            "the past 3 weeks were heavy on fast food and we want to "
+            "ease back. Trying a new dish (chicken pad thai) Saturday.'"
         ),
     )
     slots: List[SlotPlan] = Field(
         description=(
-            "All meal windows in the week. Should cover 7 days × (typically) "
-            "breakfast + lunch + dinner = up to 21 slots. Skip windows that "
-            "are reliably skipped (e.g., Jukka's breakfast during IF) by "
-            "setting slot_type='skip'."
+            "All meal windows in the week. Covers 7 days × "
+            "breakfast + lunch + dinner = 21 slots."
         ),
     )
 

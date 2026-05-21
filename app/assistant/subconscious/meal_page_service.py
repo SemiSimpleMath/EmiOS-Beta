@@ -177,7 +177,6 @@ def build_page_view_model(week_start: Optional[str] = None) -> Dict[str, Any]:
         plan_view = {
             "pod_id": plan_pod.pod_id,
             "week_start_date": meta.get("week_start_date") or "",
-            "anchors": list(meta.get("anchor_meals") or []),
             "slots": list(meta.get("slots") or []),
             "produced_at_utc": meta.get("produced_at_utc") or "",
             "theme": _extract_theme(plan_pod.body or ""),
@@ -319,6 +318,7 @@ def generate_plan_for_week(week_start: str) -> Dict[str, Any]:
         "day_of_week": seed.get("day_of_week"),
         "week_start_date": week_iso,
         "meal_context": meal_context,
+        "recent_planned_meals": seed.get("recent_planned_meals"),
         "inventory_snapshot": seed.get("inventory_snapshot"),
         "ralphs_standing_list": seed.get("ralphs_standing_list"),
         "agent_weekly_list_state": seed.get("agent_weekly_list_state"),

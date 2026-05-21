@@ -117,7 +117,6 @@ def apply_weekly_meal_planner_output(output: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "plan_pod_id": plan_pod_id,
         "slot_count": len((weekly_plan.get("slots") or [])),
-        "anchor_meals": weekly_plan.get("anchor_meals") or [],
         "weekly_list": weekly_result,
     }
 
@@ -125,7 +124,7 @@ def apply_weekly_meal_planner_output(output: Dict[str, Any]) -> Dict[str, Any]:
 def _coerce_invalid_slot_types(weekly_plan: Dict[str, Any]) -> None:
     """Safety net: per the schema, slot_type='flex'/'skip' are breakfast-
     only. If the model emits one on a lunch or dinner with a dish set,
-    promote to 'planned' rather than letting an ambiguous slot through.
+    promote to 'home_cook' rather than letting an ambiguous slot through.
     If it emits flex/skip on a lunch/dinner with NO dish, log it but
     leave alone (rendering will show the gap so the user can spot it).
     """
@@ -140,7 +139,7 @@ def _coerce_invalid_slot_types(weekly_plan: Dict[str, Any]) -> None:
             continue
         dish = (slot.get("dish") or "").strip()
         if dish:
-            slot["slot_type"] = "planned"
+            slot["slot_type"] = "home_cook"
             promoted += 1
         else:
             logger.warning(
@@ -150,7 +149,7 @@ def _coerce_invalid_slot_types(weekly_plan: Dict[str, Any]) -> None:
             )
     if promoted:
         logger.info(
-            "[meal_persist] coerced %d lunch/dinner slot(s) from flex/skip → planned",
+            "[meal_persist] coerced %d lunch/dinner slot(s) from flex/skip → home_cook",
             promoted,
         )
 
@@ -498,25 +497,22 @@ def _mint_weekly_plan_pod(
 ) -> Optional[str]:
     """Mint the plan.weekly_meals pod that the daily_meal_proposer reads.
 
-    Body is a human-readable markdown rendering of the 7-day slot grid +
-    anchors + theme. Metadata carries the structured slot list for
+    Body is a human-readable markdown rendering of the 7-day slot grid
+    plus theme. Metadata carries the structured slot list for
     programmatic readers.
     """
     try:
         pod_id = f"datapod:plan.weekly_meals:{uuid.uuid4().hex[:24]}"
         week_start = weekly_plan.get("week_start_date") or "?"
-        anchors = weekly_plan.get("anchor_meals") or []
         slots = weekly_plan.get("slots") or []
         theme = (weekly_plan.get("week_theme") or "").strip()
 
-        one_liner = f"Week of {week_start} — {len(slots)} slots, anchors: {', '.join(anchors[:3])}"
+        one_liner = f"Week of {week_start} — {len(slots)} slots"
 
         body_parts = [
             f"# Weekly meal plan — week of {week_start}",
             "",
             f"**Theme:** {theme}" if theme else "",
-            "",
-            "**Anchor meals:** " + (", ".join(anchors) if anchors else "(none)"),
             "",
             "## Slots",
         ]
@@ -561,7 +557,6 @@ def _mint_weekly_plan_pod(
             metadata={
                 "produced_at_utc": now_utc_iso,
                 "week_start_date": week_start,
-                "anchor_meals": anchors,
                 "slots": slots,
             },
         )

@@ -49,15 +49,6 @@
             </div>
             {% endif %}
 
-            {% if plan.anchors %}
-            <div class="meals-anchors">
-                <span class="meals-label">Anchor meals</span>
-                <ul>
-                    {% for a in plan.anchors %}<li>{{ a }}</li>{% endfor %}
-                </ul>
-            </div>
-            {% endif %}
-
             <div class="meals-grid">
                 {% set ns = namespace(prev_date='') %}
                 {% for slot in plan.slots %}

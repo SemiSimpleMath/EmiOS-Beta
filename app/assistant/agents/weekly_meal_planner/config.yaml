@@ -25,6 +25,9 @@ user_context_items:
   # additional considerations. Plus anything the
   # weekly_meal_planning::planner researched lands in recent_history.
   - meal_context
+  # 4-week history of past plans — drives cadence + variety rules
+  # (no repeats within 14 days; fast-food/takeout/dine-out budget).
+  - recent_planned_meals
   # Shopping-list mechanics (raw data — not LLM-distillable)
   - inventory_snapshot
   - ralphs_standing_list
@@ -32,5 +35,6 @@ user_context_items:
 
 system_context_items:
   - resource_user_data
+  - resource_household_food_registry
   - resource_meal_proposer_house_rules
   - date_time

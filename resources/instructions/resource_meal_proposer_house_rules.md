@@ -9,25 +9,13 @@ stable scaffold so skill_distiller can append learned patterns here.
 
 ---
 
-## Recipe vocabulary (recipes_house starter)
+## Recipe vocabulary
 
-These are dishes the family cooks regularly. The proposer should prefer
-these (novelty="familiar") for most meals.
-
-- Salmon + roasted broccoli + rice
-- Pasta carbonara
-- Tacos (ground beef or chicken)
-- Roast chicken + roasted veg
-- Stir-fry (chicken + bell peppers + rice)
-- Chili
-- Breakfast burritos (eggs + bacon + cheese in tortilla)
-- Overnight oats (portable breakfast)
-- Grilled cheese + tomato soup
-
-When the proposer references one of these, set `recipe_ref` to the
-matching name. When it proposes a variation (e.g., "salmon + roasted
-asparagus + rice" — swapped broccoli for asparagus), set
-novelty="variation" and note the swap in `novelty_rationale`.
+The canonical list of dishes, fast food, takeout, and restaurants the
+household actually uses lives in `resource_household_food_registry`.
+That's the source of truth — read it for picking home-cook dishes and
+naming fast_food / takeout / dine_out venues. Don't invent dishes
+outside the registry except via a `novelty` slot (capped at 1/week).
 
 ## Dietary constraints to respect (from KG, mirrored here for visibility)
 

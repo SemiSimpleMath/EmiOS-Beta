@@ -197,11 +197,18 @@ body {
     border-radius: 0 4px 4px 0;
     font-size: 14px;
 }
-.meals-slot-anchor   { border-left-color: #d97706; background: #fff7ed; }
-.meals-slot-leftover { border-left-color: #6b7280; background: #f9fafb; }
-.meals-slot-flex     { border-left-color: #3b82f6; background: #eff6ff; }
+.meals-slot-home_cook { border-left-color: #16a34a; background: #f0fdf4; }
+.meals-slot-fast_food { border-left-color: #f59e0b; background: #fffbeb; }
+.meals-slot-takeout   { border-left-color: #ec4899; background: #fdf2f8; }
+.meals-slot-dine_out  { border-left-color: #d97706; background: #fff7ed; }
+.meals-slot-leftover  { border-left-color: #6b7280; background: #f9fafb; }
+.meals-slot-novelty   { border-left-color: #8b5cf6; background: #f5f3ff; }
+.meals-slot-flex      { border-left-color: #3b82f6; background: #eff6ff; }
+.meals-slot-skip      { border-left-color: #e2e8f0; background: #fafafa; color: #a0aec0; }
+/* Legacy slot types from older plan pods — render harmlessly. */
+.meals-slot-anchor    { border-left-color: #16a34a; background: #f0fdf4; }
+.meals-slot-planned   { border-left-color: #16a34a; background: #f0fdf4; }
 .meals-slot-novel_try { border-left-color: #8b5cf6; background: #f5f3ff; }
-.meals-slot-skip     { border-left-color: #e2e8f0; background: #fafafa; color: #a0aec0; }
 
 .meals-window {
     text-transform: capitalize;
