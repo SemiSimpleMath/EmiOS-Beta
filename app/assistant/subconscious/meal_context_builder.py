@@ -107,47 +107,149 @@ def _build_recipes_house_reference() -> str:
     return "(see resource_meal_proposer_house_rules in your system context for the full recipe vocabulary this family cooks regularly)"
 
 
-def _build_dietary_context(household_members: List[str]) -> str:
-    """KG-derived dietary context for Jukka + family.
+# Substring keywords for State node LABELS that strongly suggest dietary
+# relevance. Every entry is long enough that substring-matching is safe
+# (no false-positives like "eat" matching "great").
+_FOOD_LABEL_KEYWORDS = (
+    "food", "eating", "diet", "allerg", "cooking", "meal", "snack",
+    "drink", "beverage", "bakery", "cuisine", "recipe", "intolerance",
+    "vegetarian", "vegan", "fasting", "kitchen", "appetite", "breakfast",
+    "lunch", "dinner", "treat",
+    # specific items / categories common as State labels
+    "chicken", "beef", "salmon", "fruit", "vegetable", "potato",
+    "ingredient",
+)
 
-    For Phase 1a, return Jukka's KG entity card description filtered for
-    health/dietary mentions. Phase 1c would use ask_kg with a focused query.
+# Whole-word keywords for edge SENTENCES. Sentence matching uses word
+# boundaries (not substring) — bare "eat" / "ate" / "salt" produced false
+# positives against "particiPATEs" / "Salt and Sanctuary". This list is
+# longer-form / distinctive food terms.
+_FOOD_SENTENCE_WORDS = frozenset({
+    # distinctive food/diet vocabulary
+    "food", "meal", "meals", "cook", "cooked", "cooking", "cooks",
+    "diet", "diets", "drink", "drinks", "drank", "ate", "eats",
+    "eaten", "eating", "breakfast", "lunch", "dinner", "snack",
+    "snacks", "recipe", "recipes", "ingredient", "ingredients",
+    "carb", "carbs", "protein", "intermittent", "lactose", "gluten",
+    "gerd", "diabetic", "diabetes", "allergy", "allergic", "allergies",
+    "intolerance", "vegan", "vegetarian", "pescatarian",
+    # food items (distinctive enough that whole-word matching catches them)
+    "vegetable", "vegetables", "fruit", "fruits", "tortilla",
+    "tortillas", "pasta", "salmon", "chicken", "potato", "potatoes",
+    "cheese", "bread", "cereal", "yogurt", "rice", "beef", "pork",
+    "lamb", "soup", "salad", "burrito", "burritos", "frittata",
+    "frittatas", "broccoli", "asparagus", "tomato", "tomatoes",
+    "coffee", "tea", "beer", "wine", "egg", "eggs", "bacon",
+    "milk", "butter", "sauce", "spice", "spices", "sugar", "salt",
+    "pancake", "pancakes", "oats", "oatmeal", "burger", "pizza",
+    "sandwich", "noodle", "noodles", "leftover", "leftovers",
+    "mustard", "ketchup", "mayo", "dressing", "condiment",
+    "dessert", "candy", "chocolate", "cookie", "cookies", "cake",
+    "sushi", "taco", "tacos", "burrito", "wrap", "bagel", "donut",
+    "cup", "noodle", "stir", "fry", "fried", "grilled",
+    "fish", "shrimp", "tofu", "garlic", "onion", "pepper",
+    "delivery", "restaurant", "takeout",
+})
+
+
+def _sentence_has_food_word(sentence_lower: str) -> bool:
+    """Whole-word match: tokenize the sentence, intersect with the food
+    vocabulary. Avoids the 'salt' matching 'Salt and Sanctuary' problem
+    that substring matching had — Salt and Sanctuary tokenizes to
+    {'salt', 'and', 'sanctuary'} and 'salt' IS in the food set, so this
+    particular case is still ambiguous. The downstream proposer can
+    handle borderline matches; the goal here is to cut the worst noise
+    (verb-stem matches like 'eat' in 'great', 'ate' in 'participates')
+    not eliminate every borderline case.
     """
-    try:
-        from app.assistant.kg.db.knowledge_graph_db_sqlite import Node
-        from app.models.base import get_session
+    import re
+    tokens = re.findall(r"[a-z]+", sentence_lower)
+    return any(tok in _FOOD_SENTENCE_WORDS for tok in tokens)
 
+
+def _per_member_dietary_signals(session, member: str):
+    """Return list of (state_label, edge_sentence) tuples for food-relevant
+    has_state edges on `member`. Returns None when the member has no KG
+    Entity node; empty list when they exist but carry no food signals.
+    """
+    from app.assistant.kg.db.knowledge_graph_db_sqlite import Edge, Node
+    from sqlalchemy import func
+
+    n = (
+        session.query(Node)
+        .filter(func.lower(Node.label) == member.lower())
+        .filter(Node.node_type == "Entity")
+        .first()
+    )
+    if n is None:
+        return None
+    rows = (
+        session.query(Edge, Node)
+        .join(Node, Node.id == Edge.target_id)
+        .filter(Edge.source_id == n.id)
+        .filter(Edge.relationship_type == "has_state")
+        .all()
+    )
+    out = []
+    for e, tgt in rows:
+        label = (tgt.label or "")
+        sent = (e.sentence or "")
+        lbl_l = label.lower()
+        snt_l = sent.lower()
+        if (
+            any(k in lbl_l for k in _FOOD_LABEL_KEYWORDS)
+            or _sentence_has_food_word(snt_l)
+        ):
+            out.append((label, sent.strip()))
+    return out
+
+
+def _build_dietary_context(household_members: List[str]) -> str:
+    """Per-person dietary signals pulled from KG has_state edges.
+
+    For every household member, walks the KG: finds their Entity node, lists
+    has_state edges where the target State node's label OR the edge sentence
+    carries a food-relevant signal. Renders one block per member.
+
+    Previously (Phase 1a): single-person, Jukka-only, prose-keyword filter
+    over his entity card description. That ignored 31 food-relevant State
+    edges on Annika (vegetable avoidance etc.), 19 on Peter, 35 on Katy.
+
+    If any one member's signal count exceeds RUNAWAY_THRESHOLD, surface a
+    count warning rather than silently truncating (no-list-caps-in-auditor
+    -snapshots principle).
+    """
+    if not household_members:
+        return "(no household members resolved — proposer should default to neutral household meals)"
+
+    from app.models.base import get_session
+
+    RUNAWAY_THRESHOLD = 30
+
+    try:
         session = get_session()
         try:
-            # Jukka is the primary user — most household dietary constraints
-            # belong to him (per the existing KG card structure).
-            primary = household_members[0] if household_members else "Jukka"
-            row = (
-                session.query(Node)
-                .filter(Node.label == primary)
-                .filter(Node.node_type == "Entity")
-                .one_or_none()
-            )
+            blocks: list[str] = []
+            for member in household_members:
+                signals = _per_member_dietary_signals(session, member)
+                if signals is None:
+                    blocks.append(f"{member}:\n- (no KG entity node for this person)")
+                    continue
+                if not signals:
+                    blocks.append(f"{member}:\n- (no dietary signals captured in KG yet)")
+                    continue
+                lines = [f"{member}:"]
+                for label, sentence in signals[:RUNAWAY_THRESHOLD]:
+                    lines.append(f"- {label} — {sentence}")
+                if len(signals) > RUNAWAY_THRESHOLD:
+                    lines.append(
+                        f"- (… plus {len(signals) - RUNAWAY_THRESHOLD} more food-relevant State edges "
+                        f"not shown — runaway signal density; consider tightening the keyword filter)"
+                    )
+                blocks.append("\n".join(lines))
         finally:
             session.close()
-
-        if row is None:
-            return f"(no KG entity card for {primary})"
-        description = (row.description or "").strip()
-        if not description:
-            return f"(node exists for {primary}, no description)"
-        # Filter to health/dietary-relevant sentences.
-        keywords = (
-            "diet", "eat", "food", "meal", "fast", "calorie", "weight",
-            "diabet", "gerd", "allerg", "lactose", "gluten", "vegetar",
-            "vegan", "pescatarian", "drink", "alcohol", "caffeine",
-            "intermittent", "carb", "protein", "sugar", "salt",
-        )
-        sentences = description.split(". ")
-        relevant = [s.strip() for s in sentences if any(k in s.lower() for k in keywords)]
-        if not relevant:
-            return "(no dietary signals in KG card; proposer should default to neutral, family-frequent meals)"
-        return f"Dietary context for {primary}:\n" + "\n".join(f"- {s}." for s in relevant)
+        return "Per-person dietary signals (from KG):\n\n" + "\n\n".join(blocks)
     except Exception as e:
         logger.warning("[meal_context] dietary_context build failed: %s", e)
         return "(error reading dietary context)"
