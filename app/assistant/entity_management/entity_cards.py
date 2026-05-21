@@ -28,9 +28,17 @@ def get_entity_card_for_prompt_injection_level(
     entity_name: str,
     *,
     level: int = 0,
+    sections: list[str] | None = None,
 ) -> str:
-    """Level-based prompt injection formatter, backed by entity_card_v2."""
-    return render_v2_card_for_prompt_injection_level(session, entity_name, level=level)
+    """Level-based prompt injection formatter, backed by entity_card_v2.
+
+    When `sections` is passed it overrides `level` — same semantics as
+    the underlying v2 renderer. Used by callers that need a custom
+    slice (e.g. personal_admin wants level_0 + contact only).
+    """
+    return render_v2_card_for_prompt_injection_level(
+        session, entity_name, level=level, sections=sections,
+    )
 
 
 def track_entity_card_usage_best_effort(**kwargs) -> None:
