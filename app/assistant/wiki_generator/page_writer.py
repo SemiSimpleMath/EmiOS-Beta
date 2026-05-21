@@ -35,6 +35,7 @@ from app.assistant.kg_projection import (
     sections_as_prompt_list,
     tag_bullets,
 )
+from app.assistant.utils.filename_safety import safe_filename
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.wiki_generator.references import apply_references
 from app.assistant.utils.pydantic_classes import (
@@ -195,12 +196,11 @@ def build_window_excerpts(window_ids: List[str], max_per_msg: int = MAX_CHARS_PE
 def read_rough_page(vault_path: Path, entity_label: str) -> Optional[str]:
     """Load the rough markdown page for the entity from the vault.
 
-    Must use the same filename sanitization as the writer (``_safe_filename``)
+    Must use the same filename sanitization as the writer (``safe_filename``)
     or entities with characters like ``,``, ``&``, ``@`` (e.g. "Irvine,
     California", "AT&T") will write fine but read back as None.
     """
-    from app.assistant.wiki_generator.wiki_writer import _safe_filename
-    candidate = vault_path / f"{_safe_filename(entity_label)}.md"
+    candidate = vault_path / f"{safe_filename(entity_label)}.md"
     if not candidate.exists():
         return None
     return candidate.read_text(encoding="utf-8")
@@ -208,12 +208,11 @@ def read_rough_page(vault_path: Path, entity_label: str) -> Optional[str]:
 
 def write_prose_page(vault_path: Path, entity_label: str, markdown: str) -> Path:
     """Write the finished prose page under ``<vault>/prose/<safe>.md``.
-    Filename sanitization mirrors the rough writer (_safe_filename) so the
+    Filename sanitization mirrors the rough writer (safe_filename) so the
     rough/prose pair always agree on naming."""
-    from app.assistant.wiki_generator.wiki_writer import _safe_filename
     out_dir = vault_path / "prose"
     out_dir.mkdir(parents=True, exist_ok=True)
-    target = out_dir / f"{_safe_filename(entity_label)}.md"
+    target = out_dir / f"{safe_filename(entity_label)}.md"
     target.write_text(markdown, encoding="utf-8")
     return target
 
@@ -290,7 +289,7 @@ def _load_wiki_sections_resource() -> list:
 
 
 def _section_outputs_path(vault_path: Path, entity_label: str) -> Path:
-    return vault_path / "section_outputs" / f"{entity_label}.json"
+    return vault_path / "section_outputs" / f"{safe_filename(entity_label)}.json"
 
 
 def _load_section_outputs(vault_path: Path, entity_label: str) -> Dict[str, str]:

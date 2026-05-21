@@ -18,6 +18,7 @@ from sqlalchemy import text as sql_text
 
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
+from app.assistant.utils.filename_safety import safe_filename
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import (
     Message,
@@ -46,7 +47,7 @@ def _scope() -> ScopeContext:
 
 
 def _read_prose_page(vault_path: Path, entity_label: str) -> Optional[Dict[str, Any]]:
-    path = vault_path / "prose" / f"{entity_label}.md"
+    path = vault_path / "prose" / f"{safe_filename(entity_label)}.md"
     if not path.exists():
         return None
     post = frontmatter.load(path)

@@ -37,6 +37,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import text as sql_text
 
 from app.assistant.kg.db.knowledge_graph_db import get_session
+from app.assistant.utils.filename_safety import safe_filename
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -48,7 +49,7 @@ DEFAULT_VAULT = Path.home() / "EmiWiki"
 def _existing_prose_stems(vault_path: Path) -> set[str]:
     """Set of sanitized filename stems already present in the prose dir.
 
-    Use sanitized stems (matching ``wiki_writer._safe_filename``) because
+    Use sanitized stems (matching ``utils.filename_safety.safe_filename``) because
     that's how files are named on disk — entities like "AT&T" land at
     ``prose/AT_T.md`` so the raw label "AT&T" wouldn't match a stem-based
     set. ``pick_growth_targets`` sanitizes each candidate before lookup.
@@ -94,10 +95,9 @@ def _existing_empty_stems_with_degree(vault_path: Path) -> Dict[str, int]:
 def mark_entity_empty(vault_path: Path, entity_label: str, edge_count: int) -> None:
     """Drop a sidecar marker so future ticks skip this entity until its
     KG edge count grows past ``edge_count``."""
-    from app.assistant.wiki_generator.wiki_writer import _safe_filename
     edir = _empty_dir(vault_path)
     edir.mkdir(parents=True, exist_ok=True)
-    target = edir / f"{_safe_filename(entity_label)}.json"
+    target = edir / f"{safe_filename(entity_label)}.json"
     target.write_text(
         json.dumps(
             {
@@ -129,7 +129,6 @@ def pick_growth_targets(
       - entities marked empty whose edge count hasn't grown past the
         marker's recorded count (so new KG content auto-retries).
     """
-    from app.assistant.wiki_generator.wiki_writer import _safe_filename
     from app.assistant.importance.consumers import is_wiki_growth_candidate
 
     skip_prose = _existing_prose_stems(vault_path)
@@ -169,7 +168,7 @@ def pick_growth_targets(
 
     targets: List[str] = []
     for nid, label, deg in rows:
-        stem = _safe_filename(label)
+        stem = safe_filename(label)
         if stem in skip_prose:
             continue
         prior_deg = skip_empty.get(stem)

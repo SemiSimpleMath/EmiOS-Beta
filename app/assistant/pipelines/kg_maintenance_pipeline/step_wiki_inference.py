@@ -44,6 +44,7 @@ from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
 from app.assistant.kg_maintenance.store import upsert_finding
 from app.assistant.pipelines.context import PipelineContext
+from app.assistant.utils.filename_safety import safe_filename
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import Message
 from app.models.base import get_session
@@ -93,7 +94,7 @@ def run(ctx: PipelineContext, *, subject_limit: Optional[int] = None) -> dict:
 
     for subject in subjects:
         subjects_examined += 1
-        page_path = prose_dir / f"{_safe_filename(subject['label'])}.md"
+        page_path = prose_dir / f"{safe_filename(subject['label'])}.md"
         try:
             page_text = _read_prose_page(prose_dir, subject["label"])
             if not page_text or len(page_text) < 200:
@@ -201,10 +202,6 @@ def _resolve_vault_path() -> Optional[Path]:
     return Path.home() / f"{name}Wiki"
 
 
-def _safe_filename(label: str) -> str:
-    return label.replace("/", "_").replace("\\", "_")
-
-
 def _write_examined_sidecar(page_path: Path) -> None:
     """Mark a page as examined so the next run skips it until the page
     is rewritten (page mtime > sidecar.examined_at_epoch)."""
@@ -222,7 +219,7 @@ def _write_examined_sidecar(page_path: Path) -> None:
 
 
 def _read_prose_page(prose_dir: Path, label: str) -> Optional[str]:
-    p = prose_dir / f"{_safe_filename(label)}.md"
+    p = prose_dir / f"{safe_filename(label)}.md"
     if not p.exists():
         return None
     try:

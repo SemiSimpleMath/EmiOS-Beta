@@ -9,26 +9,16 @@ Every regeneration:
 """
 from __future__ import annotations
 
-import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, List, Optional
 
 from app.assistant.kg_projection import EntityNeighborhood, get_entity_neighborhood
-from app.assistant.wiki_generator.wiki_renderer import render_page
+from app.assistant.utils.filename_safety import safe_filename
 from app.assistant.utils.logging_config import get_logger
+from app.assistant.wiki_generator.wiki_renderer import render_page
 
 logger = get_logger(__name__)
-
-
-_SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9 ._'\u2019\-]")
-
-
-def _safe_filename(label: str) -> str:
-    """Convert an entity label to a filename-safe stem. Keep apostrophes and
-    spaces so Obsidian's wiki-link target ([[Katy]]) resolves to ``Katy.md``."""
-    stem = _SAFE_FILENAME_RE.sub("_", label.strip())
-    return stem.strip(". ")
 
 
 def regenerate_entity_page(
@@ -53,7 +43,7 @@ def regenerate_entity_page(
         neighborhood = get_entity_neighborhood(label, node_id=node_id)
     canonical_label = neighborhood.entity.label
     markdown = render_page(neighborhood)
-    filename = _safe_filename(canonical_label) + ".md"
+    filename = safe_filename(canonical_label) + ".md"
     target = vault_path / filename
     target.write_text(markdown, encoding="utf-8")
     _append_log(

@@ -20,6 +20,7 @@ import json
 from pathlib import Path
 from typing import Dict, List
 
+from app.assistant.utils.filename_safety import safe_filename
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -32,7 +33,7 @@ def bullet_key(bullet_text: str) -> str:
 
 def load_tags(root: Path, entity_label: str) -> Dict[str, List[str]]:
     """Read the tag sidecar for an entity. Missing file → empty dict."""
-    path = root / "tags" / f"{entity_label}.json"
+    path = root / "tags" / f"{safe_filename(entity_label)}.json"
     if not path.exists():
         return {}
     try:
@@ -48,7 +49,7 @@ def save_tags(root: Path, entity_label: str, tags: Dict[str, List[str]]) -> None
     """Write the tag sidecar for an entity. Creates ``tags/`` if needed."""
     out_dir = root / "tags"
     out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / f"{entity_label}.json"
+    path = out_dir / f"{safe_filename(entity_label)}.json"
     path.write_text(json.dumps(tags, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
@@ -65,7 +66,7 @@ def load_bullet_index(root: Path, entity_label: str) -> List[str]:
 
     Missing file → empty list (first-run; everything will appear "added").
     """
-    path = root / "bullet_index" / f"{entity_label}.json"
+    path = root / "bullet_index" / f"{safe_filename(entity_label)}.json"
     if not path.exists():
         return []
     try:
@@ -81,7 +82,7 @@ def save_bullet_index(root: Path, entity_label: str, keys: List[str]) -> None:
     """Write the bullet-index sidecar (sorted for diffability)."""
     out_dir = root / "bullet_index"
     out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / f"{entity_label}.json"
+    path = out_dir / f"{safe_filename(entity_label)}.json"
     path.write_text(
         json.dumps(sorted(set(keys)), indent=2, ensure_ascii=False),
         encoding="utf-8",

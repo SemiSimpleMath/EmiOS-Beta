@@ -52,9 +52,9 @@ def _has_wiki_prose_page(label: str) -> bool:
     if not label:
         return False
     try:
+        from app.assistant.utils.filename_safety import safe_filename
         from app.assistant.wiki_generator.nightly_refresh import _default_vault
-        from app.assistant.wiki_generator.wiki_writer import _safe_filename
-        prose_path = _default_vault() / "prose" / (_safe_filename(label) + ".md")
+        prose_path = _default_vault() / "prose" / (safe_filename(label) + ".md")
         return prose_path.exists()
     except Exception:
         return False

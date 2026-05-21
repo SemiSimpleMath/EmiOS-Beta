@@ -105,7 +105,7 @@ def _list_prose_pages(vault_path: Path) -> List[Dict[str, Any]]:
     """Return one entry per prose page with (label, path, generated_at, kg_node_id).
 
     ``label`` is the canonical KG label from frontmatter (`name:` field), not
-    the filename stem. Stems are sanitized via ``_safe_filename`` (chars like
+    the filename stem. Stems are sanitized via ``utils.filename_safety.safe_filename`` (chars like
     '&', ',', '@' become '_'), so a page about AT&T lives at ``AT_T.md`` —
     the stem is unsafe to use as the KG lookup key. Fall back to the stem
     only when frontmatter is missing or malformed (legacy / hand-edited).
