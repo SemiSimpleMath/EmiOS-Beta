@@ -438,6 +438,110 @@ _BRIDGE_NODE_TYPES = {"State", "Event", "Goal", "Concept"}
 # selection, so high-importance bridges are visited first.
 _HOP2_MAX_ENDPOINTS_PER_BRIDGE = 5
 
+# ── Nano prefilter (wiki parity) ───────────────────────────────────────────
+# Mirrors description_creator._prefilter_edges. Entities whose collected
+# fact pool exceeds _CARD_PREFILTER_THRESHOLD are run through the
+# kg_maintenance::edge_filter nano agent in batches of
+# _CARD_PREFILTER_BATCH_SIZE; nano picks the most informative facts and
+# the rest are dropped before the importance sort + floor cut. Same
+# thresholds as the wiki path so behaviour is symmetric on the hub
+# entities (Jukka, House, Family, etc.) that have hundreds of edges.
+_CARD_PREFILTER_THRESHOLD = 60
+_CARD_PREFILTER_BATCH_SIZE = 200
+
+
+def _chunk(lst: List[Any], size: int) -> List[List[Any]]:
+    return [lst[i:i + size] for i in range(0, len(lst), size)]
+
+
+def _format_fact_oneliner(fact: Dict[str, Any], index: int) -> str:
+    """One-line descriptor of a fact for the nano prefilter prompt.
+
+    Mirrors description_creator._format_edge_oneliner but adapted to the
+    card-fact dict shape. NOT sliced — sentences pass full per the no-
+    slicing rule. The nano agent sees one fact per line; the prompt-side
+    chunking in _prefilter_facts keeps each batch bounded.
+    """
+    direction = (fact.get("direction") or "?").upper()
+    edge_type = fact.get("edge_type") or "unknown"
+    label = fact.get("object_label") or "?"
+    object_type = fact.get("object_type") or "?"
+    hop = fact.get("hop") or 1
+    hop_tag = "[H2] " if hop > 1 else ""
+    line = f"{index}. {hop_tag}{direction}: {edge_type} -> {label} ({object_type})"
+    sentence = (fact.get("edge_sentence") or "").strip()
+    if sentence:
+        line += f' | "{sentence}"'
+    return line
+
+
+def _prefilter_facts(
+    facts: List[Dict[str, Any]],
+    entity_label: str,
+    entity_type: str,
+) -> List[Dict[str, Any]]:
+    """Nano-LLM prefilter for high-degree entity fact pools.
+
+    Wiki parity (description_creator._prefilter_edges). Below threshold,
+    pass through unchanged. Above threshold, batch the facts and ask
+    kg_maintenance::edge_filter to pick the informative ones. On any
+    per-batch failure, keep all facts in that batch (fail open — better
+    to over-include than to silently lose signal).
+    """
+    if len(facts) <= _CARD_PREFILTER_THRESHOLD:
+        return facts
+
+    logger.info(
+        "[card_prefilter] %s has %d facts — running nano prefilter",
+        entity_label, len(facts),
+    )
+    from app.assistant.ServiceLocator.service_locator import DI
+    agent = DI.agent_factory.create_agent("kg_maintenance::edge_filter")
+    if agent is None:
+        logger.warning(
+            "[card_prefilter] kg_maintenance::edge_filter not available — "
+            "skipping prefilter for %s", entity_label,
+        )
+        return facts
+
+    keep_global: set[int] = set()
+    index_batches = _chunk(list(range(len(facts))), _CARD_PREFILTER_BATCH_SIZE)
+    for batch_num, global_indices in enumerate(index_batches, 1):
+        lines = [
+            _format_fact_oneliner(facts[global_i], local_i)
+            for local_i, global_i in enumerate(global_indices, 1)
+        ]
+        try:
+            response = agent.action_handler(Message(
+                agent_input={
+                    "node_label": entity_label,
+                    "node_type": entity_type,
+                    "edge_list": "\n".join(lines),
+                },
+                scope_context=_scope(),
+            ))
+            data = response.data if response and hasattr(response, "data") else None
+            if hasattr(data, "model_dump"):
+                data = data.model_dump()
+            data = data or {}
+            for local_idx in data.get("keep_indices", []):
+                if isinstance(local_idx, int) and 1 <= local_idx <= len(global_indices):
+                    keep_global.add(global_indices[local_idx - 1])
+        except Exception:
+            logger.debug(
+                "[card_prefilter] batch %d failed for %s — keeping all facts in batch",
+                batch_num, entity_label, exc_info=True,
+            )
+            keep_global.update(global_indices)
+
+    filtered = [facts[i] for i in sorted(keep_global)]
+    logger.info(
+        "[card_prefilter] %s: %d -> %d facts (%.0f%% reduction)",
+        entity_label, len(facts), len(filtered),
+        (1 - len(filtered) / len(facts)) * 100 if facts else 0,
+    )
+    return filtered
+
 
 def _is_user_self_entity(entity: Node) -> bool:
     """True when this Entity is the user themselves.
@@ -657,6 +761,14 @@ def _collect_candidate_facts(session: Session, entity: Node) -> List[Dict[str, A
             "State/Event/Goal bridges",
             entity.label, len(seen_2hop_entity_ids),
         )
+
+    # Wiki-parity nano prefilter. For hub entities the 1-hop + 2-hop walks
+    # can produce hundreds of facts; running each through section_tagger +
+    # bullet_renderer is slow and dilutes the signal. The same nano agent
+    # the wiki's description_creator uses (kg_maintenance::edge_filter)
+    # picks the informative subset; the existing importance floor + min-
+    # keep top-up then operate on that smaller pool. See _prefilter_facts.
+    facts = _prefilter_facts(facts, entity.label, entity.node_type)
 
     # Sort by importance descending so downstream rendering chunks see the
     # high-importance facts FIRST. If the section has 30 input facts and the
