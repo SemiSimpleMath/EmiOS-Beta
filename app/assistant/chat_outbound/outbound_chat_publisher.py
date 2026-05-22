@@ -42,6 +42,8 @@ class OutboundChatPublisher:
         reply_to: Optional[Dict[str, Any]],
         request_id: Optional[str] = None,
         sub_data_type: Optional[list[str]] = None,
+        allow_question_injection: bool = False,
+        topic_tag: Optional[str] = None,
     ) -> bool:
         """Publish ``text`` to the surface named in ``reply_to``.
 
@@ -52,12 +54,34 @@ class OutboundChatPublisher:
 
         ``request_id`` and ``sub_data_type`` are optional; included on
         the wire message for surfaces that thread/correlate by them.
+
+        When ``allow_question_injection`` is True, the publisher consults
+        the pending_question queue and may append a pending question to
+        the reply (one per reply, budgeted across a rolling window).
+        Pass ``topic_tag`` to bias selection toward conversation context
+        (e.g., 'meals' from a meal-planner reply). Default off — only
+        real chat replies should opt in; narrator/ack/error paths
+        should not carry questions.
         """
         if not text or not text.strip():
             return False
         if reply_to is None:
             logger.debug("[outbound] no reply_to — dropping (sender=%s)", sender)
             return False
+
+        if allow_question_injection:
+            try:
+                from app.assistant.pending_questions.injector import (
+                    inject_question_into_reply,
+                )
+                text, _question_id = inject_question_into_reply(
+                    text=text, topic_tag=topic_tag,
+                )
+            except Exception:
+                logger.exception(
+                    "[outbound] question injection failed; sending original text"
+                )
+
         surface_type = str(reply_to.get("type") or "").strip().lower()
         try:
             if surface_type == "socketio":
