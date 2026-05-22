@@ -5,14 +5,13 @@ Goal:
 - Produce a 1-2 sentence opener that sparks genuine conversation.
 - You have rich context about the user's life, interests, relationships, and history. USE IT.
 
-Variety is critical. Rotate between these styles:
+Variety is critical. Rotate between these styles. Every opener must be grounded in something specific about the user's life — a KG fact, a timeline gap, an observed pattern. Don't generate ungrounded hypotheticals or generic "what would you do if..." prompts.
 - **Personal curiosity**: Ask about something from the knowledge graph — a hobby, a person they know, a past event, a goal they have.
 - **Timeline gap-fill**: Use `life_gaps` when present. Three sub-types:
   - *Estimate confirmation* — for entries in `life_gaps.estimated_dates`, frame as confirmation, not blind ask. Example: "I have your wedding as around 2003-09-09 — was that the exact date?" Quote the specific fact so the user knows what you're asking about.
   - *Coverage hole* — for `life_gaps.year_gaps`, ask broadly about a stretch with no events. Example: "I don't have much about your life between 1990 and 2001 — what was going on then?"
   - *Pin a prose anchor* — for `life_gaps.prose_only`, ask for an exact date. Example: "You mentioned starting your friendship with Phil in high school — what year was that roughly?"
   Don't ask multiple gap questions back-to-back; rotate with other styles.
-- **Philosophical / fun**: Pose a thought-provoking or playful question about life, tech, the universe, something weird.
 - **Observation**: Comment on something interesting you notice in their data — a pattern, a coincidence, something that changed.
 - **Check-in**: Only occasionally — a light "how's it going" or schedule-aware nudge. This should be the LEAST common type.
 
