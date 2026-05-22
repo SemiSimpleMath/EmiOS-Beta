@@ -96,6 +96,21 @@ def build_card(entity_node_id: str) -> Dict[str, Any]:
         if entity is None:
             return {'status': 'error', 'reason': f'node {entity_node_id} not found'}
 
+        # 0a. The user's own entity has no card. Everything Emi needs to
+        # know about Jukka lives in resource_user_data, user_bio_context,
+        # health summaries, etc. — those flow into prompts directly. A
+        # card here just duplicates context (and is also the heaviest
+        # one to build).
+        if _is_user_self_entity(entity):
+            logger.info(
+                "[entity_cards_v2] %s: user-self entity — no card built",
+                entity.label,
+            )
+            return {
+                'status': 'skipped',
+                'reason': 'user-self entity has no card (data lives in resource_user_data)',
+            }
+
         # 0. Card-worthiness gate. Routed through the canonical gate at
         # `consumers.is_card_worthy`. Policy: pass if any of
         #   - locked_by_user_at IS NOT NULL                  (user-pinned)
@@ -406,6 +421,63 @@ def rebuild_all_group_a() -> Dict[str, Any]:
 
 # --- Implementation: candidate fact collection ------------------------------
 
+# ── Predicates we walk through at 2-hop ────────────────────────────────────
+# State/Event/Goal/Concept nodes are the temporal/conceptual bridges in this
+# graph (per the temporal-life-graph rule: connections between Entities route
+# through one of these). When the card subject has, e.g., a "Dogs" entity
+# whose connected Entities (Bonnie + Clyde) live behind a 1-hop Ownership
+# State, the 2-hop walk through that State is what surfaces the names without
+# reading Node.description (which is wiki-derived and would collapse the
+# cross-check between card and wiki projections).
+_BRIDGE_NODE_TYPES = {"State", "Event", "Goal", "Concept"}
+
+# Max Entity endpoints to surface per 1-hop bridge (avoid hub explosion when
+# a State/Event has many participants). Most bridges carry a handful; this
+# only bites on hub bridges like "Conversation" or "Family Time" that link
+# to lots of people. The 1-hop importance sort still applies to bridge
+# selection, so high-importance bridges are visited first.
+_HOP2_MAX_ENDPOINTS_PER_BRIDGE = 5
+
+
+def _is_user_self_entity(entity: Node) -> bool:
+    """True when this Entity is the user themselves.
+
+    Used to short-circuit card building — the user's data lives in
+    resource_user_data, user_bio_context, etc., and is injected into
+    prompts through other channels. A card here would just duplicate.
+
+    Match is case-insensitive against the user's first_name and
+    full_name from resource_user_data. Falls back to False on any
+    lookup failure (better to build an extra card than to wrongly
+    skip a non-user entity).
+    """
+    if (entity.node_type or "") != "Entity":
+        return False
+    label = (entity.label or "").strip().lower()
+    if not label:
+        return False
+    try:
+        from app.assistant.ServiceLocator.service_locator import DI
+        resource_manager = getattr(DI, "resource_manager", None)
+        if resource_manager is None:
+            return False
+        user_data = resource_manager.get_resource("resource_user_data")
+        if not isinstance(user_data, dict):
+            return False
+        candidates = set()
+        for key in ("first_name", "preferred_name", "full_name"):
+            v = user_data.get(key)
+            if isinstance(v, str) and v.strip():
+                candidates.add(v.strip().lower())
+        return label in candidates
+    except Exception:
+        logger.debug(
+            "[entity_cards_v2] _is_user_self_entity lookup failed for %s",
+            entity.label, exc_info=True,
+        )
+        return False
+
+
 def _collect_candidate_facts(session: Session, entity: Node) -> List[Dict[str, Any]]:
     """Walk the entity's edges, build a list of NOW-admissible facts.
 
@@ -468,6 +540,7 @@ def _collect_candidate_facts(session: Session, entity: Node) -> List[Dict[str, A
             # cutting to bullet cap.
             'node_importance': float(node_imp) if node_imp is not None else None,
             'edge_importance': float(edge_imp) if edge_imp is not None else None,
+            'hop': 1,
             'temporal': {
                 'start_date': str(other.start_date) if other.start_date else None,
                 'end_date': str(other.end_date) if other.end_date else None,
@@ -476,6 +549,114 @@ def _collect_candidate_facts(session: Session, entity: Node) -> List[Dict[str, A
                 'valid_during': other.valid_during,
             },
         })
+
+    # ── 2-hop walk through State/Event/Goal bridges ──
+    # Per the temporal-life-graph rule, Entity↔Entity connections route
+    # through a State/Event/Goal (or Concept). The card builder's 1-hop
+    # walk above sees those bridges as direct neighbors but doesn't follow
+    # them to their other Entity endpoints. That's why "Dogs" doesn't
+    # name Bonnie + Clyde at 1-hop — they live behind an Ownership State.
+    #
+    # The wiki's description_creator effectively gets the names because
+    # it reads each connected node's description (which is itself wiki-
+    # generated and names them). The card MUST NOT do that — it would
+    # collapse the card/wiki cross-check. Instead, we walk the structure
+    # ourselves and pick up the Entity endpoints behind each bridge.
+    #
+    # Capped per bridge so a high-fanout State (e.g., a recurring event
+    # with many participants) doesn't dump all of them into the pool.
+    bridge_neighbor_ids = {
+        (f['source_node_ids'][0], f['source_edge_ids'][0])
+        for f in facts
+        if (f.get('object_type') or '') in _BRIDGE_NODE_TYPES
+    }
+    seen_2hop_entity_ids: set[str] = set()
+    for (bridge_id, bridge_via_edge_id) in bridge_neighbor_ids:
+        bridge_node = session.get(Node, bridge_id)
+        if bridge_node is None:
+            continue
+        bridge_edges = session.query(Edge).filter(
+            (Edge.source_id == bridge_id) | (Edge.target_id == bridge_id)
+        ).all()
+        per_bridge = 0
+        for e2 in bridge_edges:
+            if str(e2.id) == bridge_via_edge_id:
+                continue
+            other2_id = e2.target_id if e2.source_id == bridge_id else e2.source_id
+            if other2_id == entity.id:
+                continue
+            other2 = session.get(Node, other2_id)
+            if other2 is None:
+                continue
+            # Only collect Entity endpoints at hop 2. State→State chains
+            # would pull noise; the goal is "what Entities are on the
+            # other side of this bridge."
+            if (other2.node_type or '') != "Entity":
+                continue
+            # Dedup across bridges (same Entity reachable via multiple
+            # bridges should only count once).
+            if str(other2.id) in seen_2hop_entity_ids:
+                continue
+            # NOW filter — if the 2-hop Entity itself is closed/archived,
+            # skip.
+            if not is_now_admissible(
+                other2.node_type, other2.end_date, other2.category,
+                other2.goal_status, other2.locked_by_user_at,
+                valid_currently=getattr(other2, "valid_currently", None),
+            ):
+                continue
+
+            # Compose the 2-hop fact. edge_sentence narrates the path so
+            # bullet_renderer has full context. object_description is
+            # NOT included (would be reading wiki output per the cross-
+            # check principle).
+            composed_sentence = (
+                f"Via {bridge_node.node_type} '{bridge_node.label}': "
+                f"{e2.sentence or ''}"
+            ).strip()
+            facts.append({
+                'fact_id': _next_fid(),
+                'source_node_ids': [other2.id, bridge_node.id],
+                'source_edge_ids': [e2.id, bridge_via_edge_id],
+                'subject_label': entity.label,
+                'object_label': other2.label,
+                'object_type': other2.node_type,
+                'object_category': other2.category,
+                'edge_type': e2.relationship_type,
+                'edge_sentence': composed_sentence,
+                'object_sentence': other2.original_sentence,
+                'object_description': None,
+                'direction': '2hop',
+                'confidence_tier': other2.confidence_tier or 'provisional',
+                # 2-hop facts use the 1-hop bridge's importance × the 2nd-
+                # leg edge's importance / 10 so the score remains on the
+                # 0-10 scale and dampens compared to direct 1-hop facts.
+                'node_importance': float(other2.importance) if other2.importance is not None else None,
+                'edge_importance': (
+                    float(e2.importance) if e2.importance is not None else None
+                ),
+                'hop': 2,
+                'via_bridge_label': bridge_node.label,
+                'via_bridge_type': bridge_node.node_type,
+                'temporal': {
+                    'start_date': str(other2.start_date) if other2.start_date else None,
+                    'end_date': str(other2.end_date) if other2.end_date else None,
+                    'start_date_prose': other2.start_date_prose,
+                    'end_date_prose': other2.end_date_prose,
+                    'valid_during': other2.valid_during,
+                },
+            })
+            seen_2hop_entity_ids.add(str(other2.id))
+            per_bridge += 1
+            if per_bridge >= _HOP2_MAX_ENDPOINTS_PER_BRIDGE:
+                break
+
+    if seen_2hop_entity_ids:
+        logger.info(
+            "[entity_cards_v2] %s: added %d 2-hop Entity fact(s) via "
+            "State/Event/Goal bridges",
+            entity.label, len(seen_2hop_entity_ids),
+        )
 
     # Sort by importance descending so downstream rendering chunks see the
     # high-importance facts FIRST. If the section has 30 input facts and the
