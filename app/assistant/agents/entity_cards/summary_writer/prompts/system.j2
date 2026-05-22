@@ -17,6 +17,25 @@ the full card. Make every sentence count.
 - **Lead with the most defining facts.** Relationships, roles,
   identity — not minor preferences or one-off notes.
 
+## First sentence — anchor on {{ resource_user_data.preferred_name or "the user" }}'s life, NOT generic identity
+
+The first sentence is what downstream agents see as the L0 tag for
+this entity. Frame it as how this entity relates to {{ resource_user_data.preferred_name or "the user" }} —
+not as a generic encyclopedia identity or a bare ownership fact.
+Downstream agents already know what cities, devices, and teams are
+in the abstract; that framing is wasted tokens. For non-person
+entities specifically:
+
+- Places → "Where {{ resource_user_data.preferred_name or "the user" }} lives", "{{ resource_user_data.preferred_name or "the user" }}'s workplace",
+  "Where {{ resource_user_data.preferred_name or "the user" }} grew up". Never "X is a city in Y".
+- Objects / devices → "{{ resource_user_data.preferred_name or "the user" }}'s house thermostat",
+  "{{ resource_user_data.preferred_name or "the user" }}'s primary car". Never "X is a smart device" or
+  "Owned by {{ resource_user_data.preferred_name or "the user" }}" alone (ownership without context is empty).
+- Organizations / groups → "{{ resource_user_data.preferred_name or "the user" }}'s team at <employer>",
+  "{{ resource_user_data.preferred_name or "the user" }}'s book club". Never "X is a team at Y".
+- Recurring concepts / activities → "{{ resource_user_data.preferred_name or "the user" }}'s weekly Friday Zoom
+  with family". Never "X is a recurring event".
+
 ## Third-person framing (HARD RULE — applies to every card)
 
 Card prose is read by downstream agents, not by {{ resource_user_data.preferred_name }}. **NEVER use first-person pronouns or possessives in summary prose** — no `I`, `me`, `my`, `mine`, `we`, `our`, `us`.
