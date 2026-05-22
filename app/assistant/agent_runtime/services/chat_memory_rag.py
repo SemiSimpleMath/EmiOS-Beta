@@ -25,14 +25,20 @@ from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-# v3: switched embedding model from chromadb default (all-MiniLM-L6-v2, 2021,
-# MTEB retrieval ~56) to BAAI/bge-base-en-v1.5 (2023, MTEB retrieval ~64,
-# 768-dim). Dimension change forces a new collection name. Query/doc text
-# is also augmented before embedding: queries get the bge instruction prefix
-# and docs get a "[type date]" prefix so the model sees temporal + role context.
-_COLLECTION_NAME = "chat_memory_v3"
-_EMBEDDING_MODEL = "BAAI/bge-base-en-v1.5"
-_BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
+# v4: reverted from BAAI/bge-base-en-v1.5 (~440MB, 768-dim) back to the
+# project's long-standing all-MiniLM-L6-v2 (~80MB, 384-dim). The bge
+# upgrade was for ~8 MTEB retrieval points (56 → 64) — a real but
+# modest quality bump that didn't justify the cost of (a) a big-model
+# load path that hits the meta-tensor branch under torch 2.9 + adds
+# an `accelerate` dependency, and (b) re-embedding the entire corpus
+# every time the model swaps. v4 collection is a fresh start (384-dim
+# can't coexist with v3's 768-dim records).
+#
+# Switching embedding models requires re-indexing the whole corpus.
+# Don't change this without explicit user approval and clear evidence
+# the quality gain is worth the reindex.
+_COLLECTION_NAME = "chat_memory_v4"
+_EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 _SUMMARY_LOOKBACK_DAYS = 90   # Summaries are compact and carry biographical context.
 _USER_MSG_LOOKBACK_DAYS = 14  # Raw user messages are noisy — keep recent only.
 _DEFAULT_TOP_K = 8
@@ -59,9 +65,9 @@ def _get_chroma_client():
 
 
 def _get_embedding_function():
-    """Local sentence-transformers embedder (BAAI/bge-base-en-v1.5).
+    """Local sentence-transformers embedder (all-MiniLM-L6-v2).
 
-    First call downloads the model (~440MB) to the HF cache; subsequent
+    First call downloads the model (~80MB) to the HF cache; subsequent
     calls are CPU-only and free."""
     global _embedding_function
     if _embedding_function is None:
@@ -257,15 +263,10 @@ def recall(
     if not query or not query.strip():
         return []
 
-    # bge-base-en-v1.5 was trained with an asymmetric instruction for the
-    # query side. Prepending the canonical prefix lifts MTEB retrieval by
-    # ~3-5 points; doc side stays raw.
-    prefixed_query = _BGE_QUERY_PREFIX + query.strip()
-
     try:
         collection = _get_collection()
         results = collection.query(
-            query_texts=[prefixed_query],
+            query_texts=[query.strip()],
             n_results=top_k,
             where={"room_id": room_id},
         )
