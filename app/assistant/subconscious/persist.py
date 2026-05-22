@@ -5,9 +5,10 @@ v0 storage:
 - resource_subconscious_tick_log.jsonl — one line per tick: full AgentForm dump
   for audit + later replay
 
-Belief updates and pending_questions are recorded in the tick log only.
-In v0.5 these get persisted into the real belief_store and a question
-queue the chat brain can read.
+Belief updates are still recorded in the tick log only.
+Pending questions are persisted into the pending_question queue
+(app/assistant/database/pending_question.py); the chat-reply injector
+in EmiResultHandler picks them up and appends them to outbound replies.
 """
 from __future__ import annotations
 
@@ -122,6 +123,19 @@ def apply_noticer_output(output: Dict[str, Any]) -> Dict[str, Any]:
             "output": output,
         }, ensure_ascii=False) + "\n")
 
+    # 6. Pending questions → pending_question queue. Each becomes a row the
+    # chat-reply injector (EmiResultHandler) consults next time Emi sends
+    # a reply. Topic tag, priority, and expiration are derived from the
+    # related concern when one is named — otherwise reasonable defaults.
+    # Include new_concerns in the lookup so a question linked to a
+    # just-minted concern still inherits its tags + severity.
+    concern_lookup: Dict[str, Dict[str, Any]] = dict(by_id)
+    for c in new_concerns:
+        cid = c.get("concern_id")
+        if cid:
+            concern_lookup[cid] = c
+    questions_enqueued = _enqueue_pending_questions(pending_questions, concern_lookup)
+
     return {
         "new_concerns_count": len(new_concerns),
         "reinforced_count": len(reinforced_concerns),
@@ -129,10 +143,94 @@ def apply_noticer_output(output: Dict[str, Any]) -> Dict[str, Any]:
         "escalated_count": len(escalated_concerns),
         "belief_updates_count": len(belief_updates),
         "pending_questions_count": len(pending_questions),
+        "questions_enqueued_count": questions_enqueued,
         "active_total_after": len(register.get("active", [])),
         "register_path": str(register_path),
         "tick_log_path": str(tick_log_path),
     }
+
+
+_HORIZON_TO_EXPIRY_HOURS = {
+    "today": 24.0,
+    "this_week": 24.0 * 7,
+    "this_month": 24.0 * 30,
+    "long_horizon": None,
+}
+
+_SEVERITY_TO_PRIORITY = {"low": "low", "medium": "medium", "high": "high"}
+
+
+def _enqueue_pending_questions(
+    pending_questions: List[Dict[str, Any]],
+    by_id: Dict[str, Dict[str, Any]],
+) -> int:
+    """Push each noticer-emitted question onto the pending_question queue.
+
+    Mapping:
+      - text             → question_text
+      - related_concern  → topical_tag = concern's first domain_tag
+                           (or 'general'),
+                           priority = concern.severity,
+                           expires_after_hours = horizon-derived
+      - why_asking + if_unanswered → folded into question_text as
+        "(if unanswered: <default>)" tail so the user sees the noticer's
+        assumed default; why_asking goes in the queue's created_by-side
+        for audit only.
+
+    Failures are logged but do not propagate — persist must complete
+    even if the queue is unavailable.
+    """
+    if not pending_questions:
+        return 0
+    try:
+        from app.assistant.pending_questions import enqueue_question
+    except Exception as exc:
+        logger.warning(
+            "[noticer.persist] pending_questions import failed; questions "
+            "logged to tick log only: %s", exc,
+        )
+        return 0
+
+    enqueued = 0
+    for q in pending_questions:
+        text = (q.get("text") or "").strip()
+        if not text:
+            continue
+        related_id = q.get("related_concern_id")
+        concern = by_id.get(related_id) if related_id else None
+        topical_tag = "general"
+        priority = "medium"
+        expires_after_hours: Optional[float] = 72.0
+        if concern is not None:
+            tags = concern.get("domain_tags") or []
+            if tags:
+                topical_tag = str(tags[0]).strip().lower() or "general"
+            sev = (concern.get("severity") or "").lower()
+            priority = _SEVERITY_TO_PRIORITY.get(sev, "medium")
+            horizon = (concern.get("horizon") or "").lower()
+            if horizon in _HORIZON_TO_EXPIRY_HOURS:
+                expires_after_hours = _HORIZON_TO_EXPIRY_HOURS[horizon]
+
+        if_unanswered = (q.get("if_unanswered") or "").strip()
+        question_text = text
+        if if_unanswered:
+            question_text = f"{text} (if no reply, I'll go with: {if_unanswered})"
+
+        qid = enqueue_question(
+            question_text=question_text,
+            topical_tag=topical_tag,
+            priority=priority,
+            created_by="subconscious::noticer",
+            expires_after_hours=expires_after_hours,
+        )
+        if qid:
+            enqueued += 1
+    if enqueued:
+        logger.info(
+            "[noticer.persist] enqueued %d of %d pending questions",
+            enqueued, len(pending_questions),
+        )
+    return enqueued
 
 
 def _load_register(path: Path) -> Dict[str, Any]:
