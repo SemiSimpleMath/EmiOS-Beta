@@ -689,15 +689,31 @@ def _tags_from_persisted(
             continue
         tags_by_node.setdefault(tag.node_id, []).append(tag.section_name)
     valid = set(bullet_sections)
+    # Catch-all default. Facts that survived the importance/NOW filter are
+    # card-worthy by definition (someone or something has already vouched
+    # for them); the tagger's job is precision placement, not gatekeeping.
+    # When a fact has no persisted card tag, OR its tag points at a
+    # section not in this entity's template, default to general_facts so
+    # nothing card-worthy silently disappears. Matches the existing
+    # "reject reroutes to general_facts" pattern but applies to the
+    # untagged-by-omission case too.
+    default_section = (
+        "general_facts" if "general_facts" in valid
+        else (bullet_sections[-1] if bullet_sections else None)
+    )
     out: List[Dict[str, Any]] = []
     for f in facts:
         nid = f['source_node_ids'][0] if f.get('source_node_ids') else None
         if not nid:
             continue
+        emitted = False
         for sec in tags_by_node.get(nid, []):
             if sec not in valid:
                 continue
             out.append({'fact_id': f['fact_id'], 'section': sec})
+            emitted = True
+        if not emitted and default_section is not None:
+            out.append({'fact_id': f['fact_id'], 'section': default_section})
     return out
 
 
