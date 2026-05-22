@@ -17,14 +17,6 @@ from app.assistant.utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 
-def _lazy_cadence_tick(*, target_date=None, routine=None):
-    """Lazy import to avoid circular import at module load time."""
-    from app.assistant.dayflow_orchestrator.dayflow_tick import dayflow_orchestrator_cadence_tick
-    return dayflow_orchestrator_cadence_tick(target_date=target_date, routine=routine)
-
-
-dayflow_orchestrator_cadence_tick = _lazy_cadence_tick
-
 def _lazy_situation_audit(*, target_date=None, routine=None):
     """Run the situation auditor — periodic background audit of all active context."""
     from app.assistant.pipelines.dayflow.utils.situation_audit_runner import run_situation_audit
@@ -451,7 +443,6 @@ def sleep_camera_tick_local(*, target_date=None, routine=None):
 
 
 ROUTINE_FUNCTION_REGISTRY = {
-    "dayflow_orchestrator_cadence_tick": dayflow_orchestrator_cadence_tick,
     "situation_audit": situation_audit,
     "location_refresh": location_refresh,
     "chat_memory_index": chat_memory_index,
