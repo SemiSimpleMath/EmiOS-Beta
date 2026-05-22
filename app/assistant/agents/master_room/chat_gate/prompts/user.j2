@@ -127,6 +127,11 @@ Entity context:
 - {{ t.get("title","") }}{% if t.get("user_comment","") %} — user: "{{ t.get("user_comment","") }}"{% endif %}
 {%- endfor %}
 {%- endif %}
+{%- if chat_nudges %}
+
+########## GOOD TO BRING UP WITH {{ (resource_user_data.first_name or "user") | upper }} IF IT FITS NATURALLY ##########
+{{ chat_nudges }}
+{%- endif %}
 {%- if chat_memory %}
 
 ########## PAST CONVERSATIONS (RAG — may or may not be relevant) ##########

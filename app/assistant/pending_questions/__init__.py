@@ -1,15 +1,15 @@
-"""pending_questions — Emi-initiated question queue + chat injector.
+"""pending_questions — Emi-initiated question queue + chat-context nudge.
 
 Two pieces:
 
   store.py — enqueue/get/mark APIs. Any agent or pipeline can call
-    `enqueue_question(...)` to add a question Emi should ask the user
-    next time the conversation surfaces.
+    `enqueue_question(...)` to add a question Emi should bring up next
+    time she's in conversation with the user.
 
-  injector.py — the consumer. Hooked into OutboundChatPublisher so
-    that when Emi sends a chat reply, a topically-matching pending
-    question gets appended as a "P.S." tail (one per reply, budgeted
-    across a rolling window).
+  injector.py — picks the best candidate when chat_gate is composing
+    its reply. The question text becomes a nudge in chat_gate's
+    context (NOT a mechanical post-process append); chat_gate decides
+    whether to weave it into the natural reply.
 
 Lifecycle of a question is on the PendingQuestion model
 (app/assistant/database/pending_question.py).
@@ -24,7 +24,7 @@ from app.assistant.pending_questions.store import (
 )
 from app.assistant.pending_questions.injector import (
     QuestionInjector,
-    inject_question_into_reply,
+    pick_question_for_nudge,
 )
 
 __all__ = [
@@ -35,5 +35,5 @@ __all__ = [
     "expire_stale",
     "count_asked_in_window",
     "QuestionInjector",
-    "inject_question_into_reply",
+    "pick_question_for_nudge",
 ]

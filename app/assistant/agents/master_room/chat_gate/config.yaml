@@ -34,6 +34,7 @@ user_context_items:
   - resource_expected_calendar
   - resource_assistant_data
   - chat_memory
+  - chat_nudges
 
 system_context_items:
   - room_identity

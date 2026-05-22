@@ -122,25 +122,6 @@ class EmiResultHandler(Agent):
             logger.error("[%s] Empty chat result composed from response: %r", self.name, response)
             raise ValueError(f"[{self.name}] Result handler produced empty chat string.")
 
-        # Question injection: append a pending question from the queue
-        # when appropriate (budget-bounded, topic-aware). This is the
-        # final-user-facing-reply path, so it's the right hook for
-        # Emi-initiated communicativeness. Narrator/ack paths don't get
-        # questions injected. Topic tag stays None for now (general
-        # bucket) — caller-supplied tagging is a followup.
-        try:
-            from app.assistant.pending_questions.injector import (
-                inject_question_into_reply,
-            )
-            chat_str, _appended_qid = inject_question_into_reply(
-                text=chat_str, topic_tag=None,
-            )
-        except Exception:
-            logger.debug(
-                "[%s] question injection failed; sending original text",
-                self.name, exc_info=True,
-            )
-
         content = {"chat": chat_str, "feed": feed_str }
 
 

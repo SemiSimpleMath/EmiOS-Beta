@@ -705,6 +705,32 @@ class ContextInjector:
                     context[key] = ""
                 continue
 
+            if key == "chat_nudges":
+                # Pick a pending question to nudge the chat agent with.
+                # The nudge becomes a hint in the agent's context (not
+                # a mechanical append) — the agent decides whether to
+                # weave it into the reply naturally. Mark-asked happens
+                # inside pick_question_for_nudge so the same question
+                # doesn't surface every turn (noticer can re-emit if
+                # the underlying concern persists).
+                try:
+                    from app.assistant.pending_questions import (
+                        pick_question_for_nudge,
+                    )
+                    picked = pick_question_for_nudge(topic_tag=None)
+                    if picked is None:
+                        context[key] = ""
+                    else:
+                        _qid, q_text = picked
+                        context[key] = q_text
+                except Exception as e:
+                    logger.debug(
+                        "[%s] chat_nudges lookup failed: %s",
+                        agent.name, e, exc_info=True,
+                    )
+                    context[key] = ""
+                continue
+
             if key == "chat_memory":
                 try:
                     from app.assistant.agent_runtime.services.chat_memory_rag import recall, format_recall_for_prompt

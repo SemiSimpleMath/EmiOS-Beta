@@ -1,7 +1,16 @@
-"""QuestionInjector — appends a pending question to Emi's outbound reply.
+"""QuestionInjector — picks a pending question for Emi's chat-reply
+context. The chat agent sees it as a nudge and decides whether to
+weave it into its natural reply (vs. mechanically appending).
 
-Hooked from OutboundChatPublisher. Stateless per-call; all state lives
-in the pending_question table.
+This module's job is just:
+  1. Pick the best candidate (topic match > priority > age).
+  2. Apply budget / anti-back-to-back gates.
+  3. Mark the picked question as asked so the same question doesn't
+     resurface every turn. The noticer can re-emit if the underlying
+     concern persists.
+
+The agent gets the question text plus the "if_unanswered" default
+inline; whether to actually surface it to the user is the agent's call.
 
 Selection rules:
   1. Prefer questions tagged with the current conversation topic.
@@ -9,16 +18,14 @@ Selection rules:
   3. If no topic match: fall back to the highest-priority oldest
      pending question regardless of tag.
 
-Budget rules (against the 'asked' table window):
-  - Default: max 5 asked per 24h. Configurable.
-  - High-priority questions get one reserved slot per 24h that bypasses
-    the regular budget.
-  - Default: don't append two questions back-to-back (skip if the most
-    recent asked_at is younger than min_minutes_between_asks).
+Budget rules:
+  - Default: max 5 asked per 24h.
+  - Default: don't surface two questions back-to-back within
+    min_minutes_between (10 min default).
+  - 'high' priority bypasses both gates.
 """
 from __future__ import annotations
 
-from datetime import timedelta
 from typing import Optional, Tuple
 
 from app.assistant.pending_questions.store import (
@@ -46,88 +53,64 @@ class QuestionInjector:
         self.daily_budget = max(0, int(daily_budget))
         self.min_minutes_between = max(0.0, float(min_minutes_between))
 
-    def maybe_append(
+    def pick_for_nudge(
         self,
         *,
-        text: str,
         topic_tag: Optional[str] = None,
-    ) -> Tuple[str, Optional[str]]:
-        """Decide whether to append a pending question to `text`.
+    ) -> Optional[Tuple[str, str]]:
+        """Pick a pending question to nudge the chat agent with.
 
-        Returns ``(final_text, asked_question_id_or_None)``. The caller
-        sends `final_text` to the user and (separately) can correlate
-        the asked_question_id to the outbound message id if it wants
-        the traceability stamp.
+        Returns ``(question_id, question_text)`` or None when nothing
+        is eligible. Marks the picked question as asked.
 
-        Never raises into the caller. Failures log + return the original
-        text untouched.
+        Never raises into the caller. Failures log + return None.
         """
-        if not text or not text.strip():
-            return text, None
         try:
-            # Budget check first — cheap, common skip.
+            # Budget check.
             asked_24h = count_asked_in_window(hours=24.0)
             if asked_24h >= self.daily_budget:
-                # Daily budget hit. The one slot for high-priority can
-                # still fire — let it through with a stricter source.
-                pending = get_pending(topical_tag=topic_tag, limit=1)
+                pending = []
+                if topic_tag:
+                    pending = get_pending(topical_tag=topic_tag, limit=1)
                 if not pending or pending[0].priority != "high":
                     pending = get_pending(limit=1)
                     if not pending or pending[0].priority != "high":
-                        return text, None
+                        return None
             else:
-                # Under budget. Prefer topic match, then fall back.
                 pending = []
                 if topic_tag:
                     pending = get_pending(topical_tag=topic_tag, limit=1)
                 if not pending:
                     pending = get_pending(limit=1)
             if not pending:
-                return text, None
+                return None
 
-            # Anti-back-to-back: skip if any question was asked very
-            # recently. Bypassable by high-priority entries (they
-            # should fire even mid-burst).
+            # Anti-back-to-back, bypassable by high priority.
             if self.min_minutes_between > 0 and pending[0].priority != "high":
                 recent = _seconds_since_last_ask()
                 if recent is not None and recent < self.min_minutes_between * 60:
-                    return text, None
+                    return None
 
             q = pending[0]
-            tail = self._format_tail(q.question_text)
-            new_text = f"{text.rstrip()}\n\n{tail}"
             mark_asked(q.id)
             logger.info(
-                "[question_injector] appended question id=%s tag=%s priority=%s",
+                "[question_injector] nudged question id=%s tag=%s priority=%s",
                 q.id[:8], q.topical_tag, q.priority,
             )
-            return new_text, q.id
+            return (q.id, q.question_text)
         except Exception:
-            logger.exception("[question_injector] failed, returning original text")
-            return text, None
-
-    @staticmethod
-    def _format_tail(question_text: str) -> str:
-        """Standard tail framing so the user always recognizes Emi's
-        appended question and can ignore/answer at their leisure."""
-        q = question_text.strip()
-        if not q.endswith(("?", ".", "!")):
-            q += "?"
-        return f"— quick one if you have a sec: {q}"
+            logger.exception("[question_injector] pick_for_nudge failed")
+            return None
 
 
-# Module-level convenience that uses default config; OutboundChatPublisher
-# imports this rather than instantiating per call.
+# Module-level convenience using default config.
 _DEFAULT_INJECTOR = QuestionInjector()
 
 
-def inject_question_into_reply(
-    *,
-    text: str,
-    topic_tag: Optional[str] = None,
-) -> Tuple[str, Optional[str]]:
-    """Module-level convenience using the default injector."""
-    return _DEFAULT_INJECTOR.maybe_append(text=text, topic_tag=topic_tag)
+def pick_question_for_nudge(
+    *, topic_tag: Optional[str] = None,
+) -> Optional[Tuple[str, str]]:
+    return _DEFAULT_INJECTOR.pick_for_nudge(topic_tag=topic_tag)
 
 
 def _seconds_since_last_ask() -> Optional[float]:
