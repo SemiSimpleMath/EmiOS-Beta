@@ -55,20 +55,6 @@ class GetEmailMessagesTool(BaseTool):
         return min(value, 200)
 
     @staticmethod
-    def _parse_body_max_chars(raw: Any) -> int:
-        if raw is None:
-            return 15000
-        try:
-            value = int(raw)
-        except Exception as e:
-            logger.error("Invalid body_max_chars value: %r", raw)
-            logger.debug("get_email_messages body_max_chars parse exception details", exc_info=True)
-            raise ValueError(f"body_max_chars must be an integer, got {raw!r}") from e
-        if value < 1:
-            raise ValueError("body_max_chars must be >= 1")
-        return min(value, 200000)
-
-    @staticmethod
     def _header_map(email_message: Any) -> dict[str, str]:
         out: dict[str, str] = {}
         try:
@@ -107,7 +93,6 @@ class GetEmailMessagesTool(BaseTool):
             max_results = self._parse_max_results(args.get("max_results"))
             include_body = bool(args.get("include_body", True))
             include_headers = bool(args.get("include_headers", True))
-            body_max_chars = self._parse_body_max_chars(args.get("body_max_chars")) if include_body else 0
 
             utils = self._utils()
             gmail_client = utils.get_gmail_client(None)
@@ -130,8 +115,6 @@ class GetEmailMessagesTool(BaseTool):
                 metadata = EmailProcessor.extract_metadata(email_message)
                 headers = self._header_map(email_message) if include_headers else {}
                 body = EmailProcessor.extract_email_body(email_message) if include_body else ""
-                if include_body and len(body) > body_max_chars:
-                    body = body[:body_max_chars]
 
                 date_received = str(metadata.get("date_received") or "")
                 row = {
@@ -151,37 +134,37 @@ class GetEmailMessagesTool(BaseTool):
                 }
                 rows.append(row)
 
-            # Build a per-message summary so the calling agent can actually
-            # read subjects, senders, dates, and body snippets inline.
-            # Previously `content` was just a count — callers had no way to
-            # see who sent what, and retried queries hoping for different
-            # output. Include enough per-row to answer the common questions
-            # ("which email has the Zoom link?", "is any email from X?").
+            # Render the full body of each message inline in `content`.
+            # Earlier versions emitted only `snippet[:240]` per row plus a
+            # 15000-char silent body slice in `data` — both invisible to
+            # the planner via the metadata-only summary. When the user
+            # asked for "the full email about X" the planner literally
+            # could not see the body and would report back the snippet.
+            # Same architectural shape as the http_request bug fixed
+            # 2026-05-25: useful data trapped in `data`, only metadata in
+            # `content`. Fix mirrors that one — full body inline, let the
+            # manager's summary_pre_node (trigger_on_large_result_chars:
+            # 5000) compact for downstream prompt budget if needed.
             header = f"Fetched {len(rows)} message(s) matching query: {query!r}."
             summary_lines = [header]
             for idx, r in enumerate(rows, start=1):
                 subject = str(r.get("subject") or "").strip() or "(no subject)"
                 sender = str(r.get("sender") or r.get("email_address") or "").strip()
                 date = str(r.get("date_received") or "").strip()
-                snippet = str(r.get("snippet") or "").strip()
-                line = f"[{idx}] {subject}"
+                head = f"[{idx}] {subject}"
                 if sender:
-                    line += f" — {sender}"
+                    head += f" — {sender}"
                 if date:
-                    line += f" @ {date}"
-                if snippet:
-                    line += f"\n    snippet: {snippet[:240]}"
-                # Also surface any obvious conference link hiding in the
-                # body so the planner doesn't need another round-trip.
-                body_text = str(r.get("body") or "")
+                    head += f" @ {date}"
+                summary_lines.append(head)
+                body_text = str(r.get("body") or "").strip()
                 if body_text:
-                    for keyword in ("zoom.us/j/", "meet.google.com/", "teams.microsoft.com/"):
-                        pos = body_text.find(keyword)
-                        if pos >= 0:
-                            window = body_text[pos:pos + 300].replace("\n", " ")
-                            line += f"\n    link: {window[:300]}"
-                            break
-                summary_lines.append(line)
+                    # Indent the body so the boundary between header and body
+                    # is unambiguous when multiple messages are rendered.
+                    indented = "\n".join("    " + line for line in body_text.split("\n"))
+                    summary_lines.append(indented)
+                else:
+                    summary_lines.append("    (empty body)")
             summary = "\n".join(summary_lines)
 
             return ToolResult(
@@ -194,7 +177,6 @@ class GetEmailMessagesTool(BaseTool):
                     "messages": rows,
                     "include_body": include_body,
                     "include_headers": include_headers,
-                    "body_max_chars": body_max_chars if include_body else 0,
                 },
             )
         except Exception as e:

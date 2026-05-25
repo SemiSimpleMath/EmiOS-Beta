@@ -1,6 +1,6 @@
 {
   "name": "get_google_doc",
-  "description": "Read a Google Docs document and return its plain-text content, title, revision id, and Drive metadata (created/modified times, owner, web link). Supports lookup by document_id or by name search. Body text can be truncated via max_chars.",
+  "description": "Read a Google Docs document and return its plain-text content, title, revision id, and Drive metadata (created/modified times, owner, web link). Supports lookup by document_id or by name search. The full body is rendered inline in the tool result; long docs are compacted by the manager's summarizer before the next planner turn.",
   "inputs": [
     {
       "name": "document_id",
@@ -19,12 +19,6 @@
       "type": "boolean",
       "required": false,
       "description": "Whether to include the document body text (default true). Set false to fetch metadata only."
-    },
-    {
-      "name": "max_chars",
-      "type": "integer",
-      "required": false,
-      "description": "Maximum body characters to return (default 20000, max 100000). Truncation is indicated in the response."
     }
   ],
   "outputs": [
@@ -41,17 +35,12 @@
     {
       "path": "data.body",
       "type": "string",
-      "description": "Plain-text document body (possibly truncated)."
+      "description": "Plain-text document body, full content."
     },
     {
       "path": "data.char_count",
       "type": "integer",
-      "description": "Total characters in the full document body."
-    },
-    {
-      "path": "data.truncated",
-      "type": "boolean",
-      "description": "True if body was truncated to max_chars."
+      "description": "Total characters in the document body."
     },
     {
       "path": "data.web_link",
@@ -64,7 +53,7 @@
       "description": "ISO 8601 last modified timestamp."
     }
   ],
-  "arguments_prompt": "Arguments:\ndocument_id: Google Docs document ID from the URL (e.g. \"1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms\").\nname_search: Alternatively, a name substring to find the most recently modified matching doc.\ninclude_body: true/false (default true). False returns metadata only.\nmax_chars: integer, default 20000, max 100000.\nNote: provide document_id OR name_search, not both.",
+  "arguments_prompt": "Arguments:\ndocument_id: Google Docs document ID from the URL (e.g. \"1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms\").\nname_search: Alternatively, a name substring to find the most recently modified matching doc.\ninclude_body: true/false (default true). False returns metadata only.\nNote: provide document_id OR name_search, not both.",
   "metadata": {
     "domain": "doc",
     "actions": [

@@ -10,34 +10,21 @@ from app.assistant.utils.pydantic_classes import ToolMessage, ToolResult
 
 logger = get_logger(__name__)
 
-_MAX_CHARS = 100_000
-
 
 class GetGoogleDocTool(BaseTool):
     """
     Read a Google Docs document and return its plain-text content plus metadata.
 
-    Supports reading by document_id or searching by name.  Returns the full
-    plain-text body (truncated at max_chars if necessary), the document title,
-    revision id, and Drive metadata (created/modified times, web link).
+    Supports reading by document_id or searching by name. Returns the full
+    plain-text body, the document title, revision id, and Drive metadata
+    (created/modified times, web link). The body is rendered inline in
+    ``content`` so the calling planner can read it directly; long docs
+    are compacted by the manager's summary_pre_node before reaching the
+    next planner turn.
     """
 
     def __init__(self):
         super().__init__("get_google_doc")
-
-    @staticmethod
-    def _parse_max_chars(raw: Any) -> int:
-        if raw is None:
-            return 20_000
-        try:
-            v = int(raw)
-        except Exception as e:
-            logger.error("[GetGoogleDocTool] Invalid max_chars %r: %s", raw, e)
-            logger.debug("[GetGoogleDocTool] max_chars parse exception details", exc_info=True)
-            raise ValueError(f"max_chars must be an integer, got {raw!r}") from e
-        if v < 1:
-            raise ValueError("max_chars must be >= 1")
-        return min(v, _MAX_CHARS)
 
     def execute(self, tool_message: ToolMessage) -> ToolResult:
         try:
@@ -47,7 +34,6 @@ class GetGoogleDocTool(BaseTool):
             document_id = str(args.get("document_id") or "").strip()
             name_search = str(args.get("name_search") or "").strip()
             include_body = bool(args.get("include_body", True))
-            max_chars = self._parse_max_chars(args.get("max_chars"))
 
             if not document_id and not name_search:
                 raise ValueError("Either document_id or name_search is required.")
@@ -87,14 +73,10 @@ class GetGoogleDocTool(BaseTool):
                 )
 
             body_text = ""
-            truncated = False
             if include_body:
                 body_text = client.extract_plain_text(doc)
-                if len(body_text) > max_chars:
-                    body_text = body_text[:max_chars]
-                    truncated = True
 
-            char_count = len(client.extract_plain_text(doc)) if include_body else None
+            char_count = len(body_text) if include_body else None
 
             result_data: dict[str, Any] = {
                 "found": True,
@@ -108,21 +90,33 @@ class GetGoogleDocTool(BaseTool):
                     o.get("emailAddress", "") for o in (drive_meta.get("owners") or [])
                 ],
                 "char_count": char_count,
-                "truncated": truncated,
-                "max_chars": max_chars if include_body else None,
                 "body": body_text if include_body else "",
             }
 
-            summary = f"Document '{title}' (id={document_id})."
+            # Render the full doc body inline in `content` so the planner
+            # can actually read it. Earlier behavior: silently sliced body
+            # at 20K chars in `data["body"]` and emitted a metadata-only
+            # summary in `content` — when the user asked for "the full
+            # doc" the planner could only see a one-line header. Same
+            # architectural defect class as the email tools fix
+            # (2026-05-25). Manager's summary_pre_node compacts long docs
+            # downstream if needed.
+            header_lines = [f"Document '{title}' (id={document_id})"]
+            if include_body and char_count is not None:
+                header_lines[0] += f" — {char_count} chars"
+            web_link = drive_meta.get("webViewLink", "")
+            if web_link:
+                header_lines.append(f"web_link: {web_link}")
             if include_body:
-                summary += f" {char_count} chars"
-                if truncated:
-                    summary += f" (truncated to {max_chars})"
-                summary += "."
+                header_lines.append("body:")
+                if body_text:
+                    header_lines.append("\n".join("    " + line for line in body_text.split("\n")))
+                else:
+                    header_lines.append("    (empty)")
 
             return ToolResult(
                 result_type="get_google_doc",
-                content=summary,
+                content="\n".join(header_lines),
                 data=result_data,
             )
 

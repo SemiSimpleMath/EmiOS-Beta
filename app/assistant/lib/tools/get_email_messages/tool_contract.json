@@ -25,12 +25,6 @@
       "type": "boolean",
       "required": false,
       "description": "Whether to include normalized RFC headers (default true)."
-    },
-    {
-      "name": "body_max_chars",
-      "type": "integer",
-      "required": false,
-      "description": "Maximum body chars per message when include_body=true (default 15000, max 200000)."
     }
   ],
   "outputs": [
@@ -40,7 +34,7 @@
       "description": "Matched messages with metadata and optional full body/headers."
     }
   ],
-  "arguments_prompt": "{\n  \"query\": \"from:user@example.com newer_than:14d\",\n  \"account_id\": \"google_user_primary\",\n  \"max_results\": 50,\n  \"include_body\": true,\n  \"include_headers\": true,\n  \"body_max_chars\": 20000\n}",
+  "arguments_prompt": "{\n  \"query\": \"from:user@example.com newer_than:14d\",\n  \"account_id\": \"google_user_primary\",\n  \"max_results\": 50,\n  \"include_body\": true,\n  \"include_headers\": true\n}",
   "metadata": {
     "domain": "email",
     "actions": [

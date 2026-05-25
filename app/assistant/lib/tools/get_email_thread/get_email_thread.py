@@ -217,9 +217,39 @@ class GetEmailThreadTool(BaseTool):
                     )
                     if len(recent_messages) >= recent_message_limit:
                         break
+            # Render the full body of each message inline in `content` so
+            # the calling planner can actually read the thread. The
+            # earlier "Fetched N message(s) from thread X." line left the
+            # full conversation in `data["messages"]` — invisible to the
+            # planner. Same architectural shape as the get_email_messages
+            # bug fixed alongside this (2026-05-25). Per-message header
+            # (subject + sender + date) with indented body keeps message
+            # boundaries unambiguous; the manager's summary_pre_node
+            # (trigger_on_large_result_chars: 5000) handles compaction
+            # for long threads.
+            summary_lines = [f"Thread {thread_id} — {len(messages)} message(s) in chronological order:"]
+            for idx, m in enumerate(messages, start=1):
+                if not isinstance(m, dict):
+                    continue
+                subject = str(m.get("subject") or "").strip() or "(no subject)"
+                sender = str(m.get("sender") or m.get("email_address") or "").strip()
+                date = str(m.get("date_received") or "").strip()
+                head = f"[{idx}] {subject}"
+                if sender:
+                    head += f" — {sender}"
+                if date:
+                    head += f" @ {date}"
+                summary_lines.append(head)
+                body_text = str(m.get("body") or "").strip()
+                if body_text:
+                    summary_lines.append("\n".join("    " + line for line in body_text.split("\n")))
+                else:
+                    summary_lines.append("    (empty body)")
+            content = "\n".join(summary_lines)
+
             return ToolResult(
                 result_type="get_email_thread",
-                content=f"Fetched {len(messages)} message(s) from thread {thread_id}.",
+                content=content,
                 data={
                     "thread_id": thread_id,
                     "message_count": len(messages),
