@@ -211,6 +211,18 @@ data/ring_snapshots/
 data/ring_motion_watermark.json
 data/local_camera_snapshots/
 data/cameras/
+# Pod-store image bytes (sharded by hash prefix; runtime-minted pods).
+# Each .jpg/.png lives alongside its .emipod.json sidecar.
+data/images/
+# Sandbox v1+ runtime outputs (auto-minted pods + per-call workspaces).
+data/sandbox_outputs/
+data/sandbox_workspaces/
+# Per-day routine decision logs — runtime audit trail.
+data/routine_decisions/
+
+# ── Pipeline runtime outputs ─────────────────────────────────────────────────
+# Weekly insights pipeline writes its result snapshots here on each run.
+resources/weekly_insights_pipeline_outputs/
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PERSONAL DATA — nothing below this line should ever be in a public repo
