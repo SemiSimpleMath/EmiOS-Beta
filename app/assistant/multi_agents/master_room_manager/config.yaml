@@ -14,10 +14,6 @@ agents:
     class: Agent
   - name: master_room::plan_mode
     class: Agent
-  - name: master_room::doc_create
-    class: Agent
-  - name: master_room::doc_writer
-    class: Agent
   - name: master_room::geoguessr_host
     class: Agent
   - name: master_room::switchboard
@@ -29,8 +25,6 @@ control_nodes:
     class: MasterRoomChatTaskRouterNode
   - name: plan_mode_final_router_node
     class: PlanModeFinalRouterNode
-  - name: doc_create_final_router_node
-    class: DocCreateFinalRouterNode
   - name: geoguessr_router_node
     class: GeoguessrRouterNode
   - name: master_room_switchboard_arguments_node
@@ -112,8 +106,6 @@ flow_config:
       source_agent: "master_room::chat_gate"
     planning_mode:
       source_agent: "master_room::plan_mode"
-    doc_creation_mode:
-      source_agent: "master_room::doc_create"
     game_mode:
       source_agent: "master_room::geoguessr_host"
   chat_gate:
@@ -131,12 +123,6 @@ flow_config:
     chat_response_key: "chat_response"
     planning_done_key: "planning_done_tf"
     plan_summary_key: "plan_summary"
-  doc_creation_mode:
-    source_agent: "master_room::doc_create"
-    final_node: "final_answer_node"
-    chat_response_key: "chat_response"
-    doc_done_key: "doc_creation_done_tf"
-    doc_markdown_key: "doc_markdown"
   game_mode:
     source_agent: "master_room::geoguessr_host"
     final_node: "final_answer_node"
@@ -145,9 +131,6 @@ flow_config:
     "master_room::chat_gate": "master_room_chat_task_router_node"
     "master_room::plan_mode": "plan_mode_final_router_node"
     "plan_mode_final_router_node": "final_answer_node"
-    "master_room::doc_create": "master_room::doc_writer"
-    "master_room::doc_writer": "doc_create_final_router_node"
-    "doc_create_final_router_node": "final_answer_node"
     "master_room::geoguessr_host": "geoguessr_router_node"
     "geoguessr_router_node": "final_answer_node"
     "master_room_chat_task_router_node": "master_room::switchboard"

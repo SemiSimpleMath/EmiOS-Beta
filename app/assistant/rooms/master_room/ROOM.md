@@ -4,8 +4,6 @@ policy:
   manager_name: master_room_manager
   mode_manager_overrides:
     planning_mode: master_room_planning_manager
-    task_creation_mode: task_spec_manager
-    doc_creation_mode: master_room_doc_creation_manager
     game_mode: master_room_game_manager
   history:
     scope: time_bounded
