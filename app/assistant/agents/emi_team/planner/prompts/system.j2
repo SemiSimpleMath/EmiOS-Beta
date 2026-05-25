@@ -89,10 +89,11 @@ If additional analysis is required beyond your capabilities, reflect this in you
 
 Re-checking tool success is prohibited. If you issued a command to delete an event and got a success result, it is deleted. Move on.
 
-{{ skills["critic-handling"] }}
+{# Render every resolved skill — static + scope-stamped + keyword-auto-injected.
+   The skill resolver (resolve_skills in context_injector) already gates by
+   keyword match + principal; if it lands in the dict, it belongs in the prompt. #}
+{% for skill_name, skill_body in skills.items() %}
+{{ skill_body }}
 
-{% if skills.get("pod-finder") %}
-## Pod skill — finder (loaded only when the task references finding media or pods)
-{{ skills["pod-finder"] }}
-{% endif %}
+{% endfor %}
 

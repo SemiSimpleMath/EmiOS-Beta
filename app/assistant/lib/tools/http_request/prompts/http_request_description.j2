@@ -1,8 +1,16 @@
-Make an HTTP request to any URL. Use for REST APIs, JSON endpoints, anything that doesn't need a browser. For browser-rendered pages or stateful sessions, use `playwright_manager` instead.
+Make an HTTP request to any REST/JSON API. Use this for **any service that exposes an HTTP API** — Bluesky (AT Protocol: createSession / createRecord / getTimeline), Mastodon, Reddit, GitHub, Spotify, WHOOP, OpenAI, Anthropic, Polymarket, OnStar, any social / productivity / finance / health platform. Also covers generic REST endpoints, webhooks, OAuth token endpoints, and JSON POSTs. For browser-rendered pages or stateful sessions, use `playwright_manager` instead.
 
-**Pod-aware auth.** Header values may be `datapod:` references — sealed credentials (Bearer tokens, API keys) that the tool resolves at courier scope. The resolved string never enters your transcript. Format: `datapod:<kind>:<id>` (implicit 'full' projection) or `datapod:<kind>:<id>/<projection>` (explicit).
+**Pod-aware auth.** Header values may be `datapod:` references — sealed credentials (Bearer tokens, API keys, app passwords) that the tool resolves at courier scope. The resolved string never enters your transcript. Format: `datapod:<kind>:<id>` (implicit 'full' projection) or `datapod:<kind>:<id>/<projection>` (explicit).
 
-**Pod-aware body.** The entire body can come from a pod via the same `datapod:` syntax — useful for file uploads (image / PDF bytes from `mint_pod_from_path`) or sensitive submissions (SSN/PII you should not see). Per-field pod substitution inside a dict body is NOT supported; construct a single pod up front.
+**Body is ALWAYS a string.** For JSON APIs, pass a JSON-encoded string — the tool `json.loads` it at execute time and sends it as JSON. For raw text/binary bodies, pass the literal string. For a sealed payload, pass a single `datapod:<kind>:<id>/<projection>` reference (the whole body comes from the pod).
+
+**Pod-aware fields inside the JSON body.** When the body is a JSON-encoded object/array, any string field whose value starts with `datapod:` is resolved per-field at courier scope (recurses into nested objects and arrays). This is what makes APIs like Bluesky's createSession work — write the body as:
+
+```
+"{\"identifier\": \"<handle>\", \"password\": \"datapod:auth.bearer:<id>/full\"}"
+```
+
+The `password` field resolves to the real secret at courier scope without entering your transcript.
 
 **Pod-sealed response.** Set `response_pod_kind` (e.g. `'health.private'`, `'financial.private'`) to seal the response body into a NEW pod. The tool returns `response_pod_id` instead of the body content; a downstream skill at the appropriate authority can `pod_fetch` to act on it. The agent driving this call never reads the response.
 

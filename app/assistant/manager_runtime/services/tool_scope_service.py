@@ -61,13 +61,13 @@ class KeywordMetadataToolRanker:
                         parts.append(typ.strip())
             metadata = contract.get("metadata")
             if isinstance(metadata, dict):
-                category = metadata.get("category")
+                category = metadata.get("category") or metadata.get("domain")
                 if isinstance(category, str) and category.strip():
                     parts.append(category.strip())
-                verbs = metadata.get("verbs")
+                verbs = metadata.get("verbs") if isinstance(metadata.get("verbs"), list) else metadata.get("actions")
                 if isinstance(verbs, list):
                     parts.extend([str(v).strip() for v in verbs if isinstance(v, str) and str(v).strip()])
-                entities = metadata.get("entities")
+                entities = metadata.get("entities") if isinstance(metadata.get("entities"), list) else metadata.get("selectors")
                 if isinstance(entities, list):
                     parts.extend([str(v).strip() for v in entities if isinstance(v, str) and str(v).strip()])
         return " ".join(parts).lower()
@@ -111,15 +111,17 @@ class KeywordMetadataToolRanker:
             tool_lower = tool_name.lower()
             contract = cfg_obj.get("tool_contract") if isinstance(cfg_obj.get("tool_contract"), dict) else {}
             metadata = contract.get("metadata") if isinstance(contract.get("metadata"), dict) else {}
-            category = str(metadata.get("category") or "").strip().lower()
+            category = str(metadata.get("category") or metadata.get("domain") or "").strip().lower()
+            verbs_raw = metadata.get("verbs") if isinstance(metadata.get("verbs"), list) else metadata.get("actions")
             verbs = {
                 str(v).strip().lower()
-                for v in (metadata.get("verbs") if isinstance(metadata.get("verbs"), list) else [])
+                for v in (verbs_raw if isinstance(verbs_raw, list) else [])
                 if isinstance(v, str) and str(v).strip()
             }
+            entities_raw = metadata.get("entities") if isinstance(metadata.get("entities"), list) else metadata.get("selectors")
             entities = {
                 str(v).strip().lower()
-                for v in (metadata.get("entities") if isinstance(metadata.get("entities"), list) else [])
+                for v in (entities_raw if isinstance(entities_raw, list) else [])
                 if isinstance(v, str) and str(v).strip()
             }
 

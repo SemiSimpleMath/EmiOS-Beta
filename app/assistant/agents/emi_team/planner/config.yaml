@@ -7,10 +7,10 @@ llm_params:
   
 
 allowed_tools: all
-except_tools: [emi_team]
+except_tools: [emi_team_manager]
 allowed_nodes: [return_control]
 entity_scan_keys: [incoming_message, task, information, recent_history]
-entity_card_level: 2
+entity_card_level: 0
 
 user_context_items:
   - date_time
@@ -24,6 +24,7 @@ user_context_items:
   - action_count
   - entity_card
   - referenced_pods_block
+  - available_accounts
 
 system_context_items:
   - tool_descriptions

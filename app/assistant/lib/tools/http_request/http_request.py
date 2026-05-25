@@ -12,11 +12,9 @@ In header VALUES or as a whole-body string:
     datapod:<kind>:<id>            -> projection 'full'
     datapod:<kind>:<id>/<proj>     -> projection <proj>
 
-## What v1.1 does NOT yet support
+## What v1.2 does NOT yet support
 
-- Per-field pod substitution inside a dict body. Pass a whole-body pod
-  reference instead.
-- OAuth refresh — separate sidecar tool will handle this in v1.2.
+- OAuth refresh — separate sidecar tool will handle this in v1.3.
 - Cookie jar / stateful session — use `playwright_manager` instead.
 - Binary response sealing — `response_pod_kind` sealing currently inlines
   the response text into the new pod's body. Binary responses (images, PDFs)
@@ -367,6 +365,17 @@ class HttpRequest(BaseTool):
                 f"- WARNING: response exceeds soft cap ({_SOFT_CAP_BYTES} bytes); "
                 f"consider routing through a summarizer agent before downstream use."
             )
+        elif is_text and isinstance(body_text, str):
+            # Inline the response body so the calling planner can act on
+            # values inside it (e.g. accessJwt from createSession, post
+            # URIs from getTimeline, pagination cursors, JSON fields).
+            # No size cap here — the soft_cap branch above already filters
+            # responses > _SOFT_CAP_BYTES (256KB). Anything that lands
+            # here is ≤256KB; the manager's summary_pre_node handles
+            # compaction above its trigger_on_large_result_chars threshold
+            # before the planner sees the prompt.
+            parts.append("- body:")
+            parts.append(body_text)
 
         result_data: Dict[str, Any] = {
             "ok": True,
@@ -526,16 +535,73 @@ class HttpRequest(BaseTool):
         pods_used: List[str],
         tool_message: ToolMessage,
     ) -> Tuple[Any, Optional[str]]:
-        """Returns (resolved_body, content_type_hint)."""
+        """Returns (resolved_body, content_type_hint).
+
+        body_arg is always a string (the schema enforces it). Three shapes:
+          - Whole body is a `datapod:` pod ref → resolve to a single
+            string (returned as the request body verbatim).
+          - JSON-looking string (starts with `{` or `[`) → json.loads,
+            recursively substitute any string field whose value starts
+            with `datapod:`, return the dict/list (execute() will send
+            it via requests' json= kwarg).
+          - Plain text string → pass through unchanged (execute() sends
+            via requests' data= kwarg).
+        """
         if body_arg is None:
             return None, None
-        if isinstance(body_arg, str) and body_arg.startswith(_POD_PREFIX):
+        if not isinstance(body_arg, str):
+            # Schema enforces str; defense-in-depth in case a future code
+            # path passes a dict directly.
+            if isinstance(body_arg, (dict, list)):
+                return self._resolve_pod_refs_in_container(body_arg, pods_used, tool_message), None
+            return body_arg, None
+        if body_arg.startswith(_POD_PREFIX):
             resolved = self._resolve_pod_ref(body_arg, tool_message)
             pods_used.append(body_arg)
             return resolved, None
-        # Plain string / dict / bytes: pass through. requests will encode
-        # dict as JSON via the json= kwarg in execute().
+        stripped = body_arg.lstrip()
+        if stripped[:1] in ("{", "["):
+            try:
+                parsed = json.loads(body_arg)
+            except json.JSONDecodeError:
+                # Looks like JSON but isn't — treat as plain text.
+                return body_arg, None
+            if isinstance(parsed, (dict, list)):
+                return self._resolve_pod_refs_in_container(parsed, pods_used, tool_message), None
+            # Scalar JSON (string, number, bool, null) — pass the parsed
+            # form so execute() uses json= kwarg consistently.
+            return parsed, None
         return body_arg, None
+
+    def _resolve_pod_refs_in_container(
+        self,
+        value: Any,
+        pods_used: List[str],
+        tool_message: ToolMessage,
+    ) -> Any:
+        """Recursively substitute pod refs inside dict + list bodies.
+
+        Any string value starting with `datapod:` is resolved via the same
+        courier-scope path as headers + whole-body refs. Non-string scalars
+        (int, bool, None, float) pass through.
+        """
+        if isinstance(value, str):
+            if value.startswith(_POD_PREFIX):
+                resolved = self._resolve_pod_ref(value, tool_message)
+                pods_used.append(value)
+                return resolved
+            return value
+        if isinstance(value, dict):
+            return {
+                k: self._resolve_pod_refs_in_container(v, pods_used, tool_message)
+                for k, v in value.items()
+            }
+        if isinstance(value, list):
+            return [
+                self._resolve_pod_refs_in_container(v, pods_used, tool_message)
+                for v in value
+            ]
+        return value
 
     def _resolve_pod_ref(self, ref: str, tool_message: ToolMessage) -> str:
         match = _POD_REF_RE.match(ref)

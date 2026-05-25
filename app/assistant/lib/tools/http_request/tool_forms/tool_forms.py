@@ -16,7 +16,7 @@ type back to the actual class (Pydantic 2 + OpenAI SDK incompatibility).
 Other tool_forms files in this repo follow the same convention — keep
 type hints concrete.
 """
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel
 
@@ -31,11 +31,18 @@ class http_request_args(BaseModel):
     # resolved at courier scope at execute time; the agent never sees the
     # resolved string. Use this for Authorization / X-API-Key / etc.
     headers: Optional[Dict[str, str]] = None
-    # Body: a literal string/dict/bytes OR a `datapod:` reference. If a pod
-    # reference, the entire body comes from the pod (useful for file uploads
-    # and sensitive payloads). Per-field substitution inside a dict body is
-    # NOT supported in v1 — construct the pod up front if you need it.
-    body: Optional[Union[str, Dict[str, Any], bytes]] = None
+    # Body: ALWAYS a string. For JSON APIs the planner passes a JSON-encoded
+    # string (e.g. '{"identifier":"...","password":"datapod:auth.bearer:.../full"}');
+    # the tool json.loads it at execute time, recurses to resolve any
+    # `datapod:` refs inside fields under courier scope, and sends as JSON.
+    # For raw text/binary bodies, pass the literal string. For sealed
+    # payloads, pass a single `datapod:<kind>:<id>/<projection>` reference
+    # — the whole body comes from the pod.
+    #
+    # NOT Union[str, dict, ...] — open-ended dicts are incompatible with
+    # OpenAI structured-output strict mode (see
+    # feedback_planner_action_is_str_tools_validate).
+    body: Optional[str] = None
     query_params: Optional[Dict[str, str]] = None
     timeout_s: float = 30.0
     # If set, the response body is sealed into a NEW pod with this privacy

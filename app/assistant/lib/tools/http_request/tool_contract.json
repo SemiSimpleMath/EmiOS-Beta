@@ -1,6 +1,6 @@
 {
   "name": "http_request",
-  "description": "Make an HTTP request to any URL. Headers and body may carry `datapod:` references — sealed pod values (auth tokens, API keys, sensitive payloads) the tool resolves at courier scope; the resolved values never enter your transcript. Optionally seal the response into a new pod with a declared privacy class so the response body is also kept out of your transcript.\n\nUse for REST APIs (public or authenticated). For browser-rendered pages or stateful sessions, use playwright_manager instead.\n\nPod-reference format in header values or body string: `datapod:<kind>:<id>` (implicit 'full' projection) or `datapod:<kind>:<id>/<projection>` (explicit).",
+  "description": "Make an HTTP request to any REST/JSON API. Use this for any service that exposes an HTTP API — Bluesky (AT Protocol: createSession, createRecord, getTimeline, etc.), Mastodon, Reddit, GitHub, Spotify, WHOOP, OpenAI, Anthropic, Polymarket, OnStar, any social / productivity / finance / health platform. Also covers generic REST endpoints, webhooks, OAuth token endpoints, and JSON POSTs. Headers and body may carry `datapod:` references — sealed pod values (auth tokens, API keys, app passwords, sensitive payloads) the tool resolves at courier scope; the resolved values never enter your transcript. Per-field pod substitution inside dict bodies IS supported (recurses into nested dicts and lists). Optionally seal the response into a new pod with a declared privacy class so the response body is also kept out of your transcript.\n\nUse for REST APIs (public or authenticated). For browser-rendered pages or stateful sessions, use playwright_manager instead.\n\nPod-reference format in header values OR inside body fields: `datapod:<kind>:<id>` (implicit 'full' projection) or `datapod:<kind>:<id>/<projection>` (explicit).",
   "inputs": [
     {
       "name": "url",
@@ -24,7 +24,7 @@
       "name": "body",
       "type": "any",
       "required": false,
-      "description": "Request body. May be a string, dict (sent as JSON), or `datapod:` reference (the entire body comes from the pod — useful for file uploads). Per-field pod substitution inside a dict body is NOT supported; construct the pod up front."
+      "description": "Request body, ALWAYS a string. For JSON APIs, pass a JSON-encoded string — the tool json.loads it at execute time and sends it as JSON. Per-field pod substitution IS supported inside that JSON: any string field whose value starts with `datapod:` resolves at courier scope (recurses into nested dicts and lists). For a sealed payload, pass a single `datapod:<kind>:<id>/<projection>` reference — the whole body comes from the pod. For raw text bodies, pass the literal string. Example for Bluesky createSession: `\"{\\\"identifier\\\": \\\"<handle>\\\", \\\"password\\\": \\\"datapod:auth.bearer:<id>/full\\\"}\"`."
     },
     {
       "name": "query_params",
@@ -69,11 +69,11 @@
       "description": "Structured payload: status, headers (response), content_type, content_length, body (if not sealed), response_pod_id (if sealed), duration_ms."
     }
   ],
-  "arguments_prompt": "Arguments for http_request:\nurl: str                           # target URL\nmethod: str = 'GET'                # GET/POST/PUT/PATCH/DELETE/HEAD\nheaders: Optional[dict]            # values may be `datapod:` refs (sealed auth)\nbody: Optional[str|dict|bytes]     # literal OR `datapod:` ref for sealed payload\nquery_params: Optional[dict]\ntimeout_s: float = 30.0\nresponse_pod_kind: Optional[str]   # if set, seal response in pod with this class\nfollow_redirects: bool = True\nexpect_status: Optional[list[int]] # fail if status not in list",
+  "arguments_prompt": "Arguments for http_request:\nurl: str                           # target URL\nmethod: str = 'GET'                # GET/POST/PUT/PATCH/DELETE/HEAD\nheaders: Optional[dict]            # values may be `datapod:` refs (sealed auth)\nbody: Optional[str]                # JSON-encoded string for JSON APIs (parsed at execute), raw text, or `datapod:` ref\nquery_params: Optional[dict]\ntimeout_s: float = 30.0\nresponse_pod_kind: Optional[str]   # if set, seal response in pod with this class\nfollow_redirects: bool = True\nexpect_status: Optional[list[int]] # fail if status not in list",
   "metadata": {
     "domain": "web",
-    "actions": ["fetch", "post", "api"],
-    "selectors": ["http", "rest", "api", "json"],
+    "actions": ["fetch", "post", "api", "tweet", "skeet", "publish", "comment", "reply"],
+    "selectors": ["http", "rest", "api", "json", "bluesky", "bsky", "atproto", "mastodon", "reddit", "github", "spotify", "whoop", "webhook", "oauth", "social"],
     "risk_level": "medium",
     "side_effects": "external_action",
     "requires_auth": [],
@@ -83,6 +83,6 @@
     "front_door": true,
     "room_visibility_default": "conditional",
     "approval_min_authority": 70,
-    "planner_description": "Generic HTTP/REST tool. Pod-aware auth and body; optional pod-sealed responses for sensitive data. Use for any JSON API; use playwright_manager for browser-rendered or stateful sessions."
+    "planner_description": "Generic HTTP/REST tool — your default for ANY JSON API: Bluesky/AT Protocol, Mastodon, Reddit, GitHub, Spotify, WHOOP, OAuth token exchanges, webhooks. Pod-aware auth (header values) AND per-field pod-aware body (e.g. `{\"password\": \"datapod:auth.bearer:.../full\"}`). Optional pod-sealed responses for sensitive data. Use playwright_manager only for browser-rendered or stateful sessions."
   }
 }
