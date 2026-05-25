@@ -43,11 +43,13 @@ class RoomSlashCommandRouter:
         task_sessions,
         doc_sessions,
         geo_sessions,
+        actas_sessions,
     ) -> None:
         self._plan = plan_sessions
         self._task = task_sessions
         self._doc = doc_sessions
         self._geo = geo_sessions
+        self._actas = actas_sessions
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -112,6 +114,13 @@ class RoomSlashCommandRouter:
                 context_id=context_id, sender_identity=sender_identity, meta=meta,
             )
 
+        # --- acting-as (principal toggle) ---
+        if cmd_name == "actas":
+            return self._handle_actas(
+                cmd_payload=cmd_payload, room_id=room_id, surface=surface,
+                context_id=context_id, meta=meta,
+            )
+
         return None  # unknown — caller handles as normal message
 
     # ------------------------------------------------------------------
@@ -135,6 +144,14 @@ class RoomSlashCommandRouter:
 
     def _handle_done(self, *, room_id, surface, context_id, meta) -> SlashCommandResult:
         meta = dict(meta)
+        # /end always also clears any sticky actas binding alongside other modes.
+        # This keeps /end as a single "back to defaults" exit regardless of
+        # which sticky state happens to be active.
+        actas_cleared = False
+        if self._actas is not None:
+            actas_cleared = self._actas.clear_principal(
+                room_id=room_id, surface=surface, context_id=context_id,
+            )
         closed = self._plan.deactivate_room_binding(
             room_id=room_id, surface=surface, context_id=context_id, reason="done",
         )
@@ -154,6 +171,10 @@ class RoomSlashCommandRouter:
                 closed_key = "doc_creation_mode_closed"
             else:
                 reply, closed_key = "No active session.", "task_creation_mode_closed"
+        if actas_cleared and reply == "No active session.":
+            reply = "Acting-as cleared (back to user)."
+        elif actas_cleared:
+            reply = f"{reply} Acting-as cleared (back to user)."
         return SlashCommandResult(
             meta=meta,
             continue_pipeline=False,
@@ -162,6 +183,108 @@ class RoomSlashCommandRouter:
                 "reply_payload": {"chat": reply},
                 "outbound_intent": {"send": True, "reply_text": reply, "reply_payload": {"chat": reply}},
                 closed_key: bool(closed),
+                "actas_cleared": bool(actas_cleared),
+            },
+        )
+
+    # ------------------------------------------------------------------
+    # Acting-as (principal toggle)
+    # ------------------------------------------------------------------
+
+    def _handle_actas(self, *, cmd_payload, room_id, surface, context_id, meta) -> SlashCommandResult:
+        """Set/clear the sticky principal for this room.
+
+        Forms:
+          /actas              → show current principal
+          /actas self         → enter self-mode (acting as the assistant's principal)
+          /actas user         → exit (also accepts /actas jukka, /actas normal)
+
+        Mode persists across messages until cleared via `/actas user` or `/end`.
+        """
+        meta = dict(meta)
+        arg = (cmd_payload or "").strip().lower()
+        if self._actas is None:
+            reply = "Acting-as service is not available in this room."
+            return SlashCommandResult(
+                meta=meta,
+                continue_pipeline=False,
+                early_result={
+                    "reply_text": reply,
+                    "reply_payload": {"chat": reply},
+                    "outbound_intent": {"send": True, "reply_text": reply, "reply_payload": {"chat": reply}},
+                },
+            )
+
+        # /actas (no arg) → show current
+        if not arg:
+            current = self._actas.get_principal(
+                room_id=room_id, surface=surface, context_id=context_id,
+            )
+            reply = f"Currently acting as: {current}."
+            return SlashCommandResult(
+                meta=meta,
+                continue_pipeline=False,
+                early_result={
+                    "reply_text": reply,
+                    "reply_payload": {"chat": reply},
+                    "outbound_intent": {"send": True, "reply_text": reply, "reply_payload": {"chat": reply}},
+                    "actas_principal": current,
+                },
+            )
+
+        # /actas user|jukka|normal → clear
+        if arg in {"user", "jukka", "normal", "off"}:
+            cleared = self._actas.clear_principal(
+                room_id=room_id, surface=surface, context_id=context_id,
+            )
+            reply = "Back to acting as user." if cleared else "Already acting as user."
+            return SlashCommandResult(
+                meta=meta,
+                continue_pipeline=False,
+                early_result={
+                    "reply_text": reply,
+                    "reply_payload": {"chat": reply},
+                    "outbound_intent": {"send": True, "reply_text": reply, "reply_payload": {"chat": reply}},
+                    "actas_principal": "user",
+                    "actas_cleared": bool(cleared),
+                },
+            )
+
+        # /actas self → set to the assistant's self principal (e.g. "emi")
+        if arg == "self":
+            from app.assistant.emi_accounts import _assistant_self_principal
+            principal = _assistant_self_principal()
+            self._actas.set_principal(
+                room_id=room_id, surface=surface, context_id=context_id,
+                principal=principal,
+            )
+            reply = (
+                f"Now acting as {principal}. All subsequent tasks run under {principal}'s "
+                f"identity until you `/actas user` or `/end`."
+            )
+            return SlashCommandResult(
+                meta=meta,
+                continue_pipeline=False,
+                early_result={
+                    "reply_text": reply,
+                    "reply_payload": {"chat": reply},
+                    "outbound_intent": {"send": True, "reply_text": reply, "reply_payload": {"chat": reply}},
+                    "actas_principal": principal,
+                },
+            )
+
+        # Unknown principal name. (Future: /actas katy, /actas peter, etc.)
+        reply = (
+            f"Unknown principal '{arg}'. Usage: `/actas self` to enter, "
+            f"`/actas user` (or `/actas` for status) to exit."
+        )
+        return SlashCommandResult(
+            meta=meta,
+            continue_pipeline=False,
+            early_result={
+                "reply_text": reply,
+                "reply_payload": {"chat": reply},
+                "outbound_intent": {"send": True, "reply_text": reply, "reply_payload": {"chat": reply}},
             },
         )
 
@@ -288,49 +411,62 @@ class RoomSlashCommandRouter:
     # ------------------------------------------------------------------
     # Doc creation
     # ------------------------------------------------------------------
+    #
+    # `/doc` (and aliases) now redirect to the dedicated `doc_editor` room
+    # (template: doc_editor.html; URL: /doc/editor). The legacy in-room
+    # doc_creation_mode flow inside master_room_manager is being phased out
+    # (see project_master_room_mode_overrides_cleanup memo). Matches the
+    # `/task` pattern, which redirects to `/task/create` page.
+    #
+    # Query params the doc_editor page understands:
+    #   ?load=<name>    — load an existing markdown doc
+    #   ?gdoc=<name>    — load an existing Google Doc
+    #   ?prompt=<text>  — seed an initial prompt for the chat
 
     def _handle_doc(self, *, cmd_payload, room_id, surface, context_id,
                     sender_identity, meta) -> SlashCommandResult:
+        import urllib.parse
         meta = dict(meta)
         payload = cmd_payload.strip()
 
-        # /doc load [gdoc|md] <name>
+        # /doc load [gdoc|md] <name> → redirect to editor with load/gdoc param
         if payload.lower().startswith("load"):
             return self._handle_doc_load(
                 load_rest=payload[4:].strip(), room_id=room_id, surface=surface,
                 context_id=context_id, sender_identity=sender_identity, meta=meta,
             )
 
-        # /doc [create] [md|gdoc] [name] [prompt]
+        # /doc [create] [md|gdoc] [name] [prompt] — strip leading subcommand
+        # keywords, treat the remainder as the seed prompt for the editor.
         tokens = payload.split(None, 2)
-        doc_type, doc_name, doc_prompt = "md", "", ""
-        # strip optional "create" subcommand keyword
         if tokens and tokens[0].lower() == "create":
             tokens = tokens[1:]
         if tokens and tokens[0].lower() in {"md", "gdoc"}:
-            doc_type = tokens[0].lower()
             tokens = tokens[1:]
+        doc_prompt = ""
         if tokens:
-            doc_name = tokens[0]
-            doc_prompt = tokens[1].strip() if len(tokens) > 1 else ""
+            # Treat the rest as a free-form prompt (don't pre-split name vs prompt;
+            # the editor surfaces a name field separately).
+            doc_prompt = " ".join(tokens).strip()
 
-        if self._doc is not None:
-            binding = self._doc.activate_room_binding(
-                room_id=room_id, surface=surface, context_id=context_id,
-                initiated_by=sender_identity, doc_type=doc_type,
-                doc_name=doc_name, initial_prompt=doc_prompt,
-            )
-            meta["room_mode"] = "doc_creation_mode"
-            meta["doc_creation_session_id"] = str(binding.get("session_id") or "").strip()
-            meta["doc_type"] = doc_type
-            meta["doc_name"] = str(binding.get("doc_name") or "").strip()
+        redirect_url = "/doc/editor"
+        if doc_prompt:
+            redirect_url += f"?prompt={urllib.parse.quote(doc_prompt)}"
         return SlashCommandResult(
-            normalized_body=doc_prompt or "Let's create a new document.",
             meta=meta,
+            continue_pipeline=False,
+            early_result={
+                "reply_text": "",
+                "widget_data": [{"data_type": "redirect", "url": redirect_url}],
+            },
         )
 
     def _handle_doc_load(self, *, load_rest, room_id, surface, context_id,
                          sender_identity, meta) -> SlashCommandResult:
+        """`/doc load [md|gdoc] <name>` → redirect to /doc/editor with the
+        right query param (?load=<name> for md, ?gdoc=<name> for gdoc).
+        """
+        import urllib.parse
         doc_type = "md"
         tokens = load_rest.split(None, 1)
         if tokens and tokens[0].lower() in {"md", "gdoc"}:
@@ -338,73 +474,23 @@ class RoomSlashCommandRouter:
             load_rest = tokens[1].strip() if len(tokens) > 1 else ""
         doc_name = load_rest.strip()
 
-        initial_markdown, initial_gdoc_id = self._fetch_doc_content(doc_type=doc_type, doc_name=doc_name)
-
-        if self._doc is not None:
-            binding = self._doc.activate_room_binding(
-                room_id=room_id, surface=surface, context_id=context_id,
-                initiated_by=sender_identity, doc_type=doc_type,
-                doc_name=doc_name,
-                initial_prompt=f"Load and discuss existing document: {doc_name}",
+        if not doc_name:
+            return SlashCommandResult(
+                meta=meta,
+                continue_pipeline=False,
+                early_result={"reply_text": "Usage: /doc load [md|gdoc] <name>"},
             )
-            session_id = str(binding.get("session_id") or "").strip()
-            if initial_markdown and session_id:
-                try:
-                    from app.assistant.lib.doc_utils.doc_store import save_doc_draft
-                    save_doc_draft(
-                        session_id,
-                        doc_markdown=initial_markdown,
-                        doc_type=doc_type,
-                        doc_name=doc_name,
-                        google_doc_id=initial_gdoc_id or None,
-                        caller="room_slash_command_router._handle_doc_load",
-                    )
-                except Exception as e:
-                    logger.warning("doc load: failed to persist markdown for session %s: %s", session_id, e)
-                    logger.debug("doc load markdown persist exception", exc_info=True)
-            meta["room_mode"] = "doc_creation_mode"
-            meta["doc_creation_session_id"] = session_id
-            meta["doc_type"] = doc_type
-            meta["doc_name"] = str(binding.get("doc_name") or "").strip()
 
-        widget: Dict[str, Any] = {"data_type": "doc_load_request", "doc_type": doc_type, "doc_name": doc_name}
+        param = "gdoc" if doc_type == "gdoc" else "load"
+        redirect_url = f"/doc/editor?{param}={urllib.parse.quote(doc_name)}"
         return SlashCommandResult(
             meta=meta,
             continue_pipeline=False,
             early_result={
                 "reply_text": "",
-                "widget_data": [widget],
+                "widget_data": [{"data_type": "redirect", "url": redirect_url}],
             },
         )
-
-    @staticmethod
-    def _fetch_doc_content(*, doc_type: str, doc_name: str) -> tuple[str, str]:
-        """Returns (markdown, google_doc_id). google_doc_id is "" for md docs."""
-        if not doc_name:
-            return "", ""
-        if doc_type == "gdoc":
-            try:
-                from app.assistant.lib.core_tools.google_docs_tool.google_docs_client import GoogleDocsClient
-                client = GoogleDocsClient(readonly=True)
-                hits = client.find_documents(name_contains=doc_name, max_results=1)
-                if hits:
-                    gdoc_id = str(hits[0].get("id") or "").strip()
-                    if gdoc_id:
-                        gdoc = client.get_document(gdoc_id)
-                        return client.extract_plain_text(gdoc), gdoc_id
-            except Exception as e:
-                logger.warning("doc load gdoc: failed to fetch '%s': %s", doc_name, e)
-                logger.debug("doc load gdoc fetch exception", exc_info=True)
-        else:
-            try:
-                from app.routes.doc_route import _find_doc
-                doc_path, _, _ = _find_doc(doc_name)
-                if doc_path is not None:
-                    return doc_path.read_text(encoding="utf-8"), ""
-            except Exception as e:
-                logger.warning("doc load md: failed to read '%s': %s", doc_name, e)
-                logger.debug("doc load md read exception", exc_info=True)
-        return "", ""
 
     def _handle_doc_cancel(self, *, room_id, surface, context_id, meta) -> SlashCommandResult:
         meta = dict(meta)

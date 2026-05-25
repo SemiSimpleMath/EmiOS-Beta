@@ -7,7 +7,7 @@ room context, envelope, and request data.
 from __future__ import annotations
 
 import uuid
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from app.assistant.room_session_manager.contracts import InboundEnvelope
 from app.assistant.room_session_manager.services.room_policy_service import resolve_room_authority_level
@@ -15,6 +15,15 @@ from app.assistant.manager_runtime.services.scope_adapter import (
     _SCOPE_HISTORY_LOOKBACK_HOURS,
 )
 from app.assistant.utils.pydantic_classes import ScopeContext
+
+
+# Principal → skill-pack mapping. Each principal name (the value stamped on
+# scope.acting_as) maps to a list of skill names that ride on every agent
+# inside that scope. Future principals (Katy, Peter, external clients) get
+# their own packs added here; new entries don't need code changes elsewhere.
+_PRINCIPAL_SKILL_PACKS: Dict[str, List[str]] = {
+    "emi": ["emi-acting-as-herself", "emi-values"],
+}
 
 
 def build_scope_contract_for_room_request(
@@ -54,6 +63,18 @@ def build_scope_contract_for_room_request(
     raw_reply_to = request_data.get("reply_to")
     reply_to = dict(raw_reply_to) if isinstance(raw_reply_to, dict) else None
 
+    # Read the sticky acting-as principal from request_data. This is set by
+    # room_session_manager from ActAsSessionService — the user's /actas
+    # slash command writes it; /actas user or /end clears it. Default is
+    # "user" (Jukka). Per-message keyword detection was removed in favor
+    # of explicit slash-command control.
+    acting_as_principal = str(request_data.get("actas_principal") or "user").strip().lower() or "user"
+
+    # When acting_as="emi", the emi-acting-as-herself skill rides on every
+    # downstream agent for the rest of the task — vs. keyword-trigger which
+    # only fires on the first-turn user text. Map at top of module.
+    principal_skills = _PRINCIPAL_SKILL_PACKS.get(acting_as_principal, [])
+
     scope_dict: Dict[str, Any] = {
         "schema_version": "scope_context_v1",
         "scope_id": f"scope::{envelope.surface}::{envelope.room_id}::{envelope.context_id or 'main'}::{uuid.uuid4().hex[:8]}",
@@ -65,6 +86,7 @@ def build_scope_contract_for_room_request(
         "visibility": str((room_ctx.get("room_visibility") or "room_shared")).strip(),
         "policy_id": str((room_ctx.get("room_policy_id") or f"room_policy::{envelope.room_id}")).strip(),
         "reply_to": reply_to,
+        "acting_as": acting_as_principal,
         "history": {
             "mode": "summary_plus_recent",
             "source": "unified_log",
@@ -118,6 +140,10 @@ def build_scope_contract_for_room_request(
         },
         "execution": {"max_turns": None, "max_tool_calls": None, "timeout_seconds": None, "allowed_models": []},
         "delegation": {},
+        "skills": {
+            "always_inject": list(principal_skills),
+            "denied_skills": [],
+        },
     }
     parsed = ScopeContext.model_validate(scope_dict)
     return parsed.model_dump()

@@ -3,6 +3,8 @@
 {% block optional_css %}
 <!-- Mobile-first Chat UI -->
 <link rel="stylesheet" href="{{ url_for('static', filename='mobile/css/chat_bot_mobile.css', v='20260213b') }}">
+<!-- Ticket popup (shared with desktop; has a @media (max-width: 480px) block) -->
+<link rel="stylesheet" href="{{ url_for('static', filename='css/proactive_popup.css') }}?v={{ static_v }}">
 <!-- Fonts / Icons (kept consistent with desktop) -->
 <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
 <link
@@ -47,6 +49,11 @@
 
     <!-- Composer -->
     <div class="m-composer">
+      <div id="actas-chip" class="actas-chip hidden" role="status" aria-live="polite">
+        <span class="actas-chip__label">Acting as:</span>
+        <span id="actas-chip__principal" class="actas-chip__principal">user</span>
+        <button type="button" id="actas-chip__clear" class="actas-chip__clear" aria-label="Clear acting-as">×</button>
+      </div>
       <form class="m-composer__form chat-form" aria-label="Send a message">
         <label for="chat-input" class="visually-hidden">Message input</label>
         <textarea
@@ -107,5 +114,7 @@
   }
 </script>
 <script src="{{ url_for('static', filename='mobile/js/emi_mobile.js', v='20260213b') }}"></script>
+<script>window.EMI_ASSISTANT_NAME = {{ assistant_name | tojson }};</script>
+<script src="{{ url_for('static', filename='js/proactive_popup.js') }}?v={{ static_v }}"></script>
 {% endblock %}
 

@@ -288,3 +288,36 @@ def api_chat_history():
         logger.error("Failed to load chat history: %s", e)
         logger.debug("chat history exception details", exc_info=True)
         return jsonify({"success": True, "messages": []})
+
+
+@chat_bot_bp.route("/api/actas/current", methods=["GET"])
+def api_actas_current():
+    """Return the sticky `/actas` principal for a (surface, room_id, context_id).
+
+    Defaults: master_room / ui / main. Used by the chat UI to render the
+    "Acting as: X" chip when the principal is not the default user.
+    """
+    room_id = (request.args.get("room_id") or "master_room").strip()
+    surface = (request.args.get("surface") or "ui").strip()
+    context_id = (request.args.get("context_id") or "main").strip()
+    try:
+        from app.assistant.room_session_manager.services.actas_session_service import (
+            ActAsSessionService,
+        )
+        DI = current_app.DI
+        blackboard = DI.global_blackboard
+        svc = ActAsSessionService(blackboard=blackboard)
+        principal = svc.get_principal(
+            room_id=room_id, surface=surface, context_id=context_id,
+        )
+        return jsonify({
+            "success": True,
+            "principal": principal,
+            "room_id": room_id,
+            "surface": surface,
+            "context_id": context_id,
+        })
+    except Exception as e:
+        logger.error("Failed to read actas principal: %s", e)
+        logger.debug("actas current exception details", exc_info=True)
+        return jsonify({"success": True, "principal": "user"})

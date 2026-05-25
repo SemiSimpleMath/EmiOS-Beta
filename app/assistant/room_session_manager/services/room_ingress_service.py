@@ -10,6 +10,7 @@ from app.assistant.room_session_manager.services.plan_session_service import Pla
 from app.assistant.room_session_manager.services.task_creation_session_service import TaskCreationSessionService
 from app.assistant.room_session_manager.services.doc_creation_session_service import DocCreationSessionService
 from app.assistant.room_session_manager.services.geoguessr_session_service import GeoguessrSessionService
+from app.assistant.room_session_manager.services.actas_session_service import ActAsSessionService
 from app.assistant.room_session_manager.services.room_slash_command_router import RoomSlashCommandRouter
 from app.assistant.room_session_manager.services.room_mention_router import RoomMentionRouter
 from app.assistant.utils.pydantic_classes import Message
@@ -26,6 +27,7 @@ class RoomIngressService:
         task_creation_session_service: TaskCreationSessionService | None = None,
         doc_creation_session_service: DocCreationSessionService | None = None,
         geo_session_service: GeoguessrSessionService | None = None,
+        actas_session_service: ActAsSessionService | None = None,
         manager_registry: Any = None,
         multi_agent_manager_factory: Any = None,
         manager_invoker: Any = None,
@@ -34,6 +36,7 @@ class RoomIngressService:
         self._task_sessions = task_creation_session_service
         self._doc_sessions = doc_creation_session_service
         self._geo_sessions = geo_session_service
+        self._actas_sessions = actas_session_service
         self._manager_registry = manager_registry
         self._multi_agent_manager_factory = multi_agent_manager_factory
         self._manager_invoker = manager_invoker
@@ -42,6 +45,7 @@ class RoomIngressService:
             task_sessions=task_creation_session_service,
             doc_sessions=doc_creation_session_service,
             geo_sessions=geo_session_service,
+            actas_sessions=actas_session_service,
         )
         # Built lazily on first use so DI is available (mailbox + active
         # worker resolvers are registered after RoomIngressService).

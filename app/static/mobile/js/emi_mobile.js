@@ -577,6 +577,52 @@ function setupHeaderToggles() {
   }
 }
 
+// ---- /actas chip (mobile) ----
+const ACTAS_DEFAULT_PRINCIPAL = "user";
+
+function renderActasChipMobile(principal) {
+  const root = document.getElementById("actas-chip");
+  const principalEl = document.getElementById("actas-chip__principal");
+  if (!root || !principalEl) return;
+  const p = String(principal || ACTAS_DEFAULT_PRINCIPAL).trim().toLowerCase();
+  if (!p || p === ACTAS_DEFAULT_PRINCIPAL) {
+    root.classList.add("hidden");
+    principalEl.textContent = ACTAS_DEFAULT_PRINCIPAL;
+    return;
+  }
+  principalEl.textContent = p;
+  root.classList.remove("hidden");
+}
+
+async function refreshActasChipMobile() {
+  try {
+    const params = new URLSearchParams({ room_id: "master_room", surface: "ui", context_id: "main" });
+    const res = await fetch(`/api/actas/current?${params.toString()}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    renderActasChipMobile(data && data.principal);
+  } catch (e) { console.warn("refreshActasChipMobile failed", e); }
+}
+
+function setupActasChipMobile() {
+  const clearBtn = document.getElementById("actas-chip__clear");
+  if (clearBtn) {
+    clearBtn.addEventListener("click", () => {
+      const input = document.getElementById("chat-input");
+      const form = document.querySelector(".chat-form");
+      if (!input || !form) return;
+      input.value = "/actas user";
+      form.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+    });
+  }
+  const chatBox = document.getElementById("chat-box");
+  if (chatBox && "MutationObserver" in window) {
+    const obs = new MutationObserver(() => { refreshActasChipMobile(); });
+    obs.observe(chatBox, { childList: true, subtree: false });
+  }
+  refreshActasChipMobile();
+}
+
 // ---- Boot ----
 document.addEventListener("DOMContentLoaded", () => {
   syncTtsUi();
@@ -587,6 +633,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupSocket();
   setupComposer();
   setupHeaderToggles();
+  setupActasChipMobile();
   bindPtt();
 
   // iOS can keep audio in "communication" routing if mic tracks stay live.

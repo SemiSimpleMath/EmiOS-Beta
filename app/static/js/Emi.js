@@ -1459,6 +1459,78 @@ function setupEventListeners() {
 
 }
 
+// ==================== /actas chip ====================
+// Persistent indicator above the chat composer showing the sticky
+// principal binding (set via the `/actas self` slash command). Hidden
+// when the principal is the default `"user"`. Refreshed on page load
+// and whenever the chat log gets a new node (chat replies that confirm
+// /actas state changes arrive as new chat-box messages).
+
+const ACTAS_DEFAULT_PRINCIPAL = "user";
+
+function _actasChipEls() {
+    return {
+        root: document.getElementById("actas-chip"),
+        principalEl: document.getElementById("actas-chip__principal"),
+        clearBtn: document.getElementById("actas-chip__clear"),
+    };
+}
+
+function renderActasChip(principal) {
+    const { root, principalEl } = _actasChipEls();
+    if (!root || !principalEl) return;
+    const p = String(principal || ACTAS_DEFAULT_PRINCIPAL).trim().toLowerCase();
+    if (!p || p === ACTAS_DEFAULT_PRINCIPAL) {
+        root.classList.add("hidden");
+        principalEl.textContent = ACTAS_DEFAULT_PRINCIPAL;
+        return;
+    }
+    principalEl.textContent = p;
+    root.classList.remove("hidden");
+}
+
+async function refreshActasChip() {
+    try {
+        const params = new URLSearchParams({
+            room_id: "master_room",
+            surface: "ui",
+            context_id: "main",
+        });
+        const res = await fetch(`/api/actas/current?${params.toString()}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        renderActasChip(data && data.principal);
+    } catch (e) {
+        console.warn("refreshActasChip failed", e);
+    }
+}
+
+function setupActasChip() {
+    const { root, clearBtn } = _actasChipEls();
+    if (!root) return;
+    // Clear button sends `/actas user` through the normal chat path so the
+    // server-side handler runs unchanged.
+    if (clearBtn) {
+        clearBtn.addEventListener("click", async () => {
+            const input = document.getElementById("chat-input");
+            const form = document.querySelector(".chat-form");
+            if (!input || !form) return;
+            input.value = "/actas user";
+            form.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+        });
+    }
+    // Refresh whenever a new chat node lands. Slash replies (including
+    // /actas confirmations and /end) come back as chat messages, so any
+    // new node means we may need to re-read state.
+    const chatBox = document.getElementById("chat-box");
+    if (chatBox && "MutationObserver" in window) {
+        const obs = new MutationObserver(() => { refreshActasChip(); });
+        obs.observe(chatBox, { childList: true, subtree: false });
+    }
+    // Initial fetch.
+    refreshActasChip();
+}
+
 function setupThemeListener()
 {
     window.EmiMenuControls.setupThemeListener(getEmiMenuControlsContext());
@@ -1540,6 +1612,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupIdleVisibilityHooks();
     setupThemeListener();
     setupMenuToggle(); // Initialize the hamburger menu
+    setupActasChip(); // /actas principal indicator above the composer
     setupCalendarNavigation();
     initializeCurrentCalendarDate();
     renderCalendarEvents();

@@ -480,7 +480,15 @@ class ContextInjector:
             else:
                 task = str(agent.blackboard.get_state_value("task", "") or "")
                 incoming = str(agent.blackboard.get_state_value("incoming_message", "") or "")
-                for name in injector.matching_skill_names(task=task, incoming_message=incoming):
+                scope_ctx = agent.blackboard.get_state_value("scope_context", None)
+                principal = None
+                if scope_ctx is not None:
+                    principal = getattr(scope_ctx, "acting_as", None)
+                for name in injector.matching_skill_names(
+                    task=task,
+                    incoming_message=incoming,
+                    scope_acting_as=principal,
+                ):
                     if name in resolved:
                         continue
                     skill = registry.get(name)
@@ -518,6 +526,45 @@ class ContextInjector:
                     continue
                 resolved[name] = skill.body
                 logger.debug("[%s] caller-supplied skill=%s", agent.name, name)
+
+        # 4. Scope-stamped skills (scope_context.skills.always_inject).
+        #    Set by the scope builder based on principal / mode / room / any
+        #    other scope-shaping signal. Propagates through nested sub-agents
+        #    because ScopeContext propagates — closes the gap where a
+        #    keyword-triggered skill on the user's first message would be
+        #    lost in downstream planner / tool-args / writer agents.
+        scope_context = agent.blackboard.get_state_value("scope_context", None)
+        scope_skills_policy = None
+        if isinstance(scope_context, dict):
+            scope_skills_policy = scope_context.get("skills")
+        elif scope_context is not None:
+            scope_skills_policy = getattr(scope_context, "skills", None)
+        if scope_skills_policy is not None:
+            def _policy_get(field: str):
+                if isinstance(scope_skills_policy, dict):
+                    return scope_skills_policy.get(field)
+                return getattr(scope_skills_policy, field, None)
+            for name in (_policy_get("always_inject") or []):
+                if not isinstance(name, str) or not name.strip():
+                    continue
+                name = name.strip()
+                if name in resolved:
+                    continue
+                skill = registry.get(name)
+                if skill is None:
+                    logger.warning(
+                        "[%s] scope-stamped skill %r not registered — dropped",
+                        agent.name, name,
+                    )
+                    continue
+                resolved[name] = skill.body
+                logger.debug("[%s] scope-injected skill=%s", agent.name, name)
+            # denied_skills is the final filter — applies to every path above.
+            for name in (_policy_get("denied_skills") or []):
+                if isinstance(name, str) and name.strip() in resolved:
+                    del resolved[name.strip()]
+                    logger.debug("[%s] scope-denied skill=%s", agent.name, name)
+
         return resolved
 
     def generate_injections_block(self, agent, prompt_injections, message=None, entity_injection_keys: set[str] | None = None):
@@ -595,6 +642,23 @@ class ContextInjector:
                     agent_descriptions.append({"name": name, "description": rendered_description})
 
                 context[key] = agent_descriptions
+                continue
+
+            if key == "available_accounts":
+                # Scope-filtered account list. When scope.acting_as is set,
+                # render only the accounts that principal is allowed to use.
+                # When acting_as is "user" (default), most planners see nothing
+                # here since today's registry holds Emi-owned accounts only;
+                # the user-as-principal uses primary credentials via the
+                # existing OAuth/account_ids layer.
+                from app.assistant.emi_accounts import render_accounts_for_planner
+                scope_context = agent.blackboard.get_state_value("scope_context", None)
+                principal = "user"
+                if isinstance(scope_context, dict):
+                    principal = str(scope_context.get("acting_as") or "user")
+                elif scope_context is not None:
+                    principal = str(getattr(scope_context, "acting_as", "user") or "user")
+                context[key] = render_accounts_for_planner(principal)
                 continue
 
             if key == "recent_history":

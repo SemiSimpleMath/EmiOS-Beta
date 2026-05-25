@@ -111,6 +111,11 @@
       <!-- Existing Chat Messages will appear here -->
     </div>
     {% include '_chat_pending_image.html' %}
+    <div id="actas-chip" class="actas-chip hidden" role="status" aria-live="polite">
+      <span class="actas-chip__label">Acting as:</span>
+      <span id="actas-chip__principal" class="actas-chip__principal">user</span>
+      <button type="button" id="actas-chip__clear" class="actas-chip__clear" aria-label="Clear acting-as">×</button>
+    </div>
     <!-- Chat Form -->
     <form class="chat-form" aria-label="Send a message">
       <label for="chat-input" class="visually-hidden">Message input</label>

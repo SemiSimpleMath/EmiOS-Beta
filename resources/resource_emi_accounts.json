@@ -1,0 +1,92 @@
+{
+  "doc": "Unified registry of Emi's own accounts across platforms. Handles come from EMI_OWN_* env vars at read time (kept out of git); auth tokens live in either the OAuth registry (configs/oauth_accounts.json) for Google or auth.* pods for everything else. Subsystems (subconscious, send_email, future bluesky_post / x_post / reddit_post tools) read this resource to know 'which identity am I acting as on platform X.' The /emi-accounts admin UI uses auth.env_ref + auth.secret_label to drive its configure-modal — each pod_ref account declares which env var the raw secret lives in and what to call it in the UI prompt.",
+  "schema_version": 1,
+  "accounts": [
+    {
+      "id": "emi_gmail_primary",
+      "platform": "gmail",
+      "display_name": "Emi's Gmail",
+      "handle_env": "EMI_OWN_GMAIL_HANDLE",
+      "accessible_by": ["emi"],
+      "status": "configured",
+      "auth": {
+        "kind": "google_oauth",
+        "account_id": "emi_google_primary"
+      },
+      "notes": "Shares the same Google Cloud project + OAuth client as Jukka's account (Emi is approved as a test user under that project). Complete consent at /oauth/google/start?account_id=emi_google_primary signing in as openpodbayemi@gmail.com. send_email now supports from_account='emi' end-to-end."
+    },
+    {
+      "id": "emi_bluesky_primary",
+      "platform": "bluesky",
+      "display_name": "Emi on Bluesky",
+      "handle_env": "EMI_OWN_BLUESKY_HANDLE",
+      "accessible_by": ["emi"],
+      "status": "configured",
+      "auth": {
+        "kind": "pod_ref",
+        "pod_kind": "auth.bearer",
+        "pod_id_env": "EMI_OWN_BLUESKY_AUTH_POD_ID",
+        "env_ref": "EMI_POD_BLUESKY_APP_PASSWORD",
+        "secret_label": "App password",
+        "secret_hint": "Generate at Bluesky Settings → Privacy and Security → App Passwords. Looks like abcd-efgh-ijkl-mnop.",
+        "pod_label": "Bluesky app password",
+        "validator": "bluesky"
+      },
+      "notes": "AT Protocol. App password stashed in auth.bearer pod (env_ref EMI_POD_BLUESKY_APP_PASSWORD). Wired end-to-end via http_request + skills/bluesky/SKILL.md — two-step createSession then Bearer for any operation."
+    },
+    {
+      "id": "emi_twitter_primary",
+      "platform": "twitter",
+      "display_name": "Emi on X",
+      "handle_env": "EMI_OWN_TWITTER_HANDLE",
+      "accessible_by": ["emi"],
+      "status": "not_configured",
+      "auth": {
+        "kind": "pod_ref",
+        "pod_kind": "auth.bearer",
+        "pod_id_env": "EMI_OWN_TWITTER_AUTH_POD_ID",
+        "env_ref": "EMI_POD_TWITTER_BEARER",
+        "secret_label": "Bearer token",
+        "secret_hint": "Generate at developer.x.com under your project's app keys. Paid tier required for write.",
+        "pod_label": "X (Twitter) bearer token"
+      },
+      "notes": "Paid API tier required for write. Defer until Bluesky proves the participation loop."
+    },
+    {
+      "id": "emi_reddit_primary",
+      "platform": "reddit",
+      "display_name": "Emi on Reddit",
+      "handle_env": "EMI_OWN_REDDIT_USERNAME",
+      "accessible_by": ["emi"],
+      "status": "not_configured",
+      "auth": {
+        "kind": "pod_ref",
+        "pod_kind": "auth.bearer",
+        "pod_id_env": "EMI_OWN_REDDIT_AUTH_POD_ID",
+        "env_ref": "EMI_POD_REDDIT_TOKEN",
+        "secret_label": "OAuth token",
+        "secret_hint": "Create a script-type app at reddit.com/prefs/apps; use the OAuth token, not the secret.",
+        "pod_label": "Reddit OAuth token"
+      },
+      "notes": "OAuth app + per-subreddit posting rules. Read-only browsing first; participation only after voice/persona resource is solid."
+    },
+    {
+      "id": "emi_telegram_primary",
+      "platform": "telegram",
+      "display_name": "Emi on Telegram",
+      "handle_env": "EMI_OWN_TELEGRAM_HANDLE",
+      "accessible_by": ["emi"],
+      "status": "not_configured",
+      "auth": {
+        "kind": "pod_ref",
+        "pod_kind": "auth.bearer",
+        "pod_id_env": "EMI_OWN_TELEGRAM_AUTH_POD_ID",
+        "env_ref": "EMI_POD_TELEGRAM_BOT_TOKEN",
+        "secret_label": "Bot token",
+        "secret_hint": "Talk to @BotFather on Telegram; create a new bot; copy the HTTP API token.",
+        "pod_label": "Telegram bot token"
+      },
+      "notes": "Bot account distinct from Jukka's current Telegram transport into Emi. Would let Emi DM/post on her own behalf vs route through Jukka's bot."
+    }
+  ]
+}

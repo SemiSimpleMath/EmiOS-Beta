@@ -442,3 +442,34 @@ header.d-header #mute-btn-container i:hover {
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; transform: none !important; }
 }
+
+/* /actas chip — shown above the chat composer when the room is in a
+   non-default principal (e.g. acting_as=emi). Hidden by default. */
+.actas-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  margin: 4px 12px 6px 12px;
+  border-radius: 999px;
+  background: rgba(126, 87, 194, 0.2);
+  color: var(--emi-accent-color, #6a1b9a);
+  font-size: 0.78rem;
+  font-weight: 600;
+  width: fit-content;
+}
+.actas-chip.hidden { display: none; }
+.actas-chip__label { opacity: 0.7; font-weight: 500; }
+.actas-chip__principal { text-transform: capitalize; }
+.actas-chip__clear {
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 2px;
+  margin-left: 4px;
+  cursor: pointer;
+  opacity: 0.6;
+}
+.actas-chip__clear:hover { opacity: 1; }

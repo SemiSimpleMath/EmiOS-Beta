@@ -88,6 +88,7 @@ class RoomSessionManager:
         from app.assistant.room_session_manager.services.task_creation_session_service import TaskCreationSessionService
         from app.assistant.room_session_manager.services.doc_creation_session_service import DocCreationSessionService
         from app.assistant.room_session_manager.services.geoguessr_session_service import GeoguessrSessionService
+        from app.assistant.room_session_manager.services.actas_session_service import ActAsSessionService
 
         self._blackboard = blackboard
         self._reply_router = reply_router
@@ -103,6 +104,7 @@ class RoomSessionManager:
             task_creation_session_service=TaskCreationSessionService(blackboard=blackboard) if blackboard is not None else None,
             doc_creation_session_service=DocCreationSessionService(blackboard=blackboard) if blackboard is not None else None,
             geo_session_service=GeoguessrSessionService(blackboard=blackboard) if blackboard is not None else None,
+            actas_session_service=ActAsSessionService(blackboard=blackboard) if blackboard is not None else None,
             manager_registry=manager_registry,
             multi_agent_manager_factory=multi_agent_manager_factory,
             manager_invoker=manager_invoker,
@@ -486,6 +488,21 @@ class RoomSessionManager:
             room_contact_name=room_contact_name,
             allowed_resource_context="",
         )
+        # Resolve the sticky actas principal for this room (set by /actas
+        # slash command) so the scope builder can stamp ScopeContext.acting_as.
+        actas_principal = "user"
+        actas_service = getattr(self.ingress_service, "_actas_sessions", None)
+        if actas_service is not None:
+            try:
+                actas_principal = actas_service.get_principal(
+                    room_id=envelope.room_id or "",
+                    surface=envelope.surface or "",
+                    context_id=envelope.context_id or "main",
+                )
+            except Exception:
+                logger.debug("actas_session_service.get_principal failed", exc_info=True)
+                actas_principal = "user"
+        request_data["actas_principal"] = actas_principal
         request_data["scope_contract"] = build_scope_contract_for_room_request(
             room_ctx=effective_room_ctx,
             envelope=envelope,

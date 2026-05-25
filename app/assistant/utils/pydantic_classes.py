@@ -91,6 +91,21 @@ class ScopeDelegationPolicy(ScopeBaseModel):
     pass
 
 
+class ScopeSkillsPolicy(ScopeBaseModel):
+    """Scope-level skill injection — applies to every agent run inside the scope.
+
+    Stamped by the scope builder (chat ingress, routine declaration, parent
+    sub-manager) based on principal, mode, room, or any other scope-shaping
+    signal. Propagates through nested agent calls because ScopeContext does.
+
+    Composes with the existing per-agent / keyword / per-invocation paths;
+    context_injector.resolve_skills() merges all four into one dict (with
+    denied_skills as the final filter).
+    """
+    always_inject: List[str] = Field(default_factory=list)
+    denied_skills: List[str] = Field(default_factory=list)
+
+
 class ScopeContext(ScopeBaseModel):
     schema_version: Literal["scope_context_v1"] = "scope_context_v1"
 
@@ -103,6 +118,23 @@ class ScopeContext(ScopeBaseModel):
     room_context_id: Optional[str] = None
     visibility: Literal["owner_only", "room_shared", "global_shared"] = "owner_only"
     policy_id: Optional[str] = None
+
+    # On-behalf-of dimension: whose principal does Emi execute under for this
+    # scope? Default "user" = the primary human user (Jukka); Emi reads his
+    # email, sends from his address, etc. "emi" = Emi acts on her own behalf
+    # (her own Gmail, her own social accounts, signups for her own tooling).
+    # Future principals are anticipated — Katy, Peter, an external client —
+    # each with their own accounts / voice / skill bundle / memory scope /
+    # authority gates. Hence string-typed; validation happens at runtime
+    # against a principals registry rather than at the schema level, so a
+    # new principal doesn't force a ScopeContext schema migration.
+    #
+    # Stamped at chat ingress by a keyword detector ("act as you", "as
+    # yourself", "act as Katy", etc.) or explicitly by routines/pipelines
+    # that declare on-behalf-of work. Tools that take from_account /
+    # for_account consult this when no explicit arg is passed; explicit
+    # arg always wins.
+    acting_as: str = "user"
 
     # Transport reply-to: enough info for any layer downstream of ingress
     # to send a chat message back to the originating surface (UI socket,
@@ -125,6 +157,7 @@ class ScopeContext(ScopeBaseModel):
     retention: ScopeRetentionPolicy = Field(default_factory=ScopeRetentionPolicy)
     execution: ScopeExecutionPolicy = Field(default_factory=ScopeExecutionPolicy)
     delegation: ScopeDelegationPolicy = Field(default_factory=ScopeDelegationPolicy)
+    skills: ScopeSkillsPolicy = Field(default_factory=ScopeSkillsPolicy)
 
 
 # Define the Message class using Pydantic
