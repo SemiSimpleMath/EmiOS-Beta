@@ -35,6 +35,9 @@ from app.assistant.pipelines.dayflow.utils.expected_calendar_utils import (
     normalize_expected_schedule_to_utc,
 )
 from app.assistant.pipelines.dayflow.utils.room_scope import resolve_room_scope
+from app.assistant.pipelines.dayflow.utils.subconscious_projection import (
+    project_subconscious_for_daily_context,
+)
 from app.assistant.utils.chat_formatting import messages_to_chat_excerpts
 from app.assistant.pipelines.scope_policy import build_pipeline_scope_context
 
@@ -459,6 +462,13 @@ class DailyContextGeneratorStep(BaseStep):
         )
 
         calendar_events_structured = get_calendar_events_structured_for_day(str(boundary_date))
+        # Subconscious emergence: project active concerns + intentions +
+        # latest arbiter plan into the same daily_context output so chat_gate
+        # and dayflow's situation_audit pick them up via a single read.
+        # Stratified by horizon so the 2-week-out birthday doesn't get
+        # squeezed out by today's narrative synthesizer. Read-only; failures
+        # degrade to empty fields instead of corrupting subconscious state.
+        subconscious = project_subconscious_for_daily_context()
         stage_output: Dict[str, Any] = {
             "date": boundary_date,
             "expected_schedule": expected_schedule,
@@ -466,6 +476,10 @@ class DailyContextGeneratorStep(BaseStep):
             "milestones": milestones,
             "current_status": output.get("current_status", ""),
             "calendar_events_structured": calendar_events_structured,
+            "active_concerns_this_week": subconscious["active_concerns_this_week"],
+            "active_concerns_longer_horizon": subconscious["active_concerns_longer_horizon"],
+            "upcoming_intentions_2w": subconscious["upcoming_intentions_2w"],
+            "weekly_schedule_excerpt": subconscious["weekly_schedule_excerpt"],
             "last_updated": now_local.strftime("%Y-%m-%d %I:%M %p"),
             "last_updated_utc": now_utc.isoformat(),
         }
@@ -625,6 +639,13 @@ class DailyContextGeneratorStep(BaseStep):
             "milestones": defaults.get("milestones", []),
             "current_status": defaults.get("current_status", ""),
             "calendar_events_structured": calendar_events_structured,
+            # Subconscious fields are kept in the daily_boundary reset so the
+            # schema stays consistent — concerns survive across day boundaries
+            # and the projection re-reads the live register on the next run.
+            "active_concerns_this_week": [],
+            "active_concerns_longer_horizon": [],
+            "upcoming_intentions_2w": [],
+            "weekly_schedule_excerpt": {},
             "last_updated": now_local.strftime("%Y-%m-%d %I:%M %p"),
             "last_updated_utc": now_utc.isoformat(),
             "_reset_reason": "daily_boundary",
