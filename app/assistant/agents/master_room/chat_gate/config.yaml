@@ -33,6 +33,7 @@ user_context_items:
   - recent_dayflow_items
   - resource_expected_calendar
   - resource_assistant_data
+  - resource_daily_context_generator_output
   - chat_memory
   - chat_nudges
 

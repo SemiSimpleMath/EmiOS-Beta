@@ -45,6 +45,32 @@ No schedule available.
 - {% if m.time %}[{{ m.time }}] {% endif %}{{ m.description }}{% if m.ongoing %} (ongoing){% endif %}
 {% endfor %}
 {% endif %}
+{%- set _subc = resource_daily_context_generator_output or {} %}
+{%- if _subc.active_concerns_this_week %}
+
+########## SUBCONSCIOUS — ACTIVE CONCERNS (this week) ##########
+*These were emitted by the subconscious noticer. They route via `addressable_by`: items addressed to `dayflow_orchestrator` are yours to act on (consider opening a plan_task or escalation ticket). Items addressed to other channels (chat_brain, *_proposer) are background context — don't double-handle them.*
+{%- for c in _subc.active_concerns_this_week %}
+- [{{ c.severity }}/{{ c.horizon }}] {{ c.title }}
+  subject: {{ c.subject }} | addressable_by: {{ c.addressable_by | join(", ") }} | evidence: {{ c.evidence_count }}
+  notes: {{ c.notes }}
+{%- endfor %}
+{%- endif %}
+{%- if _subc.active_concerns_longer_horizon %}
+
+########## SUBCONSCIOUS — LONGER-HORIZON CONCERNS (this_month and beyond) ##########
+*Background awareness — not today's urgent work. Use these to anticipate (e.g. start prep N days ahead), but don't create immediate plan_tasks unless evidence shows the horizon is collapsing.*
+{%- for c in _subc.active_concerns_longer_horizon %}
+- [{{ c.severity }}/{{ c.horizon }}] {{ c.title }} ({{ c.subject }})
+  notes: {{ c.notes }}
+{%- endfor %}
+{%- endif %}
+{%- if _subc.weekly_schedule_excerpt and _subc.weekly_schedule_excerpt.body %}
+
+########## SUBCONSCIOUS — WEEKLY SCHEDULE (latest arbiter plan) ##########
+*The scheduler_arbiter synthesized today's proposer intentions into this plan. Items marked anchored should hold their slots; non-anchored items can move if you find a conflict.*
+{{ _subc.weekly_schedule_excerpt.body }}
+{%- endif %}
 {% if resource_dayflow_routine %}
 
 ########## ROUTINE ##########
