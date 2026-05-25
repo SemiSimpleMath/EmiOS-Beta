@@ -16,6 +16,15 @@ No schedule available.
 {%- if meta.get("source_type","") == "email" %}
 - {% if meta.get("is_update") %}[UPDATE: {{ meta.get("update_changed_fields", [])|join(", ") }}] {% endif %}Email{% if meta.get("created_at_local") %} received {{ meta.get("created_at_local") }}{% endif %} from {{ meta.get("email_sender","Unknown") }}: "{{ meta.get("email_subject", meta.get("summary","")) }}"{% if meta.get("email_summary") %} — {{ meta.get("email_summary") }}{% endif %}{% if meta.get("importance","") not in ["medium", ""] %} — {{ meta.get("importance") }}{% endif %}
   artifact_id: {{ meta.get("short_id", meta.get("item_id","")) }}
+  {#- Verbatim body excerpt so triage sees the actual content, not just
+      the paraphrased summary. See strategic_planner/prompts/user.j2 for
+      the bug history (2026-05-25: lossy summary caused dayflow to keep
+      re-asking for finals times Katy had already provided in the body).
+      TODO: mint a pod for the full body when the excerpt may be truncated. #}
+{%- if meta.get("email_body_excerpt") %}
+  body:
+    {{ meta.get("email_body_excerpt") | replace("\n", "\n    ") }}
+{%- endif %}
 {%- else %}
 - {% if meta.get("is_update") %}[UPDATE: {{ meta.get("update_changed_fields", [])|join(", ") }}] {% endif %}{{ meta.get("summary","(no summary)") }}{% if meta.get("importance","") not in ["medium", ""] %} — {{ meta.get("importance") }}{% endif %} ({{ meta.get("source_type","") }}: {{ meta.get("event_type","") }})
   artifact_id: {{ meta.get("short_id", meta.get("item_id","")) }}

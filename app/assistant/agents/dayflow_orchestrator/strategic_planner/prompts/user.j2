@@ -87,6 +87,19 @@ I dispatched **{{ r.task_id }}** to `{{ r.dispatched_to }}`{% if r.dispatched_to
 {%- if meta.get("source_type","") == "email" %}
 - Email{% if meta.get("created_at_local") %} received {{ meta.get("created_at_local") }}{% endif %} from {{ meta.get("email_sender","Unknown") }}: "{{ meta.get("email_subject", meta.get("summary","")) }}"{% if meta.get("email_summary") %} — {{ meta.get("email_summary") }}{% endif %}{% if meta.get("importance","") not in ["medium", ""] %} — {{ meta.get("importance") }}{% endif %}
   artifact_id: {{ meta.get("short_id", meta.get("item_id","")) }}
+  {#- Render the verbatim body excerpt below the paraphrased summary so the
+      planner sees the actual specifics (dates, times, names, numbers) the
+      summary may have compressed away. Bug 2026-05-25: Katy's email listed
+      every period-specific finals time in the body but the email_summary
+      paraphrased them as "with period-specific times", and the planner
+      kept re-asking for what was already provided.
+      TODO: mint a pod for the full body so the planner can pod_fetch when
+      the excerpt is truncated (excerpt is ~1.5K chars today; long emails
+      lose data past that cutoff). #}
+{%- if meta.get("email_body_excerpt") %}
+  body:
+    {{ meta.get("email_body_excerpt") | replace("\n", "\n    ") }}
+{%- endif %}
 {%- else %}
 - {{ meta.get("summary","(no summary)") }}{% if meta.get("importance","") not in ["medium", ""] %} — {{ meta.get("importance") }}{% endif %} ({{ meta.get("source_type","") }})
   artifact_id: {{ meta.get("short_id", meta.get("item_id","")) }}
@@ -152,7 +165,9 @@ No active plans.
   source ticket: {{ m.get("directive_source_ticket_id") }}{% endif %}
 {%- if m.get("source_type","") == "email" %}
   email: from {{ m.get("email_sender","Unknown") }} — "{{ m.get("email_subject","") }}"
-  body: {{ m.get("email_summary","") }}
+  {#- Prefer the verbatim body excerpt over the summary; same reasoning as
+      the artifact list above (paraphrase loses dates/times/specifics). #}
+  body: {{ m.get("email_body_excerpt", m.get("email_summary","")) }}
 {%- endif %}
 {%- if m.get("enrichment") %}
   context: {{ m.get("enrichment") }}
