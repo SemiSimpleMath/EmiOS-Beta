@@ -1,0 +1,23 @@
+{
+  "id": "subconscious_skill_distiller",
+  "enabled": true,
+  "name": "Subconscious skill distiller — weekly learning pass",
+  "runner": "function",
+  "spec": {
+    "function_name": "skill_distiller_run"
+  },
+  "run_policy": {
+    "type": "weekly",
+    "day_of_week": "Sunday",
+    "time_local": "22:00"
+  },
+  "max_run_seconds": 900,
+  "on_error": {
+    "max_failures": 3,
+    "backoff_base_seconds": 600,
+    "backoff_max_seconds": 7200,
+    "then": "disable_with_ticket",
+    "auto_retry_after_seconds": 7200
+  },
+  "notes": "Reviews the week's intention.* pods + arbiter decisions + chat outcomes; PROPOSES rule additions to canonical task_spec files. No auto-apply — proposals land in resources/subconscious/resource_learned_skills_proposed.md for manual review. Skipped reasons are explicit so restraint is auditable. Runs late Sunday after the weekly_meal_planner has set Monday's plan."
+}

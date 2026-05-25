@@ -1,0 +1,30 @@
+{
+  "id": "subconscious_noticer",
+  "enabled": true,
+  "name": "Subconscious noticer — daily Pass A + Pass B scan",
+  "runner": "function",
+  "spec": {
+    "function_name": "noticer_run"
+  },
+  "run_policy": {
+    "type": "interval",
+    "min_interval_seconds": 86400
+  },
+  "trigger": {
+    "type": "time",
+    "active_window": {
+      "from": "04:00",
+      "to": "05:00",
+      "local": true
+    }
+  },
+  "max_run_seconds": 600,
+  "on_error": {
+    "max_failures": 3,
+    "backoff_base_seconds": 300,
+    "backoff_max_seconds": 3600,
+    "then": "disable_with_ticket",
+    "auto_retry_after_seconds": 3600
+  },
+  "notes": "Single daily noticer pass (Pass A inward pattern detection + Pass B outward opportunity scouting). Runs early enough that the day's concerns are ready by the time the proposers fire at 05:00. Architecture says 2-4x/day eventually; starting daily to keep cost predictable and build signal-volume baseline. Output: concerns_register + belief_updates + escalations to dayflow."
+}

@@ -1,0 +1,30 @@
+{
+  "id": "subconscious_scheduler_arbiter",
+  "enabled": true,
+  "name": "Subconscious scheduler arbiter — daily synthesis of proposers",
+  "runner": "function",
+  "spec": {
+    "function_name": "scheduler_arbiter_run"
+  },
+  "run_policy": {
+    "type": "interval",
+    "min_interval_seconds": 86400
+  },
+  "trigger": {
+    "type": "time",
+    "active_window": {
+      "from": "05:30",
+      "to": "06:00",
+      "local": true
+    }
+  },
+  "max_run_seconds": 600,
+  "on_error": {
+    "max_failures": 3,
+    "backoff_base_seconds": 300,
+    "backoff_max_seconds": 3600,
+    "then": "disable_with_ticket",
+    "auto_retry_after_seconds": 3600
+  },
+  "notes": "Runs AFTER the three proposers (window 05:30 to give them time to finish at 05:00–05:30). Reads intention.* pods minted today + household_calendar (hard constraint) and emits ONE plan.weekly_schedule pod with is_anchor flags. Hard conflicts surface as dayflow tickets; deduplicates near-identical proposals from different proposers."
+}

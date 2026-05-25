@@ -1,0 +1,30 @@
+{
+  "id": "subconscious_daily_meal_proposer",
+  "enabled": true,
+  "name": "Subconscious daily meal proposer",
+  "runner": "function",
+  "spec": {
+    "function_name": "daily_meal_proposer_run"
+  },
+  "run_policy": {
+    "type": "interval",
+    "min_interval_seconds": 86400
+  },
+  "trigger": {
+    "type": "time",
+    "active_window": {
+      "from": "05:00",
+      "to": "05:30",
+      "local": true
+    }
+  },
+  "max_run_seconds": 600,
+  "on_error": {
+    "max_failures": 3,
+    "backoff_base_seconds": 300,
+    "backoff_max_seconds": 3600,
+    "then": "disable_with_ticket",
+    "auto_retry_after_seconds": 3600
+  },
+  "notes": "Reads today's concerns (meal-addressable) + grocery inventory + recent feedback. Mints intention.meal + intention.shopping pods. The scheduler_arbiter (runs at 05:30) decides which intentions actually land on the calendar."
+}

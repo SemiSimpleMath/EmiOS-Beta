@@ -1,0 +1,23 @@
+{
+  "id": "subconscious_weekly_meal_planner",
+  "enabled": true,
+  "name": "Subconscious weekly meal planner",
+  "runner": "function",
+  "spec": {
+    "function_name": "weekly_meal_planner_run"
+  },
+  "run_policy": {
+    "type": "weekly",
+    "day_of_week": "Sunday",
+    "time_local": "17:00"
+  },
+  "max_run_seconds": 900,
+  "on_error": {
+    "max_failures": 3,
+    "backoff_base_seconds": 600,
+    "backoff_max_seconds": 7200,
+    "then": "disable_with_ticket",
+    "auto_retry_after_seconds": 7200
+  },
+  "notes": "Sets the next week's meal plan on Sunday evening. The daily_meal_proposer adjusts day-by-day; this run sets the strategic shape (Mon-Sun mix, shopping anchor list). Output: plan.weekly_meals pod + shopping list. Writes a meal-doc snapshot to resources/subconscious/."
+}

@@ -1,0 +1,30 @@
+{
+  "id": "subconscious_wellness_proposer",
+  "enabled": true,
+  "name": "Subconscious wellness proposer",
+  "runner": "function",
+  "spec": {
+    "function_name": "wellness_proposer_run"
+  },
+  "run_policy": {
+    "type": "interval",
+    "min_interval_seconds": 86400
+  },
+  "trigger": {
+    "type": "time",
+    "active_window": {
+      "from": "05:00",
+      "to": "05:30",
+      "local": true
+    }
+  },
+  "max_run_seconds": 600,
+  "on_error": {
+    "max_failures": 3,
+    "backoff_base_seconds": 300,
+    "backoff_max_seconds": 3600,
+    "then": "disable_with_ticket",
+    "auto_retry_after_seconds": 3600
+  },
+  "notes": "Whole-domain wellness (workouts + sleep + recovery + hydration + meditation) — NOT just fitness. Reads wellness-addressable concerns + sleep/activity signals. Mints intention.wellness pods. Acute medical (appointments, meds, symptoms) escalates through the noticer to dayflow tickets, not here."
+}

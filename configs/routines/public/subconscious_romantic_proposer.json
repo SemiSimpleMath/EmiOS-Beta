@@ -1,0 +1,30 @@
+{
+  "id": "subconscious_romantic_proposer",
+  "enabled": true,
+  "name": "Subconscious romantic proposer",
+  "runner": "function",
+  "spec": {
+    "function_name": "romantic_proposer_run"
+  },
+  "run_policy": {
+    "type": "interval",
+    "min_interval_seconds": 86400
+  },
+  "trigger": {
+    "type": "time",
+    "active_window": {
+      "from": "05:00",
+      "to": "05:30",
+      "local": true
+    }
+  },
+  "max_run_seconds": 600,
+  "on_error": {
+    "max_failures": 3,
+    "backoff_base_seconds": 300,
+    "backoff_max_seconds": 3600,
+    "then": "disable_with_ticket",
+    "auto_retry_after_seconds": 3600
+  },
+  "notes": "Relationship-domain proposer (Jukka↔Katy). Reads key_dates (anniversaries, birthdays), relationship signals, recent calendar density. Tone-calibrated — explicit skip-with-reason is preferred over forcing low-quality proposals ('busy week, high-friction right now'). Mints intention.romantic pods."
+}
