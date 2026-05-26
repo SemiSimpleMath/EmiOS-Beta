@@ -13,6 +13,8 @@ allowed_tools:
   - web_manager
   - playwright_manager
   - emi_team_manager
+  - http_manager
+  - sandbox_manager
   - devices_manager
   - create_dayflow_ticket
   - bash_manager

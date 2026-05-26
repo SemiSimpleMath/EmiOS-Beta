@@ -66,15 +66,17 @@ scope_contract:
   tools:
     requires_approval_tools:
       - playwright_manager
-      - execute_code
-    # KG mutation surfaces are off-limits at the emi_team level. emi_team
-    # reads the KG (ask_kg, kg_query, kg_find_node, kg_describe_node) but
-    # never mutates it. KG editing has its own surfaces (kg_dev room,
-    # kg_mutation_manager driven by kg_investigation_manager). Including
-    # the typed mutators by name keeps them blocked even if a future
-    # template change tries to re-enable them.
+    # emi_team delegates; it does not call manager-owned leaves directly.
+    # KG mutation surfaces, the http leaf (owned by http_manager), and the
+    # sandbox leaf (owned by sandbox_manager) are all blocked here — each
+    # has a dedicated manager that owns its approval / scope rules.
     blocked_tools:
-      # Leaf mutators
+      # Manager-owned leaves — call the wrapping manager instead
+      - http_request          # owned by http_manager
+      - oauth_token_refresh   # owned by http_manager
+      - execute_code          # owned by sandbox_manager
+      - run_shell             # owned by bash_manager
+      # KG leaf mutators
       - kg_create_node
       - kg_create_edge
       - kg_update_node
@@ -96,7 +98,12 @@ scope_contract:
       # Sunset
       - kg_team_manager
 tool_visibility:
-  always_show: [personal_admin_manager, devices_manager, web_manager, playwright_manager, bash_manager, execute_code, http_request, find_tool, install_tool, ask_user, pod_search, pod_fetch, ask_kg, discover_skills, read_skill]
+  # emi_team mostly delegates. Anything owned by a manager (http_request →
+  # http_manager, execute_code → sandbox_manager, run_shell → bash_manager,
+  # email / calendar / todo / device leaves → their respective managers) is
+  # NOT in always_show and is hidden + blocked below. The planner picks the
+  # manager; the manager runs the leaf.
+  always_show: [personal_admin_manager, devices_manager, web_manager, playwright_manager, bash_manager, http_manager, sandbox_manager, find_tool, install_tool, ask_user, pod_search, pod_fetch, ask_kg, discover_skills, read_skill]
   use_narrower: true
   hidden_tools:
     # --- personal_admin_manager leaf tools (call the manager instead) ---
@@ -212,6 +219,12 @@ tool_visibility:
     - get_event_hierarchy
     - create_dayflow_ticket
     - cancel_event_tree
+
+    # --- Manager-owned leaves — emi_team calls the manager, not the leaf ---
+    - http_request      # owned by http_manager
+    - execute_code      # owned by sandbox_manager
+    - run_shell         # owned by bash_manager
+    - oauth_token_refresh  # owned by http_manager
 
 flow_config:
   tool_return:

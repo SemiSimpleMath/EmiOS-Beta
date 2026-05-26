@@ -1,0 +1,59 @@
+name: sandbox_team::planner
+class_name: Planner
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.1"
+  model_tier: "smart"
+
+
+# sandbox_team's job is running Python in a Docker sandbox via
+# execute_code. Compute, data analysis, image/PDF/document
+# transformations, OCR, file processing. Pod I/O is first-class —
+# inputs mounted from pod_store, outputs auto-minted from
+# /workspace/outputs/.
+#
+# Chained sandbox calls are common (extract → transform → emit).
+# read_tool_result lets the planner pluck output pod_ids out of a
+# prior call's result to thread into the next.
+#
+# execute_code is AUTH_USER (99) — sandbox_manager preserves that
+# gate via scope_contract.tools.requires_approval_tools.
+allowed_tools:
+  - execute_code
+  - pod_search
+  - pod_fetch
+  - mint_pod_from_path
+  - read_tool_result
+  - ask_user
+  - discover_skills
+  - read_skill
+except_tools: []
+allowed_nodes: [return_control]
+entity_scan_keys: [incoming_message, task, information, recent_history]
+entity_card_level: 0
+
+user_context_items:
+  - date_time
+  - task
+  - information
+  - recent_history
+  - checklist
+  - progress_report
+  - action_count
+  - entity_card
+  - referenced_pods_block
+  - task_includes
+  - task_resource_context
+
+system_context_items:
+  - tool_descriptions
+  - allowed_nodes
+  - task
+  - date_time
+
+# critic-handling is the only base skill. Domain recipes (image-resize,
+# pdf-generate, OCR patterns, dataframe playbooks) auto-inject via
+# SKILL.md auto_inject_when keywords on the task text.
+skills:
+  - critic-handling
+accept_auto_skills: true

@@ -1,0 +1,46 @@
+{
+  "name": "sandbox_manager",
+  "description": "Runs Python in a Docker sandbox via execute_code. Compute, data analysis, image / PDF / document processing, OCR, file transformations. Pod I/O is first-class. Authority: AUTH_USER (99).",
+  "inputs": [
+    {
+      "name": "task",
+      "type": "string",
+      "required": true,
+      "description": "The compute / processing task, e.g. 'Resize photo.jpg in ~/Pictures to 512px max and save as thumb.jpg.'"
+    },
+    {
+      "name": "information",
+      "type": "string",
+      "required": true,
+      "description": "Supporting context (pod_ids of inputs, host paths, expected output shape). Empty string allowed."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable result text from the planner loop."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload (includes output_pod_ids for any minted output pods)."
+    }
+  ],
+  "arguments_prompt": "sandbox_manager arguments:\n- task: the compute / processing task.\n- information: supporting context. Empty string allowed.",
+  "metadata": {
+    "domain": "compute",
+    "actions": ["compute", "process", "transform", "resize", "extract", "generate", "analyze", "ocr"],
+    "selectors": ["python", "sandbox", "script", "code", "pandas", "numpy", "image", "pdf", "document", "ocr", "data"],
+    "risk_level": "medium",
+    "side_effects": "code_execution",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "medium",
+    "latency_class": "medium",
+    "front_door": true,
+    "room_visibility_default": "show",
+    "approval_min_authority": 99,
+    "planner_description": "Python-sandbox specialist. Wraps execute_code with pod I/O + chain support. Use for compute / data / image / PDF / OCR / file-transformation tasks. NOT for HTTP APIs (http_manager) or browsers (playwright_manager). Requires AUTH_USER."
+  }
+}

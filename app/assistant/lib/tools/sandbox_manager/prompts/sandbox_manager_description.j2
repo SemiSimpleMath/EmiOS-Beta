@@ -1,0 +1,14 @@
+Runs Python in a Docker sandbox via execute_code. Use for: compute / data analysis (numpy, pandas, scipy, scikit-learn), image processing (Pillow, opencv), PDF / document handling (pypdf, pymupdf, reportlab), OCR (pytesseract), audio / video (ffmpeg), generating files (charts, reports, transformed images). Pod I/O is first-class — pass input_pod_ids to mount pods as files; write to /workspace/outputs/ to auto-mint output pods.
+
+Use this when:
+- The task says "resize / convert / extract / compute / generate / analyze" and there's a file or dataset involved
+- The task needs a Python library to do work (chart, transform, OCR, etc.)
+- The task chains data transformations (read → process → emit)
+
+Do NOT use for:
+- HTTPS API calls to external services → http_manager
+- Browser automation → playwright_manager
+- Local file listing or reading → bash_manager (sandbox is for processing, not browsing)
+- Sending email / setting reminders → personal_admin_manager
+
+Authority: execute_code requires AUTH_USER (99) — only user-initiated.

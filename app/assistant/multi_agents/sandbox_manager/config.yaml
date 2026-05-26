@@ -1,0 +1,157 @@
+name: sandbox_manager
+class_name: MultiAgentManager
+description: "Runs Python in a Docker sandbox via execute_code. Compute, data analysis, image / PDF / document transformations, OCR, file processing. Pod I/O is first-class: input pods mount as files; outputs auto-mint as pods. Chained sandbox calls supported."
+display_name: "Beaker"
+max_cycles: 30
+role_bindings:
+  delegator: sandbox_team::delegator
+  tool_selector: shared::tool_selector
+  planner: sandbox_team::planner
+
+agents:
+  - name: sandbox_team::delegator
+    class: Delegator
+  - name: sandbox_team::planner
+    class: Planner
+  - name: sandbox_team::critic
+    class: Agent
+  - name: sandbox_team::summary
+    class: Agent
+  - name: sandbox_team::final_answer
+    class: Agent
+
+control_nodes:
+  - name: tool_return_router
+    class: ToolReturnRouter
+  - name: critic_pre_node
+    class: CriticPreNode
+    config:
+      enabled: true
+      critic_agent: "sandbox_team::critic"
+      continue_agent: "tool_caller"
+  - name: critic_post_node
+    class: CriticPostNode
+    config:
+      critic_agent: "sandbox_team::critic"
+  - name: summary_pre_node
+    class: SummaryPreNode
+    config:
+      enabled: true
+      summary_agent: "sandbox_team::summary"
+      resume_agent: "sandbox_team::planner"
+      planner_agent: "sandbox_team::planner"
+      cadence_every_actions: 4
+      min_messages: 30
+      trigger_on_large_result_chars: 5000
+      allow_summarize_latest_tool_result: false
+      protect_last_n_results: 3
+  - name: summary_post_node
+    class: SummaryPostNode
+    config:
+      summary_agent: "sandbox_team::summary"
+      resume_agent: "sandbox_team::planner"
+  - name: tool_caller
+    class: ToolCaller
+  - name: tool_result_handler
+    class: ToolResultHandler
+  - name: tool_approve_node
+    class: ToolApproveNode
+  - name: return_control
+    class: ReturnControlNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+  - name: graceful_exit_control_node
+    class: GracefulExitControlNode
+
+# Narrow tool surface — execute_code is the primary; the rest are
+# supporting (pod resolution, host-file ingestion, result chaining,
+# skill discovery). NO cross-manager calls.
+tools:
+  allowed_tools:
+    - execute_code
+    - pod_search
+    - pod_fetch
+    - mint_pod_from_path
+    - read_tool_result
+    - ask_user
+    - discover_skills
+    - read_skill
+  except_tools: []
+scope_contract:
+  tools:
+    # execute_code keeps its AUTH_USER (99) approval gate; sandbox_manager
+    # explicitly preserves it so the sandbox can't be invoked silently
+    # from downstream automation paths.
+    requires_approval_tools:
+      - execute_code
+    # Defense-in-depth: block any path that could recurse or break
+    # domain boundaries.
+    blocked_tools:
+      - emi_team_manager
+      - sandbox_manager        # self — no recursion
+      - http_manager
+      - playwright_manager
+      - personal_admin_manager
+      - devices_manager
+      - web_manager
+      - bash_manager
+      # KG mutators stay off-limits (mirrors emi_team_manager policy)
+      - kg_create_node
+      - kg_create_edge
+      - kg_update_node
+      - kg_delete_node
+      - kg_delete_edge
+      - kg_merge_nodes
+      - kg_rename_label
+      - kg_update_node_field
+      - kg_close_state
+      - kg_create_state_node
+      - kg_finding_resolve
+      - kg_finding_escalate
+      - kg_dev_manager
+      - kg_mutation_manager
+      - kg_investigation_manager
+      - kg_team_manager
+
+tool_visibility:
+  always_show:
+    - execute_code
+    - pod_search
+    - pod_fetch
+    - mint_pod_from_path
+    - read_tool_result
+    - ask_user
+    - discover_skills
+    - read_skill
+  use_narrower: false
+
+flow_config:
+  tool_return:
+    tool_call_result_handler_node: "tool_result_handler"
+  summary:
+    enabled: true
+    source_agent: "tool_return_router"
+    summary_agent: "sandbox_team::summary"
+    resume_agent: "sandbox_team::planner"
+    planner_agent: "sandbox_team::planner"
+    cadence_every_actions: 4
+    action_count_state_key: "{planner_agent}_action_count"
+    min_messages: 30
+    trigger_on_large_result_chars: 5000
+    payload_key: "summary_payload"
+    payload_recent_history_messages: 120
+    allow_summarize_latest_tool_result: false
+    protect_last_n_results: 3
+  state_map:
+    "sandbox_team::delegator": "sandbox_team::planner"
+    "sandbox_team::planner": "critic_pre_node"
+    "sandbox_team::critic": "critic_post_node"
+    "tool_result_handler": "tool_return_router"
+    "tool_return_router": "summary_pre_node"
+    "summary_pre_node": "sandbox_team::planner"
+    "sandbox_team::summary": "summary_post_node"
+    "summary_post_node": "sandbox_team::planner"
+    "sandbox_team::planner_return_control": "sandbox_team::final_answer"
+    "sandbox_team::final_answer": "manager_exit_node"
+    "graceful_exit": "graceful_exit_control_node"
+    "graceful_exit_control_node": "sandbox_team::final_answer"

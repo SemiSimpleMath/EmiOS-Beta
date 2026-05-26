@@ -1,0 +1,156 @@
+name: http_manager
+class_name: MultiAgentManager
+description: "Makes HTTP/REST API calls to external services (Bluesky, Mastodon, Reddit, GitHub, Spotify, WHOOP, OAuth endpoints, webhooks). Pod-aware auth + per-field body resolution. Multi-step flows (createSession → use accessJwt → next call) are first-class — uses read_tool_result to chain fields across calls."
+display_name: "Wire"
+max_cycles: 30
+role_bindings:
+  delegator: http_team::delegator
+  tool_selector: shared::tool_selector
+  planner: http_team::planner
+
+agents:
+  - name: http_team::delegator
+    class: Delegator
+  - name: http_team::planner
+    class: Planner
+  - name: http_team::critic
+    class: Agent
+  - name: http_team::summary
+    class: Agent
+  - name: http_team::final_answer
+    class: Agent
+
+control_nodes:
+  - name: tool_return_router
+    class: ToolReturnRouter
+  - name: critic_pre_node
+    class: CriticPreNode
+    config:
+      enabled: true
+      critic_agent: "http_team::critic"
+      continue_agent: "tool_caller"
+  - name: critic_post_node
+    class: CriticPostNode
+    config:
+      critic_agent: "http_team::critic"
+  - name: summary_pre_node
+    class: SummaryPreNode
+    config:
+      enabled: true
+      summary_agent: "http_team::summary"
+      resume_agent: "http_team::planner"
+      planner_agent: "http_team::planner"
+      cadence_every_actions: 4
+      min_messages: 30
+      trigger_on_large_result_chars: 5000
+      allow_summarize_latest_tool_result: false
+      protect_last_n_results: 3
+  - name: summary_post_node
+    class: SummaryPostNode
+    config:
+      summary_agent: "http_team::summary"
+      resume_agent: "http_team::planner"
+  - name: tool_caller
+    class: ToolCaller
+  - name: tool_result_handler
+    class: ToolResultHandler
+  - name: tool_approve_node
+    class: ToolApproveNode
+  - name: return_control
+    class: ReturnControlNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+  - name: graceful_exit_control_node
+    class: GracefulExitControlNode
+
+# Tightly-scoped tool surface. http_request is the primary; the rest
+# are supporting (auth refresh, pod resolution, result chaining, skill
+# discovery). NO cross-manager calls (no playwright, no sandbox, no
+# personal_admin) — multi-domain orchestration is emi_team's job.
+tools:
+  allowed_tools:
+    - http_request
+    - oauth_token_refresh
+    - pod_search
+    - pod_fetch
+    - mint_pod_from_path
+    - read_tool_result
+    - ask_user
+    - discover_skills
+    - read_skill
+  except_tools: []
+scope_contract:
+  tools:
+    # Defense-in-depth: explicitly block paths that could recurse or
+    # break domain boundaries. The allowed_tools list above is the
+    # primary gate; this list is the second seatbelt.
+    blocked_tools:
+      - emi_team_manager
+      - http_manager           # self — no recursion
+      - sandbox_manager
+      - playwright_manager
+      - personal_admin_manager
+      - devices_manager
+      - web_manager
+      - bash_manager
+      # KG mutators stay off-limits (mirrors emi_team_manager policy)
+      - kg_create_node
+      - kg_create_edge
+      - kg_update_node
+      - kg_delete_node
+      - kg_delete_edge
+      - kg_merge_nodes
+      - kg_rename_label
+      - kg_update_node_field
+      - kg_close_state
+      - kg_create_state_node
+      - kg_finding_resolve
+      - kg_finding_escalate
+      - kg_dev_manager
+      - kg_mutation_manager
+      - kg_investigation_manager
+      - kg_team_manager
+
+tool_visibility:
+  always_show:
+    - http_request
+    - oauth_token_refresh
+    - pod_search
+    - pod_fetch
+    - mint_pod_from_path
+    - read_tool_result
+    - ask_user
+    - discover_skills
+    - read_skill
+  use_narrower: false
+
+flow_config:
+  tool_return:
+    tool_call_result_handler_node: "tool_result_handler"
+  summary:
+    enabled: true
+    source_agent: "tool_return_router"
+    summary_agent: "http_team::summary"
+    resume_agent: "http_team::planner"
+    planner_agent: "http_team::planner"
+    cadence_every_actions: 4
+    action_count_state_key: "{planner_agent}_action_count"
+    min_messages: 30
+    trigger_on_large_result_chars: 5000
+    payload_key: "summary_payload"
+    payload_recent_history_messages: 120
+    allow_summarize_latest_tool_result: false
+    protect_last_n_results: 3
+  state_map:
+    "http_team::delegator": "http_team::planner"
+    "http_team::planner": "critic_pre_node"
+    "http_team::critic": "critic_post_node"
+    "tool_result_handler": "tool_return_router"
+    "tool_return_router": "summary_pre_node"
+    "summary_pre_node": "http_team::planner"
+    "http_team::summary": "summary_post_node"
+    "summary_post_node": "http_team::planner"
+    "http_team::planner_return_control": "http_team::final_answer"
+    "http_team::final_answer": "manager_exit_node"
+    "graceful_exit": "graceful_exit_control_node"
+    "graceful_exit_control_node": "http_team::final_answer"

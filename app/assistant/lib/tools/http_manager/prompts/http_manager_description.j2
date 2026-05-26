@@ -1,0 +1,12 @@
+Makes HTTP/REST API calls to external services. Bluesky (AT Protocol), Mastodon, Reddit, GitHub, Spotify, WHOOP, OpenAI, Anthropic, Polymarket, OnStar, OAuth endpoints, webhooks — anything that exposes an HTTP API. Pod-aware auth (Bearer tokens / app passwords from datapod refs) and per-field body resolution. Multi-step flows (createSession → use accessJwt → chained calls) are first-class.
+
+Use this when:
+- The task names a service with a REST API (Bluesky / GitHub / Reddit / Spotify / etc.)
+- The task is "post / like / reply / fetch / search" on such a service
+- The task needs an OAuth token refresh
+- The task is a one-off REST call (GET / POST / PUT / DELETE)
+
+Do NOT use for:
+- Browser-rendered pages or live login flows → playwright_manager
+- General web research / search engine queries → web_manager
+- Local file operations → bash_manager
