@@ -167,6 +167,22 @@ LENS_BLEND_PAGERANK_WEIGHT: float = 0.6
 # that we trust the graph topology.
 CARD_HIGH_IMPORTANCE_FLOOR: float = 7.0
 
+# CARD_MIN_DEGREE
+# ---------------
+# What it gates: the re-observation card-worthiness path. An Entity passes
+# the multi-window observation gate only when ALSO embedded in the graph
+# at this degree or above. Re-observation alone is too weak — common nouns
+# like "AC", "Lights", "Computer", "Yogurt", "School" rack up multi-day
+# observation counts by being used in normal English, not by being card-
+# worthy entities.
+#
+# Why 15: calibrated against 2026-05-26 audit. Real card-worthy entities
+# scored well above (Coffee 27, Dogs 29, Irvine 31, family 200+). The
+# common-noun bloat (AC 12, Home 10, Lights 7, Computer 4, Yogurt 3,
+# Calendar 2, School 6, House 6, Agent 6, Prompt 7, Agents 9, Downstream
+# Agents 8, Nest Thermostat 8, People 3, System 5) sits below.
+CARD_MIN_DEGREE: int = 15
+
 # WIKI_GROWTH_IMPORTANCE_FLOOR
 # ----------------------------
 # What it gates: is_wiki_growth_candidate. Entities pass the wiki
@@ -215,15 +231,25 @@ def is_card_worthy(node: "Node", *, degree: int | None = None) -> bool:
 
     Policy — pass if ANY of:
         - locked_by_user_at IS NOT NULL              (user-pinned)
-        - observation_count >= 2                     (re-observed across windows)
+        - observation_count >= 2 AND degree >= CARD_MIN_DEGREE
+                                                     (re-observed AND
+                                                     embedded in graph)
         - observation_count == 1 AND degree >= 10    (one deep window)
         - effective_importance >= CARD_HIGH_IMPORTANCE_FLOOR
                                                      (graph says it's defining)
 
-    The importance fast-path is new. Pre-importance, the gate relied
-    on re-observation alone; high-importance Entities that happened to
-    be observed once with low degree were excluded even when the graph
-    topology says they matter. The fast-path catches those.
+    The observation-only gate (`obs >= 2 → pass`) was too permissive:
+    common nouns ("AC", "Lights", "Computer", "Yogurt", "School") rack
+    up multi-day observation counts just by being used in normal English,
+    not by being card-worthy entities. Real entities have BOTH
+    re-observation AND substantial graph presence — they accumulate
+    edges to people/places/events around them. The conjunction filters
+    out the bloat.
+
+    The single-deep-window gate (obs==1 AND degree>=10) handles the
+    legit case of a newly-introduced entity with rich first-mention
+    relations. The importance fast-path handles sparse-but-defining
+    entities whose graph hasn't grown yet but rater says it matters.
 
     Pass `degree` if you've already computed it; otherwise the function
     will fetch it from the node's outgoing+incoming edges. Cheap query
@@ -235,7 +261,10 @@ def is_card_worthy(node: "Node", *, degree: int | None = None) -> bool:
         return True
     obs = getattr(node, "observation_count", None) or 0
     if obs >= 2:
-        return True
+        if degree is None:
+            degree = _compute_degree(node)
+        if degree >= CARD_MIN_DEGREE:
+            return True
     if obs == 1:
         if degree is None:
             degree = _compute_degree(node)
