@@ -88,6 +88,8 @@ tools:
     - personal_admin_manager
     - devices_manager
     - bash_manager
+    - http_manager
+    - sandbox_manager
   except_tools: []
 
 scope_contract:
