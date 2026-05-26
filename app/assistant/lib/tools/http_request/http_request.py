@@ -77,6 +77,14 @@ logger = get_logger(__name__)
 _POD_REF_RE = re.compile(
     r"^datapod:(?P<kind>[^:]+):(?P<id>[^/]+)(?:/(?P<projection>[^/]+))?$"
 )
+# Same shape, no anchors, no whitespace allowed inside — used to find pod-refs
+# EMBEDDED inside a longer string. Critical for `Authorization: Bearer <ref>`
+# style headers where the ref is preceded by a scheme keyword. The kind/id/
+# projection segments forbid whitespace so the regex terminates cleanly at
+# the next space/quote/end-of-value.
+_POD_REF_SUBSTRING_RE = re.compile(
+    r"datapod:[^:\s]+:[^/\s]+(?:/[^/\s]+)?"
+)
 _POD_PREFIX = "datapod:"
 
 # Size caps. Soft cap: caller should consider summarization (we surface the
@@ -630,6 +638,18 @@ class HttpRequest(BaseTool):
         pods_used: List[str],
         tool_message: ToolMessage,
     ) -> Dict[str, str]:
+        """Resolve pod-refs inside header values.
+
+        Two shapes need to work:
+          1. Whole-value pod-ref:  `X-API-Key: datapod:auth.bearer:.../full`
+          2. Embedded pod-ref:     `Authorization: Bearer datapod:auth.session:.../full`
+
+        Shape (2) is the convention for bearer tokens — the scheme keyword
+        sits in front of the credential. The earlier `startswith` check only
+        caught (1) and let (2) fall through as a literal string, which
+        Bluesky / OAuth / Stripe etc. then reject as an invalid token.
+        Substring substitution covers both.
+        """
         if not headers_arg:
             return {}
         if not isinstance(headers_arg, dict):
@@ -646,13 +666,29 @@ class HttpRequest(BaseTool):
                     message=f"header value for {k!r} must be a string",
                     pod_id=None, projection=None,
                 )
-            if v.startswith(_POD_PREFIX):
-                resolved = self._resolve_pod_ref(v, tool_message)
-                pods_used.append(v)
-                out[k] = resolved
-            else:
-                out[k] = v
+            out[k] = self._substitute_pod_refs_in_string(v, pods_used, tool_message)
         return out
+
+    def _substitute_pod_refs_in_string(
+        self,
+        value: str,
+        pods_used: List[str],
+        tool_message: ToolMessage,
+    ) -> str:
+        """Find every `datapod:<kind>:<id>(/projection)?` occurrence in `value`
+        and replace it with the resolved pod content. Fast path: skip the
+        regex entirely if the prefix doesn't appear at all.
+        """
+        if _POD_PREFIX not in value:
+            return value
+
+        def _replace(m: re.Match) -> str:
+            ref = m.group(0)
+            resolved = self._resolve_pod_ref(ref, tool_message)
+            pods_used.append(ref)
+            return resolved
+
+        return _POD_REF_SUBSTRING_RE.sub(_replace, value)
 
     def _resolve_body(
         self,
