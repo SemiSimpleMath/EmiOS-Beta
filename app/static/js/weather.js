@@ -214,15 +214,20 @@ function timeToMillisecondsFromMidnight(timeString) {
     if (isSun) {
       let y;
 
-      // Sun movement logic
+      // Sun movement logic — symmetric triangle wave between sunBottom
+      // (near-horizon) and sunTop (overhead). Earlier version had a stray
+      // `* 0.85` factor on the first-half start that made the peak
+      // overshoot above the box (y = -0.05H at noon) and left the sun
+      // visually pinned near the bottom for most of the day. The moon
+      // already uses a proper sin arc — the sun should match.
       if (currentTime >= dawnStart_a && currentTime < halfDay) {
         const factor = (currentTime - dawnStart_a) / (halfDay - dawnStart_a); // 0 to 1
-        y = sunBottom * 0.85 - factor * (sunBottom - sunTop); // Move upward
+        y = sunBottom - factor * (sunBottom - sunTop); // bottom → top
       } else if (currentTime >= halfDay && currentTime < duskEnd_a) {
         const factor = (currentTime - halfDay) / (duskEnd_a - halfDay); // 0 to 1
-        y = sunTop + factor * (sunBottom - sunTop); // Move downward
+        y = sunTop + factor * (sunBottom - sunTop); // top → bottom
       } else {
-        return null; // Sun not visible
+        return null; // Sun not visible (night)
       }
 
       return { x: sunX, y };
