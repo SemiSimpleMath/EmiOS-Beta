@@ -199,12 +199,37 @@ class ToolArguments(Agent):
                 content=f"{self.name} fast-validated arguments for '{target_name}'.",
                 data=normalized,
             )
-        except Exception:
-            logger.debug(
-                "[%s] Fast-validate failed for '%s' — falling through to LLM.",
-                self.name, target_name,
+        except Exception as e:
+            # Log structured-ish info so we can grep which tools routinely
+            # confuse the planner (= signal their description / Contract
+            # Inputs need richer hints).
+            failure_class = self._classify_validation_error(e)
+            arg_keys = sorted(args.keys()) if isinstance(args, dict) else []
+            logger.info(
+                "[%s] fast_validate_miss tool=%s failure_class=%s arg_keys=%s err=%s",
+                self.name, target_name, failure_class, arg_keys,
+                str(e).splitlines()[0][:200] if str(e) else "",
             )
             return None
+
+    @staticmethod
+    def _classify_validation_error(err: Exception) -> str:
+        """Coarse bucket for fast_validate misses. Used only for log signal."""
+        try:
+            from pydantic import ValidationError
+            if isinstance(err, ValidationError):
+                types = {e.get("type", "") for e in err.errors()}
+                if any(t == "missing" for t in types):
+                    return "missing_required"
+                if any(t in ("extra_forbidden", "extra_field") for t in types):
+                    return "unknown_field"
+                # Pydantic v2 type/parse error codes end in `_type` or `_parsing`.
+                if any(t.endswith("_type") or t.endswith("_parsing") for t in types):
+                    return "type_mismatch"
+                return "validation_other"
+        except Exception:
+            pass
+        return "other"
 
     def process_llm_result(self, result: Any, *, target_name: str) -> ToolResult:
         self._maybe_print_llm_result(result)

@@ -586,26 +586,9 @@ class ToolRegistry:
             except Exception as e:
                 logger.error(f"Error rendering description for '{tool_name}': {e}")
                 desc_text = "Error rendering description."
-        # Pull arguments_prompt from the JSON contract — its per-field
-        # guidance (enum values, ranges, conditional dependencies, cross-field
-        # rules) is what the planner needs to produce valid JSON args
-        # directly. Optional; empty string when the contract doesn't set it.
         contract = tool.get("tool_contract") if isinstance(tool.get("tool_contract"), dict) else None
-        args_text = ""
-        if isinstance(contract, dict):
-            ap = contract.get("arguments_prompt")
-            if isinstance(ap, str):
-                args_text = ap
-        # Smart-home tools: append the user's configured devices so the planner
-        # knows valid room/camera names without having to invent them. Devices
-        # live in configs/smart_home_tools.json under the integration key:
-        #   "lights":   {"devices": [{"alias": "Kitchen", "host": "192.168.1.51"}, ...]}
-        #   "ring":     {"devices": [{"alias": "Front Door", "camera_id": "74818139"}, ...]}
-        #   "nest":     {"devices": [{"alias": "Main", "device_id": "..."}, ...]}
-        # When the field is absent or empty, this falls through to the
-        # tool's normal description text — no behavior change for non-smart-home tools.
         devices_block = self._smart_home_devices_block(tool_name)
-        display = self._format_description_with_contract(desc_text, contract, args_text, devices_block)
+        display = self._format_description_with_contract(desc_text, contract, devices_block)
         return ToolDescription(
             display,
             tool_name=tool_name,
@@ -668,24 +651,37 @@ class ToolRegistry:
             logger.error("Failed to render smart-home devices for '%s': %s", tool_name, e)
             return ""
 
+    # Outputs are auto-rendered only when meaningfully tool-specific.
+    # Every tool emits `content: text` + `data: object` — showing that in the
+    # planner system prompt 15× per call costs ~750 chars of pure boilerplate.
+    # `args_text` (the contract's `arguments_prompt`) is INTENTIONALLY not
+    # rendered here. Planners pick the tool from description + Inputs; the
+    # detailed argument guidance reaches the args agent via
+    # `get_tool_arguments_prompt()` when fast_validate fails.
+    _BOILERPLATE_OUTPUT_PATHS = frozenset({"content", "data"})
+
+    def _outputs_are_boilerplate(self, outputs: list) -> bool:
+        if not outputs:
+            return True
+        for item in outputs:
+            if not isinstance(item, dict):
+                continue
+            path = str(item.get("path") or "").strip()
+            if path and path not in self._BOILERPLATE_OUTPUT_PATHS:
+                return False
+        return True
+
     def _format_description_with_contract(
         self,
         desc_text: str,
         contract: dict[str, Any] | None,
-        args_text: str = "",
         devices_block: str = "",
     ) -> str:
         base = str(desc_text or "").strip() or "No description available."
-        args_block = str(args_text or "").strip()
         devices = str(devices_block or "").strip()
         if not isinstance(contract, dict):
-            tail = []
-            if args_block:
-                tail.append("Argument guidance:\n" + args_block)
             if devices:
-                tail.append(devices)
-            if tail:
-                return base + "\n\n" + "\n\n".join(tail)
+                return base + "\n\n" + devices
             return base
         lines: list[str] = [base, "Contract:"]
         inputs = contract.get("inputs") if isinstance(contract.get("inputs"), list) else []
@@ -701,7 +697,7 @@ class ToolRegistry:
                 req = " required" if bool(item.get("required", False)) else ""
                 lines.append(f"    - {name}: {typ}{req}")
         outputs = contract.get("outputs") if isinstance(contract.get("outputs"), list) else []
-        if outputs:
+        if outputs and not self._outputs_are_boilerplate(outputs):
             lines.append("  Outputs:")
             for item in outputs:
                 if not isinstance(item, dict):
@@ -711,9 +707,6 @@ class ToolRegistry:
                 if not path or not typ:
                     continue
                 lines.append(f"    - {path}: {typ}")
-        if args_block:
-            lines.append("Argument guidance:")
-            lines.append(args_block)
         if devices:
             lines.append(devices)
         return "\n".join(lines).strip()
@@ -861,13 +854,13 @@ class ToolRegistry:
     def get_tool_descriptions(self, allowed_tools: list) -> dict:
         """Retrieve descriptions only for allowed tools.
 
-        Uses the FULL description template (not the compact one). Argument
-        guidance for tool_arguments / planner is in the JSON contract's
-        `arguments_prompt` field, appended after the Contract block by
-        get_tool_description. The description template is meant to be
-        shown verbatim. The compact path is still available via
-        get_tool_description_compact() when a caller explicitly wants the
-        one-line summary.
+        Planner-facing render: description.j2 + Contract Inputs (+ tool-specific
+        Outputs when non-boilerplate). The contract's `arguments_prompt` is NOT
+        included — it's args-agent territory, reachable via
+        `get_tool_arguments_prompt()`. Boilerplate `content/data` outputs are
+        suppressed; only tool-specific Outputs render. The compact path is
+        still available via get_tool_description_compact() for callers that
+        explicitly want a one-line summary.
         """
         return {tool: self.get_tool_description(tool) for tool in allowed_tools}
 
