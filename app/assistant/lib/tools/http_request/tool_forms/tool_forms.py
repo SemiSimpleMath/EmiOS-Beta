@@ -16,9 +16,9 @@ type back to the actual class (Pydantic 2 + OpenAI SDK incompatibility).
 Other tool_forms files in this repo follow the same convention — keep
 type hints concrete.
 """
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 HttpMethod = Literal["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"]
@@ -43,6 +43,12 @@ class http_request_args(BaseModel):
     # OpenAI structured-output strict mode (see
     # feedback_planner_action_is_str_tools_validate).
     body: Optional[str] = None
+    # Query params: dict[str, str] on the wire (URL encoded). Planners
+    # naturally emit ints/floats/bools for things like `limit=25` — coerce
+    # to string with a pre-validator so fast_validate succeeds. Otherwise
+    # the args-agent LLM path engages with a Dict[str, str] schema, the
+    # OpenAI strict-mode parser fails to find a clean output shape, and
+    # gpt-4.1 has been observed running away to 32K+ chars before timeout.
     query_params: Optional[Dict[str, str]] = None
     timeout_s: float = 30.0
     # If set, the response body is sealed into a NEW pod with this privacy
@@ -53,6 +59,17 @@ class http_request_args(BaseModel):
     follow_redirects: bool = True
     # If set, the tool fails if the response status is not in this list.
     expect_status: Optional[List[int]] = None
+
+    @field_validator("query_params", mode="before")
+    @classmethod
+    def _stringify_query_param_values(cls, v: Any) -> Any:
+        # Planners emit URL query params with their natural Python types
+        # (limit=25, since_ts=1716700000, include_replies=True). On the wire
+        # they all become strings. Coerce here so fast_validate accepts the
+        # planner's dict directly and the args-agent LLM path doesn't engage.
+        if isinstance(v, dict):
+            return {str(k): str(val) if val is not None else "" for k, val in v.items()}
+        return v
 
 
 class http_request_arguments(BaseModel):
