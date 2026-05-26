@@ -2,7 +2,7 @@ name: sandbox_manager
 class_name: MultiAgentManager
 description: "Runs Python in a Docker sandbox via execute_code. Compute, data analysis, image / PDF / document transformations, OCR, file processing. Pod I/O is first-class: input pods mount as files; outputs auto-mint as pods. Chained sandbox calls supported."
 display_name: "Beaker"
-max_cycles: 30
+max_cycles: 80  # match emi_team — write/run/debug iterations + ask_user need headroom
 role_bindings:
   delegator: sandbox_team::delegator
   tool_selector: shared::tool_selector

@@ -2,7 +2,7 @@ name: http_manager
 class_name: MultiAgentManager
 description: "Makes HTTP/REST API calls to external services (Bluesky, Mastodon, Reddit, GitHub, Spotify, WHOOP, OAuth endpoints, webhooks). Pod-aware auth + per-field body resolution. Multi-step flows (createSession → use accessJwt → next call) are first-class — uses read_tool_result to chain fields across calls."
 display_name: "Wire"
-max_cycles: 30
+max_cycles: 80  # match emi_team — auth + ask_user + multi-step API chains need headroom
 role_bindings:
   delegator: http_team::delegator
   tool_selector: shared::tool_selector
