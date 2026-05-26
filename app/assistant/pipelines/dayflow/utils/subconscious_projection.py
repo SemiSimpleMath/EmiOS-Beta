@@ -1,27 +1,18 @@
 """Subconscious → daily_context projection.
 
-Reads the subconscious's outputs (concerns_register, intention.* pods,
-plan.weekly_schedule) and produces compact, horizon-stratified fields
-that downstream consumers (chat_gate, dayflow situation_audit, etc.)
-read directly from the daily_context output JSON.
+Reads the subconscious's two canonical outputs (concerns_register from the
+noticer, plan.weekly_schedule from the scheduler arbiter) and projects them
+into the daily_context shape so chat_gate / strategic_planner can read both
+in one place.
 
-Why this lives here and not in the subconscious module:
+Architectural rule (2026-05-25): the noticer is THE channel for raw
+subconscious → conscious signal. Domain proposers (meal / wellness /
+romance / shopping) produce candidate intention.* pods, but those are
+pipeline intermediates the arbiter picks FROM — they never leak into chat
+context directly. If a meal/health/romance pattern matters, the noticer
+surfaces it as a concern. The arbiter's pick lives in weekly_schedule.
 
-- The subconscious WRITES authoritative state (concerns_register +
-  pod_store). This file READS that state and projects today-relevant
-  slices into the daily_context shape so consumers don't each have to
-  re-read concerns_register + scan pod_store independently.
-- Single point of fan-out: one projection serves both chat_gate and
-  dayflow. New consumers automatically inherit.
-- Read-only: this module never mutates concerns_register, pods, or
-  beliefs. Failures here degrade the daily_context (empty fields) but
-  don't corrupt subconscious state.
-
-Horizon stratification handles the day-vs-multi-week tension. A 2-week
-out birthday concern stays VISIBLE under ``longer_horizon`` instead of
-being squeezed out by today's narrative synthesizer.
-
-Output shape (each function returns a JSON-serializable list/dict):
+Output shape:
 
     active_concerns_this_week:
         [{severity, horizon, title, subject, addressable_by[],
@@ -31,20 +22,15 @@ Output shape (each function returns a JSON-serializable list/dict):
         Same shape; horizons = this_month / this_quarter / this_year /
         longer (anything that isn't today / this_week).
 
-    upcoming_intentions_2w:
-        [{date, kind, one_liner, pod_id}, ...] — intention.* pods
-        minted in the last 14 days, sorted by date ascending.
-
     weekly_schedule_excerpt:
-        {pod_id, generated_at, one_liner, items[]} from the most recent
+        {pod_id, generated_at, one_liner, body} from the most recent
         plan.weekly_schedule pod, or {} if none exists.
 """
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_repo_root
@@ -65,7 +51,6 @@ _HIGH_SEVERITIES = frozenset({"high", "critical"})
 _ACTIVE_REGISTER_KEY = "active"
 
 _NOTES_MAX_CHARS = 200
-_INTENTION_LOOKBACK_DAYS = 14
 
 
 def _concerns_register_path() -> Path:
@@ -145,75 +130,6 @@ def project_concerns() -> Dict[str, List[Dict[str, Any]]]:
     return {"this_week": this_week, "longer_horizon": longer}
 
 
-def project_upcoming_intentions(*, lookback_days: int = _INTENTION_LOOKBACK_DAYS) -> List[Dict[str, Any]]:
-    """Read recent intention.* pods (excluding the _set rollup containers)
-    from pod_store and project them as a compact list.
-
-    The _set pods are summary containers minted by each proposer per run;
-    they aggregate the day's proposals into one record. Daily_context
-    consumers want the individual intentions (each intention.meal,
-    intention.wellness, intention.romantic) — not the rollups.
-    """
-    try:
-        from app.models.db_manager import get_db_manager
-        from sqlalchemy import text as sql_text
-    except Exception as e:
-        logger.warning("[subconscious_projection] DB unavailable: %s", e)
-        return []
-
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).strftime(
-        "%Y-%m-%d %H:%M:%S.%f"
-    )
-    try:
-        with get_db_manager().read_session() as session:
-            rows = session.execute(
-                sql_text(
-                    """
-                    SELECT pod_id, kind, one_liner, created_at, metadata_json
-                    FROM pod_store
-                    WHERE kind LIKE 'intention.%'
-                      AND kind NOT LIKE '%_set'
-                      AND created_at >= :cutoff
-                    ORDER BY created_at DESC
-                    LIMIT 50
-                    """
-                ),
-                {"cutoff": cutoff},
-            ).fetchall()
-    except Exception as e:
-        logger.warning("[subconscious_projection] intention pods read failed: %s", e)
-        return []
-
-    out: List[Dict[str, Any]] = []
-    for r in rows:
-        pod_id, kind, one_liner, created_at, metadata_json = r
-        # Try to extract a target date from metadata. Intention pods
-        # generally carry their scheduled date in metadata.date or
-        # metadata.scheduled_at; if neither, fall back to created_at.
-        target_date = ""
-        try:
-            md = json.loads(metadata_json) if metadata_json else {}
-            if isinstance(md, dict):
-                for key in ("date", "scheduled_at", "scheduled_for", "target_date"):
-                    val = md.get(key)
-                    if isinstance(val, str) and val.strip():
-                        target_date = val.strip()
-                        break
-        except Exception:
-            md = {}
-        if not target_date:
-            target_date = (created_at or "")[:10]
-        out.append({
-            "pod_id": str(pod_id),
-            "kind": str(kind),
-            "one_liner": str(one_liner or "").strip()[:160],
-            "date": target_date,
-        })
-    # Sort by date ascending so "next up" lands first
-    out.sort(key=lambda x: x["date"])
-    return out
-
-
 def project_weekly_schedule_excerpt() -> Dict[str, Any]:
     """Return the most recent ``plan.weekly_schedule`` pod, compactly.
 
@@ -258,7 +174,7 @@ def project_weekly_schedule_excerpt() -> Dict[str, Any]:
 
 
 def project_subconscious_for_daily_context() -> Dict[str, Any]:
-    """One-shot projector. Returns the four fields the daily_context
+    """One-shot projector. Returns the three fields the daily_context
     output should gain so chat_gate + dayflow can read subconscious
     signal in one place.
 
@@ -270,11 +186,6 @@ def project_subconscious_for_daily_context() -> Dict[str, Any]:
         logger.warning("[subconscious_projection] concerns projection failed: %s", e)
         concerns = {"this_week": [], "longer_horizon": []}
     try:
-        intentions = project_upcoming_intentions()
-    except Exception as e:
-        logger.warning("[subconscious_projection] intentions projection failed: %s", e)
-        intentions = []
-    try:
         weekly = project_weekly_schedule_excerpt()
     except Exception as e:
         logger.warning("[subconscious_projection] weekly_schedule projection failed: %s", e)
@@ -282,6 +193,5 @@ def project_subconscious_for_daily_context() -> Dict[str, Any]:
     return {
         "active_concerns_this_week": concerns["this_week"],
         "active_concerns_longer_horizon": concerns["longer_horizon"],
-        "upcoming_intentions_2w": intentions,
         "weekly_schedule_excerpt": weekly,
     }

@@ -478,7 +478,6 @@ class DailyContextGeneratorStep(BaseStep):
             "calendar_events_structured": calendar_events_structured,
             "active_concerns_this_week": subconscious["active_concerns_this_week"],
             "active_concerns_longer_horizon": subconscious["active_concerns_longer_horizon"],
-            "upcoming_intentions_2w": subconscious["upcoming_intentions_2w"],
             "weekly_schedule_excerpt": subconscious["weekly_schedule_excerpt"],
             "last_updated": now_local.strftime("%Y-%m-%d %I:%M %p"),
             "last_updated_utc": now_utc.isoformat(),
@@ -644,7 +643,6 @@ class DailyContextGeneratorStep(BaseStep):
             # and the projection re-reads the live register on the next run.
             "active_concerns_this_week": [],
             "active_concerns_longer_horizon": [],
-            "upcoming_intentions_2w": [],
             "weekly_schedule_excerpt": {},
             "last_updated": now_local.strftime("%Y-%m-%d %I:%M %p"),
             "last_updated_utc": now_utc.isoformat(),
