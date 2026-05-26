@@ -45,6 +45,18 @@
       "description": "If set, seal the response body into a new pod with this privacy class (e.g. 'health.private', 'financial.private'). The tool returns the new pod_id instead of the body; the response content never enters your transcript. Use for sensitive data you should not read."
     },
     {
+      "name": "seal_fields",
+      "type": "array",
+      "required": false,
+      "description": "List of top-level field names in the response JSON to seal into pods. Each named field is replaced in the response body with a `datapod:<seal_pod_kind>:<id>/full` reference; the real value goes into a fresh pod. Subsequent http_request calls can reference that pod-ref verbatim in a header value (e.g. `Authorization: Bearer datapod:auth.session:<id>/full`) and the tool resolves it at courier scope. Use whenever a service returns a credential the next call needs to relay — e.g. Bluesky's createSession returns `accessJwt`/`refreshJwt`; pass `seal_fields: [\"accessJwt\", \"refreshJwt\"]` and the JWT never enters your transcript (LLM transcription corrupts long opaque strings, see project_http_request_inbound_credential_sealing)."
+    },
+    {
+      "name": "seal_pod_kind",
+      "type": "string",
+      "required": false,
+      "description": "Pod kind to use when sealing fields via `seal_fields`. Defaults to 'auth.session'. The authority class is derived from the kind suffix (.private/.gated/.chat/.public) or falls through to AUTH_USER for unknown suffixes — 'auth.session' falls through, matching 'auth.bearer'."
+    },
+    {
       "name": "follow_redirects",
       "type": "boolean",
       "required": false,
@@ -69,7 +81,7 @@
       "description": "Structured payload: status, headers (response), content_type, content_length, body (if not sealed), response_pod_id (if sealed), duration_ms."
     }
   ],
-  "arguments_prompt": "Arguments for http_request:\nurl: str                           # target URL\nmethod: str = 'GET'                # GET/POST/PUT/PATCH/DELETE/HEAD\nheaders: Optional[dict]            # values may be `datapod:` refs (sealed auth)\nbody: Optional[str]                # JSON-encoded string for JSON APIs (parsed at execute), raw text, or `datapod:` ref\nquery_params: Optional[dict]\ntimeout_s: float = 30.0\nresponse_pod_kind: Optional[str]   # if set, seal response in pod with this class\nfollow_redirects: bool = True\nexpect_status: Optional[list[int]] # fail if status not in list",
+  "arguments_prompt": "Arguments for http_request:\nurl: str                           # target URL\nmethod: str = 'GET'                # GET/POST/PUT/PATCH/DELETE/HEAD\nheaders: Optional[dict]            # values may be `datapod:` refs (sealed auth)\nbody: Optional[str]                # JSON-encoded string for JSON APIs (parsed at execute), raw text, or `datapod:` ref\nquery_params: Optional[dict]\ntimeout_s: float = 30.0\nresponse_pod_kind: Optional[str]   # if set, seal response in pod with this class\nseal_fields: Optional[list[str]]   # top-level fields to seal into pods (e.g. ['accessJwt','refreshJwt']) — replaced in response body with pod-refs the next call can relay verbatim. LLM never sees the bytes.\nseal_pod_kind: Optional[str]       # pod kind for seal_fields. Default 'auth.session'.\nfollow_redirects: bool = True\nexpect_status: Optional[list[int]] # fail if status not in list",
   "metadata": {
     "domain": "web",
     "actions": ["fetch", "post", "api", "tweet", "skeet", "publish", "comment", "reply"],

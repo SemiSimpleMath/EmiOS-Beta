@@ -56,6 +56,19 @@ class http_request_args(BaseModel):
     # body content. Use for sensitive data (health, financial, medical) that
     # the agent should be able to *cause to be fetched* without *reading*.
     response_pod_kind: Optional[str] = None
+    # If set, named TOP-LEVEL fields in the response JSON are sealed into
+    # pods and replaced with `datapod:` ref strings before the body reaches
+    # the agent. Use when a service returns credentials (accessJwt /
+    # refreshJwt / OAuth bearer / signed tokens) that subsequent calls need
+    # to relay verbatim — without that relay going through LLM
+    # transcription, where long opaque strings get corrupted by one or two
+    # characters silently. Same architectural pattern as outbound
+    # `datapod:auth.bearer:.../full` substitution in headers/body, just
+    # closing the inbound side. Each sealed field becomes its own pod;
+    # the response JSON the agent sees has those fields replaced with
+    # `datapod:<seal_pod_kind>:<id>/full`. Default kind: "auth.session".
+    seal_fields: Optional[List[str]] = None
+    seal_pod_kind: Optional[str] = None
     follow_redirects: bool = True
     # If set, the tool fails if the response status is not in this list.
     expect_status: Optional[List[int]] = None

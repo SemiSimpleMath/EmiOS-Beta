@@ -128,6 +128,11 @@ class HttpRequest(BaseTool):
         query_params = args.get("query_params")
         timeout_s = float(args.get("timeout_s") or 30.0)
         response_pod_kind = (args.get("response_pod_kind") or "").strip() or None
+        seal_fields_raw = args.get("seal_fields")
+        seal_fields: List[str] = [
+            str(f).strip() for f in (seal_fields_raw or []) if isinstance(f, str) and str(f).strip()
+        ]
+        seal_pod_kind = (args.get("seal_pod_kind") or "auth.session").strip() or "auth.session"
         follow_redirects = bool(args.get("follow_redirects", True))
         expect_status = args.get("expect_status")
 
@@ -295,6 +300,36 @@ class HttpRequest(BaseTool):
         host = urlparse(url).netloc
         soft_cap_hit = response_bytes > _SOFT_CAP_BYTES
 
+        # ---- seal_fields: extract named top-level fields into pods, rewrite body -----
+        # Closes the inbound side of the credential-confinement pattern.
+        # Services like Bluesky's createSession return tokens (accessJwt /
+        # refreshJwt) that subsequent calls need to relay verbatim in
+        # headers. Today's failure mode: planner copies the JWT from the
+        # transcript into the next call's Authorization header, LLM
+        # transcription silently corrupts ~1 char in ~200, signature
+        # verification fails, call returns InvalidToken. Sealing each named
+        # field into its own pod and replacing it in the body with the
+        # pod-ref means the JWT never enters LLM token prediction.
+        sealed_field_pod_ids: List[str] = []
+        if seal_fields and isinstance(body_json, dict):
+            try:
+                body_json, body_text, sealed_field_pod_ids = self._seal_response_fields(
+                    body_json=body_json,
+                    fields=seal_fields,
+                    seal_pod_kind=seal_pod_kind,
+                    method=method, url=url, host=host,
+                    status_code=response.status_code,
+                    caller_agent=self._caller_agent(tool_message),
+                    request_id=getattr(tool_message, "request_id", None),
+                )
+                pods_used.extend(sealed_field_pod_ids)
+            except Exception as e:
+                logger.error("http_request: seal_fields failed: %s", e)
+                logger.debug("seal_fields exception details", exc_info=True)
+                # Don't fail the call — the response is still valid, the
+                # planner just won't have pod-refs for the fields. Better
+                # than aborting on a sealing bug.
+
         # ---- response_pod_kind: seal the response into a new pod -------
 
         response_pod_id: Optional[str] = None
@@ -426,6 +461,96 @@ class HttpRequest(BaseTool):
             "gated":     AUTH_GATED,
             "private":   AUTH_USER,
         }.get(suffix, AUTH_USER)
+
+    def _seal_response_fields(
+        self,
+        *,
+        body_json: Dict[str, Any],
+        fields: List[str],
+        seal_pod_kind: str,
+        method: str, url: str, host: str,
+        status_code: int,
+        caller_agent: Optional[str],
+        request_id: Optional[str],
+    ) -> Tuple[Dict[str, Any], str, List[str]]:
+        """Extract named top-level fields from `body_json`, mint a pod per field
+        carrying the raw value, and replace each field in the JSON with a
+        `datapod:<seal_pod_kind>:<uuid>/full` reference string.
+
+        Returns the rewritten body_json dict, the re-serialized body_text
+        (JSON pretty-printed), and the list of pod_ids minted.
+
+        Missing fields are silently skipped — same shape as `read_tool_result`,
+        tolerant of optional fields. Non-string values are JSON-stringified
+        before sealing (so an int/float/dict field would still be capturable,
+        but the typical case is opaque-string tokens).
+
+        Authority: pod kind is hashed through _kind_to_min_authority; for
+        the default `auth.session` kind (no .private/.gated/.chat/.public
+        suffix) this falls through to AUTH_USER (99), matching `auth.bearer`.
+        """
+        from app.assistant.pod_store.contracts import Pod
+        from app.assistant.pod_store.pod_store import PodStore
+
+        rewritten = dict(body_json)
+        minted_pod_ids: List[str] = []
+        store = PodStore()
+        min_authority = self._kind_to_min_authority(seal_pod_kind)
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        for field_name in fields:
+            if field_name not in rewritten:
+                continue
+            raw_value = rewritten[field_name]
+            if raw_value is None:
+                continue
+            # Normalize to string for storage. The expected case is an
+            # opaque token (str). Non-strings (e.g. an object payload) get
+            # JSON-serialized so the sealed pod always has a string body.
+            if isinstance(raw_value, str):
+                stored_body = raw_value
+            else:
+                try:
+                    stored_body = json.dumps(raw_value, ensure_ascii=False)
+                except Exception:
+                    stored_body = str(raw_value)
+
+            pod_uuid = uuid.uuid4().hex
+            pod_id = f"datapod:{seal_pod_kind}:{pod_uuid}"
+            one_liner = (
+                f"{field_name} from {method} {host} → {status_code} "
+                f"(sealed at {now_iso})"
+            )
+            pod = Pod(
+                pod_id=pod_id,
+                kind=seal_pod_kind,
+                tags=["http_response_field", host, seal_pod_kind, field_name],
+                one_liner=one_liner,
+                body=stored_body,
+                source_refs=[],
+                for_agents=[],
+                scope_id=None,
+                created_by=caller_agent or "http_request",
+                metadata={
+                    "url": url,
+                    "method": method,
+                    "host": host,
+                    "status_code": status_code,
+                    "sealed_field": field_name,
+                    "sealed_at": now_iso,
+                    "sealed_by_request_id": request_id,
+                },
+                min_authority=min_authority,
+            )
+            store.put(pod)
+            minted_pod_ids.append(pod_id)
+            # Replace the value with the pod-ref. /full projection matches
+            # the auth.bearer pattern; resolvers already handle the "no
+            # explicit projection ⇒ full" case so either form works.
+            rewritten[field_name] = f"{pod_id}/full"
+
+        rewritten_body_text = json.dumps(rewritten, ensure_ascii=False)
+        return rewritten, rewritten_body_text, minted_pod_ids
 
     def _seal_response_pod(
         self,

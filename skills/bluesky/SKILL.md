@@ -47,37 +47,49 @@ For a one-shot post, the simplest pattern is: createSession → post → done. C
 
 Read the **handle** and **secret ref** for Bluesky from the `available_accounts` block in your prompt (it lists them for the current scope). Use those values verbatim — do not invent pod_ids from environment variable names.
 
+**CRITICAL: always pass `seal_fields: ["accessJwt", "refreshJwt"]` on this call.** Bluesky returns JWTs in the response that the next call relays in `Authorization: Bearer …`. If you transcribe the JWT from the response body into the next call's header yourself, your LLM will silently corrupt it (long opaque base64 strings get one or two characters flipped during token prediction — same failure mode that motivates the password-pod pattern, just on the inbound side). With `seal_fields`, the JWTs land in their own pods, the response body has `datapod:auth.session:<id>/full` references where the JWTs would have been, and you relay those references verbatim in the next call — the courier resolver substitutes the real bytes at execute time.
+
 ```
-POST https://bsky.social/xrpc/com.atproto.server.createSession
-Content-Type: application/json
-Body: {
-  "identifier": "<paste handle from available_accounts>",
-  "password":   "<paste secret ref from available_accounts (the datapod:... string ending in /full)>"
-}
+http_request:
+  url:    https://bsky.social/xrpc/com.atproto.server.createSession
+  method: POST
+  headers: {"Content-Type": "application/json"}
+  body:   "{\"identifier\": \"<handle from available_accounts>\", \"password\": \"<secret ref from available_accounts>\"}"
+  seal_fields: ["accessJwt", "refreshJwt"]
 ```
 
-The `/full` projection resolves under courier scope automatically (http_request handles it), so the actual password never appears in your transcript.
-
-Response:
+Response you'll see (the JWTs are replaced with pod-refs; the rest is verbatim):
 ```json
 {
-  "accessJwt": "eyJ...",
-  "refreshJwt": "eyJ...",
+  "did": "did:plc:o4gn7k7srpqbpdo4xv6qomb2",
+  "didDoc": {"service": [{"serviceEndpoint": "https://stropharia.us-west.host.bsky.network"}, ...]},
   "handle": "openpodbayemi.bsky.social",
-  "did": "did:plc:..."
+  "accessJwt": "datapod:auth.session:<uuid-a>/full",
+  "refreshJwt": "datapod:auth.session:<uuid-b>/full",
+  "active": true
 }
 ```
 
-## Step 2: Use accessJwt as Bearer for any subsequent call
+The `did` and `serviceEndpoint` are still visible — you need them for subsequent calls.
+
+## Step 2: Use the accessJwt pod-ref as Bearer for every subsequent call
 
 ```
-GET https://bsky.social/xrpc/app.bsky.feed.getTimeline
-Authorization: Bearer <accessJwt>
+http_request:
+  url:    <serviceEndpoint>/xrpc/app.bsky.feed.getTimeline
+  method: GET
+  headers:
+    Authorization: "Bearer datapod:auth.session:<uuid-a>/full"   ← copy verbatim from createSession response
+  query_params: {"limit": "20"}
 ```
 
-Pass the JWT inline in the next http_request call's headers. (For multi-step tasks the planner can cache it in agent_input across calls; for one-shots, just re-call createSession.)
+`accessJwt` lasts ~2 hours; on `401 ExpiredToken`, either call `refreshSession` (passing the `refreshJwt` pod-ref the same way) or just re-do createSession from the app password.
+
+For a one-shot post, the simplest pattern is: createSession → post → done. The pod-refs work across multiple http_request calls in the same task.
 
 ## Common operations
+
+In every example below, `<accessJwt>` means the pod-ref string you got from createSession's response (`datapod:auth.session:<uuid>/full`) — relay it verbatim in the `Authorization: Bearer …` header; do NOT transcribe a raw JWT from anywhere.
 
 ### Post a top-level skeet
 
