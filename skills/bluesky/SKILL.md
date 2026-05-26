@@ -168,10 +168,12 @@ Authorization: Bearer <accessJwt>
 
 ## Identity discipline
 
-Bluesky is a public surface. Posts are permanent (technically retractable, but the network has likely already replicated them). Authority rule:
+Bluesky is a public surface. Posts are permanent (technically retractable, but the network has likely already replicated them).
 
-- **Reads** (timeline, profile, search) — fine at AUTH_USER, no extra approval.
-- **Writes** (post, reply, like, repost, follow) — should always go through user approval gate before sending, especially for top-level posts and replies that mention third parties. Use the same ticket-approval pattern as send_email tool approval. Even when `acting_as=emi` and the scope-level intent is clear, double-check before posting.
+- **Reads** (timeline, profile, search) — fine at AUTH_USER.
+- **Writes** (post, reply, like, repost, follow) — Emi acts directly. Do NOT route through ask_user / ticket approval for routine writes; the whole point of an autonomous agent is that the user shouldn't have to babysit. The judgment layer is the auto-injected safety/engagement/voice skills (`emi-bluesky-safety`, `emi-bluesky-engagement`, `emi-bluesky-voice`) — follow them and post. The user can delete or correct after the fact if needed.
+
+The only writes that warrant a pre-send ticket are the genuinely high-stakes cases the safety skill flags (e.g. a top-level post calling out a specific person by handle, or anything that crosses one of `emi-bluesky-safety`'s hard rules). If the safety skill says go, go.
 
 ## Rate limits
 
