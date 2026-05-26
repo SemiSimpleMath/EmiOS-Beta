@@ -57,7 +57,7 @@ import requests
 from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
 from app.assistant.lib.core_tools.tool_error_protocol import make_tool_error
 from app.assistant.pod_store.authority import (
-    AUTH_PUBLIC, AUTH_CHAT, AUTH_GATED, AUTH_USER,
+    AUTH_PUBLIC, AUTH_CHAT, AUTH_GATED, AUTH_USER, AUTH_COURIER,
 )
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import (
@@ -493,69 +493,95 @@ class HttpRequest(BaseTool):
         before sealing (so an int/float/dict field would still be capturable,
         but the typical case is opaque-string tokens).
 
-        Authority: pod kind is hashed through _kind_to_min_authority; for
-        the default `auth.session` kind (no .private/.gated/.chat/.public
-        suffix) this falls through to AUTH_USER (99), matching `auth.bearer`.
+        Authority model matches `auth.bearer`: the value lives ONLY in a
+        `full` projection gated at AUTH_COURIER (100) — readable solely
+        from http_request's own courier-scope resolver path, never by any
+        agent at AUTH_USER or below. PodRow.body stays None; projections
+        are the canonical retrieval surface. The earlier version of this
+        code stored the JWT in PodRow.body and never created a projection
+        row, which made the resolver report "pod has no projection 'full'"
+        and broke the whole flow — fixed.
         """
-        from app.assistant.pod_store.contracts import Pod
-        from app.assistant.pod_store.pod_store import PodStore
+        from app.assistant.pod_store.models import PodRow, PodProjection
+        from app.models.base import get_session
 
         rewritten = dict(body_json)
         minted_pod_ids: List[str] = []
-        store = PodStore()
-        min_authority = self._kind_to_min_authority(seal_pod_kind)
         now_iso = datetime.now(timezone.utc).isoformat()
 
-        for field_name in fields:
-            if field_name not in rewritten:
-                continue
-            raw_value = rewritten[field_name]
-            if raw_value is None:
-                continue
-            # Normalize to string for storage. The expected case is an
-            # opaque token (str). Non-strings (e.g. an object payload) get
-            # JSON-serialized so the sealed pod always has a string body.
-            if isinstance(raw_value, str):
-                stored_body = raw_value
-            else:
-                try:
-                    stored_body = json.dumps(raw_value, ensure_ascii=False)
-                except Exception:
-                    stored_body = str(raw_value)
+        session = get_session()
+        try:
+            for field_name in fields:
+                if field_name not in rewritten:
+                    continue
+                raw_value = rewritten[field_name]
+                if raw_value is None:
+                    continue
+                # Normalize to string. Expected: opaque token (str).
+                # Non-strings (a nested object) get JSON-serialized so the
+                # projection's plain_value column always holds a string.
+                if isinstance(raw_value, str):
+                    stored_value = raw_value
+                else:
+                    try:
+                        stored_value = json.dumps(raw_value, ensure_ascii=False)
+                    except Exception:
+                        stored_value = str(raw_value)
 
-            pod_uuid = uuid.uuid4().hex
-            pod_id = f"datapod:{seal_pod_kind}:{pod_uuid}"
-            one_liner = (
-                f"{field_name} from {method} {host} → {status_code} "
-                f"(sealed at {now_iso})"
-            )
-            pod = Pod(
-                pod_id=pod_id,
-                kind=seal_pod_kind,
-                tags=["http_response_field", host, seal_pod_kind, field_name],
-                one_liner=one_liner,
-                body=stored_body,
-                source_refs=[],
-                for_agents=[],
-                scope_id=None,
-                created_by=caller_agent or "http_request",
-                metadata={
-                    "url": url,
-                    "method": method,
-                    "host": host,
-                    "status_code": status_code,
-                    "sealed_field": field_name,
-                    "sealed_at": now_iso,
-                    "sealed_by_request_id": request_id,
-                },
-                min_authority=min_authority,
-            )
-            store.put(pod)
-            minted_pod_ids.append(pod_id)
-            # Replace the value with the pod-ref. /full projection matches
-            # the auth.bearer pattern; resolvers already handle the "no
-            # explicit projection ⇒ full" case so either form works.
-            rewritten[field_name] = f"{pod_id}/full"
+                pod_uuid = uuid.uuid4().hex
+                pod_id = f"datapod:{seal_pod_kind}:{pod_uuid}"
+                one_liner = (
+                    f"{field_name} from {method} {host} → {status_code} "
+                    f"(sealed at {now_iso})"
+                )
+
+                # PodRow: metadata only, body=None. Same shape as auth.bearer.
+                row = PodRow(
+                    pod_id=pod_id,
+                    kind=seal_pod_kind,
+                    tags_json=["http_response_field", host, seal_pod_kind, field_name],
+                    one_liner=one_liner,
+                    body=None,
+                    source_refs_json=[],
+                    for_agents_json=[],
+                    scope_id=None,
+                    min_authority=AUTH_COURIER,
+                    created_by=caller_agent or "http_request",
+                    metadata_json={
+                        "url": url,
+                        "method": method,
+                        "host": host,
+                        "status_code": status_code,
+                        "sealed_field": field_name,
+                        "sealed_at": now_iso,
+                        "sealed_by_request_id": request_id,
+                    },
+                )
+                session.add(row)
+                session.flush()
+
+                # PodProjection.full: the actual JWT, courier-only.
+                session.add(PodProjection(
+                    id=str(uuid.uuid4()),
+                    pod_id=pod_id,
+                    projection_name="full",
+                    min_authority=AUTH_COURIER,
+                    storage_kind="plain",
+                    plain_value=stored_value,
+                    env_ref=None,
+                    file_ref=None,
+                ))
+
+                minted_pod_ids.append(pod_id)
+                # Replace the value in the response body the agent sees.
+                rewritten[field_name] = f"{pod_id}/full"
+
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
 
         rewritten_body_text = json.dumps(rewritten, ensure_ascii=False)
         return rewritten, rewritten_body_text, minted_pod_ids
