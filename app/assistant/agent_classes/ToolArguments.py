@@ -205,10 +205,10 @@ class ToolArguments(Agent):
             # Inputs need richer hints).
             failure_class = self._classify_validation_error(e)
             arg_keys = sorted(args.keys()) if isinstance(args, dict) else []
+            err_line = str(e).splitlines()[0] if str(e) else ""
             logger.info(
                 "[%s] fast_validate_miss tool=%s failure_class=%s arg_keys=%s err=%s",
-                self.name, target_name, failure_class, arg_keys,
-                str(e).splitlines()[0][:200] if str(e) else "",
+                self.name, target_name, failure_class, arg_keys, err_line,
             )
             return None
 
