@@ -113,6 +113,10 @@ What to output:
 - A short label of what the user is doing right now (examples: At work, On lunch, AFK, Driving, At home).
 - This MUST be grounded in presence telemetry. If the user is AT_KEYBOARD, the status cannot be an out-of-house activity regardless of stated intent.
 
+Presence recency:
+- AFK / AT_KEYBOARD telemetry IS a recency signal about being at the desktop — use it the same way you'd use updated_at_local on a schedule item: the most recent AT_KEYBOARD or AFK transition is the freshest fact about presence.
+- Chat existing is NOT a presence signal. The user can chat from phone, so a recent chat message does not imply AT_KEYBOARD.
+
 Allowed edits:
 - Update only when there is a material change in current activity, based on the newest evidence.
 - Prefer inferred logic internally, but the output here is just the label (no evidence tag in this section).
