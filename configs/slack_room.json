@@ -1,12 +1,14 @@
 {
-  "use_room_mode": false,
-  "send_reply": false,
-  "allow_real_slack_send": false,
-  "message_persistence_mode": "global_blackboard_only",
-  "channel_id": "",
-  "default_room_id": "",
+  "use_room_mode": true,
+  "send_reply": true,
+  "allow_real_slack_send": true,
+  "message_persistence_mode": "global_blackboard_and_unified_log",
+  "channel_id": "C08AB0R54HM",
+  "default_room_id": "justin",
   "poll_limit": 100,
   "poll_overlap_seconds": 120,
   "status_resource_file": "resources/status/resource_slack_room_status.json",
-  "room_name_map": {}
+  "room_name_map": {
+    "justin": "justin"
+  }
 }
