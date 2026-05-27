@@ -32,18 +32,32 @@ class _RunContext:
     belief_update_result: Optional[Dict] = None
     reevaluation_result: Optional[Dict] = None
     canonicalization_result: Optional[Dict] = None
+    # Set by the caller (BeliefEngineAdapter) to "full" or "new_only".
+    # CanonicalizeBeliefSetStep reads this and falls back to its own
+    # sweep_tracker lookup when None.
+    canonicalization_mode: Optional[str] = None
 
 
 class BeliefEnginePipeline:
     pipeline_id = "belief_engine"
 
-    def __init__(self, domain: str = "routine", lookback_days: int = 14) -> None:
+    def __init__(
+        self,
+        domain: str = "routine",
+        lookback_days: int = 14,
+        canonicalization_mode: Optional[str] = None,
+    ) -> None:
         self.domain = domain
         self.lookback_days = lookback_days
+        self.canonicalization_mode = canonicalization_mode
 
     def run(self, *, run_id: Optional[str] = None) -> Dict:
         run_id = run_id or uuid.uuid4().hex[:8]
-        ctx = _RunContext(domain=self.domain, run_id=run_id)
+        ctx = _RunContext(
+            domain=self.domain,
+            run_id=run_id,
+            canonicalization_mode=self.canonicalization_mode,
+        )
         started = datetime.now(timezone.utc).isoformat()
         step_results = []
 

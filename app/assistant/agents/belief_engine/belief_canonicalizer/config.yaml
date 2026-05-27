@@ -2,8 +2,8 @@ name: belief_engine::belief_canonicalizer
 class_name: Agent
 llm_params:
   llm_provider: "openai"
-  engine: "gpt-5.2"
-  model_tier: "strong"
+  engine: "gpt-5.4-mini"
+  model_tier: "mini"
 
 allowed_tools: []
 except_tools: []

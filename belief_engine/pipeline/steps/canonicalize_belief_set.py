@@ -1,21 +1,33 @@
 """
 Step 4: Canonicalize near-duplicate beliefs within a domain.
 
-Strategy:
-- Load all active beliefs for the domain.
-- Sort them by embedding proximity using a nearest-neighbour walk so
-  semantically similar beliefs tend to be adjacent.
-- Send overlapping chunks of beliefs to the belief_canonicalizer LLM.
-- The LLM decides which beliefs to merge or leave as-is.
-- Repeat until a full pass produces zero merges.
-- Max passes is capped to avoid infinite loops.
+Two modes, decided per run by `belief_engine.state.sweep_tracker.decide_mode`:
 
-The embedding proximity is only used to sort/group candidates. The LLM makes
-all merge decisions. There is no hard cosine cutoff for actual merges.
+  - "full" (default cadence: weekly, plus bootstrap on first run):
+    Load ALL active beliefs for the domain, sort by embedding proximity,
+    send overlapping chunks to the canonicalizer LLM, multi-pass until
+    converged. After the last domain completes its full sweep, the
+    pipeline marks the timestamp.
+
+  - "new_only" (default cadence: 6 of 7 nights):
+    Load only beliefs created since the last full sweep. Skip the
+    domain entirely if fewer than 2 new beliefs (nothing to merge among
+    themselves). One pass, no multi-pass loop, no overlap — chunks are
+    tiny by definition.
+
+The hot path is "new_only" — usually 0-3 LLM calls per night across all
+domains. The weekly full sweep is the catch-net for cross-belief
+duplicates the new-only mode skipped (existing belief drifted, or
+reevaluator rewrote one belief into a near-duplicate of another).
+
+The embedding proximity is only used to sort/group candidates. The LLM
+makes all merge decisions. There is no hard cosine cutoff for actual
+merges.
 """
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Set
 
 from app.assistant.ServiceLocator.service_locator import ServiceLocator
@@ -23,6 +35,10 @@ from app.assistant.manager_runtime.services.scope_adapter import build_system_sc
 from app.assistant.utils.pydantic_classes import Message
 from app.assistant.utils.time_utils import get_local_time_str
 
+from belief_engine.state.sweep_tracker import (
+    decide_mode,
+    read_last_full_sweep_at,
+)
 from belief_engine.store.belief_store import BeliefRecord, BeliefStore
 
 logger = logging.getLogger(__name__)
@@ -292,13 +308,48 @@ def _run_canonicalization_pass(
     return total_merges
 
 
+def _filter_new_beliefs_since(
+    beliefs: List[BeliefRecord],
+    cutoff_utc: Optional[datetime],
+) -> List[BeliefRecord]:
+    """Return beliefs whose `created_at` is strictly after the cutoff.
+
+    cutoff_utc=None (no prior sweep recorded) → returns everything,
+    so the first run after bootstrap canonicalizes the full set.
+    Defensive on parse failure: treats unparseable timestamps as
+    "new" (better to include than silently skip).
+    """
+    if cutoff_utc is None:
+        return list(beliefs)
+    out: List[BeliefRecord] = []
+    cutoff_iso = cutoff_utc.isoformat()
+    for b in beliefs:
+        created_at = getattr(b, "created_at", None)
+        if not created_at:
+            out.append(b)
+            continue
+        # String compare is fine for ISO 8601 timestamps with a
+        # consistent timezone offset. Handle trailing Z by normalizing.
+        s = str(created_at).strip()
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        if s > cutoff_iso:
+            out.append(b)
+    return out
+
+
 class CanonicalizeBeliefSetStep:
     """
     Step 4 of BeliefEnginePipeline.
 
-    Repeatedly presents all active domain beliefs, sorted by proximity and
-    grouped into overlapping chunks, to the belief_canonicalizer LLM until no
-    more merges are produced or MAX_PASSES is reached.
+    Modes (decided via belief_engine.state.sweep_tracker.decide_mode):
+      - "full":     traditional multi-pass over all beliefs in the domain.
+      - "new_only": single pass over beliefs created since the last full
+                    sweep; skip if < 2.
+
+    The pipeline itself decides when to call `mark_full_sweep_completed()`
+    after the last domain completes a full sweep — this step doesn't
+    write the state itself (because it runs per-domain).
     """
 
     name = "canonicalize_belief_set"
@@ -334,8 +385,70 @@ class CanonicalizeBeliefSetStep:
             }
             return ctx.canonicalization_result
 
+        # ---- decide mode ----
+        # Honor an explicit override on ctx if the pipeline driver set
+        # one for this run; otherwise consult the sweep tracker. This
+        # lets the pipeline make ONE decision for all domains and pass
+        # it down, avoiding skew if midnight rolls over mid-pipeline.
+        mode = getattr(ctx, "canonicalization_mode", None) or decide_mode()
+        last_sweep = read_last_full_sweep_at()
+
+        if mode == "new_only":
+            new_beliefs = _filter_new_beliefs_since(initial_beliefs, last_sweep)
+            if len(new_beliefs) < 2:
+                logger.info(
+                    "[CanonicalizeBeliefSet] domain=%s new_only: %d new belief(s) since last sweep — skipping",
+                    self.domain, len(new_beliefs),
+                )
+                ctx.canonicalization_result = {
+                    "status": "skipped",
+                    "reason": "new_only_too_few_new",
+                    "mode": "new_only",
+                    "domain": self.domain,
+                    "initial_belief_count": initial_count,
+                    "final_belief_count": initial_count,
+                    "new_belief_count": len(new_beliefs),
+                    "total_merges": 0,
+                    "passes": 0,
+                }
+                return ctx.canonicalization_result
+
+            sorted_new = _proximity_sort(new_beliefs, store)
+            if dry_run:
+                ctx.canonicalization_result = {
+                    "status": "dry_run",
+                    "mode": "new_only",
+                    "domain": self.domain,
+                    "new_belief_count": len(new_beliefs),
+                    "new_belief_keys": [b.belief_key for b in sorted_new],
+                }
+                return ctx.canonicalization_result
+
+            agent_factory = ServiceLocator.get("agent_factory")
+            if agent_factory is None:
+                raise RuntimeError("agent_factory not available in DI")
+
+            logger.info(
+                "[CanonicalizeBeliefSet] domain=%s new_only: %d new beliefs to merge among themselves",
+                self.domain, len(new_beliefs),
+            )
+            merges = _run_canonicalization_pass(sorted_new, self.domain, store, agent_factory)
+            final_count = len(store.list_by_domain(self.domain))
+            ctx.canonicalization_result = {
+                "status": "ok",
+                "mode": "new_only",
+                "domain": self.domain,
+                "initial_belief_count": initial_count,
+                "final_belief_count": final_count,
+                "new_belief_count": len(new_beliefs),
+                "total_merges": merges,
+                "passes": 1,
+            }
+            return ctx.canonicalization_result
+
+        # ---- full mode (existing behavior) ----
         logger.info(
-            "[CanonicalizeBeliefSet] domain=%s starting with %d beliefs, chunk_size=%d overlap=%d max_passes=%d",
+            "[CanonicalizeBeliefSet] domain=%s full sweep: %d beliefs, chunk_size=%d overlap=%d max_passes=%d",
             self.domain,
             initial_count,
             CHUNK_SIZE,
@@ -349,6 +462,7 @@ class CanonicalizeBeliefSetStep:
             chunks = _iter_overlapping_chunks(sorted_beliefs)
             ctx.canonicalization_result = {
                 "status": "dry_run",
+                "mode": "full",
                 "domain": self.domain,
                 "belief_count": initial_count,
                 "chunk_size": CHUNK_SIZE,
@@ -438,6 +552,7 @@ class CanonicalizeBeliefSetStep:
 
         ctx.canonicalization_result = {
             "status": "ok",
+            "mode": "full",
             "domain": self.domain,
             "initial_belief_count": initial_count,
             "final_belief_count": final_count,
