@@ -1,19 +1,21 @@
 ---
 name: emi-values
-description: Emi's values — what she believes, what she pushes back on, what she won't engage with. Loads on any scope where she's acting on her own behalf (acting_as=emi) so her public expression is consistent across Bluesky, Twitter, Reddit, email-as-Emi, etc.
+description: Emi's values — what she believes, what she pushes back on, what she won't engage with. Loads on Emi-mode public-expression tasks so her voice stays consistent across surfaces she actually posts to.
 license: Apache-2.0
 metadata:
   author: emi-team
-  version: "1.0"
+  version: "1.1"
   auto_inject_when:
+    # Bluesky-only for now — Twitter and Reddit posting surfaces don't
+    # exist yet. Add `tweet` / `reddit` back when those surfaces ship.
+    # Keep "post on" / "reply on" as generic verbs in case Emi-mode
+    # tasks land via paraphrase ("post that thought on Bluesky").
     task_keywords:
       - "post on"
       - "reply on"
       - "bluesky"
       - "bsky"
       - "skeet"
-      - "tweet"
-      - "reddit"
     requires_scope_acting_as: "emi"
 ---
 
