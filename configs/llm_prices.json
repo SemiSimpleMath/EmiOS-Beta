@@ -1,0 +1,22 @@
+{
+  "_comment": "Per-engine LLM prices in USD per 1M tokens. Manually maintained. Update when providers change pricing. Missing engines log a warning at record time and store cost as 0 (under-counts; not fatal).",
+  "_last_updated": "2026-05-26",
+  "_source": "provider pricing pages",
+
+  "gpt-5.1":         {"input_per_1m_usd": 1.25, "output_per_1m_usd": 10.0},
+  "gpt-5.2":         {"input_per_1m_usd": 5.0,  "output_per_1m_usd": 25.0},
+  "gpt-5.4-mini":    {"input_per_1m_usd": 0.40, "output_per_1m_usd": 1.60},
+  "gpt-5.4-nano":    {"input_per_1m_usd": 0.05, "output_per_1m_usd": 0.40},
+  "gpt-5-nano":      {"input_per_1m_usd": 0.05, "output_per_1m_usd": 0.40},
+  "gpt-5-mini":      {"input_per_1m_usd": 0.25, "output_per_1m_usd": 2.00},
+  "gpt-5":           {"input_per_1m_usd": 1.25, "output_per_1m_usd": 10.0},
+  "gpt-4.1":         {"input_per_1m_usd": 2.0,  "output_per_1m_usd": 8.0},
+  "gpt-4.1-mini":    {"input_per_1m_usd": 0.40, "output_per_1m_usd": 1.60},
+
+  "claude-opus-4-7":     {"input_per_1m_usd": 15.0, "output_per_1m_usd": 75.0},
+  "claude-sonnet-4-6":   {"input_per_1m_usd": 3.0,  "output_per_1m_usd": 15.0},
+  "claude-haiku-4-5-20251001": {"input_per_1m_usd": 1.0, "output_per_1m_usd": 5.0},
+
+  "gemini-3-flash-preview": {"input_per_1m_usd": 0.10, "output_per_1m_usd": 0.40},
+  "gemini-3-pro-preview":   {"input_per_1m_usd": 1.25, "output_per_1m_usd": 5.00}
+}

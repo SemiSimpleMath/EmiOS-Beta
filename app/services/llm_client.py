@@ -324,6 +324,9 @@ class OpenAIStructuredOutputStrategy:
 class OpenAIPromptJsonValidateStrategy(OpenAIStructuredOutputStrategy):
     route_name = "prompt_json_validate"
 
+    def __init__(self):
+        self.last_usage = None
+
     def execute(
         self,
         *,
@@ -336,6 +339,9 @@ class OpenAIPromptJsonValidateStrategy(OpenAIStructuredOutputStrategy):
     ) -> Dict[str, Any]:
         kwargs = caps.build_base_kwargs(messages=messages, timeout=timeout, temperature=temperature)
         response = client.responses.create(**kwargs)
+        # Capture usage for the call logger before parsing. Persists even
+        # if the parse below fails — failed parses still bill real tokens.
+        self.last_usage = getattr(response, "usage", None)
         raw_text = _extract_response_text(response)
         if not isinstance(raw_text, str) or not raw_text.strip():
             raise ValueError("OpenAI response contained no parsable text output")
@@ -348,6 +354,9 @@ class OpenAIPromptJsonValidateStrategy(OpenAIStructuredOutputStrategy):
 
 class OpenAIDirectPydanticParseStrategy(OpenAIStructuredOutputStrategy):
     route_name = "direct_pydantic_parse"
+
+    def __init__(self):
+        self.last_usage = None
 
     def execute(
         self,
@@ -369,6 +378,10 @@ class OpenAIDirectPydanticParseStrategy(OpenAIStructuredOutputStrategy):
             raise RuntimeError("OpenAI client does not support responses.parse for direct Pydantic output.")
 
         response = parse_api(**parse_kwargs)
+        # Capture usage before extracting parsed result — same reasoning
+        # as the prompt-json-validate path. The most-trafficked strategy
+        # in production (most agents route through here).
+        self.last_usage = getattr(response, "usage", None)
         parsed = getattr(response, "output_parsed", None)
         if parsed is None:
             raise ValueError("OpenAI parse response did not include output_parsed.")
@@ -554,6 +567,8 @@ class OpenAILLM(BaseLLMProvider):
         raise RuntimeError("structured_output: no attempts were made")
 
     def _structured_output_once(self, messages, **send_params):
+        import time as _time
+
         messages = _normalize_openai_responses_messages(messages)
         response_format = send_params.get('response_format')
         model = send_params.get('engine') or send_params.get('model') or "gpt-4.1-mini"
@@ -573,14 +588,21 @@ class OpenAILLM(BaseLLMProvider):
 
         # Start timing the LLM call
         timer_id = performance_monitor.start_timer('llm_structured_output', f"{model}_{len(messages)}")
-        
+
+        # llm_call_log telemetry (Phase 1, 2026-05-26). Wall-clock around
+        # the API call so duration_ms captures the full provider round
+        # trip. Strategy is built (and stays as None) before the API call
+        # — populated in the try block once we know which one to use.
+        strategy: Optional[OpenAIStructuredOutputStrategy] = None
+        log_status = "error"
+        _call_started = _time.monotonic()
+
         try:
             from pydantic import BaseModel as _BaseModel  # local import for clarity
             if not isinstance(model, str) or not model.strip():
                 raise ValueError("model must be a non-empty string")
             caps = OpenAIModelCapabilityNormalizer(model_name=model)
 
-            strategy: OpenAIStructuredOutputStrategy
             if isinstance(response_format, type) and issubclass(response_format, _BaseModel):
                 if pydantic_mode == "prompt_json_validate":
                     strategy = OpenAIPromptJsonValidateStrategy()
@@ -602,7 +624,7 @@ class OpenAILLM(BaseLLMProvider):
                 )
             else:
                 raise ValueError(f"Invalid response format: {type(response_format)}")
-            return strategy.execute(
+            result = strategy.execute(
                 client=self.client,
                 caps=caps,
                 messages=messages,
@@ -610,6 +632,8 @@ class OpenAILLM(BaseLLMProvider):
                 temperature=temperature,
                 response_format=response_format,
             )
+            log_status = "ok"
+            return result
 
         except Exception as e:
             # End timing and record error
@@ -621,11 +645,24 @@ class OpenAILLM(BaseLLMProvider):
                 'timeout': timeout,
                 'error': str(e)
             })
-            
+
             logger.error(f"Error processing input function_query: {e}")
             logger.debug("OpenAI structured_output exception details", exc_info=True)
             error_str = str(e).lower()
-            
+
+            # Classify for the call log status field (kept simple — the
+            # exception type carries the detail; status is for fast group-by).
+            if "quota" in error_str or "insufficient_quota" in error_str:
+                log_status = "quota"
+            elif "timeout" in error_str or "timed out" in error_str:
+                log_status = "timeout"
+            elif "rate limit" in error_str:
+                log_status = "rate_limit"
+            elif "invalid json" in error_str or "validation error" in error_str:
+                log_status = "parse_error"
+            else:
+                log_status = "error"
+
             # FATAL: Quota errors require immediate program exit
             if "quota" in error_str or "insufficient_quota" in error_str:
                 _handle_fatal_quota_error(str(e), f"structured_output (model: {model})")
@@ -636,6 +673,22 @@ class OpenAILLM(BaseLLMProvider):
             if "rate limit" in error_str:
                 raise RuntimeError("LLM rate limit exceeded") from e
             raise RuntimeError(f"LLM structured_output failed: {e}") from e
+        finally:
+            # Persist one llm_call_log row regardless of outcome. Failure-
+            # tolerant inside the helper — won't raise even if the DB write
+            # fails (telemetry must never break the actual LLM call).
+            try:
+                from app.services.llm_call_logger import record_llm_call
+                duration_ms = int((_time.monotonic() - _call_started) * 1000.0)
+                record_llm_call(
+                    engine=model,
+                    provider="openai",
+                    usage=getattr(strategy, "last_usage", None) if strategy else None,
+                    duration_ms=duration_ms,
+                    status=log_status,
+                )
+            except Exception as _telemetry_err:  # paranoia layer; logger already absorbs
+                logger.debug("llm_call_log write skipped: %s", _telemetry_err)
 
     def structured_output_json(self, messages, **send_params):
         messages = _normalize_openai_responses_messages(messages)

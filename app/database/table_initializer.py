@@ -35,6 +35,7 @@ def initialize_core_tables():
     from app.assistant.database.processed_entity_log import ProcessedEntityLog  # noqa: F401
     from app.assistant.database.kg_node_verdict import KGNodeVerdict  # noqa: F401
     from app.assistant.ticket_manager.ticket import Ticket  # noqa: F401
+    from app.models.llm_call_log import LLMCallLog  # noqa: F401  # token telemetry
 
     engine = get_current_engine()
     Base.metadata.create_all(engine, checkfirst=True)

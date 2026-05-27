@@ -347,11 +347,31 @@ class LLMClient:
             )
             logger.info("[%s] LLM request engine=%s input_tokens≈%d", agent.name, engine, _total_chars // 4)
 
-            response = llm_interface.structured_output(
-                messages,
-                use_json=use_json,
-                **params,
+            # Set call-context for the telemetry logger (llm_call_log).
+            # Stays scoped to this call via try/finally so nested calls
+            # inherit / restore correctly.
+            from app.services.llm_call_logger import set_current_call_context
+            try:
+                _scope_ctx = agent.blackboard.get_state_value("scope_context")
+            except Exception:
+                _scope_ctx = None
+            _scope_id = None
+            if _scope_ctx is not None:
+                _scope_id = getattr(_scope_ctx, "scope_id", None) or (
+                    _scope_ctx.get("scope_id") if isinstance(_scope_ctx, dict) else None
+                )
+            _prev_ctx = set_current_call_context(
+                agent_name=agent.name,
+                caller_scope_id=_scope_id,
             )
+            try:
+                response = llm_interface.structured_output(
+                    messages,
+                    use_json=use_json,
+                    **params,
+                )
+            finally:
+                set_current_call_context(**_prev_ctx)
             self.check_for_quota_error(agent_name=agent.name, response_text=response)
             return response
         except Exception as e:
