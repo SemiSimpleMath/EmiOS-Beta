@@ -34,8 +34,28 @@ from typing import Any, Dict, List
 
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_repo_root
+from app.assistant.utils.time_utils import utc_to_local
 
 logger = get_logger(__name__)
+
+
+def _iso_utc_to_local_str(value: Any) -> str:
+    """Convert an ISO-8601 UTC string to local 'YYYY-MM-DD HH:MM AM/PM'.
+    Returns "" on missing / unparseable input.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return ""
+    try:
+        from datetime import datetime, timezone
+        s = value.strip()
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return utc_to_local(dt).strftime("%Y-%m-%d %I:%M %p")
+    except Exception:
+        return ""
 
 
 # Concerns with these horizons go into the "this_week" bucket; everything
@@ -90,6 +110,10 @@ def _project_concern(concern: Dict[str, Any]) -> Dict[str, Any]:
         "notes": notes,
         "evidence_count": len(concern.get("evidence") or [])
         if isinstance(concern.get("evidence"), list) else 0,
+        # Freshness signal — parallel to expected_schedule items' updated_at_local.
+        # Consumers use this to resolve "newer signal wins" overrides when a
+        # concern contradicts an older calendar entry.
+        "last_updated_local": _iso_utc_to_local_str(concern.get("last_reinforced_utc")),
     }
 
 

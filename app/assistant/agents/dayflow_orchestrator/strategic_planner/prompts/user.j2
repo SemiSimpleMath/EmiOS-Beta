@@ -52,7 +52,7 @@ No schedule available.
 *These were emitted by the subconscious noticer. They route via `addressable_by`: items addressed to `dayflow_orchestrator` are yours to act on (consider opening a plan_task or escalation ticket). Items addressed to other channels (chat_brain, *_proposer) are background context — don't double-handle them.*
 {%- for c in _subc.active_concerns_this_week %}
 - [{{ c.severity }}/{{ c.horizon }}] {{ c.title }}
-  subject: {{ c.subject }} | addressable_by: {{ c.addressable_by | join(", ") }} | evidence: {{ c.evidence_count }}
+  subject: {{ c.subject }} | addressable_by: {{ c.addressable_by | join(", ") }} | evidence: {{ c.evidence_count }}{% if c.last_updated_local %} | updated_at: {{ c.last_updated_local }}{% endif %}
   notes: {{ c.notes }}
 {%- endfor %}
 {%- endif %}
@@ -61,7 +61,7 @@ No schedule available.
 ########## SUBCONSCIOUS — LONGER-HORIZON CONCERNS (this_month and beyond) ##########
 *Background awareness — not today's urgent work. Use these to anticipate (e.g. start prep N days ahead), but don't create immediate plan_tasks unless evidence shows the horizon is collapsing.*
 {%- for c in _subc.active_concerns_longer_horizon %}
-- [{{ c.severity }}/{{ c.horizon }}] {{ c.title }} ({{ c.subject }})
+- [{{ c.severity }}/{{ c.horizon }}] {{ c.title }} ({{ c.subject }}){% if c.last_updated_local %} | updated_at: {{ c.last_updated_local }}{% endif %}
   notes: {{ c.notes }}
 {%- endfor %}
 {%- endif %}
