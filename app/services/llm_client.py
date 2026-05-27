@@ -947,6 +947,8 @@ class GeminiLLM(BaseLLMProvider):
         )
 
     def structured_output(self, messages, **send_params):
+        import time as _time
+
         response_format = send_params.get('response_format')
         model_name = send_params.get('engine', self.engine)
         temperature = send_params.get('temperature', self.temperature)
@@ -961,6 +963,12 @@ class GeminiLLM(BaseLLMProvider):
         logger.info(f"Using Gemini model: {model_name} for structured output")
 
         timer_id = performance_monitor.start_timer('llm_structured_output_gemini', f"{model_name}_{len(messages)}")
+
+        # llm_call_log telemetry — Gemini exposes usage at
+        # response.usage_metadata (prompt_token_count / candidates_token_count).
+        _telemetry_usage = None
+        _telemetry_status = "error"
+        _call_started = _time.monotonic()
 
         try:
             system_instruction, content = self._convert_messages_to_contents(messages)
@@ -996,6 +1004,7 @@ class GeminiLLM(BaseLLMProvider):
                     safety_settings=self._permissive_safety_settings(),
                 )
             )
+            _telemetry_usage = getattr(response, "usage_metadata", None)
 
             print(f"    [Gemini] << OK [thread:{_thread.name}]", flush=True)
             logger.info("Gemini generate_content returned (model=%s, thread=%s)", model_name, _thread.name)
@@ -1020,12 +1029,37 @@ class GeminiLLM(BaseLLMProvider):
 
             performance_monitor.end_timer(timer_id, {'status': 'success', 'model': model_name})
             logger.info(f"✅ Gemini response received successfully")
+            _telemetry_status = "ok"
             return result_dict
 
         except Exception as e:
             performance_monitor.end_timer(timer_id, {'status': 'error', 'model': model_name, 'error': str(e)})
             logger.error(f"Gemini LLM error: {e}", exc_info=True)
+            err_str = str(e).lower()
+            if "quota" in err_str or "exceeded" in err_str:
+                _telemetry_status = "quota"
+            elif "timeout" in err_str or "timed out" in err_str:
+                _telemetry_status = "timeout"
+            elif "rate" in err_str and "limit" in err_str:
+                _telemetry_status = "rate_limit"
+            elif "json" in err_str or "validation" in err_str or "block_reason" in err_str:
+                _telemetry_status = "parse_error"
+            else:
+                _telemetry_status = "error"
             raise
+        finally:
+            try:
+                from app.services.llm_call_logger import record_llm_call
+                duration_ms = int((_time.monotonic() - _call_started) * 1000.0)
+                record_llm_call(
+                    engine=model_name,
+                    provider="gemini",
+                    usage=_telemetry_usage,
+                    duration_ms=duration_ms,
+                    status=_telemetry_status,
+                )
+            except Exception as _telemetry_err:
+                logger.debug("llm_call_log write skipped (gemini): %s", _telemetry_err)
 
     def structured_output_json(self, messages, **send_params):
         """Gemini equivalent for structured JSON output."""
@@ -1089,6 +1123,8 @@ class AnthropicLLM(BaseLLMProvider):
         return "\n\n".join(system_parts) if system_parts else None, chat_messages
 
     def structured_output(self, messages, **send_params):
+        import time as _time
+
         response_format = send_params.get('response_format')
         model_name = send_params.get('engine', self.engine)
         temperature = send_params.get('temperature', self.temperature)
@@ -1099,6 +1135,12 @@ class AnthropicLLM(BaseLLMProvider):
 
         logger.info(f"Using Anthropic model: {model_name} for structured output")
         timer_id = performance_monitor.start_timer('llm_structured_output_anthropic', f"{model_name}_{len(messages)}")
+
+        # llm_call_log telemetry — capture usage from `response.usage` on
+        # the Anthropic side. Wrap in finally so failures persist too.
+        _telemetry_usage = None
+        _telemetry_status = "error"
+        _call_started = _time.monotonic()
 
         try:
             import json as json_lib
@@ -1121,6 +1163,7 @@ class AnthropicLLM(BaseLLMProvider):
                 system=full_system,
                 messages=chat_messages,
             )
+            _telemetry_usage = getattr(response, "usage", None)
 
             raw_text = response.content[0].text.strip()
 
@@ -1133,12 +1176,37 @@ class AnthropicLLM(BaseLLMProvider):
 
             performance_monitor.end_timer(timer_id, {'status': 'success', 'model': model_name})
             logger.info("✅ Anthropic response received successfully")
+            _telemetry_status = "ok"
             return result_dict
 
         except Exception as e:
             performance_monitor.end_timer(timer_id, {'status': 'error', 'model': model_name, 'error': str(e)})
             logger.error(f"Anthropic LLM error: {e}", exc_info=True)
+            err_str = str(e).lower()
+            if "quota" in err_str or "insufficient" in err_str or "credit" in err_str:
+                _telemetry_status = "quota"
+            elif "timeout" in err_str or "timed out" in err_str:
+                _telemetry_status = "timeout"
+            elif "rate" in err_str and "limit" in err_str:
+                _telemetry_status = "rate_limit"
+            elif "json" in err_str or "validation" in err_str:
+                _telemetry_status = "parse_error"
+            else:
+                _telemetry_status = "error"
             raise
+        finally:
+            try:
+                from app.services.llm_call_logger import record_llm_call
+                duration_ms = int((_time.monotonic() - _call_started) * 1000.0)
+                record_llm_call(
+                    engine=model_name,
+                    provider="anthropic",
+                    usage=_telemetry_usage,
+                    duration_ms=duration_ms,
+                    status=_telemetry_status,
+                )
+            except Exception as _telemetry_err:
+                logger.debug("llm_call_log write skipped (anthropic): %s", _telemetry_err)
 
     def structured_output_json(self, messages, **send_params):
         return self.structured_output(messages, **send_params)

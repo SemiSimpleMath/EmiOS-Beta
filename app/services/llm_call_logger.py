@@ -185,26 +185,40 @@ def record_llm_call(
 
 
 def _extract_usage_counts(usage: Any) -> tuple[int, int, int]:
-    """Returns (input_tokens, output_tokens, cached_tokens). 0/0/0 on missing usage."""
+    """Returns (input_tokens, output_tokens, cached_tokens). 0/0/0 on missing usage.
+
+    Three provider conventions:
+      - OpenAI Responses API: usage.input_tokens / output_tokens, with
+        usage.input_tokens_details.cached_tokens for the cached sub-count.
+      - OpenAI Chat Completions: usage.prompt_tokens / completion_tokens.
+      - Anthropic: usage.input_tokens / output_tokens (matches OpenAI naming).
+      - Gemini: usage_metadata.prompt_token_count / candidates_token_count,
+        with cached_content_token_count for the cached sub-count.
+    Try each in turn; first non-None wins.
+    """
     if usage is None:
         return 0, 0, 0
-    # OpenAI responses API uses input_tokens / output_tokens.
     input_tokens = (
         getattr(usage, "input_tokens", None)
         or getattr(usage, "prompt_tokens", None)
+        or getattr(usage, "prompt_token_count", None)
         or 0
     )
     output_tokens = (
         getattr(usage, "output_tokens", None)
         or getattr(usage, "completion_tokens", None)
+        or getattr(usage, "candidates_token_count", None)
         or 0
     )
-    # Cached tokens come back inside input_tokens_details on responses API,
-    # or directly as cached_tokens on some flows.
+    # Cached tokens: OpenAI nests them; Anthropic + Gemini surface a flat field.
     cached = 0
     details = getattr(usage, "input_tokens_details", None)
     if details is not None:
         cached = getattr(details, "cached_tokens", 0) or 0
     if not cached:
-        cached = getattr(usage, "cached_tokens", 0) or 0
+        cached = (
+            getattr(usage, "cached_tokens", 0)
+            or getattr(usage, "cached_content_token_count", 0)
+            or 0
+        )
     return int(input_tokens or 0), int(output_tokens or 0), int(cached or 0)
