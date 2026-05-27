@@ -203,6 +203,9 @@ data/execution_traces/
 data/playwright_profile/
 data/playwright_screenshots/
 data/kg_projection/
+# Local backups (beliefs, KG snapshots, etc.) — point-in-time data dumps,
+# stay local to the install.
+data/backups/
 # EmiCode runtime state — Claude Code session_ids per room context.
 data/emi_code/
 # Ring camera credentials + snapshots — never commit these
