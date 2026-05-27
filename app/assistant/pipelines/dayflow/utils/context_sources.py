@@ -26,6 +26,19 @@ def _parse_utc(value: Optional[str]) -> Optional[datetime]:
         return None
 
 
+def _format_iso_utc_as_local(value: Optional[str]) -> str:
+    """Convert Google Calendar's ISO-8601 UTC string (e.g. "2024-09-15T21:11:42.000Z")
+    to a local 'YYYY-MM-DD HH:MM AM/PM' string. Returns empty string when input
+    is missing or unparseable so callers can use it as a render-when-present hint.
+    """
+    if not value:
+        return ""
+    dt_utc = _parse_utc(value)
+    if dt_utc is None:
+        return ""
+    return utc_to_local(dt_utc).strftime("%Y-%m-%d %I:%M %p")
+
+
 def _load_calendar_events() -> List[Dict[str, Any]]:
     try:
         from app.assistant.event_repository.event_repository import EventRepositoryManager
@@ -59,6 +72,8 @@ def _load_calendar_events() -> List[Dict[str, Any]]:
                     "start_utc": start,
                     "end_utc": end,
                     "attendees": data.get("attendees", []) or [],
+                    "updated": data.get("updated", ""),
+                    "created": data.get("created", ""),
                 }
             )
 
@@ -112,6 +127,8 @@ def get_calendar_events_structured_for_day(boundary_date_local: str) -> List[Dic
             seed = f"{event.get('summary','')}|{start_utc.isoformat()}|{end_utc.isoformat() if end_utc else ''}"
             source_id = f"calendar_{hashlib.sha256(seed.encode('utf-8')).hexdigest()[:16]}"
 
+        updated_at_local = _format_iso_utc_as_local(event.get("updated"))
+
         structured.append(
             {
                 "calendar_item_id": source_id,
@@ -121,7 +138,8 @@ def get_calendar_events_structured_for_day(boundary_date_local: str) -> List[Dic
                 "start_local": start_local_dt.strftime("%I:%M %p"),
                 "end_local": end_local_dt.strftime("%I:%M %p") if end_local_dt else "",
                 "status": status,
-                "source": "event_repository",
+                "source": "google_calendar",
+                "updated_at_local": updated_at_local,
             }
         )
 

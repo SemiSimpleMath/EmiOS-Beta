@@ -602,6 +602,8 @@ class CalendarTool(BaseTool):
                     }
                     for attendee in event.get("attendees", [])
                 ],
+                "created": event.get("created", ""),
+                "updated": event.get("updated", ""),
                 "data_type": "calendar",
             }
 
