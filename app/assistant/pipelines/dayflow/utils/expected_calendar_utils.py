@@ -59,7 +59,11 @@ def normalize_expected_schedule_to_utc(
         start_local = str(item.get("start_local") or "").strip()
         end_local = str(item.get("end_local") or "").strip()
         status = str(item.get("status") or "upcoming").strip().lower() or "upcoming"
-        source = str(item.get("source") or "user").strip().lower() or "user"
+        # Preserve free-form source (no lower-casing) so agent-emitted tags like
+        # "concern:Memorial Day delays Irvine trash pickup by a day" round-trip
+        # intact. Default to "google_calendar" if missing.
+        source = str(item.get("source") or "google_calendar").strip() or "google_calendar"
+        updated_at_local = str(item.get("updated_at_local") or "").strip()
         calendar_item_id = str(item.get("calendar_item_id") or "").strip()
 
         start_utc = _resolve_start_utc(item, boundary_date=boundary_date, local_tz=local_tz)
@@ -77,6 +81,7 @@ def normalize_expected_schedule_to_utc(
                 "end_local": end_local,
                 "status": status,
                 "source": source,
+                "updated_at_local": updated_at_local,
                 "calendar_item_id": calendar_item_id,
                 "start_utc": start_utc.isoformat() if isinstance(start_utc, datetime) else "",
                 "end_utc": end_utc.isoformat() if isinstance(end_utc, datetime) else "",

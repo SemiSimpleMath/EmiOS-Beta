@@ -41,9 +41,9 @@
 ########## NEW SIGNALS ##########
 {%- if expected_calendar_payload and expected_calendar_payload.expected_schedule %}
 ## Expected Calendar (source of truth)
-*Use this as the baseline schedule for today. Apply only evidence-based edits from chat/tickets/AFK.*
+*Use this as the baseline schedule for today. Apply only evidence-based edits from chat/tickets/AFK. The `source` and `updated_at` annotations let you decide which signal wins when two contradict — newer overrides older.*
 {%- for item in expected_calendar_payload.expected_schedule %}
-- **{{ item.title }}** ({{ item.start_local }}{% if item.end_local %} - {{ item.end_local }}{% endif %}) [status: {{ item.status }}]{% if item.calendar_item_id %} [calendar_item_id: {{ item.calendar_item_id }}]{% endif %}
+- **{{ item.title }}** ({{ item.start_local }}{% if item.end_local %} - {{ item.end_local }}{% endif %}) [status: {{ item.status }}] [source: {{ item.source or "google_calendar" }}]{% if item.updated_at_local %} [updated_at: {{ item.updated_at_local }}]{% endif %}{% if item.calendar_item_id %} [calendar_item_id: {{ item.calendar_item_id }}]{% endif %}
 {%- endfor %}
 {%- endif %}
 {%- if expected_calendar_markdown %}

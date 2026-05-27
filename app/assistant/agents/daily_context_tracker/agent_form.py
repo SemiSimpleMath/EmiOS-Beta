@@ -19,13 +19,30 @@ class ScheduleItem(BaseModel):
     status: Literal["upcoming", "ongoing", "completed", "cancelled"] = Field(
         description="Lifecycle status relative to current time."
     )
-    source: Literal["calendar", "user", "inferred"] = Field(
-        default="calendar",
-        description="Where this item originated: 'calendar' (Google Calendar), 'user' (user chat/report), 'inferred' (derived from evidence)."
+    source: str = Field(
+        default="google_calendar",
+        description=(
+            "Short label for where this item came from / what last asserted it. "
+            "Free-form, but use compact tags so downstream readers can compare. "
+            "Examples: 'google_calendar' (recurring or one-off Google event), "
+            "'user_chat' (user reported it), 'concern:<concern_title_or_id>' "
+            "(subconscious concern), 'ticket:<id>' (ticket response), 'inferred' "
+            "(derived from telemetry). When a newer signal overrides an older one, "
+            "update source to the newer source."
+        ),
+    )
+    updated_at_local: str = Field(
+        default="",
+        description=(
+            "Local time this item was last asserted or updated, in 'YYYY-MM-DD HH:MM AM/PM' "
+            "form. For Google Calendar items, this is the event's last-modified time; for "
+            "user_chat-driven items, the message time; for concern-driven items, the concern's "
+            "last-updated time. Empty if unknown. Used to resolve override conflicts — newer wins."
+        ),
     )
     calendar_item_id: str = Field(
         default="",
-        description="Stable calendar event ID. Copy verbatim from the input calendar event if source is 'calendar'. Leave empty for user/inferred items.",
+        description="Stable calendar event ID. Copy verbatim from the input calendar event if source is 'google_calendar'. Leave empty for non-calendar items.",
     )
 
 

@@ -28,13 +28,19 @@ make a note that even if total sleep is X then because of users statements it wa
 ====================
 
 What to output:
-- Today's adjusted schedule as a structured list of items. Each item has: title, start_local, end_local, status, source, calendar_item_id.
+- Today's adjusted schedule as a structured list of items. Each item has: title, start_local, end_local, status, source, updated_at_local, calendar_item_id.
 - Treat expected_calendar_payload.expected_schedule as the baseline source-of-truth for today's schedule.
 - Build the final schedule by applying evidence-based edits (calendar/chat/tickets/AFK) to that baseline while maintaining continuity with the previous daily context.
 - When Google Calendar events are provided with calendar_item_id, copy that ID verbatim into schedule items. Preserve calendar_item_id on later updates.
-- Adjust based on evidence from chat, tickets, and AFK: if the user says "dentist moved to 2 PM", update that item's times. If the user says something is cancelled today, mark it cancelled. If the user mentions a new activity, add it with source "user" (leave calendar_item_id empty for non-calendar items).
+- Adjust based on evidence from chat, tickets, and AFK: if the user says "dentist moved to 2 PM", update that item's times. If the user says something is cancelled today, mark it cancelled. If the user mentions a new activity, add it with source "user_chat" (leave calendar_item_id empty for non-calendar items).
 - Use local 12-hour times (e.g., "9:00 AM", "4:30 PM"). The pipeline will convert to UTC.
 - Mark items that have already passed as "completed". Items happening now as "ongoing". Future items as "upcoming". Cancelled items as "cancelled".
+
+Provenance per item (CRITICAL — this is how the system resolves conflicts):
+- For every item, record `source` (where this item came from / what last asserted it) and `updated_at_local` (the local time when that source last asserted it).
+- Source examples: 'google_calendar' (recurring or one-off Google event), 'user_chat', 'concern:<short concern title>', 'ticket:<id>', 'inferred'.
+- When two signals contradict on the same item, prefer the NEWER `updated_at_local`. Then set `source` and `updated_at_local` on the emitted item to the newer signal — not to the older one being overridden. Example: a recurring Google Calendar entry created months ago for "Trash Night" is older than a subconscious concern surfaced this morning that says "Memorial Day delays Irvine pickup by a day" — the concern wins, and the item's status should reflect the concern (e.g., cancelled or moved), with source set to the concern and updated_at_local set to the concern's last-updated time.
+- If an item is unchanged from prior daily context, keep its existing source and updated_at_local (do not bump updated_at_local just because you re-emitted the item).
 
 Allowed edits:
 - You may edit this section only if:
