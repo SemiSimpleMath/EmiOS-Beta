@@ -1,22 +1,13 @@
-Make an HTTP request to any REST/JSON API. Use this for **any service that exposes an HTTP API** — Bluesky (AT Protocol: createSession / createRecord / getTimeline), Mastodon, Reddit, GitHub, Spotify, WHOOP, OpenAI, Anthropic, Polymarket, OnStar, any social / productivity / finance / health platform. Also covers generic REST endpoints, webhooks, OAuth token endpoints, and JSON POSTs. For browser-rendered pages or stateful sessions, use `playwright_manager` instead.
+HTTP/REST request tool with two project-specific extensions a stock HTTP client doesn't have:
 
-**Pod-aware auth.** Header values may be `datapod:` references — sealed credentials (Bearer tokens, API keys, app passwords) that the tool resolves at courier scope. The resolved string never enters your transcript. Format: `datapod:<kind>:<id>` (implicit 'full' projection) or `datapod:<kind>:<id>/<projection>` (explicit).
-
-**Body is ALWAYS a string.** For JSON APIs, pass a JSON-encoded string — the tool `json.loads` it at execute time and sends it as JSON. For raw text/binary bodies, pass the literal string. For a sealed payload, pass a single `datapod:<kind>:<id>/<projection>` reference (the whole body comes from the pod).
-
-**Pod-aware fields inside the JSON body.** When the body is a JSON-encoded object/array, any string field whose value starts with `datapod:` is resolved per-field at courier scope (recurses into nested objects and arrays). This is what makes APIs like Bluesky's createSession work — write the body as:
+1. **Pod-aware auth.** Any header value, OR any string field inside a JSON-encoded `body`, that starts with `datapod:<kind>:<id>[/<projection>]` resolves at courier scope at execute time — the secret bytes never enter your transcript. Per-field substitution recurses into nested objects and arrays. Example for Bluesky createSession:
 
 ```
-"{\"identifier\": \"<handle>\", \"password\": \"datapod:auth.bearer:<id>/full\"}"
+body: "{\"identifier\":\"<handle>\",\"password\":\"datapod:auth.bearer:<id>/full\"}"
 ```
 
-The `password` field resolves to the real secret at courier scope without entering your transcript.
+2. **Pod-sealed response.** Set `response_pod_kind` (e.g. `'health.private'`, `'financial.private'`) to seal the response body into a new pod at that privacy class. The agent gets `response_pod_id` instead of body content; downstream skills at the appropriate authority `pod_fetch` to act on it.
 
-**Pod-sealed response.** Set `response_pod_kind` (e.g. `'health.private'`, `'financial.private'`) to seal the response body into a NEW pod. The tool returns `response_pod_id` instead of the body content; a downstream skill at the appropriate authority can `pod_fetch` to act on it. The agent driving this call never reads the response.
+`body` is ALWAYS a string. For JSON APIs, JSON-encode and pass; the tool `json.loads` at execute time. `expect_status` (e.g. `[200]`) fails the call loudly on any other status; omit it to let the agent inspect the status itself.
 
-When NOT to use:
-- Static page reads that don't need an API → `scrape_url`
-- Browser-rendered SPAs / login flows → `playwright_manager`
-- Calling another agent / running a routine → those are managers, not HTTP
-
-Always pass `expect_status` if you want the call to fail loudly on non-2xx responses (default lets the agent see the status and decide).
+NOT for: browser-rendered pages or interactive logins → `playwright_manager`. Static page reads → `scrape_url`. Calling another agent / running a routine → invoke that manager directly.
