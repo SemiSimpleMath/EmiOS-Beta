@@ -210,6 +210,8 @@ data/backups/
 data/emi_code/
 # Ring camera credentials + snapshots — never commit these
 data/ring_token.json
+# Belief engine sweep-tracker state — single-timestamp file, local only
+data/belief_engine_state.json
 data/ring_snapshots/
 data/ring_motion_watermark.json
 data/local_camera_snapshots/
