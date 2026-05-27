@@ -1,0 +1,114 @@
+{# /tokens/agent/<name> — recent calls for one agent.
+
+   Period selector at top (same options as /tokens). Recent-calls
+   table is capped at 200 rows; aggregate stats cover the full period.
+#}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ agent_name }} — Tokens — Emi</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/tokens_admin.css') }}">
+</head>
+<body class="tokens-admin">
+
+<p class="subtle"><a href="/tokens" style="color: #9ba2b0;">← back to tokens overview</a></p>
+
+<h1>{{ agent_name }}</h1>
+<p class="subtle">LLM call detail for one agent.</p>
+
+<div class="period-bar">
+    {% for p in periods %}
+    <a href="?period={{ p }}" class="{% if p == period_key %}active{% endif %}">{{ p }}</a>
+    {% endfor %}
+</div>
+
+<h2>Summary — {{ period_label }}</h2>
+<div class="tiles">
+    <div class="tile">
+        <div class="label">Cost</div>
+        <div class="value">${{ '%.4f'|format(summary.usd) }}</div>
+        <div class="sub">{{ summary.calls }} call{{ '' if summary.calls == 1 else 's' }}</div>
+    </div>
+    <div class="tile">
+        <div class="label">Input tokens</div>
+        <div class="value">{{ '{:,}'.format(summary.in_tok) }}</div>
+        <div class="sub">{{ '{:,}'.format(summary.out_tok) }} output</div>
+    </div>
+    <div class="tile">
+        <div class="label">Avg latency</div>
+        <div class="value">{{ '{:,}'.format(summary.avg_ms) }} ms</div>
+        <div class="sub">max {{ '{:,}'.format(summary.max_ms) }} ms</div>
+    </div>
+    <div class="tile">
+        <div class="label">Engines used</div>
+        <div class="value" style="font-size: 1rem;">{{ engines|length }}</div>
+        <div class="sub">{% if engines %}top: {{ engines[0].engine }}{% endif %}</div>
+    </div>
+</div>
+
+{% if engines %}
+<h2>By engine — {{ period_label }}</h2>
+<table>
+    <thead>
+        <tr>
+            <th>Engine</th>
+            <th class="num">Calls</th>
+            <th class="num">Input</th>
+            <th class="num">Output</th>
+            <th class="num">Cost</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for e in engines %}
+        <tr>
+            <td class="engine">{{ e.engine }}</td>
+            <td class="num">{{ e.calls }}</td>
+            <td class="num">{{ '{:,}'.format(e.in_tok) }}</td>
+            <td class="num">{{ '{:,}'.format(e.out_tok) }}</td>
+            <td class="num usd">${{ '%.4f'|format(e.usd) }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+<h2>Recent calls — {{ period_label }}</h2>
+{% if showing < total_calls %}
+<p class="subtle">Showing the {{ showing }} most recent of {{ total_calls }} calls in this window.</p>
+{% endif %}
+{% if calls %}
+<table>
+    <thead>
+        <tr>
+            <th>When</th>
+            <th>Engine</th>
+            <th class="num">Duration</th>
+            <th class="num">In tok</th>
+            <th class="num">Out tok</th>
+            <th class="num">Cost</th>
+            <th>Status</th>
+            <th>Scope</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for c in calls %}
+        <tr>
+            <td><a href="/tokens/call/{{ c.id }}" style="color: #d0d3da;">{{ c.ts }}</a></td>
+            <td class="engine">{{ c.engine }}</td>
+            <td class="num {% if c.duration_ms > 30000 %}duration-runaway{% elif c.duration_ms > 10000 %}duration-slow{% endif %}">{{ '{:,}'.format(c.duration_ms) }} ms</td>
+            <td class="num">{{ '{:,}'.format(c.in_tok) }}</td>
+            <td class="num">{{ '{:,}'.format(c.out_tok) }}</td>
+            <td class="num usd">${{ '%.6f'|format(c.usd) }}</td>
+            <td class="status-{{ c.status }}">{{ c.status }}</td>
+            <td style="font-family: ui-monospace, monospace; font-size: 0.75rem; color: #6b7180;">{{ (c.scope_id or '')[:12] }}{% if c.scope_id and c.scope_id|length > 12 %}…{% endif %}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="empty">No calls in {{ period_label|lower }}.</div>
+{% endif %}
+
+</body>
+</html>

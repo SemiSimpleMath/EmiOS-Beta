@@ -206,7 +206,7 @@ def tokens_admin():
         slow_rows = s.execute(
             sql_text(f"""
                 SELECT
-                    ts_utc, agent_name, engine, duration_ms,
+                    id, ts_utc, agent_name, engine, duration_ms,
                     input_tokens, output_tokens, total_cost_usd, status
                 FROM llm_call_log
                 {where}
@@ -217,14 +217,15 @@ def tokens_admin():
         ).fetchall()
         slowest = [
             {
-                "ts": _fmt_ts(r[0]),
-                "agent": r[1] or "(unknown)",
-                "engine": r[2] or "(unknown)",
-                "duration_ms": int(r[3] or 0),
-                "in_tok": int(r[4] or 0),
-                "out_tok": int(r[5] or 0),
-                "usd": float(r[6] or 0.0),
-                "status": r[7] or "",
+                "id": r[0],
+                "ts": _fmt_ts(r[1]),
+                "agent": r[2] or "(unknown)",
+                "engine": r[3] or "(unknown)",
+                "duration_ms": int(r[4] or 0),
+                "in_tok": int(r[5] or 0),
+                "out_tok": int(r[6] or 0),
+                "usd": float(r[7] or 0.0),
+                "status": r[8] or "",
             }
             for r in slow_rows
         ]
@@ -233,7 +234,7 @@ def tokens_admin():
         fail_rows = s.execute(
             sql_text(f"""
                 SELECT
-                    ts_utc, agent_name, engine, status, duration_ms,
+                    id, ts_utc, agent_name, engine, status, duration_ms,
                     input_tokens, output_tokens
                 FROM llm_call_log
                 {where}{' AND' if where else 'WHERE'} status != 'ok'
@@ -244,13 +245,14 @@ def tokens_admin():
         ).fetchall()
         failures = [
             {
-                "ts": _fmt_ts(r[0]),
-                "agent": r[1] or "(unknown)",
-                "engine": r[2] or "(unknown)",
-                "status": r[3] or "",
-                "duration_ms": int(r[4] or 0),
-                "in_tok": int(r[5] or 0),
-                "out_tok": int(r[6] or 0),
+                "id": r[0],
+                "ts": _fmt_ts(r[1]),
+                "agent": r[2] or "(unknown)",
+                "engine": r[3] or "(unknown)",
+                "status": r[4] or "",
+                "duration_ms": int(r[5] or 0),
+                "in_tok": int(r[6] or 0),
+                "out_tok": int(r[7] or 0),
             }
             for r in fail_rows
         ]
@@ -285,4 +287,161 @@ def tokens_admin():
         slowest=slowest,
         failures=failures,
         statuses=statuses,
+    )
+
+
+# ---------------------------------------------------------------- detail pages
+
+
+@tokens_admin_bp.route("/tokens/call/<call_id>")
+def tokens_call_detail(call_id: str):
+    """Single-call detail. Shows the full row + any sibling calls in
+    the same caller_scope_id (i.e. other LLM calls made during the
+    same manager invocation). Useful for tracing what one task cost."""
+    from app.models.llm_call_log import LLMCallLog
+
+    s = get_session()
+    try:
+        call = s.query(LLMCallLog).filter_by(id=call_id).one_or_none()
+        if call is None:
+            return render_template("tokens_call_detail.html", call=None, siblings=[]), 404
+
+        # Pull sibling calls in the same scope (other calls in the same
+        # manager invocation). Limit so a wedged loop doesn't render
+        # thousands of rows.
+        siblings: List[Dict] = []
+        if call.caller_scope_id:
+            rows = (
+                s.query(LLMCallLog)
+                .filter(LLMCallLog.caller_scope_id == call.caller_scope_id)
+                .order_by(LLMCallLog.ts_utc.asc())
+                .limit(200)
+                .all()
+            )
+            siblings = [
+                {
+                    "id": r.id,
+                    "ts": _fmt_ts(r.ts_utc),
+                    "agent": r.agent_name,
+                    "engine": r.engine,
+                    "duration_ms": int(r.duration_ms or 0),
+                    "in_tok": int(r.input_tokens or 0),
+                    "out_tok": int(r.output_tokens or 0),
+                    "usd": float(r.total_cost_usd or 0.0),
+                    "status": r.status,
+                    "is_current": r.id == call.id,
+                }
+                for r in rows
+            ]
+
+        call_view = {
+            "id": call.id,
+            "ts": _fmt_ts(call.ts_utc),
+            "agent": call.agent_name,
+            "engine": call.engine,
+            "provider": call.provider,
+            "in_tok": int(call.input_tokens or 0),
+            "out_tok": int(call.output_tokens or 0),
+            "cached_tok": int(call.cached_tokens or 0),
+            "input_cost_usd": float(call.input_cost_usd or 0.0),
+            "output_cost_usd": float(call.output_cost_usd or 0.0),
+            "total_cost_usd": float(call.total_cost_usd or 0.0),
+            "duration_ms": int(call.duration_ms or 0),
+            "status": call.status,
+            "caller_request_id": call.caller_request_id,
+            "caller_manager_id": call.caller_manager_id,
+            "caller_scope_id": call.caller_scope_id,
+        }
+
+        sibling_total_usd = sum(s_["usd"] for s_ in siblings)
+        sibling_total_in = sum(s_["in_tok"] for s_ in siblings)
+        sibling_total_out = sum(s_["out_tok"] for s_ in siblings)
+    finally:
+        s.close()
+
+    return render_template(
+        "tokens_call_detail.html",
+        call=call_view,
+        siblings=siblings,
+        sibling_total_usd=sibling_total_usd,
+        sibling_total_in=sibling_total_in,
+        sibling_total_out=sibling_total_out,
+    )
+
+
+@tokens_admin_bp.route("/tokens/agent/<path:agent_name>")
+def tokens_agent_detail(agent_name: str):
+    """All calls for one agent in the selected period."""
+    from app.models.llm_call_log import LLMCallLog
+
+    period_key, period_label, cutoff, _chart_days = _resolve_period(
+        request.args.get("period")
+    )
+
+    s = get_session()
+    try:
+        q = s.query(LLMCallLog).filter(LLMCallLog.agent_name == agent_name)
+        if cutoff is not None:
+            q = q.filter(LLMCallLog.ts_utc >= cutoff)
+
+        rows = q.order_by(LLMCallLog.ts_utc.desc()).limit(200).all()
+
+        calls = [
+            {
+                "id": r.id,
+                "ts": _fmt_ts(r.ts_utc),
+                "engine": r.engine,
+                "duration_ms": int(r.duration_ms or 0),
+                "in_tok": int(r.input_tokens or 0),
+                "out_tok": int(r.output_tokens or 0),
+                "usd": float(r.total_cost_usd or 0.0),
+                "status": r.status,
+                "scope_id": r.caller_scope_id,
+            }
+            for r in rows
+        ]
+
+        # Aggregate stats for the period (using the same filter).
+        agg_q = s.query(LLMCallLog).filter(LLMCallLog.agent_name == agent_name)
+        if cutoff is not None:
+            agg_q = agg_q.filter(LLMCallLog.ts_utc >= cutoff)
+        all_rows = agg_q.all()
+        summary = {
+            "calls": len(all_rows),
+            "in_tok": sum(int(r.input_tokens or 0) for r in all_rows),
+            "out_tok": sum(int(r.output_tokens or 0) for r in all_rows),
+            "usd": sum(float(r.total_cost_usd or 0.0) for r in all_rows),
+            "avg_ms": int(
+                sum(int(r.duration_ms or 0) for r in all_rows) / max(1, len(all_rows))
+            ),
+            "max_ms": max((int(r.duration_ms or 0) for r in all_rows), default=0),
+        }
+
+        # By engine within this agent
+        engine_totals: Dict[str, Dict] = {}
+        for r in all_rows:
+            e = r.engine or "(unknown)"
+            d = engine_totals.setdefault(e, {"calls": 0, "in_tok": 0, "out_tok": 0, "usd": 0.0})
+            d["calls"] += 1
+            d["in_tok"] += int(r.input_tokens or 0)
+            d["out_tok"] += int(r.output_tokens or 0)
+            d["usd"] += float(r.total_cost_usd or 0.0)
+        engines = sorted(
+            ({"engine": k, **v} for k, v in engine_totals.items()),
+            key=lambda x: -x["usd"],
+        )
+    finally:
+        s.close()
+
+    return render_template(
+        "tokens_agent_detail.html",
+        agent_name=agent_name,
+        period_key=period_key,
+        period_label=period_label,
+        periods=list(_PERIODS.keys()),
+        summary=summary,
+        calls=calls,
+        engines=engines,
+        showing=min(len(rows) if rows else 0, 200),
+        total_calls=summary["calls"],
     )

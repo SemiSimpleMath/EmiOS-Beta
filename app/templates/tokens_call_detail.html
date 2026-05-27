@@ -1,0 +1,101 @@
+{# /tokens/call/<id> — single-call detail.
+
+   Shows the full row for one llm_call_log entry plus all sibling calls
+   in the same caller_scope_id (i.e. the same manager invocation). Lets
+   you trace what one task cost in total.
+#}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Call detail — Tokens — Emi</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/tokens_admin.css') }}">
+</head>
+<body class="tokens-admin">
+
+<p class="subtle"><a href="/tokens" style="color: #9ba2b0;">← back to tokens overview</a></p>
+
+{% if call is none %}
+<h1>Call not found</h1>
+<p>No row with that id in <code>llm_call_log</code>.</p>
+{% else %}
+
+<h1>LLM call detail</h1>
+<p class="subtle"><code>{{ call.id }}</code></p>
+
+<div class="tiles">
+    <div class="tile">
+        <div class="label">Agent</div>
+        <div class="value" style="font-size: 1rem; font-family: ui-monospace, monospace;">{{ call.agent }}</div>
+        <div class="sub"><a href="/tokens/agent/{{ call.agent }}" style="color: #2a73c2;">→ recent calls for this agent</a></div>
+    </div>
+    <div class="tile">
+        <div class="label">Cost</div>
+        <div class="value">${{ '%.6f'|format(call.total_cost_usd) }}</div>
+        <div class="sub">${{ '%.6f'|format(call.input_cost_usd) }} in + ${{ '%.6f'|format(call.output_cost_usd) }} out</div>
+    </div>
+    <div class="tile">
+        <div class="label">Tokens</div>
+        <div class="value">{{ '{:,}'.format(call.in_tok) }} <span style="font-size: 0.7rem; color: #6b7180;">in</span> / {{ '{:,}'.format(call.out_tok) }} <span style="font-size: 0.7rem; color: #6b7180;">out</span></div>
+        <div class="sub">{{ call.cached_tok }} cached</div>
+    </div>
+    <div class="tile">
+        <div class="label">Duration</div>
+        <div class="value {% if call.duration_ms > 30000 %}duration-runaway{% elif call.duration_ms > 10000 %}duration-slow{% endif %}">{{ '{:,}'.format(call.duration_ms) }} ms</div>
+        <div class="sub">status: <span class="status-{{ call.status }}">{{ call.status }}</span></div>
+    </div>
+</div>
+
+<h2>Call metadata</h2>
+<table style="margin-bottom: 24px;">
+    <tr><td style="width: 200px; color: #8b919e;">Timestamp (UTC)</td><td>{{ call.ts }}</td></tr>
+    <tr><td style="color: #8b919e;">Engine</td><td class="engine">{{ call.engine }}</td></tr>
+    <tr><td style="color: #8b919e;">Provider</td><td>{{ call.provider }}</td></tr>
+    <tr><td style="color: #8b919e;">Caller scope</td><td><code>{{ call.caller_scope_id or '—' }}</code></td></tr>
+    <tr><td style="color: #8b919e;">Caller manager</td><td><code>{{ call.caller_manager_id or '—' }}</code></td></tr>
+    <tr><td style="color: #8b919e;">Caller request</td><td><code>{{ call.caller_request_id or '—' }}</code></td></tr>
+</table>
+
+{% if siblings %}
+<h2>Other calls in the same scope ({{ siblings|length }} total)</h2>
+<p class="subtle">Cumulative for the scope: {{ '{:,}'.format(sibling_total_in) }} in + {{ '{:,}'.format(sibling_total_out) }} out tokens, ${{ '%.4f'|format(sibling_total_usd) }} total.</p>
+<table>
+    <thead>
+        <tr>
+            <th>When</th>
+            <th>Agent</th>
+            <th>Engine</th>
+            <th class="num">Duration</th>
+            <th class="num">In tok</th>
+            <th class="num">Out tok</th>
+            <th class="num">Cost</th>
+            <th>Status</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for sib in siblings %}
+        <tr {% if sib.is_current %}style="background: #1d2129;"{% endif %}>
+            <td>{% if sib.is_current %}▶ {% endif %}<a href="/tokens/call/{{ sib.id }}" style="color: #d0d3da;">{{ sib.ts }}</a></td>
+            <td class="agent"><a href="/tokens/agent/{{ sib.agent }}" style="color: #d0d3da;">{{ sib.agent }}</a></td>
+            <td class="engine">{{ sib.engine }}</td>
+            <td class="num {% if sib.duration_ms > 30000 %}duration-runaway{% elif sib.duration_ms > 10000 %}duration-slow{% endif %}">{{ '{:,}'.format(sib.duration_ms) }} ms</td>
+            <td class="num">{{ '{:,}'.format(sib.in_tok) }}</td>
+            <td class="num">{{ '{:,}'.format(sib.out_tok) }}</td>
+            <td class="num usd">${{ '%.6f'|format(sib.usd) }}</td>
+            <td class="status-{{ sib.status }}">{{ sib.status }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+{% if call.caller_scope_id %}
+<p class="subtle">No other calls in scope <code>{{ call.caller_scope_id }}</code>.</p>
+{% else %}
+<p class="subtle">No scope id on this call (not part of a tracked manager invocation).</p>
+{% endif %}
+{% endif %}
+
+{% endif %}
+
+</body>
+</html>

@@ -98,7 +98,7 @@
     <tbody>
     {% for a in agents %}
         <tr>
-            <td class="agent">{{ a.agent_name }}</td>
+            <td class="agent"><a href="/tokens/agent/{{ a.agent_name }}?period={{ period_key }}" style="color: #e3e5e9;">{{ a.agent_name }}</a></td>
             <td class="num">{{ a.calls }}</td>
             <td class="num">{{ '{:,}'.format(a.in_tok) }}</td>
             <td class="num">{{ '{:,}'.format(a.out_tok) }}</td>
@@ -162,8 +162,8 @@
     <tbody>
     {% for c in slowest %}
         <tr>
-            <td>{{ c.ts }}</td>
-            <td class="agent">{{ c.agent }}</td>
+            <td><a href="/tokens/call/{{ c.id }}" style="color: #d0d3da;">{{ c.ts }}</a></td>
+            <td class="agent"><a href="/tokens/agent/{{ c.agent }}?period={{ period_key }}" style="color: #e3e5e9;">{{ c.agent }}</a></td>
             <td class="engine">{{ c.engine }}</td>
             <td class="num {% if c.duration_ms > 30000 %}duration-runaway{% elif c.duration_ms > 10000 %}duration-slow{% endif %}">{{ '{:,}'.format(c.duration_ms) }} ms</td>
             <td class="num">{{ '{:,}'.format(c.in_tok) }}</td>
@@ -195,8 +195,8 @@
     <tbody>
     {% for f in failures %}
         <tr>
-            <td>{{ f.ts }}</td>
-            <td class="agent">{{ f.agent }}</td>
+            <td><a href="/tokens/call/{{ f.id }}" style="color: #d0d3da;">{{ f.ts }}</a></td>
+            <td class="agent"><a href="/tokens/agent/{{ f.agent }}?period={{ period_key }}" style="color: #e3e5e9;">{{ f.agent }}</a></td>
             <td class="engine">{{ f.engine }}</td>
             <td class="status-{{ f.status }}">{{ f.status }}</td>
             <td class="num">{{ '{:,}'.format(f.duration_ms) }} ms</td>
