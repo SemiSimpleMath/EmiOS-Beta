@@ -183,6 +183,8 @@ def create_app(config_class="config.DevelopmentConfig"):
     app.register_blueprint(runtime_monitor_bp)
     from app.routes.routines_admin import routines_admin_bp
     app.register_blueprint(routines_admin_bp)
+    from app.routes.tokens_admin import tokens_admin_bp
+    app.register_blueprint(tokens_admin_bp)
     from app.routes.dev_wiki import dev_wiki_bp
     app.register_blueprint(dev_wiki_bp)
     app.register_blueprint(smart_home_bridge_bp)

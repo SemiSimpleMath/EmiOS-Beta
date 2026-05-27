@@ -1,0 +1,212 @@
+{# /tokens admin page — LLM call telemetry rollups.
+
+   Data comes from llm_call_log (one row per LLM API call). All numeric
+   fields are pre-aggregated in tokens_admin.py via SQL, so this template
+   just renders. Period selector is at the top; everything else respects
+   the active period EXCEPT the daily-bars chart (which always shows the
+   last N days so it remains comparable across period choices).
+#}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Tokens — Emi</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/tokens_admin.css') }}">
+</head>
+<body class="tokens-admin">
+
+<h1>LLM token usage</h1>
+<p class="subtle">Per-call telemetry from <code>llm_call_log</code>. Cost in USD via <code>configs/llm_prices.json</code>.</p>
+
+<div class="period-bar">
+    {% for p in periods %}
+    <a href="?period={{ p }}" class="{% if p == period_key %}active{% endif %}">{{ p }}</a>
+    {% endfor %}
+</div>
+
+<h2>Summary — {{ period_label }}</h2>
+<div class="tiles">
+    <div class="tile">
+        <div class="label">Total cost</div>
+        <div class="value">${{ '%.4f'|format(summary.usd) }}</div>
+        <div class="sub">across {{ summary.calls }} call{{ '' if summary.calls == 1 else 's' }}</div>
+    </div>
+    <div class="tile">
+        <div class="label">Input tokens</div>
+        <div class="value">{{ '{:,}'.format(summary.in_tok) }}</div>
+        <div class="sub">{{ '{:,}'.format(summary.out_tok) }} output</div>
+    </div>
+    <div class="tile">
+        <div class="label">Avg latency</div>
+        <div class="value">{{ '{:,}'.format(summary.avg_ms) }} ms</div>
+        <div class="sub">{% if summary.calls %}per call{% else %}no data{% endif %}</div>
+    </div>
+    <div class="tile">
+        <div class="label">Top spender</div>
+        {% if agents %}
+        <div class="value" style="font-size: 1rem; font-family: ui-monospace, 'SF Mono', monospace;">{{ agents[0].agent_name }}</div>
+        <div class="sub">${{ '%.4f'|format(agents[0].usd) }}</div>
+        {% else %}
+        <div class="value" style="font-size: 1rem; color: #6b7180;">—</div>
+        <div class="sub">no calls yet</div>
+        {% endif %}
+    </div>
+</div>
+
+<h2>Daily cost — last {{ chart_days }} day{{ '' if chart_days == 1 else 's' }}</h2>
+{% if daily %}
+<div class="daily-bars">
+    {% for d in daily %}
+    {# bar height: 95% of container max, proportional to daily_max (avoid div-by-zero) #}
+    {% set h = (d.usd / daily_max * 95)|round(1) if daily_max > 0 else 2 %}
+    <div class="daily-bar" style="height: {{ h }}%;" title="{{ d.day }}">
+        <div class="tooltip">{{ d.day }}<br>${{ '%.4f'|format(d.usd) }} · {{ d.calls }} call{{ '' if d.calls == 1 else 's' }}</div>
+        <div class="day-label">{{ d.day[-5:] }}</div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty">No data in the last {{ chart_days }} days.</div>
+{% endif %}
+
+<h2>Status distribution — {{ period_label }}</h2>
+{% if statuses %}
+<div class="status-chips">
+    {% for s in statuses %}
+    <div class="status-chip s-{{ s.status }}">{{ s.status }} <span class="n">{{ s.count }}</span></div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty">No calls in {{ period_label|lower }}.</div>
+{% endif %}
+
+<h2>By agent — {{ period_label }}</h2>
+{% if agents %}
+<table>
+    <thead>
+        <tr>
+            <th>Agent</th>
+            <th class="num">Calls</th>
+            <th class="num">Input</th>
+            <th class="num">Output</th>
+            <th class="num">Cached</th>
+            <th class="num">Avg ms</th>
+            <th class="num">Max ms</th>
+            <th class="num">Cost</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for a in agents %}
+        <tr>
+            <td class="agent">{{ a.agent_name }}</td>
+            <td class="num">{{ a.calls }}</td>
+            <td class="num">{{ '{:,}'.format(a.in_tok) }}</td>
+            <td class="num">{{ '{:,}'.format(a.out_tok) }}</td>
+            <td class="num">{{ '{:,}'.format(a.cached_tok) }}</td>
+            <td class="num">{{ '{:,}'.format(a.avg_ms) }}</td>
+            <td class="num {% if a.max_ms > 30000 %}duration-runaway{% elif a.max_ms > 10000 %}duration-slow{% endif %}">{{ '{:,}'.format(a.max_ms) }}</td>
+            <td class="num usd">${{ '%.4f'|format(a.usd) }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="empty">No agent calls yet.</div>
+{% endif %}
+
+<h2>By engine — {{ period_label }}</h2>
+{% if engines %}
+<table>
+    <thead>
+        <tr>
+            <th>Engine</th>
+            <th>Provider</th>
+            <th class="num">Calls</th>
+            <th class="num">Input tokens</th>
+            <th class="num">Output tokens</th>
+            <th class="num">Cost</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for e in engines %}
+        <tr>
+            <td class="engine">{{ e.engine }}</td>
+            <td>{{ e.provider }}</td>
+            <td class="num">{{ e.calls }}</td>
+            <td class="num">{{ '{:,}'.format(e.in_tok) }}</td>
+            <td class="num">{{ '{:,}'.format(e.out_tok) }}</td>
+            <td class="num usd">${{ '%.4f'|format(e.usd) }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="empty">No engine data yet.</div>
+{% endif %}
+
+<h2>Slowest calls — {{ period_label }}</h2>
+{% if slowest %}
+<table>
+    <thead>
+        <tr>
+            <th>When</th>
+            <th>Agent</th>
+            <th>Engine</th>
+            <th class="num">Duration</th>
+            <th class="num">In tok</th>
+            <th class="num">Out tok</th>
+            <th class="num">Cost</th>
+            <th>Status</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for c in slowest %}
+        <tr>
+            <td>{{ c.ts }}</td>
+            <td class="agent">{{ c.agent }}</td>
+            <td class="engine">{{ c.engine }}</td>
+            <td class="num {% if c.duration_ms > 30000 %}duration-runaway{% elif c.duration_ms > 10000 %}duration-slow{% endif %}">{{ '{:,}'.format(c.duration_ms) }} ms</td>
+            <td class="num">{{ '{:,}'.format(c.in_tok) }}</td>
+            <td class="num">{{ '{:,}'.format(c.out_tok) }}</td>
+            <td class="num usd">${{ '%.4f'|format(c.usd) }}</td>
+            <td class="status-{{ c.status }}">{{ c.status }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="empty">No calls in this window.</div>
+{% endif %}
+
+{% if failures %}
+<h2>Failures — {{ period_label }}</h2>
+<table>
+    <thead>
+        <tr>
+            <th>When</th>
+            <th>Agent</th>
+            <th>Engine</th>
+            <th>Status</th>
+            <th class="num">Duration</th>
+            <th class="num">In tok</th>
+            <th class="num">Out tok</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for f in failures %}
+        <tr>
+            <td>{{ f.ts }}</td>
+            <td class="agent">{{ f.agent }}</td>
+            <td class="engine">{{ f.engine }}</td>
+            <td class="status-{{ f.status }}">{{ f.status }}</td>
+            <td class="num">{{ '{:,}'.format(f.duration_ms) }} ms</td>
+            <td class="num">{{ '{:,}'.format(f.in_tok) }}</td>
+            <td class="num">{{ '{:,}'.format(f.out_tok) }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+</body>
+</html>

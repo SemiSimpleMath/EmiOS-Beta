@@ -1,0 +1,200 @@
+/* /tokens admin page. Layout: top period selector, summary tiles row,
+   chart, then four data tables stacked. Color palette matches the rest
+   of the admin pages (dark theme). */
+
+body.tokens-admin {
+  background: #0f1217;
+  color: #e3e5e9;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  margin: 0;
+  padding: 24px;
+}
+
+.tokens-admin h1 {
+  font-size: 1.6rem;
+  margin: 0 0 8px;
+  font-weight: 500;
+}
+
+.tokens-admin h2 {
+  font-size: 1.1rem;
+  margin: 24px 0 12px;
+  font-weight: 500;
+  color: #bcc1cb;
+  border-bottom: 1px solid #2a2f3a;
+  padding-bottom: 6px;
+}
+
+.tokens-admin p.subtle {
+  color: #8b919e;
+  margin: 0 0 16px;
+  font-size: 0.9rem;
+}
+
+/* period selector */
+.period-bar {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0 24px;
+}
+.period-bar a {
+  color: #9ba2b0;
+  text-decoration: none;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid #2a2f3a;
+  font-size: 0.85rem;
+}
+.period-bar a.active {
+  background: #2a73c2;
+  color: #fff;
+  border-color: #2a73c2;
+}
+.period-bar a:not(.active):hover {
+  background: #1d2129;
+}
+
+/* summary tiles */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.tile {
+  background: #181c24;
+  border: 1px solid #2a2f3a;
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+.tile .label { color: #8b919e; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.tile .value { font-size: 1.7rem; font-weight: 600; margin-top: 4px; color: #f0f2f5; }
+.tile .sub   { color: #6b7180; font-size: 0.78rem; margin-top: 2px; }
+
+/* daily bars */
+.daily-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 120px;
+  background: #181c24;
+  border: 1px solid #2a2f3a;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 20px;
+}
+.daily-bar {
+  flex: 1;
+  background: #2a73c2;
+  border-radius: 3px 3px 0 0;
+  min-height: 2px;
+  position: relative;
+  cursor: default;
+}
+.daily-bar .tooltip {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #0f1217;
+  border: 1px solid #2a2f3a;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  color: #e3e5e9;
+  margin-bottom: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.1s;
+  z-index: 10;
+}
+.daily-bar:hover .tooltip { opacity: 1; }
+.daily-bar .day-label {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.65rem;
+  color: #6b7180;
+  margin-top: 4px;
+  white-space: nowrap;
+}
+
+/* tables */
+.tokens-admin table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #181c24;
+  border: 1px solid #2a2f3a;
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 0.88rem;
+  margin-bottom: 24px;
+}
+.tokens-admin th {
+  background: #1d2129;
+  text-align: left;
+  padding: 10px 12px;
+  font-weight: 500;
+  color: #bcc1cb;
+  border-bottom: 1px solid #2a2f3a;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.tokens-admin td {
+  padding: 8px 12px;
+  border-bottom: 1px solid #1d2129;
+  color: #d0d3da;
+  font-variant-numeric: tabular-nums;
+}
+.tokens-admin tr:last-child td { border-bottom: none; }
+.tokens-admin tr:hover td { background: #1d2129; }
+
+td.num, th.num { text-align: right; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+td.usd         { color: #f5c46b; }
+td.agent       { color: #e3e5e9; }
+td.engine      { color: #a4c8e8; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.83rem; }
+
+td.status-ok          { color: #6cc77a; }
+td.status-timeout     { color: #f5c46b; }
+td.status-quota       { color: #e08a8a; font-weight: 600; }
+td.status-parse_error { color: #e08a8a; }
+td.status-rate_limit  { color: #f5c46b; }
+td.status-error       { color: #e08a8a; }
+
+td.duration-slow { color: #f5c46b; }
+td.duration-runaway { color: #e08a8a; font-weight: 600; }
+
+.empty {
+  color: #6b7180;
+  font-style: italic;
+  padding: 24px;
+  text-align: center;
+  background: #181c24;
+  border: 1px solid #2a2f3a;
+  border-radius: 8px;
+}
+
+/* status distribution chips */
+.status-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+.status-chip {
+  background: #181c24;
+  border: 1px solid #2a2f3a;
+  border-radius: 16px;
+  padding: 4px 12px;
+  font-size: 0.82rem;
+}
+.status-chip .n { color: #f0f2f5; font-weight: 600; margin-left: 6px; }
+.status-chip.s-ok          { border-color: #2d5a36; }
+.status-chip.s-timeout     { border-color: #5a4a2a; }
+.status-chip.s-quota       { border-color: #5a2a2a; }
+.status-chip.s-parse_error { border-color: #5a2a2a; }
+.status-chip.s-rate_limit  { border-color: #5a4a2a; }
+.status-chip.s-error       { border-color: #5a2a2a; }
