@@ -2,7 +2,7 @@ name: location_inference
 class_name: Agent
 llm_params:
   llm_provider: "openai"
-  engine: "gpt-4.1-mini"
+  engine: "gpt-5.4-mini"
   model_tier: "mini"
   temperature: 0.3
 allowed_tools: []

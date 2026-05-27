@@ -2,8 +2,8 @@ name: http_team::planner
 class_name: Planner
 llm_params:
   llm_provider: "openai"
-  engine: "gpt-5.1"
-  model_tier: "smart"
+  engine: "gpt-5.4-mini"
+  model_tier: "mini"
 
 
 # http_team's job is making HTTP/REST API calls to external services.
