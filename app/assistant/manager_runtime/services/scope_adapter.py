@@ -172,14 +172,128 @@ def build_system_scope_context(
 
 class ScopeAdapter:
     """
-    Manager ingress scope adapter.
+    Manager ingress scope adapter and scope factory.
 
     Responsibilities:
     1) Resolve effective scope contract for manager invocation.
     2) Inherit from parent (message scope) or derive room-root scope.
     3) Apply manager-level narrowing contract (if configured).
     4) Return a normalized Message with scope_context attached.
+
+    Factory methods (``for_sub_manager``, ``for_courier_call``,
+    ``for_system_routine``) are call-site seams introduced in the scope-audit
+    migration (see ``docs/architecture/SCOPE_AUDIT.md``). They centralize
+    scope construction so the semantic shift in Step 5 (authority-cap +
+    local tools, replacing tool-list intersection) lands in one place
+    instead of 40+. Today these factories preserve current behavior; the
+    only thing they change is WHERE scope construction lives.
     """
+
+    # ------------------------------------------------------------------
+    # Scope factories (call-site seams for the SCOPE_AUDIT.md migration)
+    # ------------------------------------------------------------------
+
+    def for_sub_manager(
+        self,
+        *,
+        parent_scope: ScopeContext | None,
+        child_manager_name: str,
+    ) -> ScopeContext | None:
+        """Construct the ScopeContext to attach to a Message bound for a child
+        sub-manager (i.e. the manager-as-tool delegation pattern).
+
+        Today: returns ``parent_scope`` verbatim. Manager-level narrowing
+        still happens on the receiving side via ``apply()`` →
+        ``_apply_manager_narrowing()`` (which contains the May 5 fix's
+        REPLACE-when-declared logic + the related gap when the child's
+        scope_contract.tools.allowed_tools is undeclared).
+
+        Future (Step 5 of the migration): builds a fresh scope where
+            child.authority = min(parent.authority, child.declared)
+            child.tools.allowed_tools is LOCAL (read from child manager
+                                                config at use-time)
+            child.tools.blocked_tools = parent.blocked ∪ child.blocked
+            child identity fields (acting_as, owner_id, room_id, reply_to,
+                ...) inherited from parent verbatim
+
+        See docs/architecture/SCOPE_AUDIT.md section 7 for the principle.
+        """
+        return parent_scope
+
+    def for_courier_call(
+        self,
+        *,
+        parent_scope: ScopeContext | None,
+        intent: str,
+    ) -> ScopeContext | None:
+        """Construct the ScopeContext for a tool's internal sub-call (e.g.
+        ``http_request`` resolving a ``datapod:auth.bearer:.../full`` pod ref
+        at courier scope, or ``execute_code`` minting an isolated sandbox
+        scope for sub-work).
+
+        ``intent`` is a short label describing the courier purpose
+        ("pod_resolution", "sandbox_isolation", "secret_unsealing", ...).
+        Today it's not consumed; Step 5 may use it to select per-intent
+        defaults.
+
+        Today: returns ``parent_scope`` verbatim. Tier-3 call sites
+        (lib/tools/execute_code, lib/tools/http_request,
+        lib/tools/web_type_secret, lib/tools/invoke_agent,
+        lib/tools/oauth_token_refresh) currently construct fresh
+        ``ScopeContext(...)`` instances with hand-picked identity fields.
+        Step 2 migrates those to call this method; Step 5 makes the
+        per-intent semantics meaningful.
+        """
+        return parent_scope
+
+    @staticmethod
+    def for_system_routine(
+        *,
+        routine_id: str,
+        owner_id: str,
+        actor_id: str | None = None,
+        authority_level: int = 0,
+        room_id: str | None = None,
+        room_context_id: str | None = None,
+        visibility: str = "owner_only",
+        policy_id: str | None = None,
+        scope_id: str | None = None,
+    ) -> ScopeContext:
+        """Construct a fresh ScopeContext for an autonomous routine run
+        (no chat-origin context — subconscious sweeps, KG maintenance,
+        wiki refresh, daily-insights pipeline, etc.).
+
+        ``routine_id`` is captured for telemetry / policy lookup; today
+        it's stamped into ``policy_id`` if no explicit policy_id is given,
+        so /tokens and decision logs can trace authority back to the
+        triggering routine.
+
+        Today: thin wrapper around ``build_system_scope_context()`` with
+        the routine name folded into policy_id. Tier-2 sites
+        (subconscious/run_*.py, routine_handlers/*, kg_investigator,
+        kg_maintenance_pipeline, wiki_generator, importance/scoring,
+        pod_store/image_pod_enrichment, etc.) currently construct fresh
+        ``ScopeContext(...)`` instances directly. Step 2 migrates those
+        to this method; Step 5 enables per-routine policy lookup (e.g.
+        the routine's declared authority floor).
+        """
+        effective_actor_id = actor_id if actor_id else owner_id
+        effective_policy_id = policy_id if policy_id else f"routine:{routine_id}"
+        return build_system_scope_context(
+            owner_id=owner_id,
+            actor_id=effective_actor_id,
+            surface="system",
+            room_id=room_id,
+            room_context_id=room_context_id,
+            visibility=visibility,
+            policy_id=effective_policy_id,
+            scope_id=scope_id,
+            authority_level=authority_level,
+        )
+
+    # ------------------------------------------------------------------
+    # Manager ingress (existing API — unchanged)
+    # ------------------------------------------------------------------
 
     def apply(self, *, manager_name: str, manager_config: dict[str, Any] | None, message: Message) -> Message:
         if not isinstance(message, Message):

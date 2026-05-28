@@ -5,9 +5,17 @@ import uuid
 from app.assistant.utils.pydantic_classes import ToolMessage, Message, ToolResult
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.lib.core_tools.tool_error_protocol import make_tool_error
+from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
 
 from app.assistant.utils.logging_config import get_logger
 logger = get_logger(__name__)
+
+# Scope construction seam — sub-manager scope flows through this factory
+# instead of the parent's scope being stamped verbatim. See
+# docs/architecture/SCOPE_AUDIT.md sections 3 + 7 for the migration plan.
+# Today this is a passthrough; Step 5 will land the authority-cap semantics
+# here in ONE place rather than the prior 40+ scattered sites.
+_scope_factory = ScopeAdapter()
 
 
 """
@@ -44,7 +52,17 @@ class ManagerInterface:
             data = dict(data)
             data["task_file"] = task_file.strip()
         request_id = tool_message.request_id
-        inherited_scope = getattr(tool_message, "scope_context", None)
+        parent_scope = getattr(tool_message, "scope_context", None)
+        # Route through the scope factory seam (SCOPE_AUDIT.md Step 1).
+        # Today this returns parent_scope verbatim; Step 5 will replace this
+        # passthrough with the authority-cap + local-tools construction in
+        # exactly one place. Downstream manager_invoker.apply() still runs
+        # _apply_manager_narrowing on the receiving side — that's where the
+        # May 5 fix lives and where Step 5's logic will eventually move.
+        inherited_scope = _scope_factory.for_sub_manager(
+            parent_scope=parent_scope,
+            child_manager_name=self.manager_name,
+        )
         if self._should_trace_emi_ingress():
             logger.info(
                 "[emi_team ingress] execute start request_id=%s has_task_file=%s has_inherited_scope=%s data_keys=%s",
