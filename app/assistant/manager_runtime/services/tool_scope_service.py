@@ -325,9 +325,12 @@ class ToolScopeService:
                     len(pinned),
                     pinned,
                 )
+                # Pinned-tools override — these are also the always_show set
+                # for downstream filters (no narrowing/ranking happens here).
                 ToolScopeStateManager(blackboard).initialize_runtime_scope(
                     visible_tools=pinned,
                     max_visible=-1,
+                    always_show=pinned,
                 )
                 return
 
@@ -447,6 +450,7 @@ class ToolScopeService:
         ToolScopeStateManager(blackboard).initialize_runtime_scope(
             visible_tools=visible,
             max_visible=max_visible,
+            always_show=always_show,
         )
         if manager_name == _PLANNER_MANAGER_NAME:
             logger.info(

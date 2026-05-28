@@ -61,6 +61,23 @@ class ToolPolicyResolver:
         if missing_tools:
             logger.warning("[%s] References unavailable tools: %s", self._name, missing_tools)
 
+        # Manager's always_show list. Tools in always_show bypass the
+        # task-level restrictions below — this matches the bypass that
+        # tool_scope_service.initialize_scope already applies for scope
+        # contract filtering, so both filter paths agree.
+        # See SCOPE_AUDIT.md Step 1.5: without this, a tool declared in
+        # the manager's tool_visibility.always_show survives the scope
+        # filter (tool_scope_service path) but gets stripped here when
+        # task_allowed_tools is narrower — the http_request bug.
+        manager_always_show = self._bb_get("manager_always_show")
+        always_show_set: set[str] = set()
+        if isinstance(manager_always_show, list):
+            always_show_set = {
+                str(x).strip()
+                for x in manager_always_show
+                if isinstance(x, str) and str(x).strip()
+            }
+
         # --- Task-level restrictions (further restrict capabilities) ---
         task_allowed = self._bb_get("task_allowed_tools")
         task_except = self._bb_get("task_except_tools")
@@ -74,19 +91,19 @@ class ToolPolicyResolver:
             if isinstance(dyn_allowed, list) and dyn_allowed and "all" not in allowset:
                 allowset.update({str(x).strip() for x in dyn_allowed if isinstance(x, str) and x.strip()})
             if "all" not in allowset:
-                valid_tools = [t for t in valid_tools if t in allowset]
+                valid_tools = [t for t in valid_tools if t in allowset or t in always_show_set]
 
         if isinstance(task_except, list) and task_except:
             denyset = {str(x).strip() for x in task_except if isinstance(x, str) and x.strip()}
             if denyset:
-                valid_tools = [t for t in valid_tools if t not in denyset]
+                valid_tools = [t for t in valid_tools if t not in denyset or t in always_show_set]
 
         # Dynamic deny list can tighten policy at runtime.
         dyn_denied = self._bb_get("dynamic_denied_tools")
         if isinstance(dyn_denied, list) and dyn_denied:
             denyset = {str(x).strip() for x in dyn_denied if isinstance(x, str) and x.strip()}
             if denyset:
-                valid_tools = [t for t in valid_tools if t not in denyset]
+                valid_tools = [t for t in valid_tools if t not in denyset or t in always_show_set]
 
         # If task-level allowset was not provided, include dynamic allowed tools.
         if not isinstance(task_allowed, list):
