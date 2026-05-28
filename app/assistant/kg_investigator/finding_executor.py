@@ -30,14 +30,9 @@ from typing import Any, Dict, List, Optional
 
 from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
 from app.assistant.ServiceLocator.service_locator import DI
+from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.pydantic_classes import (
-    Message,
-    ScopeApprovalPolicy,
-    ScopeContext,
-    ScopeResourcePolicy,
-    ScopeWritePolicy,
-)
+from app.assistant.utils.pydantic_classes import Message, ScopeContext
 from app.assistant.utils.time_utils import utc_now
 from app.models.db_manager import get_db_manager
 
@@ -53,15 +48,14 @@ def _executor_scope() -> ScopeContext:
     tools to its curated mutator allowlist (full read + mutate suite
     including merge/delete; safety lives in the dev-page 24h grace +
     Accept review, not in tool exclusion)."""
-    return ScopeContext(
+    return ScopeAdapter.for_system_routine(
+        routine_id="kg_investigator::finding_executor",
         scope_id="scope::kg_investigator::finding_executor",
         owner_id="jukka",
         actor_id="kg_finding_executor",
-        surface="system",
-        room_id=None,
-        approval=ScopeApprovalPolicy(authority_level=100),
-        resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
-        writes=ScopeWritePolicy(write_kg=True, write_unified_log=True),
+        authority_level=100,
+        write_kg=True,
+        write_unified_log=True,
     )
 
 

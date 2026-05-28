@@ -45,10 +45,9 @@ BATCH_SIZE = 15  # predicates per LLM call
 
 def run(ctx: PipelineContext = None) -> dict:
     """Run one curation sweep. Returns stats dict."""
+    from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
     from app.assistant.ServiceLocator.service_locator import DI
-    from app.assistant.utils.pydantic_classes import (
-        Message, ScopeApprovalPolicy, ScopeContext, ScopeResourcePolicy,
-    )
+    from app.assistant.utils.pydantic_classes import Message
 
     # --- Phase 1: find candidates (read session, no LLM) ---
     with get_db_manager().read_session() as session:
@@ -99,14 +98,14 @@ def run(ctx: PipelineContext = None) -> dict:
         logger.warning("[edge_canon_curation] curator agent unavailable")
         return {"candidates": len(candidates), "verdicts": 0, "alias_added": 0, "canon_added": 0, "edges_rewritten": 0}
 
-    scope = ScopeContext(
+    scope = ScopeAdapter.for_system_routine(
+        routine_id="edge_canon_curation",
         scope_id="scope::edge_canon_curation",
         owner_id="jukka",
         actor_id="edge_canon_curator_runner",
         surface="ui",
         room_id="me_lens",
-        approval=ScopeApprovalPolicy(authority_level=99),
-        resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
+        authority_level=99,
     )
 
     all_verdicts: List[Dict] = []

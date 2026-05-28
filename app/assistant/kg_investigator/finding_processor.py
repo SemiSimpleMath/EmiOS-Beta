@@ -20,14 +20,9 @@ from typing import Any, Dict, List, Optional
 from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
 from app.assistant.kg_investigator.finding_brief import build_finding_brief
 from app.assistant.ServiceLocator.service_locator import DI
+from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.pydantic_classes import (
-    Message,
-    ScopeApprovalPolicy,
-    ScopeContext,
-    ScopeResourcePolicy,
-    ScopeWritePolicy,
-)
+from app.assistant.utils.pydantic_classes import Message, ScopeContext
 from app.models.db_manager import get_db_manager
 
 logger = get_logger(__name__)
@@ -51,15 +46,14 @@ def _investigation_scope() -> ScopeContext:
     and the on-demand /kg-maintenance/api/finding/<id>/investigate route)
     pass through investigate_one(), so building the scope here covers both.
     """
-    return ScopeContext(
+    return ScopeAdapter.for_system_routine(
+        routine_id="kg_investigator::finding_processor",
         scope_id="scope::kg_investigator::finding_processor",
         owner_id="jukka",
         actor_id="kg_finding_investigator",
-        surface="system",
-        room_id=None,
-        approval=ScopeApprovalPolicy(authority_level=100),
-        resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
-        writes=ScopeWritePolicy(write_kg=False, write_unified_log=False),
+        authority_level=100,
+        write_kg=False,
+        write_unified_log=False,
     )
 
 
@@ -71,15 +65,14 @@ def _mutation_scope() -> ScopeContext:
     kg_update_node_field, kg_finding_resolve, kg_finding_escalate). Therefore
     write_kg is True here.
     """
-    return ScopeContext(
+    return ScopeAdapter.for_system_routine(
+        routine_id="kg_investigator::finding_executor",
         scope_id="scope::kg_investigator::finding_executor",
         owner_id="jukka",
         actor_id="kg_finding_executor",
-        surface="system",
-        room_id=None,
-        approval=ScopeApprovalPolicy(authority_level=100),
-        resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
-        writes=ScopeWritePolicy(write_kg=True, write_unified_log=False),
+        authority_level=100,
+        write_kg=True,
+        write_unified_log=False,
     )
 
 

@@ -314,9 +314,7 @@ def tag_nodes_by_id(
     contact_bypassed, errors, card_tags_written, wiki_tags_written}.
     """
     from app.assistant.ServiceLocator.service_locator import DI
-    from app.assistant.manager_runtime.services.scope_adapter import (
-        build_system_scope_context,
-    )
+    from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
     from app.assistant.utils.pydantic_classes import Message
     from app.models.base import get_session
 
@@ -374,11 +372,12 @@ def tag_nodes_by_id(
         ):
             batch = taggable[batch_start : batch_start + _TAG_BATCH_SIZE]
             nodes_block = _format_nodes_block(batch)
-            scope = build_system_scope_context(
+            scope = ScopeAdapter.for_system_routine(
+                routine_id="kg_pipeline::section_tagging",
+                scope_id="scope::kg_pipeline::section_tagging",
                 owner_id="kg_pipeline",
                 actor_id="section_tagging::tag_nodes_by_id",
                 surface="pipeline",
-                scope_id="scope::kg_pipeline::section_tagging",
             )
             try:
                 resp = agent.action_handler(Message(

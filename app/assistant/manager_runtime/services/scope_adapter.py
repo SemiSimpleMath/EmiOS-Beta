@@ -105,6 +105,9 @@ def build_system_scope_context(
     policy_id: str | None = None,
     scope_id: str | None = None,
     authority_level: int = 0,
+    write_unified_log: bool = True,
+    write_kg: bool = False,
+    allow_fact_extraction: bool = False,
 ) -> ScopeContext:
     rid = _as_non_empty_str(room_id)
     rcid = _as_non_empty_str(room_context_id)
@@ -148,9 +151,9 @@ def build_system_scope_context(
         },
         "cards": {"enabled": True, "allowed_cards": [], "max_cards_per_turn": None, "max_total_chars": None},
         "writes": {
-            "write_unified_log": True,
-            "write_kg": False,
-            "allow_fact_extraction": False,
+            "write_unified_log": bool(write_unified_log),
+            "write_kg": bool(write_kg),
+            "allow_fact_extraction": bool(allow_fact_extraction),
             "writable_state_keys": [],
         },
         "delivery": {
@@ -317,6 +320,10 @@ class ScopeAdapter:
         visibility: str = "owner_only",
         policy_id: str | None = None,
         scope_id: str | None = None,
+        surface: str = "system",
+        write_unified_log: bool = True,
+        write_kg: bool = False,
+        allow_fact_extraction: bool = False,
     ) -> ScopeContext:
         """Construct a fresh ScopeContext for an autonomous routine run
         (no chat-origin context — subconscious sweeps, KG maintenance,
@@ -341,13 +348,16 @@ class ScopeAdapter:
         return build_system_scope_context(
             owner_id=owner_id,
             actor_id=effective_actor_id,
-            surface="system",
+            surface=surface,
             room_id=room_id,
             room_context_id=room_context_id,
             visibility=visibility,
             policy_id=effective_policy_id,
             scope_id=scope_id,
             authority_level=authority_level,
+            write_unified_log=write_unified_log,
+            write_kg=write_kg,
+            allow_fact_extraction=allow_fact_extraction,
         )
 
     # ------------------------------------------------------------------

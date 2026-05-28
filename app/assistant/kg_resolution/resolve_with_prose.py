@@ -11,14 +11,9 @@ from typing import Any, Dict, List, Optional
 
 from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
 from app.assistant.ServiceLocator.service_locator import DI
+from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.pydantic_classes import (
-    Message,
-    ScopeApprovalPolicy,
-    ScopeContext,
-    ScopeResourcePolicy,
-    ScopeWritePolicy,
-)
+from app.assistant.utils.pydantic_classes import Message, ScopeContext
 from app.models.db_manager import get_db_manager
 
 logger = get_logger(__name__)
@@ -30,15 +25,14 @@ def _resolution_scope() -> ScopeContext:
     """Authority for kg_resolution_manager. Writes to the KG (mutators)
     AND to entity_cards / wiki vault (regen tools). Owner authority is
     high because the manager carries out user-confirmed instructions."""
-    return ScopeContext(
+    return ScopeAdapter.for_system_routine(
+        routine_id="kg_resolution::resolve_with_prose",
         scope_id="scope::kg_resolution::resolve_with_prose",
         owner_id="jukka",
         actor_id="kg_resolution_manager",
-        surface="system",
-        room_id=None,
-        approval=ScopeApprovalPolicy(authority_level=100),
-        resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
-        writes=ScopeWritePolicy(write_kg=True, write_unified_log=True),
+        authority_level=100,
+        write_kg=True,
+        write_unified_log=True,
     )
 
 
