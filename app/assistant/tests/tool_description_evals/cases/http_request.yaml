@@ -1,0 +1,102 @@
+# Test cases for http_request description.
+#
+# The tool under test (http_request) is rendered into the catalog using
+# either its live description or a candidate trim passed via --override.
+# Distractors always use their live descriptions; they're the realistic
+# peer set http_request has to disambiguate against.
+#
+# Assertion modes:
+#   expect_action: <tool_name>      tool that MUST be chosen
+#   expect_action_not: <name|list>  tool(s) that MUST NOT be chosen
+#   expect_args_contain: [keys]     action_input dict must contain these keys
+#   expect_args_match: {k: v}       action_input must contain these k=v pairs
+
+tool: http_request
+
+# Realistic peer set the planner sees in emi_team_manager. Roughly the
+# always_show list minus the new wrapper managers (http_manager,
+# sandbox_manager) — those would override the leaf for HTTP tasks once
+# we promote them. Here we're testing the LEAF's description quality.
+distractors:
+  - playwright_manager
+  - web_manager
+  - bash_manager
+  - personal_admin_manager
+  - send_email
+  - run_shell
+  - ask_user
+  - pod_search
+  - pod_fetch
+  - execute_code
+  - find_tool
+  - one_shot_tool_runner
+  - get_weather
+
+cases:
+  # ───────────────────────────── positive cases ──────────────────────────
+  - name: bluesky_explicit_endpoint
+    task: |
+      Call https://bsky.social/xrpc/com.atproto.server.createSession with a POST
+      and a JSON body containing identifier and password fields.
+    expect_action: http_request
+    expect_args_contain: [url, method]
+    expect_args_match:
+      method: POST
+
+  - name: github_rest_get
+    task: |
+      Make a GET request to https://api.github.com/users/octocat and return the response.
+    expect_action: http_request
+    expect_args_match:
+      url: https://api.github.com/users/octocat
+
+  - name: whoop_api_named
+    task: |
+      Hit the WHOOP API to get my latest recovery score for today.
+    expect_action: http_request
+    expect_args_contain: [url]
+
+  - name: reddit_api_named
+    task: |
+      Use the Reddit API to fetch the top 5 posts in r/LocalLLaMA right now.
+    expect_action: http_request
+    expect_args_contain: [url]
+
+  - name: webhook_post
+    task: |
+      POST a webhook to https://hooks.example.com/notify with body {"event": "task_done"}.
+    expect_action: http_request
+    expect_args_match:
+      method: POST
+      url: https://hooks.example.com/notify
+
+  # ───────────────────────────── negative cases ──────────────────────────
+  - name: negative_browser_form
+    task: |
+      Open the DoorDash website, log in, and place an order for two burritos.
+    expect_action: playwright_manager
+    expect_action_not: http_request
+
+  - name: negative_weather
+    task: |
+      What is the weather in Paris today?
+    expect_action_not: http_request
+    # Note: there are two arguably-correct answers here — one_shot_tool_runner
+    # (which would call get_weather) or get_weather directly. We assert only
+    # that http_request is NOT picked, since a dedicated weather tool is the
+    # cleaner path even though http_request COULD technically hit wttr.in.
+
+  - name: negative_email
+    task: |
+      Send Katy an email saying I'll be late for dinner.
+    expect_action_not: http_request
+
+  - name: negative_local_file
+    task: |
+      List the folders in my Documents directory.
+    expect_action_not: http_request
+
+  - name: negative_python_compute
+    task: |
+      Resize photo.jpg in ~/Pictures to 512px max and save as thumb.jpg.
+    expect_action_not: http_request

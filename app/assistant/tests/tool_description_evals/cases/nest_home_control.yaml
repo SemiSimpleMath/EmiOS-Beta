@@ -1,0 +1,127 @@
+# Test cases for nest_home_control description.
+#
+# Most of these exist because the planner has hit the underlying preconditions
+# in production (2026-05-28 morning) and the old one-sentence description
+# didn't surface them. Each case targets one precondition + the recipe shape
+# the description teaches.
+
+tool: nest_home_control
+
+# Realistic peer set in emi_team_manager: other smart-home tools the planner
+# might plausibly route to, plus ask_user (escape hatch) and get_weather
+# (sometimes invoked when the task mentions temperature).
+distractors:
+  - lights_control
+  - ring_camera_control
+  - local_camera_snapshot
+  - ask_user
+  - get_weather
+  - one_shot_tool_runner
+  - find_tool
+
+cases:
+  # ───────────────────────── positive — basic recipes ─────────────────────────
+  - name: cool_to_75
+    task: |
+      Switch the thermostat to cooling and set it to 75°F.
+    expect_action: nest_home_control
+    expect_args_match:
+      mode: COOL
+      target_temperature: 75
+
+  - name: heat_to_68
+    task: |
+      Turn on heat at 68 degrees.
+    expect_action: nest_home_control
+    expect_args_match:
+      mode: HEAT
+      target_temperature: 68
+
+  - name: turn_off
+    task: |
+      Turn off the thermostat.
+    expect_action: nest_home_control
+    # Quote "OFF" — unquoted OFF parses as YAML boolean false.
+    expect_args_match:
+      mode: "OFF"
+
+  - name: read_state
+    task: |
+      What's the thermostat doing right now?
+    expect_action: nest_home_control
+    # Read-state can be empty args or {get_status: true} — both valid.
+
+  # ───────────────────────── positive — preconditions ─────────────────────────
+  # The whole reason this description was rewritten: the planner kept calling
+  # set_target_temperature / set_eco_mode from OFF and getting FAILED_PRECONDITION.
+  - name: cool_from_off_must_include_mode
+    task: |
+      The thermostat is currently OFF. Cool the house to 72°F.
+    expect_action: nest_home_control
+    # Per the description's precondition rule, mode and target_temperature
+    # must be in the SAME call. The bridge runs mode first.
+    expect_args_contain: [mode, target_temperature]
+    expect_args_match:
+      mode: COOL
+      target_temperature: 72
+
+  - name: eco_from_off_should_consider_state
+    task: |
+      The thermostat is OFF. Enable eco mode.
+    expect_action: nest_home_control
+    # The strict "right" call is to turn HEAT or COOL on first then enable eco.
+    # We can't easily assert the multi-step sequence, but at minimum the
+    # planner should NOT just blast `{eco_enabled: true}` from OFF — it should
+    # either include a mode change OR ask first. We weakly assert eco_enabled
+    # is paired with a mode field; if this case proves flaky, tighten via a
+    # narrative-style task that says "turn cooling on then enable eco".
+    expect_args_contain: [mode]
+
+  - name: setpoint_only_when_already_running
+    task: |
+      The AC is already cooling. Bump the setpoint up to 78 to save energy.
+    expect_action: nest_home_control
+    # No need to pass `mode` — currently in COOL, setpoint-only update works.
+    expect_args_match:
+      target_temperature: 78
+
+  - name: fan_kick_on
+    task: |
+      Turn the thermostat fan on for a bit to circulate the air.
+    expect_action: nest_home_control
+    expect_args_match:
+      fan_mode: "on"
+
+  # ───────────────────────── negative — wrong tool entirely ─────────────────
+  - name: negative_lights
+    task: |
+      Turn on the kitchen lights.
+    expect_action_not: nest_home_control
+
+  - name: negative_camera_snapshot
+    task: |
+      Take a picture of what's happening at the front door.
+    expect_action_not: nest_home_control
+
+  - name: negative_outdoor_weather
+    task: |
+      What's the weather in Irvine today?
+    expect_action_not: nest_home_control
+
+  # ───────────────────────── negative — bad mode values ─────────────────────
+  # HEATCOOL was removed (Jukka's preference). The description says so. The
+  # planner should never emit it.
+  - name: negative_no_heatcool
+    task: |
+      Turn the thermostat to auto / heat-cool mode at 72°F.
+    # Either nest_home_control with a single mode (HEAT or COOL) OR ask_user
+    # to clarify is acceptable — both honor "HEATCOOL not allowed". What's
+    # NOT acceptable is silently picking HEATCOOL as if it worked.
+    # (Asserting "not HEATCOOL" requires a custom predicate the harness
+    # doesn't have today; for now we just require it doesn't blow through
+    # to the wrong tool family entirely.)
+    expect_action_not:
+      - lights_control
+      - ring_camera_control
+      - local_camera_snapshot
+      - get_weather
