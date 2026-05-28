@@ -84,13 +84,10 @@ class InvokeAgent(BaseTool):
         # Build the message. agent_input dict gets unpacked onto the
         # agent's blackboard by AgentInputApplier.apply_agent_input().
         # Include a scope_context so agents that need resource resolution work.
-        from app.assistant.utils.pydantic_classes import ScopeContext, ScopeResourcePolicy
-        scope = ScopeContext(
+        from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
+        scope = ScopeAdapter.for_internal_invocation(
             scope_id=f"invoke_agent::{agent_name}",
-            owner_id="system",
             actor_id="invoke_agent",
-            surface="internal",
-            resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
         )
         msg = Message(agent_input=agent_input, scope_context=scope)
 

@@ -6,7 +6,13 @@ from typing import Any, Dict
 
 from app.assistant.rooms.room_resource_loader import load_room_context_for_manager
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.pydantic_classes import Message, ScopeContext
+from app.assistant.utils.pydantic_classes import (
+    Message,
+    ScopeApprovalPolicy,
+    ScopeContext,
+    ScopeResourcePolicy,
+    ScopeToolPolicy,
+)
 from app.assistant.utils.surfaces import DEFAULT_AUTHORITY_BY_SURFACE
 
 logger = get_logger(__name__)
@@ -220,31 +226,84 @@ class ScopeAdapter:
         """
         return parent_scope
 
+    @staticmethod
     def for_courier_call(
-        self,
         *,
-        parent_scope: ScopeContext | None,
-        intent: str,
-    ) -> ScopeContext | None:
-        """Construct the ScopeContext for a tool's internal sub-call (e.g.
-        ``http_request`` resolving a ``datapod:auth.bearer:.../full`` pod ref
-        at courier scope, or ``execute_code`` minting an isolated sandbox
-        scope for sub-work).
+        tool_name: str,
+        request_id: str | None = None,
+        authority_level: int = 100,
+        owner_id: str = "jukka",
+        actor_id_suffix: str | None = None,
+        purpose: str = "courier",
+    ) -> ScopeContext:
+        """Construct a fresh elevated scope for a tool's internal courier
+        work — typically pod projection fetches for secret unsealing.
 
-        ``intent`` is a short label describing the courier purpose
-        ("pod_resolution", "sandbox_isolation", "secret_unsealing", ...).
-        Today it's not consumed; Step 5 may use it to select per-intent
-        defaults.
+        Used by tools like ``http_request``, ``execute_code``,
+        ``web_type_secret``, ``oauth_token_refresh`` when they need to
+        resolve a ``datapod:auth.bearer:.../full`` reference to its
+        underlying secret. Authority 100 grants the admin bypass per
+        ``compute_approval_reasons`` — required so the courier fetch
+        doesn't trigger an approval ticket per secret resolution.
 
-        Today: returns ``parent_scope`` verbatim. Tier-3 call sites
-        (lib/tools/execute_code, lib/tools/http_request,
-        lib/tools/web_type_secret, lib/tools/invoke_agent,
-        lib/tools/oauth_token_refresh) currently construct fresh
-        ``ScopeContext(...)`` instances with hand-picked identity fields.
-        Step 2 migrates those to call this method; Step 5 makes the
-        per-intent semantics meaningful.
+        Today: constructs the same fresh ScopeContext shape that the
+        4 courier sites construct inline today (authority=100,
+        room=tool_name, allowed_global_resources=["all"]). Step 5 may
+        refine the authority bypass logic, but the courier surface area
+        is small and stable.
+
+        ``authority_level`` defaults to 100 (admin bypass for elevated
+        courier work). A few sites use 50 for non-elevated pod reads
+        (e.g. checking token expiry); pass explicitly when needed.
+
+        ``purpose`` distinguishes sub-call shapes within one tool — e.g.
+        oauth_token_refresh uses ``purpose="expiry_check"`` for its
+        non-elevated read and ``purpose="courier"`` (default) for the
+        actual refresh. Becomes part of scope_id for trace visibility.
         """
-        return parent_scope
+        suffix = actor_id_suffix if actor_id_suffix is not None else f"request_id={request_id or '?'}"
+        actor_id_val = f"{tool_name}:{suffix}" if suffix else tool_name
+        return ScopeContext(
+            scope_id=f"scope::{tool_name}::{purpose}",
+            owner_id=owner_id,
+            actor_id=actor_id_val,
+            surface="system",
+            room_id=tool_name,
+            approval=ScopeApprovalPolicy(authority_level=authority_level),
+            resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
+            tools=ScopeToolPolicy(),
+        )
+
+    @staticmethod
+    def for_internal_invocation(
+        *,
+        scope_id: str,
+        actor_id: str,
+        owner_id: str = "system",
+    ) -> ScopeContext:
+        """Construct a fresh system-internal scope for tool-driven agent
+        invocations (e.g. ``invoke_agent`` calling an agent without a
+        chat-originating manager context).
+
+        Caller specifies both ``scope_id`` and ``actor_id`` since the
+        invocation contexts vary (invoke_agent uses ``invoke_agent::<agent>``
+        as scope_id and ``invoke_agent`` as actor_id; future callers may
+        differ).
+
+        Today: matches the existing invoke_agent ScopeContext shape
+        (owner_id="system", surface="internal", broad resource access).
+        Step 5 will revisit whether system-internal scopes need their
+        own authority floor — today they default to authority 0 via
+        ScopeApprovalPolicy() default, relying on the tool registry's
+        approval gates to handle individual call risk.
+        """
+        return ScopeContext(
+            scope_id=scope_id,
+            owner_id=owner_id,
+            actor_id=actor_id,
+            surface="internal",
+            resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
+        )
 
     @staticmethod
     def for_system_routine(

@@ -61,10 +61,6 @@ from app.assistant.pod_store.authority import (
 )
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import (
-    ScopeApprovalPolicy,
-    ScopeContext,
-    ScopeResourcePolicy,
-    ScopeToolPolicy,
     ToolMessage,
     ToolResult,
 )
@@ -809,15 +805,10 @@ class HttpRequest(BaseTool):
         from app.assistant.pod_store.authority import PodAuthorityError
         from app.assistant.pod_store.resolvers import PodValueMissing
 
-        courier_scope = ScopeContext(
-            scope_id="scope::http_request::courier",
-            owner_id="jukka",
-            actor_id=f"http_request:request_id={getattr(tool_message, 'request_id', '?')}",
-            surface="system",
-            room_id="http_request",
-            approval=ScopeApprovalPolicy(authority_level=100),
-            resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
-            tools=ScopeToolPolicy(),
+        from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
+        courier_scope = ScopeAdapter.for_courier_call(
+            tool_name="http_request",
+            request_id=getattr(tool_message, "request_id", None),
         )
         try:
             value = PodStore().fetch_projection(

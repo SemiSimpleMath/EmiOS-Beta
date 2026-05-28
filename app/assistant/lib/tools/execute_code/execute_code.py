@@ -46,10 +46,6 @@ from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
 from app.assistant.lib.core_tools.tool_error_protocol import make_tool_error
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import (
-    ScopeApprovalPolicy,
-    ScopeContext,
-    ScopeResourcePolicy,
-    ScopeToolPolicy,
     ToolMessage,
     ToolResult,
 )
@@ -78,6 +74,12 @@ _IMAGE = "emi-sandbox:v1"
 # /workspace. Pruned daily by a routine (workspaces older than 24h).
 _REPO_ROOT = Path(__file__).resolve().parents[5]
 _WORKSPACES_ROOT = _REPO_ROOT / "data" / "sandbox_workspaces"
+
+# Where binary outputs are persisted so output pods can carry a real file
+# (referenced via metadata.stored_path, the same convention image/document/
+# audio/video pods use). Survives the per-call workspace teardown; swept by
+# the sandbox_outputs_sweep routine.
+_OUTPUTS_ROOT = _REPO_ROOT / "data" / "sandbox_outputs"
 
 
 class ExecuteCode(BaseTool):
@@ -464,15 +466,10 @@ class ExecuteCode(BaseTool):
         from app.assistant.pod_store.authority import PodAuthorityError
         from app.assistant.pod_store.resolvers import PodValueMissing
 
-        courier_scope = ScopeContext(
-            scope_id="scope::execute_code::courier",
-            owner_id="jukka",
-            actor_id=f"execute_code:request_id={request_id or '?'}",
-            surface="system",
-            room_id="execute_code",
-            approval=ScopeApprovalPolicy(authority_level=100),
-            resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
-            tools=ScopeToolPolicy(),
+        from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
+        courier_scope = ScopeAdapter.for_courier_call(
+            tool_name="execute_code",
+            request_id=request_id,
         )
 
         store = PodStore()
@@ -566,12 +563,21 @@ class ExecuteCode(BaseTool):
         return base
 
     def _mint_output_pods(self, outputs_dir: Path, call_id: str) -> List[str]:
-        """Each file in outputs_dir becomes a new pod (kind=tool_result)."""
+        """Each file in outputs_dir becomes a new pod (kind=tool_result).
+
+        Text-decodable files keep their content inline in pod.body. Binary
+        files are copied to data/sandbox_outputs/<call_id>/<filename> and the
+        pod carries metadata.stored_path so downstream tools (send_email,
+        pod_fetch) attach the real file. Per-call workspace is torn down
+        after this method returns; the persisted copy is what survives.
+        """
         if not outputs_dir.exists():
             return []
         from app.assistant.pod_store.contracts import Pod
         from app.assistant.pod_store.pod_store import PodStore
+        from app.assistant.utils.path_utils import get_repo_root
 
+        repo_root = get_repo_root()
         pod_ids: List[str] = []
         store = PodStore()
         for f in sorted(outputs_dir.iterdir()):
@@ -579,15 +585,28 @@ class ExecuteCode(BaseTool):
                 continue
             try:
                 data = f.read_bytes()
-                # Best-effort: store text content if decodable; otherwise just
-                # note the bytes in metadata. v1 doesn't have file-backed pods,
-                # so binary outputs stash a placeholder. Future v1.1 will
-                # support file_ref-backed pods for binary.
                 try:
                     body_text = data.decode("utf-8")
+                    stored_rel: Optional[str] = None
                 except Exception:
-                    body_text = f"<binary {len(data)} bytes; file_ref pods coming v1.1>"
+                    body_text = (
+                        f"Binary file ({len(data)} bytes) attachable via pod_id. "
+                        f"Real bytes at metadata.stored_path."
+                    )
+                    persist_dir = _OUTPUTS_ROOT / call_id
+                    persist_dir.mkdir(parents=True, exist_ok=True)
+                    persist_path = persist_dir / f.name
+                    shutil.copyfile(f, persist_path)
+                    stored_rel = str(persist_path.resolve().relative_to(repo_root)).replace("\\", "/")
                 pod_id = f"datapod:tool_result:exec_{call_id}_{f.name}"
+                metadata = {
+                    "filename": f.name,
+                    "bytes": len(data),
+                    "call_id": call_id,
+                    "minted_at": datetime.now(timezone.utc).isoformat(),
+                }
+                if stored_rel:
+                    metadata["stored_path"] = stored_rel
                 pod = Pod(
                     pod_id=pod_id,
                     kind="tool_result",
@@ -598,12 +617,7 @@ class ExecuteCode(BaseTool):
                     for_agents=[],
                     scope_id=None,
                     created_by="execute_code",
-                    metadata={
-                        "filename": f.name,
-                        "bytes": len(data),
-                        "call_id": call_id,
-                        "minted_at": datetime.now(timezone.utc).isoformat(),
-                    },
+                    metadata=metadata,
                 )
                 store.put(pod)
                 pod_ids.append(pod_id)

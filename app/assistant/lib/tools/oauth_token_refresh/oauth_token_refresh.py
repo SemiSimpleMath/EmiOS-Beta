@@ -38,10 +38,6 @@ from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
 from app.assistant.lib.core_tools.tool_error_protocol import make_tool_error
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import (
-    ScopeApprovalPolicy,
-    ScopeContext,
-    ScopeResourcePolicy,
-    ScopeToolPolicy,
     ToolMessage,
     ToolResult,
 )
@@ -278,13 +274,12 @@ class OauthTokenRefresh(BaseTool):
     def _seconds_until_expiry(pod_id: str, store) -> Optional[int]:
         """Read the expiry projection at chat-tier scope and parse it.
         Returns None if not parseable (e.g., 'unknown')."""
-        chat_scope = ScopeContext(
-            scope_id="scope::oauth_refresh::expiry_check",
-            owner_id="jukka", actor_id="oauth_token_refresh",
-            surface="system", room_id="oauth_token_refresh",
-            approval=ScopeApprovalPolicy(authority_level=50),
-            resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
-            tools=ScopeToolPolicy(),
+        from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
+        chat_scope = ScopeAdapter.for_courier_call(
+            tool_name="oauth_token_refresh",
+            authority_level=50,
+            purpose="expiry_check",
+            actor_id_suffix="",  # legacy actor_id was bare "oauth_token_refresh"
         )
         try:
             expiry_str = store.fetch_projection(pod_id, "expiry", scope=chat_scope)
@@ -306,14 +301,10 @@ class OauthTokenRefresh(BaseTool):
         from app.assistant.pod_store.authority import PodAuthorityError
         from app.assistant.pod_store.resolvers import PodValueMissing
 
-        scope = ScopeContext(
-            scope_id="scope::oauth_token_refresh::courier",
-            owner_id="jukka",
-            actor_id=f"oauth_token_refresh:request_id={getattr(tool_message, 'request_id', '?')}",
-            surface="system", room_id="oauth_token_refresh",
-            approval=ScopeApprovalPolicy(authority_level=100),
-            resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
-            tools=ScopeToolPolicy(),
+        from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
+        scope = ScopeAdapter.for_courier_call(
+            tool_name="oauth_token_refresh",
+            request_id=getattr(tool_message, "request_id", None),
         )
         try:
             value = store.fetch_projection(pod_id, projection, scope=scope)
