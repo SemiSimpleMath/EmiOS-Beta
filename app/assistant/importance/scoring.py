@@ -233,13 +233,9 @@ def regenerate_edge_importance(
 
     Returns: number of edges scored this run.
     """
+    from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
     from app.assistant.ServiceLocator.service_locator import DI
-    from app.assistant.utils.pydantic_classes import (
-        Message,
-        ScopeApprovalPolicy,
-        ScopeContext,
-        ScopeResourcePolicy,
-    )
+    from app.assistant.utils.pydantic_classes import Message
 
     started = time.time()
 
@@ -258,14 +254,14 @@ def regenerate_edge_importance(
         len(all_edges), batch_size, only_unrated,
     )
 
-    scope = ScopeContext(
+    scope = ScopeAdapter.for_system_routine(
+        routine_id="me::edge_importance",
         scope_id="scope::me::edge_importance",
         owner_id="jukka",
         actor_id="me_edge_importance_runner",
         surface="ui",
         room_id="me_lens",
-        approval=ScopeApprovalPolicy(authority_level=99),
-        resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
+        authority_level=99,
     )
 
     rated_count = 0

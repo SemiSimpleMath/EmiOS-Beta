@@ -38,12 +38,8 @@ from app.assistant.kg_projection import (
 from app.assistant.utils.filename_safety import safe_filename
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.wiki_generator.references import apply_references
-from app.assistant.utils.pydantic_classes import (
-    Message,
-    ScopeApprovalPolicy,
-    ScopeContext,
-    ScopeResourcePolicy,
-)
+from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
+from app.assistant.utils.pydantic_classes import Message, ScopeContext
 
 logger = get_logger(__name__)
 
@@ -89,14 +85,14 @@ def strip_debug_scaffolding(markdown: str) -> str:
 
 
 def _scope() -> ScopeContext:
-    return ScopeContext(
+    return ScopeAdapter.for_system_routine(
+        routine_id="wiki::page_writer",
         scope_id="scope::wiki::page_writer",
         owner_id="jukka",
         actor_id="wiki_page_writer",
         surface="ui",
         room_id="master_room",
-        approval=ScopeApprovalPolicy(authority_level=100),
-        resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
+        authority_level=100,
     )
 
 
@@ -268,14 +264,14 @@ def parse_rough_sections(rough: str) -> dict[str, str]:
 # indented (starting with space/tab) or start with ">" (quoted source
 # sentence). A blank line or a new "- " at column 0 ends the current bullet.
 
-_SCOPE_SECTION_WRITER = ScopeContext(
+_SCOPE_SECTION_WRITER = ScopeAdapter.for_system_routine(
+    routine_id="wiki::section_writer",
     scope_id="scope::wiki::section_writer",
     owner_id="jukka",
     actor_id="wiki_section_writer",
     surface="ui",
     room_id="master_room",
-    approval=ScopeApprovalPolicy(authority_level=100),
-    resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
+    authority_level=100,
 )
 
 

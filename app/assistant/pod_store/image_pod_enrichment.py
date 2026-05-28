@@ -84,12 +84,9 @@ def enrich_image_pod(
 
     # Invoke the captioner agent
     try:
+        from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
         from app.assistant.ServiceLocator.service_locator import DI
-        from app.assistant.utils.pydantic_classes import (
-            Message,
-            ScopeContext,
-            ScopeResourcePolicy,
-        )
+        from app.assistant.utils.pydantic_classes import Message
         from app.assistant.utils.time_utils import get_local_time_str
 
         agent = DI.agent_factory.create_agent("image_pod_captioner")
@@ -102,12 +99,9 @@ def enrich_image_pod(
             "trigger_message": (trigger_message or "").strip() or "(no accompanying message)",
             "chat_context_block": chat_context_block,
         }
-        scope = ScopeContext(
+        scope = ScopeAdapter.for_internal_invocation(
             scope_id="pod_store::image_enrichment",
-            owner_id="system",
             actor_id="image_pod_enrichment",
-            surface="internal",
-            resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
         )
         result = agent.action_handler(Message(agent_input=agent_input, scope_context=scope))
     except Exception as e:
