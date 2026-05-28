@@ -112,18 +112,39 @@ def _load_prices() -> dict:
         return _price_cache
 
 
-def _cost_for(engine: str, input_tokens: int, output_tokens: int) -> tuple[float, float]:
-    """Returns (input_cost_usd, output_cost_usd). 0 / 0 if engine unknown."""
+def _cost_for(
+    engine: str,
+    input_tokens: int,
+    output_tokens: int,
+    cached_tokens: int = 0,
+) -> tuple[float, float]:
+    """Returns (input_cost_usd, output_cost_usd). 0 / 0 if engine unknown.
+
+    `input_tokens` is the provider's total input count, which INCLUDES
+    cached_tokens. Cached portion is billed at the engine's cached_input
+    rate when known (OpenAI auto-caches prompts ≥1024 tokens with shared
+    prefixes — 10× cheaper). When the engine's cached_input rate isn't
+    in the price table, cached tokens fall back to the full input rate
+    (conservative — matches old behavior, slight over-count vs reality).
+    """
     prices = _load_prices()
     entry = prices.get(engine)
     if not entry:
         return 0.0, 0.0
     in_rate = float(entry.get("input_per_1m_usd") or 0.0)
     out_rate = float(entry.get("output_per_1m_usd") or 0.0)
-    return (
-        (input_tokens / 1_000_000.0) * in_rate,
-        (output_tokens / 1_000_000.0) * out_rate,
-    )
+    cached_rate_raw = entry.get("cached_input_per_1m_usd")
+    cached_rate = float(cached_rate_raw) if cached_rate_raw is not None else in_rate
+
+    cached = max(int(cached_tokens or 0), 0)
+    # Guard against cached > input (shouldn't happen, but providers
+    # occasionally report quirky numbers); clamp.
+    cached = min(cached, max(int(input_tokens or 0), 0))
+    non_cached = max(int(input_tokens or 0) - cached, 0)
+
+    in_cost = (non_cached / 1_000_000.0) * in_rate + (cached / 1_000_000.0) * cached_rate
+    out_cost = (output_tokens / 1_000_000.0) * out_rate
+    return in_cost, out_cost
 
 
 # --------------------------------------------------------------------------
@@ -151,7 +172,7 @@ def record_llm_call(
     """
     try:
         input_tokens, output_tokens, cached_tokens = _extract_usage_counts(usage)
-        in_cost, out_cost = _cost_for(engine, input_tokens, output_tokens)
+        in_cost, out_cost = _cost_for(engine, input_tokens, output_tokens, cached_tokens)
         ctx = get_current_call_context()
 
         from app.models.base import get_session
