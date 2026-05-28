@@ -28,9 +28,9 @@ from app.assistant.subconscious.meal_context_builder import build_weekly_meal_pl
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import (
     Message,
-    ScopeContext,
-    ScopeResourcePolicy,
 )
+
+from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
 
 logger = get_logger(__name__)
 
@@ -62,12 +62,12 @@ def main():
     if agent is None:
         print("ERROR: failed to create meal_context_distiller agent.")
         sys.exit(1)
-    scope = ScopeContext(
+    scope = ScopeAdapter.for_internal_invocation(
+
         scope_id="subconscious::meal_context_distiller",
-        owner_id="system",
+
         actor_id="run_meal_context_distiller",
-        surface="internal",
-        resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
+
     )
     msg = Message(agent_input=context, scope_context=scope)
     try:

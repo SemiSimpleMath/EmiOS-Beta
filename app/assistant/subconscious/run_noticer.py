@@ -27,9 +27,9 @@ from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import (
     Message,
-    ScopeContext,
-    ScopeResourcePolicy,
 )
+
+from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
 
 logger = get_logger(__name__)
 
@@ -82,12 +82,15 @@ def main():
         print(f"ERROR: failed to create agent {agent_name!r}.")
         sys.exit(1)
 
-    scope = ScopeContext(
+    scope = ScopeAdapter.for_internal_invocation(
+
+
         scope_id=f"subconscious::{agent_name}",
-        owner_id="system",
+
+
         actor_id="run_noticer",
-        surface="internal",
-        resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
+
+
     )
     msg = Message(agent_input=context, scope_context=scope)
 

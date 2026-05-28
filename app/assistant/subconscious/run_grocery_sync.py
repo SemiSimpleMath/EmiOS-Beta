@@ -40,9 +40,9 @@ from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_repo_root
 from app.assistant.utils.pydantic_classes import (
     Message,
-    ScopeContext,
-    ScopeResourcePolicy,
 )
+
+from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
 
 logger = get_logger(__name__)
 
@@ -89,12 +89,12 @@ def main():
         if agent is None:
             print("ERROR: failed to create grocery_intent_scanner agent.")
             sys.exit(1)
-        scope = ScopeContext(
+        scope = ScopeAdapter.for_internal_invocation(
+
             scope_id="subconscious::grocery_intent_scanner",
-            owner_id="system",
+
             actor_id="run_grocery_sync",
-            surface="internal",
-            resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
+
         )
         msg = Message(agent_input=ctx, scope_context=scope)
         try:

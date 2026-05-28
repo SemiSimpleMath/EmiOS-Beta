@@ -24,11 +24,8 @@ from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.subconscious.meal_context_builder import build_daily_meal_proposer_context
 from app.assistant.subconscious.meal_persist import apply_daily_meal_proposer_output
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.pydantic_classes import (
-    Message,
-    ScopeContext,
-    ScopeResourcePolicy,
-)
+from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
+from app.assistant.utils.pydantic_classes import Message
 
 logger = get_logger(__name__)
 
@@ -61,12 +58,9 @@ def main():
     if agent is None:
         print("ERROR: failed to create daily_meal_proposer agent.")
         sys.exit(1)
-    scope = ScopeContext(
+    scope = ScopeAdapter.for_internal_invocation(
         scope_id="subconscious::daily_meal_proposer",
-        owner_id="system",
         actor_id="run_daily_meal_proposer",
-        surface="internal",
-        resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
     )
     msg = Message(agent_input=context, scope_context=scope)
     try:

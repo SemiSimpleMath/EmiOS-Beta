@@ -256,11 +256,8 @@ def generate_plan_for_week(week_start: str) -> Dict[str, Any]:
         from app.assistant.subconscious.meal_persist import (
             apply_weekly_meal_planner_output,
         )
-        from app.assistant.utils.pydantic_classes import (
-            Message,
-            ScopeContext,
-            ScopeResourcePolicy,
-        )
+        from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
+        from app.assistant.utils.pydantic_classes import Message
     except Exception as e:
         logger.exception("[meal_page_service] generate import failed")
         return {"status": "error", "message": f"import failed: {type(e).__name__}: {e}"}
@@ -281,12 +278,9 @@ def generate_plan_for_week(week_start: str) -> Dict[str, Any]:
     distiller = DI.agent_factory.create_agent("meal_context_distiller")
     if distiller is None:
         return {"status": "error", "message": "meal_context_distiller unavailable"}
-    distiller_scope = ScopeContext(
+    distiller_scope = ScopeAdapter.for_internal_invocation(
         scope_id="subconscious::meal_context_distiller",
-        owner_id="system",
         actor_id="meal_page_service",
-        surface="internal",
-        resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
     )
     try:
         distiller_result = distiller.action_handler(
@@ -306,12 +300,9 @@ def generate_plan_for_week(week_start: str) -> Dict[str, Any]:
     )
     if manager is None:
         return {"status": "error", "message": "weekly_meal_planning_manager unavailable"}
-    mgr_scope = ScopeContext(
+    mgr_scope = ScopeAdapter.for_internal_invocation(
         scope_id="subconscious::weekly_meal_planning_manager",
-        owner_id="system",
         actor_id="meal_page_service",
-        surface="internal",
-        resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
     )
     manager_context: Dict[str, Any] = {
         "date_time": seed.get("date_time"),
