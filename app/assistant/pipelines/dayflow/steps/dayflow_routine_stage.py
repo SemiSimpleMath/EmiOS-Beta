@@ -2,13 +2,17 @@
 DayFlow Routine Stage
 
 Generates resource_dayflow_routine.md — a living, belief-enriched, context-aware
-routine document covering a SHORT FORWARD WINDOW (current schedule item +
-next two upcoming items, with a 2h/6h floor/cap). Runs hourly throughout
-the day; each regen advances the window with the clock.
+routine document covering a FORWARD WINDOW (current schedule item + next
+upcoming items, with a 5h/8h floor/cap). Runs hourly throughout the day;
+each regen advances the window with the clock. The 5h floor guarantees
+wall-clock-anchored beliefs (e.g. "AC to 70°F at 21:00") land in the
+visible window well before their trigger, with multiple regen turns of
+visibility before the planner has to act.
 
 - Reads resource_user_beliefs.json (belief engine export)
-- Reads resource_expected_calendar.json and windows it to "current + next 2"
-  so the doc doesn't re-emit detailed late-night blocks at 9am
+- Reads resource_expected_calendar.json and windows it to at least the
+  next 5 hours (extending past "current + next 2" if items happen quickly)
+  so wall-clock-anchored beliefs reach the writer with enough lead time
 - Feeds daily_context_generator output so the agent knows what has already happened
 - Emits one-line tail anchors (e.g. "Later today: 16:30 work end · 21:00 dog
   walk · 22:30 CPAP") so downstream agents stay aware of upcoming pivots
@@ -61,9 +65,16 @@ def _write_text_atomic(path: Path, text: str) -> None:
         raise
 
 
-_WINDOW_MIN_HOURS = 2
-_WINDOW_MAX_HOURS = 6
-_WINDOW_DEFAULT_ITEM_COUNT = 3  # current item + next 2
+# Window covers at minimum 5 hours forward (the floor) and extends up to
+# 8h if natural item boundaries fall there. The 5h floor is load-bearing:
+# anything less and wall-clock-anchored beliefs (AC at 21:00, lights at
+# sunset, calendar pre-fill at 21:30, etc.) drop out of the writer's view
+# until they're too imminent for the planner to plan around. Two hourly
+# regen turns must keep the same belief visible so a single bad-judgment
+# turn doesn't drop the rule.
+_WINDOW_MIN_HOURS = 5
+_WINDOW_MAX_HOURS = 8
+_WINDOW_DEFAULT_ITEM_COUNT = 3  # current item + next 2 (floor loop extends as needed)
 _BACKDROP_MIN_HOURS = 4  # items longer than this are treated as backdrops
 
 
@@ -102,7 +113,7 @@ def _window_schedule(
     (start ≤ now < end). Past or future-only backdrops are dropped on
     the floor — past backdrops don't belong here (milestone tracker
     owns "what already happened"), and a future backdrop that starts
-    in 6h is just noise for the next-few-hours doc.
+    past the window cap is just noise for the next-few-hours doc.
 
     Items missing parseable ``end_utc`` / ``start_utc`` are dropped
     entirely — nothing the writer can act on.
