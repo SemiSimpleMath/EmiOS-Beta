@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict
+from typing import Any, Dict, List
 from sqlalchemy import select
 
 from jinja2 import Template
@@ -450,13 +450,50 @@ class ContextInjector:
 
         Both paths feed the same dict (templates render the same way).
         Missing skills are logged and dropped — never crash the prompt.
+
+        Companion helper: ``resolve_auto_injected_skill_names`` exposes
+        just the names that came from path (2)+(3)+(4) (anything not in
+        ``agent.config['skills']``). Templates use it to render a
+        single ``{% for name in auto_injected_skill_names %}{{ skills[name] }}{% endfor %}``
+        block without per-skill explicit references — see SCOPE_AUDIT
+        Step 1.5 follow-up (skill rendering gap closed by exposing the
+        auto-injected names list).
+        """
+        resolved, _ = self._resolve_skills_with_provenance(agent)
+        return resolved
+
+    def resolve_auto_injected_skill_names(self, agent) -> List[str]:
+        """Return the ordered list of skill names that came from any
+        dynamic path (auto-inject / caller-supplied / scope-stamped) —
+        i.e. NOT statically declared in ``agent.config['skills']``.
+
+        Used by prompt templates to render dynamic skills generically:
+
+            {%- for name in auto_injected_skill_names %}
+            {{ skills[name] }}
+            {%- endfor %}
+
+        This closes the "auto-injection but template doesn't render"
+        gap that caused Wire to discover_skills('bluesky') even though
+        the bluesky skill was already loaded into the skills dict.
+        """
+        _, dynamic_names = self._resolve_skills_with_provenance(agent)
+        return dynamic_names
+
+    def _resolve_skills_with_provenance(self, agent) -> tuple[Dict[str, str], List[str]]:
+        """Internal: build the skills dict and track which names came
+        from dynamic paths (auto-inject / caller / scope) vs static
+        agent.config['skills'].
+
+        Returns ``(skills_dict, dynamic_names_in_order)``.
         """
         registry = getattr(DI, "skill_registry", None)
         if registry is None:
             logger.warning("[%s] DI.skill_registry not available — no skills loaded", agent.name)
-            return {}
+            return {}, []
 
         resolved: Dict[str, str] = {}
+        static_names: set[str] = set()
 
         # 1. Static skills from agent config.
         for name in (agent.config.get("skills", []) or []):
@@ -469,6 +506,7 @@ class ContextInjector:
                 )
                 continue
             resolved[skill.name] = skill.body
+            static_names.add(skill.name)
 
         # 2. Auto-injected skills (opt-in via accept_auto_skills).
         if agent.config.get("accept_auto_skills"):
@@ -565,7 +603,10 @@ class ContextInjector:
                     del resolved[name.strip()]
                     logger.debug("[%s] scope-denied skill=%s", agent.name, name)
 
-        return resolved
+        # Compute dynamic-names list — preserves insertion order from the
+        # resolved dict (Python 3.7+), filters out static-config skills.
+        dynamic_names = [n for n in resolved.keys() if n not in static_names]
+        return resolved, dynamic_names
 
     def generate_injections_block(self, agent, prompt_injections, message=None, entity_injection_keys: set[str] | None = None):
         if not isinstance(prompt_injections, list):
@@ -579,17 +620,28 @@ class ContextInjector:
         non_entity_keys = [key for key in prompt_injections if key not in entity_keys]
         entity_field_keys = [key[len("entity_"):] for key in entity_keys if key.startswith("entity_")]
 
+        # Resolve skills once and expose both shapes:
+        #   - ``skills`` (dict by name) — for explicit references like
+        #     ``{{ skills["critic-handling"] }}``.
+        #   - ``auto_injected_skill_names`` (list, insertion-ordered) —
+        #     names from any dynamic path (auto-inject / caller-supplied /
+        #     scope-stamped). Templates render with one block:
+        #         {%- for name in auto_injected_skill_names %}
+        #         {{ skills[name] }}
+        #         {%- endfor %}
+        #     Without this list, auto-injected skills are loaded into
+        #     ``skills`` but never rendered unless the template explicitly
+        #     names them — the bug that made Wire call discover_skills
+        #     for the already-loaded bluesky skill.
+        skills_dict, auto_injected_skill_names = self._resolve_skills_with_provenance(agent)
         context: Dict[str, Any] = {
             "date_time": get_local_time_str(),
             "day_of_week": datetime.now().strftime("%A"),
             "action_count": agent.blackboard.get_state_value(f"{agent.name}_action_count", 0),
             "room_contact_name": str(agent.blackboard.get_state_value("room_contact_name", "") or "").strip(),
             "current_speaker_name": str(agent.blackboard.get_state_value("current_speaker_name", "") or "").strip(),
-            # Skills declared at agent.config.skills are resolved here once,
-            # exposed as a dict that templates access via
-            # ``{{ skills["skill-name"] }}``. Missing skills are dropped
-            # with a warning, never crash the prompt.
-            "skills": self.resolve_skills(agent),
+            "skills": skills_dict,
+            "auto_injected_skill_names": auto_injected_skill_names,
         }
 
         if message is not None:

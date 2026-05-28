@@ -68,3 +68,13 @@ Imperfection: Judge if the user's core intent is satisfied. "Good enough" beats 
 Auth + pod refs: When the body or a header value should carry a secret, use the `datapod:<kind>:<id>/full` form. The tool resolves it at courier scope and the actual secret never enters your transcript. Never inline a literal password or token.
 
 {{ skills["critic-handling"] }}
+{# Auto-injected domain skills (Bluesky, future Mastodon/Reddit/GitHub recipes). #}
+{# These auto_inject_when their keywords match the task text. Rendered here   #}
+{# so the planner doesn't have to discover_skills + read_skill to find content #}
+{# that's already been loaded into context.                                    #}
+{%- for name in auto_injected_skill_names %}
+
+## Skill: {{ name }}
+
+{{ skills[name] }}
+{%- endfor %}

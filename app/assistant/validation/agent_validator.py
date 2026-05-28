@@ -29,6 +29,7 @@ _FRAMEWORK_BUILTINS = {
     "room_contact_name",
     "current_speaker_name",
     "skills",
+    "auto_injected_skill_names",
     # Conditionally populated by context_injector — agents that don't
     # need them just get empty values, but they're never Undefined:
     "_keyword_injected_resources",  # keyword_resource_injection path
