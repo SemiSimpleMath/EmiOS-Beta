@@ -1,6 +1,6 @@
 {
   "name": "nest_home_control",
-  "description": "Read or set Jukka's Nest thermostat.\n\nRecipes:\n  - Set cooling to 75F:    {\"mode\": \"COOL\", \"target_temperature\": 75}\n  - Set heating to 68F:    {\"mode\": \"HEAT\", \"target_temperature\": 68}\n  - Just change setpoint:  {\"target_temperature\": 72}     (mode unchanged)\n  - Turn off:              {\"mode\": \"OFF\"}\n  - Read current state:    {}                                (no args)\n\nFields:\n  - `mode`: HEAT, COOL, or OFF (uppercase). Omit to leave unchanged.\n  - `target_temperature`: Fahrenheit number. Omit to leave unchanged.",
+  "description": "Read or change Jukka's single Nest thermostat. With no args, reads current state. With fields set, issues SDM commands in fixed order: mode → target_temperature → fan_mode → eco_enabled.\n\nPRECONDITIONS (HTTP 400 if violated):\n  - set_target_temperature requires HEAT or COOL — pass `mode` in the same call if currently OFF.\n  - eco_enabled: true requires HEAT or COOL (cannot enable from OFF).\n  - fan_mode currently only supports `on`; auto/off reject.\n  - HEATCOOL mode not allowed (single-mode only).\n\nRecipes:\n  - Cool to 75F (works from OFF too):  {\"mode\": \"COOL\", \"target_temperature\": 75}\n  - Heat to 68F:                        {\"mode\": \"HEAT\", \"target_temperature\": 68}\n  - Change setpoint (must be in HEAT/COOL already): {\"target_temperature\": 72}\n  - Turn off:                           {\"mode\": \"OFF\"}\n  - Enable eco (must be in HEAT/COOL):  {\"eco_enabled\": true}\n  - Kick fan on:                        {\"fan_mode\": \"on\"}\n  - Read current state:                 {}\n\nWhen in doubt about current mode, call {} first to read state.",
   "inputs": [
     {
       "name": "device_id",
@@ -12,31 +12,31 @@
       "name": "mode",
       "type": "string",
       "required": false,
-      "description": "Bare uppercase one of: HEAT, COOL, OFF."
+      "description": "Bare uppercase one of: HEAT, COOL, OFF. HEATCOOL is NOT allowed. Variants like 'heat_cool' / 'heat-cool' reject."
     },
     {
       "name": "target_temperature",
       "type": "number",
       "required": false,
-      "description": "Fahrenheit number, e.g. 75."
+      "description": "Fahrenheit number (e.g. 72). Requires thermostat in HEAT or COOL — if currently OFF, pass mode in the same call."
     },
     {
       "name": "fan_mode",
       "type": "string",
       "required": false,
-      "description": ""
+      "description": "Only 'on' works today (auto/off not wired through the bridge — they reject)."
     },
     {
       "name": "eco_enabled",
       "type": "boolean",
       "required": false,
-      "description": ""
+      "description": "true → MANUAL_ECO, false → OFF. Enabling requires HEAT or COOL; cannot enable from OFF (FAILED_PRECONDITION). Read state first if unsure."
     },
     {
       "name": "get_status",
       "type": "boolean",
       "required": false,
-      "description": ""
+      "description": "true to explicitly read current state. Omitting all fields does the same."
     }
   ],
   "outputs": [
@@ -51,7 +51,7 @@
       "description": "Smart-home gateway response payload."
     }
   ],
-  "arguments_prompt": "Read or set the Nest thermostat. Pass nothing to read current state.\n\nFields (all optional):\n  - `mode`               — `HEAT`, `COOL`, or `OFF`. Bare uppercase.\n  - `target_temperature` — Fahrenheit number (e.g. 75).\n\nExamples:\n  Change setpoint:           `{ \"target_temperature\": 75 }`\n  Switch to cooling at 72:   `{ \"mode\": \"COOL\", \"target_temperature\": 72 }`\n  Read current state:        `{}`",
+  "arguments_prompt": "Read or change the Nest thermostat. Pass nothing (or get_status=true) to read current state.\n\nCommand execution order (when multiple fields set):\n  mode → target_temperature → fan_mode → eco_enabled\n\nFields (all optional):\n  - mode               — HEAT, COOL, or OFF. Uppercase. HEATCOOL NOT allowed.\n  - target_temperature — Fahrenheit. Requires HEAT or COOL (pass `mode` in same call if currently OFF).\n  - fan_mode           — Only 'on' works (auto/off reject).\n  - eco_enabled        — bool. true requires HEAT/COOL (FAILED_PRECONDITION from OFF).\n  - device_id          — usually omit (single thermostat).\n  - get_status         — true to read state.\n\nExamples:\n  Cool to 75F (works from OFF too):       { \"mode\": \"COOL\", \"target_temperature\": 75 }\n  Change setpoint (already in HEAT/COOL): { \"target_temperature\": 72 }\n  Turn off:                                { \"mode\": \"OFF\" }\n  Enable eco (must be HEAT/COOL):         { \"eco_enabled\": true }\n  Read state:                              {}\n\nWhen in doubt about current mode, read first ({}) then issue the change.",
   "metadata": {
     "domain": "smart_home",
     "actions": [

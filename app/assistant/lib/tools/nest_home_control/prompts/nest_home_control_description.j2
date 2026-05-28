@@ -1,1 +1,75 @@
-Control Nest thermostat devices through the configured smart-home gateway endpoint.
+Read or change Jukka's single Nest thermostat via the smart-home gateway.
+
+All fields are optional. With no args (or `get_status: true`) the tool reads
+the current state. With one or more fields set, the tool issues the matching
+SDM command(s) in this fixed order: mode → target_temperature → fan_mode →
+eco_enabled. Mode goes first so a setpoint lands on the freshly-correct mode.
+
+# Fields
+
+- `mode` — `HEAT`, `COOL`, or `OFF`. Uppercase. **`HEATCOOL` is not allowed**
+  (removed per Jukka's preference; single-mode only). Variants like
+  "heat-cool", "heat_cool", "heat cool" all reject.
+- `target_temperature` — Fahrenheit number (e.g. `72`). Server converts to
+  Celsius for the SDM call.
+- `fan_mode` — Schema accepts `on` / `auto` / `off`, but **the underlying
+  bridge currently only supports `on`** (auto/off rejected with HTTP 400).
+  Treat this as a one-shot fan kick, not a persistent fan policy.
+- `eco_enabled` — boolean. `true` switches Nest into MANUAL_ECO; `false`
+  switches it back to OFF.
+- `device_id` — Optional. Jukka has a single thermostat; usually omit.
+- `get_status` — `true` to explicitly read state. Omitting all fields does
+  the same thing.
+
+# Preconditions (CRITICAL — these are why calls fail with HTTP 400 / FAILED_PRECONDITION)
+
+- **`target_temperature` requires the thermostat to currently be in HEAT or
+  COOL.** If it's OFF, you must either:
+  1. Pass `mode: HEAT` or `mode: COOL` in the SAME call (mode runs first and
+     puts the unit into a setpoint-accepting state), or
+  2. Issue `mode` first in a prior call, then set the temperature.
+
+  Calling `set_target_temperature` from OFF without specifying mode raises:
+  "Thermostat mode is not HEAT/COOL. Provide arguments.mode as HEAT or COOL."
+
+- **`eco_enabled: true` requires the thermostat to be in HEAT or COOL.**
+  Enabling eco from OFF returns FAILED_PRECONDITION
+  ("ThermostatEco.SetMode command not allowed in current thermostat mode").
+  If unsure of current mode, read state first with `get_status: true`.
+
+- **`fan_mode` must be `on`.** `auto` and `off` are not wired through the
+  bridge today and will reject.
+
+# Recipes
+
+  Switch to cooling at 75°F (works from OFF too — mode runs first):
+    `{ "mode": "COOL", "target_temperature": 75 }`
+
+  Switch to heating at 68°F:
+    `{ "mode": "HEAT", "target_temperature": 68 }`
+
+  Change setpoint only (assumes thermostat already in HEAT or COOL):
+    `{ "target_temperature": 72 }`
+
+  Turn the thermostat off:
+    `{ "mode": "OFF" }`
+
+  Enable eco mode (only when currently HEAT or COOL — read first if unsure):
+    `{ "eco_enabled": true }`
+
+  Disable eco:
+    `{ "eco_enabled": false }`
+
+  Kick the fan on (one-shot — auto/off not supported):
+    `{ "fan_mode": "on" }`
+
+  Read current state:
+    `{}`
+
+# When in doubt: read first
+
+If you don't know the current mode and you need to set a temperature or
+enable eco, call with `{}` first to read state, then issue the command
+informed by what you saw. One extra call is cheap; an HTTP 400 from a
+precondition violation costs more cycles + risks leaving the planner
+spinning on retries.
