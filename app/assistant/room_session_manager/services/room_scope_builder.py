@@ -55,6 +55,33 @@ def build_scope_contract_for_room_request(
     else:
         raise ValueError("task_except_tools must be a list when provided.")
 
+    # Per-manager rules: read from ROOM.md frontmatter's `permissions.per_manager`.
+    # Shape:
+    #   permissions:
+    #     per_manager:
+    #       emi_team_manager:
+    #         allow: [web_manager, pod_search, pod_fetch, ...]
+    #       web_manager:
+    #         block: [http_request, oauth_token_refresh]
+    # Each entry fires when the named manager runs anywhere in this scope's
+    # call tree; rule.allow REPLACES that manager's natives with the intersection;
+    # rule.block subtracts. See ScopeToolRule.
+    raw_per_manager = room_permissions.get("per_manager") if isinstance(room_permissions.get("per_manager"), dict) else {}
+    per_manager_rules: Dict[str, Dict[str, Any]] = {}
+    for name, rule_dict in raw_per_manager.items():
+        if not isinstance(name, str) or not name.strip():
+            continue
+        if not isinstance(rule_dict, dict):
+            continue
+        rule: Dict[str, Any] = {}
+        raw_allow = rule_dict.get("allow")
+        if isinstance(raw_allow, list):
+            rule["allow"] = [str(t).strip() for t in raw_allow if isinstance(t, str) and str(t).strip()]
+        raw_block = rule_dict.get("block")
+        if isinstance(raw_block, list):
+            rule["block"] = [str(t).strip() for t in raw_block if isinstance(t, str) and str(t).strip()]
+        per_manager_rules[name.strip()] = rule
+
     # ``reply_to`` is the per-request transport-reply dict each surface
     # builds (UI: {type=socketio, room_id}; slack: {type=slack, channel_id,
     # thread_ts, ...}; etc.). Carried through scope so chained
@@ -106,6 +133,7 @@ def build_scope_contract_for_room_request(
             "blocked_tools": resolved_blocked_tools,
             "requires_approval_tools": [],
             "allow_external_side_effects": bool(tool_classes.get("external_action", False)),
+            "per_manager": per_manager_rules,
         },
         "entities": {
             "enabled": True,

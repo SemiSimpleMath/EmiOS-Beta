@@ -26,11 +26,35 @@ class ScopeResourcePolicy(ScopeBaseModel):
     resource_groups: List[str] = Field(default_factory=list)
 
 
+class ScopeToolRule(ScopeBaseModel):
+    """Per-manager tool-surface rule that fires when the named manager runs.
+
+    Keyed by manager name in ScopeToolPolicy.per_manager. The rule applies
+    only if that manager actually runs somewhere in the call tree under
+    this scope — entries for managers that never run are no-ops.
+
+    - ``allow`` (Optional[List[str]]): when present (even empty), REPLACES
+      the manager's native allowed_tools with this list. Use when you want
+      to narrow the manager to a specific subset. When ``None``, the
+      manager's natives apply unchanged.
+    - ``block`` (List[str]): subtracted from the manager's effective tool
+      surface (after ``allow`` narrowing). Surgical removal of specific
+      leaves while keeping the rest of the manager's natives.
+    """
+    allow: Optional[List[str]] = None
+    block: List[str] = Field(default_factory=list)
+
+
 class ScopeToolPolicy(ScopeBaseModel):
     allowed_tools: List[str] = Field(default_factory=lambda: ["all"])
     blocked_tools: List[str] = Field(default_factory=list)
     requires_approval_tools: List[str] = Field(default_factory=list)
     allow_external_side_effects: bool = False
+    # Per-manager rules. Lookup at manager startup time: when manager X
+    # runs anywhere in this scope's call tree, scope.tools.per_manager[X]
+    # narrows / trims X's effective surface. Unmentioned managers run with
+    # their native allowed_tools unchanged. See ScopeToolRule.
+    per_manager: Dict[str, ScopeToolRule] = Field(default_factory=dict)
 
     @field_validator("allowed_tools")
     @classmethod

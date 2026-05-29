@@ -417,6 +417,33 @@ class ToolScopeService:
             if scope_block_set:
                 ranked = [t for t in ranked if t not in scope_block_set]
 
+            # Per-manager scope rule (ScopeToolPolicy.per_manager). Fires when
+            # the CURRENT manager is named in scope.tools.per_manager.
+            # - rule.allow (when present, even empty): REPLACES the manager's
+            #   ranked surface with the intersection of `ranked` and `allow`.
+            # - rule.block: subtracts specific items from the resulting surface.
+            # Unmentioned managers see no change.
+            per_manager_rules = scope_context.tools.per_manager or {}
+            rule = per_manager_rules.get(manager_name)
+            if rule is not None:
+                if rule.allow is not None:
+                    allow_set = {str(x).strip() for x in rule.allow if isinstance(x, str) and str(x).strip()}
+                    before = len(ranked)
+                    ranked = [t for t in ranked if t in allow_set]
+                    logger.info(
+                        "[tool_scope] per_manager.allow applied manager=%s allow=%s before=%s after=%s",
+                        manager_name, sorted(allow_set), before, len(ranked),
+                    )
+                if rule.block:
+                    block_set = {str(x).strip() for x in rule.block if isinstance(x, str) and str(x).strip()}
+                    if block_set:
+                        before = len(ranked)
+                        ranked = [t for t in ranked if t not in block_set]
+                        logger.info(
+                            "[tool_scope] per_manager.block applied manager=%s block=%s before=%s after=%s",
+                            manager_name, sorted(block_set), before, len(ranked),
+                        )
+
         # Optional LLM narrowing: tighten visible list to task-relevant tools.
         # Narrower sees the FULL ranked list (pre-hidden) so it can surface any
         # tool the task needs, including leaf tools normally hidden from the planner.

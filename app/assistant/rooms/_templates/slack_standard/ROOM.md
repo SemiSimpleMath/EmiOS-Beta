@@ -25,6 +25,35 @@ permissions:
     sensitive: true
   allowed_tools: null
   blocked_tools: []
+  # Per-manager rules. Each entry fires when the named manager runs in this
+  # scope's call tree. `allow` REPLACES that manager's natives with the
+  # listed subset (fail-closed — new tools added to a manager later are NOT
+  # auto-exposed). `block` subtracts specific leaves from a manager's natives
+  # without touching the rest. See ScopeToolRule.
+  per_manager:
+    # When emi_team_manager runs from this Slack scope, narrow its surface
+    # to the safe research subset (web/maps via web_manager, slack-channel
+    # pod memory, operational tools). Everything emi_team natively reaches
+    # — personal_admin, devices, playwright, bash, sandbox, KG, scheduler —
+    # is implicitly excluded because it's not in this allow list.
+    emi_team_manager:
+      allow:
+        - web_manager
+        - pod_search
+        - pod_fetch
+        - ask_user
+        - find_tool
+        - install_tool
+        - read_skill
+        - discover_skills
+        - read_tool_result
+    # When emi_team delegates to web_manager, strip the credential-courier
+    # leaves out of web_manager's natives. Search/scrape/news/weather/maps
+    # all keep working.
+    web_manager:
+      block:
+        - http_request
+        - oauth_token_refresh
   allow_images: true
 access:
   allowed_global_resources:
