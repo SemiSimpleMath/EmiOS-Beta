@@ -339,16 +339,12 @@ class ToolScopeService:
             always_show = ["find_tool", "install_tool", "ask_user"]
         always_show = [str(x).strip() for x in always_show if isinstance(x, str) and str(x).strip()]
 
-        # Sanitize always_show against the calling scope's tool boundaries BEFORE
-        # any filter consumes it. A manager's always_show is "I want these pinned
-        # WITHIN what the scope allows" — it must never bypass the scope's safety
-        # boundaries (blocked_tools = denylist floor; allowed_tools = whitelist
-        # ceiling when not "all"). Without this, emi_team_manager's always_show
-        # (playwright, bash, ask_kg, etc.) would surface in a low-authority room
-        # (e.g. Slack) even when that room's scope restricts to a small whitelist
-        # — the manager would silently re-expand the scope.
+        # Sanitize always_show against the calling scope's blocked_tools BEFORE
+        # any filter consumes it. blocked_tools is the safety floor — a manager's
+        # always_show MUST NOT bypass it. Without this, a Slack room blocking
+        # `playwright_*` would still see playwright tools via emi_team_manager's
+        # always_show (transitive risk).
         scope_blocked_for_always_show: set[str] = set()
-        scope_allowed_for_always_show: set[str] | None = None  # None = "all" allowed
         try:
             raw_scope_for_always_show = blackboard.get_state_value("scope_context")
             sc_for_always_show: ScopeContext | None = None
@@ -361,14 +357,8 @@ class ToolScopeService:
                 scope_blocked_for_always_show = {
                     str(x).strip() for x in blocked if isinstance(x, str) and str(x).strip()
                 }
-                allowed = sc_for_always_show.tools.allowed_tools or []
-                allowed_set = {
-                    str(x).strip() for x in allowed if isinstance(x, str) and str(x).strip()
-                }
-                if allowed_set and "all" not in allowed_set:
-                    scope_allowed_for_always_show = allowed_set
         except Exception as e:
-            logger.debug("[tool_scope] could not read scope tool boundaries for always_show sanitization: %s", e, exc_info=True)
+            logger.debug("[tool_scope] could not read scope blocked_tools for always_show sanitization: %s", e, exc_info=True)
         if scope_blocked_for_always_show:
             stripped = [t for t in always_show if t in scope_blocked_for_always_show]
             if stripped:
@@ -377,14 +367,6 @@ class ToolScopeService:
                     manager_name, stripped,
                 )
             always_show = [t for t in always_show if t not in scope_blocked_for_always_show]
-        if scope_allowed_for_always_show is not None:
-            stripped = [t for t in always_show if t not in scope_allowed_for_always_show]
-            if stripped:
-                logger.info(
-                    "[tool_scope] always_show stripped against scope.allowed_tools manager=%s removed=%s",
-                    manager_name, stripped,
-                )
-            always_show = [t for t in always_show if t in scope_allowed_for_always_show]
 
         hidden_tools_raw = vis_cfg.get("hidden_tools")
         hidden_tools: set[str] = set()
