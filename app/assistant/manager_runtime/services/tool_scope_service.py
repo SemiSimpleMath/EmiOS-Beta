@@ -339,6 +339,35 @@ class ToolScopeService:
             always_show = ["find_tool", "install_tool", "ask_user"]
         always_show = [str(x).strip() for x in always_show if isinstance(x, str) and str(x).strip()]
 
+        # Sanitize always_show against the calling scope's blocked_tools BEFORE
+        # any filter consumes it. blocked_tools is the safety floor — a manager's
+        # always_show MUST NOT bypass it. Without this, a Slack room blocking
+        # `playwright_*` would still see playwright tools via emi_team_manager's
+        # always_show (transitive risk).
+        scope_blocked_for_always_show: set[str] = set()
+        try:
+            raw_scope_for_always_show = blackboard.get_state_value("scope_context")
+            sc_for_always_show: ScopeContext | None = None
+            if isinstance(raw_scope_for_always_show, ScopeContext):
+                sc_for_always_show = raw_scope_for_always_show
+            elif isinstance(raw_scope_for_always_show, dict):
+                sc_for_always_show = ScopeContext.model_validate(raw_scope_for_always_show)
+            if sc_for_always_show is not None:
+                blocked = sc_for_always_show.tools.blocked_tools or []
+                scope_blocked_for_always_show = {
+                    str(x).strip() for x in blocked if isinstance(x, str) and str(x).strip()
+                }
+        except Exception as e:
+            logger.debug("[tool_scope] could not read scope blocked_tools for always_show sanitization: %s", e, exc_info=True)
+        if scope_blocked_for_always_show:
+            stripped = [t for t in always_show if t in scope_blocked_for_always_show]
+            if stripped:
+                logger.info(
+                    "[tool_scope] always_show stripped against scope.blocked_tools manager=%s removed=%s",
+                    manager_name, stripped,
+                )
+            always_show = [t for t in always_show if t not in scope_blocked_for_always_show]
+
         hidden_tools_raw = vis_cfg.get("hidden_tools")
         hidden_tools: set[str] = set()
         if isinstance(hidden_tools_raw, list):
