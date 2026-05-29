@@ -103,11 +103,12 @@ class PodStoreTool(BaseTool):
         raw_limit = arguments.get("limit")
         limit = int(raw_limit) if raw_limit is not None else 20
 
-        # `scope` is not an agent-facing argument. Cross-room retrieval is the
-        # default (pods are user memory, not room-private). If a future policy
-        # needs to narrow by the calling scope's room, derive it here from
-        # tool_message.scope_context.room_id rather than asking the agent.
-        scope = None
+        # `scope` is not an agent-facing argument — pod_search filters to the
+        # calling scope's room. Same pattern as send_email reading
+        # scope_context.acting_as to pick the right account: the tool consumes
+        # the scope dimension it needs as input.
+        scope_ctx = getattr(tool_message, "scope_context", None)
+        scope = getattr(scope_ctx, "room_id", None) if scope_ctx is not None else None
 
         pods = self._ensure_store().query(
             tags=tags,
@@ -145,12 +146,22 @@ class PodStoreTool(BaseTool):
         if not isinstance(raw_ids, list) or not raw_ids:
             raise ValueError("`pod_ids` must be a non-empty list of strings")
 
+        # Scope filter: pod_fetch returns only pods that match the calling
+        # scope's room (when set). Mirrors pod_search's filter; without it,
+        # a planner with a cross-room pod_id could still fetch the body.
+        scope_ctx = getattr(tool_message, "scope_context", None)
+        scope = getattr(scope_ctx, "room_id", None) if scope_ctx is not None else None
+
         store = self._ensure_store()
         fetched: List[Dict[str, Any]] = []
         missing: List[str] = []
         for pid in raw_ids:
             pod = store.get(str(pid))
             if pod is None:
+                missing.append(str(pid))
+                continue
+            if scope is not None and pod.scope_id != scope:
+                # Cross-scope pod_id — not visible from this scope, treat as missing.
                 missing.append(str(pid))
                 continue
             fetched.append(_pod_to_full(pod))
