@@ -95,6 +95,28 @@ class PodAuthorityError(Exception):
         super().__init__(msg)
 
 
+class PodScopeError(Exception):
+    """Raised when a non-master room tries to read a pod from a different room.
+
+    The room-scoping rule (enforced at pod_search/pod_fetch tool wrappers):
+    rooms with authority_level < AUTH_USER (99) can only see pods whose
+    `scope_id` matches their own `room_id`. Master_room and system-authority
+    contexts bypass this — they can read pods across all rooms.
+
+    Defends against transitive cross-room leakage: a Slack-side planner
+    calling pod_search/pod_fetch should not return chat_cluster pods minted
+    in master_room or other private contexts.
+    """
+    def __init__(self, *, pod_id: str, pod_scope: Optional[str], caller_room: Optional[str]):
+        self.pod_id = pod_id
+        self.pod_scope = pod_scope
+        self.caller_room = caller_room
+        super().__init__(
+            f"pod {pod_id} belongs to scope {pod_scope!r}; "
+            f"caller room {caller_room!r} cannot read across scopes"
+        )
+
+
 def caller_authority(scope) -> int:
     """Extract the integer authority level from a scope object.
 
