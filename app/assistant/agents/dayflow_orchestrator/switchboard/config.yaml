@@ -6,7 +6,12 @@ llm_params:
   model_tier: "mini"
 
 allowed_tools: all
-except_tools: []
+# Switchboard routes; it doesn't ask the user mid-decision. ask_user is a
+# clarification leaf for in-task use by a manager, not a routing primitive.
+# See room/switchboard/config.yaml for the same rule + the Slack incident
+# that motivated this explicit block.
+except_tools:
+  - ask_user
 allowed_nodes: [return_control]
 entity_scan_keys: []
 

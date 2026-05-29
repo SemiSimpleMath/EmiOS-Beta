@@ -7,7 +7,16 @@ llm_params:
 
 
 allowed_tools: all
-except_tools: []
+# Switchboard's job is ROUTING — pick a manager or no-op. It should never
+# pick clarification/leaf tools directly. ask_user is for in-task
+# clarification (called BY a manager mid-execution), not for the routing
+# decision itself — picking it here means "interrupt to ask the user
+# something" when the user just spoke, which is nonsensical at this layer.
+# Slack 2026-05-28 case: planner picked ask_user instead of routing to a
+# pod-search-capable manager, then crashed with "Missing 'question' argument"
+# because it passed manager-shape args (task+information).
+except_tools:
+  - ask_user
 allowed_nodes: [return_control]
 entity_scan_keys: [incoming_message, task, information, recent_history]
 
