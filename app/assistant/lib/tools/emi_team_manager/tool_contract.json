@@ -36,12 +36,12 @@
     "selectors": [
       "workflow"
     ],
-    "risk_level": "low",
-    "side_effects": "read_only",
+    "risk_level": "critical",
+    "side_effects": "external_action",
     "requires_auth": [],
-    "requires_network": false,
-    "cost_level": "medium",
-    "latency_class": "moderate",
+    "requires_network": true,
+    "cost_level": "high",
+    "latency_class": "slow",
     "front_door": false,
     "room_visibility_default": "conditional",
     "approval_required": false
