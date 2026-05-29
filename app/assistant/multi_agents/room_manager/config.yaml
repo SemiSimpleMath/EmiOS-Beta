@@ -36,6 +36,7 @@ control_nodes:
 tools:
   # Start broad, then constrain per room policy with task_allowed_tools / task_except_tools.
   allowed_tools:
+    - emi_team_manager           # general-purpose orchestrator (scope narrows actual surface)
     - get_important_emails
     - send_email
     - find_calendar_event_by_name
@@ -69,6 +70,7 @@ tools:
 scope_contract:
   tools:
     allowed_tools:
+      - emi_team_manager           # general-purpose orchestrator (scope narrows actual surface)
       - get_important_emails
       - send_email
       - find_calendar_event_by_name

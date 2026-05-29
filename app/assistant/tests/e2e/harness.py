@@ -120,6 +120,7 @@ def simulate_room_inbound(
     speaker_name: str = "TestSpeaker",
     speaker_external_id: str = "U_test",
     context_id: str = "main",
+    setup_fn: Optional[callable] = None,
 ) -> HarnessResult:
     """Run one inbound message through the full room → manager pipeline.
 
@@ -149,6 +150,12 @@ def simulate_room_inbound(
     from app.assistant.ServiceLocator.service_locator import DI
 
     with sandboxed_di():
+        if setup_fn is not None:
+            # Hook for pre-seeding sandbox state (pods, ResourceManager values,
+            # KG nodes, etc.) before the manager runs. Runs INSIDE the sandbox
+            # so writes land in the tempfile DB.
+            setup_fn()
+
         room_ctx = load_room_context_for_manager(room_id)
         if not room_ctx:
             raise ValueError(f"Room {room_id!r} has no ROOM.md or it's empty.")

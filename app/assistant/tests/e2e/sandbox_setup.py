@@ -101,6 +101,61 @@ def _initialize_tables_for_sandbox() -> None:
     initialize_news_tables()
 
 
+def _initialize_manager_runtime_services() -> None:
+    """Register manager-runtime services that test_setup.py omits.
+
+    test_setup.py covers the basics (registries, factories, agent components,
+    resource manager). The harness needs more for end-to-end manager invocation:
+    mam_instance_manager (tracks active manager invocations), mailbox, outbound
+    publisher, chat_narrator, etc. Mirrors a subset of initialize_system.py.
+
+    Idempotent — checks if a service is already registered before registering.
+    """
+    from app.assistant.ServiceLocator.service_locator import DI, ServiceLocator
+
+    def _register_if_missing(name: str, build_fn):
+        if not hasattr(DI, name) or getattr(DI, name) is None:
+            try:
+                ServiceLocator.register(name, build_fn())
+            except Exception:
+                # Defensive: a service may fail to construct in test env (e.g.,
+                # missing config). Don't bring down the harness for an
+                # optional service.
+                pass
+
+    # mailbox + mam_instance_manager are required by ManagerInvoker.invoke.
+    from app.assistant.manager_runtime.mailbox import Mailbox
+    _register_if_missing("mailbox", Mailbox)
+
+    from app.assistant.manager_runtime.mam_instance_manager import MAMInstanceManager
+    _register_if_missing(
+        "mam_instance_manager",
+        lambda: MAMInstanceManager(resource_manager=DI.resource_manager),
+    )
+
+    # Outbound + narrator — needed when manager publishes a final response.
+    from app.assistant.chat_outbound import OutboundChatPublisher
+    _register_if_missing("outbound_chat_publisher", OutboundChatPublisher)
+
+    from app.assistant.chat_narrator import ChatNarrator
+    _register_if_missing("chat_narrator", ChatNarrator)
+
+    # progress_curator publishes agent_progress_fact events; some control
+    # nodes assume it's around.
+    try:
+        from app.assistant.progress_curator import ProgressCurator
+        _register_if_missing("progress_curator", ProgressCurator)
+    except ImportError:
+        pass
+
+    # question_service powers the ask_user path on socketio/sms.
+    try:
+        from app.assistant.question_service import QuestionService
+        _register_if_missing("question_service", QuestionService)
+    except ImportError:
+        pass
+
+
 def _initialize_di_once() -> None:
     """Run the heavy DI bootstrap if it hasn't run yet in this process."""
     global _INITIALIZED
@@ -115,6 +170,8 @@ def _initialize_di_once() -> None:
         # because they're Flask-SQLAlchemy bound; rest of the always-on set
         # uses plain SQLAlchemy and works outside an app context.
         _initialize_tables_for_sandbox()
+        # Manager-runtime services needed for full pipeline invocation.
+        _initialize_manager_runtime_services()
         _INITIALIZED = True
 
 

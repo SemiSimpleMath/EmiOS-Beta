@@ -407,46 +407,55 @@ class ToolScopeService:
         except Exception as e:
             logger.error("[tool_scope] Failed reading scope_context for tool filtering: %s", e)
             logger.debug("[tool_scope] scope_context read exception details", exc_info=True)
-        if scope_contract_enforced and scope_context is not None:
+        def _apply_scope_filters(items: list[str], stage: str) -> list[str]:
+            """Apply scope_contract allow/block + per_manager.allow/block rules.
+
+            Called BEFORE the narrower (so narrower never evaluates already-blocked
+            tools) AND AFTER the narrower (so the narrower's expanded list can't
+            re-introduce scope-blocked tools — pre-existing design quirk where
+            narrower receives ranked_for_narrower, the pre-filter list).
+            """
+            if not (scope_contract_enforced and scope_context is not None):
+                return items
+            result = items
             scope_allowed = scope_context.tools.allowed_tools if isinstance(scope_context.tools.allowed_tools, list) else []
             scope_blocked = scope_context.tools.blocked_tools if isinstance(scope_context.tools.blocked_tools, list) else []
-            scope_allow_set = {str(x).strip() for x in scope_allowed if isinstance(x, str) and str(x).strip()}
-            scope_block_set = {str(x).strip() for x in scope_blocked if isinstance(x, str) and str(x).strip()}
-            if scope_allow_set and "all" not in scope_allow_set:
-                ranked = [t for t in ranked if t in scope_allow_set]
-            if scope_block_set:
-                ranked = [t for t in ranked if t not in scope_block_set]
-
-            # Per-manager scope rule (ScopeToolPolicy.per_manager). Fires when
-            # the CURRENT manager is named in scope.tools.per_manager.
-            # - rule.allow (when present, even empty): REPLACES the manager's
-            #   ranked surface with the intersection of `ranked` and `allow`.
-            # - rule.block: subtracts specific items from the resulting surface.
-            # Unmentioned managers see no change.
+            allow_set = {str(x).strip() for x in scope_allowed if isinstance(x, str) and str(x).strip()}
+            block_set = {str(x).strip() for x in scope_blocked if isinstance(x, str) and str(x).strip()}
+            if allow_set and "all" not in allow_set:
+                result = [t for t in result if t in allow_set]
+            if block_set:
+                result = [t for t in result if t not in block_set]
+            # Per-manager rule for the current manager
             per_manager_rules = scope_context.tools.per_manager or {}
             rule = per_manager_rules.get(manager_name)
             if rule is not None:
                 if rule.allow is not None:
-                    allow_set = {str(x).strip() for x in rule.allow if isinstance(x, str) and str(x).strip()}
-                    before = len(ranked)
-                    ranked = [t for t in ranked if t in allow_set]
+                    pm_allow = {str(x).strip() for x in rule.allow if isinstance(x, str) and str(x).strip()}
+                    before = len(result)
+                    result = [t for t in result if t in pm_allow]
                     logger.info(
-                        "[tool_scope] per_manager.allow applied manager=%s allow=%s before=%s after=%s",
-                        manager_name, sorted(allow_set), before, len(ranked),
+                        "[tool_scope/%s] per_manager.allow manager=%s allow=%s before=%s after=%s",
+                        stage, manager_name, sorted(pm_allow), before, len(result),
                     )
                 if rule.block:
-                    block_set = {str(x).strip() for x in rule.block if isinstance(x, str) and str(x).strip()}
-                    if block_set:
-                        before = len(ranked)
-                        ranked = [t for t in ranked if t not in block_set]
+                    pm_block = {str(x).strip() for x in rule.block if isinstance(x, str) and str(x).strip()}
+                    if pm_block:
+                        before = len(result)
+                        result = [t for t in result if t not in pm_block]
                         logger.info(
-                            "[tool_scope] per_manager.block applied manager=%s block=%s before=%s after=%s",
-                            manager_name, sorted(block_set), before, len(ranked),
+                            "[tool_scope/%s] per_manager.block manager=%s block=%s before=%s after=%s",
+                            stage, manager_name, sorted(pm_block), before, len(result),
                         )
+            return result
+
+        # Pre-narrower filter: keeps narrower from wasting tokens on blocked tools.
+        ranked = _apply_scope_filters(ranked, stage="pre_narrower")
 
         # Optional LLM narrowing: tighten visible list to task-relevant tools.
-        # Narrower sees the FULL ranked list (pre-hidden) so it can surface any
-        # tool the task needs, including leaf tools normally hidden from the planner.
+        # Narrower sees the FULL pre-filter ranked list (pre-hidden) so it can
+        # surface any tool the task needs, including leaf tools normally hidden
+        # from the planner.
         if use_narrower and (task or information):
             ranked = self._run_narrower(
                 ranked=ranked_for_narrower,
@@ -456,6 +465,12 @@ class ToolScopeService:
                 information=information,
                 manager_name=manager_name,
             )
+
+        # Post-narrower filter: narrower's expanded output runs through scope
+        # again so it can't re-introduce blocked tools. This is the load-bearing
+        # apply — without it, per_manager.allow has no effect when use_narrower
+        # is True (which it is for emi_team and other broad managers).
+        ranked = _apply_scope_filters(ranked, stage="post_narrower")
 
         visible: list[str] = []
         for t in always_show:

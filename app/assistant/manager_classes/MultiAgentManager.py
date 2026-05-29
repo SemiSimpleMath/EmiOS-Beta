@@ -235,6 +235,22 @@ class MultiAgentManager:
                 for key, value in resolved_data.items():
                     self.blackboard.update_state_value(key, value)
 
+            # Surface room context onto the blackboard so the 17 downstream
+            # readers of get_state_value("room_id") / "room_surface" /
+            # "room_context_id" actually find it. Without this, every
+            # non-master room silently fell back to master_room — most
+            # consequentially in chat_memory_rag where it leaked cross-room
+            # RAG matches into agent prompts. Surfaced by the e2e harness
+            # via slack/__test__ → chat_gate seeing master_room pod IDs.
+            for _attr, _key in (
+                ("room_id", "room_id"),
+                ("room_surface", "room_surface"),
+                ("room_context_id", "room_context_id"),
+            ):
+                _val = getattr(user_message, _attr, None)
+                if isinstance(_val, str) and _val.strip():
+                    self.blackboard.update_state_value(_key, _val.strip())
+
             # Preserve reply_to from the inbound message metadata so agents inside
             # the manager can set their _active_reply_to (needed for TTS routing).
             try:

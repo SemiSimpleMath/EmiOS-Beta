@@ -111,11 +111,32 @@ When you find pods:
 
 - Emit each `pod_id` verbatim in your output text. The downstream agent
   + the PodInjector will hydrate headers from them automatically.
-- **Do NOT call `pod_fetch` to read bodies unless the question requires
-  body content to answer.** Most "find" tasks end with "here are the
-  candidates" + pod_ids — the next agent decides whether to open them.
 - If the search returns 0 pods, widen filters once (drop tags / extend
   `since` / loosen `query`) and retry before reporting empty.
+
+### User-facing vs. downstream-agent: when to `pod_fetch`
+
+Decide whether the search result is feeding **another agent** or going
+**back to the user** as the reply.
+
+- **Downstream-agent path** (find pods for `send_email` to attach,
+  `kg_*` to link, etc.): DON'T fetch. The pod_id is the handoff.
+
+- **User-facing path** (the user asked a question and your search
+  result will reach them in the room): the user wants CONTENT, not a
+  pod_id. Decide which of these they want and `pod_fetch` accordingly:
+
+  1. **Verbatim body** — "show me that conversation", "what exactly did
+     I write", "paste it". Fetch and return the body as-is.
+  2. **Summary** — "what did we talk about", "remind me what that
+     thread covered". Fetch, paraphrase in 1-3 sentences.
+  3. **Specific answer** — "what time did we agree on?", "what did
+     Justin say about X?". Fetch, extract the specific fact, reply
+     with just that.
+
+  ALL THREE require `pod_fetch` — a one_liner header won't satisfy a
+  user-facing answer. Header-only replies leak pod_ids into chat and
+  read like search results, not conversation.
 
 ## Hydrated pod headers in your context
 

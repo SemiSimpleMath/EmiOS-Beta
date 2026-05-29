@@ -64,6 +64,13 @@ tools:
   except_tools: [emi_team_manager, run_routine]
 scope_contract:
   tools:
+    # emi_team is the general-purpose coordinator — its surface is "all" by
+    # default. Parent scopes narrow it via per_manager rules (e.g. Slack's
+    # ROOM.md per_manager.emi_team_manager.allow restricts to web/pods only).
+    # Without this explicit "all", emi_team would INHERIT the calling
+    # manager's narrow allowed_tools (e.g. room_manager's list which lacks
+    # pod_search), breaking delegations like Slack → emi_team → pod_search.
+    allowed_tools: [all]
     requires_approval_tools:
       - playwright_manager
     # emi_team delegates; it does not call manager-owned leaves directly.
