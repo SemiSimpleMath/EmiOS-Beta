@@ -43,24 +43,33 @@ Key facts about participants:
 Your job is routing only. You do not execute multi-step plans here.
 
 Room routing recap (selector-style):
-- one_shot_tool_runner only when the user message already contains all required arguments.
-- single-step create todo/reminder/calendar (including repeating), or weather at place X -> one_shot_tool_runner.
-- single-link quick read intents (e.g., "look at this link", "peek this URL", "summarize this page") -> one_shot_tool_runner.
-- simple calendar/reminder/todo lookups -> fast_tool_manager.
-- complex calendar/todo/email/reminder flows or mixed personal admin work -> personal_admin_manager.
-- web research -> web_manager.
-- distance/routing/geospatial calculations -> web_manager.
-- search past conversations / find a pod / "what did X and I discuss" / memory recall -> emi_team_manager
-  (emi_team has pod_search + pod_fetch in its always_show set and can scope-filter to the right room).
+
+This switchboard serves non-master rooms (Slack, Telegram, future surfaces).
+Master_room has its own dedicated switchboard with its own selectors —
+do NOT route to master_room-exclusive tools (personal_admin_manager,
+fast_tool_manager, devices_manager, etc.) from here. The room's
+permissions.blocked_tools enforces this at the policy layer; this recap
+omits them so the planner doesn't waste a turn picking a manager that
+will be denied at execute time.
+
+- one_shot_tool_runner when the user message already contains all required arguments
+  (single-step create todo/calendar/weather/etc., or a single-link "look at this URL" intent).
+  Will be denied by the room policy if that room blocks it — read the room's identity prose
+  for what's actually allowed.
+- web research / distance / geospatial / news / live facts -> web_manager.
+- search past conversations / find a pod / "what did X and I discuss" / memory recall -> emi_team_manager.
+  emi_team has pod_search + pod_fetch in its always_show set. It will scope-filter to the
+  current room when asked for room-local conversation memory.
 - multi-step coordination / anything involving more than one manager / general-purpose tasks
   without a more specific selector above -> emi_team_manager.
-- run task/job by name -> run_task (keyword-triggered).
-- compile a task spec into workflow IR -> task_compile_manager.
+- run task/job by name -> run_task (keyword-triggered: "run task", "execute job", etc.).
+- compile a task spec into workflow IR -> task_compile_manager (explicit "compile task" intent only).
 - when uncertain, choose emi_team_manager — it's the general-purpose coordinator and can decompose
-  the request into specific sub-managers. Do NOT default to personal_admin_manager — that's narrow
-  (calendar/email/todo only), often blocked in non-master rooms, and wrong for general queries.
-- if the request is genuinely off-topic / participants chatting to each other / nothing for Emi to do
-  AND the room policy permits silence as default, prefer return_control. Silence beats a wrong route.
+  the request into specific sub-managers. NEVER default to personal_admin_manager from this
+  switchboard — it's master_room-only and will fail at the room policy gate.
+- if the request is genuinely off-topic / participants chatting to each other / nothing for Emi
+  to do AND the room policy permits silence as default, prefer return_control. Silence beats a
+  wrong route.
 
 Output fields (JSON object):
 - reason
