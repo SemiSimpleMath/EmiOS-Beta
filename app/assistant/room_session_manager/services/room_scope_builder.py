@@ -55,6 +55,22 @@ def build_scope_contract_for_room_request(
     else:
         raise ValueError("task_except_tools must be a list when provided.")
 
+    # Pod scope visibility: which pod scope_ids this room can read.
+    # Read from ROOM.md frontmatter's `permissions.pod_scopes` block.
+    # Special tokens:
+    #   - "all": see all pods regardless of scope_id (owner surfaces — master_room)
+    #   - "self": see only this room's own pods (default — slack channels, sms, etc.)
+    # Mixing "all" with specific ids is invalid (validator rejects).
+    # Default if unset: ["self"] (most restrictive — fail-closed).
+    raw_pod_scopes = room_permissions.get("pod_scopes")
+    if isinstance(raw_pod_scopes, list):
+        pod_scopes_resolved = [
+            str(s).strip() for s in raw_pod_scopes
+            if isinstance(s, str) and str(s).strip()
+        ] or ["self"]
+    else:
+        pod_scopes_resolved = ["self"]
+
     # Per-manager rules: read from ROOM.md frontmatter's `permissions.per_manager`.
     # Shape:
     #   permissions:
@@ -134,6 +150,9 @@ def build_scope_contract_for_room_request(
             "requires_approval_tools": [],
             "allow_external_side_effects": bool(tool_classes.get("external_action", False)),
             "per_manager": per_manager_rules,
+        },
+        "pods": {
+            "allowed_scopes": pod_scopes_resolved,
         },
         "entities": {
             "enabled": True,

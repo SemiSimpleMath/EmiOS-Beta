@@ -20,6 +20,57 @@ from app.assistant.utils.pydantic_classes import ToolMessage, ToolResult
 logger = get_logger(__name__)
 
 
+def _resolve_pod_allowed_scopes(tool_message: ToolMessage) -> List[str]:
+    """Return the concrete pod scope_ids the caller can read.
+
+    Reads ``scope_context.pods.allowed_scopes`` (default ``["self"]``) and
+    expands the ``"self"`` token to the caller's room_id. Returns either:
+
+    - ``["all"]`` — owner-wide; tool should not filter by scope_id
+    - A list of explicit scope_ids — tool should restrict to those
+
+    When scope_context is missing or has no room_id, falls back to
+    unrestricted (``["all"]``) — this preserves behavior for system-
+    internal callers (routines, dayflow ticks) that invoke pod tools
+    without a room context.
+    """
+    scope_ctx = getattr(tool_message, "scope_context", None)
+    if scope_ctx is None:
+        return ["all"]
+    # Defensive: scope_context might come through as dict on some paths.
+    if isinstance(scope_ctx, dict):
+        pods_block = scope_ctx.get("pods") or {}
+        raw = pods_block.get("allowed_scopes") if isinstance(pods_block, dict) else None
+        room_id = scope_ctx.get("room_id")
+    else:
+        pods_obj = getattr(scope_ctx, "pods", None)
+        raw = getattr(pods_obj, "allowed_scopes", None) if pods_obj is not None else None
+        room_id = getattr(scope_ctx, "room_id", None)
+    if not isinstance(raw, list) or not raw:
+        raw = ["self"]
+    if "all" in raw:
+        return ["all"]
+    out: List[str] = []
+    for s in raw:
+        s_str = str(s).strip()
+        if not s_str:
+            continue
+        if s_str == "self":
+            if isinstance(room_id, str) and room_id.strip():
+                expanded = room_id.strip()
+                if expanded not in out:
+                    out.append(expanded)
+            # If self is requested but no room_id is set, skip silently —
+            # the caller has no room identity to bind to.
+            continue
+        if s_str not in out:
+            out.append(s_str)
+    # If we ended up with nothing concrete, return [self]-shaped empty
+    # (no readable scope) so the query filter genuinely returns nothing.
+    # A sentinel "__none__" makes this unambiguous in the multi-scope path.
+    return out or ["__none__"]
+
+
 def _pod_to_header(pod: Pod) -> Dict[str, Any]:
     """Cheap retrieval payload — everything an agent needs to decide whether to
     fetch the full body, with no body attached."""
@@ -103,23 +154,47 @@ class PodStoreTool(BaseTool):
         raw_limit = arguments.get("limit")
         limit = int(raw_limit) if raw_limit is not None else 20
 
-        # `scope` is not an agent-facing argument — pod_search filters to the
-        # calling scope's room. Same pattern as send_email reading
-        # scope_context.acting_as to pick the right account: the tool consumes
-        # the scope dimension it needs as input.
-        scope_ctx = getattr(tool_message, "scope_context", None)
-        scope = getattr(scope_ctx, "room_id", None) if scope_ctx is not None else None
+        # `scope` is not an agent-facing argument — derived from the calling
+        # scope_context.pods.allowed_scopes. Same pattern as send_email
+        # reading scope_context.acting_as: the tool consumes the scope
+        # dimension it needs as input.
+        #
+        # - allowed_scopes=["all"]: no filter (owner surfaces like master_room)
+        # - allowed_scopes=["self"]: filter to this room's own pods (default)
+        # - explicit room_ids: filter to that set (+ self if listed)
+        allowed_scopes = _resolve_pod_allowed_scopes(tool_message)
 
-        pods = self._ensure_store().query(
-            tags=tags,
-            scope=scope,
-            kind=kind,
-            linked_to_entity=linked_to_entity,
-            linked_via=linked_via,
-            since=since,
-            query=query,
-            limit=limit,
-        )
+        if allowed_scopes == ["all"]:
+            # Owner-wide visibility — no per-scope filter on the query.
+            pods = self._ensure_store().query(
+                tags=tags, scope=None, kind=kind,
+                linked_to_entity=linked_to_entity, linked_via=linked_via,
+                since=since, query=query, limit=limit,
+            )
+        elif len(allowed_scopes) == 1:
+            # Single-scope filter — passes straight to the existing query API.
+            pods = self._ensure_store().query(
+                tags=tags, scope=allowed_scopes[0], kind=kind,
+                linked_to_entity=linked_to_entity, linked_via=linked_via,
+                since=since, query=query, limit=limit,
+            )
+        else:
+            # Multi-scope: query each scope and merge, deduped by pod_id.
+            # Limit is applied per-scope, then trimmed in Python to honor
+            # the caller's limit.
+            seen: set[str] = set()
+            merged: List = []
+            for s in allowed_scopes:
+                for pod in self._ensure_store().query(
+                    tags=tags, scope=s, kind=kind,
+                    linked_to_entity=linked_to_entity, linked_via=linked_via,
+                    since=since, query=query, limit=limit,
+                ):
+                    if pod.pod_id in seen:
+                        continue
+                    seen.add(pod.pod_id)
+                    merged.append(pod)
+            pods = merged[:limit]
         headers = [_pod_to_header(p) for p in pods]
         summary_line = (
             f"Found {len(headers)} pod(s)"
@@ -146,11 +221,13 @@ class PodStoreTool(BaseTool):
         if not isinstance(raw_ids, list) or not raw_ids:
             raise ValueError("`pod_ids` must be a non-empty list of strings")
 
-        # Scope filter: pod_fetch returns only pods that match the calling
-        # scope's room (when set). Mirrors pod_search's filter; without it,
-        # a planner with a cross-room pod_id could still fetch the body.
-        scope_ctx = getattr(tool_message, "scope_context", None)
-        scope = getattr(scope_ctx, "room_id", None) if scope_ctx is not None else None
+        # Scope filter: pod_fetch returns only pods whose scope_id is in the
+        # caller's allowed_scopes set. Mirrors pod_search; without it, a
+        # planner that obtained a cross-room pod_id could fetch the body.
+        # "all" → no filter. Otherwise restrict to the resolved scope list.
+        allowed_scopes = _resolve_pod_allowed_scopes(tool_message)
+        unrestricted = allowed_scopes == ["all"]
+        allowed_set = set(allowed_scopes) if not unrestricted else set()
 
         store = self._ensure_store()
         fetched: List[Dict[str, Any]] = []
@@ -160,7 +237,7 @@ class PodStoreTool(BaseTool):
             if pod is None:
                 missing.append(str(pid))
                 continue
-            if scope is not None and pod.scope_id != scope:
+            if not unrestricted and pod.scope_id not in allowed_set:
                 # Cross-scope pod_id — not visible from this scope, treat as missing.
                 missing.append(str(pid))
                 continue

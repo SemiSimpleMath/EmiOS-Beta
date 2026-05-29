@@ -65,6 +65,34 @@ class ScopeToolPolicy(ScopeBaseModel):
         return cleaned
 
 
+class ScopePodPolicy(ScopeBaseModel):
+    """Which pod scopes this room can see/fetch.
+
+    Pods are tagged with a ``scope_id`` (typically the room_id where they
+    were minted). A room declares which pod scopes its agents can read,
+    independent of authority. Sensitivity gating (min_authority) is a
+    SEPARATE concern — this controls cross-room privacy, not body access.
+
+    Special tokens:
+      - ``"all"``: see all pods regardless of scope_id (owner surfaces)
+      - ``"self"``: see only pods whose scope_id matches this room's room_id
+
+    Mixing "all" with explicit room_ids is invalid (just use "all"). Mixing
+    "self" with explicit room_ids is fine — that expands self with extras.
+    Default (empty list) = ``["self"]`` behavior — the safest, most
+    restrictive option.
+    """
+    allowed_scopes: List[str] = Field(default_factory=lambda: ["self"])
+
+    @field_validator("allowed_scopes")
+    @classmethod
+    def validate_allowed_scopes_semantics(cls, v: List[str]) -> List[str]:
+        cleaned = [str(item).strip() for item in (v or []) if isinstance(item, str) and str(item).strip()]
+        if "all" in cleaned and len(cleaned) > 1:
+            raise ValueError("pods.allowed_scopes cannot mix 'all' with specific room_ids.")
+        return cleaned or ["self"]
+
+
 class ScopeEntityPolicy(ScopeBaseModel):
     enabled: bool = True
     allowed_entity_cards: List[str] = Field(default_factory=list)
@@ -173,6 +201,7 @@ class ScopeContext(ScopeBaseModel):
     history: ScopeHistoryPolicy = Field(default_factory=ScopeHistoryPolicy)
     resources: ScopeResourcePolicy = Field(default_factory=ScopeResourcePolicy)
     tools: ScopeToolPolicy = Field(default_factory=ScopeToolPolicy)
+    pods: ScopePodPolicy = Field(default_factory=ScopePodPolicy)
     entities: ScopeEntityPolicy = Field(default_factory=ScopeEntityPolicy)
     cards: ScopeCardPolicy = Field(default_factory=ScopeCardPolicy)
     writes: ScopeWritePolicy = Field(default_factory=ScopeWritePolicy)
