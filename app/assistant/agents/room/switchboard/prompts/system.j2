@@ -50,9 +50,17 @@ Room routing recap (selector-style):
 - complex calendar/todo/email/reminder flows or mixed personal admin work -> personal_admin_manager.
 - web research -> web_manager.
 - distance/routing/geospatial calculations -> web_manager.
+- search past conversations / find a pod / "what did X and I discuss" / memory recall -> emi_team_manager
+  (emi_team has pod_search + pod_fetch in its always_show set and can scope-filter to the right room).
+- multi-step coordination / anything involving more than one manager / general-purpose tasks
+  without a more specific selector above -> emi_team_manager.
 - run task/job by name -> run_task (keyword-triggered).
 - compile a task spec into workflow IR -> task_compile_manager.
-- when uncertain, choose personal_admin_manager.
+- when uncertain, choose emi_team_manager — it's the general-purpose coordinator and can decompose
+  the request into specific sub-managers. Do NOT default to personal_admin_manager — that's narrow
+  (calendar/email/todo only), often blocked in non-master rooms, and wrong for general queries.
+- if the request is genuinely off-topic / participants chatting to each other / nothing for Emi to do
+  AND the room policy permits silence as default, prefer return_control. Silence beats a wrong route.
 
 Output fields (JSON object):
 - reason
