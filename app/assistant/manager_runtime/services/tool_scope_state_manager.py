@@ -84,7 +84,6 @@ class ToolScopeStateManager:
         *,
         visible_tools: list[str],
         max_visible: int,
-        always_show: list[str] | None = None,
     ) -> None:
         clamped_max = self._normalize_max_visible(max_visible)
         dedup_visible = self._dedupe([x for x in visible_tools if isinstance(x, str) and x.strip()])
@@ -94,17 +93,6 @@ class ToolScopeStateManager:
         self.blackboard.update_state_value("recently_installed_tools", [])
         self.blackboard.update_state_value("visible_tools", self._apply_limit(dedup_visible, clamped_max))
         self.blackboard.update_state_value("tool_visibility_max", clamped_max)
-        # Export the manager's always_show list so tool_policy_resolver
-        # can apply the same bypass logic when evaluating task-level
-        # restrictions and scope-derived task_allowed_tools. Without this,
-        # the two filter paths disagree about always_show — the bug we
-        # diagnosed in SCOPE_AUDIT.md (http_request stripped by
-        # tool_policy_resolver even though tool_scope_service bypassed
-        # it). See Step 1.5 of the SCOPE_AUDIT.md migration.
-        normalized_always_show = self._dedupe(
-            [x for x in (always_show or []) if isinstance(x, str) and x.strip()]
-        )
-        self.blackboard.update_state_value("manager_always_show", normalized_always_show)
 
     def record_tool_result(
         self,

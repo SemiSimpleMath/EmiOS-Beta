@@ -27,30 +27,17 @@ def check_tool_access(
     task_allowed_tools: list | None,
     task_except_tools: list | None,
     caller_name: str,
-    manager_always_show: list | None = None,
 ) -> tuple[bool, str]:
     """Check whether *tool_name* is permitted.
 
     Returns ``(allowed, reason)``.  When ``allowed`` is False, *reason*
     is a human-readable error message suitable for the blackboard.
 
-    ``manager_always_show`` is the optional list of tools that the
-    invoking manager has declared as always-visible (via its
-    tool_visibility.always_show config). Tools in this list bypass
-    scope_contract narrowing and task-level restrictions — they're
-    fundamental to the manager's operation. This matches the same
-    bypass applied by tool_scope_service and tool_policy_resolver
-    (SCOPE_AUDIT.md Step 1.5: all three filter paths agree).
+    Note: ``always_show`` is a visibility-only concept (narrower-bypass
+    in tool_scope_service). It does NOT grant permission and is not
+    consulted here — permission flows purely from scope.allowed_tools
+    intersected with task-level restrictions.
     """
-    always_show_set: set[str] = set()
-    if isinstance(manager_always_show, list):
-        always_show_set = {
-            str(x).strip()
-            for x in manager_always_show
-            if isinstance(x, str) and str(x).strip()
-        }
-    is_always_show = tool_name in always_show_set
-
     # --- Layer 1: Scope contract ---
     if scope_contract_enforced and isinstance(scope_context, ScopeContext):
         scope_allowed = scope_context.tools.allowed_tools if isinstance(scope_context.tools.allowed_tools, list) else []
@@ -60,9 +47,9 @@ def check_tool_access(
             raise ValueError(
                 f"[{caller_name}] scope_context.tools.allowed_tools cannot mix 'all' with specific tool names."
             )
-        if "all" not in scope_allowset and tool_name not in scope_allowset and not is_always_show:
+        if "all" not in scope_allowset and tool_name not in scope_allowset:
             return False, f"Tool '{tool_name}' is outside scope_contract allowed_tools."
-        if tool_name in set(scope_blocked) and not is_always_show:
+        if tool_name in set(scope_blocked):
             return False, f"Tool '{tool_name}' is blocked by scope_contract."
 
     # --- Layer 2: Task-level restrictions ---
@@ -98,9 +85,9 @@ def check_tool_access(
             allowset = set(allowset)
             allowset.add(tool_name)
 
-    if allowset is not None and "all" not in allowset and tool_name not in allowset and not is_always_show:
+    if allowset is not None and "all" not in allowset and tool_name not in allowset:
         return False, f"Tool '{tool_name}' is not allowed for this task."
-    if tool_name in denyset and not is_always_show:
+    if tool_name in denyset:
         return False, f"Tool '{tool_name}' is denied for this task."
 
     return True, ""

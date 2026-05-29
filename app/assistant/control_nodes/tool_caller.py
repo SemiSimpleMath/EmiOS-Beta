@@ -139,14 +139,6 @@ class ToolCaller(ControlNode):
             logger.debug("[%s] Could not read task_except_tools from blackboard", self.name, exc_info=True)
             task_except = None
 
-        # Manager's always_show list — fundamental tools that bypass
-        # scope_contract narrowing + task restrictions (SCOPE_AUDIT Step 1.5).
-        # Same bypass that tool_scope_service + tool_policy_resolver apply.
-        try:
-            manager_always_show = self.blackboard.get_state_value("manager_always_show")
-        except Exception:
-            manager_always_show = None
-
         # Only enforce if the selected target is a tool (not an agent/control node).
         is_known_tool = self.tool_registry.get_tool(selected_target) is not None
         if is_known_tool:
@@ -157,7 +149,6 @@ class ToolCaller(ControlNode):
                 task_allowed_tools=task_allowed,
                 task_except_tools=task_except,
                 caller_name=self.name,
-                manager_always_show=manager_always_show,
             )
             if not allowed:
                 logger.error(f"[{self.name}] {reason}")

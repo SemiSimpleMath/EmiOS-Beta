@@ -325,12 +325,10 @@ class ToolScopeService:
                     len(pinned),
                     pinned,
                 )
-                # Pinned-tools override — these are also the always_show set
-                # for downstream filters (no narrowing/ranking happens here).
+                # Pinned-tools override — no narrowing/ranking happens here.
                 ToolScopeStateManager(blackboard).initialize_runtime_scope(
                     visible_tools=pinned,
                     max_visible=-1,
-                    always_show=pinned,
                 )
                 return
 
@@ -384,9 +382,8 @@ class ToolScopeService:
         ranked_for_narrower = list(ranked)  # Save pre-hidden list for narrower.
 
         if hidden_tools and not use_narrower:
-            always_show_set = set(always_show)
             pre_hidden_count = len(ranked)
-            ranked = [t for t in ranked if t not in hidden_tools or t in always_show_set]
+            ranked = [t for t in ranked if t not in hidden_tools]
             if manager_name == _PLANNER_MANAGER_NAME:
                 logger.info(
                     "[tool_scope] planner hidden_tools applied hidden_count=%s before=%s after=%s",
@@ -416,11 +413,9 @@ class ToolScopeService:
             scope_allow_set = {str(x).strip() for x in scope_allowed if isinstance(x, str) and str(x).strip()}
             scope_block_set = {str(x).strip() for x in scope_blocked if isinstance(x, str) and str(x).strip()}
             if scope_allow_set and "all" not in scope_allow_set:
-                always_show_set = set(always_show)
-                ranked = [t for t in ranked if t in scope_allow_set or t in always_show_set]
+                ranked = [t for t in ranked if t in scope_allow_set]
             if scope_block_set:
-                always_show_set = set(always_show)
-                ranked = [t for t in ranked if t not in scope_block_set or t in always_show_set]
+                ranked = [t for t in ranked if t not in scope_block_set]
 
         # Optional LLM narrowing: tighten visible list to task-relevant tools.
         # Narrower sees the FULL ranked list (pre-hidden) so it can surface any
@@ -450,7 +445,6 @@ class ToolScopeService:
         ToolScopeStateManager(blackboard).initialize_runtime_scope(
             visible_tools=visible,
             max_visible=max_visible,
-            always_show=always_show,
         )
         if manager_name == _PLANNER_MANAGER_NAME:
             logger.info(
