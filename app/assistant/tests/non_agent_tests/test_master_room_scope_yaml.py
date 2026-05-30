@@ -102,22 +102,9 @@ def test_room_behavior_preserved(built):
     assert built["visibility"] == "owner_only"
 
 
-# --- whole-bucket equality: overlay output == hand-loaded scope.yaml on every
-#     permission field (no drift) ---
-
-def test_full_permission_bucket_matches_loader(built):
-    identity = {k: built.get(k) for k in (
-        "scope_id", "owner_id", "actor_id", "surface", "room_id",
-        "room_context_id", "visibility", "policy_id", "reply_to", "acting_as",
-    )}
-    loaded = load_scope(
-        resolve_room_config_dir(_ROOM_ID) / "scope.yaml", identity=identity
-    ).model_dump()
-
-    built_ctx = ScopeContext.model_validate(built).model_dump()
-    # delivery.allowed_reply_types is builder-derived (not in scope.yaml), so
-    # compare delivery field-wise on the permission bits only.
-    for block in ("tools", "pods", "resources", "entities", "cards", "writes", "approval"):
-        assert loaded[block] == built_ctx[block], f"permission block '{block}' drifted"
-    assert loaded["delivery"]["auto_send"] == built_ctx["delivery"]["auto_send"]
-    assert loaded["delivery"]["allow_initiation"] == built_ctx["delivery"]["allow_initiation"]
+# NOTE: a former test_full_permission_bucket_matches_loader was REMOVED
+# (circularity audit 2026-05-30). It compared load_scope(scope.yaml) to the
+# builder output, but the overlay makes the builder read scope.yaml back — so
+# it was tautological and caught no drift. The per-field tests above pin every
+# permission value against hardcoded literals on the builder output, which DO
+# catch a wrong scope.yaml (e.g. authority 50 -> test_authority_is_99 fails).

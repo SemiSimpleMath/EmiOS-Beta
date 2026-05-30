@@ -1,17 +1,16 @@
-"""Characterization test: slack/__test__/scope.yaml reproduces the PERMISSION
-fields the legacy room builder emits for that room.
+"""slack/__test__ scope.yaml verification (Step 2a, hardened).
 
-This is the Step-2a proof-of-equivalence. It touches NO production code — it
-builds the golden scope_dict via the existing
-``build_scope_contract_for_room_request`` and asserts that
-``load_scope(scope.yaml, identity)`` produces the same PERMISSION bucket.
+ORIGINALLY this file compared load_scope(scope.yaml) to the room builder output.
+That was sound when written — but Step 2b made the scope.yaml overlay live, so
+the builder now reads slack/__test__/scope.yaml back. A builder-vs-loader
+comparison became CIRCULAR (tautological): it passed for ANY scope.yaml content
+and could not catch a drifted file. The circularity audit (2026-05-30) caught
+this with a mutation test.
 
-Permission-only by design (see project_unified_scope_design "three buckets"):
-- ASSERTED: tools (allowed_tools + per_manager), pods, approval, resources,
-  entities, writes, delivery.{auto_send, allow_initiation}.
-- NOT asserted: history / retention / execution (room behavior, stay in
-  ROOM.md), delivery.allowed_reply_types + skills (stamped from request),
-  scope_id (random).
+Rewritten to assert load_scope(scope.yaml) against EXPLICIT GOLDEN CONSTANTS
+(the same non-circular pattern as test_tracked_room_scope_yaml.py). The golden
+values are the intended slack/__test__ permission bucket (mirrors slack_standard
+at authority 30). A wrong/drifted scope.yaml now fails.
 
 Run:
     .venv\\Scripts\\python.exe -m pytest \\
@@ -19,19 +18,13 @@ Run:
 """
 from __future__ import annotations
 
-import pytest
-
 from app.assistant.rooms.room_resource_loader import resolve_room_config_dir
 from app.assistant.scope.loader import load_scope
-from app.assistant.utils.pydantic_classes import ScopeContext
 
 
 _ROOM_ID = "slack/__test__"
-# Canonical room-dir resolver — never hand-roll Path(__file__).parents[N].
-_SCOPE_YAML = resolve_room_config_dir(_ROOM_ID) / "scope.yaml"
 
-# Identity envelope matching the golden builder run (see harness _build_envelope:
-# actor_id = speaker_external_id, owner_id = room_id).
+# Identity envelope (stamped at load; not part of the permission assertions).
 _IDENTITY = {
     "owner_id": _ROOM_ID,
     "actor_id": "U_test",
@@ -44,109 +37,82 @@ _IDENTITY = {
     "reply_to": None,
 }
 
-
-def _golden_scope() -> ScopeContext:
-    """The scope the CURRENT production builder emits for slack/__test__."""
-    from app.assistant.rooms.room_resource_loader import load_room_context_for_manager
-    from app.assistant.room_session_manager.services.room_scope_builder import (
-        build_scope_contract_for_room_request,
-    )
-    from app.assistant.tests.e2e.harness import _build_envelope
-
-    room_ctx = load_room_context_for_manager(_ROOM_ID)
-    env = _build_envelope(
-        surface="slack",
-        room_id=_ROOM_ID,
-        content="hi",
-        speaker_name="TestFriend",
-        speaker_external_id="U_test",
-        context_id="main",
-    )
-    d = build_scope_contract_for_room_request(
-        room_ctx=room_ctx,
-        envelope=env,
-        request_data={
-            "task_allowed_tools": None,
-            "task_except_tools": None,
-            "reply_to": None,
-            "actas_principal": "user",
-        },
-    )
-    return ScopeContext.model_validate(d)
+# GOLDEN: the intended slack/__test__ permission bucket. Hardcoded literals, NOT
+# derived from the builder — so a drifted scope.yaml is caught.
+_EMI_TEAM_ALLOW = [
+    "web_manager", "pod_search", "pod_fetch", "ask_user", "find_tool",
+    "install_tool", "read_skill", "discover_skills", "read_tool_result",
+]
+_WEB_BLOCK = ["http_request", "oauth_token_refresh"]
+_RESOURCES = [
+    "resource_user_data", "resource_assistant_data", "resource_chat_guidelines",
+    "resource_assistant_personality", "resource_weather",
+]
 
 
-@pytest.fixture(scope="module")
-def golden() -> ScopeContext:
-    return _golden_scope()
-
-
-@pytest.fixture(scope="module")
-def loaded() -> ScopeContext:
-    assert _SCOPE_YAML.exists(), f"missing {_SCOPE_YAML}"
-    return load_scope(_SCOPE_YAML, identity=_IDENTITY)
+def _loaded():
+    return load_scope(resolve_room_config_dir(_ROOM_ID) / "scope.yaml", identity=_IDENTITY)
 
 
 # ---------------------------------------------------------------------------
-# permission-bucket equivalence
+# permission bucket — asserted against hardcoded golden constants
 # ---------------------------------------------------------------------------
 
-def test_tools_allowed_tools(golden, loaded):
-    assert loaded.tools.allowed_tools == golden.tools.allowed_tools
+def test_scope_yaml_exists():
+    assert (resolve_room_config_dir(_ROOM_ID) / "scope.yaml").exists()
 
 
-def test_tools_blocked_tools(golden, loaded):
-    assert loaded.tools.blocked_tools == golden.tools.blocked_tools
+def test_authority_is_30():
+    assert _loaded().approval.authority_level == 30
 
 
-def test_per_manager_rules_match(golden, loaded):
-    def norm(pm):
-        return {
-            name: (rule.allow, rule.block)
-            for name, rule in pm.items()
-        }
-    assert norm(loaded.tools.per_manager) == norm(golden.tools.per_manager)
+def test_tools_allowed_tools():
+    assert _loaded().tools.allowed_tools == ["all"]
 
 
-def test_pods(golden, loaded):
-    assert loaded.pods.allowed_scopes == golden.pods.allowed_scopes
+def test_per_manager_rules():
+    pm = _loaded().tools.per_manager
+    assert pm["emi_team_manager"].allow == _EMI_TEAM_ALLOW
+    assert pm["emi_team_manager"].block == []
+    assert pm["web_manager"].allow is None
+    assert pm["web_manager"].block == _WEB_BLOCK
 
 
-def test_approval_authority(golden, loaded):
-    assert loaded.approval.authority_level == golden.approval.authority_level == 30
+def test_pods():
+    assert _loaded().pods.allowed_scopes == ["self"]
 
 
-def test_resources(golden, loaded):
-    assert (
-        loaded.resources.allowed_global_resources
-        == golden.resources.allowed_global_resources
-    )
-    assert loaded.resources.resource_groups == golden.resources.resource_groups
+def test_resources():
+    s = _loaded()
+    assert s.resources.allowed_global_resources == _RESOURCES
+    assert s.resources.resource_groups == ["chat", "memory"]
 
 
-def test_entities(golden, loaded):
-    assert loaded.entities.enabled == golden.entities.enabled
-    assert loaded.entities.allowed_entity_cards == golden.entities.allowed_entity_cards
+def test_entities():
+    assert _loaded().entities.allowed_entity_cards == ["all"]
 
 
-def test_writes(golden, loaded):
-    assert loaded.writes.write_unified_log == golden.writes.write_unified_log
-    assert loaded.writes.write_kg == golden.writes.write_kg
-    assert loaded.writes.allow_fact_extraction == golden.writes.allow_fact_extraction
+def test_writes():
+    w = _loaded().writes
+    assert w.write_unified_log is True
+    assert w.write_kg is False
+    assert w.allow_fact_extraction is False
 
 
-def test_delivery_permission_bits(golden, loaded):
-    # auto_send / allow_initiation are permission; allowed_reply_types is stamped.
-    assert loaded.delivery.auto_send == golden.delivery.auto_send
-    assert loaded.delivery.allow_initiation == golden.delivery.allow_initiation
+def test_delivery_permission_bits():
+    d = _loaded().delivery
+    assert d.auto_send is True
+    assert d.allow_initiation is True
 
 
 # ---------------------------------------------------------------------------
-# identity stamping sanity
+# identity stamping (sound — pins identity against the envelope, not the file)
 # ---------------------------------------------------------------------------
 
-def test_identity_stamped(loaded):
-    assert loaded.owner_id == _ROOM_ID
-    assert loaded.actor_id == "U_test"
-    assert loaded.surface == "slack"
-    assert loaded.visibility == "room_shared"
-    assert loaded.acting_as == "user"
+def test_identity_stamped():
+    s = _loaded()
+    assert s.owner_id == _ROOM_ID
+    assert s.actor_id == "U_test"
+    assert s.surface == "slack"
+    assert s.visibility == "room_shared"
+    assert s.acting_as == "user"
