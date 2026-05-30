@@ -1,0 +1,38 @@
+# Permission scope for the kg_pipeline (KG ingest pipeline).
+#
+# PERMISSION ONLY. Identity (owner_id, actor_id, surface) is stamped per run by
+# the caller via load_scope_for_source — never authored here.
+#
+# ONE scope per pipeline, built once at run start, threaded through every step.
+#
+# NO TOOLS: the kg_pipeline agents (entity_resolver, conversation_boundary,
+# window_critic_v2, fact_extractor, meta_data_add) are toolless structured-output
+# extractors — each declares allowed_tools: [] in its own config. They consume
+# scope for RESOURCES + acting_as, never tools. The legacy builder emitted
+# allowed_tools: [all] only because scope.json declared no tools block and the
+# system default is permissive; this scope.yaml makes the real "no tools"
+# posture explicit (fail-closed).
+#
+# write_kg is FALSE on purpose: the pipeline writes proposal/extraction TABLES
+# (kg_resolved_message, claim_proposals, ...), not the live KG. Promotion to the
+# KG is a separate routine (proposal_promoter).
+
+approval:
+  authority_level: 0
+
+tools:
+  allowed_tools: []
+
+resources:
+  allowed_global_resources: [all]
+  resource_groups:
+    - chat
+    - memory
+
+pods:
+  allowed_scopes: [self]
+
+writes:
+  write_unified_log: true
+  write_kg: false
+  allow_fact_extraction: false

@@ -119,6 +119,69 @@ def load_scope(
         raise ValueError(f"load_scope: invalid scope declaration from {src}: {e}") from e
 
 
+def load_scope_for_source(
+    *,
+    kind: str,
+    source_id: str,
+    actor_id: str,
+    identity_overrides: "Mapping[str, Any] | None" = None,
+) -> ScopeContext:
+    """Resolve a SOURCE's ``scope.yaml`` by (kind, id) and load it.
+
+    The unified entry point for non-room sources (pipelines first; routines/jobs
+    as their layout settles). Maps ``(kind, source_id)`` to the source's
+    ``scope.yaml`` path, builds a default identity envelope appropriate to the
+    kind (``owner_id = source_id``, ``surface = kind``, plus the caller's
+    ``actor_id``), applies any ``identity_overrides``, and delegates to
+    :func:`load_scope`.
+
+    Build this ONCE at the start of a run and thread it through every step — do
+    not call per-step. (Replaces the per-step ``build_pipeline_scope_context``
+    pattern.)
+
+    Raises
+    ------
+    NotImplementedError
+        For a kind whose on-disk layout isn't wired yet (routine/job).
+    ValueError
+        On an unknown kind or empty source_id.
+    FileNotFoundError
+        When the resolved ``scope.yaml`` does not exist (fail-loud: a migrated
+        source MUST declare its scope).
+    """
+    kind_n = str(kind or "").strip().lower()
+    sid = str(source_id or "").strip()
+    if not sid:
+        raise ValueError("load_scope_for_source: source_id must be non-empty.")
+
+    if kind_n == "pipeline":
+        from app.assistant.utils.path_utils import get_repo_root
+        scope_path: Path = get_repo_root() / "app" / "assistant" / "pipelines" / sid / "scope.yaml"
+        default_surface = "pipeline"
+    elif kind_n == "room":
+        from app.assistant.rooms.room_resource_loader import resolve_room_config_dir
+        scope_path = resolve_room_config_dir(sid) / "scope.yaml"
+        # Rooms carry a real transport surface; the caller must supply it.
+        default_surface = None
+    elif kind_n in ("routine", "job"):
+        raise NotImplementedError(
+            f"load_scope_for_source: {kind_n!r} scope layout is not wired yet. "
+            "Decide the on-disk location (e.g. configs/routines/<id>.scope.yaml) "
+            "when migrating routines, then add the branch here."
+        )
+    else:
+        raise ValueError(f"load_scope_for_source: unknown source kind {kind!r}.")
+
+    identity: Dict[str, Any] = {"owner_id": sid, "actor_id": str(actor_id or "").strip() or f"{sid}_runner"}
+    if default_surface is not None:
+        identity["surface"] = default_surface
+    if identity_overrides:
+        for k, v in identity_overrides.items():
+            identity[k] = v
+
+    return load_scope(scope_path, identity=identity)
+
+
 # ── helpers ─────────────────────────────────────────────────────────────────
 
 

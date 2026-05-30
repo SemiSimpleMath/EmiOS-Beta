@@ -239,7 +239,7 @@ class ResolveMessagesStep:
     def _run_resolver_on_batch(self, context: List[Dict], new: List[Dict]) -> Dict:
         from app.assistant.ServiceLocator.service_locator import DI
         from app.assistant.agents.knowledge_graph_add.entity_resolver.agent_form import build_dynamic_form
-        from app.assistant.pipelines.scope_policy import build_pipeline_scope_context
+        from app.assistant.scope.loader import load_scope_for_source
 
         ctx_block = "\n".join(self._line(m, resolved=True) for m in context)
         new_tagged = "\n".join(self._line(m, resolved=False) for m in new)
@@ -250,8 +250,8 @@ class ResolveMessagesStep:
         msg_ids = [self._safe_id(m["unified_log_id"]) for m in new]
         agent.config["structured_output"] = build_dynamic_form(msg_ids)
 
-        scope = build_pipeline_scope_context(
-            pipeline_id="kg_pipeline", actor_id="resolve_messages",
+        scope = load_scope_for_source(
+            kind="pipeline", source_id="kg_pipeline", actor_id="resolve_messages",
         )
         agent_input = {"text": new_tagged}
         if ctx_block:

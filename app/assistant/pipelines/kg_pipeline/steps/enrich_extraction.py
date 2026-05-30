@@ -26,7 +26,7 @@ from app.assistant.database.kg_pipeline_models import (
     KGWindowMessage,
 )
 from app.assistant.kg.proposal_group_splitter import split_into_connected_components
-from app.assistant.pipelines.scope_policy import build_pipeline_scope_context
+from app.assistant.scope.loader import load_scope_for_source
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import Message
 from app.models.db_manager import get_db_manager
@@ -190,8 +190,8 @@ class EnrichExtractionStep:
                     "resolved_window": resolved_window,
                     "message_timestamp": message_timestamp,
                 }
-                scope = build_pipeline_scope_context(
-                    pipeline_id="kg_pipeline", actor_id="enrich_extraction",
+                scope = load_scope_for_source(
+                    kind="pipeline", source_id="kg_pipeline", actor_id="enrich_extraction",
                 )
 
                 try:

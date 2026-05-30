@@ -22,7 +22,7 @@ from app.assistant.database.kg_pipeline_models import (
     KGWindowMessage,
 )
 from app.assistant.pipelines.kg_shared import normalize_extraction_result
-from app.assistant.pipelines.scope_policy import build_pipeline_scope_context
+from app.assistant.scope.loader import load_scope_for_source
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import Message
 from app.models.db_manager import get_db_manager
@@ -139,8 +139,8 @@ class CritiqueAndExtractStep:
             if not agent:
                 return {"extractable": True, "kept_indices": all_indices,
                         "reason": "critic agent unavailable"}
-            scope = build_pipeline_scope_context(
-                pipeline_id="kg_pipeline", actor_id="critique_and_extract",
+            scope = load_scope_for_source(
+                kind="pipeline", source_id="kg_pipeline", actor_id="critique_and_extract",
             )
             agent_input = {"context_lines": context_block, "indexed_user_lines": indexed_block}
             result = agent.action_handler(Message(agent_input=agent_input, scope_context=scope))
@@ -174,8 +174,8 @@ class CritiqueAndExtractStep:
         agent = DI.agent_factory.create_agent(FACT_EXTRACTOR_AGENT_NAME)
         if not agent:
             raise RuntimeError(f"Failed to create agent: {FACT_EXTRACTOR_AGENT_NAME}")
-        scope = build_pipeline_scope_context(
-            pipeline_id="kg_pipeline", actor_id="critique_and_extract",
+        scope = load_scope_for_source(
+            kind="pipeline", source_id="kg_pipeline", actor_id="critique_and_extract",
         )
         agent_input = {"text": payload["user_text"]}
         if payload.get("full_conversation"):
