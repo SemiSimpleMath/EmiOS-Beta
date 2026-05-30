@@ -1,0 +1,31 @@
+# Permission scope for the entity_cards_v2 pipeline (entity card builder).
+#
+# PERMISSION ONLY. Identity (owner_id, actor_id, surface) is stamped per run by
+# the caller via load_scope_for_source — never authored here. Room-behavior
+# (history/delivery routing) is deliberately absent: a pipeline is not a
+# conversation, so it takes the bare ScopeContext defaults for those.
+#
+# NO TOOLS: the card-builder agents are toolless structured-output writers (the
+# legacy path gave allowed_tools=["all"] only via the permissive base default).
+# They read KG/card context through scope RESOURCES (preserved below) + the
+# context injector, not through tool grants. fail-closed: allowed_tools = [].
+
+approval:
+  authority_level: 0
+
+tools:
+  allowed_tools: []
+
+resources:
+  allowed_global_resources: [all]
+  resource_groups:
+    - chat
+    - memory
+
+pods:
+  allowed_scopes: [self]
+
+writes:
+  write_unified_log: true
+  write_kg: false
+  allow_fact_extraction: false

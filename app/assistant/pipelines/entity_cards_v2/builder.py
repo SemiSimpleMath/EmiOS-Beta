@@ -1013,10 +1013,13 @@ def _tags_from_persisted(
 # --- Implementation: section_tagger LLM call --------------------------------
 
 def _scope():
-    """Pipeline scope context for v2 card agents — needed for resource injection."""
-    from app.assistant.pipelines.scope_policy import build_pipeline_scope_context
-    return build_pipeline_scope_context(
-        pipeline_id="entity_cards_v2", actor_id="entity_cards_v2",
+    """Pipeline scope context for v2 card agents — needed for resource injection.
+
+    Permission is declared in app/assistant/pipelines/entity_cards_v2/scope.yaml.
+    """
+    from app.assistant.scope.loader import load_scope_for_source
+    return load_scope_for_source(
+        kind="pipeline", source_id="entity_cards_v2", actor_id="entity_cards_v2",
     )
 
 
