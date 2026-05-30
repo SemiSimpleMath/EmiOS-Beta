@@ -8,7 +8,7 @@ from typing import Any, List
 from app.assistant.utils.path_utils import get_resources_dir as _get_resources_dir
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.ServiceLocator.service_locator import DI
-from app.assistant.pipelines.scope_policy import build_pipeline_scope_context
+from app.assistant.scope.loader import load_scope_for_source
 from app.assistant.utils.pydantic_classes import Message
 
 logger = get_logger(__name__)
@@ -75,8 +75,9 @@ class SynthesizeWeeklyInsightsStep:
         if agent is None:
             raise RuntimeError(f"[SynthesizeWeeklyInsights] Agent '{_AGENT_NAME}' not found")
 
-        scope = build_pipeline_scope_context(
-            pipeline_id="weekly_insights",
+        scope = load_scope_for_source(
+            kind="pipeline",
+            source_id="weekly_insights",
             actor_id="weekly_synthesizer_runner",
         )
         msg = Message(

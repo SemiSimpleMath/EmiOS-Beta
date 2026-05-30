@@ -70,6 +70,18 @@ def test_empty_source_id_raises():
         load_scope_for_source(kind="pipeline", source_id="", actor_id="a")
 
 
+def test_weekly_insights_scope_loads_with_no_tools():
+    # Second migrated pipeline (toolless single-shot synthesizer).
+    s = load_scope_for_source(kind="pipeline", source_id="weekly_insights", actor_id="weekly_synthesizer_runner")
+    assert s.tools.allowed_tools == []
+    assert s.approval.authority_level == 0
+    assert s.resources.allowed_global_resources == ["all"]
+    assert s.resources.resource_groups == ["chat", "memory"]
+    assert s.writes.write_kg is False
+    assert s.surface == "pipeline"
+    assert s.owner_id == "weekly_insights"
+
+
 def test_routine_kind_not_wired_yet():
     with pytest.raises(NotImplementedError, match="not wired yet"):
         load_scope_for_source(kind="routine", source_id="some_routine", actor_id="a")

@@ -1,0 +1,33 @@
+# Permission scope for the weekly_insights pipeline.
+#
+# PERMISSION ONLY. Identity (owner_id, actor_id, surface) is stamped per run by
+# the caller via load_scope_for_source — never authored here.
+#
+# ONE scope file per pipeline.
+#
+# NO TOOLS: the weekly_synthesizer agent is a single-shot text-in ->
+# structured-insights-out synthesizer (its config declares no allowed_tools;
+# comment: "no tools, no skills, no KG/RAG access"). It reads only what's handed
+# to it in agent_input. The legacy builder emitted allowed_tools: [all] only
+# because scope.json declared no tools block + the system default is permissive;
+# this scope.yaml makes the real fail-closed "no tools" posture explicit.
+
+approval:
+  authority_level: 0
+
+tools:
+  allowed_tools: []
+
+resources:
+  allowed_global_resources: [all]
+  resource_groups:
+    - chat
+    - memory
+
+pods:
+  allowed_scopes: [self]
+
+writes:
+  write_unified_log: true
+  write_kg: false
+  allow_fact_extraction: false
