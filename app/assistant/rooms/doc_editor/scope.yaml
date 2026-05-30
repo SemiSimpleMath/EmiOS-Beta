@@ -1,0 +1,33 @@
+# Permission scope for the doc_editor room (UI document-editing surface).
+#
+# PERMISSION ONLY. Room/session behavior stays in ROOM.md. Identity is stamped
+# per request at load time — never authored here.
+#
+# Faithful migration of the prior builder output: UI surface, authority 50,
+# full tool surface, no per_manager narrowing, KG writes off.
+
+approval:
+  authority_level: 50
+
+tools:
+  allowed_tools: [all]
+  allow_external_side_effects: false
+
+pods:
+  allowed_scopes: [self]
+
+resources:
+  allowed_global_resources: [all]
+
+entities:
+  enabled: true
+  allowed_entity_cards: []
+
+writes:
+  write_unified_log: true
+  write_kg: false
+  allow_fact_extraction: false
+
+delivery:
+  auto_send: true
+  allow_initiation: false

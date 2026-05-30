@@ -1,0 +1,40 @@
+# Permission scope for the SMS room (room_id "1234").
+#
+# PERMISSION ONLY. Room/session behavior stays in ROOM.md. Identity is stamped
+# per request at load time — never authored here.
+#
+# LOCKED DOWN: no tools. SMS has never been used as an action surface and is the
+# lowest-trust transport (no auth on inbound number, trivially spoofable). Pure
+# chat only. A specific SMS number that should have access would override this
+# with its own scope.yaml (same opt-in pattern as Katy on Telegram).
+#
+# NOTE: this corrects a latent gap — the legacy builder emitted allowed_tools
+# [all] for SMS (the ROOM.md never restricted it), so SMS silently had the full
+# tool surface. scope.yaml makes the lock-down real (fail-closed at
+# check_tool_access).
+
+approval:
+  authority_level: 30
+
+tools:
+  allowed_tools: []          # no tools — pure chat (fail-closed)
+  allow_external_side_effects: false
+
+pods:
+  allowed_scopes: [self]
+
+resources:
+  allowed_global_resources: [all]
+
+entities:
+  enabled: true
+  allowed_entity_cards: []
+
+writes:
+  write_unified_log: true
+  write_kg: false
+  allow_fact_extraction: false
+
+delivery:
+  auto_send: true
+  allow_initiation: false

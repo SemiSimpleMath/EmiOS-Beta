@@ -1,0 +1,38 @@
+# Permission scope for kg_dev_room (UI KG admin/workshop surface).
+#
+# PERMISSION ONLY. Room/session behavior stays in ROOM.md. Identity is stamped
+# per request at load time — never authored here.
+#
+# Faithful migration of the prior builder output: UI surface, authority 50,
+# full tool surface, no per_manager narrowing, KG writes off.
+#
+# NOTE: allow_external_side_effects is TRUE here (unlike the other UI rooms) —
+# the kg_dev ROOM.md declares tool_classes.external_action: true. Declared
+# explicitly so the migration is faithful; omitting it would flip it to the
+# model default (false) and silently restrict the room.
+
+approval:
+  authority_level: 50
+
+tools:
+  allowed_tools: [all]
+  allow_external_side_effects: true
+
+pods:
+  allowed_scopes: [self]
+
+resources:
+  allowed_global_resources: [all]
+
+entities:
+  enabled: true
+  allowed_entity_cards: []
+
+writes:
+  write_unified_log: true
+  write_kg: false
+  allow_fact_extraction: false
+
+delivery:
+  auto_send: true
+  allow_initiation: false

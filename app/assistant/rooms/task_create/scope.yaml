@@ -1,0 +1,36 @@
+# Permission scope for the task_create room (UI task-spec authoring surface).
+#
+# PERMISSION ONLY. Room/session behavior stays in ROOM.md. Identity is stamped
+# per request at load time — never authored here.
+#
+# Faithful migration of the prior builder output: UI surface, authority 50,
+# full tool surface, no per_manager narrowing, KG writes off.
+#
+# Note: this config dir (task_create) also backs dynamic task_spec::<id> rooms
+# via the room-id prefix map, so this scope applies to task-spec sessions too.
+
+approval:
+  authority_level: 50
+
+tools:
+  allowed_tools: [all]
+  allow_external_side_effects: false
+
+pods:
+  allowed_scopes: [self]
+
+resources:
+  allowed_global_resources: [all]
+
+entities:
+  enabled: true
+  allowed_entity_cards: []
+
+writes:
+  write_unified_log: true
+  write_kg: false
+  allow_fact_extraction: false
+
+delivery:
+  auto_send: true
+  allow_initiation: false
