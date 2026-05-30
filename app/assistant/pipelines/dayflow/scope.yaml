@@ -1,0 +1,40 @@
+# Permission scope for the dayflow PIPELINE (toolless stage extractors).
+#
+# NOTE: this is the pipeline source (app/assistant/pipelines/dayflow), NOT the
+# dayflow_orchestrator ROOM (app/assistant/rooms/dayflow_orchestrator), which is
+# a separate source with its own scope.yaml.
+#
+# PERMISSION ONLY. Identity (owner_id, actor_id, surface, room_id) is stamped per
+# run by the caller via load_scope_for_source — never authored here. Room-behavior
+# (history/delivery routing) is deliberately absent (bare defaults; inert off-room).
+#
+# LOAD-BEARING BLOCK = resources. Every dayflow agent declares resource_* context
+# items; context_injector.resolve_resource raises if scope_context is None and
+# ResourceManager.get_resource enforces resources.allowed_global_resources as a
+# gate — so allowed_global_resources: [all] is what lets each resource_* item
+# resolve with content. (Verified by tracing the injector + resource manager.)
+#
+# INERT-BUT-DECLARED: the dayflow extractors call no tools and no managers, so
+# tools/pods are inert; persistence runs through deterministic Python writers that
+# do not consult scope.writes, so writes are inert too. tools: [] is therefore a
+# correct fail-closed assertion that simply never fires here.
+
+approval:
+  authority_level: 0
+
+tools:
+  allowed_tools: []
+
+resources:
+  allowed_global_resources: [all]
+  resource_groups:
+    - chat
+    - memory
+
+pods:
+  allowed_scopes: [self]
+
+writes:
+  write_unified_log: true
+  write_kg: false
+  allow_fact_extraction: false

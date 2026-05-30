@@ -18,7 +18,7 @@ def run_situation_audit() -> dict:
     """Run one audit cycle. Returns a summary dict."""
     from app.assistant.pipelines.dayflow.utils.situation_snapshot import build_situation_snapshot
     from app.assistant.ServiceLocator.service_locator import DI
-    from app.assistant.pipelines.scope_policy import build_pipeline_scope_context
+    from app.assistant.scope.loader import load_scope_for_source
     from app.assistant.utils.pydantic_classes import Message, UserMessage, UserMessageData
 
     logger.info("[situation_audit] Starting audit cycle.")
@@ -36,12 +36,7 @@ def run_situation_audit() -> dict:
 
     # 2. Call the auditor agent.
     try:
-        scope_context = build_pipeline_scope_context(
-            pipeline_id="dayflow",
-            actor_id="situation_auditor_runner",
-            room_id="dayflow_orchestrator",
-            room_surface="ui",
-        )
+        scope_context = load_scope_for_source(kind="pipeline", source_id="dayflow", actor_id="situation_auditor_runner", identity_overrides={"room_id": "dayflow_orchestrator", "surface": ("ui") or "pipeline"})
 
         agent = DI.agent_factory.create_agent("situation_auditor")
         if not agent:

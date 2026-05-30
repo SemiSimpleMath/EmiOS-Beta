@@ -21,7 +21,7 @@ from app.assistant.utils.time_utils import (
     get_local_time_str,
 )
 from app.assistant.pipelines.dayflow.step_types import BaseStep, StepContext, StepResult
-from app.assistant.pipelines.scope_policy import build_pipeline_scope_context
+from app.assistant.scope.loader import load_scope_for_source
 from app.assistant.pod_store.contracts import Pod
 from app.assistant.pod_store.pod_store import PodStore
 
@@ -147,10 +147,7 @@ class DietTrackerStep(BaseStep):
         if agent is None:
             raise RuntimeError("diet_tracker agent unavailable")
 
-        scope_context = build_pipeline_scope_context(
-            pipeline_id="dayflow",
-            actor_id=f"{self.step_id}_runner",
-        )
+        scope_context = load_scope_for_source(kind="pipeline", source_id="dayflow", actor_id=f"{self.step_id}_runner")
         msg = Message(
             scope_context=scope_context,
             agent_input={

@@ -18,7 +18,7 @@ from app.assistant.utils.time_utils import parse_iso_utc, utc_to_local
 from app.assistant.pipelines.dayflow.step_types import BaseStep, StepContext, StepResult
 from app.assistant.pipelines.dayflow.utils.room_scope import resolve_room_scope
 from app.assistant.utils.chat_formatting import messages_to_chat_excerpts
-from app.assistant.pipelines.scope_policy import build_pipeline_scope_context
+from app.assistant.scope.loader import load_scope_for_source
 
 logger = get_logger(__name__)
 
@@ -28,12 +28,7 @@ class ActivityTrackerStep(BaseStep):
         scope_data = history_scope if isinstance(history_scope, dict) else {}
         room_id = str(scope_data.get("room_id") or "").strip()
         room_surface = str(scope_data.get("room_surface") or "").strip()
-        return build_pipeline_scope_context(
-            pipeline_id="dayflow",
-            actor_id=f"{self.step_id}_runner",
-            room_id=room_id or None,
-            room_surface=room_surface or None,
-        )
+        return load_scope_for_source(kind="pipeline", source_id="dayflow", actor_id=f"{self.step_id}_runner", identity_overrides={"room_id": room_id or None, "surface": (room_surface or None) or "pipeline"})
 
     step_id: str = "activity_tracker"
 

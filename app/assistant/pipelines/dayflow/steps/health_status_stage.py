@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.pipelines.dayflow.step_types import BaseStep, StepContext, StepResult
-from app.assistant.pipelines.scope_policy import build_pipeline_scope_context
+from app.assistant.scope.loader import load_scope_for_source
 from app.assistant.utils.path_utils import get_resources_dir as _get_resources_dir
 
 logger = get_logger(__name__)
@@ -267,10 +267,7 @@ class HealthStatusStep(BaseStep):
             if agent is None:
                 raise RuntimeError("health_status_writer agent not found")
 
-            scope = build_pipeline_scope_context(
-                pipeline_id="dayflow",
-                actor_id="health_status_runner",
-            )
+            scope = load_scope_for_source(kind="pipeline", source_id="dayflow", actor_id="health_status_runner")
 
             msg = Message(
                 scope_context=scope,

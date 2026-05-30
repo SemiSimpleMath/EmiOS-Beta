@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.assistant.pipelines.dayflow.step_types import BaseStep, StepContext, StepResult
-from app.assistant.pipelines.scope_policy import build_pipeline_scope_context
+from app.assistant.scope.loader import load_scope_for_source
 from app.assistant.pipelines.dayflow.utils.context_sources import (
     _format_ticket_for_context,
     build_time_since,
@@ -34,12 +34,7 @@ class DayFlowCronTicketsStep(BaseStep):
         history_scope = agent_input.get("history_scope") if isinstance(agent_input, dict) else {}
         room_id = str(history_scope.get("room_id") or "").strip() if isinstance(history_scope, dict) else ""
         room_surface = str(history_scope.get("room_surface") or "").strip() if isinstance(history_scope, dict) else ""
-        return build_pipeline_scope_context(
-            pipeline_id="dayflow",
-            actor_id=f"{self.step_id}_runner",
-            room_id=room_id or None,
-            room_surface=room_surface or None,
-        )
+        return load_scope_for_source(kind="pipeline", source_id="dayflow", actor_id=f"{self.step_id}_runner", identity_overrides={"room_id": room_id or None, "surface": (room_surface or None) or "pipeline"})
 
     step_id: str = "dayflow_cron_tickets"
 

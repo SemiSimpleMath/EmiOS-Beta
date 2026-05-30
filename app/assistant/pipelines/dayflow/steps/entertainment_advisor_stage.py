@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.assistant.pipelines.dayflow.step_types import BaseStep, StepContext, StepResult
-from app.assistant.pipelines.scope_policy import build_pipeline_scope_context
+from app.assistant.scope.loader import load_scope_for_source
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_resources_dir as _get_resources_dir
 from app.assistant.utils.time_utils import utc_to_local
@@ -34,12 +34,7 @@ class EntertainmentAdvisorStep(BaseStep):
     step_id: str = "entertainment_advisor"
 
     def _build_pipeline_scope_context(self, agent_input: Dict[str, Any]):
-        return build_pipeline_scope_context(
-            pipeline_id="dayflow",
-            actor_id=f"{self.step_id}_runner",
-            room_id=None,
-            room_surface=None,
-        )
+        return load_scope_for_source(kind="pipeline", source_id="dayflow", actor_id=f"{self.step_id}_runner", identity_overrides={"room_id": None, "surface": (None) or "pipeline"})
 
     def _get_afk_snapshot(self) -> Dict[str, Any]:
         from app.assistant.ServiceLocator.service_locator import DI

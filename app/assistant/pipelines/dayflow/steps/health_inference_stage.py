@@ -32,7 +32,7 @@ from app.assistant.pipelines.dayflow.utils.context_sources import (
 )
 from app.assistant.pipelines.dayflow.utils.room_scope import resolve_room_scope
 from app.assistant.utils.chat_formatting import messages_to_chat_history_text
-from app.assistant.pipelines.scope_policy import build_pipeline_scope_context
+from app.assistant.scope.loader import load_scope_for_source
 
 logger = get_logger(__name__)
 
@@ -42,12 +42,7 @@ class HealthInferenceStep(BaseStep):
         history_scope = agent_input.get("history_scope") if isinstance(agent_input, dict) else {}
         room_id = str(history_scope.get("room_id") or "").strip() if isinstance(history_scope, dict) else ""
         room_surface = str(history_scope.get("room_surface") or "").strip() if isinstance(history_scope, dict) else ""
-        return build_pipeline_scope_context(
-            pipeline_id="dayflow",
-            actor_id=f"{self.step_id}_runner",
-            room_id=room_id or None,
-            room_surface=room_surface or None,
-        )
+        return load_scope_for_source(kind="pipeline", source_id="dayflow", actor_id=f"{self.step_id}_runner", identity_overrides={"room_id": room_id or None, "surface": (room_surface or None) or "pipeline"})
 
     """
     Pipeline stage that runs the health_status_inference agent to infer
