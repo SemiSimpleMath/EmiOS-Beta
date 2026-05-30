@@ -1,0 +1,46 @@
+# Permission scope for master_room — the owner's primary UI surface.
+#
+# PERMISSION ONLY. Declares what callers in this room may DO and SEE.
+# Room/session behavior (history, retention, mode_manager_overrides) stays in
+# ROOM.md. Identity (scope_id, owner_id, actor_id, surface, reply_to, ...) is
+# stamped per request at load time — never authored here.
+#
+# master_room is authority 99 — the highest-trust room. Full tool surface, all
+# pods (cross-room owner visibility), KG writes + fact extraction enabled,
+# external side effects allowed. NO per_manager narrowing: the owner room runs
+# every manager with its native toolkit.
+#
+# NOTE: several of these are MORE permissive than the model defaults
+# (write_kg, allow_fact_extraction, allow_external_side_effects, pods:[all],
+# entities:[all]) and MUST be declared explicitly — omitting them would
+# silently downgrade master_room to the fail-closed floor.
+
+approval:
+  authority_level: 99
+
+tools:
+  allowed_tools: [all]
+  allow_external_side_effects: true
+  # No per_manager: master_room runs every manager with its full native surface.
+
+pods:
+  allowed_scopes: [all]
+
+resources:
+  allowed_global_resources: [all]
+  resource_groups:
+    - chat
+    - memory
+
+entities:
+  enabled: true
+  allowed_entity_cards: [all]
+
+writes:
+  write_unified_log: true
+  write_kg: true
+  allow_fact_extraction: true
+
+delivery:
+  auto_send: true
+  allow_initiation: true

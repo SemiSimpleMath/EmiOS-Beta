@@ -101,10 +101,13 @@ def test_overlay_makes_scope_yaml_authoritative_for_permission():
 
 
 def test_overlay_is_noop_without_scope_yaml():
-    # master_room has no scope.yaml (yet) — overlay returns the dict unchanged.
-    base = {**_identity_block(), "owner_id": "master_room", "room_id": "master_room",
+    # A room with no scope.yaml on disk — overlay returns the dict unchanged.
+    # Uses a synthetic room_id so this stays a true no-op regardless of which
+    # real rooms get migrated later.
+    rid = "noop_probe_room_no_scope_yaml"
+    base = {**_identity_block(), "owner_id": rid, "room_id": rid,
             "approval": {"authority_level": 99}}
-    out = _overlay_scope_yaml_permission(room_id="master_room", scope_dict=base)
+    out = _overlay_scope_yaml_permission(room_id=rid, scope_dict=base)
     assert out == base
     assert out["approval"]["authority_level"] == 99  # untouched
 
