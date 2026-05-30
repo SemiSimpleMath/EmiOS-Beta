@@ -4,14 +4,16 @@
 # per request at load time — never authored here.
 #
 # Faithful migration of the prior builder output: UI surface, authority 50,
-# full tool surface, no per_manager narrowing, KG writes off.
+# full tool surface, no per_manager narrowing, KG writes off,
+# allow_external_side_effects TRUE (doc_editor's ROOM.md declares
+# tool_classes.external_action: true).
 
 approval:
   authority_level: 50
 
 tools:
   allowed_tools: [all]
-  allow_external_side_effects: false
+  allow_external_side_effects: true
 
 pods:
   allowed_scopes: [self]

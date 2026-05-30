@@ -4,19 +4,15 @@
 # per request at load time — never authored here.
 #
 # Faithful migration of the prior builder output: UI surface, authority 50,
-# full tool surface, no per_manager narrowing, KG writes off.
-#
-# NOTE: allow_external_side_effects is TRUE here (unlike the other UI rooms) —
-# the kg_dev ROOM.md declares tool_classes.external_action: true. Declared
-# explicitly so the migration is faithful; omitting it would flip it to the
-# model default (false) and silently restrict the room.
+# full tool surface, no per_manager narrowing, KG writes off, external side
+# effects off (kg_dev's ROOM.md declares tool_classes.external_action: false).
 
 approval:
   authority_level: 50
 
 tools:
   allowed_tools: [all]
-  allow_external_side_effects: true
+  allow_external_side_effects: false
 
 pods:
   allowed_scopes: [self]

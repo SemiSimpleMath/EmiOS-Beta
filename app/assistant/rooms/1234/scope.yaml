@@ -4,31 +4,35 @@
 # per request at load time — never authored here.
 #
 # LOCKED DOWN: no tools. SMS has never been used as an action surface and is the
-# lowest-trust transport (no auth on inbound number, trivially spoofable). Pure
-# chat only. A specific SMS number that should have access would override this
-# with its own scope.yaml (same opt-in pattern as Katy on Telegram).
-#
-# NOTE: this corrects a latent gap — the legacy builder emitted allowed_tools
-# [all] for SMS (the ROOM.md never restricted it), so SMS silently had the full
-# tool surface. scope.yaml makes the lock-down real (fail-closed at
-# check_tool_access).
+# lowest-trust transport. The ONLY deliberate change from the prior builder
+# output is tools.allowed_tools [all] -> [] (no tool can execute). Everything
+# else (authority 40, resources, entities, writes, delivery) is faithful to the
+# prior behavior — locking tools does not change what context Emi may read.
+# A specific SMS number that should have action access would override this with
+# its own scope.yaml (same opt-in pattern as Katy on Telegram).
 
 approval:
-  authority_level: 30
+  authority_level: 40
 
 tools:
-  allowed_tools: []          # no tools — pure chat (fail-closed)
+  allowed_tools: []          # no tools — pure chat (fail-closed). The lockdown.
   allow_external_side_effects: false
 
 pods:
   allowed_scopes: [self]
 
 resources:
-  allowed_global_resources: [all]
+  allowed_global_resources:
+    - resource_chat_guidelines
+    - resource_user_data
+    - resource_assistant_data
+    - resource_user_email
+  resource_groups:
+    - chat
 
 entities:
   enabled: true
-  allowed_entity_cards: []
+  allowed_entity_cards: [all]
 
 writes:
   write_unified_log: true
