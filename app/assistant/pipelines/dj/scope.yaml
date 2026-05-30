@@ -1,0 +1,36 @@
+# Permission scope for the dj pipeline (Emi's music DJ — vibe check + track
+# extraction).
+#
+# PERMISSION ONLY. Identity (owner_id, actor_id, surface, room_context_id) is
+# stamped per run by the caller via load_scope_for_source — never authored here.
+# Room-behavior (history.mode/lookback, delivery.allowed_reply_types) is NOT a
+# permission concern and is deliberately absent: a pipeline is not a conversation
+# and has no transport, so it correctly takes the bare ScopeContext defaults for
+# those. The legacy builder set room-shaped history/delivery values on every
+# scope; that conflation does not carry into the unified permission scope.
+#
+# NO TOOLS: the dj agents are toolless structured-output extractors (vibe
+# checker, track extractor). The legacy path gave allowed_tools=["all"] only
+# because dj/scope.json declared no tools block and the system base default is
+# permissive. This scope.yaml makes the real "no tools" posture explicit
+# (fail-closed).
+
+approval:
+  authority_level: 0
+
+tools:
+  allowed_tools: []
+
+resources:
+  allowed_global_resources: [all]
+  resource_groups:
+    - chat
+    - memory
+
+pods:
+  allowed_scopes: [self]
+
+writes:
+  write_unified_log: true
+  write_kg: false
+  allow_fact_extraction: false
