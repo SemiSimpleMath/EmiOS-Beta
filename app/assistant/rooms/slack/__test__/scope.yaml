@@ -1,0 +1,59 @@
+# Permission scope for the e2e test Slack channel.
+#
+# PERMISSION ONLY. This file declares what callers in this room may DO and SEE.
+# Room/session behavior (history, retention, execution) stays in ROOM.md.
+# Identity (scope_id, owner_id, actor_id, surface, room_id, reply_to, ...) is
+# stamped per request at load time — never authored here.
+#
+# Mirrors slack_standard: low-trust surface, narrowed to research + pods via
+# per_manager. allowed_tools:[all] gates the room's DIRECT dispatch surface;
+# per_manager narrows each manager when it runs.
+
+approval:
+  authority_level: 30
+
+tools:
+  allowed_tools: [all]
+  per_manager:
+    emi_team_manager:
+      allow:
+        - web_manager
+        - pod_search
+        - pod_fetch
+        - ask_user
+        - find_tool
+        - install_tool
+        - read_skill
+        - discover_skills
+        - read_tool_result
+    web_manager:
+      block:
+        - http_request
+        - oauth_token_refresh
+
+pods:
+  allowed_scopes: [self]
+
+resources:
+  allowed_global_resources:
+    - resource_user_data
+    - resource_assistant_data
+    - resource_chat_guidelines
+    - resource_assistant_personality
+    - resource_weather
+  resource_groups:
+    - chat
+    - memory
+
+entities:
+  enabled: true
+  allowed_entity_cards: [all]
+
+writes:
+  write_unified_log: true
+  write_kg: false
+  allow_fact_extraction: false
+
+delivery:
+  auto_send: true
+  allow_initiation: true
