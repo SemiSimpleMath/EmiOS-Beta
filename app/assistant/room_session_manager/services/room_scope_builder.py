@@ -258,8 +258,6 @@ def build_scope_contract_for_room_request(
     }
     # Unified-scope transition: if the room declares a scope.yaml, it is the
     # authoritative source for the permission bucket. No-op for rooms without one.
-    scope_dict = _overlay_scope_yaml_permission(room_id=str(envelope.room_id or ""), scope_dict=scope_dict)
-
     # Unified-scope transition: if the room declares a scope.yaml, it is the
     # authoritative source for the permission bucket. No-op for rooms without one.
     scope_dict = _overlay_scope_yaml_permission(room_id=str(envelope.room_id or ""), scope_dict=scope_dict)
