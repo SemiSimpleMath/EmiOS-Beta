@@ -14,7 +14,71 @@ from app.assistant.room_session_manager.services.room_policy_service import reso
 from app.assistant.manager_runtime.services.scope_adapter import (
     _SCOPE_HISTORY_LOOKBACK_HOURS,
 )
+from app.assistant.rooms.room_resource_loader import resolve_room_config_dir
+from app.assistant.scope.loader import load_scope
+from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import ScopeContext
+
+logger = get_logger(__name__)
+
+_SCOPE_FILE_NAME = "scope.yaml"
+
+# Permission sub-policies a room's scope.yaml owns authoritatively. When a
+# scope.yaml is present these REPLACE the ROOM.md-derived blocks wholesale.
+# ``delivery`` is handled field-level below (auto_send / allow_initiation are
+# permission; allowed_reply_types is derived from surface and stays builder-
+# computed). Identity + room-behavior (history / retention / execution) + skills
+# are NOT in this set — they remain builder-computed.
+_PERMISSION_BLOCKS = ("tools", "pods", "resources", "entities", "cards", "writes", "approval")
+
+
+def _overlay_scope_yaml_permission(*, room_id: str, scope_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """Overlay a room's scope.yaml PERMISSION bucket onto the ROOM.md-derived dict.
+
+    Unified-scope transition (Step 2b): when a room declares ``scope.yaml`` it
+    is the authoritative source for permission. Identity, room-behavior
+    (history/retention/execution) and derived fields (delivery.allowed_reply_types,
+    skills) stay builder-computed. Rooms WITHOUT a scope.yaml are returned
+    unchanged — this is a no-op until a room opts in by adding the file.
+    """
+    rid = str(room_id or "").strip()
+    if not rid:
+        return scope_dict
+    try:
+        scope_path = resolve_room_config_dir(rid) / _SCOPE_FILE_NAME
+    except Exception as e:
+        logger.debug("scope.yaml path resolution failed for room_id=%s: %s", rid, e, exc_info=True)
+        return scope_dict
+    if not scope_path.exists():
+        return scope_dict
+
+    identity = {
+        "scope_id": scope_dict.get("scope_id"),
+        "owner_id": scope_dict.get("owner_id"),
+        "actor_id": scope_dict.get("actor_id"),
+        "surface": scope_dict.get("surface"),
+        "room_id": scope_dict.get("room_id"),
+        "room_context_id": scope_dict.get("room_context_id"),
+        "visibility": scope_dict.get("visibility"),
+        "policy_id": scope_dict.get("policy_id"),
+        "reply_to": scope_dict.get("reply_to"),
+        "acting_as": scope_dict.get("acting_as"),
+    }
+    permission = load_scope(scope_path, identity=identity).model_dump()
+
+    out = dict(scope_dict)
+    for block in _PERMISSION_BLOCKS:
+        out[block] = permission[block]
+    # delivery is field-level: permission bits from the file, allowed_reply_types
+    # stays the builder-derived value.
+    out_delivery = dict(out.get("delivery") or {})
+    file_delivery = permission.get("delivery") or {}
+    out_delivery["auto_send"] = file_delivery.get("auto_send", out_delivery.get("auto_send"))
+    out_delivery["allow_initiation"] = file_delivery.get("allow_initiation", out_delivery.get("allow_initiation"))
+    out["delivery"] = out_delivery
+
+    logger.info("[scope] room %s: scope.yaml is authoritative for permission (overlay applied).", rid)
+    return out
 
 
 # Principal → skill-pack mapping. Each principal name (the value stamped on
@@ -192,5 +256,13 @@ def build_scope_contract_for_room_request(
             "denied_skills": [],
         },
     }
+    # Unified-scope transition: if the room declares a scope.yaml, it is the
+    # authoritative source for the permission bucket. No-op for rooms without one.
+    scope_dict = _overlay_scope_yaml_permission(room_id=str(envelope.room_id or ""), scope_dict=scope_dict)
+
+    # Unified-scope transition: if the room declares a scope.yaml, it is the
+    # authoritative source for the permission bucket. No-op for rooms without one.
+    scope_dict = _overlay_scope_yaml_permission(room_id=str(envelope.room_id or ""), scope_dict=scope_dict)
+
     parsed = ScopeContext.model_validate(scope_dict)
     return parsed.model_dump()
