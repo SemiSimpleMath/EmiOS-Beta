@@ -434,6 +434,20 @@ class ScopeAdapter:
         return bool(task_file or has_scope_contract_seed or has_resource_contract)
 
     def _derive_room_scope(self, *, message: Message) -> ScopeContext | None:
+        """Build a room scope for a system/internal Message that carries a
+        room_id but no pre-attached scope_context.
+
+        Unified-scope refactor: this used to hand-roll its own scope_dict,
+        which had diverged from the canonical chat-ingress builder — it
+        omitted tools.per_manager, the pods block, the skills block, and the
+        scope.yaml overlay. So the SAME room reached via the system path got a
+        broader, weaker scope than via chat. This now delegates to the single
+        reference builder (build_scope_contract_for_room_request) so BOTH
+        ingress vectors produce identical permission for the same room. Only
+        identity (actor_id/surface/reply_to) is bridged from the Message into
+        an InboundEnvelope; the builder derives everything else from room_ctx
+        + the room's scope.yaml exactly as it does for chat.
+        """
         room_id = _as_non_empty_str(getattr(message, "room_id", None))
         if not room_id:
             data = message.data if isinstance(message.data, dict) else {}
@@ -445,14 +459,23 @@ class ScopeAdapter:
         if not isinstance(room_ctx, dict):
             raise ValueError(f"Invalid room context for room_id={room_id!r}")
 
-        room_policy = room_ctx.get("room_policy") if isinstance(room_ctx.get("room_policy"), dict) else {}
-        room_permissions = room_ctx.get("room_permissions") if isinstance(room_ctx.get("room_permissions"), dict) else {}
-        room_access = room_ctx.get("room_access") if isinstance(room_ctx.get("room_access"), dict) else {}
-        retention = room_policy.get("retention") if isinstance(room_policy.get("retention"), dict) else {}
-        delivery = room_policy.get("delivery") if isinstance(room_policy.get("delivery"), dict) else {}
+        from app.assistant.room_session_manager.contracts import InboundEnvelope
+        from app.assistant.room_session_manager.services.room_scope_builder import (
+            build_scope_contract_for_room_request,
+        )
 
         data = message.data if isinstance(message.data, dict) else {}
-        reply_to = message.metadata.get("reply_to") if isinstance(message.metadata, dict) and isinstance(message.metadata.get("reply_to"), dict) else {}
+        reply_to = (
+            message.metadata.get("reply_to")
+            if isinstance(message.metadata, dict) and isinstance(message.metadata.get("reply_to"), dict)
+            else {}
+        )
+
+        # Bridge the Message's identity into the envelope shape the reference
+        # builder consumes. actor_id resolution mirrors the prior behavior:
+        # room_speaker_external_id -> sender_id -> sender_name -> sender.
+        # The builder reads actor_id as (speaker_external_id or speaker_name),
+        # so the resolved actor goes into speaker_external_id.
         actor_id = (
             _as_non_empty_str(getattr(message, "room_speaker_external_id", None))
             or _as_non_empty_str(data.get("sender_id"))
@@ -460,89 +483,48 @@ class ScopeAdapter:
             or _as_non_empty_str(getattr(message, "sender", None))
             or "unknown_actor"
         )
-
         surface = (
             _as_non_empty_str(getattr(message, "room_surface", None))
             or _as_non_empty_str(room_ctx.get("room_surface"))
             or _as_non_empty_str(reply_to.get("type"))
             or "unknown"
         )
+        context_id = (
+            _as_non_empty_str(getattr(message, "room_context_id", None))
+            or _as_non_empty_str(room_ctx.get("room_context_id"))
+            or "main"
+        )
 
-        scope_dict: Dict[str, Any] = {
-            "schema_version": "scope_context_v1",
-            "scope_id": f"scope::{surface}::{room_id}::{uuid.uuid4()}",
-            "owner_id": room_id,
-            "actor_id": actor_id,
-            "surface": surface,
-            "room_id": room_id,
-            "room_context_id": (
-                _as_non_empty_str(getattr(message, "room_context_id", None))
-                or _as_non_empty_str(room_ctx.get("room_context_id"))
-                or "main"
-            ),
-            "visibility": _as_non_empty_str(getattr(message, "room_visibility", None)) or _as_non_empty_str(room_ctx.get("room_visibility")) or "room_shared",
-            "policy_id": _as_non_empty_str(getattr(message, "room_policy_id", None)) or _as_non_empty_str(room_ctx.get("room_policy_id")),
-            "history": {
-                "mode": "summary_plus_recent",
-                "source": "unified_log",
-                "include_room_scoped": True,
-                "lookback_hours": _SCOPE_HISTORY_LOOKBACK_HOURS,
-                "max_messages": None,
-                "max_chars_per_message": None,
-            },
-            "resources": {
-                "allowed_global_resources": _as_str_list(room_ctx.get("room_allowed_global_resources")) or ["all"],
-                "allowed_room_resources": [],
-                "denied_resources": [],
-                "resource_groups": _as_str_list(room_ctx.get("room_rag_scopes")),
-            },
-            "tools": {
-                "allowed_tools": _resolve_allowed_tools_from_data(data),
-                "blocked_tools": _as_str_list(data.get("task_except_tools")),
-                "requires_approval_tools": [],
-                "allow_external_side_effects": bool(room_permissions.get("tool_classes", {}).get("external_action", False))
-                if isinstance(room_permissions.get("tool_classes"), dict)
-                else False,
-            },
-            "entities": {
-                "enabled": True,
-                "allowed_entity_cards": _as_str_list(room_access.get("allowed_entity_cards")),
-                "pinned_entities": _as_str_list(room_access.get("pinned_entities")),
-                "entity_lookback_messages": None,
-                "entity_lookback_seconds": None,
-            },
-            "cards": {"enabled": True, "allowed_cards": [], "max_cards_per_turn": None, "max_total_chars": None},
-            "writes": {
-                "write_unified_log": bool(retention.get("write_unified_log", True)),
-                "write_kg": bool(retention.get("write_kg", False)),
-                "allow_fact_extraction": bool(retention.get("allow_fact_extraction", False)),
-                "writable_state_keys": [],
-            },
-            "delivery": {
-                "auto_send": bool(delivery.get("auto_send", True)),
-                "allow_initiation": bool(delivery.get("allow_initiation", False)),
-                "allowed_reply_types": [surface],
-            },
-            "approval": {
-                "authority_level": _coerce_authority_level(
-                    room_policy.get(
-                        "authority_level",
-                        _default_authority_for_surface(
-                            surface=surface,
-                        ),
-                    ),
-                    field_name="room_policy.authority_level",
-                ),
-            },
-            "retention": {
-                "persist_chat": bool(retention.get("persist_chat", True)),
-                "persist_tool_results": True,
-                "allow_context_summarization": True,
-                "redact_before_persist": False,
-            },
-            "execution": {"max_turns": None, "max_tool_calls": None, "timeout_seconds": None, "allowed_models": []},
-            "delegation": {},
+        envelope = InboundEnvelope(
+            surface=surface,
+            room_id=room_id,
+            context_id=context_id,
+            request_id=_as_non_empty_str(getattr(message, "request_id", None)),
+            speaker_name=actor_id,
+            speaker_id=actor_id,
+            speaker_external_id=actor_id,
+            content=_as_non_empty_str(getattr(message, "content", None)),
+            timestamp_local="",
+            inbound_line="",
+            transport_message_id="",
+            transport_from=actor_id,
+            transport_to=room_id,
+            reply_to=reply_to,
+            metadata=message.metadata if isinstance(message.metadata, dict) else {},
+        )
+
+        request_data: Dict[str, Any] = {
+            "task_allowed_tools": data.get("task_allowed_tools"),
+            "task_except_tools": data.get("task_except_tools"),
+            "reply_to": reply_to or None,
+            "actas_principal": _as_non_empty_str(data.get("actas_principal")) or "user",
         }
+
+        scope_dict = build_scope_contract_for_room_request(
+            room_ctx=room_ctx,
+            envelope=envelope,
+            request_data=request_data,
+        )
         return ScopeContext.model_validate(scope_dict)
 
     def _derive_system_scope(self, *, manager_name: str, message: Message) -> ScopeContext:
