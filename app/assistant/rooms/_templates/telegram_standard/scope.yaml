@@ -1,0 +1,50 @@
+# Permission scope for a standard Telegram chat (room factory template).
+#
+# PERMISSION ONLY. Identity is stamped per request at load time — no
+# placeholders here. Copied verbatim into every new Telegram room by
+# room_bootstrap.
+#
+# NO TOOLS by default. A standard Telegram chat is pure conversation —
+# Emi talks, but cannot execute any tool. This is a deliberate FAIL-CLOSED
+# floor (enforced at tool_caller / check_tool_access: an explicit empty
+# allowed_tools denies every tool). A specific Telegram room that should
+# have access (e.g. Katy's) overrides this with its own scope.yaml granting
+# the tools/managers it needs.
+#
+# NOTE: this corrects a prior latent bug — the legacy ROOM.md
+# permissions.allowed_tools field was never read by the builder, so live
+# Telegram rooms silently ran with the FULL tool surface. scope.yaml makes
+# the lock-down real.
+
+approval:
+  authority_level: 40
+
+tools:
+  allowed_tools: []          # no tools — pure chat (fail-closed)
+  allow_external_side_effects: false
+
+pods:
+  allowed_scopes: [self]
+
+resources:
+  allowed_global_resources:
+    - resource_chat_guidelines
+    - resource_assistant_personality
+    - resource_user_data
+    - resource_assistant_data
+    - resource_user_email
+  resource_groups:
+    - chat
+
+entities:
+  enabled: true
+  allowed_entity_cards: []
+
+writes:
+  write_unified_log: true
+  write_kg: false
+  allow_fact_extraction: false
+
+delivery:
+  auto_send: true
+  allow_initiation: false

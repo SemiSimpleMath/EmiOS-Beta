@@ -1,0 +1,70 @@
+# Permission scope for a standard Slack channel (room factory template).
+#
+# PERMISSION ONLY. Declares what callers in a Slack room may DO and SEE.
+# Room/session behavior (history, retention) stays in ROOM.md. Identity
+# (scope_id, owner_id, actor_id, surface, room_id, reply_to, ...) is stamped
+# per request at load time — never authored here, so this file carries NO
+# {{ROOM_ID}}-style placeholders.
+#
+# Copied verbatim into every new Slack room by room_bootstrap. Low-trust
+# surface: full dispatch surface gated to a safe research subset via
+# per_manager (web/maps + pod memory + operational), with the credential-
+# courier leaves stripped from web_manager.
+
+approval:
+  authority_level: 70
+
+tools:
+  allowed_tools: [all]
+  allow_external_side_effects: true
+  per_manager:
+    # emi_team narrowed to the safe research subset when it runs in this scope.
+    # Everything it natively reaches (personal_admin, devices, playwright,
+    # bash, sandbox, KG, scheduler) is implicitly excluded — not in this list.
+    emi_team_manager:
+      allow:
+        - web_manager
+        - pod_search
+        - pod_fetch
+        - ask_user
+        - find_tool
+        - install_tool
+        - read_skill
+        - discover_skills
+        - read_tool_result
+    # Strip the credential-courier leaves from web_manager; search/scrape/
+    # news/weather/maps keep working.
+    web_manager:
+      block:
+        - http_request
+        - oauth_token_refresh
+
+pods:
+  allowed_scopes: [self]
+
+resources:
+  allowed_global_resources:
+    - resource_user_data
+    - resource_assistant_data
+    - resource_chat_guidelines
+    - resource_assistant_personality
+    - resource_weather
+    - resource_daily_context_generator_output
+    - resource_daily_context
+    - resource_health_inference_output
+  resource_groups:
+    - chat
+    - memory
+
+entities:
+  enabled: true
+  allowed_entity_cards: [all]
+
+writes:
+  write_unified_log: true
+  write_kg: true
+  allow_fact_extraction: true
+
+delivery:
+  auto_send: true
+  allow_initiation: true

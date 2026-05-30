@@ -13,8 +13,11 @@ from app.assistant.utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 _SAFE_ROOM_ID_RE = re.compile(r"^[A-Za-z0-9._:/-]+$")
-# Single-file room contract — see app/assistant/rooms/ROOM_CONTRACT.md.
-_TEMPLATE_FILES = ("ROOM.md",)
+# Room contract: ROOM.md holds identity/prose + room-behavior frontmatter;
+# scope.yaml holds the permission scope (unified-scope refactor). Both are
+# copied into every new room. scope.yaml carries no {{TOKEN}} placeholders,
+# so the token-replacement loop below is a harmless no-op on it.
+_TEMPLATE_FILES = ("ROOM.md", "scope.yaml")
 _TELEGRAM_TEMPLATE_DIR = Path(__file__).resolve().parent / "_templates" / "telegram_standard"
 _SLACK_TEMPLATE_DIR = Path(__file__).resolve().parent / "_templates" / "slack_standard"
 
