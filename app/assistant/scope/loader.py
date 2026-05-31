@@ -71,6 +71,8 @@ _REQUIRED_IDENTITY: tuple = ("owner_id", "actor_id", "surface")
 _SUBSYSTEM_SCOPE_DIRS: "dict[str, tuple]" = {
     "wiki_generator": ("app", "assistant", "wiki_generator"),
     "subconscious": ("app", "assistant", "subconscious"),
+    "kg_investigator": ("app", "assistant", "kg_investigator"),
+    "kg_resolution": ("app", "assistant", "kg_resolution"),
 }
 
 

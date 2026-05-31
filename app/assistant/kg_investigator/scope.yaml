@@ -1,0 +1,50 @@
+# app/assistant/kg_investigator/scope.yaml
+#
+# PERMISSION-ONLY scope for the kg_investigator subsystem — the LLM-driven
+# investigate/mutate path for kg_maintenance_finding rows.
+#
+# Consumed via: load_scope_for_source(kind="subsystem", source_id="kg_investigator",
+#                                     actor_id=..., identity_overrides={...})
+#
+# This is a SELF-SCOPING source (scope boundary principle): its four callers
+# (kg_maintenance_pipeline step 6, routine_manager, the /kg-maintenance UI route,
+# the wiki critic) hand off via plain Python calls passing only finding IDs — no
+# scope-bearing Message — so finding_processor/finding_executor build their own
+# scope here. They then ENFORCE it across the next boundary by threading this
+# scope into the manager's Message (kg_investigation_manager / kg_mutation_manager
+# inherit it; managers never self-scope).
+#
+# ONE scope, identity stamped per call. The legacy code built three near-identical
+# scopes (_investigation_scope, _mutation_scope) differing ONLY in actor_id/
+# scope_id (identity) and write_kg/write_unified_log (inert — KG writes are
+# deterministic SQLAlchemy that never consult scope.writes). tools + authority
+# were identical. So it is ONE permission scope, not several.
+#
+# authority_level: 99 — autonomous KG-maintenance routine (no human approver).
+# Legacy hardcoded 100; verified NOT load-bearing here — the kg managers declare
+# requires_approval_tools:[] and the KG leaf mutators (kg_merge_nodes,
+# kg_delete_node, kg_create_edge, kg_rename_label, ...) set no approval_min_authority
+# and no requires_approval, so nothing on this path needs the >=100 admin bypass.
+# 99 vs 100 is behaviorally identical here; 99 per the routine-authority rule.
+#
+# tools: [all] — faithful to legacy (the builders specified no tools, so the
+# system default ["all"] applied). The code restricts capability by WHICH manager
+# it invokes (kg_investigation_manager read-only, kg_mutation_manager mutate);
+# each manager carries its own native tool allowlist. A narrower source list here
+# would INTERSECT with and strip the managers' own leaf tools (the documented
+# emi_team -> http_manager failure mode), so tightening is a separate, verified
+# step — not this migration.
+
+approval:
+  authority_level: 99
+
+tools:
+  allowed_tools: [all]
+
+resources:
+  allowed_global_resources: [all]
+
+writes:
+  write_unified_log: true
+  write_kg: true
+  allow_fact_extraction: false

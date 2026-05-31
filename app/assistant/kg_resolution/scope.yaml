@@ -1,0 +1,36 @@
+# app/assistant/kg_resolution/scope.yaml
+#
+# PERMISSION-ONLY scope for the kg_resolution subsystem — runs
+# kg_resolution_manager to apply user-confirmed cluster resolutions to the KG
+# (and regen entity_cards / wiki vault).
+#
+# Consumed via: load_scope_for_source(kind="subsystem", source_id="kg_resolution",
+#                                     actor_id=..., identity_overrides={...})
+#
+# Self-scoping source (scope boundary principle): callers (the /kg-maintenance UI
+# route, kg_investigator finding_executor) hand off without a scope-bearing
+# Message, so resolve_with_prose builds its own scope here and then enforces it
+# across the boundary into kg_resolution_manager's Message.
+#
+# authority_level: 99 — autonomous KG-maintenance routine. Legacy hardcoded 100;
+# verified NOT load-bearing (kg_resolution_manager declares requires_approval_tools:[]
+# and the KG leaf mutators set no approval gate, so nothing needs the >=100 admin
+# bypass). 99 per the routine-authority rule.
+#
+# tools: [all] — faithful to legacy; the manager carries its own curated mutator
+# allowlist. Tightening to [kg_resolution_manager] risks intersecting away the
+# manager's native tools — a separate verified step.
+
+approval:
+  authority_level: 99
+
+tools:
+  allowed_tools: [all]
+
+resources:
+  allowed_global_resources: [all]
+
+writes:
+  write_unified_log: true
+  write_kg: true
+  allow_fact_extraction: false

@@ -30,7 +30,7 @@ from typing import Any, Dict, List, Optional
 
 from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
 from app.assistant.ServiceLocator.service_locator import DI
-from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
+from app.assistant.scope.loader import load_scope_for_source
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import Message, ScopeContext
 from app.assistant.utils.time_utils import utc_now
@@ -48,14 +48,15 @@ def _executor_scope() -> ScopeContext:
     tools to its curated mutator allowlist (full read + mutate suite
     including merge/delete; safety lives in the dev-page 24h grace +
     Accept review, not in tool exclusion)."""
-    return ScopeAdapter.for_system_routine(
-        routine_id="kg_investigator::finding_executor",
-        scope_id="scope::kg_investigator::finding_executor",
-        owner_id="jukka",
+    return load_scope_for_source(
+        kind="subsystem",
+        source_id="kg_investigator",
         actor_id="kg_finding_executor",
-        authority_level=100,
-        write_kg=True,
-        write_unified_log=True,
+        identity_overrides={
+            "owner_id": "jukka",
+            "actor_id": "kg_finding_executor",
+            "scope_id": "scope::kg_investigator::finding_executor",
+        },
     )
 
 
