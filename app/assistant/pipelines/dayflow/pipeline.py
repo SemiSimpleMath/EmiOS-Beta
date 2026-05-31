@@ -10,7 +10,6 @@ from app.assistant.utils.logging_config import get_logger
 
 from .context import DayFlowContext
 from .step_runner import DayFlowRunner, _load_step_class
-from app.assistant.pipelines.scope_policy import load_pipeline_scope_policy
 from .utils.room_scope import resolve_room_scope
 
 logger = get_logger(__name__)
@@ -29,7 +28,6 @@ class DayFlowPipeline:
     def __init__(self) -> None:
         self._config_path = get_configs_dir() / "dayflow_pipeline.json"
         self._config_mtime: float | None = None
-        self._scope_policy = load_pipeline_scope_policy(self.pipeline_id)
 
         self._pipeline_config: Dict = {}
         self._steps: list = []

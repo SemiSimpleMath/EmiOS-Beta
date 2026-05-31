@@ -189,8 +189,8 @@ class ScopeAdapter:
     3) Apply manager-level narrowing contract (if configured).
     4) Return a normalized Message with scope_context attached.
 
-    Factory methods (``for_sub_manager``, ``for_courier_call``,
-    ``for_system_routine``) are call-site seams introduced in the scope-audit
+    Factory methods (``for_sub_manager``, ``for_courier_call``) are
+    call-site seams introduced in the scope-audit
     migration (see ``docs/architecture/SCOPE_AUDIT.md``). They centralize
     scope construction so the semantic shift in Step 5 (authority-cap +
     local tools, replacing tool-list intersection) lands in one place
@@ -275,89 +275,6 @@ class ScopeAdapter:
             approval=ScopeApprovalPolicy(authority_level=authority_level),
             resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
             tools=ScopeToolPolicy(),
-        )
-
-    @staticmethod
-    def for_internal_invocation(
-        *,
-        scope_id: str,
-        actor_id: str,
-        owner_id: str = "system",
-    ) -> ScopeContext:
-        """Construct a fresh system-internal scope for tool-driven agent
-        invocations (e.g. ``invoke_agent`` calling an agent without a
-        chat-originating manager context).
-
-        Caller specifies both ``scope_id`` and ``actor_id`` since the
-        invocation contexts vary (invoke_agent uses ``invoke_agent::<agent>``
-        as scope_id and ``invoke_agent`` as actor_id; future callers may
-        differ).
-
-        Today: matches the existing invoke_agent ScopeContext shape
-        (owner_id="system", surface="internal", broad resource access).
-        Step 5 will revisit whether system-internal scopes need their
-        own authority floor — today they default to authority 0 via
-        ScopeApprovalPolicy() default, relying on the tool registry's
-        approval gates to handle individual call risk.
-        """
-        return ScopeContext(
-            scope_id=scope_id,
-            owner_id=owner_id,
-            actor_id=actor_id,
-            surface="internal",
-            resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
-        )
-
-    @staticmethod
-    def for_system_routine(
-        *,
-        routine_id: str,
-        owner_id: str,
-        actor_id: str | None = None,
-        authority_level: int = 0,
-        room_id: str | None = None,
-        room_context_id: str | None = None,
-        visibility: str = "owner_only",
-        policy_id: str | None = None,
-        scope_id: str | None = None,
-        surface: str = "system",
-        write_unified_log: bool = True,
-        write_kg: bool = False,
-        allow_fact_extraction: bool = False,
-    ) -> ScopeContext:
-        """Construct a fresh ScopeContext for an autonomous routine run
-        (no chat-origin context — subconscious sweeps, KG maintenance,
-        wiki refresh, daily-insights pipeline, etc.).
-
-        ``routine_id`` is captured for telemetry / policy lookup; today
-        it's stamped into ``policy_id`` if no explicit policy_id is given,
-        so /tokens and decision logs can trace authority back to the
-        triggering routine.
-
-        Today: thin wrapper around ``build_system_scope_context()`` with
-        the routine name folded into policy_id. Tier-2 sites
-        (subconscious/run_*.py, routine_handlers/*, kg_investigator,
-        kg_maintenance_pipeline, wiki_generator, importance/scoring,
-        pod_store/image_pod_enrichment, etc.) currently construct fresh
-        ``ScopeContext(...)`` instances directly. Step 2 migrates those
-        to this method; Step 5 enables per-routine policy lookup (e.g.
-        the routine's declared authority floor).
-        """
-        effective_actor_id = actor_id if actor_id else owner_id
-        effective_policy_id = policy_id if policy_id else f"routine:{routine_id}"
-        return build_system_scope_context(
-            owner_id=owner_id,
-            actor_id=effective_actor_id,
-            surface=surface,
-            room_id=room_id,
-            room_context_id=room_context_id,
-            visibility=visibility,
-            policy_id=effective_policy_id,
-            scope_id=scope_id,
-            authority_level=authority_level,
-            write_unified_log=write_unified_log,
-            write_kg=write_kg,
-            allow_fact_extraction=allow_fact_extraction,
         )
 
     # ------------------------------------------------------------------

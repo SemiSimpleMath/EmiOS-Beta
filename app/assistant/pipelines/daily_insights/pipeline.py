@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Dict, Optional
 
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.pipelines.scope_policy import load_pipeline_scope_policy
 
 from app.assistant.pipelines.context import PipelineContext
 from app.assistant.pipelines.step_runner import PipelineRunner
@@ -23,7 +22,6 @@ class DailyInsightsPipeline:
     pipeline_id = "daily_insights"
 
     def __init__(self) -> None:
-        self._scope_policy = load_pipeline_scope_policy(self.pipeline_id)
         self._runner = PipelineRunner(
             steps=[
                 ArchiveDailyContextStep(),
