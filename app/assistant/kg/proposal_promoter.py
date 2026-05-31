@@ -875,7 +875,7 @@ def _call_node_merger_for_state_match(
     import json
     try:
         from app.assistant.ServiceLocator.service_locator import DI
-        from app.assistant.pipelines.scope_policy import build_pipeline_scope_context
+        from app.assistant.scope.loader import load_scope_for_source
         from app.assistant.utils.pydantic_classes import Message
     except Exception as exc:
         logger.warning("[promoter] node_merger unavailable: %s", exc)
@@ -886,8 +886,8 @@ def _call_node_merger_for_state_match(
         logger.warning("[promoter] could not create node_merger agent")
         return None
 
-    scope = build_pipeline_scope_context(
-        pipeline_id="kg_pipeline", actor_id="proposal_promoter",
+    scope = load_scope_for_source(
+        kind="pipeline", source_id="kg_pipeline", actor_id="proposal_promoter",
     )
     agent_input = {
         "new_node_context": json.dumps(new_node_ctx, ensure_ascii=True, indent=2),
@@ -1153,7 +1153,7 @@ def _estimate_state_ttl(
     TTL-less states as durable)."""
     try:
         from app.assistant.ServiceLocator.service_locator import DI
-        from app.assistant.pipelines.scope_policy import build_pipeline_scope_context
+        from app.assistant.scope.loader import load_scope_for_source
         from app.assistant.utils.pydantic_classes import Message
     except Exception as exc:
         logger.warning("[promoter] TTL estimator unavailable: %s", exc)
@@ -1174,8 +1174,8 @@ def _estimate_state_ttl(
         "originating_sentence": originating_sentence or "",
     }
 
-    scope = build_pipeline_scope_context(
-        pipeline_id="kg_pipeline", actor_id="proposal_promoter",
+    scope = load_scope_for_source(
+        kind="pipeline", source_id="kg_pipeline", actor_id="proposal_promoter",
     )
     try:
         res = agent.action_handler(Message(agent_input=agent_input, scope_context=scope))
@@ -1318,7 +1318,7 @@ def _canonicalize_sentence(
 
     try:
         from app.assistant.ServiceLocator.service_locator import DI
-        from app.assistant.pipelines.scope_policy import build_pipeline_scope_context
+        from app.assistant.scope.loader import load_scope_for_source
         from app.assistant.utils.pydantic_classes import Message
     except Exception as exc:
         logger.warning("[promoter] fact_canonicalizer unavailable: %s", exc)
@@ -1344,8 +1344,8 @@ def _canonicalize_sentence(
     if isinstance(attrs, dict) and attrs.get("valid_during"):
         agent_input["valid_during"] = attrs["valid_during"]
 
-    scope = build_pipeline_scope_context(
-        pipeline_id="kg_pipeline", actor_id="proposal_promoter",
+    scope = load_scope_for_source(
+        kind="pipeline", source_id="kg_pipeline", actor_id="proposal_promoter",
     )
     try:
         res = agent.action_handler(Message(agent_input=agent_input, scope_context=scope))

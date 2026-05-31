@@ -69,7 +69,7 @@ def _enrich_nodes_via_meta_data_add(
     try:
         import json as _json
         from app.assistant.ServiceLocator.service_locator import DI
-        from app.assistant.pipelines.scope_policy import build_pipeline_scope_context
+        from app.assistant.scope.loader import load_scope_for_source
         from app.assistant.utils.pydantic_classes import Message
     except Exception as exc:
         logger.warning("[proposal_writer] meta_data_add unavailable: %s", exc)
@@ -112,8 +112,8 @@ def _enrich_nodes_via_meta_data_add(
         "message_timestamp": message_ts,
     }
 
-    scope = build_pipeline_scope_context(
-        pipeline_id="kg_pipeline", actor_id="proposal_writer",
+    scope = load_scope_for_source(
+        kind="pipeline", source_id="kg_pipeline", actor_id="proposal_writer",
     )
     try:
         resp = agent.action_handler(Message(agent_input=agent_input, scope_context=scope))

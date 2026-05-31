@@ -13,9 +13,14 @@
 # system default is permissive; this scope.yaml makes the real "no tools"
 # posture explicit (fail-closed).
 #
-# write_kg is FALSE on purpose: the pipeline writes proposal/extraction TABLES
-# (kg_resolved_message, claim_proposals, ...), not the live KG. Promotion to the
-# KG is a separate routine (proposal_promoter).
+# write_kg is FALSE on purpose AND inert here: nothing in the kg_pipeline path
+# reads scope.writes.write_kg. The extraction agents write proposal/extraction
+# TABLES (kg_resolved_message, claim_proposals, ...); the proposal_promoter
+# writes the LIVE KG via deterministic SQLAlchemy that takes no scope param.
+# Both the extraction agents AND the promoter's LLM helpers (node_merger,
+# ttl_estimator, fact_canonicalizer) are toolless and share THIS scope — the
+# live-KG write is deterministic code, not a scope-gated capability, so no
+# separate kg_promotion scope is needed.
 
 approval:
   authority_level: 0
