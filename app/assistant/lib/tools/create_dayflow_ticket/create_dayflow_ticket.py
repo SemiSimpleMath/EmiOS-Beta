@@ -129,21 +129,23 @@ class CreateDayflowTicketTool(BaseTool):
         """Use the ticket_builder agent to convert a brief into ticket fields."""
         try:
             from app.assistant.ServiceLocator.service_locator import DI
-            from app.assistant.utils.pydantic_classes import Message, ScopeResourcePolicy
-            from app.assistant.room_session_manager.services.system_scope_builder import (
-                build_system_scope_for_room,
-            )
+            from app.assistant.utils.pydantic_classes import Message
+            from app.assistant.scope.loader import load_scope_for_source
 
             agent = DI.agent_factory.create_agent("dayflow_orchestrator::ticket_builder")
 
-            # Build a permissive scope so the agent can resolve resource_user_data.
-            scope = build_system_scope_for_room(
-                room_id="dayflow_orchestrator",
-                scope_id="ticket_builder_inline",
+            # Scope is the dayflow_orchestrator room scope.yaml (resources: [all]
+            # there is a superset of the resource_user_data this agent resolves).
+            scope = load_scope_for_source(
+                kind="room",
+                source_id="dayflow_orchestrator",
                 actor_id="create_dayflow_ticket",
-                owner_id="dayflow_orchestrator",
-                surface="system",
-                resources=ScopeResourcePolicy(allowed_global_resources=["resource_user_data"]),
+                identity_overrides={
+                    "scope_id": "ticket_builder_inline",
+                    "owner_id": "dayflow_orchestrator",
+                    "surface": "system",
+                    "room_id": "dayflow_orchestrator",
+                },
             )
 
             msg = Message(

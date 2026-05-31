@@ -1,0 +1,51 @@
+# Permission scope for dayflow_orchestrator — the autonomous orchestration room.
+#
+# PERMISSION ONLY. Declares what callers in this room may DO and SEE.
+# Room/session behavior (history, retention mode, manager overrides) stays in
+# ROOM.md. Identity (scope_id, owner_id, actor_id, surface, reply_to, ...) is
+# stamped per request at load time — never authored here.
+#
+# Mirrors master_room's permission set (owner-trust orchestrator), with ONE
+# deliberate difference: authority_level 95 (master_room is 99). dayflow_
+# orchestrator is the autonomous engine that acts on the owner's behalf across
+# every surface; it runs just below the owner's own room. The 95-vs-99 gap is
+# intentional — master_room (the owner) outranks the orchestrator.
+#
+# Full tool surface, all pods (cross-room owner visibility for event
+# correlation — see ROOM.md), KG writes + fact extraction enabled, auto-send
+# enabled. NO per_manager narrowing: the orchestrator runs every manager with
+# its native toolkit.
+#
+# NOTE: write_kg / allow_fact_extraction / pods:[all] / entities:[all] are MORE
+# permissive than the model defaults and MUST be declared explicitly — omitting
+# them would silently downgrade the room to the fail-closed floor.
+
+approval:
+  authority_level: 95
+
+tools:
+  allowed_tools: [all]
+  allow_external_side_effects: true
+  # No per_manager: dayflow_orchestrator runs every manager with its full surface.
+
+pods:
+  allowed_scopes: [all]
+
+resources:
+  allowed_global_resources: [all]
+  resource_groups:
+    - chat
+    - memory
+
+entities:
+  enabled: true
+  allowed_entity_cards: [all]
+
+writes:
+  write_unified_log: true
+  write_kg: true
+  allow_fact_extraction: true
+
+delivery:
+  auto_send: true
+  allow_initiation: true

@@ -23,11 +23,9 @@ from app.assistant.dayflow_orchestrator.orchestrator_status import (
     load_orchestrator_status,
     persist_orchestrator_status,
 )
-from app.assistant.room_session_manager.services.system_scope_builder import (
-    build_system_scope_for_room,
-)
+from app.assistant.scope.loader import load_scope_for_source
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.pydantic_classes import Message, ScopeResourcePolicy
+from app.assistant.utils.pydantic_classes import Message
 from app.assistant.utils.time_utils import parse_iso_utc_strict
 
 logger = get_logger(__name__)
@@ -88,12 +86,16 @@ def dayflow_orchestrator_cadence_tick(
     blackboard_extras = build_dayflow_blackboard_extras()
 
     request_id = str(uuid.uuid4())
-    scope = build_system_scope_for_room(
-        room_id=DAYFLOW_ORCHESTRATOR_ROOM_ID,
-        scope_id=f"dayflow_cadence::{request_id}",
+    scope = load_scope_for_source(
+        kind="room",
+        source_id=DAYFLOW_ORCHESTRATOR_ROOM_ID,
         actor_id="dayflow_cadence_tick",
-        surface="internal",
-        resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
+        identity_overrides={
+            "scope_id": f"dayflow_cadence::{request_id}",
+            "owner_id": "system",
+            "surface": "internal",
+            "room_id": DAYFLOW_ORCHESTRATOR_ROOM_ID,
+        },
     )
     msg_data: Dict[str, Any] = {
         "trigger": "routine_cadence",
