@@ -41,17 +41,23 @@ class PipelineStep:
 
 ### Scope Policy
 
-Each pipeline has a `scope.json` defining:
-```json
-{
-  "resources": {
-    "allowed_global_resources": [...],
-    "denied_resources": [...]
-  },
-  "visibility": "...",
-  "approval": "...",
-  "execution": "..."
-}
+Each pipeline declares its permissions in a `scope.yaml` (permission-only). Identity
+(`owner_id`, `actor_id`, `surface`) is stamped per run by the caller via
+`load_scope_for_source(kind="pipeline", source_id="<id>")` — never authored in the file:
+```yaml
+approval:
+  authority_level: 0
+tools:
+  allowed_tools: []            # fail-closed; list tools only if the pipeline calls them
+resources:
+  allowed_global_resources: [all]
+  resource_groups: [chat, memory]
+pods:
+  allowed_scopes: [self]
+writes:
+  write_unified_log: true
+  write_kg: false
+  allow_fact_extraction: false
 ```
 
 ## Routines
@@ -209,5 +215,5 @@ Tools compute their own defaults when arguments are missing (date ranges, locati
 | `routine_manager/run_types.py` | RoutineRunContext, RoutineRunResult |
 | `pipelines/step_runner.py` | Sequential pipeline executor |
 | `pipelines/context.py` | Pipeline context (date, paths) |
-| `pipelines/scope_policy.py` | Pipeline scope enforcement |
+| `scope/loader.py` | Pipeline / subsystem scope loading (`load_scope_for_source`) |
 | `configs/routines.json` | Routine definitions |

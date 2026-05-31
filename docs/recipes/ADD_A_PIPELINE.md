@@ -17,7 +17,7 @@ app/assistant/pipelines/<my_pipeline_id>/
     step_a.py                 # PipelineStep impls
     step_b.py
     step_c.py
-  scope.json                  # what resources / write rights the pipeline gets
+  scope.yaml                  # what resources / write rights the pipeline gets
   README.md                   # optional but recommended
 ```
 
@@ -119,25 +119,32 @@ See [Add a routine](ADD_A_ROUTINE.md) for the full menu of policies and runner t
 
 ## Scope policy
 
-Create `app/assistant/pipelines/my_pipeline_id/scope.json`:
+Create `app/assistant/pipelines/my_pipeline_id/scope.yaml` (permission-only; identity is
+stamped at load time, never authored here):
 
-```json
-{
-  "resources": {
-    "allowed_global_resources": ["resource_user_data", "resource_routine_status"],
-    "denied_resources": []
-  },
-  "writes": {
-    "write_kg": false,
-    "write_unified_log": false
-  },
-  "approval": {
-    "authority_level": 95
-  }
-}
+```yaml
+approval:
+  authority_level: 0
+tools:
+  allowed_tools: []            # fail-closed; list tools only if the pipeline calls them
+resources:
+  allowed_global_resources: [resource_user_data, resource_routine_status]
+  resource_groups: [memory]
+writes:
+  write_unified_log: false
+  write_kg: false
 ```
 
-The pipeline runner uses this to construct a ScopeContext for any agents the pipeline invokes. Same narrowing rule applies — see [15_EMI_TEAM_AND_SCOPE.md](../architecture/15_EMI_TEAM_AND_SCOPE.md).
+Build the scope once at run start and thread it through every step:
+
+```python
+from app.assistant.scope.loader import load_scope_for_source
+scope = load_scope_for_source(
+    kind="pipeline", source_id="my_pipeline_id", actor_id="my_pipeline_runner",
+)
+```
+
+The same narrowing rule applies — see [15_EMI_TEAM_AND_SCOPE.md](../architecture/15_EMI_TEAM_AND_SCOPE.md).
 
 ## Test it manually
 

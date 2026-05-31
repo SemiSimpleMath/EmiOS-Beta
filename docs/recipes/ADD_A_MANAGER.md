@@ -20,7 +20,6 @@ This recipe walks the **emi_team-derived** path because that's what 90% of new m
 app/assistant/multi_agents/<my_manager_name>/
   __init__.py
   config.yaml
-  scope.json                  # optional but recommended
 ```
 
 ```

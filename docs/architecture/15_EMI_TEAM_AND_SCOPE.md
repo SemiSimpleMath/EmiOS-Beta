@@ -180,7 +180,7 @@ Where scope is built:
 
 - **Inbound user messages from a room**: `ScopeAdapter._derive_room_scope` reads `room_policy.json`, `permissions.json`, `access.json` and assembles a scope (`scope_adapter.py:253-363`).
 - **System / background work**: `build_system_scope_context` (`scope_adapter.py:91-170`).
-- **Pipelines**: `build_pipeline_scope_context` (`app/assistant/pipelines/scope_policy.py:46-85`) — wraps `build_system_scope_context` and overlays the per-pipeline `scope.json`.
+- **Pipelines**: `load_scope_for_source(kind="pipeline", source_id=...)` (`app/assistant/scope/loader.py`) — loads the pipeline's `scope.yaml` and stamps per-run identity. Built once at run start, threaded through every step.
 - **Explicit caller-provided scopes**: handed to `ManagerInvoker.invoke` on the `Message`, then passed through `ScopeAdapter.apply` for narrowing.
 
 `ScopeAdapter.apply` (`scope_adapter.py:184-196`) is what the `ManagerInvoker` calls before `request_handler`. It resolves the scope (inherit from message, derive from room, or build from system defaults), applies the manager's `scope_contract` *as a narrowing*, and projects the result into `message.data` so legacy tool-scoping code can keep reading `task_allowed_tools`, `write_kg`, etc.
@@ -308,7 +308,7 @@ System-initiated background work (pipelines, routines, the finding executor) typ
 
 `allowed_room_resources` works the same way for room-scoped resources. `denied_resources` is a hard blocklist regardless of allow lists. `resource_groups` names RAG scopes for retrieval pipelines.
 
-Pipelines that need a deliberately small resource surface (e.g. `kg_chat_pipeline`) ship a `scope.json` next to the pipeline that names exactly the resources they need; `build_pipeline_scope_context` overlays it on the system scope (`scope_policy.py:66-85`).
+Pipelines that need a deliberately small resource surface ship a `scope.yaml` next to the pipeline that names exactly the resources they need; `load_scope_for_source(kind="pipeline", source_id=...)` loads it.
 
 The context injector reads these lists when resolving `resource_*` context items in agent configs — see [01_AGENTS.md](01_AGENTS.md).
 
@@ -338,7 +338,7 @@ End-to-end tool resolution order is covered in [07_TOOLS.md](07_TOOLS.md#tool-vi
 | `app/assistant/manager_runtime/services/tool_scope_service.py` | Downstream tool visibility filter. |
 | `app/assistant/utils/pydantic_classes.py` | `ScopeContext` and all sub-policies. |
 | `app/assistant/utils/surfaces.py` | Surface constants and `DEFAULT_AUTHORITY_BY_SURFACE`. |
-| `app/assistant/pipelines/scope_policy.py` | `build_pipeline_scope_context` for pipeline-driven work. |
+| `app/assistant/scope/loader.py` | `load_scope_for_source(kind="pipeline", ...)` for pipeline-driven work. |
 | `app/assistant/kg_investigator/finding_executor.py` | The `_mutation_scope()` case study. |
 
 ---
@@ -412,5 +412,5 @@ Rules of thumb:
 
 - Grant the **minimum** the target manager needs. The manager's own `scope_contract` will narrow further, but if you grant too much you weaken the audit story.
 - `surface="system"` is the right marker for non-user-initiated work. `actor_id` should name the caller distinctly so logs and KG provenance can trace back to the right routine.
-- For a pipeline, prefer `build_pipeline_scope_context(pipeline_id=..., actor_id=...)` and put the policy in `app/assistant/pipelines/<pipeline_id>/scope.json` — that way the policy lives with the pipeline definition rather than in inline code.
+- For a pipeline, prefer `load_scope_for_source(kind="pipeline", source_id=..., actor_id=...)` and put the policy in `app/assistant/pipelines/<pipeline_id>/scope.yaml` — that way the policy lives with the pipeline definition rather than in inline code.
 - For routine-style work calling into a manager that requires a permission the system default does not grant, follow the `_mutation_scope()` pattern in `kg_finding_executor` (`finding_executor.py:35-52`).
