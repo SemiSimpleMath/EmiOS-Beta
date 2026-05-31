@@ -56,6 +56,7 @@ from sqlalchemy.orm import Session
 
 from app.assistant.kg.db.knowledge_graph_db_sqlite import Edge, Node
 from app.assistant.utils.logging_config import get_logger
+from app.assistant.utils.pydantic_classes import ScopeContext
 from app.models.db_manager import get_db_manager
 
 logger = get_logger(__name__)
@@ -176,6 +177,7 @@ def regenerate_edge_importance(
     *,
     batch_size: int = EDGE_RATER_BATCH_SIZE,
     only_unrated: bool = True,
+    scope_context: ScopeContext,
 ) -> int:
     """Rate every edge and write to kg_edge_metadata.importance.
 
@@ -233,7 +235,6 @@ def regenerate_edge_importance(
 
     Returns: number of edges scored this run.
     """
-    from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
     from app.assistant.ServiceLocator.service_locator import DI
     from app.assistant.utils.pydantic_classes import Message
 
@@ -254,15 +255,9 @@ def regenerate_edge_importance(
         len(all_edges), batch_size, only_unrated,
     )
 
-    scope = ScopeAdapter.for_system_routine(
-        routine_id="me::edge_importance",
-        scope_id="scope::me::edge_importance",
-        owner_id="jukka",
-        actor_id="me_edge_importance_runner",
-        surface="ui",
-        room_id="me_lens",
-        authority_level=99,
-    )
+    # Scope is built once by the caller (kg_importance_rater routine) and threaded
+    # in — this LLM rater is an internal step, not a source, so it RECEIVES scope.
+    scope = scope_context
 
     rated_count = 0
     failures = 0

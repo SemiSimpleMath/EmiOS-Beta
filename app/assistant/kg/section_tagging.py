@@ -291,6 +291,7 @@ from app.assistant.importance.queries import max_source_entity_importance
 def tag_nodes_by_id(
     node_ids: Sequence[str],
     *,
+    scope_context: "ScopeContext",
     tagger_version: str = "v1",
     importance_threshold: Optional[float] = DEFAULT_IMPORTANCE_THRESHOLD,
 ) -> dict:
@@ -314,7 +315,6 @@ def tag_nodes_by_id(
     contact_bypassed, errors, card_tags_written, wiki_tags_written}.
     """
     from app.assistant.ServiceLocator.service_locator import DI
-    from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
     from app.assistant.utils.pydantic_classes import Message
     from app.models.base import get_session
 
@@ -372,20 +372,13 @@ def tag_nodes_by_id(
         ):
             batch = taggable[batch_start : batch_start + _TAG_BATCH_SIZE]
             nodes_block = _format_nodes_block(batch)
-            scope = ScopeAdapter.for_system_routine(
-                routine_id="kg_pipeline::section_tagging",
-                scope_id="scope::kg_pipeline::section_tagging",
-                owner_id="kg_pipeline",
-                actor_id="section_tagging::tag_nodes_by_id",
-                surface="pipeline",
-            )
             try:
                 resp = agent.action_handler(Message(
                     agent_input={
                         "nodes_block": nodes_block,
                         "namespaces_block": namespaces_block,
                     },
-                    scope_context=scope,
+                    scope_context=scope_context,
                 ))
                 data = resp.data if resp and hasattr(resp, "data") else {}
             except Exception as exc:
@@ -455,6 +448,7 @@ def tag_nodes_by_id(
 
 def backfill_untagged_nodes(
     *,
+    scope_context: "ScopeContext",
     limit: Optional[int] = None,
     only_node_types: Optional[Sequence[str]] = None,
 ) -> dict:
@@ -496,6 +490,6 @@ def backfill_untagged_nodes(
         return {"to_tag": 0, "tagged": 0}
 
     # tag_nodes_by_id handles batching + persistence
-    result = tag_nodes_by_id(node_ids)
+    result = tag_nodes_by_id(node_ids, scope_context=scope_context)
     result["to_tag"] = len(node_ids)
     return result

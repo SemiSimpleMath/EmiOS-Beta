@@ -1,0 +1,39 @@
+# app/assistant/pipelines/kg_importance_rater/scope.yaml
+#
+# PERMISSION-ONLY scope for the kg_importance_rater pipeline — the periodic
+# "rate edges via LLM, then derive node importance + section-tag" admin routine.
+#
+# Consumed via: load_scope_for_source(kind="pipeline", source_id="kg_importance_rater",
+#                                     actor_id=...). Built ONCE at the routine
+# entry (_lazy_kg_importance_rater) and THREADED as scope_context into the two
+# LLM-using steps (regenerate_edge_importance, tag_nodes_by_id via
+# backfill_untagged_nodes). The pure-DB derivation steps (regenerate_entity_/
+# state_importance) take no scope — they call no LLM.
+#
+# LLM-AS-PRIMITIVE: this is trusted deterministic Python (an admin routine with
+# full DB access) that calls a TOOLLESS LLM as a computation primitive (rate this
+# edge, tag this node). The LLM advises; the Python writes. scope is needed only
+# to build the LLM Message, not as a privilege gate.
+#
+# authority_level: 99 — autonomous routine (no human approver), capped below the
+# 100 admin-bypass/courier band so it can never reach .env/SSN-tier capability.
+# The agents are toolless, so 99 is an advisor with no hands. (Legacy
+# for_system_routine hardcoded 99 here already for the edge rater; the tagger used
+# the implicit default — unified to 99.)
+#
+# tools: [] — the rater (me::edge_importance_rater) and tagger
+# (kg_pipeline::section_tagger) are toolless structured-output agents.
+
+approval:
+  authority_level: 99
+
+tools:
+  allowed_tools: []
+
+resources:
+  allowed_global_resources: [all]
+
+writes:
+  write_unified_log: true
+  write_kg: false
+  allow_fact_extraction: false

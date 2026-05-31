@@ -338,11 +338,22 @@ def _lazy_kg_importance_rater(*, target_date=None, routine=None):
         regenerate_entity_importance,
         regenerate_state_importance,
     )
+    from app.assistant.scope.loader import load_scope_for_source
     spec = (routine.spec if routine and hasattr(routine, "spec") else {}) or {}
     batch_edges = int(spec.get("batch_size_edges", 50))
 
+    # One scope, built at the routine entry, threaded into the two LLM steps
+    # (edge rater + section tagger). The pure-DB derivation steps take no scope.
+    scope = load_scope_for_source(
+        kind="pipeline",
+        source_id="kg_importance_rater",
+        actor_id="kg_importance_rater",
+    )
+
     # Step 1: rate edges via me::edge_importance_rater. The single LLM input.
-    edge_count = regenerate_edge_importance(batch_size=batch_edges, only_unrated=True)
+    edge_count = regenerate_edge_importance(
+        batch_size=batch_edges, only_unrated=True, scope_context=scope,
+    )
     edge_status = int(edge_count or 0)
 
     # Step 2: derive Entity / Concept importance from adjacent edge importance.
@@ -362,7 +373,7 @@ def _lazy_kg_importance_rater(*, target_date=None, routine=None):
     tag_stats = {}
     try:
         from app.assistant.kg.section_tagging import backfill_untagged_nodes
-        tag_stats = backfill_untagged_nodes()
+        tag_stats = backfill_untagged_nodes(scope_context=scope)
     except Exception:
         logger.exception("[kg_importance_rater] tagging step failed")
         tag_stats = {"error": "exception"}
