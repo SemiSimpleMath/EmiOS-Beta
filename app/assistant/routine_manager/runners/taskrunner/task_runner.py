@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from app.assistant.ServiceLocator.service_locator import DI
-from app.assistant.manager_runtime.services.scope_adapter import build_system_scope_context
+from app.assistant.scope.loader import load_scope_for_source
 from app.assistant.routine_manager.run_types import RoutineRunContext, RoutineRunResult
 from app.assistant.routine_manager.runners.types import RoutineLike
 from app.assistant.utils.logging_config import get_logger
@@ -72,11 +72,17 @@ class TaskRoutineRunner:
             "task_runner_version": "v2",
             "task_execution_mode": "prose_manager",
         }
-        scope_contract = build_system_scope_context(
-            owner_id="routine_manager",
+        # Standard task scope (authority 98) — a routine running a task spec is
+        # task execution. owner_id/surface preserved as the routine identity.
+        scope_contract = load_scope_for_source(
+            kind="subsystem",
+            source_id="task",
             actor_id="routine_task_runner_v2",
-            surface="routine",
-            scope_id=f"scope::routine::{task_spec.task_id}",
+            identity_overrides={
+                "owner_id": "routine_manager",
+                "surface": "routine",
+                "scope_id": f"scope::routine::{task_spec.task_id}",
+            },
         )
         data["scope_contract"] = scope_contract.model_dump()
 
