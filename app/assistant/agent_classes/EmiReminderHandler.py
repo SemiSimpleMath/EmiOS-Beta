@@ -63,13 +63,15 @@ class EmiReminderHandler(Agent):
                 self.blackboard.update_state_value(key, value)
 
             # resolve_resource requires scope_context on the blackboard.
-            # This handler runs outside any manager, so we build a minimal open system scope.
+            # This handler is scheduler-fired (runs outside any manager, no
+            # scope-bearing caller), so it self-scopes from its own source.
             try:
-                from app.assistant.manager_runtime.services.scope_adapter import build_system_scope_context
-                _scope = build_system_scope_context(
-                    owner_id="system",
+                from app.assistant.scope.loader import load_scope_for_source
+                _scope = load_scope_for_source(
+                    kind="subsystem",
+                    source_id="system_reminder",
                     actor_id="emi_reminder_handler",
-                    surface="system",
+                    identity_overrides={"owner_id": "system", "surface": "system"},
                 )
                 self.blackboard.update_state_value("scope_context", _scope.model_dump())
             except Exception as e:

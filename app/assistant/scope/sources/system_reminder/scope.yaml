@@ -1,0 +1,38 @@
+# app/assistant/scope/sources/system_reminder/scope.yaml
+#
+# PERMISSION-ONLY scope for the EmiReminderHandler — delivers scheduled reminders
+# to the user (forms the spoken/feed output via one LLM call, then publishes).
+#
+# Consumed via: load_scope_for_source(kind="subsystem", source_id="system_reminder",
+#   actor_id=...). Homed under scope/sources/ (the handler lives in agent_classes/,
+# which is not its own source module).
+#
+# Self-scoping source: the scheduler fires EmiReminderHandler directly (outside
+# any manager, no scope-bearing caller), so it builds its own scope at entry and
+# stamps it on its blackboard. It runs one LLM (structured output) to shape the
+# reminder; it dispatches no tools.
+#
+# authority_level: 99 — autonomous routine (scheduler-fired, no human approver),
+# below the 100 admin/courier band. (Legacy build_system_scope_context defaulted
+# to 0; raised to 99 per the routine rule — inert here since the handler is
+# toolless, so the authority gates are never reached.)
+#
+# tools: [] — the reminder agent is a toolless structured-output agent (legacy
+# default was ["all"]; tightened — it calls no tool).
+#
+# resources: [all] — the handler's construct_prompt resolves resource_* context
+# items, which require scope.resources (faithful to the legacy [all] default).
+
+approval:
+  authority_level: 99
+
+tools:
+  allowed_tools: []
+
+resources:
+  allowed_global_resources: [all]
+
+writes:
+  write_unified_log: true
+  write_kg: false
+  allow_fact_extraction: false

@@ -81,6 +81,8 @@ _SUBSYSTEM_SCOPE_DIRS: "dict[str, tuple]" = {
     "image_pod_enrichment": ("app", "assistant", "scope", "sources", "image_pod_enrichment"),
     # belief_engine pipeline — top-level package, not under app/assistant/pipelines.
     "belief_engine": ("belief_engine",),
+    # EmiReminderHandler — scheduler-fired reminder delivery (agent_classes/ is not its source).
+    "system_reminder": ("app", "assistant", "scope", "sources", "system_reminder"),
 }
 
 
