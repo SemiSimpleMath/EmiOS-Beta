@@ -63,6 +63,16 @@ _IDENTITY_FIELDS: frozenset = frozenset(
 _REQUIRED_IDENTITY: tuple = ("owner_id", "actor_id", "surface")
 
 
+# Co-located scope.yaml homes for non-pipeline, non-room SUBSYSTEM sources.
+# kind="subsystem" resolves source_id through this map; each value is the path
+# (relative to repo root, as path segments) to the DIRECTORY holding that
+# subsystem's single scope.yaml. Co-located with the owning module where one
+# exists. Fail-loud on an unknown id — a typo must not silently misresolve.
+_SUBSYSTEM_SCOPE_DIRS: "dict[str, tuple]" = {
+    "wiki_generator": ("app", "assistant", "wiki_generator"),
+}
+
+
 def load_scope(
     source: "str | Path | Mapping[str, Any]",
     *,
@@ -163,6 +173,19 @@ def load_scope_for_source(
         scope_path = resolve_room_config_dir(sid) / "scope.yaml"
         # Rooms carry a real transport surface; the caller must supply it.
         default_surface = None
+    elif kind_n == "subsystem":
+        # Non-pipeline, non-room internal sources (wiki_generator, kg_maintenance,
+        # subconscious, ...). Co-located with the owning module via a registry,
+        # since these dirs do not follow the pipelines/<id> or rooms/<id> layout.
+        from app.assistant.utils.path_utils import get_repo_root
+        rel = _SUBSYSTEM_SCOPE_DIRS.get(sid)
+        if rel is None:
+            raise ValueError(
+                f"load_scope_for_source: unknown subsystem source_id {sid!r}. "
+                f"Add it to _SUBSYSTEM_SCOPE_DIRS. Known: {sorted(_SUBSYSTEM_SCOPE_DIRS)}."
+            )
+        scope_path = get_repo_root().joinpath(*rel) / "scope.yaml"
+        default_surface = "subsystem"
     elif kind_n in ("routine", "job"):
         raise NotImplementedError(
             f"load_scope_for_source: {kind_n!r} scope layout is not wired yet. "

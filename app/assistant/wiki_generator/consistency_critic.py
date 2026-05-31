@@ -20,7 +20,7 @@ from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
 from app.assistant.utils.filename_safety import safe_filename
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
+from app.assistant.scope.loader import load_scope_for_source
 from app.assistant.utils.pydantic_classes import Message, ScopeContext
 from app.models.base import get_session
 
@@ -31,14 +31,11 @@ FINDING_TYPE = "wiki_contradiction"
 
 
 def _scope() -> ScopeContext:
-    return ScopeAdapter.for_system_routine(
-        routine_id="wiki::consistency_critic",
-        scope_id="scope::wiki::consistency_critic",
-        owner_id="jukka",
+    return load_scope_for_source(
+        kind="subsystem",
+        source_id="wiki_generator",
         actor_id="wiki_consistency_critic",
-        surface="ui",
-        room_id="master_room",
-        authority_level=100,
+        identity_overrides={"owner_id": "jukka", "actor_id": "wiki_consistency_critic"},
     )
 
 

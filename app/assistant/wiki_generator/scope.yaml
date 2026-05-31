@@ -1,0 +1,43 @@
+# app/assistant/wiki_generator/scope.yaml
+#
+# PERMISSION-ONLY scope for the wiki_generator subsystem (entity wiki page
+# writers: wiki_writer, wiki_section_tagger, wiki_lead_writer,
+# wiki_consistency_critic).
+#
+# Consumed via: load_scope_for_source(kind="subsystem", source_id="wiki_generator",
+#                                     actor_id=..., identity_overrides={...})
+#
+# This file declares CAPABILITY ONLY. Identity (owner_id, actor_id, surface,
+# room_id, scope_id, policy_id) is stamped per call at load time and is NOT
+# authored here (the loader strips any identity field that appears below).
+#
+# authority_level: 99 — wiki_generator is an autonomous routine. The approval
+# gate is a human-in-the-loop mechanism; a routine has no human to approve, so
+# 99 is the working ceiling that lets any autonomous routine act without a
+# prompt. (Legacy for_system_routine hardcoded 100; 100 is the courier band for
+# deterministic code unsealing .env secrets and is wrong for an LLM routine.
+# 0 would be wrong too — it would make the routine hang on any gated action.)
+#
+# resources: [all] — three of the four agents take resource_kg_node_reading as a
+# system_context_item and consistency_critic makes a direct get_resource call.
+# context_injector.resolve_resource SOFT-FAILS a blocked resource to "" (no
+# exception), so an empty allowlist would SILENTLY strip the KG-reading
+# instruction block — kept [all] (faithful to legacy; allowlist tightening is a
+# separate later step, per the deferred resource-contract work).
+#
+# tools: [] — all four agents are toolless structured-output writers (their own
+# configs declare allowed_tools: []); the scope tool surface is empty to match.
+# If wiki ever needs a tool/manager, declare it HERE (source of truth).
+
+approval:
+  authority_level: 99
+
+tools:
+  allowed_tools: []
+
+resources:
+  allowed_global_resources: [all]
+
+# pods, writes, entities, cards, delivery intentionally OMITTED -> model defaults
+# (pods ["self"], write_kg false, allow_fact_extraction false). Inert on the
+# wiki path today; raise pods authority/visibility here if wiki later opens one.

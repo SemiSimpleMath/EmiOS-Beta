@@ -38,8 +38,8 @@ from app.assistant.kg_projection import (
 from app.assistant.utils.filename_safety import safe_filename
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.wiki_generator.references import apply_references
-from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
-from app.assistant.utils.pydantic_classes import Message, ScopeContext
+from app.assistant.scope.loader import load_scope_for_source
+from app.assistant.utils.pydantic_classes import Message
 
 logger = get_logger(__name__)
 
@@ -82,18 +82,6 @@ def strip_debug_scaffolding(markdown: str) -> str:
     # Collapse runs of blank lines that the strips leave behind
     out = re.sub(r"\n{3,}", "\n\n", out).rstrip() + "\n"
     return out
-
-
-def _scope() -> ScopeContext:
-    return ScopeAdapter.for_system_routine(
-        routine_id="wiki::page_writer",
-        scope_id="scope::wiki::page_writer",
-        owner_id="jukka",
-        actor_id="wiki_page_writer",
-        surface="ui",
-        room_id="master_room",
-        authority_level=100,
-    )
 
 
 def collect_entity_window_ids(
@@ -264,14 +252,11 @@ def parse_rough_sections(rough: str) -> dict[str, str]:
 # indented (starting with space/tab) or start with ">" (quoted source
 # sentence). A blank line or a new "- " at column 0 ends the current bullet.
 
-_SCOPE_SECTION_WRITER = ScopeAdapter.for_system_routine(
-    routine_id="wiki::section_writer",
-    scope_id="scope::wiki::section_writer",
-    owner_id="jukka",
+_SCOPE_SECTION_WRITER = load_scope_for_source(
+    kind="subsystem",
+    source_id="wiki_generator",
     actor_id="wiki_section_writer",
-    surface="ui",
-    room_id="master_room",
-    authority_level=100,
+    identity_overrides={"owner_id": "jukka", "actor_id": "wiki_section_writer"},
 )
 
 

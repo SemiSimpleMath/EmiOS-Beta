@@ -14,7 +14,7 @@ from typing import Optional
 
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
+from app.assistant.scope.loader import load_scope_for_source
 from app.assistant.utils.pydantic_classes import Message, ScopeContext
 
 logger = get_logger(__name__)
@@ -23,14 +23,11 @@ LEAD_AGENT = "wiki_lead_writer"
 
 
 def _scope() -> ScopeContext:
-    return ScopeAdapter.for_system_routine(
-        routine_id="wiki::lead_writer",
-        scope_id="scope::wiki::lead_writer",
-        owner_id="jukka",
+    return load_scope_for_source(
+        kind="subsystem",
+        source_id="wiki_generator",
         actor_id="wiki_lead_writer",
-        surface="ui",
-        room_id="master_room",
-        authority_level=100,
+        identity_overrides={"owner_id": "jukka", "actor_id": "wiki_lead_writer"},
     )
 
 
