@@ -77,6 +77,8 @@ _SUBSYSTEM_SCOPE_DIRS: "dict[str, tuple]" = {
     "edge_importance_eval": ("app", "assistant", "scope", "sources", "edge_importance_eval"),
     # Standard scope for compiled-task execution (invoke_agent, task compile runner).
     "task": ("app", "assistant", "scope", "sources", "task"),
+    # Image-caption-into-pod routine (pod_store is too broad to be the source).
+    "image_pod_enrichment": ("app", "assistant", "scope", "sources", "image_pod_enrichment"),
 }
 
 

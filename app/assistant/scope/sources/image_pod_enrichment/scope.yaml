@@ -1,0 +1,31 @@
+# app/assistant/scope/sources/image_pod_enrichment/scope.yaml
+#
+# PERMISSION-ONLY scope for the image_pod_enrichment routine — captions ingested
+# images (doorbell/camera) into pods via the image_pod_captioner OneShotAgent.
+#
+# Consumed via: load_scope_for_source(kind="subsystem",
+#   source_id="image_pod_enrichment", actor_id=...).
+#
+# Self-scoping source: enrich_image_pod() is invoked on image ingest with no
+# scope-bearing caller, so it builds its own scope at entry. Homed under
+# scope/sources/ (not co-located in pod_store/, which is a broad package this is
+# only one routine of).
+#
+# authority_level: 99 — autonomous routine (fires on ingest, no human approver),
+# below the 100 admin/courier band. tools: [] — image_pod_captioner is a toolless
+# OneShotAgent (the pod write is deterministic Python, not a tool). resources:
+# [all] so the captioner's context items resolve.
+
+approval:
+  authority_level: 99
+
+tools:
+  allowed_tools: []
+
+resources:
+  allowed_global_resources: [all]
+
+writes:
+  write_unified_log: false
+  write_kg: false
+  allow_fact_extraction: false
