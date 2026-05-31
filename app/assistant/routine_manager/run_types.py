@@ -16,6 +16,10 @@ class RoutineRunContext:
     # this carries the original Message so the handler can read camera_id /
     # snapshot_path / payload data from it. None for time-triggered runs.
     event_message: Optional[Any] = None
+    # Scope OPTIONALLY attached by the firing routine (load_scope_for_source
+    # kind="routine"); None when the routine declares no scope.yaml. Tool/function
+    # payloads run under it; pipeline/task/job payloads self-scope and ignore it.
+    scope_context: Optional[Any] = None
 
     # Runner-specific overrides (e.g., pipeline only_steps) can live in routine.spec,
     # but this provides a stable place for cross-cutting flags.

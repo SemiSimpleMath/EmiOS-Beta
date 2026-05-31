@@ -148,7 +148,7 @@ def load_scope_for_source(
     source_id: str,
     actor_id: str,
     identity_overrides: "Mapping[str, Any] | None" = None,
-) -> ScopeContext:
+) -> "ScopeContext | None":
     """Resolve a SOURCE's ``scope.yaml`` by (kind, id) and load it.
 
     The unified entry point for non-room sources (pipelines first; routines/jobs
@@ -199,11 +199,18 @@ def load_scope_for_source(
             )
         scope_path = get_repo_root().joinpath(*rel) / "scope.yaml"
         default_surface = "subsystem"
-    elif kind_n in ("routine", "job"):
+    elif kind_n == "routine":
+        # Routines OPTIONALLY declare a scope as a sibling YAML next to the routine
+        # config. Missing file -> None (the routine attaches no scope; its payload
+        # self-scopes or hits the system floor). See project_scope_resolution_model.
+        from app.assistant.utils.path_utils import get_repo_root
+        scope_path = get_repo_root() / "configs" / "routines" / "public" / f"{sid}.scope.yaml"
+        if not scope_path.exists():
+            return None
+        default_surface = "system"
+    elif kind_n == "job":
         raise NotImplementedError(
-            f"load_scope_for_source: {kind_n!r} scope layout is not wired yet. "
-            "Decide the on-disk location (e.g. configs/routines/<id>.scope.yaml) "
-            "when migrating routines, then add the branch here."
+            "load_scope_for_source: 'job' scope layout is not wired yet."
         )
     else:
         raise ValueError(f"load_scope_for_source: unknown source kind {kind!r}.")

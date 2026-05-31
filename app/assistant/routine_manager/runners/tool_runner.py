@@ -29,6 +29,7 @@ class ToolRoutineRunner:
                 "tool_name": tool_name,
                 "arguments": spec.get("arguments") or {},
             },
+            scope_context=run_ctx.scope_context,
         )
         result = tool.execute(tool_message)
         if result is not None and getattr(result, "result_type", None) == "error":

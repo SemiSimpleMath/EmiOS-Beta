@@ -1400,6 +1400,15 @@ class RoutineManager:
         status = "success"
         error: Optional[str] = None
         try:
+            # Routines OPTIONALLY attach a scope (sibling configs/routines/public/
+            # <id>.scope.yaml); None when undeclared. Tool/function payloads run under
+            # it; pipeline/task/job payloads self-scope and ignore it.
+            from app.assistant.scope.loader import load_scope_for_source
+            _routine_scope = load_scope_for_source(
+                kind="routine",
+                source_id=routine.routine_id,
+                actor_id=f"{routine.routine_id}_runner",
+            )
             run_ctx = RoutineRunContext(
                 run_id=run_id,
                 now_utc=started_at_utc,
@@ -1407,6 +1416,7 @@ class RoutineManager:
                 target_date=target_date,
                 force=bool((routine.spec or {}).get("force", False)),
                 event_message=event_message,
+                scope_context=_routine_scope,
             )
             logger.info(
                 "Routine dispatch: id=%s run_id=%s runner=%s spec_keys=%s",
