@@ -27,7 +27,7 @@ from app.assistant.pipelines.dayflow.steps.health_status_stage import (
     _LATEST_FILENAME,
     _WEEKLY_INSIGHTS_PATH,
 )
-from app.assistant.pipelines.scope_policy import build_pipeline_scope_context
+from app.assistant.scope.loader import load_scope_for_source
 from app.assistant.utils.pydantic_classes import Message
 from app.assistant.utils.time_utils import get_local_time
 from app.assistant.routine_manager.utils import resources_dir, read_json_file
@@ -66,8 +66,9 @@ def main() -> None:
         weekly_insights_data = read_json_file(_WEEKLY_INSIGHTS_PATH)
     weekly_health_block = _format_weekly_health(weekly_insights_data)
 
-    scope = build_pipeline_scope_context(
-        pipeline_id="dayflow",
+    scope = load_scope_for_source(
+        kind="pipeline",
+        source_id="dayflow",
         actor_id="health_status_test",
     )
 

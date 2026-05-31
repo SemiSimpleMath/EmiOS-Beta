@@ -31,11 +31,12 @@ def main():
     # Also show full agent output if available
     from app.assistant.pipelines.dayflow.utils.situation_snapshot import build_situation_snapshot
     from app.assistant.ServiceLocator.service_locator import DI
-    from app.assistant.pipelines.scope_policy import build_pipeline_scope_context
+    from app.assistant.scope.loader import load_scope_for_source
     from app.assistant.utils.pydantic_classes import Message
 
-    scope_context = build_pipeline_scope_context(
-        pipeline_id="dayflow", actor_id="test", room_id="dayflow_orchestrator", room_surface="ui",
+    scope_context = load_scope_for_source(
+        kind="pipeline", source_id="dayflow", actor_id="test",
+        identity_overrides={"room_id": "dayflow_orchestrator", "surface": "ui", "room_context_id": "main"},
     )
     agent = DI.agent_factory.create_agent("situation_auditor")
     r2 = agent.action_handler(Message(

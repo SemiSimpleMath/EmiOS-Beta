@@ -31,7 +31,7 @@ from sqlalchemy import text as sql_text
 from app.assistant.kg.proposal_promoter import _snapshot_state_candidate
 from app.assistant.kg.db.knowledge_graph_db_sqlite import Node
 from app.assistant.ServiceLocator.service_locator import DI
-from app.assistant.pipelines.scope_policy import build_pipeline_scope_context
+from app.assistant.scope.loader import load_scope_for_source
 from app.assistant.utils.pydantic_classes import Message
 from app.models.db_manager import get_db_manager
 
@@ -173,8 +173,8 @@ def main() -> None:
     if agent is None:
         raise SystemExit("agent_factory could not create node_merger — DI not bootstrapped?")
 
-    scope = build_pipeline_scope_context(
-        pipeline_id="kg_pipeline", actor_id="proposal_promoter",
+    scope = load_scope_for_source(
+        kind="pipeline", source_id="kg_pipeline", actor_id="proposal_promoter",
     )
     agent_input = {
         "new_node_context": json.dumps(new_node_ctx, ensure_ascii=True, indent=2),

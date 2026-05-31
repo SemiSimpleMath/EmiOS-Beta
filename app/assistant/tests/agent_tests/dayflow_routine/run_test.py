@@ -26,7 +26,7 @@ from app.assistant.pipelines.dayflow.steps.dayflow_routine_stage import (
     _format_weekly_insights,
     _LATEST_FILENAME,
 )
-from app.assistant.pipelines.scope_policy import build_pipeline_scope_context
+from app.assistant.scope.loader import load_scope_for_source
 from app.assistant.utils.pydantic_classes import Message
 from app.assistant.utils.time_utils import get_local_time
 from app.assistant.routine_manager.utils import read_json_file, resources_dir
@@ -55,8 +55,9 @@ def main() -> None:
     previous_doc_path = resources_dir() / "dayflow_pipeline_outputs" / _LATEST_FILENAME
     previous_doc = previous_doc_path.read_text(encoding="utf-8") if previous_doc_path.exists() else None
 
-    scope = build_pipeline_scope_context(
-        pipeline_id="dayflow",
+    scope = load_scope_for_source(
+        kind="pipeline",
+        source_id="dayflow",
         actor_id="dayflow_routine_test",
     )
 
