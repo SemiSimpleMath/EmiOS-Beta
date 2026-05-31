@@ -75,6 +75,8 @@ _SUBSYSTEM_SCOPE_DIRS: "dict[str, tuple]" = {
     "kg_resolution": ("app", "assistant", "kg_resolution"),
     # Dev/eval CLIs with no owning production module live under scope/sources/.
     "edge_importance_eval": ("app", "assistant", "scope", "sources", "edge_importance_eval"),
+    # Standard scope for compiled-task execution (invoke_agent, task compile runner).
+    "task": ("app", "assistant", "scope", "sources", "task"),
 }
 
 

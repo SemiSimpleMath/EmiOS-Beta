@@ -1,0 +1,37 @@
+# app/assistant/scope/sources/task/scope.yaml
+#
+# STANDARD scope for task execution — the one scope all compiled-task machinery
+# runs under (task IR tool_sequence steps via invoke_agent, the task_create
+# compile runner). Consumed via:
+#   load_scope_for_source(kind="subsystem", source_id="task", actor_id=...)
+#
+# Why one shared scope: the task IR executor threads no scope of its own, and a
+# compiled task runs arbitrary agents/tools, so there is no single source
+# identity to key on — tasks get a standard scope built at the execution entry.
+#
+# authority_level: 98 — high (tasks act autonomously on the owner's behalf), set
+# one notch below the 99 dedicated-routine ceiling because a task is an arbitrary
+# compiled sequence rather than a specific vetted routine. Still below the 100
+# admin-bypass/courier band.
+#
+# tools: [all] — a task tool_sequence can call any tool, and invoke_agent runs
+# arbitrary agents; each invoked agent/manager gates further via its own config.
+# resources: [all] — tasks may need any resource.
+#
+# FUTURE (out of scope now, per Jukka 2026-05-30): a task that runs multiple
+# managers may want a DIFFERENT scope per stage. Not modeled yet — one standard
+# task scope for all stages today.
+
+approval:
+  authority_level: 98
+
+tools:
+  allowed_tools: [all]
+
+resources:
+  allowed_global_resources: [all]
+
+writes:
+  write_unified_log: true
+  write_kg: false
+  allow_fact_extraction: false

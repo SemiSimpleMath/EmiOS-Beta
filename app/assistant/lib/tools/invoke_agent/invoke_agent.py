@@ -83,11 +83,19 @@ class InvokeAgent(BaseTool):
 
         # Build the message. agent_input dict gets unpacked onto the
         # agent's blackboard by AgentInputApplier.apply_agent_input().
-        # Include a scope_context so agents that need resource resolution work.
-        from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
-        scope = ScopeAdapter.for_internal_invocation(
-            scope_id=f"invoke_agent::{agent_name}",
+        # Standard task scope (authority 98) — invoke_agent runs agents as part of
+        # compiled-task execution. The invoked agent further gates via its own
+        # config.allowed_tools.
+        from app.assistant.scope.loader import load_scope_for_source
+        scope = load_scope_for_source(
+            kind="subsystem",
+            source_id="task",
             actor_id="invoke_agent",
+            identity_overrides={
+                "owner_id": "system",
+                "surface": "internal",
+                "scope_id": f"invoke_agent::{agent_name}",
+            },
         )
         msg = Message(agent_input=agent_input, scope_context=scope)
 

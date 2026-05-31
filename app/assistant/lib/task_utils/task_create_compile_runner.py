@@ -177,7 +177,7 @@ class TaskCreateCompileRunner:
 
     @classmethod
     def _invoke_compile(cls, *, spec_path: Path, session_id: str) -> str:
-        from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
+        from app.assistant.scope.loader import load_scope_for_source
         from app.assistant.ServiceLocator.service_locator import DI
         from app.assistant.utils.pydantic_classes import Message
 
@@ -193,9 +193,15 @@ class TaskCreateCompileRunner:
             "task_description": f"Task created via chat flow: {task_id.replace('_', ' ')}",
         })
 
-        scope_context = ScopeAdapter.for_internal_invocation(
-            scope_id=f"compile::{session_id}",
+        scope_context = load_scope_for_source(
+            kind="subsystem",
+            source_id="task",
             actor_id="task_create_compile_runner",
+            identity_overrides={
+                "owner_id": "system",
+                "surface": "internal",
+                "scope_id": f"compile::{session_id}",
+            },
         )
 
         logger.info(
