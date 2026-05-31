@@ -56,7 +56,7 @@ def _ensure_manager_runtime_registered() -> None:
 from app.assistant.subconscious.meal_context_builder import build_weekly_meal_planner_context
 from app.assistant.subconscious.meal_persist import apply_weekly_meal_planner_output
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
+from app.assistant.scope.loader import load_scope_for_source
 from app.assistant.utils.pydantic_classes import Message
 
 logger = get_logger(__name__)
@@ -87,9 +87,11 @@ def main():
     if distiller is None:
         print("ERROR: failed to create meal_context_distiller.")
         sys.exit(1)
-    distiller_scope = ScopeAdapter.for_internal_invocation(
-        scope_id="subconscious::meal_context_distiller",
+    distiller_scope = load_scope_for_source(
+        kind="subsystem",
+        source_id="subconscious",
         actor_id="run_weekly_meal_planning",
+        identity_overrides={"owner_id": "system", "scope_id": "subconscious::meal_context_distiller", "surface": "internal"},
     )
     try:
         distiller_result = distiller.action_handler(
@@ -113,9 +115,11 @@ def main():
     if manager is None:
         print("ERROR: failed to create weekly_meal_planning_manager.")
         sys.exit(3)
-    mgr_scope = ScopeAdapter.for_internal_invocation(
-        scope_id="subconscious::weekly_meal_planning_manager",
+    mgr_scope = load_scope_for_source(
+        kind="subsystem",
+        source_id="subconscious",
         actor_id="run_weekly_meal_planning",
+        identity_overrides={"owner_id": "system", "scope_id": "subconscious::weekly_meal_planning_manager", "surface": "internal"},
     )
     # Manager-stage context: distilled meal_context + timing + shopping
     # mechanics. NOT the raw seed — the distiller already culled.

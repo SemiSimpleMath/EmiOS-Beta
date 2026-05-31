@@ -38,7 +38,7 @@ def feedback_extractor_run(
     from app.assistant.subconscious.feedback_extractor_persist import (
         apply_feedback_extractor_output,
     )
-    from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
+    from app.assistant.scope.loader import load_scope_for_source
     from app.assistant.utils.pydantic_classes import Message
 
     context = build_feedback_extractor_context()
@@ -54,9 +54,11 @@ def feedback_extractor_run(
         logger.error("[feedback_extractor_run] could not create feedback_extractor agent")
         return {"status": "error", "error": "agent_unavailable"}
 
-    scope = ScopeAdapter.for_internal_invocation(
-        scope_id="subconscious::feedback_extractor",
+    scope = load_scope_for_source(
+        kind="subsystem",
+        source_id="subconscious",
         actor_id="routine::feedback_extractor_run",
+        identity_overrides={"owner_id": "system", "scope_id": "subconscious::feedback_extractor", "surface": "internal"},
     )
     try:
         result = agent.action_handler(Message(agent_input=context, scope_context=scope))

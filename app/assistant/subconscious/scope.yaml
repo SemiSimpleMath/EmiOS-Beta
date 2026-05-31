@@ -1,0 +1,46 @@
+# app/assistant/subconscious/scope.yaml
+#
+# PERMISSION-ONLY scope for the subconscious subsystem (autonomous noticer,
+# proposers, distillers, arbiters, and the meal-planning manager pathway).
+#
+# Consumed via: load_scope_for_source(kind="subsystem", source_id="subconscious",
+#                                     actor_id=..., identity_overrides={...})
+#
+# This file declares CAPABILITY ONLY. Identity (owner_id, actor_id, surface,
+# scope_id) is stamped per call at load time and is NOT authored here. The legacy
+# for_internal_invocation calls used owner_id="system", surface="internal", and a
+# per-agent scope_id (e.g. "subconscious::romantic_proposer"); those are
+# preserved verbatim per call via identity_overrides, so this migration drifts NO
+# identity.
+#
+# authority_level: 99 — subconscious is an autonomous routine. The approval gate
+# is human-in-the-loop and a routine has no approver, so 99 is the working
+# ceiling that lets it act without a prompt (use playwright via the meal-research
+# manager pathway, open pods, etc.). This RAISES authority from the legacy
+# for_internal_invocation default of 0 — intended, per the routine authority rule;
+# raising only removes approval friction and cannot break a working flow. 100 is
+# the courier band (deterministic code unsealing .env secrets), not for an LLM
+# routine.
+#
+# tools: [all] — FAITHFUL to the legacy for_internal_invocation default (tools
+# defaulted to ["all"]). subconscious invokes managers (weekly_meal_planning_
+# manager, meal_research_manager) that inherit this scope and rely on their
+# native allowed_tools; a narrower surface here would strip them. Tightening to
+# an explicit grant (the audit suggested [meal_research_manager] + a per_manager
+# rule) is a SEPARATE, separately-verified step — deferred so this migration
+# preserves current behavior exactly.
+#
+# resources: [all] — faithful to the legacy default.
+
+approval:
+  authority_level: 99
+
+tools:
+  allowed_tools: [all]
+
+resources:
+  allowed_global_resources: [all]
+
+# pods, writes, entities, cards, delivery intentionally OMITTED -> model defaults
+# (pods ["self"], write_kg false). Raise pod visibility/authority here when a
+# concrete pod need is identified.

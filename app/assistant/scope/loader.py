@@ -70,6 +70,7 @@ _REQUIRED_IDENTITY: tuple = ("owner_id", "actor_id", "surface")
 # exists. Fail-loud on an unknown id — a typo must not silently misresolve.
 _SUBSYSTEM_SCOPE_DIRS: "dict[str, tuple]" = {
     "wiki_generator": ("app", "assistant", "wiki_generator"),
+    "subconscious": ("app", "assistant", "subconscious"),
 }
 
 

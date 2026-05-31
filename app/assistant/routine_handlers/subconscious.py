@@ -55,7 +55,7 @@ def _run_subconscious_agent(
     routine_manager can record a failure (it surfaces in its decision log
     + counts toward on_error.max_failures).
     """
-    from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
+    from app.assistant.scope.loader import load_scope_for_source
     from app.assistant.ServiceLocator.service_locator import DI
     from app.assistant.utils.pydantic_classes import Message
 
@@ -63,9 +63,11 @@ def _run_subconscious_agent(
     if agent is None:
         raise RuntimeError(f"[{handler_label}] could not create agent {agent_name!r}")
 
-    scope = ScopeAdapter.for_internal_invocation(
-        scope_id=scope_id,
+    scope = load_scope_for_source(
+        kind="subsystem",
+        source_id="subconscious",
         actor_id=actor_id,
+        identity_overrides={"owner_id": "system", "scope_id": scope_id, "surface": "internal"},
     )
     result = agent.action_handler(Message(agent_input=context, scope_context=scope))
 

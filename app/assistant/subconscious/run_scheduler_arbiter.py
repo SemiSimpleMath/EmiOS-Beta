@@ -35,7 +35,7 @@ from app.assistant.utils.pydantic_classes import (
     Message,
 )
 
-from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
+from app.assistant.scope.loader import load_scope_for_source
 
 logger = get_logger(__name__)
 
@@ -68,12 +68,11 @@ def main():
     if agent is None:
         print("ERROR: failed to create scheduler_arbiter agent.")
         sys.exit(1)
-    scope = ScopeAdapter.for_internal_invocation(
-
-        scope_id="subconscious::scheduler_arbiter",
-
+    scope = load_scope_for_source(
+        kind="subsystem",
+        source_id="subconscious",
         actor_id="run_scheduler_arbiter",
-
+        identity_overrides={"owner_id": "system", "scope_id": "subconscious::scheduler_arbiter", "surface": "internal"},
     )
     msg = Message(agent_input=context, scope_context=scope)
     try:
