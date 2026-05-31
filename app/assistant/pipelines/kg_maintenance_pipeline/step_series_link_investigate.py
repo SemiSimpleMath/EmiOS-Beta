@@ -45,7 +45,7 @@ from sqlalchemy import or_
 
 from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
 from app.assistant.pipelines.context import PipelineContext
-from app.assistant.pipelines.scope_policy import build_pipeline_scope_context
+from app.assistant.scope.loader import load_scope_for_source
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import Message
@@ -394,10 +394,7 @@ def run(ctx: PipelineContext) -> dict:
     """Returns {clusters_seen, approved, rejected, errors}."""
     logger.info("[series_link_investigate] Starting run_id=%s", ctx.run_id)
 
-    scope_context = build_pipeline_scope_context(
-        pipeline_id=ctx.pipeline_id,
-        actor_id="kg_maintenance_runner",
-    )
+    scope_context = load_scope_for_source(kind="pipeline", source_id=ctx.pipeline_id, actor_id="kg_maintenance_runner")
 
     clusters = _load_pending_clusters()
     if not clusters:

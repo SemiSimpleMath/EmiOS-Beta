@@ -49,7 +49,7 @@ from typing import Any, Optional
 
 from app.assistant.kg_maintenance.store import upsert_finding
 from app.assistant.pipelines.context import PipelineContext
-from app.assistant.pipelines.scope_policy import build_pipeline_scope_context
+from app.assistant.scope.loader import load_scope_for_source
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import Message
@@ -384,10 +384,7 @@ def run(ctx: PipelineContext) -> dict:
     """Returns {events_loaded, clusters_found, confirmed_series, new_findings}."""
     logger.info("[series_link_scan] Starting run_id=%s", ctx.run_id)
 
-    scope_context = build_pipeline_scope_context(
-        pipeline_id=ctx.pipeline_id,
-        actor_id="kg_maintenance_runner",
-    )
+    scope_context = load_scope_for_source(kind="pipeline", source_id=ctx.pipeline_id, actor_id="kg_maintenance_runner")
 
     events, entities_by_label = _load_events_and_entities()
     if not events:

@@ -24,7 +24,7 @@ from typing import Any, Dict, List
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import Message
 from app.assistant.ServiceLocator.service_locator import DI
-from app.assistant.pipelines.scope_policy import build_pipeline_scope_context
+from app.assistant.scope.loader import load_scope_for_source
 from app.models.base import get_session
 
 logger = get_logger(__name__)
@@ -89,9 +89,7 @@ def _prefilter_edges(
         node_label, len(all_edges),
     )
     edge_filter_agent = DI.agent_factory.create_agent("kg_maintenance::edge_filter")
-    _scope = build_pipeline_scope_context(
-        pipeline_id="kg_maintenance_pipeline", actor_id="edge_filter_runner",
-    )
+    _scope = load_scope_for_source(kind="pipeline", source_id="kg_maintenance_pipeline", actor_id="edge_filter_runner")
     edge_filter_agent.blackboard.update_state_value("scope_context", _scope)
     keep_global: set[int] = set()
 
@@ -141,9 +139,7 @@ def generate_description_for_node(node_id: str) -> str | None:
     can decide whether to abort or continue.
     """
     description_agent = DI.agent_factory.create_agent("kg_maintenance::description_creator")
-    _scope = build_pipeline_scope_context(
-        pipeline_id="kg_maintenance_pipeline", actor_id="description_creator_runner",
-    )
+    _scope = load_scope_for_source(kind="pipeline", source_id="kg_maintenance_pipeline", actor_id="description_creator_runner")
     description_agent.blackboard.update_state_value("scope_context", _scope)
 
     # ── READ PHASE ────────────────────────────────────────────────────────────

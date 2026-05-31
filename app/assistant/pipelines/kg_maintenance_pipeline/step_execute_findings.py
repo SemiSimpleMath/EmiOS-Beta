@@ -219,7 +219,7 @@ def _llm_merge_fields(winner_data: dict, loser_data: dict) -> Optional[dict]:
     back to simple field-copy merge).
     """
     import json
-    from app.assistant.pipelines.scope_policy import build_pipeline_scope_context
+    from app.assistant.scope.loader import load_scope_for_source
     from app.assistant.ServiceLocator.service_locator import DI
     from app.assistant.utils.pydantic_classes import Message
 
@@ -229,10 +229,7 @@ def _llm_merge_fields(winner_data: dict, loser_data: dict) -> Optional[dict]:
             logger.error("[execute_findings] Failed to create kg_maintenance::node_data_merger agent")
             return None
 
-        scope_context = build_pipeline_scope_context(
-            pipeline_id="kg_maintenance_pipeline",
-            actor_id="kg_maintenance_executor",
-        )
+        scope_context = load_scope_for_source(kind="pipeline", source_id="kg_maintenance_pipeline", actor_id="kg_maintenance_executor")
 
         response = agent.action_handler(
             Message(

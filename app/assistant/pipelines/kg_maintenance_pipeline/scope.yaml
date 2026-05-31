@@ -1,0 +1,36 @@
+# Permission scope for the kg_maintenance_pipeline (periodic graph-quality scan).
+#
+# PERMISSION ONLY. Identity (owner_id, actor_id, surface) is stamped per run by
+# the caller via load_scope_for_source — never authored here.
+#
+# This is the SCANNER source: orphan_scan, duplicate_scan, pagerank,
+# missing_dates_scan, execute_findings — all toolless. They find/queue findings
+# (and execute_findings applies them via deterministic Python), never via a
+# tool/manager dispatch. The separate LLM-driven investigate/mutate path lives in
+# the kg_investigator and kg_resolution SUBSYSTEMS, which self-scope at their own
+# entry boundaries (their callers hand off without a scope-bearing Message).
+#
+# NO TOOLS: the legacy builder emitted allowed_tools: [all] only because
+# scope.json declared no tools block and the system default is permissive; this
+# makes the real "no tools" posture explicit (fail-closed).
+#
+# Ported from scope.json: resources [all] + resource_groups [memory], authority 0.
+
+approval:
+  authority_level: 0
+
+tools:
+  allowed_tools: []
+
+resources:
+  allowed_global_resources: [all]
+  resource_groups:
+    - memory
+
+pods:
+  allowed_scopes: [self]
+
+writes:
+  write_unified_log: true
+  write_kg: false
+  allow_fact_extraction: false
