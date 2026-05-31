@@ -73,6 +73,8 @@ _SUBSYSTEM_SCOPE_DIRS: "dict[str, tuple]" = {
     "subconscious": ("app", "assistant", "subconscious"),
     "kg_investigator": ("app", "assistant", "kg_investigator"),
     "kg_resolution": ("app", "assistant", "kg_resolution"),
+    # Dev/eval CLIs with no owning production module live under scope/sources/.
+    "edge_importance_eval": ("app", "assistant", "scope", "sources", "edge_importance_eval"),
 }
 
 

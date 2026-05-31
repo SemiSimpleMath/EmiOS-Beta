@@ -1,0 +1,30 @@
+# app/assistant/scope/sources/edge_importance_eval/scope.yaml
+#
+# PERMISSION-ONLY scope for the edge_importance_eval DEV/EVAL CLI
+# (app/assistant/kg/edge_importance_eval.py — `python -m ...`, human-run).
+#
+# Homed under scope/sources/ (not co-located with the .py) because it's a
+# single-file manual dev tool with no owning production module: it measures the
+# me::edge_importance_rater agent's prompt MAE against a gold-standard YAML
+# before a full re-rating pass. It is its OWN source — a self-scoping entry
+# (nothing hands it a scope; it's invoked standalone from the CLI), so it builds
+# scope at its own boundary via load_scope_for_source(kind="subsystem",
+# source_id="edge_importance_eval").
+#
+# authority_level: 99 — same trust as the production edge rater it exercises
+# (kg_importance_rater), capped below the 100 admin/courier band. tools: [] —
+# the rater agent is toolless; this harness only reads edges + calls the agent.
+
+approval:
+  authority_level: 99
+
+tools:
+  allowed_tools: []
+
+resources:
+  allowed_global_resources: [all]
+
+writes:
+  write_unified_log: false
+  write_kg: false
+  allow_fact_extraction: false

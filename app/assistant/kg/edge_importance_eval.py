@@ -71,7 +71,7 @@ def run_rater(
     `few_shot_examples` are NOT scored — they're sent in the system-prompt
     `information` field as worked examples for the model to follow.
     """
-    from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
+    from app.assistant.scope.loader import load_scope_for_source
     from app.assistant.ServiceLocator.service_locator import DI
     from app.assistant.utils.pydantic_classes import Message
 
@@ -110,14 +110,11 @@ def run_rater(
             info_lines.append("")
         information_text = "\n".join(info_lines)
 
-    scope = ScopeAdapter.for_system_routine(
-        routine_id="me::edge_importance_eval",
-        scope_id="scope::me::edge_importance_eval",
-        owner_id="jukka",
+    scope = load_scope_for_source(
+        kind="subsystem",
+        source_id="edge_importance_eval",
         actor_id="me_edge_importance_eval",
-        surface="ui",
-        room_id="me_lens",
-        authority_level=99,
+        identity_overrides={"owner_id": "jukka"},
     )
 
     agent = DI.agent_factory.create_agent("me::edge_importance_rater")
