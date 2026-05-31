@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import Message
 from app.assistant.ServiceLocator.service_locator import DI
-from app.assistant.pipelines.scope_policy import build_pipeline_scope_context
+from app.assistant.scope.loader import load_scope_for_source
 
 logger = get_logger(__name__)
 
@@ -97,8 +97,8 @@ def _run_nano_node_filter(snapshots: list[NodeSnapshot]) -> list[NodeSnapshot]:
 
     try:
         filter_agent = DI.agent_factory.create_agent("kg_maintenance::description_filter")
-        _scope = build_pipeline_scope_context(
-            pipeline_id="kg_maintenance_pipeline", actor_id="description_filter_runner",
+        _scope = load_scope_for_source(
+            kind="pipeline", source_id="kg_maintenance_pipeline", actor_id="description_filter_runner",
         )
         filter_agent.blackboard.update_state_value("scope_context", _scope)
     except Exception:

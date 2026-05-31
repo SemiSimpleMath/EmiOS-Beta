@@ -161,7 +161,7 @@ def kg_interests_test_run():
     if not user_text:
         return jsonify({"ok": False, "error": "user_text is required"}), 400
 
-    from app.assistant.pipelines.scope_policy import build_pipeline_scope_context
+    from app.assistant.scope.loader import load_scope_for_source
     from app.assistant.utils.pydantic_classes import Message
 
     user_block = user_text
@@ -175,8 +175,8 @@ def kg_interests_test_run():
     if agent is None:
         return jsonify({"ok": False, "error": "window_critic agent unavailable"}), 500
 
-    scope = build_pipeline_scope_context(
-        pipeline_id="kg_pipeline", actor_id="window_critic_tester",
+    scope = load_scope_for_source(
+        kind="pipeline", source_id="kg_pipeline", actor_id="window_critic_tester",
     )
     agent_input = {"context_lines": context_block, "user_lines": user_block}
 
