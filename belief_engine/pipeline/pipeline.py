@@ -28,6 +28,10 @@ class _RunContext:
     """Minimal context object passed between steps."""
     domain: str
     run_id: str
+    # One scope for the whole run, built at pipeline entry and threaded to the
+    # LLM steps (update / reevaluate / canonicalize). Steps receive it; they do
+    # not build their own.
+    scope_context: Any = None
     evidence_bundle: Any = None
     belief_update_result: Optional[Dict] = None
     reevaluation_result: Optional[Dict] = None
@@ -53,9 +57,21 @@ class BeliefEnginePipeline:
 
     def run(self, *, run_id: Optional[str] = None) -> Dict:
         run_id = run_id or uuid.uuid4().hex[:8]
+        from app.assistant.scope.loader import load_scope_for_source
+        scope_context = load_scope_for_source(
+            kind="subsystem",
+            source_id="belief_engine",
+            actor_id=f"belief_engine_{self.domain}",
+            identity_overrides={
+                "owner_id": "belief_engine",
+                "surface": "pipeline",
+                "scope_id": f"scope::belief_engine::{self.domain}::{run_id}",
+            },
+        )
         ctx = _RunContext(
             domain=self.domain,
             run_id=run_id,
+            scope_context=scope_context,
             canonicalization_mode=self.canonicalization_mode,
         )
         started = datetime.now(timezone.utc).isoformat()

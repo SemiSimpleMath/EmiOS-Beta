@@ -1,0 +1,37 @@
+# belief_engine/scope.yaml
+#
+# PERMISSION-ONLY scope for the belief_engine pipeline (BeliefEnginePipeline —
+# per-domain belief update / reevaluate / canonicalize).
+#
+# Consumed via: load_scope_for_source(kind="subsystem", source_id="belief_engine",
+#   actor_id=...). belief_engine is a top-level package (not under
+# app/assistant/pipelines/), so it resolves through the loader's subsystem
+# registry rather than the pipelines/<id> path — pipeline_id stays "belief_engine"
+# for telemetry; this is its single scope source.
+#
+# Built ONCE at the pipeline entry (BeliefEnginePipeline.run -> _RunContext) and
+# threaded as ctx.scope_context into the three LLM steps (UpdateBeliefsStep,
+# ReevaluateBeliefsStep, CanonicalizeBeliefSetStep). The two non-LLM steps
+# (CollectEvidence, RecomputeBeliefSnapshot) take no scope.
+#
+# LLM-AS-PRIMITIVE: trusted deterministic Python (the belief pipeline, full DB
+# access) calls toolless LLM agents to update/reevaluate/canonicalize beliefs;
+# the agents advise, the Python writes. scope is needed only to build the LLM
+# Message, not as a privilege gate.
+#
+# authority_level: 99 — autonomous routine, below the 100 admin/courier band.
+# tools: [] — the belief agents are toolless structured-output agents.
+
+approval:
+  authority_level: 99
+
+tools:
+  allowed_tools: []
+
+resources:
+  allowed_global_resources: [all]
+
+writes:
+  write_unified_log: true
+  write_kg: false
+  allow_fact_extraction: false

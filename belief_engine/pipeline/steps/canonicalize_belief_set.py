@@ -31,7 +31,6 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Set
 
 from app.assistant.ServiceLocator.service_locator import ServiceLocator
-from app.assistant.manager_runtime.services.scope_adapter import build_system_scope_context
 from app.assistant.utils.pydantic_classes import Message
 from app.assistant.utils.time_utils import get_local_time_str
 
@@ -214,20 +213,18 @@ def _run_canonicalization_pass(
         domain: str,
         store: BeliefStore,
         agent_factory: Any,
+        *,
+        scope_context: Any,
 ) -> int:
     """
     Send all beliefs in overlapping chunks to the canonicalizer LLM.
 
     Returns the total number of merge operations performed this pass.
+
+    ``scope_context`` is built once by the pipeline and threaded in via the
+    CanonicalizeBeliefSetStep — this pass receives it, does not build its own.
     """
     total_merges = 0
-
-    scope_context = build_system_scope_context(
-        owner_id="belief_engine",
-        actor_id=f"canonicalize_beliefs_{domain}",
-        surface="pipeline",
-        scope_id=f"scope::belief_engine::canonicalize::{domain}",
-    )
 
     chunks = _iter_overlapping_chunks(beliefs)
 
@@ -432,7 +429,7 @@ class CanonicalizeBeliefSetStep:
                 "[CanonicalizeBeliefSet] domain=%s new_only: %d new beliefs to merge among themselves",
                 self.domain, len(new_beliefs),
             )
-            merges = _run_canonicalization_pass(sorted_new, self.domain, store, agent_factory)
+            merges = _run_canonicalization_pass(sorted_new, self.domain, store, agent_factory, scope_context=ctx.scope_context)
             final_count = len(store.list_by_domain(self.domain))
             ctx.canonicalization_result = {
                 "status": "ok",

@@ -79,6 +79,8 @@ _SUBSYSTEM_SCOPE_DIRS: "dict[str, tuple]" = {
     "task": ("app", "assistant", "scope", "sources", "task"),
     # Image-caption-into-pod routine (pod_store is too broad to be the source).
     "image_pod_enrichment": ("app", "assistant", "scope", "sources", "image_pod_enrichment"),
+    # belief_engine pipeline — top-level package, not under app/assistant/pipelines.
+    "belief_engine": ("belief_engine",),
 }
 
 

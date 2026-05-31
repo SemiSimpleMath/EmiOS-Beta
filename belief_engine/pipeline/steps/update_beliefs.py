@@ -14,7 +14,6 @@ from datetime import datetime, timezone
 from typing import Any, List, Optional
 
 from app.assistant.ServiceLocator.service_locator import ServiceLocator
-from app.assistant.manager_runtime.services.scope_adapter import build_system_scope_context
 from app.assistant.utils.pydantic_classes import Message
 from app.assistant.utils.time_utils import get_local_time_str
 
@@ -124,13 +123,8 @@ class UpdateBeliefsStep:
         )
         existing_block = _format_existing_beliefs(existing_hits)
 
-        scope_context = build_system_scope_context(
-            owner_id="belief_engine",
-            actor_id=f"update_beliefs_{self.domain}",
-            surface="pipeline",
-            scope_id=f"scope::belief_engine::update_beliefs::{self.domain}",
-        )
-
+        # Scope built once by the pipeline, threaded via ctx — this LLM step
+        # receives it, does not build its own.
         msg = Message(
             agent_input={
                 "task": f"Process new evidence for the '{self.domain}' domain.",
@@ -139,7 +133,7 @@ class UpdateBeliefsStep:
                 "date_today": get_local_time_str(),
                 "domain": self.domain,
             },
-            scope_context=scope_context,
+            scope_context=ctx.scope_context,
         )
 
         resp = agent.action_handler(msg)

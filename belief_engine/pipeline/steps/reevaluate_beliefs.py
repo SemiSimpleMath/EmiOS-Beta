@@ -13,7 +13,6 @@ from datetime import datetime, timezone
 from typing import Any, List, Optional
 
 from app.assistant.ServiceLocator.service_locator import ServiceLocator
-from app.assistant.manager_runtime.services.scope_adapter import build_system_scope_context
 from app.assistant.utils.pydantic_classes import Message
 from app.assistant.utils.time_utils import get_local_time_str
 
@@ -100,13 +99,8 @@ class ReevaluateBeliefsStep:
                 if agent is None:
                     raise RuntimeError(f"Agent '{_AGENT_NAME}' not found")
 
-                scope_context = build_system_scope_context(
-                    owner_id="belief_engine",
-                    actor_id=f"reevaluate_beliefs_{ctx.domain}",
-                    surface="pipeline",
-                    scope_id=f"scope::belief_engine::reevaluate::{ctx.domain}",
-                )
-
+                # Scope built once by the pipeline, threaded via ctx — this LLM
+                # step receives it, does not build its own.
                 msg = Message(
                     agent_input={
                         "task": f"Re-evaluate belief '{belief_key}' using its complete evidence trail.",
@@ -115,7 +109,7 @@ class ReevaluateBeliefsStep:
                         "domain": ctx.domain,
                         "date_today": get_local_time_str(),
                     },
-                    scope_context=scope_context,
+                    scope_context=ctx.scope_context,
                 )
 
                 resp = agent.action_handler(msg)
