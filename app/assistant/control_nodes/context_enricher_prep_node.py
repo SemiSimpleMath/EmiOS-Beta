@@ -210,13 +210,16 @@ class ContextEnricherPrepNode(ControlNode):
             return
 
         from app.models.base import get_session
-        from app.assistant.pipelines.scope_policy import build_pipeline_scope_context
+        from app.assistant.scope.loader import load_scope_for_source
 
-        scope_context = build_pipeline_scope_context(
-            pipeline_id="dayflow",
+        scope_context = load_scope_for_source(
+            kind="pipeline",
+            source_id="dayflow",
             actor_id=f"{self.name}_runner",
-            room_id="dayflow_orchestrator",
-            room_surface="ui",
+            identity_overrides={
+                "room_id": "dayflow_orchestrator",
+                "surface": "ui",
+            },
         )
 
         enrichments: List[Dict[str, str]] = []
