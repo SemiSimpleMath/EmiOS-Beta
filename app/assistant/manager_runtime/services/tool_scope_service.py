@@ -422,7 +422,12 @@ class ToolScopeService:
             scope_blocked = scope_context.tools.blocked_tools if isinstance(scope_context.tools.blocked_tools, list) else []
             allow_set = {str(x).strip() for x in scope_allowed if isinstance(x, str) and str(x).strip()}
             block_set = {str(x).strip() for x in scope_blocked if isinstance(x, str) and str(x).strip()}
-            if allow_set and "all" not in allow_set:
+            # Empty allow_set means "allow nothing" -> show nothing. Only "all"
+            # (or absence of a scope contract, handled above) bypasses the filter.
+            # Guarding on `if allow_set` was a fail-open seam: an empty allowed_tools
+            # skipped the filter and surfaced the full tool list (visibility then
+            # disagreed with the execution gate, which correctly denies empty).
+            if "all" not in allow_set:
                 result = [t for t in result if t in allow_set]
             if block_set:
                 result = [t for t in result if t not in block_set]

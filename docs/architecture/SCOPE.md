@@ -144,7 +144,22 @@ A tool call is allowed only if it passes **all four**:
 
 **Visibility ≠ permission.** `ToolScopeService` narrows what the planner *sees* (downstream filter); the four gates decide what it *may call* (upstream gate). Visibility is never a permission lever — `allowed_tools` is the only grant. (Historic `always_show` "narrower-only" cleanup: do **not** re-add `or t in always_show_set` to any gate.)
 
-> Known fail-open seam (tracked): an empty `allowed_tools` is mishandled in one visibility path in `tool_scope_service.py` — treat "empty means nothing" everywhere. Security follow-up.
+> **"Empty means nothing" — enforced (fixed 2026-05-31).** Two visibility fail-opens that surfaced the full tool list when narrowing produced an empty set are now closed:
+> - `tool_scope_service._apply_scope_filters` guarded the allow filter on `if allow_set` — an empty `allowed_tools` skipped filtering and showed everything. Now `if "all" not in allow_set:` — empty → show nothing.
+> - `tool_policy_resolver.get_visible_tools` fell back to the full `allowed` set when `visible_raw ∩ allowed` was empty. Now returns the strict intersection (empty → empty).
+> Both align visibility with the execution gate (which already denied these cases). Agents that can be narrowed keep `find_tool` in `always_show`, so an empty visible list is never a dead end. Do not reintroduce either fail-open.
+
+### Restricting an agent's dispatch surface via `per_manager` (the switchboard case)
+A room's `allowed_tools` **cannot** trim what its manager's agents are shown — `ScopeAdapter._apply_manager_narrowing` *replaces* the inherited `allowed_tools` with the manager's own `scope_contract.allowed_tools` (often `["all"]`), so a room-level allowlist is overwritten. The lever that survives is `per_manager`, keyed on the **hosting manager's name** (`tool_scope_service` reads `manager_name = manager_config["name"]`). To restrict what a room's switchboard may route to, add a rule for the manager that *hosts* the switchboard — for non-master rooms that is `room_manager` (NOT the room id, NOT the agent name `room::switchboard`):
+> ```yaml
+> # <room>/scope.yaml
+> tools:
+>   allowed_tools: [all]
+>   per_manager:
+>     room_manager:            # hosts room::switchboard
+>       allow: [emi_team_manager]
+> ```
+> Verified on the wire: this collapses the Slack switchboard's "Available tools" from 29 → 1 and forces all work through `emi_team_manager`. `per_manager` is visibility-enforced, which is sufficient for a router: the switchboard's only power is picking from the list it is shown.
 
 ---
 

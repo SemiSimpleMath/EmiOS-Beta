@@ -1,4 +1,4 @@
-"""Smoke tests for the e2e harness — verify the pipeline assembles cleanly.
+"""Smoke tests for the room test harness — verify the pipeline assembles cleanly.
 
 These tests EXCLUDE the actual manager.request_handler call to avoid burning
 LLM tokens on every CI run. They verify:
@@ -24,7 +24,7 @@ if str(REPO_ROOT) not in sys.path:
 
 def test_sandbox_isolates_writes_from_real_db():
     """Writes inside sandboxed_di land in the tempfile, not in real emi.db."""
-    from app.assistant.tests.e2e.sandbox_setup import sandboxed_di
+    from app.assistant.tests.room_test_harness.sandbox_setup import sandboxed_di
 
     real_db = REPO_ROOT / "emi.db"
     real_existed = real_db.exists()
@@ -72,14 +72,14 @@ def test_sandbox_isolates_writes_from_real_db():
 
 def test_per_manager_rules_load_from_test_room_md():
     """ROOM.md → room_resource_loader → scope_builder → scope.tools.per_manager."""
-    from app.assistant.tests.e2e.sandbox_setup import sandboxed_di
+    from app.assistant.tests.room_test_harness.sandbox_setup import sandboxed_di
 
     with sandboxed_di():
         from app.assistant.rooms.room_resource_loader import load_room_context_for_manager
         from app.assistant.room_session_manager.services.room_scope_builder import (
             build_scope_contract_for_room_request,
         )
-        from app.assistant.tests.e2e.harness import _build_envelope
+        from app.assistant.tests.room_test_harness.harness import _build_envelope
 
         room_ctx = load_room_context_for_manager("slack/__test__")
         assert room_ctx, "test slack ROOM.md should load"
@@ -115,7 +115,7 @@ def test_per_manager_rules_load_from_test_room_md():
 
 def test_room_manager_instantiates_for_test_slack_room():
     """The full chain from ROOM.md to a live manager instance works."""
-    from app.assistant.tests.e2e.sandbox_setup import sandboxed_di
+    from app.assistant.tests.room_test_harness.sandbox_setup import sandboxed_di
 
     with sandboxed_di():
         from app.assistant.rooms.room_resource_loader import load_room_context_for_manager

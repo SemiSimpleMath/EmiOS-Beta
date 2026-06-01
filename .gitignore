@@ -326,8 +326,8 @@ app/assistant/rooms/phil/
 app/assistant/rooms/tg_*/
 app/assistant/rooms/telegram/
 app/assistant/rooms/slack/*
-# Exception: __test__ is a deterministic test channel for the e2e harness —
-# no personal data, fixed config, used by tests in app/assistant/tests/e2e/.
+# Exception: __test__ is a deterministic test channel for the room test harness —
+# no personal data, fixed config, used by tests in app/assistant/tests/room_test_harness/.
 # Must ignore children individually (not parent dir) so this re-include works.
 !app/assistant/rooms/slack/__test__/
 !app/assistant/rooms/slack/__test__/**

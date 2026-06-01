@@ -12,7 +12,7 @@ asks the test slack room to find it. Reports:
 
 Run::
 
-    .venv\\Scripts\\python.exe -m app.assistant.tests.e2e.live_karpathy_pod
+    .venv\\Scripts\\python.exe -m app.assistant.tests.room_test_harness.live_karpathy_pod
 
 Expected to validate:
   1. Slack scope per_manager.allow narrows emi_team to web/pod/operational only
@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-from app.assistant.tests.e2e.harness import simulate_room_inbound
+from app.assistant.tests.room_test_harness.harness import simulate_room_inbound
 
 
 SLACK_TEST_ROOM_ID = "slack/__test__"

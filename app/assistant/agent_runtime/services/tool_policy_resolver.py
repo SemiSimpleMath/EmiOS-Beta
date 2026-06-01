@@ -111,8 +111,12 @@ class ToolPolicyResolver:
         if not isinstance(visible_raw, list) or not visible_raw:
             return allowed
         allowed_set = set(allowed)
-        visible = [t for t in visible_raw if isinstance(t, str) and t in allowed_set]
-        return visible if visible else allowed
+        # visible is strictly the intersection of the computed visible list and
+        # the allowed set. An empty intersection means "show nothing" — never
+        # fall back to the full allowed set (that would surface tools the scope
+        # deliberately narrowed away). Agents that can be narrowed keep find_tool
+        # in always_show, so an empty visible list is never a dead end.
+        return [t for t in visible_raw if isinstance(t, str) and t in allowed_set]
 
     def get_tool_descriptions(self) -> Dict[str, str]:
         """Return tool descriptions for visible tools."""

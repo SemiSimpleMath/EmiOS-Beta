@@ -1,4 +1,4 @@
-"""End-to-end room harness — run a real inbound through the pipeline.
+"""Room test harness — run a real inbound through the full room pipeline.
 
 The entry point ``simulate_room_inbound`` builds a synthetic InboundEnvelope,
 loads the target room's ROOM.md, builds the real scope contract (so
@@ -16,7 +16,7 @@ Side-effect isolation:
 
 Usage::
 
-    from app.assistant.tests.e2e.harness import simulate_room_inbound
+    from app.assistant.tests.room_test_harness.harness import simulate_room_inbound
 
     result = simulate_room_inbound(
         surface="slack",
@@ -37,11 +37,11 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from app.assistant.tests.e2e.recorders import (
+from app.assistant.tests.room_test_harness.recorders import (
     HarnessResult,
     LLMCallRecord,
 )
-from app.assistant.tests.e2e.sandbox_setup import sandboxed_di
+from app.assistant.tests.room_test_harness.sandbox_setup import sandboxed_di
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -166,47 +166,48 @@ def simulate_room_inbound(
             context_id=context_id,
         )
 
+        # Drive the REAL ingress path (RoomIngressService) rather than a
+        # hand-built Message. This is what resolves the room's flow mode and
+        # seeds request_data["next_agent"] = flow_config.flow[mode].source_agent
+        # — without it, managers with a mode-based flow (e.g. master_room_manager,
+        # which starts at master_room::chat_gate) abort at cycle 0 in the
+        # delegator. Mirrors room_session_manager.py's build_request_data ->
+        # set scope_contract -> build_manager_request -> invoke_room_manager.
+        from app.assistant.room_session_manager.services.room_ingress_service import (
+            RoomIngressService,
+        )
+        ingress = RoomIngressService(
+            multi_agent_manager_factory=DI.multi_agent_manager_factory,
+            manager_invoker=DI.manager_invoker,
+            manager_registry=getattr(DI, "manager_registry", None),
+        )
+
+        request_data = ingress.build_request_data(
+            room_ctx=room_ctx,
+            envelope=envelope,
+            room_contact_name=speaker_name,
+            allowed_resource_context="",
+        )
+
         # Build the real scope contract for this room — per_manager rules,
         # blocked_tools, authority_level, etc. all apply exactly as in prod.
+        # Set it on request_data the same way production does (after
+        # build_request_data, before build_manager_request).
         scope_dict = build_scope_contract_for_room_request(
             room_ctx=room_ctx,
             envelope=envelope,
-            request_data={"task_allowed_tools": None, "task_except_tools": None},
+            request_data=request_data,
         )
-
-        # Minimal Message — bypasses the persistence / history-seeding layers
-        # of RoomSessionManager but gives the manager everything it needs to
-        # run: task, scope, room metadata.
-        msg = Message(
-            data_type="user_message",
-            sender=speaker_name,
-            content=content,
-            task=content,
-            information="",
-            request_id=envelope.request_id,
-            scope_context=scope_dict,
-            room_id=room_id,
-            room_surface=surface,
-            room_context_id=context_id,
-            room_visibility="room_shared",
-            room_policy_id=f"room_policy::{room_id}::v1",
-            room_speaker_name=speaker_name,
-            room_speaker_external_id=speaker_external_id,
-            room_message_direction="inbound",
-            agent_input=content,
-            timestamp=datetime.now(timezone.utc),
-        )
+        request_data["scope_contract"] = scope_dict
 
         manager_name = _resolve_manager_name(room_ctx)
         logger.info("[harness] room=%s manager=%s content=%r", room_id, manager_name, content)
 
-        factory = DI.multi_agent_manager_factory
-        manager = factory.create_manager(manager_name)
+        msg = ingress.build_manager_request(envelope=envelope, request_data=request_data)
 
-        invoker = DI.manager_invoker
         t0 = time.monotonic()
         turn_start = datetime.now(timezone.utc)
-        manager_result = invoker.invoke(manager, msg)
+        manager_result = ingress.invoke_room_manager(manager_name=manager_name, manager_request=msg)
         elapsed_ms = int((time.monotonic() - t0) * 1000)
 
         if isinstance(manager_result, ToolResult):

@@ -124,7 +124,7 @@ def test_overlay_is_noop_with_blank_room_id():
 
 def _build_full() -> dict:
     from app.assistant.rooms.room_resource_loader import load_room_context_for_manager
-    from app.assistant.tests.e2e.harness import _build_envelope
+    from app.assistant.tests.room_test_harness.harness import _build_envelope
 
     room_ctx = load_room_context_for_manager(_ROOM_ID)
     env = _build_envelope(

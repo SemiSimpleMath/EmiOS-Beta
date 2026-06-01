@@ -23,8 +23,8 @@ Sending emails.
 ++ playwright_manager
 - tasks that require interacting with a live website through a real browser: clicking buttons, filling forms, navigating JS-heavy SPAs, scraping behind login, DoorDash/Uber Eats/any app that blocks scrapers
 - any task where the user explicitly says "use playwright", "open the browser", "go to <site> and do X", "navigate to", "click on", "log in to", "check out" on a live site
-- prefer playwright_manager over web_manager whenever the task requires actions on a page (not just reading static content)
-- **NOT for services with REST APIs.** Bluesky / Mastodon / Reddit / GitHub / Spotify / Twitter/X / WHOOP / OpenAI / Anthropic and similar platforms have direct APIs — route those to `http_manager`. Playwright is the fallback only when no API exists or the user explicitly says "use the browser".
+- prefer playwright_manager over web_manager whenever the task requires actions on a page (not just reading static content) — UNLESS the page belongs to a service with a REST API (see the NOT list below); those go to `http_manager`.
+- **NOT for services with REST APIs.** Bluesky / Mastodon / Reddit / GitHub / Spotify / Twitter/X / WHOOP / OpenAI / Anthropic and similar platforms have direct APIs — route those to `http_manager`. Words like "browse", "find", "check", "look at", "interesting", "respond to", or a multi-step "find one and reply" framing do NOT mandate a browser: if the named service has a REST API, it still goes to `http_manager`. Playwright is the fallback only when no API exists, or the user explicitly says "use the browser".
 
 ++ create_dayflow_ticket — purely communicative tasks to the user. Use it when the task is to NOTIFY, REMIND, ASK, or PROMPT the user about something with no prior research/work needed on your part.
 - "notify Jukka that X" / "tell Jukka about X" / "let the user know X" / "remind Jukka about X" → create_dayflow_ticket
@@ -35,6 +35,7 @@ Sending emails.
 
 ++ http_manager
 - single-domain HTTP/REST API tasks: post / like / reply on Bluesky, create a GitHub issue, send a Reddit comment, fetch from a service's REST endpoint, call OAuth-protected endpoints, hit a webhook.
+- this INCLUDES discover-then-act flows on ONE service: "find an interesting post on Bluesky and reply", "read my feed and like the top post", "search a subreddit via the API and comment". Reading/searching the service's API to pick a target and then acting on it is still http_manager — the API has feed/search/timeline endpoints, so no browser is needed.
 - pure API calls (no browser, no local file work, no calendar/email orchestration). The manager handles pod-aware auth, multi-step flows (createSession → use token → next call), and result chaining.
 - when the task explicitly names a service with an API (Bluesky / Mastodon / Reddit / GitHub / Spotify / WHOOP / OpenAI / Anthropic / Polymarket / OnStar / etc.) and the user wants to act on that service.
 

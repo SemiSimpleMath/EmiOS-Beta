@@ -18,6 +18,15 @@ tools:
   allowed_tools: [all]
   allow_external_side_effects: true
   per_manager:
+    # Restrict the room switchboard's dispatch surface to emi_team_manager only.
+    # room_manager hosts room::switchboard; this rule narrows what the switchboard
+    # is shown (and can route to). Without it the switchboard sees room_manager's
+    # full ~29-tool surface (email/calendar/bash/screen-capture) and can dispatch
+    # there directly, bypassing the per_manager narrowing below. All work funnels
+    # through emi_team_manager, which is itself narrowed to the safe subset.
+    room_manager:
+      allow:
+        - emi_team_manager
     # emi_team narrowed to the safe research subset when it runs in this scope.
     # Everything it natively reaches (personal_admin, devices, playwright,
     # bash, sandbox, KG, scheduler) is implicitly excluded — not in this list.

@@ -24,7 +24,7 @@ from app.assistant.room_session_manager.services.room_scope_builder import (
     build_scope_contract_for_room_request,
 )
 from app.assistant.scope.loader import load_scope
-from app.assistant.tests.e2e.harness import _build_envelope
+from app.assistant.tests.room_test_harness.harness import _build_envelope
 from app.assistant.utils.pydantic_classes import ScopeContext
 
 

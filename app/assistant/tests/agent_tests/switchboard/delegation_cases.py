@@ -183,9 +183,10 @@ CASES: Tuple[Case, ...] = (
          notes="Public web read."),
     Case("bluesky_public_profile",
          "What's @anthropic posting about on Bluesky today?", "",
-         "web_manager", accept_also=("playwright_manager",),
+         "web_manager", accept_also=("http_manager", "playwright_manager"),
          category="web",
-         notes="Public Bluesky profile is readable without login."),
+         notes="Public Bluesky profile is readable without login — web_manager (page read) or "
+               "http_manager (getAuthorFeed, no auth) both valid; genuinely dual."),
     Case("reddit_top_programming",
          "What are the top posts on r/programming today?", "",
          "web_manager",
@@ -207,9 +208,11 @@ CASES: Tuple[Case, ...] = (
          notes="Login required → playwright."),
     Case("bluesky_post",
          "Go to my Bluesky page and post 'Good morning'.", "",
-         "playwright_manager",
-         category="playwright",
-         notes="'Go to <site> and do X' + authenticated post action."),
+         "http_manager", accept_also=("playwright_manager",),
+         category="http",
+         notes="API-first: Bluesky has a post endpoint, so a plain post is http_manager even though "
+               "the phrasing says 'go to my Bluesky page' (colloquial, not 'use the browser'). "
+               "playwright stays acceptable since the wording is explicitly navigational — flag for grading."),
     Case("gform_fill",
          "Open the browser and fill out this Google Form: https://forms.gle/abc123", "",
          "playwright_manager",
@@ -222,9 +225,32 @@ CASES: Tuple[Case, ...] = (
          notes="Navigate + click action."),
     Case("bluesky_my_posts",
          "Get my latest 5 posts from Bluesky.", "",
-         "emi_team_manager", accept_also=("playwright_manager", "web_manager"),
-         category="emi_team",
-         notes="'My posts' needs handle lookup (KG) + Bluesky fetch. Cross-domain → emi_team. Bluesky profiles ARE publicly readable, so web_manager could work if the handle were known."),
+         "http_manager", accept_also=("emi_team_manager", "web_manager"),
+         category="http",
+         notes="Single-service API read. http_manager resolves 'my' handle from the auth pod "
+               "(pod_search/pod_fetch) then calls getAuthorFeed — no cross-domain step needed, so "
+               "it's http_manager, not emi_team. web_manager works only if the handle is already known."),
+
+    # =========================================================================
+    # http_manager — single-service REST API tasks (incl. discover-then-act)
+    # =========================================================================
+    Case("bluesky_find_and_reply",
+         "Find an interesting post on Bluesky and respond to it.", "",
+         "http_manager", accept_also=("emi_team_manager",),
+         category="http",
+         notes="REGRESSION (2026-05-31): misrouted to playwright_manager. Discover-then-act on ONE "
+               "service — the Bluesky API has feed/search endpoints to find a post and a post endpoint "
+               "to reply. 'browse / find / interesting / respond' do NOT mandate a browser."),
+    Case("github_create_issue",
+         "Open a GitHub issue on my emi repo titled 'Fix switchboard routing'.", "",
+         "http_manager",
+         category="http",
+         notes="Single-service API write — GitHub REST API."),
+    Case("reddit_api_comment",
+         "Reply to the top post in r/programming with 'Nice writeup'.", "",
+         "http_manager", accept_also=("playwright_manager",),
+         category="http",
+         notes="Discover-then-act on one service — Reddit API (read top post + comment)."),
 
     # =========================================================================
     # emi_team_manager — cross-domain / pods / gdocs / unclear

@@ -82,9 +82,11 @@ def test_weekly_insights_scope_loads_with_no_tools():
     assert s.owner_id == "weekly_insights"
 
 
-def test_routine_kind_not_wired_yet():
-    with pytest.raises(NotImplementedError, match="not wired yet"):
-        load_scope_for_source(kind="routine", source_id="some_routine", actor_id="a")
+def test_routine_with_no_scope_yaml_returns_none():
+    # kind="routine" is the optional-attach model (wired in a05a6e0a): a routine
+    # without a configs/routines/public/<id>.scope.yaml resolves to None, so the
+    # tool runs scope-free (floor). Was previously a NotImplementedError before wiring.
+    assert load_scope_for_source(kind="routine", source_id="some_routine", actor_id="a") is None
 
 
 def test_missing_pipeline_scope_raises():

@@ -240,7 +240,7 @@ class MultiAgentManager:
             # "room_context_id" actually find it. Without this, every
             # non-master room silently fell back to master_room — most
             # consequentially in chat_memory_rag where it leaked cross-room
-            # RAG matches into agent prompts. Surfaced by the e2e harness
+            # RAG matches into agent prompts. Surfaced by the room test harness
             # via slack/__test__ → chat_gate seeing master_room pod IDs.
             for _attr, _key in (
                 ("room_id", "room_id"),

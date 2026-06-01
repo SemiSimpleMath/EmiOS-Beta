@@ -26,6 +26,7 @@ Caveats:
 """
 from __future__ import annotations
 
+import logging
 import os
 import tempfile
 import threading
@@ -35,6 +36,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator, Optional
 
+logger = logging.getLogger(__name__)
 
 _INIT_LOCK = threading.Lock()
 _INITIALIZED = False
@@ -189,8 +191,36 @@ def sandboxed_di() -> Iterator[SandboxContext]:
     schema would already exist. Tempfile names use uuid4 so collision risk
     is nil.
     """
+    # SAFETY GUARD (entry): refuse only a sqlite:// TEST_DATABASE_URI_EMI override.
+    # get_database_uri() honors TEST_DATABASE_URI_EMI ahead of TEST_DB_NAME, but
+    # ONLY when it starts with "sqlite://" (this is the SQLite repo; non-sqlite
+    # URIs are ignored and the path falls through to TEST_DB_NAME). So only a
+    # sqlite override would actually bypass the tempfile sandbox onto a real/shared
+    # DB while teardown deletes the unused tempfile. A non-sqlite URI (e.g. a
+    # postgres test URI in the environment) is inert here — allow it.
+    _explicit_uri = os.environ.get("TEST_DATABASE_URI_EMI")
+    if _explicit_uri and str(_explicit_uri).startswith("sqlite://"):
+        raise RuntimeError(
+            "sandboxed_di refuses to run with a sqlite:// TEST_DATABASE_URI_EMI set "
+            f"({_explicit_uri!r}) — get_database_uri() would honor it and bypass the "
+            "tempfile sandbox, operating on a non-sandbox database. Unset it before "
+            "running the harness."
+        )
+
     db_name, db_path = _make_tempfile_db_name()
     prior_env = _set_db_env(db_name)
+    # Force prompt + LLM-result logging ON for EVERY agent during harness runs.
+    # EMI_PRINT_PROMPTS / EMI_PRINT_LLM_RESULTS are the built-in global overrides
+    # checked FIRST in llm_client.resolve_prompt_debug_flags / resolve_llm_result_debug_flag,
+    # so every agent — including ones with no per-agent prompt_debug config such as
+    # room::switchboard — writes MODEL_SYSTEM / MODEL_USER / MODEL_OUTPUT to the
+    # agent log. This is the existing logging path; no capture hooks needed.
+    _prior_print = {
+        "EMI_PRINT_PROMPTS": os.environ.get("EMI_PRINT_PROMPTS"),
+        "EMI_PRINT_LLM_RESULTS": os.environ.get("EMI_PRINT_LLM_RESULTS"),
+    }
+    os.environ["EMI_PRINT_PROMPTS"] = "1"
+    os.environ["EMI_PRINT_LLM_RESULTS"] = "1"
     global _CURRENT_DB_PATH
     _CURRENT_DB_PATH = db_path
     try:
@@ -213,15 +243,37 @@ def sandboxed_di() -> Iterator[SandboxContext]:
                 eng.dispose()
         except Exception:
             pass
-        # Best-effort cleanup. SQLite may hold a WAL/SHM sidecar.
-        for suffix in ("", "-wal", "-shm"):
-            try:
-                p = Path(str(db_path) + suffix)
-                if p.exists():
-                    p.unlink()
-            except Exception:
-                pass
+        # SAFETY GUARD (teardown): only ever delete the uuid-named sandbox
+        # tempfile. Refuse to unlink anything else — most importantly the real
+        # emi.db — even if db_path were somehow corrupted. Safe by construction,
+        # not by accident.
+        _repo_root = Path(__file__).resolve().parents[4]
+        _real_db = (_repo_root / "emi.db").resolve()
+        _safe_to_delete = (
+            db_path.name.startswith("e2e_sandbox_")
+            and db_path.name.endswith(".db")
+            and db_path.resolve() != _real_db
+        )
+        if not _safe_to_delete:
+            logger.error(
+                "[sandbox] REFUSING to delete non-sandbox DB path: %s (real=%s). "
+                "Leaving it untouched.", db_path, _real_db,
+            )
+        else:
+            # Best-effort cleanup. SQLite may hold a WAL/SHM sidecar.
+            for suffix in ("", "-wal", "-shm"):
+                try:
+                    p = Path(str(db_path) + suffix)
+                    if p.exists():
+                        p.unlink()
+                except Exception:
+                    pass
         _restore_db_env(prior_env)
+        for _k, _v in _prior_print.items():
+            if _v is None:
+                os.environ.pop(_k, None)
+            else:
+                os.environ[_k] = _v
         _CURRENT_DB_PATH = None
 
 

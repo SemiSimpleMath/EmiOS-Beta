@@ -1,4 +1,4 @@
-# Permission scope for the e2e test Slack channel.
+# Permission scope for the room-test-harness Slack channel.
 #
 # PERMISSION ONLY. This file declares what callers in this room may DO and SEE.
 # Room/session behavior (history, retention, execution) stays in ROOM.md.
@@ -15,6 +15,9 @@ approval:
 tools:
   allowed_tools: [all]
   per_manager:
+    room_manager:
+      allow:
+        - emi_team_manager
     emi_team_manager:
       allow:
         - web_manager

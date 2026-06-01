@@ -16,7 +16,6 @@ allowed_tools:
   - http_manager
   - sandbox_manager
   - devices_manager
-  - create_dayflow_ticket
   - bash_manager
 except_tools: []
 allowed_nodes: []
