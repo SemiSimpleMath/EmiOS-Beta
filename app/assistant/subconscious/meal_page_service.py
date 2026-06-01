@@ -9,27 +9,17 @@ The route layer (app/routes/meals.py) is a thin wrapper around this.
 """
 from __future__ import annotations
 
-import os
-import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from app.assistant.pod_store.contracts import Pod
 from app.assistant.pod_store.pod_store import PodStore
 from app.assistant.subconscious.meal_email_renderer import (
     consolidate_intention_shopping,
-    render_weekly_meal_email,
 )
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
-
-# Canonical Send-To recipient for the meal page. Personal data is NOT hardcoded
-# (public repo) — set MEAL_SEND_TO_EMAIL / MEAL_SEND_TO_NAME in .env. The
-# placeholder default keeps the route functional in a fresh clone without
-# leaking a real address.
-KATY_EMAIL = os.environ.get("MEAL_SEND_TO_EMAIL", "recipient@example.com")
-KATY_DISPLAY_NAME = os.environ.get("MEAL_SEND_TO_NAME", "Meal Recipient")
 
 
 def load_latest_weekly_plan_pod() -> Optional[Pod]:
@@ -202,8 +192,6 @@ def build_page_view_model(week_start: Optional[str] = None) -> Dict[str, Any]:
         "shopping_text": shopping_text,
         "weekly_doc_present": bool(doc_body),
         "ad_hoc_count": len(consolidate_intention_shopping(ad_hoc_pods)),
-        "recipient_email": KATY_EMAIL,
-        "recipient_name": KATY_DISPLAY_NAME,
         "viewing_week": viewing_week_iso,
         "nav": nav,
     }
@@ -352,163 +340,6 @@ def generate_plan_for_week(week_start: str) -> Dict[str, Any]:
         "plan_pod_id": plan_pod_id,
         "summary": summary,
     }
-
-
-def send_meal_plan_email(
-    *,
-    to: Optional[str] = None,
-    recipient_name: Optional[str] = None,
-    week_start: Optional[str] = None,
-) -> Dict[str, Any]:
-    """Send a weekly meal plan email to `to` (defaults to Katy).
-
-    When ``week_start`` is given, sends the plan for that week (so the
-    "Send to Katy" button on /meals respects whatever week the user
-    has navigated to). When omitted, falls back to the latest plan.
-    Mints a delivery.email audit pod on success.
-    """
-    recipient = (to or KATY_EMAIL).strip()
-    name = (recipient_name or KATY_DISPLAY_NAME).strip() or recipient
-
-    if week_start:
-        parsed = _parse_week_start(week_start)
-        plan_pod = load_plan_pod_for_week(parsed.isoformat()) if parsed else None
-        if plan_pod is None:
-            return {
-                "status": "no_plan",
-                "message": f"No weekly meal plan exists for week of {week_start}.",
-            }
-    else:
-        plan_pod = load_latest_weekly_plan_pod()
-        if plan_pod is None:
-            return {
-                "status": "no_plan",
-                "message": "No weekly meal plan exists yet. Run the weekly planner first.",
-            }
-
-    doc_body = fetch_weekly_shopping_doc_body()
-    ad_hoc_pods = load_recent_intention_shopping_pods()
-    shopping_text = build_shopping_text(doc_body=doc_body, ad_hoc_pods=ad_hoc_pods)
-
-    subject, body = render_weekly_meal_email(plan_pod, shopping_text=shopping_text)
-
-    send_result = _invoke_send_email_tool(to=recipient, subject=subject, body=body)
-    if not send_result.get("ok"):
-        return {
-            "status": "send_failed",
-            "message": send_result.get("message") or "Email send failed.",
-            "details": send_result,
-        }
-
-    delivery_pod_id = _mint_delivery_email_pod(
-        to=recipient,
-        recipient_name=name,
-        subject=subject,
-        body=body,
-        plan_pod_id=plan_pod.pod_id,
-        message_id=send_result.get("message_id") or "",
-    )
-
-    return {
-        "status": "ok",
-        "message": f"Sent weekly meal plan to {name} <{recipient}>.",
-        "subject": subject,
-        "recipient": recipient,
-        "recipient_name": name,
-        "plan_pod_id": plan_pod.pod_id,
-        "delivery_pod_id": delivery_pod_id,
-        "gmail_message_id": send_result.get("message_id") or "",
-    }
-
-
-def _invoke_send_email_tool(*, to: str, subject: str, body: str) -> Dict[str, Any]:
-    """Call the SendEmail tool's execute() directly. The recipient is
-    already allowlisted (configs/email_allowlist.yaml), and this is a
-    user-clicked UI action, so we bypass the approval ticket layer."""
-    try:
-        from app.assistant.ServiceLocator.service_locator import DI
-        from app.assistant.utils.pydantic_classes import ToolMessage
-
-        cls = DI.tool_registry.get_tool_class("send_email")
-        if cls is None:
-            return {"ok": False, "message": "send_email tool not registered."}
-        tool = cls()
-        tm = ToolMessage(
-            tool_name="send_email",
-            tool_data={"arguments": {"to": to, "subject": subject, "body": body}},
-        )
-        result = tool.execute(tm)
-        # SendEmail returns either a ToolResult (success) or a ToolError-shaped
-        # message via make_tool_error (failure). Distinguish via result_type.
-        result_type = getattr(result, "result_type", None) or ""
-        if result_type == "send_email":
-            data = getattr(result, "data", None) or {}
-            return {
-                "ok": True,
-                "message": getattr(result, "content", "") or "sent",
-                "message_id": data.get("message_id") or "",
-            }
-        # Treat anything else as an error
-        content = getattr(result, "content", "") or ""
-        data = getattr(result, "data", None) or {}
-        return {
-            "ok": False,
-            "message": content or "send_email returned an error.",
-            "error_data": data,
-        }
-    except Exception as e:
-        logger.exception("[meal_page_service] send_email invocation raised")
-        return {"ok": False, "message": f"send_email raised: {type(e).__name__}: {e}"}
-
-
-def _mint_delivery_email_pod(
-    *,
-    to: str,
-    recipient_name: str,
-    subject: str,
-    body: str,
-    plan_pod_id: str,
-    message_id: str,
-) -> Optional[str]:
-    """Audit record: a delivery.email pod for each send. Body holds the
-    exact email body that was delivered (so future-us can answer 'what
-    did Katy actually receive on <date>?')."""
-    try:
-        pod_id = f"datapod:delivery.email:{uuid.uuid4().hex[:24]}"
-        now_utc_iso = datetime.now(timezone.utc).isoformat()
-        pod = Pod(
-            pod_id=pod_id,
-            kind="delivery.email",
-            tags=["delivery", "email", "meal_plan"],
-            one_liner=f"Emailed weekly meal plan to {recipient_name} <{to}>",
-            body=(
-                f"# Delivery — {now_utc_iso}\n\n"
-                f"**To:** {recipient_name} <{to}>\n"
-                f"**Subject:** {subject}\n"
-                f"**Source plan pod:** {plan_pod_id}\n"
-                f"**Gmail message id:** {message_id or '(none)'}\n\n"
-                "---\n\n"
-                f"{body}"
-            ),
-            source_refs=[],
-            for_agents=[],
-            scope_id=None,
-            created_by="meal_page_service",
-            metadata={
-                "delivered_at_utc": now_utc_iso,
-                "to": to,
-                "recipient_name": recipient_name,
-                "subject": subject,
-                "source_plan_pod_id": plan_pod_id,
-                "gmail_message_id": message_id,
-                "via_route": "/meals/send-to-katy",
-            },
-        )
-        PodStore().put(pod)
-        return pod_id
-    except Exception as e:
-        logger.warning("[meal_page_service] mint delivery.email failed: %s", e)
-        return None
 
 
 def _extract_theme(body: str) -> str:
