@@ -437,6 +437,12 @@ emi_shared.css
 configs/smart_home_tools.json
 
 # ── User-specific runtime data and configs ───────────────────────────────────
+# OAuth account definitions — Emi-specific account ids/display names (creds
+# themselves are file-path pointers to already-gitignored credentials/*.json).
+# Untracked per policy: every Emi-specific thing is gitignored unless a clean
+# template exists. NOTE: oauth_registry.py requires this file at startup, so a
+# fresh clone must create configs/oauth_accounts.json (no in-repo example yet).
+configs/oauth_accounts.json
 # Wellness activities the user tracks (meal/hydration/etc) — personal choice.
 app/assistant/pipelines/dayflow/step_configs/config_tracked_activities.json
 # Lens layout + per-node importance ratings — personal KG-derived.
