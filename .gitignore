@@ -317,6 +317,13 @@ resources/instructions/*
 # Personal soul/identity doc
 SOUL.md
 
+# Private/persona skills — per-user actas-persona skills (the assistant's own
+# voice/values, account-acting skills, etc.). Each user creates their own; they
+# are NEVER committed to the public repo. The skill registry scans skills/private/
+# in addition to skills/ (skill_registry._load_all). Generic, shareable skills
+# stay in skills/ and ARE tracked.
+skills/private/
+
 # Rooms — personal contact rooms (contain real names, relationships, private context)
 # The structural templates and system rooms ARE tracked (master_room, dayflow_orchestrator,
 # 1234, _templates) — only personal contact rooms are excluded.

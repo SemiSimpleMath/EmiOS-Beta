@@ -104,13 +104,36 @@ class SkillRegistry:
             logger.info("[skill_registry] no skills/ directory at %s — registry empty", self._skills_dir)
             return
 
+        # Two roots: skills/ (generic, public, tracked) and skills/private/
+        # (per-user persona/actas skills — gitignored, never committed). Both
+        # are scanned identically; `private` is just where a user's own,
+        # non-shareable skills live so they can't leak into the public repo.
+        public_loaded, public_skipped = self._load_skills_from(self._skills_dir, skip_names={"private"})
+        private_dir = (self._skills_dir / "private").resolve()
+        private_loaded, private_skipped = (
+            self._load_skills_from(private_dir) if private_dir.is_dir() else (0, 0)
+        )
+        loaded = public_loaded + private_loaded
+        skipped = public_skipped + private_skipped
+
+        logger.info(
+            "[skill_registry] loaded %d skill(s) (%d public, %d private), skipped %d",
+            loaded, public_loaded, private_loaded, skipped,
+        )
+
+    def _load_skills_from(self, root: Path, *, skip_names: Optional[set] = None) -> tuple[int, int]:
+        """Scan one directory of ``<name>/SKILL.md`` skill dirs. Returns (loaded, skipped)."""
+        skip = skip_names or set()
         loaded = 0
         skipped = 0
-        for child in sorted(self._skills_dir.iterdir()):
+        for child in sorted(root.iterdir()):
             if not child.is_dir():
                 continue
             if child.name.startswith(".") or child.name.startswith("_"):
                 # Convention: hidden / template directories are skipped.
+                continue
+            if child.name in skip:
+                # e.g. the `private` subdir is scanned as its own root, not as a skill.
                 continue
             skill_md = child / _SKILL_FILE_NAME
             if not skill_md.is_file():
@@ -134,11 +157,7 @@ class SkillRegistry:
                     "[skill_registry] loaded %s with warnings: %s",
                     skill.name, "; ".join(result.warnings),
                 )
-
-        logger.info(
-            "[skill_registry] loaded %d skill(s), skipped %d, from %s",
-            loaded, skipped, self._skills_dir,
-        )
+        return loaded, skipped
 
 
 # ── helpers ─────────────────────────────────────────────────────────
