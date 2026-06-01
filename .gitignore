@@ -444,12 +444,16 @@ emi_shared.css
 configs/smart_home_tools.json
 
 # ── User-specific runtime data and configs ───────────────────────────────────
-# OAuth account definitions — Emi-specific account ids/display names (creds
-# themselves are file-path pointers to already-gitignored credentials/*.json).
-# Untracked per policy: every Emi-specific thing is gitignored unless a clean
-# template exists. NOTE: oauth_registry.py requires this file at startup, so a
-# fresh clone must create configs/oauth_accounts.json (no in-repo example yet).
+# OAuth account definitions — per-user account ids/display names (creds are
+# file-path pointers to already-gitignored credentials/*.json). Category 2:
+# oauth_registry.py REQUIRES this file at startup, so the installer materializes
+# it from configs/templates/oauth_accounts.template.json (instantiate_config_templates).
 configs/oauth_accounts.json
+# Email allowlist — recipients send_email may reach without an approval ticket.
+# Contains real personal contacts (family/friends). Category 1: allowlist.py
+# tolerates absence (empty set => everything needs approval), so no template —
+# just gitignored. Each user maintains their own.
+configs/email_allowlist.yaml
 # Edge-importance calibration eval — fixture of REAL KG edges (real node UUIDs +
 # contact facts: phone/email). Personal data; not safe for the public repo. Only
 # read by the manually-run `python -m app.assistant.kg.edge_importance_eval`
