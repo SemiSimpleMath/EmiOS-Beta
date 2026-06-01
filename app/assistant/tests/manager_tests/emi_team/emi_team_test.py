@@ -49,7 +49,7 @@ def main(manager_type, task, info=None):
 
 
 if __name__ == "__main__":
-    #task = "Find out the distance between 1 Agate Irvine CA and Manhattan NY"
+    #task = "Find out the distance between 123 Main St Springfield and Manhattan NY"
     #task = "Find out btc price."
     task = "What school did Jukka go to?"
     main('emi_team_manager', task)

@@ -141,7 +141,7 @@ def _set_busy_test_page(server_entry: dict) -> None:
         <input id="modal-address-search" aria-label="Address input" placeholder="Enter address..." style="width: 460px; padding: 10px 12px; border-radius: 12px; border: 1px solid #cbd5e1;" />
       </div>
       <div class="row">
-        <div class="pill">1 Agate, Irvine, CA 92614</div>
+        <div class="pill">123 Main St, Springfield, CA 92614</div>
         <button class="btn" aria-label="Confirm address">Confirm</button>
       </div>
       <div class="row">
