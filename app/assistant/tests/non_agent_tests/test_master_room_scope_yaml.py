@@ -65,8 +65,20 @@ def test_authority_is_99(built):
 def test_full_tool_surface(built):
     assert built["tools"]["allowed_tools"] == ["all"]
     assert built["tools"]["allow_external_side_effects"] is True
-    # owner room runs every manager natively — no per_manager narrowing
-    assert built["tools"]["per_manager"] == {}
+    # master_room is full-trust ([all]); the ONE per_manager rule is a
+    # narrower-cost reduction (NOT a capability cut): emi_team_manager's DIRECT
+    # pool is pinned to its delegate-managers + kg_query + operational tools so
+    # its LLM tool_narrower ranks ~16 instead of ~138. Specialist leaves stay
+    # reachable THROUGH those managers. See rooms/master_room/scope.yaml header.
+    per_mgr = built["tools"]["per_manager"]
+    assert set(per_mgr.keys()) == {"emi_team_manager"}
+    allow = per_mgr["emi_team_manager"]["allow"]
+    # the 7 delegate managers + kg_query + emi_team operational tools (16 total)
+    assert "web_manager" in allow and "http_manager" in allow
+    assert "personal_admin_manager" in allow and "kg_query_manager" in allow
+    assert "pod_search" in allow and "ask_user" in allow
+    assert "create_dayflow_ticket" not in allow  # switchboard-only, not emi_team's
+    assert len(allow) == 16
 
 
 def test_all_pods_visible(built):

@@ -259,23 +259,25 @@ def resolve_gmail_account_id(
     the registry has no Gmail record for her, or when the resolved record's
     auth.kind isn't google_oauth, or when her account is unconfigured.
     """
+    from app.assistant.utils.identity_names import resolve_principal
     explicit = (alias or "").strip().lower()
     effective = explicit or (scope_acting_as or "").strip().lower()
-    raw = effective
-    if raw in ("", "jukka", "user", "owner"):
+    # Canonicalize: "jukka"/"user"/"owner"/"" -> user; "emi"/"self"/<assistant name> -> self.
+    canonical = resolve_principal(effective)
+    if canonical == "user":
         from app.assistant.lib.google_auth.account_ids import GMAIL_GOOGLE_ACCOUNT_ID
         return GMAIL_GOOGLE_ACCOUNT_ID
-    if raw == "emi":
+    if canonical == "self":
         account = get_emi_account_by_platform("gmail")
         if not account:
             raise ValueError(
-                "acting_as='emi' (or from_account='emi') requested but "
+                "acting_as=self (the assistant) requested but "
                 "resource_emi_accounts.json has no record with platform='gmail'."
             )
         auth = account.get("auth") or {}
         if (auth.get("kind") or "").strip() != "google_oauth":
             raise ValueError(
-                f"acting_as='emi' requested but {account['id']!r} has "
+                f"acting_as=self requested but {account['id']!r} has "
                 f"auth.kind={auth.get('kind')!r}; expected 'google_oauth'."
             )
         if str(account.get("status") or "").strip().lower() != "configured":
@@ -285,7 +287,7 @@ def resolve_gmail_account_id(
                 f"?account_id={auth.get('account_id')}"
             )
             raise ValueError(
-                f"acting_as='emi' requested but {account['id']!r} is not "
+                f"acting_as=self requested but {account['id']!r} is not "
                 f"configured: {reason}"
             )
         return str(auth.get("account_id") or "")

@@ -57,6 +57,55 @@ def get_required_primary_user_name() -> str:
     )
 
 
+_SELF_ALIASES = {"self", "me", "myself", "assistant", "herself", "himself", "themself"}
+_USER_ALIASES = {"user", "", "owner", "primary", "primary_user"}
+
+
+def resolve_principal(raw: str | None) -> str:
+    """Canonicalize an acting_as / principal string to a stable form.
+
+    Many surface inputs name the same principal: `/actas self`, `/actas me`,
+    `/actas <assistant's configured name>` all mean "the assistant acting as
+    herself". This maps every alias to a CANONICAL id so storage, the skill
+    principal-gate, account `accessible_by`, and the principal skill-pack all
+    compare on the same value — and none of them hardcode the install's
+    assistant name.
+
+    Canonical ids:
+      "self"  — the assistant-as-persona (aliases: self/me/myself/assistant +
+                the configured assistant name from resource_assistant_data).
+      "user"  — the primary user / default (aliases: user/owner/primary/empty).
+      "<id>"  — any other principal (e.g. a future persona "katy") passes
+                through lowercased, so /actas katy -> "katy" works unchanged.
+
+    Pure + cheap; safe to call on every comparison. Never raises — an
+    unresolvable assistant-name lookup just means the configured name isn't
+    treated as a self-alias (still correct for explicit "self").
+    """
+    val = str(raw or "").strip().lower()
+    if val in _USER_ALIASES:
+        return "user"
+    if val in _SELF_ALIASES:
+        return "self"
+    # The configured assistant name is an alias of "self" (so an account's
+    # accessible_by entry or an acting_as value that names the assistant both
+    # canonicalize to "self" — regardless of how the install named its assistant).
+    try:
+        if val and val == get_required_assistant_name().strip().lower():
+            return "self"
+    except Exception:
+        # No configured name available — fall through; explicit "self" still works.
+        pass
+    # The configured primary-user name is an alias of "user" (so acting_as naming
+    # the owner canonicalizes to "user" without hardcoding the install's owner name).
+    try:
+        if val and val == get_required_primary_user_name().strip().lower():
+            return "user"
+    except Exception:
+        pass
+    return val
+
+
 def resolve_display_name(
     *,
     raw_name: str | None = None,
