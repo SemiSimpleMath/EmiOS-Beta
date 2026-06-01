@@ -14,7 +14,7 @@ For every node, return one set of section tags **per namespace** — even if the
 - A node belongs in a section if that section would naturally surface this claim.
 - **Multi-tag liberally** when the fact genuinely connects themes. Example: "{{ resource_user_data.preferred_name }} met his wife at Berkeley" belongs in `wiki:marriage_and_family` AND `wiki:education` — both sections would mention it.
 - **Card sections are NOW-snapshot.** Reject (empty list for the card namespace) closed states, past one-off events that aren't definitional, achieved/abandoned goals. The wiki namespace can still pick them up.
-- **Contact info goes in card:contact.** Phone numbers, emails, mailing/home addresses, social handles → `card:contact`. Identify these from the claim sentence (e.g., "Jukka's phone number is 310 963 0721" → card:contact). Don't double-tag contact facts into `notes`.
+- **Contact info goes in card:contact.** Phone numbers, emails, mailing/home addresses, social handles → `card:contact`. Identify these from the claim sentence (e.g., "Alex's phone number is 555-0123" → card:contact). Don't double-tag contact facts into `notes`.
 - **Use only the keys listed.** If you don't see a fit, return `[]` for that namespace — don't invent section keys.
 - **Never re-describe the node.** Output only the tag lists.
 

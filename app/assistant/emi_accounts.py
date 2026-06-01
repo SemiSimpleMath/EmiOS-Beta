@@ -158,8 +158,8 @@ def render_accounts_for_planner(principal: str) -> str:
 
         You are currently acting as: emi
         Accounts available to this scope (use these literal values in tool calls):
-        - gmail: openpodbayemi@gmail.com (Google OAuth account_id: emi_google_primary)
-        - bluesky: openpodbayemi.bsky.social
+        - gmail: emi@example.com (Google OAuth account_id: emi_google_primary)
+        - bluesky: emi.bsky.social
             secret ref (paste verbatim in tool body): datapod:auth.bearer:f97.../full
 
     Empty when no accounts apply (e.g. principal='user' today). The planner

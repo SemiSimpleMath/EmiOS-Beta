@@ -443,6 +443,11 @@ configs/smart_home_tools.json
 # template exists. NOTE: oauth_registry.py requires this file at startup, so a
 # fresh clone must create configs/oauth_accounts.json (no in-repo example yet).
 configs/oauth_accounts.json
+# Edge-importance calibration eval — fixture of REAL KG edges (real node UUIDs +
+# contact facts: phone/email). Personal data; not safe for the public repo. Only
+# read by the manually-run `python -m app.assistant.kg.edge_importance_eval`
+# script (not app startup, not the test suite), so untracking has no runtime impact.
+app/assistant/kg/edge_importance_eval.yaml
 # Wellness activities the user tracks (meal/hydration/etc) — personal choice.
 app/assistant/pipelines/dayflow/step_configs/config_tracked_activities.json
 # Lens layout + per-node importance ratings — personal KG-derived.

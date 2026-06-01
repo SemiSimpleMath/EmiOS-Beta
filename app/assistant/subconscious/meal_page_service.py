@@ -9,6 +9,7 @@ The route layer (app/routes/meals.py) is a thin wrapper around this.
 """
 from __future__ import annotations
 
+import os
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -23,12 +24,12 @@ from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-# Katy is the canonical Send-To today. The address lives in
-# configs/email_allowlist.yaml under "Family"; surfaced here in code so
-# the route doesn't have to thread it through. If/when we add more
-# recipients, lift this into a small config helper.
-KATY_EMAIL = "ksuttorp@yahoo.com"
-KATY_DISPLAY_NAME = "Katy"
+# Canonical Send-To recipient for the meal page. Personal data is NOT hardcoded
+# (public repo) — set MEAL_SEND_TO_EMAIL / MEAL_SEND_TO_NAME in .env. The
+# placeholder default keeps the route functional in a fresh clone without
+# leaking a real address.
+KATY_EMAIL = os.environ.get("MEAL_SEND_TO_EMAIL", "recipient@example.com")
+KATY_DISPLAY_NAME = os.environ.get("MEAL_SEND_TO_NAME", "Meal Recipient")
 
 
 def load_latest_weekly_plan_pod() -> Optional[Pod]:
