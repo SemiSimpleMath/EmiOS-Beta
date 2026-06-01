@@ -1,0 +1,27 @@
+# Forbidden strings — substrings the pre-commit hook blocks from STAGED changes.
+#
+# Copy this to scripts/git-hooks/forbidden_strings.txt (gitignored) and fill in
+# YOUR real personal data + secrets. The live file is NEVER committed — it
+# contains the very strings we keep out of the public repo.
+#
+# Two entry formats (blank lines and #-comments ignored):
+#   <substring>     case-INSENSITIVE substring match. Use for PII like emails,
+#                   phone numbers, addresses — specific enough to avoid false
+#                   positives (a full email, not a common word).
+#   word:<Word>     case-SENSITIVE whole-WORD match. Use for personal names and
+#                   the hardcoded assistant name. A capitalized assistant-name
+#                   entry blocks it used as a bare display string but NOT
+#                   lowercased identifiers / import paths, so it catches the name
+#                   hardcoded as display text, not code references. A whole-word
+#                   entry also won't match inside a longer word.
+#
+# Only ADDED lines in the staged diff are scanned — existing tree content is
+# invisible; only NEW content in a commit can trip the hook.
+#
+# Examples (REPLACE with your own — these are placeholders):
+# you@example.com
+# spouse@example.com
+# 555-0123
+# 123 Main St, Springfield
+# word:YourName
+# word:Aria        # your assistant's name, to catch it hardcoded as a string

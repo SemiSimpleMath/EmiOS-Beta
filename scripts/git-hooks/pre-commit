@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# Block commits that introduce forbidden strings (PII / secrets) into tracked files.
+#
+# Why: this repo's origin is the PUBLIC EmiOS-Beta repo. Personal data (phone,
+# address, family emails) and secrets have leaked in before via prompt examples,
+# fixtures, and config. A *rule* ("don't commit PII") isn't enforcement; this hook
+# is. It scans the STAGED diff and aborts the commit if any forbidden string appears.
+#
+# The forbidden list lives in scripts/git-hooks/forbidden_strings.txt, which is
+# GITIGNORED — the list itself contains the very strings we must keep out of the
+# repo, so it must never be committed. A tracked .example documents the format.
+#
+# List format — one entry per line (blank lines and #-comments ignored):
+#   <substring>        case-INSENSITIVE substring match (for PII: emails/phone/
+#                      address — an email is an email regardless of case/context).
+#   word:<Word>        case-SENSITIVE whole-WORD match (for names + the hardcoded
+#                      assistant name). e.g. a capitalized assistant-name entry
+#                      blocks it used as a bare display string but NOT lowercased
+#                      identifiers like the_team / the_accounts / import paths — it
+#                      catches the name hardcoded as text, not code refs. A
+#                      whole-word name entry also won't hit longer words.
+#
+# Only the STAGED diff's ADDED lines are scanned — existing occurrences elsewhere
+# in the tree are invisible; only NEW content in this commit can trip it.
+#
+# Trigger: pre-commit. Non-zero exit -> commit aborts.
+# Bypass (genuine false positive only): git commit --no-verify
+
+set -eu
+
+repo_root="$(git rev-parse --show-toplevel)"
+list="$repo_root/scripts/git-hooks/forbidden_strings.txt"
+
+# No list configured -> nothing to enforce (don't block; fail open is fine here
+# because the list is a local secret, and a fresh clone legitimately has none yet).
+if [ ! -f "$list" ]; then
+    exit 0
+fi
+
+# Collect forbidden substrings (skip blank lines and # comments).
+patterns=()
+while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+        ''|'#'*) continue ;;
+    esac
+    patterns+=("$line")
+done < "$list"
+
+if [ "${#patterns[@]}" -eq 0 ]; then
+    exit 0
+fi
+
+# Added lines only, across all staged files. From the unified diff, keep lines
+# that start with a single '+' (added content) but drop the '+++ ' file header,
+# then strip the leading '+' so matching sees the real content.
+added_lines="$(git diff --cached --no-color --unified=0 \
+    | grep '^+' \
+    | grep -v '^+++ ' \
+    | sed 's/^+//')"
+
+violations=0
+for pat in "${patterns[@]}"; do
+    case "$pat" in
+        word:*)
+            # case-SENSITIVE whole-word match. Strip the 'word:' prefix.
+            w="${pat#word:}"
+            [ -n "$w" ] || continue
+            hits="$(printf '%s\n' "$added_lines" | grep -wF -- "$w" || true)"
+            label="$w (whole-word)"
+            ;;
+        *)
+            # case-INSENSITIVE substring match.
+            hits="$(printf '%s\n' "$added_lines" | grep -iF -- "$pat" || true)"
+            label="$pat"
+            ;;
+    esac
+    if [ -n "$hits" ]; then
+        if [ "$violations" -eq 0 ]; then
+            echo "❌ pre-commit: forbidden string(s) found in staged changes." >&2
+            echo "   origin is the PUBLIC repo — these must not be committed." >&2
+            echo "" >&2
+        fi
+        echo "  forbidden: \"$label\"" >&2
+        violations=$((violations + 1))
+    fi
+done
+
+if [ "$violations" -ne 0 ]; then
+    echo "" >&2
+    echo "Fix: remove the string(s), or replace with a placeholder (example.com, 555-..)." >&2
+    echo "If this is a genuine false positive, bypass with: git commit --no-verify" >&2
+    echo "(Forbidden list: scripts/git-hooks/forbidden_strings.txt — gitignored.)" >&2
+    exit 1
+fi
+
+exit 0

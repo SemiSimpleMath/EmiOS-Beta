@@ -475,3 +475,7 @@ tasks/allowlist_test_output.txt
 # and are not shared with the public repo. Examples: hardcoded camera ids,
 # screen-capture cadences, custom morning briefings.
 /configs/routines/private/
+
+# Pre-commit forbidden-strings list — contains the very PII/secrets it blocks;
+# never commit it. The .example is tracked.
+scripts/git-hooks/forbidden_strings.txt
