@@ -202,6 +202,35 @@ def tokens_admin():
             for r in engine_rows
         ]
 
+        # ---- per-provider rollup (top-line: OpenAI vs Google vs Anthropic) --
+        provider_rows = s.execute(
+            sql_text(f"""
+                SELECT
+                    provider,
+                    COUNT(*) AS calls,
+                    COALESCE(SUM(input_tokens), 0)   AS in_tok,
+                    COALESCE(SUM(output_tokens), 0)  AS out_tok,
+                    COALESCE(SUM(total_cost_usd), 0) AS usd
+                FROM llm_call_log
+                {where}
+                GROUP BY provider
+                ORDER BY usd DESC
+            """),
+            params,
+        ).fetchall()
+        _prov_total = sum(float(r[4] or 0.0) for r in provider_rows) or 1.0
+        providers = [
+            {
+                "provider": r[0] or "(unknown)",
+                "calls": int(r[1] or 0),
+                "in_tok": int(r[2] or 0),
+                "out_tok": int(r[3] or 0),
+                "usd": float(r[4] or 0.0),
+                "pct": round(float(r[4] or 0.0) / _prov_total * 100.0, 1),
+            }
+            for r in provider_rows
+        ]
+
         # ---- slowest calls (catches runaways) -----------------------
         slow_rows = s.execute(
             sql_text(f"""
@@ -284,6 +313,7 @@ def tokens_admin():
         chart_days=chart_days,
         agents=agents,
         engines=engines,
+        providers=providers,
         slowest=slowest,
         failures=failures,
         statuses=statuses,

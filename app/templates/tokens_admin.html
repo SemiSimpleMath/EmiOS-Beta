@@ -53,6 +53,21 @@
     </div>
 </div>
 
+<h2>By provider — {{ period_label }}</h2>
+{% if providers %}
+<div class="tiles">
+    {% for p in providers %}
+    <div class="tile">
+        <div class="label">{{ p.provider }}</div>
+        <div class="value">${{ '%.2f'|format(p.usd) }}</div>
+        <div class="sub">{{ p.pct }}% &middot; {{ p.calls }} calls &middot; {{ '{:,}'.format(p.in_tok + p.out_tok) }} tok</div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<p class="empty">No calls in this period.</p>
+{% endif %}
+
 <h2>Daily cost — last {{ chart_days }} day{{ '' if chart_days == 1 else 's' }}</h2>
 {% if daily %}
 <div class="daily-bars">
