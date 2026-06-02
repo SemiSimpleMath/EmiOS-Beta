@@ -15,12 +15,11 @@ from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-# Maps room_id -> agent name. Rooms not listed fall back to the generic agent.
-_ROOM_AGENT_REGISTRY: Dict[str, str] = {
-    "master_room": "master_room::room_summary",
-    "dayflow_orchestrator": "dayflow_orchestrator::room_summary",
-}
-_DEFAULT_AGENT = "room_summary"
+# Which summary agent runs for a room is no longer decided here — the room
+# declares it in its own config (ROOM.md policy.chat_compaction.summary_agent).
+# The caller resolves that and passes `summary_agent` in. See
+# room_policy_service.resolve_room_chat_compaction and the trigger in
+# room_session_manager._maybe_trigger_room_summary.
 
 _room_locks: Dict[str, threading.Lock] = {}
 _room_locks_guard = threading.Lock()
@@ -33,10 +32,13 @@ def _get_room_lock(room_id: str) -> threading.Lock:
         return _room_locks[room_id]
 
 
-def maybe_trigger_room_summary(room_id: str) -> bool:
+def maybe_trigger_room_summary(room_id: str, summary_agent: str) -> bool:
     """
-    Fire a background summarization run for `room_id` if one is not already
-    in progress.
+    Fire a background summarization run for `room_id` using `summary_agent`,
+    if one is not already in progress.
+
+    `summary_agent` is the agent the room opted into (room-specific or the
+    generic `room_summary`); the caller reads it from the room's policy.
 
     Returns True if a background thread was started, False if one was already
     running (the trigger is dropped, not queued).
@@ -46,8 +48,11 @@ def maybe_trigger_room_summary(room_id: str) -> bool:
     """
     if not isinstance(room_id, str) or not room_id.strip():
         raise ValueError("maybe_trigger_room_summary requires a non-empty room_id.")
+    if not isinstance(summary_agent, str) or not summary_agent.strip():
+        raise ValueError("maybe_trigger_room_summary requires a non-empty summary_agent.")
 
     room_id = room_id.strip()
+    agent_name = summary_agent.strip()
     lock = _get_room_lock(room_id)
 
     if not lock.acquire(blocking=False):
@@ -59,9 +64,8 @@ def maybe_trigger_room_summary(room_id: str) -> bool:
 
     def _background() -> None:
         try:
-            from app.assistant.maintenance_manager.room_chat_summary import RoomChatSummaryRunner
+            from app.assistant.room_session_manager.services.room_chat_summary import RoomChatSummaryRunner
 
-            agent_name = _ROOM_AGENT_REGISTRY.get(room_id, _DEFAULT_AGENT)
             runner = RoomChatSummaryRunner(room_id=room_id, agent_name=agent_name)
             produced = runner.run()
             logger.debug(

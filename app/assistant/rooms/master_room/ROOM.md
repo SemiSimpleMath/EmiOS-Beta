@@ -1,6 +1,9 @@
 ---
 policy:
   policy_id: room_policy::master_room::v1
+  chat_compaction:
+    enabled: true
+    summary_agent: master_room::room_summary
   manager_name: master_room_manager
   mode_manager_overrides:
     planning_mode: master_room_planning_manager

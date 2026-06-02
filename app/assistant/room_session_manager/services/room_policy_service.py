@@ -83,6 +83,38 @@ def room_policy_allows_unified_log(room_ctx: Dict[str, Any] | None) -> bool:
     return True
 
 
+def resolve_room_chat_compaction(room_ctx: Dict[str, Any] | None) -> tuple[bool, str | None]:
+    """Resolve whether a room opts into async chat-history compaction and which
+    summary agent it uses.
+
+    Per-room and opt-in: a room enables compaction by declaring
+    ``chat_compaction: {enabled: true, summary_agent: "<agent>"}`` in its ROOM.md
+    policy block. ``summary_agent`` may be a room-specific agent
+    (e.g. ``master_room::room_summary``) or the shared generic ``room_summary``.
+
+    Returns ``(enabled, agent)``. Absent/disabled config => ``(False, None)`` and
+    the room is never summarized (this is what keeps transient/ephemeral rooms out).
+    Raises if a room enables compaction without naming an agent — each room must
+    point to its own summarizer rather than inherit a hidden default.
+    """
+    if not isinstance(room_ctx, dict):
+        return False, None
+    policy = room_ctx.get("room_policy")
+    if not isinstance(policy, dict):
+        return False, None
+    cfg = policy.get("chat_compaction")
+    if not isinstance(cfg, dict):
+        return False, None
+    if not bool(cfg.get("enabled", False)):
+        return False, None
+    agent = cfg.get("summary_agent")
+    if not isinstance(agent, str) or not agent.strip():
+        raise ValueError(
+            "room_policy.chat_compaction.enabled is true but summary_agent is missing/empty."
+        )
+    return True, agent.strip()
+
+
 def resolve_room_unified_log_persistence(
         *,
         message_persistence_mode: str,

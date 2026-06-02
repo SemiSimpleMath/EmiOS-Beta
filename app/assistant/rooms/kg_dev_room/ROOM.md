@@ -1,6 +1,9 @@
 ---
 policy:
   policy_id: room_policy::kg_dev_room::v1
+  chat_compaction:
+    enabled: true
+    summary_agent: room_summary
   manager_name: kg_dev_room_manager
   surface: ui
   default_visibility: owner_only

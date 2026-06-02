@@ -625,12 +625,18 @@ class RoomSessionManager:
             response["dry_run"] = True
         return response
 
-    def _maybe_trigger_room_summary(self, *, room_id: str) -> None:
+    def _maybe_trigger_room_summary(self, *, room_id: str, room_ctx: Dict[str, Any] | None) -> None:
         if not isinstance(room_id, str) or not room_id.strip():
             return
         try:
-            from app.assistant.maintenance_manager.room_summary_service import maybe_trigger_room_summary
-            maybe_trigger_room_summary(room_id=room_id)
+            from app.assistant.room_session_manager.services.room_policy_service import resolve_room_chat_compaction
+            enabled, summary_agent = resolve_room_chat_compaction(room_ctx)
+            if not enabled:
+                # Opt-in: a room only summarizes if it declared chat_compaction in
+                # its ROOM.md policy. Unregistered rooms are skipped here.
+                return
+            from app.assistant.room_session_manager.services.room_summary_service import maybe_trigger_room_summary
+            maybe_trigger_room_summary(room_id=room_id, summary_agent=summary_agent)
         except Exception as e:
             logger.error("Failed triggering room summary for room_id=%s: %s", room_id, e)
             logger.debug("room summary trigger exception details", exc_info=True)
@@ -739,7 +745,7 @@ class RoomSessionManager:
         if isinstance(envelope.metadata, dict):
             envelope_mode = str(envelope.metadata.get("room_mode") or "").strip().lower()
         if envelope_mode in ("", "normal"):
-            self._maybe_trigger_room_summary(room_id=envelope.room_id)
+            self._maybe_trigger_room_summary(room_id=envelope.room_id, room_ctx=room_ctx)
         ensure_request_room_metadata(
             blackboard=self._blackboard,
             request_id=envelope.request_id,
