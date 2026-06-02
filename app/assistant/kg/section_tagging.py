@@ -27,6 +27,13 @@ logger = get_logger(__name__)
 # Namespace constants — using strings everywhere is fragile.
 NAMESPACE_CARD = "card"
 NAMESPACE_WIKI = "wiki"
+# Sentinel namespace: marks a node as "the tagger ran and produced no card/wiki
+# tags" (reject / empty result). Distinct from "never processed". backfill_untagged_nodes
+# selects nodes with NO tag row at all, so without a sentinel a rejected node loops
+# through the LLM on every routine run forever. Readers filter by NAMESPACE_CARD/WIKI,
+# so this row is invisible to card/wiki building.
+NAMESPACE_PROCESSED = "_processed"
+PROCESSED_SENTINEL = "none"
 
 
 # ---------------------------------------------------------------------------
@@ -324,6 +331,7 @@ def tag_nodes_by_id(
         "skipped_empty": 0,
         "skipped_low_importance": 0,
         "contact_bypassed": 0,
+        "marked_processed": 0,
         "errors": 0,
         "card_tags_written": 0,
         "wiki_tags_written": 0,
@@ -386,6 +394,8 @@ def tag_nodes_by_id(
                 logger.exception("[section_tagging] tagger raised: %s", exc)
                 continue
 
+            tagged_ids: set[str] = set()        # got >=1 real card/wiki tag this batch
+            gate_skipped_ids: set[str] = set()  # intentionally deferred by importance gate
             for tn in (data.get("results") or []):
                 try:
                     idx = int(tn.get("number"))
@@ -412,6 +422,9 @@ def tag_nodes_by_id(
                                 stats["contact_bypassed"] += 1
                             else:
                                 stats["skipped_low_importance"] += 1
+                                # Defer (don't sentinel) — gate intends to re-tag once
+                                # importance is re-derived. Gate is off by default.
+                                gate_skipped_ids.add(node.id)
                                 continue
 
                     n_card = replace_tags(
@@ -425,9 +438,25 @@ def tag_nodes_by_id(
                     stats["card_tags_written"] += n_card
                     stats["wiki_tags_written"] += n_wiki
                     stats["tagged"] += 1
+                    if n_card or n_wiki:
+                        tagged_ids.add(node.id)
                 except Exception as exc:
                     stats["errors"] += 1
                     logger.exception("[section_tagging] per-node persist failed: %s", exc)
+
+            # Treadmill fix: any node we sent this batch that got NO real tag — a
+            # reject/empty LLM result, or one the LLM omitted from `results` — and
+            # was not gate-deferred, gets a sentinel row. backfill_untagged_nodes
+            # selects nodes with no tag row, so without this rejected nodes are
+            # re-sent to the LLM on every 30-min routine run forever.
+            for node in batch:
+                if node.id in tagged_ids or node.id in gate_skipped_ids:
+                    continue
+                replace_tags(
+                    session, node.id, NAMESPACE_PROCESSED,
+                    [PROCESSED_SENTINEL], tagger_version=tagger_version,
+                )
+                stats["marked_processed"] += 1
             session.commit()
             logger.info(
                 "[section_tagging] batch %d/%d done — tagged so far: %d",
@@ -438,10 +467,11 @@ def tag_nodes_by_id(
         session.close()
 
     logger.info(
-        "[section_tagging] tagged=%d skipped_type=%d skipped_empty=%d errors=%d "
-        "card_tags=%d wiki_tags=%d",
-        stats["tagged"], stats["skipped_type"], stats["skipped_empty"],
-        stats["errors"], stats["card_tags_written"], stats["wiki_tags_written"],
+        "[section_tagging] tagged=%d marked_processed=%d skipped_type=%d skipped_empty=%d "
+        "errors=%d card_tags=%d wiki_tags=%d",
+        stats["tagged"], stats["marked_processed"], stats["skipped_type"],
+        stats["skipped_empty"], stats["errors"], stats["card_tags_written"],
+        stats["wiki_tags_written"],
     )
     return stats
 

@@ -2,9 +2,11 @@ name: sleep_analyzer
 class_name: Agent
 llm_params:
   llm_provider: "openai"
-  # Vision-capable. Same model the shared::vision_image_describe agent uses.
-  engine: "gpt-5.4-mini"
-  model_tier: "powerful"
+  # Vision-capable, cheapest OpenAI vision tier. gpt-5.4-mini was ~6x pricier on
+  # output for the same asleep/awake scene classification. Snapshot is downscaled
+  # to 768px upstream to keep image input tokens low.
+  engine: "gpt-5.4-nano"
+  model_tier: "mini"
 
 allowed_tools: []
 except_tools: []

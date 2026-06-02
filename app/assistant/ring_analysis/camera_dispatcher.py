@@ -35,6 +35,12 @@ logger = get_logger(__name__)
 # Window for "previous frame" lookup used by sleep_analyzer-like agents.
 _MAX_PAIR_GAP_SECONDS = 10 * 60
 
+# Max dimension (px) of the frame handed to vision analyzers. The stored JPEG and
+# any minted pod stay full-resolution; only the analysis copy is shrunk. 1080p
+# high-detail vision input costs ~1100 tokens/image; 768px ~425 — a large cut for
+# scene classification (asleep/awake, motion category), which needs no fine detail.
+_ANALYZER_MAX_DIM = 768
+
 
 # ---------------------------------------------------------------------------
 # Core dispatch — invoked by the camera_dispatch routine (event-triggered)
@@ -192,12 +198,41 @@ def _date_subfolder_for(captured_at_utc: str) -> str:
 # Analyzer input
 # ---------------------------------------------------------------------------
 
+def _downscaled_for_analysis(path: Path) -> Path:
+    """Return a <= _ANALYZER_MAX_DIM px copy of `path` for vision analysis.
+
+    Writes into an `_analysis/` subfolder so it never appears to
+    `_find_previous_frame` (which scans frame folders non-recursively). The
+    original full-res frame is left untouched for pod minting. Idempotent —
+    reuses an existing fresh copy. Fail-safe: on any error (Pillow missing,
+    decode failure) returns the original path so analysis still runs.
+    """
+    try:
+        from PIL import Image
+        cache_dir = path.parent / "_analysis"
+        out = cache_dir / f"{path.stem}.an{_ANALYZER_MAX_DIM}.jpg"
+        if out.exists() and out.stat().st_mtime >= path.stat().st_mtime:
+            return out
+        cache_dir.mkdir(exist_ok=True)
+        with Image.open(path) as im:
+            im = im.convert("RGB")
+            im.thumbnail((_ANALYZER_MAX_DIM, _ANALYZER_MAX_DIM))
+            im.save(out, "JPEG", quality=85)
+        return out
+    except Exception as exc:
+        logger.warning(
+            "[camera_dispatcher] analysis downscale failed for %s (%s) — using full-res",
+            path, exc,
+        )
+        return path
+
+
 def _build_agent_input(
     camera: Dict[str, Any], jpeg: Path, captured_at_utc: str,
 ) -> Dict[str, Any]:
     agent_input: Dict[str, Any] = {
         "date_time": get_local_time_str(),
-        "image": str(jpeg),
+        "image": str(_downscaled_for_analysis(jpeg)),
         "camera_id": camera.get("id", ""),
         "captured_at_utc": captured_at_utc,
     }
@@ -206,7 +241,7 @@ def _build_agent_input(
     # We surface it for every analyzer; analyzers that don't reference it
     # in their prompt simply ignore it.
     previous = _find_previous_frame(camera, jpeg)
-    agent_input["previous_image"] = str(previous) if previous else ""
+    agent_input["previous_image"] = str(_downscaled_for_analysis(previous)) if previous else ""
     agent_input["previous_image_label"] = (
         previous.name if previous else "(none — first frame in window)"
     )

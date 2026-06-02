@@ -9,6 +9,7 @@ This manager builds a location timeline based on:
 
 Other agents can query: "Where will user be at X time?"
 """
+import hashlib
 import json
 import os
 from datetime import datetime, timezone, timedelta
@@ -640,20 +641,57 @@ class LocationManager:
             "reasoning": "No calendar events with locations"
         }]
     
-    def build_location_timeline(self, days_ahead: int = 7) -> List[Dict]:
+    def _calendar_signature(self, events: List[Dict]) -> str:
+        """Stable hash of the calendar inputs that determine the inferred timeline.
+
+        The agent's output is a pure function of these fields, so an unchanged
+        signature means a re-inference would reproduce the same timeline.
+        """
+        parts = [
+            f"{e.get('start','')}|{e.get('end','')}|{e.get('summary','')}|{e.get('location','')}"
+            for e in events
+        ]
+        return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
+
+    def build_location_timeline(self, days_ahead: int = 7, force: bool = False) -> List[Dict]:
         """
         Build complete location timeline.
-        
+
         1. Get ALL calendar events
         2. Send to agent to infer locations based on event names + guidelines
         3. Agent returns complete timeline
+
+        Cost gate: the LLM inference (~12K output tokens/call on gpt-5.4-mini)
+        only runs when the calendar actually changed, or once/day as a floor.
+        Previously this fired on every location_refresh poll (~every 15 min),
+        re-deriving an unchanged 7-day timeline and burning ~$3/day. Current
+        location stays fresh regardless — update_current_location() derives it
+        from the cached timeline + clock with no LLM call.
         """
         logger.info(f"📍 Building location timeline for next {days_ahead} days...")
-        
+
         # Step 1: Get ALL calendar events (not just ones with locations)
         all_calendar_events = self._get_calendar_events(days_ahead)
         logger.info("  Found %d total calendar events", len(all_calendar_events))
-        
+
+        # Cost gate — skip the LLM when calendar is unchanged AND last inference < 24h.
+        signature = self._calendar_signature(all_calendar_events)
+        existing = self.location_data.get("location_timeline") or []
+        last_sig = self.location_data.get("_inference_signature")
+        last_at = self.location_data.get("_inference_at_utc")
+        stale = True
+        if last_at:
+            try:
+                age_h = (datetime.now(timezone.utc) - _parse_datetime(last_at)).total_seconds() / 3600.0
+                stale = age_h >= 24.0
+            except Exception:
+                stale = True
+        if not force and existing and signature == last_sig and not stale:
+            logger.info(
+                "📍 Calendar unchanged and last inference <24h ago — skipping LLM rebuild (cost gate)."
+            )
+            return existing
+
         # Step 2: Send ALL events to agent - it will infer locations based on:
         #   - Event names (e.g., "Sam's drama camp" → Lake Forest)
         #   - Guidelines (work from home, drop-off/pick-up patterns)
@@ -661,14 +699,16 @@ class LocationManager:
         logger.debug("Calling agent to build location timeline...")
         all_entries = self._infer_gaps_with_agent(all_calendar_events, days_ahead)
         logger.info(f"  Agent returned {len(all_entries)} timeline entries")
-        
+
         # Sort by start time
         all_entries.sort(key=lambda x: x.get("start", ""))
-        
+
         # Update storage
         self.location_data["location_timeline"] = all_entries
+        self.location_data["_inference_signature"] = signature
+        self.location_data["_inference_at_utc"] = datetime.now(timezone.utc).isoformat()
         self._save_location()
-        
+
         logger.info(f"📍 Built timeline with {len(all_entries)} total entries")
         return all_entries
     

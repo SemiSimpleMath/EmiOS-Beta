@@ -231,6 +231,11 @@ def _extract_usage_counts(usage: Any) -> tuple[int, int, int]:
         or getattr(usage, "candidates_token_count", None)
         or 0
     )
+    # Gemini thinking models bill reasoning as output but report it in a SEPARATE
+    # field (thoughts_token_count), not in candidates_token_count. Without this we
+    # silently undercount output on every gemini-3-flash-preview call. OpenAI nests
+    # reasoning inside output_tokens already, so getattr→0 there (no double count).
+    output_tokens = (output_tokens or 0) + (getattr(usage, "thoughts_token_count", 0) or 0)
     # Cached tokens: OpenAI nests them; Anthropic + Gemini surface a flat field.
     cached = 0
     details = getattr(usage, "input_tokens_details", None)
