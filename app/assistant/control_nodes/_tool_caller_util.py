@@ -287,7 +287,7 @@ def _persist_tool_result(
     """
     try:
         from datetime import datetime, timezone
-        from app.assistant.maintenance_manager.save_to_unified_db import save_to_unified_db
+        from app.assistant.message_manager.save_to_unified_db import save_to_unified_db
         import json
 
         now_utc = datetime.now(timezone.utc)

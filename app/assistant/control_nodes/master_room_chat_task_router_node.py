@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from app.assistant.control_nodes.chat_task_router_node import ChatTaskRouterNode
 from app.assistant.ServiceLocator.service_locator import DI
-from app.assistant.maintenance_manager.save_to_unified_db import save_to_unified_db
+from app.assistant.message_manager.save_to_unified_db import save_to_unified_db
 from app.assistant.utils.identity_names import get_required_assistant_name
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import Message as PersistMessage

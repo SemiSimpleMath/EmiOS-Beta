@@ -33,7 +33,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from app.assistant.ServiceLocator.service_locator import DI
-from app.assistant.maintenance_manager.save_to_unified_db import save_to_unified_db
+from app.assistant.message_manager.save_to_unified_db import save_to_unified_db
 from app.assistant.room_session_manager.services.room_history_builder import RoomHistoryBuilder
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.message_visibility_policy import _NON_NORMAL_ROOM_MODES

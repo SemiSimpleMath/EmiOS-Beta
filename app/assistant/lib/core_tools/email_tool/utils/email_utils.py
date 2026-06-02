@@ -17,7 +17,7 @@ from app.assistant.ServiceLocator.service_locator import DI
 from sqlalchemy import select
 
 from app.assistant.database.db_handler import UnifiedLog2026
-from app.assistant.maintenance_manager.save_to_unified_db import save_to_unified_db
+from app.assistant.message_manager.save_to_unified_db import save_to_unified_db
 from app.assistant.utils.logging_config import get_logger
 from app.models.base import get_session
 

@@ -94,7 +94,7 @@ def process_request():
 def handle_memo_mode(text, socket_id, timer_id):
     """Memo mode: Direct database storage, no agent processing"""
     try:
-        from app.assistant.maintenance_manager.save_to_unified_db import save_to_unified_db
+        from app.assistant.message_manager.save_to_unified_db import save_to_unified_db
         from datetime import timezone
 
         payload = {

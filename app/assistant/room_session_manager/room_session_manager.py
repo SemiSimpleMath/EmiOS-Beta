@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
 from typing import Any, Callable, Dict
 
-from app.assistant.maintenance_manager.save_to_unified_db import save_to_unified_db
+from app.assistant.message_manager.save_to_unified_db import save_to_unified_db
 from app.assistant.room_session_manager.contracts import InboundEnvelope
 from app.assistant.room_session_manager.services import (
     PostRoomService,

@@ -650,7 +650,7 @@ class ConversationStarterStep(BaseStep):
                                     },
                                 )
                             )
-                            from app.assistant.maintenance_manager.save_to_unified_db import save_proactive_chat_message
+                            from app.assistant.message_manager.save_to_unified_db import save_proactive_chat_message
                             save_proactive_chat_message(
                                 content=first_question,
                                 sender=_assistant_name,
@@ -738,7 +738,7 @@ class ConversationStarterStep(BaseStep):
                     },
                 )
             )
-            from app.assistant.maintenance_manager.save_to_unified_db import save_proactive_chat_message
+            from app.assistant.message_manager.save_to_unified_db import save_proactive_chat_message
             save_proactive_chat_message(
                 content=text,
                 sender=_assistant_name,
