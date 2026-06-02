@@ -150,6 +150,15 @@ its frontmatter `metadata`. Two trigger fields, AND-conjoined:
 
 The governing rules (`SkillInjector`, `app/skill_registry/`):
 
+0. **The gate is UNIVERSAL.** `requires_scope` is checked on EVERY injection path —
+   static config binding (5.1), keyword auto-inject (5.2/5.3), caller-supplied
+   (`skills_input`), and scope-stamped (`always_inject`). No path bypasses it. A skill
+   pinned in an agent's static `skills:` list still only injects when its
+   `requires_scope` matches the live scope (e.g. a persona skill statically listed by
+   `emi_team::planner` injects only when `acting_as=self`, never for `user`). The
+   single check is `SkillInjector.skill_gate_passes`; the resolver
+   (`context_injector._resolve_skills_with_provenance`) calls it on every admission.
+   A skill with no `requires_scope` passes trivially.
 1. **Matching = `(keyword hit, if any) AND (every requires_scope field matches)`.**
 2. **`requires_scope` fields are an explicit identity/context allowlist:**
    `acting_as`, `surface`, `room_id`, `room_context_id`, `visibility`.

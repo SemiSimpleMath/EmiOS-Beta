@@ -495,7 +495,19 @@ class ContextInjector:
         resolved: Dict[str, str] = {}
         static_names: set[str] = set()
 
-        # 1. Static skills from agent config.
+        # The skill GATE is universal: every path below (static, keyword, caller-
+        # supplied, scope-stamped) must check that a skill's requires_scope matches
+        # the live scope before admitting it. A skill with no requires_scope passes
+        # trivially. Single source of truth: SkillInjector.skill_gate_passes.
+        scope_ctx = agent.blackboard.get_state_value("scope_context", None)
+        _gate_injector = getattr(DI, "skill_injector", None)
+
+        def _passes_gate(skill) -> bool:
+            if _gate_injector is None:
+                return True  # no injector -> can't evaluate; don't block (logged once below)
+            return _gate_injector.skill_gate_passes(skill, scope=scope_ctx)
+
+        # 1. Static skills from agent config — gated like every other path.
         for name in (agent.config.get("skills", []) or []):
             if not isinstance(name, str) or not name.strip():
                 continue
@@ -503,6 +515,12 @@ class ContextInjector:
             if skill is None:
                 logger.warning(
                     "[%s] declared skill %r not registered — dropped", agent.name, name,
+                )
+                continue
+            if not _passes_gate(skill):
+                logger.debug(
+                    "[%s] static skill %r blocked by requires_scope gate (scope mismatch)",
+                    agent.name, skill.name,
                 )
                 continue
             resolved[skill.name] = skill.body
@@ -518,7 +536,6 @@ class ContextInjector:
             else:
                 task = str(agent.blackboard.get_state_value("task", "") or "")
                 incoming = str(agent.blackboard.get_state_value("incoming_message", "") or "")
-                scope_ctx = agent.blackboard.get_state_value("scope_context", None)
                 principal = None
                 if scope_ctx is not None:
                     principal = (
@@ -566,6 +583,12 @@ class ContextInjector:
                         agent.name, name,
                     )
                     continue
+                if not _passes_gate(skill):
+                    logger.debug(
+                        "[%s] caller-supplied skill %r blocked by requires_scope gate",
+                        agent.name, name,
+                    )
+                    continue
                 resolved[name] = skill.body
                 logger.debug("[%s] caller-supplied skill=%s", agent.name, name)
 
@@ -575,12 +598,14 @@ class ContextInjector:
         #    because ScopeContext propagates — closes the gap where a
         #    keyword-triggered skill on the user's first message would be
         #    lost in downstream planner / tool-args / writer agents.
-        scope_context = agent.blackboard.get_state_value("scope_context", None)
+        #    (These names were already gate-matched when always_inject was built;
+        #    re-checking here keeps the gate universal even if a list was
+        #    hand-stamped without going through discovery.)
         scope_skills_policy = None
-        if isinstance(scope_context, dict):
-            scope_skills_policy = scope_context.get("skills")
-        elif scope_context is not None:
-            scope_skills_policy = getattr(scope_context, "skills", None)
+        if isinstance(scope_ctx, dict):
+            scope_skills_policy = scope_ctx.get("skills")
+        elif scope_ctx is not None:
+            scope_skills_policy = getattr(scope_ctx, "skills", None)
         if scope_skills_policy is not None:
             def _policy_get(field: str):
                 if isinstance(scope_skills_policy, dict):
@@ -596,6 +621,12 @@ class ContextInjector:
                 if skill is None:
                     logger.warning(
                         "[%s] scope-stamped skill %r not registered — dropped",
+                        agent.name, name,
+                    )
+                    continue
+                if not _passes_gate(skill):
+                    logger.debug(
+                        "[%s] scope-stamped skill %r blocked by requires_scope gate",
                         agent.name, name,
                     )
                     continue

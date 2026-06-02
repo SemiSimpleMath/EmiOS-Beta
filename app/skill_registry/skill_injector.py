@@ -123,6 +123,26 @@ class SkillInjector:
                 out.append(header.name)
         return out
 
+    def skill_gate_passes(self, skill, *, scope: object = None, scope_acting_as: Optional[str] = None) -> bool:
+        """THE universal gate check: may this skill enter this scope?
+
+        Every injection path — static config binding, keyword auto-inject,
+        caller-supplied, scope-stamped, discoverable — MUST consult this before
+        admitting a skill. A skill's requires_scope (from auto_inject_when) is the
+        lock; the live scope is the key. A skill with no requires_scope passes
+        trivially (generic skills are unrestricted). Canonicalization is per-field
+        (acting_as via resolve_principal), so a 'self'-gated skill matches any
+        install's assistant name.
+
+        `skill` may be a Skill or SkillHeader (anything with .auto_inject_when).
+        """
+        trigger = getattr(skill, "auto_inject_when", None)
+        req = getattr(trigger, "requires_scope", None) if trigger is not None else None
+        if not req:
+            return True
+        live = self._scope_identity(scope=scope, scope_acting_as=scope_acting_as)
+        return self._scope_gate_passes(req, live)
+
     # ── requires_scope gate ────────────────────────────────────────────
     _GATE_FIELDS = ("acting_as", "surface", "room_id", "room_context_id", "visibility")
 
