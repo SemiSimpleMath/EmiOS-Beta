@@ -4,7 +4,18 @@ description: Slack uses its own mrkdwn dialect, not GitHub-flavored Markdown. Us
 license: Apache-2.0
 metadata:
   author: jukka
-  version: "1.0"
+  version: "1.1"
+  auto_inject_when:
+    # Surface-gated: only injects when the run's scope.surface is slack — the
+    # mechanism enforces "only on Slack" (was prose-only before). Keywords are
+    # broad because formatting applies to any outbound Slack response.
+    requires_scope:
+      surface: slack
+    task_keywords:
+      - "slack"
+      - "respond"
+      - "reply"
+      - "message"
 ---
 
 # Slack formatting

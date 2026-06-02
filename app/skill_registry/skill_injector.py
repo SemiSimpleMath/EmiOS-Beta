@@ -37,18 +37,24 @@ class SkillInjector:
         task: str = "",
         incoming_message: str = "",
         scope_acting_as: Optional[str] = None,
+        scope: object = None,
     ) -> List[str]:
         """Return names of skills whose triggers match the given context.
 
-        Two conditions per skill (AND-conjuncted when both present):
+        A skill matches iff (AND-conjunction):
+          1. ``auto_inject_when.task_keywords`` — any substring appears in
+             ``task + incoming_message`` (case-insensitive); AND
+          2. ``auto_inject_when.requires_scope`` — EVERY listed field matches
+             the live scope. "Scope is the key, the skill carries the lock."
+             Allowed fields: acting_as, surface, room_id, room_context_id,
+             visibility (identity/context only — permission fields are rejected
+             at parse time). Each field is matched via its own canonicalizer
+             (acting_as via resolve_principal).
 
-          1. ``auto_inject_when.task_keywords`` — substring match against
-             ``task + incoming_message`` (case-insensitive).
-          2. ``auto_inject_when.requires_scope_acting_as`` — if set, the
-             scope's principal must equal this value. Used to gate
-             persona-specific skills (emi-bluesky-voice, emi-values, etc.)
-             so they don't leak into other principals' contexts even when
-             their keyword fires.
+        ``scope`` is the live ScopeContext (object or dict); the gate reads its
+        identity fields. ``scope_acting_as`` is kept for back-compat / callers
+        that only have the principal — it seeds the acting_as field when ``scope``
+        is absent.
 
         Skills with no ``auto_inject_when`` block are static-bound only and
         are skipped here.
@@ -57,10 +63,7 @@ class SkillInjector:
         if not search_text.strip():
             return []
 
-        # Canonicalize the runtime principal so the gate is name-agnostic:
-        # acting_as="emi"/"self"/"me" all compare equal to a skill gated on "self".
-        from app.assistant.utils.identity_names import resolve_principal
-        principal = resolve_principal(scope_acting_as)
+        live = self._scope_identity(scope=scope, scope_acting_as=scope_acting_as)
         matches: List[str] = []
         for header in self._registry.headers():
             trigger = header.auto_inject_when
@@ -78,15 +81,12 @@ class SkillInjector:
                     break
             if not keyword_hit:
                 continue
-            # Principal gate (AND-conjunction). Canonicalize the gate too, so a
-            # skill may declare requires_scope_acting_as: self|emi|<name> and all
-            # resolve to the same canonical principal.
-            gate = trigger.requires_scope_acting_as
-            if gate is not None and resolve_principal(gate) != principal:
+            # Generic requires_scope gate (AND over every required field).
+            if not self._scope_gate_passes(trigger.requires_scope, live):
                 logger.debug(
-                    "[skill_injector] skill=%s matched keyword=%r but principal gate failed "
-                    "(required=%r, current=%r)",
-                    header.name, matched_kw, gate, principal or "(none)",
+                    "[skill_injector] skill=%s matched keyword=%r but requires_scope gate "
+                    "failed (required=%r, live=%r)",
+                    header.name, matched_kw, dict(trigger.requires_scope), live,
                 )
                 continue
             matches.append(header.name)
@@ -95,3 +95,50 @@ class SkillInjector:
                 header.name, matched_kw,
             )
         return matches
+
+    # ── requires_scope gate ────────────────────────────────────────────
+    _GATE_FIELDS = ("acting_as", "surface", "room_id", "room_context_id", "visibility")
+
+    @staticmethod
+    def _scope_identity(*, scope: object, scope_acting_as: Optional[str]) -> dict:
+        """Extract the gateable identity fields from the live scope (object or
+        dict). Falls back to scope_acting_as for the acting_as field when no
+        scope is supplied (back-compat for callers that only have the principal)."""
+        live: dict = {}
+        if scope is not None:
+            for fld in SkillInjector._GATE_FIELDS:
+                if isinstance(scope, dict):
+                    v = scope.get(fld)
+                else:
+                    v = getattr(scope, fld, None)
+                if v is not None and str(v).strip():
+                    live[fld] = str(v).strip()
+        if "acting_as" not in live and scope_acting_as is not None and str(scope_acting_as).strip():
+            live["acting_as"] = str(scope_acting_as).strip()
+        return live
+
+    @staticmethod
+    def _canon_field(field: str, value: str) -> str:
+        """Canonicalize a scope field value for gate comparison (per-field
+        resolver). Both the skill's required value and the live value go through
+        this, so a skill gating on acting_as=self matches any install's name."""
+        v = str(value or "").strip().lower()
+        if field == "acting_as":
+            from app.assistant.utils.identity_names import resolve_principal
+            return resolve_principal(v)
+        # surface/room_id/room_context_id/visibility: lowercased exact for now.
+        # (surface normalizer can be added here when surface aliases appear.)
+        return v
+
+    def _scope_gate_passes(self, requires_scope: dict, live: dict) -> bool:
+        """True iff EVERY required field matches the live scope (canonicalized).
+        Empty requires_scope → always passes (no gate)."""
+        if not requires_scope:
+            return True
+        for field, required in requires_scope.items():
+            live_val = live.get(field)
+            if live_val is None:
+                return False  # gated field absent from live scope → no match
+            if self._canon_field(field, required) != self._canon_field(field, live_val):
+                return False
+        return True

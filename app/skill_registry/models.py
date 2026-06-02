@@ -37,6 +37,31 @@ class AutoInjectTrigger(BaseModel):
             "incoming_message (case-insensitive), the skill auto-injects."
         ),
     )
+    requires_scope_acting_as: Optional[str] = Field(
+        default=None,
+        description=(
+            "AND-conjunction gate. When set, keyword match is only sufficient "
+            "if scope.acting_as equals this principal name. Use for persona-"
+            "specific skills (emi-bluesky-voice, emi-values, etc.) that must "
+            "not leak into other principals' planner contexts even when the "
+            "keyword would otherwise match. Leave None for principal-agnostic "
+            "skills like the technical bluesky API recipe. "
+            "SUGAR for requires_scope={'acting_as': <value>}."
+        ),
+    )
+    requires_scope: Dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Generic scope gate (AND-conjunction): the skill injects only when "
+            "EVERY listed field matches the live ScopeContext. 'Scope is the key, "
+            "the skill carries the lock.' Allowed fields (identity/context bucket "
+            "only): acting_as, surface, room_id, room_context_id, visibility. "
+            "Permission fields (tools/pods/approval/writes/...) are FORBIDDEN — "
+            "skills gate relevance, never authorization. Each field is matched "
+            "via its own canonicalizer (acting_as via resolve_principal, etc.). "
+            "requires_scope_acting_as folds into this under the 'acting_as' key."
+        ),
+    )
 
 
 class SkillHeader(BaseModel):

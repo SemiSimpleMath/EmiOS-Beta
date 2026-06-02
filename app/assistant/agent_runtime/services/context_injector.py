@@ -521,11 +521,15 @@ class ContextInjector:
                 scope_ctx = agent.blackboard.get_state_value("scope_context", None)
                 principal = None
                 if scope_ctx is not None:
-                    principal = getattr(scope_ctx, "acting_as", None)
+                    principal = (
+                        scope_ctx.get("acting_as") if isinstance(scope_ctx, dict)
+                        else getattr(scope_ctx, "acting_as", None)
+                    )
                 for name in injector.matching_skill_names(
                     task=task,
                     incoming_message=incoming,
                     scope_acting_as=principal,
+                    scope=scope_ctx,
                 ):
                     if name in resolved:
                         continue

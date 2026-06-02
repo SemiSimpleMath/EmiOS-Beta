@@ -41,6 +41,14 @@ _NAME_MAX = 64
 _DESCRIPTION_MAX = 1024
 _COMPATIBILITY_MAX = 500
 
+# requires_scope may gate ONLY on identity/context ScopeContext fields — never the
+# permission bucket (tools/pods/approval/writes/resources/entities/cards). Gating a
+# skill on permission would make skills a backdoor authorization lever; skills gate
+# RELEVANCE, not access. Explicit + reviewable; widen only deliberately.
+_REQUIRES_SCOPE_ALLOWED_FIELDS = frozenset(
+    {"acting_as", "surface", "room_id", "room_context_id", "visibility"}
+)
+
 
 def parse_skill_md(path: Path) -> Tuple[Optional[Skill], ValidationResult]:
     """Parse and validate one SKILL.md file.
@@ -144,7 +152,45 @@ def parse_skill_md(path: Path) -> Tuple[Optional[Skill], ValidationResult]:
                     "metadata.auto_inject_when.task_keywords must be a list of non-empty strings."
                 )
             else:
-                auto_inject = AutoInjectTrigger(task_keywords=[str(k).lower() for k in (kw or [])])
+                principal_gate = raw_auto.get("requires_scope_acting_as")
+                if principal_gate is not None and not (isinstance(principal_gate, str) and principal_gate.strip()):
+                    result.errors.append(
+                        "metadata.auto_inject_when.requires_scope_acting_as must be a non-empty string when provided."
+                    )
+                # Generic requires_scope gate. Identity/context bucket ONLY —
+                # permission fields are forbidden (skills gate relevance, never
+                # authorization). Fail-loud on any non-allowlisted field.
+                req_scope: dict = {}
+                raw_req = raw_auto.get("requires_scope")
+                if raw_req is not None and not isinstance(raw_req, dict):
+                    result.errors.append(
+                        "metadata.auto_inject_when.requires_scope must be a mapping when provided."
+                    )
+                elif isinstance(raw_req, dict):
+                    for fld, val in raw_req.items():
+                        if fld not in _REQUIRES_SCOPE_ALLOWED_FIELDS:
+                            result.errors.append(
+                                f"metadata.auto_inject_when.requires_scope: field {fld!r} is not "
+                                f"allowed. Allowed (identity/context only): "
+                                f"{sorted(_REQUIRES_SCOPE_ALLOWED_FIELDS)}. Permission/authority "
+                                f"fields are forbidden — skills gate relevance, not authorization."
+                            )
+                            continue
+                        if not (isinstance(val, str) and val.strip()):
+                            result.errors.append(
+                                f"metadata.auto_inject_when.requires_scope.{fld} must be a non-empty string."
+                            )
+                            continue
+                        req_scope[fld] = val.strip().lower()
+                # requires_scope_acting_as is sugar for requires_scope.acting_as.
+                if principal_gate and isinstance(principal_gate, str) and principal_gate.strip():
+                    req_scope.setdefault("acting_as", principal_gate.strip().lower())
+                if not result.errors:
+                    auto_inject = AutoInjectTrigger(
+                        task_keywords=[str(k).lower() for k in (kw or [])],
+                        requires_scope_acting_as=(str(principal_gate).strip().lower() if principal_gate else None),
+                        requires_scope=req_scope,
+                    )
 
     # Body — empty warns but does not block
     if not body.strip():
