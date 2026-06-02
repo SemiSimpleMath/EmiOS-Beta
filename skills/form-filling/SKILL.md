@@ -134,8 +134,8 @@ Steps:
    - `ref=e4` label="Date of birth" (date input)
    - `ref=e5` "Submit" (button)
 3. Map:
-   - e1: `browser_type(ref=e1, text="Jukka Virtanen")`
-   - e2: `browser_type(ref=e2, text="semisimplemath@gmail.com")`
+   - e1: `browser_type(ref=e1, text="Jane Doe")`
+   - e2: `browser_type(ref=e2, text="name@example.com")`
    - e3: `pod_search(label="SSN")` → `pod_id="datapod:identity.ssn:..."`
          → `web_type_secret(ref=e3, pod_id=..., projection="full")`
          The result says "typed_length: 11" — you never saw "123-45-6789".

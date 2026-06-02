@@ -61,9 +61,9 @@ http_request:
 Response you'll see (the JWTs are replaced with pod-refs; the rest is verbatim):
 ```json
 {
-  "did": "did:plc:o4gn7k7srpqbpdo4xv6qomb2",
-  "didDoc": {"service": [{"serviceEndpoint": "https://stropharia.us-west.host.bsky.network"}, ...]},
-  "handle": "openpodbayemi.bsky.social",
+  "did": "did:plc:example0000000000000000",
+  "didDoc": {"service": [{"serviceEndpoint": "https://example.us-west.host.bsky.network"}, ...]},
+  "handle": "your-handle.bsky.social",
   "accessJwt": "datapod:auth.session:<uuid-a>/full",
   "refreshJwt": "datapod:auth.session:<uuid-b>/full",
   "active": true
