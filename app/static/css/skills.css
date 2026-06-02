@@ -290,3 +290,35 @@ code {
 }
 .btn.primary:hover { background: #6c5cdf; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Social <assistant> editor (skills_social.html) ───────────────────── */
+.skill-platform-status { margin: 16px 0; }
+.skill-platform {
+    padding: 12px 16px;
+    border-radius: 10px;
+    border: 1px solid var(--skills-border);
+    background: var(--skills-card);
+    color: var(--skills-muted);
+    font-size: 0.92rem;
+}
+.skill-platform.ok { border-color: var(--skills-good); color: var(--skills-good); }
+.skill-platform.off { border-color: var(--skills-border); }
+.skill-platform a { color: #c0b8ff; }
+
+.skill-social-editors { display: flex; flex-direction: column; gap: 20px; }
+.skill-social-row {
+    background: var(--skills-card);
+    border: 1px solid var(--skills-border);
+    border-radius: 12px;
+    padding: 16px 18px;
+}
+.skill-social-head h2 {
+    margin: 0 0 4px;
+    font-size: 1.05rem;
+    color: var(--skills-text);
+}
+.skill-social-head h2 i { color: var(--skills-accent); margin-right: 8px; }
+.skill-social-hint { margin: 0 0 12px; color: var(--skills-muted); font-size: 0.88rem; }
+.skill-social-row .skill-textarea { min-height: 180px; }
+.skill-loading { color: var(--skills-muted); padding: 12px 0; }
+.skill-loading.bad { color: var(--skills-bad); }

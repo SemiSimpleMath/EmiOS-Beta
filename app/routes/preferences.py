@@ -1067,6 +1067,126 @@ def skills_personal_admin_page():
     return render_template('skills_personal_admin.html')
 
 
+# ---------------------------------------------------------------------------
+# Social <assistant> — persona skills that gate on acting_as=self. Unlike the
+# flat-file editors above, these are real SKILL.md files (frontmatter + body)
+# under skills/private/<id>/ (gitignored, per-user). The editor edits only the
+# BODY; frontmatter (the principal gate + keywords) is preserved on write.
+# Each platform is "enabled" iff its account is registered (resource_emi_accounts).
+# ---------------------------------------------------------------------------
+
+# id -> the SKILL.md path under the skills tree. Strict allowlist (never an
+# arbitrary path from a request). These live in skills/private/ (gitignored).
+_SOCIAL_SKILL_DIRS = {
+    "voice":       "emi-bluesky-voice",
+    "interests":   "emi-bluesky-interests",
+    "engagement":  "emi-bluesky-engagement",
+    "safety":      "emi-bluesky-safety",
+}
+
+
+def _social_skill_md_path(skill_key: str) -> Path:
+    sub = _SOCIAL_SKILL_DIRS.get(skill_key)
+    if not sub:
+        raise ValueError(f"unknown social skill: {skill_key!r}")
+    return Path(get_project_root()) / "skills" / "private" / sub / "SKILL.md"
+
+
+@preferences_bp.route('/skills/social', methods=['GET'])
+def skills_social_page():
+    """Social-presence editor for the assistant-as-persona skills."""
+    return render_template('skills_social.html')
+
+
+@preferences_bp.route('/api/skills/social', methods=['GET'])
+def skills_social_list_api():
+    """List the persona social skills + whether the platform is account-linked.
+
+    Returns each editable skill's metadata (name/description/exists) for the
+    page to render the editor list. Body is fetched per-skill via the GET below.
+    """
+    out = []
+    for key, sub in _SOCIAL_SKILL_DIRS.items():
+        path = _social_skill_md_path(key)
+        desc = ""
+        exists = path.exists()
+        if exists:
+            try:
+                import frontmatter as _fm
+                post = _fm.loads(path.read_text(encoding="utf-8"))
+                desc = str(post.get("description") or "")
+            except Exception:
+                pass
+        out.append({"key": key, "skill_dir": sub, "description": desc, "exists": exists})
+
+    # Platform enablement: is a Bluesky account registered for the assistant?
+    bluesky_linked = False
+    try:
+        from app.assistant.emi_accounts import get_emi_account_by_platform
+        acct = get_emi_account_by_platform("bluesky")
+        bluesky_linked = bool(acct) and str((acct or {}).get("status") or "").strip().lower() == "configured"
+    except Exception:
+        pass
+
+    return jsonify({"skills": out, "platforms": {"bluesky": {"linked": bluesky_linked}}})
+
+
+@preferences_bp.route('/api/skills/social/<skill_key>', methods=['GET'])
+def skills_social_get_api(skill_key: str):
+    """Read just the BODY (markdown below the frontmatter) of a persona skill."""
+    try:
+        path = _social_skill_md_path(skill_key)
+    except ValueError:
+        return jsonify({"error": "unknown skill"}), 404
+    if not path.exists():
+        return jsonify({"key": skill_key, "body": "", "exists": False})
+    try:
+        import frontmatter as _fm
+        post = _fm.loads(path.read_text(encoding="utf-8"))
+        return jsonify({"key": skill_key, "body": post.content or "", "exists": True})
+    except Exception as e:
+        logger.error("Failed reading social skill %s: %s", skill_key, e)
+        return jsonify({"error": "read failed"}), 500
+
+
+@preferences_bp.route('/api/skills/social/<skill_key>', methods=['PUT'])
+def skills_social_put_api(skill_key: str):
+    """Write ONLY the body of a persona skill; preserve its frontmatter (the
+    principal gate + keywords stay intact)."""
+    try:
+        path = _social_skill_md_path(skill_key)
+    except ValueError:
+        return jsonify({"error": "unknown skill"}), 404
+    if not path.exists():
+        return jsonify({"error": "skill file does not exist"}), 404
+    payload = request.get_json(silent=True) or {}
+    body = str(payload.get("body") or "")
+    try:
+        import frontmatter as _fm
+        post = _fm.loads(path.read_text(encoding="utf-8"))
+        post.content = body
+        rendered = _fm.dumps(post)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        with tmp.open("w", encoding="utf-8", newline="\n") as f:
+            f.write(rendered)
+            if not rendered.endswith("\n"):
+                f.write("\n")
+            f.flush()
+        tmp.replace(path)
+    except Exception as e:
+        logger.error("Failed writing social skill %s: %s", skill_key, e)
+        return jsonify({"error": "write failed"}), 500
+    # Drop the registry cache so the edit takes effect without a restart.
+    try:
+        from app.assistant.ServiceLocator.service_locator import DI
+        reg = getattr(DI, "skill_registry", None)
+        if reg is not None and hasattr(reg, "reload"):
+            reg.reload()
+    except Exception:
+        pass
+    return jsonify({"ok": True, "key": skill_key, "bytes": len(body)})
+
+
 @preferences_bp.route('/api/skills', methods=['GET'])
 def skills_list_api():
     """Catalog of skills for the overview page, grouped by injection pattern.

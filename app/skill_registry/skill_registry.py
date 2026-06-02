@@ -43,6 +43,18 @@ class SkillRegistry:
 
     # ── public API ──────────────────────────────────────────────────
 
+    def reload(self) -> None:
+        """Re-scan skills/ + skills/private/ from disk, replacing the cache.
+
+        Normally skills are stable (loaded once at construction). The /skills
+        editor UI calls this after a user edits a skill body so the change takes
+        effect without a process restart. Thread-safe; rebuilds atomically.
+        """
+        with self._lock:
+            self._skills = {}
+            self._validations = {}
+        self._load_all()
+
     def get(self, name: str) -> Optional[Skill]:
         """Return the full skill record, or None if not registered."""
         with self._lock:

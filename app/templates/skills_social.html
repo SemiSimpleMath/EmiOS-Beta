@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Skill — Social {{ assistant_name|default('Assistant') }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/setup_wizard.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/skills.css') }}?v={{ static_v }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+<div class="container skill-editor-container">
+    <header class="topbar">
+        <div class="title-block">
+            <a class="back-link" href="/skills">&lsaquo; All skills</a>
+            <h1><i class="fas fa-hashtag"></i> Social {{ assistant_name|default('Assistant') }}</h1>
+            <p class="subtitle">
+                How {{ assistant_name|default('your assistant') }} shows up on social platforms when she posts
+                <strong>as herself</strong> (acting&nbsp;as&nbsp;self). These skills only load when she's
+                acting as her own persona — they never apply when you post to your own accounts.
+                Edit her voice, what she's into, how she engages, and her safety floor.
+            </p>
+        </div>
+    </header>
+
+    <section id="platform-status" class="skill-platform-status"></section>
+
+    <section id="editors" class="skill-social-editors">
+        <p class="skill-loading" id="loading">Loading skills…</p>
+    </section>
+</div>
+
+<script>
+(function () {
+    const ASSISTANT = {{ (assistant_name or 'your assistant') | tojson }};
+    const editorsEl = document.getElementById("editors");
+    const loadingEl = document.getElementById("loading");
+    const statusEl = document.getElementById("platform-status");
+
+    const LABELS = {
+        voice:      { icon: "fa-comment", title: "Voice",      hint: "How she writes — tone, register, first-person style." },
+        interests:  { icon: "fa-star",    title: "Interests",  hint: "What she posts about; her topics." },
+        engagement: { icon: "fa-reply",   title: "Engagement", hint: "When she replies / likes / reposts / follows." },
+        safety:     { icon: "fa-shield",  title: "Safety",     hint: "Hard rules — what she never does, when to disengage." },
+    };
+
+    function renderPlatforms(platforms) {
+        const bsky = (platforms && platforms.bluesky) || {};
+        if (bsky.linked) {
+            statusEl.innerHTML =
+                `<div class="skill-platform ok"><i class="fas fa-check-circle"></i> ` +
+                `Bluesky account linked — ${ASSISTANT} can post as herself.</div>`;
+        } else {
+            statusEl.innerHTML =
+                `<div class="skill-platform off"><i class="fas fa-circle-info"></i> ` +
+                `No Bluesky account linked yet. You can still edit these skills; ` +
+                `link an account on the <a href="/emi-accounts">Accounts</a> page to enable posting.</div>`;
+        }
+    }
+
+    function setRowStatus(row, text, kind) {
+        const s = row.querySelector(".save-status");
+        s.textContent = text;
+        s.className = "save-status" + (kind ? " " + kind : "");
+    }
+
+    async function saveBody(key, row) {
+        const ta = row.querySelector(".skill-textarea");
+        const btn = row.querySelector(".save-btn");
+        btn.disabled = true;
+        setRowStatus(row, "Saving…", "dim");
+        try {
+            const r = await fetch(`/api/skills/social/${key}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ body: ta.value }),
+            });
+            const data = await r.json().catch(() => ({}));
+            if (!r.ok || data.ok === false) throw new Error(data.error || ("HTTP " + r.status));
+            setRowStatus(row, `Saved ${data.bytes} bytes.`, "ok");
+        } catch (e) {
+            setRowStatus(row, `Save failed: ${e.message}`, "bad");
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    async function loadBody(key, row) {
+        const ta = row.querySelector(".skill-textarea");
+        try {
+            const r = await fetch(`/api/skills/social/${key}`);
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            const data = await r.json();
+            ta.value = data.body || "";
+            if (!data.exists) setRowStatus(row, "(no skill file — create it on disk first)", "dim");
+        } catch (e) {
+            setRowStatus(row, `Load failed: ${e.message}`, "bad");
+        }
+    }
+
+    function buildRow(skill) {
+        const meta = LABELS[skill.key] || { icon: "fa-pen", title: skill.key, hint: "" };
+        const row = document.createElement("section");
+        row.className = "skill-social-row";
+        row.innerHTML = `
+            <div class="skill-social-head">
+                <h2><i class="fas ${meta.icon}"></i> ${meta.title}</h2>
+                <p class="skill-social-hint">${skill.description || meta.hint}</p>
+            </div>
+            <textarea class="skill-textarea" spellcheck="false" placeholder="Loading…"></textarea>
+            <div class="skill-editor-toolbar">
+                <span class="save-status"></span>
+                <button class="btn primary save-btn">Save</button>
+            </div>`;
+        row.querySelector(".save-btn").addEventListener("click", () => saveBody(skill.key, row));
+        return row;
+    }
+
+    async function init() {
+        try {
+            const r = await fetch("/api/skills/social");
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            const data = await r.json();
+            renderPlatforms(data.platforms);
+            loadingEl.remove();
+            for (const skill of (data.skills || [])) {
+                const row = buildRow(skill);
+                editorsEl.appendChild(row);
+                loadBody(skill.key, row);
+            }
+        } catch (e) {
+            loadingEl.textContent = `Failed to load: ${e.message}`;
+            loadingEl.className = "skill-loading bad";
+        }
+    }
+    init();
+})();
+</script>
+</body>
+</html>
