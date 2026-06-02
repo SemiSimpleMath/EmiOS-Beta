@@ -138,6 +138,85 @@ Analogous to PodInjector. A `SkillInjector` watches the message / blackboard / s
 
 The same skill can be available via multiple paths. `slack-formatting` could be statically declared (5.1) by some agents and auto-injected (5.3) for any path that touches a slack surface. The registry doesn't care; it just answers `get(name)` and `discover(query)`.
 
+### 5.4 Auto-injection semantics — `auto_inject_when` (the actual mechanism)
+
+A skill opts into auto-injection (5.3) by declaring an `auto_inject_when` block in
+its frontmatter `metadata`. Two trigger fields, AND-conjoined:
+
+- **`task_keywords`** — lowercase substrings; a match against the agent's rendered
+  `task + incoming_message` makes the skill *keyword-eligible*.
+- **`requires_scope`** — a `{field: value}` map of conditions the live `ScopeContext`
+  must satisfy. **Principle: scope is the key, the skill carries the lock.**
+
+The governing rules (`SkillInjector`, `app/skill_registry/`):
+
+1. **Matching = `(keyword hit, if any) AND (every requires_scope field matches)`.**
+2. **`requires_scope` fields are an explicit identity/context allowlist:**
+   `acting_as`, `surface`, `room_id`, `room_context_id`, `visibility`.
+   Any other field — especially the **permission bucket** (`tools`, `pods`,
+   `approval`/`authority_level`, `writes`, `resources`, `entities`, `cards`) — is a
+   **parse-time error (fail-loud)**. Skills gate *relevance*, never *authorization*;
+   `allowed_tools` is the only grant. (See SCOPE.md: visibility ≠ permission.)
+3. **Per-field canonicalization** both sides before comparison: `acting_as` via
+   `resolve_principal` (so a skill gated on `self` matches any install's assistant
+   name — `emi`/`aria`/`me` all canonicalize to `self`). Other fields lowercased-exact.
+4. **`requires_scope_acting_as: X`** is back-compat sugar for `requires_scope: {acting_as: X}`.
+5. **Two injection routes by keyword presence:**
+   - **has `task_keywords`** → *keyword-gated*; fires only where the keyword appears
+     (`matching_skill_names`). Rides the turn it matched.
+   - **no `task_keywords` + a `requires_scope`** → *always-on for that scope*
+     (`always_inject_skill_names`); the scope builder stamps it into
+     `scope.skills.always_inject`, which **propagates to every downstream agent** for
+     the whole task (it doesn't depend on any agent seeing a keyword).
+   - **neither** → inert (static-bind only, 5.1).
+
+#### Worked examples
+
+**1. Keyword-gated contextual skill** — generic how-to, fires by topic, any principal:
+```yaml
+# skills/github/SKILL.md
+metadata:
+  auto_inject_when:
+    task_keywords: ["github", "pull request", "gh issue"]
+# No requires_scope → applies to whoever is acting. Fires when the task mentions GitHub.
+```
+
+**2. Surface-gated contextual skill** — keyword + a scope condition:
+```yaml
+# skills/slack-formatting/SKILL.md
+metadata:
+  auto_inject_when:
+    requires_scope: { surface: slack }     # ONLY when the run's surface is slack
+    task_keywords: ["slack", "reply", "message"]
+# Injects on Slack responses; mechanically NOT on ui/sms/telegram/email
+# (replaces the old prose-only "do not apply elsewhere").
+```
+
+**3. Always-on persona skill** — keyword-less + a principal gate:
+```yaml
+# skills/private/emi-acting-as-herself/SKILL.md   (private — owner persona)
+metadata:
+  auto_inject_when:
+    requires_scope: { acting_as: self }    # NO task_keywords
+# Always-on whenever acting as the assistant persona; rides every downstream
+# agent via scope.skills.always_inject. Discovered from the registry — there is
+# no hardcoded principal→skills map. `self` matches regardless of the assistant's
+# configured name.
+```
+
+**4. INVALID — permission-gated skill (rejected at parse, fail-loud)**:
+```yaml
+metadata:
+  auto_inject_when:
+    task_keywords: ["delete"]
+    requires_scope: { authority_level: "99" }   # ❌ PARSE ERROR
+# Error: "field 'authority_level' is not allowed. Allowed (identity/context only):
+# [acting_as, room_context_id, room_id, surface, visibility]. Permission/authority
+# fields are forbidden — skills gate relevance, not authorization."
+# A skill must NEVER decide access. Gate on identity/context; let the four-layer
+# tool gate decide what's allowed.
+```
+
 ## 6. SkillRegistry — the runtime service
 
 A DI-registered service that owns all skill loading + matching:
@@ -147,7 +226,16 @@ class SkillRegistry:
     def get(self, name: str) -> Skill: ...                        # path 5.1
     def discover(self, query: str) -> list[SkillHeader]: ...      # path 5.2
     def headers(self) -> list[SkillHeader]: ...                   # bulk metadata for indexing
+    def reload(self) -> None: ...                                 # re-scan after an edit (UI)
     def validate(self, path: Path) -> ValidationResult: ...       # tooling
+
+class SkillInjector:                                              # path 5.3/5.4 matching
+    def matching_skill_names(self, *, task, incoming_message,
+                             scope=None, scope_acting_as=None) -> list[str]: ...
+        # keyword-gated skills whose requires_scope (if any) matches the live scope
+    def always_inject_skill_names(self, *, scope=None,
+                                  scope_acting_as=None) -> list[str]: ...
+        # keyword-LESS skills whose requires_scope matches → scope.skills.always_inject
 ```
 
 At startup the registry:
