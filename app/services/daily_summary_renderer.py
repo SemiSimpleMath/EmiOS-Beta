@@ -261,12 +261,14 @@ def generate_daily_summary_page(analysis_data):
 
 def convert_daily_summary_result_to_html_data(daily_summary_result):
     """
-    Converts the raw daily summary result from the manager into the format
-    expected by the HTML template.
-    
+    Converts a stored daily summary result into the format expected by the
+    HTML template.
+
     Args:
-        daily_summary_result (dict): The raw result from daily_summary_manager
-        
+        daily_summary_result (dict): The stored summary as written by the
+            save_daily_summary tool (DailySummaryStorage), produced by the
+            morning_briefing task's daily_summary::daily_summary agent.
+
     Returns:
         dict: Formatted data for the HTML template
     """
