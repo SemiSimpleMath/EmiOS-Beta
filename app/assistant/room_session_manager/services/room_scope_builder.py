@@ -81,15 +81,11 @@ def _overlay_scope_yaml_permission(*, room_id: str, scope_dict: Dict[str, Any]) 
     return out
 
 
-# CANONICAL principal → skill-pack mapping. Keyed on the canonical principal id
-# (resolve_principal: "self" = the assistant-as-persona, regardless of the
-# install's configured assistant name; "user" = default; future personas like
-# "katy" use their own id). The lookup canonicalizes acting_as before reading,
-# so an install named "aria" still matches the "self" pack. New personas add an
-# entry here; no code changes elsewhere.
-_PRINCIPAL_SKILL_PACKS: Dict[str, List[str]] = {
-    "self": ["emi-acting-as-herself", "emi-values"],
-}
+# (Always-on persona/scope skills are now data-driven: skills self-declare a
+# keyword-less requires_scope gate and the injector discovers them — see
+# always_inject_skill_names. The old hardcoded _PRINCIPAL_SKILL_PACKS dict was
+# removed in favor of that. New always-on skills just add the frontmatter gate;
+# no code change here.)
 
 
 def build_scope_contract_for_room_request(
@@ -179,12 +175,29 @@ def build_scope_contract_for_room_request(
     # of explicit slash-command control.
     acting_as_principal = str(request_data.get("actas_principal") or "user").strip().lower() or "user"
 
-    # When acting as the assistant persona, its persona skills ride on every
-    # downstream agent for the rest of the task — vs. keyword-trigger which
-    # only fires on the first-turn user text. Canonicalize so any install's
-    # assistant name (emi/aria/...) resolves to the "self" pack.
-    from app.assistant.utils.identity_names import resolve_principal
-    principal_skills = _PRINCIPAL_SKILL_PACKS.get(resolve_principal(acting_as_principal), [])
+    # Always-on skills for this scope ride on every downstream agent for the
+    # rest of the task (vs. keyword-trigger, which only fires on the first-turn
+    # user text). DATA-DRIVEN: skills self-declare "always-on for principal X"
+    # via a keyword-less requires_scope gate (e.g. requires_scope:{acting_as:self}).
+    # The injector discovers them from the registry — no hardcoded principal->skills
+    # map. Canonicalization (emi/aria -> self) happens inside the gate matcher.
+    principal_skills: list = []
+    try:
+        from app.assistant.ServiceLocator.service_locator import DI
+        injector = getattr(DI, "skill_injector", None)
+        if injector is not None:
+            principal_skills = injector.always_inject_skill_names(
+                scope={
+                    "acting_as": acting_as_principal,
+                    "surface": str(envelope.surface or "").strip() or "unknown",
+                    "room_id": str(envelope.room_id or "").strip() or None,
+                    "room_context_id": str(envelope.context_id or "main").strip(),
+                    "visibility": str((room_ctx.get("room_visibility") or "room_shared")).strip(),
+                },
+            )
+    except Exception as e:
+        logger.warning("[room_scope_builder] always-on skill discovery failed: %s", e)
+        principal_skills = []
 
     scope_dict: Dict[str, Any] = {
         "schema_version": "scope_context_v1",

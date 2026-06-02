@@ -96,6 +96,33 @@ class SkillInjector:
             )
         return matches
 
+    def always_inject_skill_names(self, *, scope: object = None, scope_acting_as: Optional[str] = None) -> List[str]:
+        """Return skills that are ALWAYS-ON for the given scope — i.e. they have a
+        requires_scope gate that matches the live scope AND no task_keywords (so
+        they're not keyword-triggered, they ride the whole task).
+
+        This is the data-driven replacement for the hardcoded _PRINCIPAL_SKILL_PACKS:
+        the scope builder calls this to populate scope.skills.always_inject, which
+        propagates a skill across every downstream agent. A skill opts in by
+        declaring, e.g.:
+            auto_inject_when:
+              requires_scope: { acting_as: self }   # and NO task_keywords
+        Keyword-less + a scope gate = "always on whenever this scope is active."
+        """
+        live = self._scope_identity(scope=scope, scope_acting_as=scope_acting_as)
+        out: List[str] = []
+        for header in self._registry.headers():
+            trigger = header.auto_inject_when
+            if trigger is None:
+                continue
+            if trigger.task_keywords:
+                continue  # keyword-triggered -> handled by matching_skill_names, not always-on
+            if not trigger.requires_scope:
+                continue  # no gate + no keywords -> not auto-injected at all
+            if self._scope_gate_passes(trigger.requires_scope, live):
+                out.append(header.name)
+        return out
+
     # ── requires_scope gate ────────────────────────────────────────────
     _GATE_FIELDS = ("acting_as", "surface", "room_id", "room_context_id", "visibility")
 
