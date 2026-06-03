@@ -8,21 +8,17 @@ from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.scope.loader import load_scope_for_source
 from app.assistant.routine_manager.run_types import RoutineRunContext, RoutineRunResult
 from app.assistant.routine_manager.runners.types import RoutineLike
-from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_repo_root, resolve_repo_path
-from app.assistant.utils.pydantic_classes import Message
 from app.assistant.utils.task_spec_loader import TaskSpec, load_task_spec
-
-logger = get_logger(__name__)
 
 
 class TaskRoutineRunner:
     """
     v2 task runner.
 
-    Execution is explicit by mode:
-    - prose_manager: execute task spec body by manager invocation.
-    - compiled_task: execute compiled workflow JSON via Task IR runner service.
+    Executes a compiled workflow JSON via the Task IR runner service. The task
+    inherits a standard task-execution scope (it is a scope consumer, not a
+    source), so it never falls back to the IR executor's system scope.
     """
 
     def run(self, routine: RoutineLike, run_ctx: RoutineRunContext) -> RoutineRunResult:
@@ -33,47 +29,27 @@ class TaskRoutineRunner:
             raise ValueError("task runner requires spec.task_file")
 
         task_spec = load_task_spec(task_file)
-        mode = str(spec.get("execution_mode") or "prose_manager").strip().lower()
-        if mode == "compiled_task":
-            return self._run_compiled_task_mode(spec=spec, task_file=task_file, task_spec=task_spec)
-        if mode == "prose_manager":
-            return self._run_prose_mode(spec=spec, task_file=task_file, task_spec=task_spec)
-        raise ValueError(f"Unsupported task runner execution_mode: {mode}")
-
-    def _run_prose_mode(self, *, spec: dict[str, Any], task_file: str, task_spec: TaskSpec) -> RoutineRunResult:
-        rendered = str(task_spec.task_body or "").strip()
-        if rendered.upper().startswith("SKIPPED:"):
-            return RoutineRunResult(
-                status="skipped",
-                message=rendered,
-                data={"task_file": task_file, "task_id": task_spec.task_id, "execution_mode": "prose_manager"},
+        mode = str(spec.get("execution_mode") or "compiled_task").strip().lower()
+        if mode != "compiled_task":
+            raise ValueError(
+                f"Unsupported task runner execution_mode: {mode!r}. "
+                "Tasks are always compiled; the prose_manager path was removed."
             )
+        return self._run_compiled_task_mode(spec=spec, task_file=task_file, task_spec=task_spec)
 
-        manager_type = str(spec.get("manager") or task_spec.manager or "").strip()
-        if not manager_type:
-            raise ValueError("Task spec missing manager and no spec.manager override provided")
+    def _run_compiled_task_mode(self, *, spec: dict[str, Any], task_file: str, task_spec: TaskSpec) -> RoutineRunResult:
+        compiled_file = self._resolve_compiled_file(spec=spec, task_spec=task_spec)
+        compiled_task = self._read_compiled_task(compiled_file)
 
-        manager = DI.multi_agent_manager_factory.create_manager(manager_type)
-        self._apply_manager_limits(manager=manager, task_spec=task_spec)
+        runner = getattr(DI, "task_ir_runner", None)
+        if runner is None:
+            raise RuntimeError("task_ir_runner service is not registered.")
 
-        data = {
-            "task_id": task_spec.task_id,
-            "task_description": task_spec.description,
-            "task_spec": task_spec.frontmatter,
-            "task_includes": task_spec.task_includes,
-            "allowed_resources": task_spec.allowed_resources,
-            "allowed_read_files": task_spec.allowed_read_files,
-            "allowed_write_files": task_spec.allowed_write_files,
-            "task_llm_params": (
-                task_spec.frontmatter.get("llm_params")
-                if isinstance(task_spec.frontmatter, dict) and isinstance(task_spec.frontmatter.get("llm_params"), dict)
-                else None
-            ),
-            "task_runner_version": "v2",
-            "task_execution_mode": "prose_manager",
-        }
-        # Standard task scope (authority 98) — a routine running a task spec is
-        # task execution. owner_id/surface preserved as the routine identity.
+        # A task is a scope CONSUMER, not a source: it inherits the standard
+        # task-execution scope (authority 98) built at the execution entry — the
+        # same scope the run_task tool threads from its caller. Without this the
+        # IR executor falls to its fail-closed system scope (authority 95,
+        # resources zeroed). owner_id/surface carry the routine identity.
         scope_contract = load_scope_for_source(
             kind="subsystem",
             source_id="task",
@@ -84,39 +60,15 @@ class TaskRoutineRunner:
                 "scope_id": f"scope::routine::{task_spec.task_id}",
             },
         )
-        data["scope_contract"] = scope_contract.model_dump()
-
-        DI.manager_invoker.invoke(
-            manager,
-            Message(
-                content=f"Run task spec: {task_spec.task_id}",
-                task=task_spec.task_body,
-                information=str(spec.get("information") or ""),
-                data=data,
-                scope_context=scope_contract,
-            ),
+        initial_context = (
+            dict(spec.get("initial_context")) if isinstance(spec.get("initial_context"), dict) else {}
         )
-        return RoutineRunResult(
-            status="success",
-            data={
-                "task_file": task_file,
-                "manager": manager_type,
-                "execution_mode": "prose_manager",
-            },
-        )
-
-    def _run_compiled_task_mode(self, *, spec: dict[str, Any], task_file: str, task_spec: TaskSpec) -> RoutineRunResult:
-        compiled_file = self._resolve_compiled_file(spec=spec, task_spec=task_spec)
-        compiled_task = self._read_compiled_task(compiled_file)
-
-        runner = getattr(DI, "task_ir_runner", None)
-        if runner is None:
-            raise RuntimeError("task_ir_runner service is not registered.")
+        initial_context.setdefault("_task_ir_inherited_scope_context", scope_contract.model_dump())
 
         runner.ensure_event_subscription()
         run_state = runner.start_run(
             compiled_task=compiled_task,
-            initial_context=(spec.get("initial_context") if isinstance(spec.get("initial_context"), dict) else {}),
+            initial_context=initial_context,
         )
 
         return RoutineRunResult(
@@ -180,15 +132,3 @@ class TaskRoutineRunner:
         if not isinstance(data, dict):
             raise ValueError("Compiled task file must contain a JSON object")
         return data
-
-    def _apply_manager_limits(self, *, manager: Any, task_spec: TaskSpec) -> None:
-        limits = task_spec.frontmatter.get("limits", {}) if isinstance(task_spec.frontmatter, dict) else {}
-        if not isinstance(limits, dict):
-            raise ValueError("task frontmatter limits must be an object when provided")
-        if limits.get("max_cycles") is None:
-            return
-        max_cycles = int(limits.get("max_cycles"))
-        if max_cycles <= 0:
-            raise ValueError("task frontmatter limits.max_cycles must be > 0")
-        manager.manager_config["max_cycles"] = max_cycles
-        logger.info("Task runner v2 applied manager max_cycles override: %s", max_cycles)
