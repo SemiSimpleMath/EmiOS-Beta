@@ -27,7 +27,8 @@ logger = get_logger(__name__)
 
 JOB_ID = "dayflow_scheduler_next_tick"
 DEBOUNCE_SECONDS = 60
-MIN_GAP_SECONDS = 120
+MIN_GAP_SECONDS = 120          # mutual-exclusion floor; applies to scheduled-item ticks
+POKE_MIN_INTERVAL_SECONDS = 600  # delta/poke wakes throttle to >= this since last run (10 min)
 MAX_CEILING_SECONDS = 1800
 
 # A waiting/watching item whose reactivate_at_utc is overdue by more than
@@ -88,18 +89,40 @@ class DayflowScheduler:
                 )
                 return
 
-        self._schedule_tick(delay_seconds=DEBOUNCE_SECONDS, reason=reason)
+        self._schedule_tick(delay_seconds=DEBOUNCE_SECONDS, reason=reason, is_poke=True)
 
-    def _schedule_tick(self, *, delay_seconds: float, reason: str, triggered_item_id: Optional[str] = None) -> None:
+    def _schedule_tick(self, *, delay_seconds: float, reason: str,
+                       triggered_item_id: Optional[str] = None, is_poke: bool = False) -> None:
         now_utc = datetime.now(timezone.utc)
 
         with self._lock:
+            # Delta/poke wakes throttle to POKE_MIN_INTERVAL_SECONDS since the last
+            # run (don't react instantly to every chat/email). Scheduled-item wakes
+            # only respect the small MIN_GAP (mutual exclusion), so a job due at time
+            # T still fires at T. Reaction to a delta = max(debounce, floor - age),
+            # so it's only near-10-min when something *just* ran.
+            floor_gap = POKE_MIN_INTERVAL_SECONDS if is_poke else MIN_GAP_SECONDS
             if self._last_run_finished_utc is not None:
-                earliest = self._last_run_finished_utc + timedelta(seconds=MIN_GAP_SECONDS)
+                earliest = self._last_run_finished_utc + timedelta(seconds=floor_gap)
                 candidate = now_utc + timedelta(seconds=delay_seconds)
                 run_date = max(candidate, earliest)
             else:
                 run_date = now_utc + timedelta(seconds=delay_seconds)
+
+        # Never push an already-scheduled, sooner run later. A throttled poke must
+        # not clobber a scheduled item tick that's due sooner — the item tick does
+        # full ingestion, so it also picks up the pending delta.
+        try:
+            existing = self._scheduler.get_job(JOB_ID)
+            if existing is not None and existing.next_run_time is not None \
+                    and existing.next_run_time <= run_date:
+                logger.info(
+                    "[DayflowScheduler] Keeping sooner scheduled run %s (reason=%s would be %s)",
+                    existing.next_run_time.isoformat(), reason, run_date.isoformat(),
+                )
+                return
+        except Exception:
+            pass  # if we can't read the existing job, just schedule normally
 
         try:
             self._scheduler.add_job(
@@ -181,13 +204,16 @@ class DayflowScheduler:
 
             logger.info("[DayflowScheduler] === TICK END === run_id=%s", run_id)
 
+            # Always (re)schedule the next item tick first so scheduled jobs fire on
+            # time. If a delta arrived during the run, also schedule a throttled poke
+            # — the "don't clobber a sooner run" guard keeps whichever is earlier, so
+            # a due item still wins and the delta is absorbed by it.
+            self._schedule_next_from_items()
             if pending:
                 logger.info(
-                    "[DayflowScheduler] Re-scheduling from queued poke: %s", pending,
+                    "[DayflowScheduler] Delta queued during run; scheduling throttled poke: %s", pending,
                 )
-                self._schedule_tick(delay_seconds=DEBOUNCE_SECONDS, reason=f"queued:{pending}")
-            else:
-                self._schedule_next_from_items()
+                self._schedule_tick(delay_seconds=DEBOUNCE_SECONDS, reason=f"queued:{pending}", is_poke=True)
 
     def _subscribe_events(self) -> None:
         from app.assistant.ServiceLocator.service_locator import DI
