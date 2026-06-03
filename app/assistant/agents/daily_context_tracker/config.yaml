@@ -1,8 +1,11 @@
 name: daily_context_tracker
 class_name: Agent
 llm_params:
-  llm_provider: "gemini"
-  engine: "gemini-3-flash-preview"
+  # Moved off gemini-3-flash-preview (confirmed ~$0.50/$3.00, the bulk of the
+  # ~$200/mo Gemini bill) to gpt-5.4-mini, which is currently billing ~$0 on
+  # OpenAI. A/B the synthesis quality before trusting it — this is the context brain.
+  llm_provider: "openai"
+  engine: "gpt-5.4-mini"
   model_tier: "mini"
   temperature: 1.0
 entity_scan_keys: [recent_chat_excerpts, expected_calendar_markdown, current_daily_context]
