@@ -946,6 +946,36 @@ class GeminiLLM(BaseLLMProvider):
             f"got {type(response_format)}"
         )
 
+    def _build_thinking_config(self, send_params):
+        """Optional Gemini thinking control from agent llm_params — backward compatible.
+
+        Returns a ThinkingConfig, or None when no thinking_* param is set — in which
+        case the call uses Gemini's DEFAULT thinking (i.e. behavior is unchanged for
+        every agent that doesn't opt in). Accepted llm_params:
+          - thinking_level: 'low' | 'medium' | 'high'
+          - thinking_budget: int (0 disables thinking on gemini-3; the clean off-switch)
+          - include_thoughts: bool
+        Never raises: a bad value or an SDK without ThinkingConfig falls back to None
+        (default thinking), so this can't break existing calls.
+        """
+        level = send_params.get('thinking_level')
+        budget = send_params.get('thinking_budget')
+        include = send_params.get('include_thoughts')
+        if level is None and budget is None and include is None:
+            return None
+        try:
+            kwargs = {}
+            if level is not None:
+                kwargs['thinking_level'] = str(level).strip().lower()
+            if budget is not None:
+                kwargs['thinking_budget'] = int(budget)
+            if include is not None:
+                kwargs['include_thoughts'] = bool(include)
+            return self.types.ThinkingConfig(**kwargs)
+        except Exception as e:
+            logger.warning("Gemini thinking_config build failed (%s); using default thinking", e)
+            return None
+
     def structured_output(self, messages, **send_params):
         import time as _time
 
@@ -994,15 +1024,21 @@ class GeminiLLM(BaseLLMProvider):
             )
             print(f"    [Gemini] >> {model_name} prompt={len(full_prompt)} chars [thread:{_thread.name}]", flush=True)
 
+            gen_config_kwargs = dict(
+                response_mime_type='application/json',
+                response_json_schema=json_schema,
+                temperature=temperature,
+                safety_settings=self._permissive_safety_settings(),
+            )
+            # Optional thinking control — only present if an agent opted in; absent
+            # => Gemini default thinking (unchanged behavior for every other agent).
+            thinking_config = self._build_thinking_config(send_params)
+            if thinking_config is not None:
+                gen_config_kwargs['thinking_config'] = thinking_config
             response = self.client.models.generate_content(
                 model=model_name,
                 contents=full_prompt,
-                config=self.types.GenerateContentConfig(
-                    response_mime_type='application/json',
-                    response_json_schema=json_schema,
-                    temperature=temperature,
-                    safety_settings=self._permissive_safety_settings(),
-                )
+                config=self.types.GenerateContentConfig(**gen_config_kwargs),
             )
             _telemetry_usage = getattr(response, "usage_metadata", None)
 
