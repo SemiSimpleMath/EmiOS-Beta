@@ -54,16 +54,37 @@ tokens_admin_bp = Blueprint("tokens_admin", __name__)
 
 
 _PERIODS = {
-    "today":  ("Today",       0,   1),    # since midnight UTC
+    "today":  ("Today",       0,   1),    # since midnight in the active tz (utc|local)
     "24h":    ("Last 24h",   24,   1),
     "7d":     ("Last 7d",  7*24,   7),
     "30d":    ("Last 30d", 30*24, 14),    # 14-day chart even when period is 30d
     "all":    ("All time",  None, 14),
 }
 
+TZ_OPTIONS = ("utc", "local")
 
-def _resolve_period(name: Optional[str]) -> Tuple[str, str, Optional[datetime], int]:
-    """Returns (key, label, cutoff_utc_or_none, chart_days)."""
+
+def _normalize_tz(name: Optional[str]) -> str:
+    tz = (name or "utc").strip().lower()
+    return tz if tz in TZ_OPTIONS else "utc"
+
+
+def _today_cutoff_utc(tz: str, now_utc: datetime) -> datetime:
+    """Midnight 'today' in the given tz (utc|local), returned as a UTC datetime."""
+    if tz == "local":
+        try:
+            from app.assistant.utils.time_utils import get_local_timezone
+            now_local = now_utc.astimezone(get_local_timezone())
+            midnight_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+            return midnight_local.astimezone(timezone.utc)
+        except Exception:
+            pass  # fall back to UTC midnight
+    return now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def _resolve_period(name: Optional[str], tz: str = "utc") -> Tuple[str, str, Optional[datetime], int]:
+    """Returns (key, label, cutoff_utc_or_none, chart_days). The 'today' boundary
+    is midnight in `tz`, converted to UTC for the ts_utc comparison."""
     key = (name or "today").strip().lower()
     if key not in _PERIODS:
         key = "today"
@@ -71,7 +92,7 @@ def _resolve_period(name: Optional[str]) -> Tuple[str, str, Optional[datetime], 
     cutoff: Optional[datetime] = None
     now_utc = datetime.now(timezone.utc)
     if key == "today":
-        cutoff = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+        cutoff = _today_cutoff_utc(tz, now_utc)
     elif hours is not None:
         cutoff = now_utc - timedelta(hours=hours)
     # else: all time → no cutoff
@@ -86,10 +107,14 @@ def _cutoff_clause(cutoff: Optional[datetime]) -> Tuple[str, Dict]:
 
 @tokens_admin_bp.route("/tokens")
 def tokens_admin():
+    tz = _normalize_tz(request.args.get("tz"))
     period_key, period_label, cutoff, chart_days = _resolve_period(
-        request.args.get("period")
+        request.args.get("period"), tz
     )
     where, params = _cutoff_clause(cutoff)
+    # tz-controlled SQL expressions (controlled literals, not user input).
+    daily_date_expr = "date(ts_utc)" if tz == "utc" else "date(ts_utc, 'localtime')"
+    ts_expr = "ts_utc" if tz == "utc" else "datetime(ts_utc, 'localtime')"
 
     s = get_session()
     try:
@@ -120,9 +145,9 @@ def tokens_admin():
         days_back = chart_days
         daily_cutoff = datetime.now(timezone.utc) - timedelta(days=days_back)
         daily_rows = s.execute(
-            sql_text("""
+            sql_text(f"""
                 SELECT
-                    date(ts_utc, 'localtime')                  AS day,
+                    {daily_date_expr}                          AS day,
                     COALESCE(SUM(total_cost_usd), 0)           AS usd,
                     COUNT(*)                                   AS calls
                 FROM llm_call_log
@@ -235,7 +260,7 @@ def tokens_admin():
         slow_rows = s.execute(
             sql_text(f"""
                 SELECT
-                    id, ts_utc, agent_name, engine, duration_ms,
+                    id, {ts_expr} AS ts, agent_name, engine, duration_ms,
                     input_tokens, output_tokens, total_cost_usd, status
                 FROM llm_call_log
                 {where}
@@ -263,7 +288,7 @@ def tokens_admin():
         fail_rows = s.execute(
             sql_text(f"""
                 SELECT
-                    id, ts_utc, agent_name, engine, status, duration_ms,
+                    id, {ts_expr} AS ts, agent_name, engine, status, duration_ms,
                     input_tokens, output_tokens
                 FROM llm_call_log
                 {where}{' AND' if where else 'WHERE'} status != 'ok'
@@ -307,6 +332,8 @@ def tokens_admin():
         period_key=period_key,
         period_label=period_label,
         periods=list(_PERIODS.keys()),
+        tz=tz,
+        tz_options=list(TZ_OPTIONS),
         summary=summary,
         daily=daily,
         daily_max=daily_max,

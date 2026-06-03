@@ -20,9 +20,15 @@
 
 <div class="period-bar">
     {% for p in periods %}
-    <a href="?period={{ p }}" class="{% if p == period_key %}active{% endif %}">{{ p }}</a>
+    <a href="?period={{ p }}&tz={{ tz }}" class="{% if p == period_key %}active{% endif %}">{{ p }}</a>
+    {% endfor %}
+    <span style="margin: 0 10px; opacity: 0.35;">|</span>
+    {% for t in tz_options %}
+    <a href="?period={{ period_key }}&tz={{ t }}" class="{% if t == tz %}active{% endif %}"
+       title="Day boundary, daily bars, and timestamps in {{ t|upper }}">{{ t|upper }}</a>
     {% endfor %}
 </div>
+<p class="subtle">Day boundary &amp; timestamps: <strong>{{ tz|upper }}</strong>{% if tz == 'utc' %} (matches the OpenAI/Google usage dashboards){% else %} (your local time){% endif %}.</p>
 
 <h2>Summary — {{ period_label }}</h2>
 <div class="tiles">
