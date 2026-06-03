@@ -14,11 +14,12 @@ class DailySummaryStorage:
     
     def __init__(self, storage_dir=None):
         if storage_dir is None:
-            # Default to app/daily_summaries for Flask app compatibility
-            from pathlib import Path
-            app_root = Path(__file__).parent.parent.parent  # Go up to app directory
-            storage_dir = app_root / "daily_summaries"
-        
+            # app/daily_summaries — resolved via the canonical helper rather than
+            # Path(__file__).parents[N] so it survives this file moving (it did:
+            # maintenance_manager -> app/services).
+            from app.assistant.utils.path_utils import get_app_root
+            storage_dir = get_app_root() / "daily_summaries"
+
         self.storage_dir = Path(storage_dir)
         self.storage_dir.mkdir(exist_ok=True)
         logger.info(f"Daily summary storage initialized at: {self.storage_dir.absolute()}")

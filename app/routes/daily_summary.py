@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify, current_app
 from app.services.daily_summary_renderer import generate_daily_summary_page, convert_daily_summary_result_to_html_data
 from app.assistant.utils.time_utils import get_local_time
-from app.assistant.maintenance_manager.daily_summary_storage import DailySummaryStorage
+from app.services.daily_summary_storage import DailySummaryStorage
 
 daily_summary_route_bp = Blueprint('daily_summary', __name__)
 

@@ -68,7 +68,7 @@ class SaveDailySummary(BaseTool):
                 summary_data = agent_output
 
         try:
-            from app.assistant.maintenance_manager.daily_summary_storage import DailySummaryStorage
+            from app.services.daily_summary_storage import DailySummaryStorage
             storage = DailySummaryStorage()
             filepath = storage.save_daily_summary(summary_data, date_str=date_str)
 
