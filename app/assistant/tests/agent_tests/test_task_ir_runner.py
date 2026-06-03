@@ -173,8 +173,19 @@ def test_wait_for_clock_timer_event_per_step():
         ],
     }
     runner = TaskIRRunner(max_steps_per_tick=20)
+    # Clock timers always resolve asynchronously: a 0s timer arms a ~immediate job
+    # that fires via the scheduler and resumes this (subscribed) runner.
+    runner.ensure_event_subscription()
     run_state = runner.start_run(compiled_task=compiled_task, initial_context={})
-    assert run_state["status"] == "completed"
+    run_id = run_state["run_id"]
+    deadline = time.time() + 3.0
+    latest = run_state
+    while time.time() < deadline:
+        latest = runner._require_run(run_id)
+        if latest["status"] == "completed":
+            break
+        time.sleep(0.05)
+    assert latest["status"] == "completed"
 
 
 def test_wait_for_relative_timer_reentry_clears_stale_timer_state():
@@ -245,6 +256,9 @@ def test_wait_for_relative_timer_auto_wakes_waiting_run():
         ],
     }
     runner = TaskIRRunner(max_steps_per_tick=20)
+    # Subscribe so the timer job's published event routes back to THIS runner and
+    # resumes the run (production wires this in initialize_system).
+    runner.ensure_event_subscription()
     run_state = runner.start_run(compiled_task=compiled_task, initial_context={})
     assert run_state["status"] == "waiting"
     run_id = run_state["run_id"]
@@ -370,9 +384,12 @@ def test_action_data_id_contract_enforced_and_forwarded(monkeypatch):
                 },
             )
         if step_id == "s2":
-            consumed = data.get("task_ir_consumed_inputs", {})
-            assert consumed.get("artifact_1") == [{"subject": "a"}]
-            assert consumed.get("fact_1") is True
+            # Consumed inputs are delivered to the executor via the `information`
+            # field (natural-language context), not a structured data key. The
+            # produces/consumes data_id round-trip is asserted via data_index below.
+            information = tool_message.tool_data.get("arguments", {}).get("information", "")
+            assert "artifact_1" in information, information
+            assert "fact_1" in information, information
             return ToolResult(
                 result_type="success",
                 content="ok",
@@ -441,10 +458,13 @@ def test_action_declared_output_must_be_materialized(monkeypatch):
             {
                 "id": "s1",
                 "kind": "action",
-                "title": "Produce id",
+                "title": "Produce ids",
                 "executor": "emi_team_manager",
-                "instruction": "Should produce artifact_1",
-                "produces_data_ids": ["artifact_1"],
+                "instruction": "Should produce artifact_1 and artifact_2",
+                # Multiple declared outputs cannot be auto-projected (single-output
+                # projection only applies when exactly one id is unresolved), so an
+                # empty manager result must raise.
+                "produces_data_ids": ["artifact_1", "artifact_2"],
                 "next_step": "s2",
             },
             {"id": "s2", "kind": "end", "title": "Done"},
@@ -452,11 +472,11 @@ def test_action_declared_output_must_be_materialized(monkeypatch):
     }
 
     runner = TaskIRRunner(max_steps_per_tick=20)
-    try:
-        runner.start_run(compiled_task=compiled_task, initial_context={})
-        assert False, "Expected ValueError for missing declared produced data id."
-    except ValueError as e:
-        assert "not materialized" in str(e)
+    run_state = runner.start_run(compiled_task=compiled_task, initial_context={})
+    # The runner records step failures on the run (status=failed + last_error)
+    # rather than raising out of start_run.
+    assert run_state["status"] == "failed"
+    assert "could not materialize" in str(run_state.get("last_error") or "")
 
 
 def test_single_artifact_output_can_be_projected_from_final_answer_payload(monkeypatch):
@@ -497,4 +517,7 @@ def test_single_artifact_output_can_be_projected_from_final_answer_payload(monke
     assert run_state["status"] == "completed"
     artifacts = run_state["context"]["task_state"]["artifacts"]
     assert "artifact_1" in artifacts
-    assert artifacts["artifact_1"]["final_answer_answer"] == "emails fetched"
+    # A single declared artifact output is projected from the manager envelope and
+    # coerced to a string (JSON-serialized); parse it back to verify the payload.
+    import json
+    assert json.loads(artifacts["artifact_1"]) == {"final_answer_answer": "emails fetched"}

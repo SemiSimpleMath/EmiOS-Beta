@@ -126,6 +126,25 @@ def initialize_services():
     ServiceLocator.register("agent_components_factory", agent_components_factory)
     logger.info("✅ AgentComponentsFactory initialized")
 
+    # TaskIR timer scheduling requires DI.scheduler (production wires SchedulerService in
+    # bootstrap.py). Tests need a faithful double: TaskIRTimerManager only touches
+    # DI.scheduler.timing_engine.scheduler and arms real date-triggered jobs, so a running
+    # APScheduler BackgroundScheduler is the minimal thing that both satisfies
+    # _require_scheduler() and actually fires timers (relative-timer auto-wake tests).
+    if not hasattr(DI, "scheduler") or DI.scheduler is None:
+        import atexit
+        from types import SimpleNamespace
+        from datetime import timezone as _utc_tz
+        from apscheduler.schedulers.background import BackgroundScheduler
+        _test_bg_scheduler = BackgroundScheduler(timezone=_utc_tz.utc)
+        _test_bg_scheduler.start()
+        atexit.register(lambda: _test_bg_scheduler.shutdown(wait=False))
+        ServiceLocator.register(
+            "scheduler",
+            SimpleNamespace(timing_engine=SimpleNamespace(scheduler=_test_bg_scheduler)),
+        )
+        logger.info("✅ Test scheduler (BackgroundScheduler) initialized")
+
     logger.info("✅ Test services initialized.")
 
 
