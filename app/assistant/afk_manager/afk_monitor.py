@@ -154,6 +154,26 @@ class AFKMonitor:
             logger.warning(f"Error loading AFK thresholds from config: {e}, using defaults")
             return default
 
+    def _load_input_config(self) -> Dict[str, Any]:
+        """Robust input-tracking config from configs/sleep_tracking.yaml
+        (input_tracking section). Defaults keep robust tracking on."""
+        cfg = {"use_robust": True, "mouse_jitter_px": 25.0, "require_sustained_movement": True}
+        try:
+            from app.assistant.utils.path_utils import get_configs_dir
+            from app.assistant.utils.config_loader import load_config
+
+            config_file = get_configs_dir() / "sleep_tracking.yaml"
+            if config_file.exists():
+                data = load_config(str(config_file))
+                it = data.get("input_tracking") if isinstance(data, dict) else None
+                if isinstance(it, dict):
+                    cfg["use_robust"] = bool(it.get("use_robust", True))
+                    cfg["mouse_jitter_px"] = float(it.get("mouse_jitter_px", 25.0))
+                    cfg["require_sustained_movement"] = bool(it.get("require_sustained_movement", True))
+        except Exception as e:
+            logger.warning(f"Error loading input_tracking config: {e}, using defaults")
+        return cfg
+
     # ---------------------------------------------------------------------
     # Thread management
     # ---------------------------------------------------------------------
@@ -176,12 +196,37 @@ class AFKMonitor:
         )
         logger.info(f"AFK monitor started (polling every {interval_seconds}s)")
 
+        # Robust input tracking (keystroke heartbeat + de-jittered mouse).
+        # Best-effort: on failure the monitor falls back to GetLastInputInfo,
+        # so AFK detection degrades to today's behavior rather than breaking.
+        try:
+            from app.assistant.utils.system_activity import start_input_listener
+
+            ic = self._load_input_config()
+            active = start_input_listener(
+                mouse_jitter_px=ic["mouse_jitter_px"],
+                require_sustained=ic["require_sustained_movement"],
+                use_robust=ic["use_robust"],
+            )
+            logger.info(
+                "AFK robust input listener: %s",
+                "active (keystroke + de-jittered mouse)" if active
+                else "inactive (fallback to GetLastInputInfo)",
+            )
+        except Exception as e:
+            logger.warning(f"Could not start robust input listener (fallback to GetLastInputInfo): {e}")
+
     def stop(self) -> None:
         """Stop the AFK monitor thread."""
         if not self._running:
             return
 
         self._running = False
+        try:
+            from app.assistant.utils.system_activity import stop_input_listener
+            stop_input_listener()
+        except Exception:
+            pass
         if self._thread:
             self._thread.join(timeout=2)
         logger.info("AFK monitor stopped")
@@ -212,9 +257,11 @@ class AFKMonitor:
             return "afk"
         return "active"
 
-    def _safe_idle_from_system(self) -> tuple[float, int]:
+    def _safe_idle_from_system(self) -> tuple[float, int, Dict[str, Any]]:
         """
-        Returns (idle_minutes, idle_seconds). Never raises.
+        Returns (idle_minutes, idle_seconds, extras). Never raises.
+        extras carries A/B + debug fields: idle_source, raw_idle_seconds,
+        keystroke_idle_seconds, mouse_idle_seconds.
         """
         try:
             from app.assistant.utils.system_activity import get_activity_status
@@ -222,11 +269,17 @@ class AFKMonitor:
             sys_activity = get_activity_status() or {}
             idle_minutes_raw = sys_activity.get("idle_minutes", None)
             idle_seconds_raw = sys_activity.get("idle_seconds", None)
+            extras = {
+                "idle_source": sys_activity.get("idle_source"),
+                "raw_idle_seconds": sys_activity.get("raw_idle_seconds"),
+                "keystroke_idle_seconds": sys_activity.get("keystroke_idle_seconds"),
+                "mouse_idle_seconds": sys_activity.get("mouse_idle_seconds"),
+            }
 
             if idle_minutes_raw is None or idle_seconds_raw is None:
                 # Unknown idle state: default to AFK-safe threshold
                 fallback_minutes = float(self.thresholds.confirmed_minutes)
-                return fallback_minutes, int(fallback_minutes * 60)
+                return fallback_minutes, int(fallback_minutes * 60), extras
 
             idle_minutes = float(idle_minutes_raw or 0)
             idle_seconds = int(idle_seconds_raw or 0)
@@ -236,12 +289,22 @@ class AFKMonitor:
             if idle_seconds < 0:
                 idle_seconds = 0
 
-            return idle_minutes, idle_seconds
+            return idle_minutes, idle_seconds, extras
 
         except Exception as e:
             logger.warning(f"Could not get system activity status: {e}")
             fallback_minutes = float(self.thresholds.confirmed_minutes)
-            return fallback_minutes, int(fallback_minutes * 60)
+            return fallback_minutes, int(fallback_minutes * 60), {}
+
+    @staticmethod
+    def _attach_idle_extras(snapshot: Dict[str, Any], extras: Dict[str, Any]) -> Dict[str, Any]:
+        """Propagate idle_source / raw_idle / component idles into the published
+        snapshot (debuggability + the side-by-side A/B fields)."""
+        for k in ("idle_source", "raw_idle_seconds", "keystroke_idle_seconds", "mouse_idle_seconds"):
+            v = (extras or {}).get(k)
+            if v is not None:
+                snapshot[k] = v
+        return snapshot
 
     def update(self) -> Dict[str, Any]:
         """
@@ -249,9 +312,31 @@ class AFKMonitor:
 
         Returns the snapshot dict (also written into status_data["computer_activity"]).
         """
+        # De-jittered mouse sample (no-op unless the robust listener is active).
+        try:
+            from app.assistant.utils.system_activity import note_cursor_sample
+            note_cursor_sample()
+        except Exception:
+            pass
+
         now_utc = self._now_utc()
-        idle_minutes, idle_seconds = self._safe_idle_from_system()
+        idle_minutes, idle_seconds, idle_extras = self._safe_idle_from_system()
         next_state = self._derive_state(idle_minutes, self.thresholds)
+
+        # Side-by-side A/B validation: robust idle vs the raw GetLastInputInfo idle.
+        # Watch overnight — with a jittery mouse, raw stays ~0 while robust crosses
+        # the AFK threshold. Remove this line once the fix is validated.
+        try:
+            _raw = idle_extras.get("raw_idle_seconds")
+            logger.info(
+                "[AFK A/B] robust_idle=%ss raw_getlastinput=%s source=%s next_state=%s",
+                idle_seconds,
+                ("%.1f" % _raw) if isinstance(_raw, (int, float)) else "n/a",
+                idle_extras.get("idle_source"),
+                next_state,
+            )
+        except Exception:
+            pass
 
         # Bootstrap: first observation sets internal state and publishes a snapshot.
         # Also check for open segments from a previous crash/restart.
@@ -290,6 +375,7 @@ class AFKMonitor:
                 just_returned=False,
                 return_duration_minutes=None,
             )
+            self._attach_idle_extras(snapshot, idle_extras)
             self._publish_snapshot(snapshot)
             return snapshot
 
@@ -390,6 +476,7 @@ class AFKMonitor:
             return_duration_minutes=return_duration_minutes,
             return_afk_start_utc=return_afk_start_utc,
         )
+        self._attach_idle_extras(snapshot, idle_extras)
         self._publish_snapshot(snapshot)
 
         # Publish event on AFK state transitions (event bus consumers should not poll).

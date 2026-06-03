@@ -26,6 +26,19 @@ afk_thresholds:
   is_potentially_afk_minutes: 1  # Grace period - wellness cycle pauses but user not yet considered AFK
   confirmed_afk_minutes: 3       # User is confirmed AFK
 
+# Robust input tracking (keystroke heartbeat + de-jittered mouse).
+# Fixes GetLastInputInfo's combined keyboard+mouse idle, where a jittery mouse
+# keeps the user "active". A keystroke is the unfakeable presence anchor; mouse
+# movement counts only when sustained/meaningful. Falls back to GetLastInputInfo
+# when use_robust is false or the keyboard hook can't install (no regression).
+# NOTE: uses a global low-level keyboard hook that records ONLY timestamps (never
+# keys). It's keylogger-CLASS infrastructure and AV may flag it; for public
+# distribution make this opt-in.
+input_tracking:
+  use_robust: true
+  mouse_jitter_px: 25            # cursor must move >= this (px) between polls to count
+  require_sustained_movement: true  # must exceed on 2 consecutive polls (rejects single spikes; ~10s mouse-only latency at 5s poll)
+
 # AFK-based activity resets
 # If user was away from the computer for >= min_minutes, reset timers for activities
 # that have reset_on_afk: true in config_tracked_activities.json (e.g., stretches).
