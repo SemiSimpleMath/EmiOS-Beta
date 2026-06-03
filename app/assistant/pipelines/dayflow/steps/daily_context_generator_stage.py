@@ -241,21 +241,27 @@ class DailyContextGeneratorStep(BaseStep):
         min_interval = int(run_policy.get("min_interval_seconds", 300))  # Default 5 min for agent stages
 
         last_run_utc = self._get_last_run_utc(ctx)
-        if last_run_utc:
-            elapsed = (ctx.now_utc - last_run_utc).total_seconds()
-            if elapsed < min_interval:
-                remaining = int(min_interval - elapsed)
-                return False, f"interval={remaining}s remaining"
+        elapsed = (ctx.now_utc - last_run_utc).total_seconds() if last_run_utc else None
+        if elapsed is not None and elapsed < min_interval:
+            remaining = int(min_interval - elapsed)
+            return False, f"interval={remaining}s remaining"
 
         afk_guard = step_cfg.get("afk_guard", {}) if isinstance(step_cfg, dict) else {}
         if isinstance(afk_guard, dict):
             snapshot = self._get_afk_snapshot()
             is_afk = bool(snapshot.get("is_afk", False))
             is_potentially_afk = bool(snapshot.get("is_potentially_afk", False))
-            if afk_guard.get("skip_when_afk", True) and is_afk:
-                return False, "afk_guard=afk"
-            if afk_guard.get("skip_when_potentially_afk", False) and is_potentially_afk:
-                return False, "afk_guard=potentially_afk"
+            # AFK heartbeat: don't stop entirely while AFK — still advance the day's
+            # context at a minimum cadence (default hourly) so the day boundary and
+            # "Current Status" keep moving while the user is away. Below that cadence
+            # the AFK guard skips as before.
+            max_afk_interval = int(afk_guard.get("max_afk_interval_seconds", 3600))
+            afk_heartbeat_due = (elapsed is None) or (elapsed >= max_afk_interval)
+            if not afk_heartbeat_due:
+                if afk_guard.get("skip_when_afk", True) and is_afk:
+                    return False, f"afk_guard=afk (heartbeat in {int(max_afk_interval - (elapsed or 0))}s)"
+                if afk_guard.get("skip_when_potentially_afk", False) and is_potentially_afk:
+                    return False, "afk_guard=potentially_afk"
 
         return True, "ready"
 

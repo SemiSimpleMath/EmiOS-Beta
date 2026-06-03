@@ -6,8 +6,10 @@
     "min_interval_seconds": 300
   },
   "afk_guard": {
-    "skip_when_afk": false,
-    "skip_when_potentially_afk": false
+    "skip_when_afk": true,
+    "skip_when_potentially_afk": false,
+    "max_afk_interval_seconds": 3600,
+    "_comment": "When active: every min_interval_seconds (5 min). When confirmed AFK: throttle to a heartbeat every max_afk_interval_seconds (1 hour) so the day still advances without re-synthesizing every 5 min while away."
   },
   "lookback_hours": {
     "calendar_upcoming": 12,
