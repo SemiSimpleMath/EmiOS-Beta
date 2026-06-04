@@ -172,10 +172,21 @@ class FindCalendarEventByName(CalendarTool):
             # Extract just the events for data_list
             top_events = [item['event'] for item in top_k]
             
-            # Build a readable summary
+            # Build a readable summary. Include id + location + meeting link so the
+            # agent can act on a match directly (fetch the event / use the link)
+            # instead of re-scanning the whole calendar.
             summary_lines = [f"Found {len(top_k)} matching events:"]
             for i, item in enumerate(top_k, 1):
-                summary_lines.append(f"{i}. '{item['event'].get('summary', 'No Title')}' (similarity: {item['similarity']:.4f})")
+                ev = item['event']
+                title = ev.get('summary', 'No Title')
+                line = f"{i}. '{title}' (id={ev.get('id', '')}, similarity: {item['similarity']:.4f})"
+                location = str(ev.get('location') or '').strip()
+                meeting_link = str(ev.get('meeting_link') or '').strip()
+                if location:
+                    line += f" location={location[:120]}"
+                if meeting_link:
+                    line += f" meeting_link={meeting_link}"
+                summary_lines.append(line)
             
             return ToolResult(
                 result_type="success",

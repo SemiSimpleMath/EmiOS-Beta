@@ -304,3 +304,41 @@ def test_data_list_still_populated_with_full_event_objects(monkeypatch):
     assert event["summary"] == "Friday Night Meats"
     assert "us02web.zoom.us" in event["description"]
     assert event["id"] == "evt1"
+
+
+def test_content_surfaces_meeting_link_from_conference_data(monkeypatch):
+    """The join link must come from structured conferenceData even when the
+    description is the Google placeholder (Gmail-auto-created events)."""
+    tool, _fake = build_calendar_tool(monkeypatch)
+    ev = _base_event(
+        event_id="fnm1",
+        summary="Friday night meats",
+        location="Zoom",
+        description=(
+            "To see detailed information for automatically created events like "
+            "this one, use the official Google Calendar app. https://g.co/calendar"
+        ),
+    )
+    ev["conferenceData"] = {"entryPoints": [
+        {"entryPointType": "more", "uri": "https://g.co/calendar"},
+        {"entryPointType": "video", "uri": "https://zoom.us/j/12345678901"},
+    ]}
+    _install_stub_get_events(monkeypatch, [ev])
+    result = tool.handle_get_calendar_events({
+        "start_date": "2026-04-24T00:00:00Z",
+        "end_date": "2026-04-25T00:00:00Z",
+    })
+    assert "meeting_link=https://zoom.us/j/12345678901" in result.content
+
+
+def test_content_surfaces_meeting_link_from_hangout_link(monkeypatch):
+    """With no conferenceData video entry, the legacy hangoutLink (Meet) is used."""
+    tool, _fake = build_calendar_tool(monkeypatch)
+    ev = _base_event(event_id="meet1", summary="Team sync")
+    ev["hangoutLink"] = "https://meet.google.com/abc-defg-hij"
+    _install_stub_get_events(monkeypatch, [ev])
+    result = tool.handle_get_calendar_events({
+        "start_date": "2026-04-24T00:00:00Z",
+        "end_date": "2026-04-25T00:00:00Z",
+    })
+    assert "meeting_link=https://meet.google.com/abc-defg-hij" in result.content

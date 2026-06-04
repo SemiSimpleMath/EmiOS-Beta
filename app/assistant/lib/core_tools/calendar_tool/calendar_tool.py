@@ -64,6 +64,22 @@ def _extract_blocking(event: Dict[str, Any]) -> bool:
         return True
 
 
+def _extract_meeting_link(event: Dict[str, Any]) -> str:
+    """The conference JOIN url (Zoom / Google Meet) from structured
+    conferenceData entry points, else the legacy hangoutLink. Empty string when
+    none — Gmail-auto-created events carry a placeholder description, so the join
+    link lives only in these structured fields, not the description.
+    """
+    conf = event.get("conferenceData")
+    if isinstance(conf, dict):
+        for ep in (conf.get("entryPoints") or []):
+            if isinstance(ep, dict) and ep.get("entryPointType") == "video":
+                uri = str(ep.get("uri") or "").strip()
+                if uri:
+                    return uri
+    return str(event.get("hangoutLink") or "").strip()
+
+
 def format_rrule(
     freq: str, 
     start: str, 
@@ -159,6 +175,7 @@ class CalendarTool(BaseTool):
             "start": start_utc,
             "end": end_utc,
             "link": event.get("htmlLink"),
+            "meeting_link": _extract_meeting_link(event),
             "is_recurring": is_recurring,
             "is_all_day": is_all_day,
             "recurring_event_id": recurring_event_id,
@@ -589,6 +606,7 @@ class CalendarTool(BaseTool):
                 "start": start_utc,
                 "end": end_utc,
                 "link": event.get("htmlLink"),
+                "meeting_link": _extract_meeting_link(event),
                 "is_recurring": is_recurring,
                 "is_all_day": is_all_day,
                 "recurring_event_id": recurring_event_id,
@@ -649,12 +667,15 @@ class CalendarTool(BaseTool):
             seen_titles.add(key)
             start = str(ev.get("start") or "").strip()
             location = str(ev.get("location") or "").strip()
+            meeting_link = str(ev.get("meeting_link") or "").strip()
             description = str(ev.get("description") or "").strip()
             line = f"- {title}"
             if start:
                 line += f" @ {start}"
             if location:
                 line += f"  location={location[:200]}"
+            if meeting_link:
+                line += f"  meeting_link={meeting_link}"
             if description:
                 # Keep descriptions bounded but include enough for a Zoom/Meet
                 # link to land inside the snippet.

@@ -208,3 +208,24 @@ def test_dedupes_duplicate_titles_before_scoring(monkeypatch):
     result = tool.execute(msg)
     titles = [e["summary"] for e in result.data_list]
     assert titles.count("Friday Night Meats") == 1
+
+
+def test_content_includes_event_id_and_meeting_link(monkeypatch):
+    """content (agent-visible) must carry the event id + meeting link so the
+    agent can act on the match without re-scanning the calendar."""
+    _install_stub_embedder(monkeypatch)
+    tool = _build_tool(monkeypatch)
+    ev = _base_event(event_id="fnm-id-1", summary="Friday Night Meats")
+    ev["conferenceData"] = {"entryPoints": [
+        {"entryPointType": "video", "uri": "https://zoom.us/j/99999999999"},
+    ]}
+    _install_stub_get_events(monkeypatch, [ev])
+
+    from app.assistant.utils.pydantic_classes import ToolMessage
+    msg = ToolMessage(
+        tool_name="find_calendar_event_by_name",
+        tool_data={"arguments": {"event_name": "friday night meats"}},
+    )
+    result = tool.execute(msg)
+    assert "id=fnm-id-1" in result.content
+    assert "meeting_link=https://zoom.us/j/99999999999" in result.content
