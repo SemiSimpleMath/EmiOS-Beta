@@ -47,6 +47,7 @@ def _seed_personal_resources() -> None:
         resources_dir / "assistant" / "resource_relationship_config.json",
         resources_dir / "assistant" / "assistant_core.json",
         resources_dir / "resource_emi_accounts.json",
+        resources_dir / "env_registry_user.json",
     ]
 
     for real_path in example_pairs:
@@ -225,6 +226,9 @@ def initialize_services(app):
     from app.assistant.entity_management.entity_catalog import EntityCatalog
     entity_catalog = EntityCatalog.instance()
     ServiceLocator.register("entity_catalog", entity_catalog)
+
+    from app.assistant.env_registry import EnvRegistryService
+    ServiceLocator.register("env_registry", EnvRegistryService())
     logger.info("✅ Entity catalog initialized")
 
     # Initialize scheduler service (auto-starts via TimingEngine.__init__)

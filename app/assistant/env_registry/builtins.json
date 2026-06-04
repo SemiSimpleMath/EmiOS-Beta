@@ -1,0 +1,132 @@
+{
+  "doc": "Builtin env-var registry entries shipped with the release (tracked, sanitized — NO values, NO personal data). The EnvRegistryService merges these with the user's gitignored resources/env_registry_user.json. Each entry is metadata + the env var NAME(s); actual values live in .env (kind=value) or pods (kind=secret / account.auth). owner = user|assistant (UI grouping, maps to PRINCIPAL_USER/PRINCIPAL_SELF). feature = freeform tag a feature page filters on. Env var names here still use the current EMI_* spelling so today's readers resolve; the rename to ASSISTANT_* happens with the reader migration (registry holds whatever the install uses).",
+  "schema_version": 1,
+  "entries": [
+    {
+      "name": "PRIMARY_USER",
+      "kind": "value",
+      "owner": "user",
+      "feature": "identity",
+      "label": "Your name",
+      "hint": "Your preferred name (also resolvable from resources/user/resource_user_data.json).",
+      "required": true
+    },
+    {
+      "name": "ASSISTANT_NAME",
+      "kind": "value",
+      "owner": "assistant",
+      "feature": "identity",
+      "label": "Assistant name",
+      "hint": "What you call your assistant.",
+      "required": true
+    },
+    {
+      "name": "assistant_gmail",
+      "kind": "account",
+      "owner": "assistant",
+      "feature": "email",
+      "label": "Assistant Gmail",
+      "platform": "gmail",
+      "handle_env": "EMI_OWN_GMAIL_HANDLE",
+      "accessible_by": ["self"],
+      "auth": { "kind": "google_oauth", "account_id": "emi_google_primary" }
+    },
+    {
+      "name": "assistant_bluesky",
+      "kind": "account",
+      "owner": "assistant",
+      "feature": "social",
+      "label": "Assistant Bluesky",
+      "platform": "bluesky",
+      "handle_env": "EMI_OWN_BLUESKY_HANDLE",
+      "accessible_by": ["self"],
+      "auth": {
+        "kind": "pod_ref",
+        "pod_kind": "auth.bearer",
+        "pod_id_env": "EMI_OWN_BLUESKY_AUTH_POD_ID",
+        "env_ref": "EMI_POD_BLUESKY_APP_PASSWORD",
+        "secret_label": "App password",
+        "secret_hint": "Generate at Bluesky Settings -> Privacy and Security -> App Passwords. Looks like abcd-efgh-ijkl-mnop.",
+        "validator": "bluesky"
+      }
+    },
+    {
+      "name": "assistant_twitter",
+      "kind": "account",
+      "owner": "assistant",
+      "feature": "social",
+      "label": "Assistant X (Twitter)",
+      "platform": "twitter",
+      "handle_env": "EMI_OWN_TWITTER_HANDLE",
+      "accessible_by": ["self"],
+      "auth": {
+        "kind": "pod_ref",
+        "pod_kind": "auth.bearer",
+        "pod_id_env": "EMI_OWN_TWITTER_AUTH_POD_ID",
+        "env_ref": "EMI_POD_TWITTER_BEARER",
+        "secret_label": "Bearer token",
+        "secret_hint": "Generate at developer.x.com under your project's app keys. Paid tier required for write."
+      }
+    },
+    {
+      "name": "assistant_reddit",
+      "kind": "account",
+      "owner": "assistant",
+      "feature": "social",
+      "label": "Assistant Reddit",
+      "platform": "reddit",
+      "handle_env": "EMI_OWN_REDDIT_USERNAME",
+      "accessible_by": ["self"],
+      "auth": {
+        "kind": "pod_ref",
+        "pod_kind": "auth.bearer",
+        "pod_id_env": "EMI_OWN_REDDIT_AUTH_POD_ID",
+        "env_ref": "EMI_POD_REDDIT_TOKEN",
+        "secret_label": "OAuth token",
+        "secret_hint": "Create a script-type app at reddit.com/prefs/apps; use the OAuth token, not the secret."
+      }
+    },
+    {
+      "name": "assistant_telegram",
+      "kind": "account",
+      "owner": "assistant",
+      "feature": "social",
+      "label": "Assistant Telegram",
+      "platform": "telegram",
+      "handle_env": "EMI_OWN_TELEGRAM_HANDLE",
+      "accessible_by": ["self"],
+      "auth": {
+        "kind": "pod_ref",
+        "pod_kind": "auth.bearer",
+        "pod_id_env": "EMI_OWN_TELEGRAM_AUTH_POD_ID",
+        "env_ref": "EMI_POD_TELEGRAM_BOT_TOKEN",
+        "secret_label": "Bot token",
+        "secret_hint": "Talk to @BotFather on Telegram; create a new bot; copy the HTTP API token."
+      }
+    },
+    {
+      "name": "EMI_POD_SPOTIFY_CLIENT_ID",
+      "kind": "secret",
+      "owner": "assistant",
+      "feature": "music",
+      "label": "Spotify client ID",
+      "hint": "Create an app at developer.spotify.com; copy the Client ID."
+    },
+    {
+      "name": "EMI_POD_SPOTIFY_CLIENT_SECRET",
+      "kind": "secret",
+      "owner": "assistant",
+      "feature": "music",
+      "label": "Spotify client secret",
+      "hint": "Create an app at developer.spotify.com; copy the Client Secret."
+    },
+    {
+      "name": "EMI_POD_WHOOP_TOKEN",
+      "kind": "secret",
+      "owner": "user",
+      "feature": "fitness",
+      "label": "WHOOP API token",
+      "hint": "WHOOP API access token."
+    }
+  ]
+}

@@ -244,6 +244,7 @@ resources/user/.setup_draft.json
 # Assistant's own cross-platform accounts (reveals account footprint; notes may
 # carry real emails/names). .example ships sanitized, seeded on first run.
 resources/resource_emi_accounts.json
+resources/env_registry_user.json
 
 # Subconscious — noticer's living state + per-tick audit log + digest output. Personal.
 resources/subconscious/resource_concerns_register.json

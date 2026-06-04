@@ -1,0 +1,5 @@
+{
+  "doc": "User-added env-var registry entries (gitignored; written by the settings UI). Seeded from this .example on first run. Same entry shape as app/assistant/env_registry/builtins.json. Add entries here (or via the UI) when you wire up your own functionality that needs an env var; they appear in the central env settings and on any feature page that filters your chosen `feature` tag. Values are NOT stored here — plain values go to .env, secrets to pods.",
+  "schema_version": 1,
+  "entries": []
+}
