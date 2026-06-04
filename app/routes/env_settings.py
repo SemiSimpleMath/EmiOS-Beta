@@ -33,6 +33,13 @@ def enrich_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+@env_settings_bp.app_template_global("env_for_feature")
+def env_for_feature(feature: str) -> list[dict[str, Any]]:
+    """Jinja global: enriched registry entries for a feature tag, so any feature
+    page can embed an inline editable section via _env_entries.html."""
+    return enrich_entries(DI.env_registry.for_feature(feature))
+
+
 def _grouped() -> list[dict[str, Any]]:
     reg = DI.env_registry
     by_owner: dict[str, dict[str, list[dict[str, Any]]]] = {}

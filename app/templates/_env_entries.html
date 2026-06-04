@@ -1,10 +1,12 @@
 {# Reusable env-var entry renderer. Embed on any feature page:
      {% from '_env_entries.html' import env_entries %}
-     {{ env_entries(items) }}
-   `items` is a list of registry entries, each enriched by the route with either
-   `state` ({set, shown}) for value/secret kinds, or `account` (projected account)
-   for kind=account. Edits POST to /settings/env/set and reload the page. #}
-{% macro env_entries(items, set_action='/settings/env/set') %}
+     {{ env_entries(env_for_feature('email'), add_feature='email') }}
+   `items` is a list of registry entries, each enriched (by the route or the
+   env_for_feature Jinja global) with either `state` ({set, shown}) for value/secret
+   kinds, or `account` (projected account) for kind=account. Pass `add_feature` to
+   show an inline "add a <feature> variable" form pre-tagged to that feature.
+   Edits POST to /settings/env/* and reload the page. #}
+{% macro env_entries(items, set_action='/settings/env/set', add_feature=None) %}
 <div class="env-entries">
   {% for it in items %}
   <div class="env-entry env-kind-{{ it.kind }}">
@@ -45,6 +47,22 @@
       </form>
     {% endif %}
   </div>
+  {% else %}
+  <div class="env-entry env-empty">No variables here yet{% if add_feature %} — add one below{% endif %}.</div>
   {% endfor %}
+
+  {% if add_feature %}
+  <form class="env-add-form env-add-inline" method="post" action="/settings/env/add">
+    <input type="hidden" name="feature" value="{{ add_feature }}">
+    <input name="name" placeholder="ENV_VAR_NAME" required>
+    <input name="label" placeholder="Label">
+    <select name="owner">
+      <option value="user">You</option>
+      <option value="assistant">Assistant</option>
+    </select>
+    <label class="env-add-secret"><input type="checkbox" name="secret" value="1"> secret</label>
+    <button type="submit" class="env-btn env-btn-primary">Add to {{ add_feature }}</button>
+  </form>
+  {% endif %}
 </div>
 {% endmacro %}
