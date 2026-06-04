@@ -2,7 +2,7 @@
 
 Renders the unified env-var registry (EnvRegistryService) grouped by owner then
 feature, with inline value/secret editors and an "add variable" form. Account
-entries link to the existing /emi-accounts configure flow. The same entry list is
+entries link to the richer /settings/accounts configure flow. The same entry list is
 reusable inline on feature pages via templates/_env_entries.html.
 """
 from __future__ import annotations

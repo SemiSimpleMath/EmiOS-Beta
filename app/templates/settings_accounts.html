@@ -1,0 +1,151 @@
+{% extends 'base.html' %}
+
+{% block optional_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/setup_wizard.css') }}">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/settings_accounts.css') }}?v={{ static_v }}">
+{% endblock %}
+
+{% block content %}
+<div class="setup-container">
+  <div class="setup-header">
+    <h1><i class="fas fa-user-circle"></i> {{ assistant_name }}'s Accounts</h1>
+    <p>{{ assistant_name }}'s own identities across platforms. Subsystems read this registry when they need to act <em>as {{ assistant_name }}</em> rather than as you. This is the richer editor for the account entries on the <a href="/settings/env">Environment</a> page.</p>
+    <p class="acct-meta">
+      Source: the env registry (shipped defaults + your additions) &middot;
+      Handles: <code>*_HANDLE</code> env vars &middot;
+      Auth: <code>configs/oauth_accounts.json</code> for Google, <code>auth.*</code> pods otherwise
+    </p>
+  </div>
+
+  <div class="settings-section">
+    <div class="acct-table-wrap">
+    <table class="acct-table">
+      <thead>
+        <tr>
+          <th>Platform</th>
+          <th>Handle</th>
+          <th>Status</th>
+          <th>Auth</th>
+          <th>Notes</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in accounts %}
+        <tr class="acct-row status-{{ a.status }}"
+            data-account-id="{{ a.id }}"
+            data-platform="{{ a.platform }}"
+            data-handle="{{ a.handle or '' }}"
+            data-secret-label="{{ a.auth.secret_label or '' }}"
+            data-secret-hint="{{ a.auth.secret_hint or '' }}"
+            data-auth-kind="{{ a.auth.kind }}">
+          <td class="acct-platform">
+            <strong>{{ a.display_name }}</strong>
+            <div class="acct-id">id: <code>{{ a.id }}</code></div>
+          </td>
+          <td class="acct-handle">
+            {% if a.handle %}
+              <code>{{ a.handle }}</code>
+            {% else %}
+              <span class="acct-empty">— <code>{{ a.handle_env }}</code> unset</span>
+            {% endif %}
+          </td>
+          <td class="acct-status">
+            {% if a.status == 'configured' %}
+              <span class="status-pill status-pill-ok"><i class="fas fa-check"></i> configured</span>
+            {% elif a.status == 'unconfigured' %}
+              <span class="status-pill status-pill-warn"><i class="fas fa-triangle-exclamation"></i> unconfigured</span>
+            {% else %}
+              <span class="status-pill status-pill-muted"><i class="fas fa-circle-dot"></i> {{ a.status }}</span>
+            {% endif %}
+            {% if a.status_reason %}<div class="acct-reason">{{ a.status_reason }}</div>{% endif %}
+          </td>
+          <td class="acct-auth">
+            {% if a.auth.kind == 'google_oauth' %}
+              <code>oauth: {{ a.auth.account_id }}</code>
+            {% elif a.auth.kind == 'pod_ref' %}
+              <code>pod ({{ a.auth.pod_kind }}):</code>
+              {% if a.auth.pod_id %}<code>{{ a.auth.pod_id }}</code>{% else %}<span class="acct-empty">— pod id env unset</span>{% endif %}
+            {% else %}
+              <span class="acct-empty">—</span>
+            {% endif %}
+          </td>
+          <td class="acct-notes">{{ a.notes or '' }}</td>
+          <td class="acct-actions">
+            {% if a.auth.kind == 'pod_ref' and a.status != 'configured' %}
+              <button type="button" class="acct-configure-btn" data-action="open-configure">
+                <i class="fas fa-key"></i> Configure
+              </button>
+            {% elif a.auth.kind == 'pod_ref' and a.status == 'configured' %}
+              <button type="button" class="acct-configure-btn acct-configure-btn-rotate" data-action="open-configure">
+                <i class="fas fa-rotate"></i> Rotate
+              </button>
+            {% elif a.auth.kind == 'google_oauth' %}
+              <a class="acct-configure-btn"
+                 href="/oauth/google/start?account_id={{ a.auth.account_id }}">
+                <i class="fab fa-google"></i> OAuth
+              </a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+
+  <div class="settings-section acct-howto">
+    <h2><i class="fas fa-circle-info"></i> How to add an account</h2>
+    <ol>
+      <li>Add an account entry to the env registry declaring <code>platform</code>, <code>handle_env</code>, and <code>auth</code> (include <code>env_ref</code>, <code>secret_label</code>, <code>secret_hint</code>, and optionally <code>validator</code> for the configure UI).</li>
+      <li>For Google accounts: add an entry to <code>configs/oauth_accounts.json</code> and drop the OAuth client JSON at the <code>client_credentials</code> path.</li>
+      <li>Set the matching <code>*_HANDLE</code> env var in <code>.env</code> and restart so the row appears with handle resolved.</li>
+      <li>For non-Google: click <strong>Configure</strong> on the row, paste the platform-issued secret (app password / API token), and let {{ assistant_name }} mint the <code>auth.*</code> pod for you. No file editing or restart needed.</li>
+    </ol>
+  </div>
+</div>
+
+<!-- Configure modal — single instance, populated per row -->
+<div id="configure-modal" class="acct-modal hidden" role="dialog" aria-modal="true" aria-labelledby="configure-modal-title">
+  <div class="acct-modal-backdrop" data-action="close-configure"></div>
+  <div class="acct-modal-panel">
+    <header class="acct-modal-header">
+      <h2 id="configure-modal-title">Configure account</h2>
+      <button type="button" class="acct-modal-close" data-action="close-configure" aria-label="Close">
+        <i class="fas fa-xmark"></i>
+      </button>
+    </header>
+    <div class="acct-modal-body">
+      <div id="configure-context" class="acct-configure-context"></div>
+
+      <label class="acct-configure-label" for="configure-secret">
+        <span id="configure-secret-label">Secret</span>
+      </label>
+      <textarea id="configure-secret"
+                rows="2"
+                autocomplete="off"
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck="false"
+                placeholder="Paste secret here"></textarea>
+      <div id="configure-secret-hint" class="acct-configure-hint"></div>
+
+      <label class="acct-configure-checkbox">
+        <input type="checkbox" id="configure-test-first" checked>
+        <span>Test the credential against the live API before saving (recommended)</span>
+      </label>
+
+      <div id="configure-result" class="acct-configure-result hidden"></div>
+    </div>
+    <footer class="acct-modal-footer">
+      <button type="button" class="acct-btn acct-btn-secondary" data-action="close-configure">Cancel</button>
+      <button type="button" class="acct-btn acct-btn-primary" id="configure-submit">
+        <i class="fas fa-key"></i> Mint pod
+      </button>
+    </footer>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/settings_accounts.js') }}?v={{ static_v }}"></script>
+{% endblock %}

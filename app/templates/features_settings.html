@@ -41,7 +41,7 @@
         {% from '_env_entries.html' import env_entries %}
         <div class="settings-section">
             <h2><i class="fas fa-envelope"></i> Email accounts &amp; keys</h2>
-            <p class="step-description">Env vars and accounts tagged <code>email</code>. Manage the assistant's Gmail here or on the <a href="/emi-accounts">Accounts</a> page; the full list is on <a href="/settings/env">Environment &amp; accounts</a>.</p>
+            <p class="step-description">Env vars and accounts tagged <code>email</code>. Manage the assistant's Gmail here or on the <a href="/settings/accounts">Accounts</a> page; the full list is on <a href="/settings/env">Environment &amp; accounts</a>.</p>
             {{ env_entries(env_for_feature('email'), add_feature='email') }}
         </div>
 

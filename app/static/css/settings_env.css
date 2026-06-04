@@ -1,71 +1,83 @@
-/* Central env-var settings page + the reusable inline env_entries partial. */
-.env-settings { max-width: 880px; margin: 0 auto; padding: 24px 20px 64px; }
-.env-settings-header h1 { margin: 0 0 6px; font-size: 1.5rem; }
-.env-settings-header p { color: #6b7180; margin: 0 0 8px; line-height: 1.5; }
+/* Central env-var settings page + the reusable inline env_entries partial.
+   Light theme, matched to settings_accounts.css so the two pages feel like one
+   system. The class names are shared with the inline sections embedded on
+   feature pages (features_settings, local_cameras), so they restyle in lockstep. */
+
+/* setup_wizard.css flex-centers the body for short setup cards. Override so a
+   tall registry page scrolls normally and uses the viewport width. */
+body {
+  display: block;
+  align-items: initial;
+  justify-content: initial;
+  min-height: auto;
+  padding: 24px;
+}
+
+.setup-container { max-width: 920px; }
 
 .env-flash {
   margin: 14px 0; padding: 10px 14px; border-radius: 8px;
-  background: #1e2536; color: #d0d3da; border: 1px solid #2c3650; font-size: 0.9rem;
+  background: rgba(59, 130, 246, 0.08); color: #1e40af;
+  border: 1px solid rgba(59, 130, 246, 0.25); font-size: 0.9em;
 }
 
-.env-owner { margin-top: 28px; }
-.env-owner > h2 {
-  font-size: 1.05rem; margin: 0 0 8px; padding-bottom: 6px;
-  border-bottom: 1px solid #2c3650; color: #e3e5e9;
-}
-.env-feature { margin: 14px 0 8px; }
+.env-feature { margin: 0 0 18px; }
 .env-feature > h3 {
-  font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em;
-  color: #8a90a0; margin: 0 0 8px;
+  font-size: 0.78em; text-transform: uppercase; letter-spacing: 0.04em;
+  color: #6b7280; margin: 0 0 8px; font-weight: 600;
 }
 
 /* ── entries (shared by central page + inline feature sections) ── */
-.env-entries { display: flex; flex-direction: column; gap: 10px; }
+.env-entries { display: flex; flex-direction: column; gap: 8px; }
 .env-entry {
-  border: 1px solid #262d40; border-radius: 10px; padding: 12px 14px;
-  background: #161b27;
+  border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px 12px;
+  background: #f9fafb;
 }
 .env-entry-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-.env-entry-label { font-weight: 600; color: #e3e5e9; }
-.env-entry-name { font-size: 0.78rem; color: #7b8295; }
+.env-entry-label { font-weight: 600; color: #374151; }
+.env-entry-name { font-size: 0.78em; color: #9ca3af; font-family: 'Cascadia Code', 'Consolas', monospace; }
 .env-entry-user {
-  font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.03em;
-  color: #b48ead; border: 1px solid #4a3a52; border-radius: 999px; padding: 1px 7px;
+  font-size: 0.68em; text-transform: uppercase; letter-spacing: 0.03em;
+  color: #7c3aed; border: 1px solid #ddd6fe; border-radius: 999px; padding: 1px 7px;
 }
-.env-entry-hint { color: #6b7180; font-size: 0.82rem; margin: 4px 0 0; }
+.env-entry-hint { color: #6b7280; font-size: 0.82em; margin: 4px 0 0; }
 
 .env-set-form { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
 .env-input {
-  flex: 1 1 260px; min-width: 180px; padding: 7px 10px; border-radius: 7px;
-  border: 1px solid #2c3650; background: #0f1320; color: #e3e5e9; font-size: 0.9rem;
+  flex: 1 1 260px; min-width: 180px; padding: 7px 10px; border-radius: 5px;
+  border: 1px solid #d1d5db; background: #fff; color: #111827; font-size: 0.9em;
 }
-.env-input:focus { outline: none; border-color: #4a6cf7; }
+.env-input:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15); }
 
 .env-account { display: flex; align-items: center; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
-.env-handle { color: #cdd2dc; font-size: 0.85rem; }
-.env-status { font-size: 0.75rem; border-radius: 999px; padding: 2px 9px; }
-.env-status-configured { background: #16331f; color: #7ee2a0; border: 1px solid #235c36; }
-.env-status-unconfigured { background: #332a16; color: #e2c87e; border: 1px solid #5c4c23; }
+.env-handle { color: #4b5563; font-size: 0.85em; font-family: 'Cascadia Code', 'Consolas', monospace; }
+.env-status { font-size: 0.75em; border-radius: 999px; padding: 2px 9px; font-weight: 600; }
+.env-status-configured { background: rgba(72, 187, 120, 0.18); color: #166534; }
+.env-status-unconfigured { background: rgba(237, 137, 54, 0.18); color: #92400e; }
 
 .env-btn {
-  display: inline-block; padding: 6px 12px; border-radius: 7px; font-size: 0.85rem;
-  border: 1px solid #2c3650; background: #1b2233; color: #d0d3da; cursor: pointer;
+  display: inline-block; padding: 6px 12px; border-radius: 4px; font-size: 0.85em;
+  border: 1px solid #d1d5db; background: #fff; color: #374151; cursor: pointer;
   text-decoration: none;
 }
-.env-btn:hover { background: #222a40; }
-.env-btn-primary { background: #3551c9; border-color: #3551c9; color: #fff; }
-.env-btn-primary:hover { background: #3f5ee0; }
+.env-btn:hover { background: #f3f4f6; }
+.env-btn-primary { background: #3b82f6; border-color: #3b82f6; color: #fff; }
+.env-btn-primary:hover { background: #2563eb; }
 
-.env-flag { font-size: 0.78rem; }
-.env-flag-ok { color: #7ee2a0; }
-.env-flag-no { color: #8a90a0; }
+.env-flag { font-size: 0.78em; }
+.env-flag-ok { color: #166534; }
+.env-flag-no { color: #9ca3af; }
 
-/* ── add-variable form ── */
-.env-add { margin-top: 36px; padding-top: 16px; border-top: 1px solid #2c3650; }
-.env-add > h2 { font-size: 1.0rem; margin: 0 0 10px; }
+.env-empty {
+  color: #9ca3af; font-style: italic; background: transparent;
+  border: 1px dashed #e5e7eb;
+}
+
+/* ── add-variable form (central page + inline "add to <feature>") ── */
 .env-add-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .env-add-form input, .env-add-form select {
-  padding: 7px 10px; border-radius: 7px; border: 1px solid #2c3650;
-  background: #0f1320; color: #e3e5e9; font-size: 0.88rem;
+  padding: 7px 10px; border-radius: 5px; border: 1px solid #d1d5db;
+  background: #fff; color: #111827; font-size: 0.88em;
 }
-.env-add-secret { color: #8a90a0; font-size: 0.85rem; display: flex; align-items: center; gap: 5px; }
+.env-add-secret { color: #6b7280; font-size: 0.85em; display: flex; align-items: center; gap: 5px; }
+.env-add-inline { margin-top: 10px; }

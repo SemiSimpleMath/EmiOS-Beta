@@ -373,15 +373,15 @@ def google_accounts_settings_page():
     return render_template('google_accounts_settings.html')
 
 
-@preferences_bp.route('/emi-accounts', methods=['GET'])
-def emi_accounts_page():
+@preferences_bp.route('/settings/accounts', methods=['GET'])
+def accounts_settings_page():
     """Render the assistant's own cross-platform accounts (Gmail, Bluesky, X, Reddit, ...)."""
     accounts = DI.env_registry.accounts()
-    return render_template('emi_accounts.html', accounts=accounts)
+    return render_template('settings_accounts.html', accounts=accounts)
 
 
-@preferences_bp.route('/api/emi-accounts/<account_id>/configure', methods=['POST'])
-def emi_account_configure(account_id: str):
+@preferences_bp.route('/api/accounts/<account_id>/configure', methods=['POST'])
+def account_configure(account_id: str):
     """Mint an auth pod for a pod_ref account from a user-supplied secret.
 
     Body JSON: {"secret": "...", "test_first": bool}
@@ -417,7 +417,7 @@ def emi_account_configure(account_id: str):
             "ok": False,
             "message": (
                 f"account {account_id!r} is missing auth metadata "
-                f"(env_ref / pod_id_env / pod_kind); fix resource_emi_accounts.json"
+                f"(env_ref / pod_id_env / pod_kind); fix the account's registry entry"
             ),
         }), 500
 
@@ -446,21 +446,21 @@ def emi_account_configure(account_id: str):
                 "ok": False,
                 "message": f"Credential test failed (not minting): {probe_msg}",
             }), 400
-        logger.info("emi_account_configure: validator passed for %s — %s", account_id, probe_msg)
+        logger.info("account_configure: validator passed for %s — %s", account_id, probe_msg)
 
     # 2. Persist the secret env var (.env on disk + os.environ in-process).
     try:
         upsert_env(env_ref, secret)
     except Exception as e:
-        logger.exception("emi_account_configure: env_writer failed for %s", env_ref)
+        logger.exception("account_configure: env_writer failed for %s", env_ref)
         return jsonify({"ok": False, "message": f".env write failed: {e}"}), 500
     os.environ[env_ref] = secret
 
     # 3. Build an AUTH_USER scope and mint the pod.
     scope = ScopeContext(
-        scope_id=f"emi-accounts-configure::{account_id}",
+        scope_id=f"account-configure::{account_id}",
         owner_id=PRINCIPAL_USER,
-        actor_id="emi-accounts-ui",
+        actor_id="account-configure-ui",
         surface="internal",
         approval=ScopeApprovalPolicy(authority_level=99),
     )
@@ -474,14 +474,14 @@ def emi_account_configure(account_id: str):
             scope=scope,
         )
     except Exception as e:
-        logger.exception("emi_account_configure: put_secret_pod failed for %s", account_id)
+        logger.exception("account_configure: put_secret_pod failed for %s", account_id)
         return jsonify({"ok": False, "message": f"pod mint failed: {e}"}), 500
 
     # 4. Persist + in-process: the resource's pod_id_env now points at the new pod.
     try:
         upsert_env(pod_id_env, pod_id)
     except Exception as e:
-        logger.exception("emi_account_configure: env_writer failed for %s", pod_id_env)
+        logger.exception("account_configure: env_writer failed for %s", pod_id_env)
         return jsonify({"ok": False, "message": f".env write for pod_id failed: {e}"}), 500
     os.environ[pod_id_env] = pod_id
 
