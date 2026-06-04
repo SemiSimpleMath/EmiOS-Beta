@@ -392,3 +392,41 @@ body {
   background: #9ca3af;
   cursor: not-allowed;
 }
+
+/* ===== Add-account form + flash ===== */
+
+.acct-flash {
+  margin: 14px 0; padding: 10px 14px; border-radius: 8px;
+  background: rgba(59, 130, 246, 0.08); color: #1e40af;
+  border: 1px solid rgba(59, 130, 246, 0.25); font-size: 0.9em;
+}
+
+.acct-add { margin-top: 24px; }
+
+.acct-add-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 18px;
+  align-items: end;
+  margin-top: 12px;
+}
+
+.acct-add-form label {
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 0.82em; font-weight: 600; color: #374151;
+}
+
+.acct-add-form input {
+  padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 5px;
+  font-size: 0.9em; font-weight: 400; box-sizing: border-box;
+}
+
+.acct-add-form input:focus {
+  outline: none; border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18);
+}
+
+.acct-add-form button {
+  grid-column: 1 / -1;
+  justify-self: start;
+}

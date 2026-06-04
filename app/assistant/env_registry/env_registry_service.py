@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -96,6 +97,11 @@ class EnvRegistryService:
         auth = entry.get("auth") or {}
         if (auth.get("kind") or "").strip() != "pod_ref":
             return ""
+        # Direct pod_id on the entry (user-created accounts) wins; else the legacy
+        # pod_id_env convention (builtin accounts that stash the id in a .env var).
+        direct = str(auth.get("pod_id") or "").strip()
+        if direct:
+            return direct
         env_name = str(auth.get("pod_id_env") or "").strip()
         return str(os.getenv(env_name) or "").strip() if env_name else ""
 
@@ -120,6 +126,7 @@ class EnvRegistryService:
             "handle": handle,
             "handle_env": entry.get("handle_env"),
             "auth": auth,
+            "authority": int(entry.get("authority") or 99),  # surfacing dial; 99 = typical
             "status": "configured" if configured else "unconfigured",
         }
 
@@ -160,10 +167,9 @@ class EnvRegistryService:
         (configured assistant name, lowercased). Fails loud if unconfigured."""
         return get_required_assistant_name().lower()
 
-    def render_accounts_for_planner(self, principal: str) -> str:
-        """Scope-filtered account list as a prompt-ready text block (literal handles
-        + Google account_id / pod ref). Empty when no configured accounts apply."""
-        accounts = self.accounts_for_principal(principal)
+    def _render_account_lines(self, principal: str, accounts: list[dict[str, Any]]) -> str:
+        """Render a list of projected accounts as a prompt-ready text block (literal
+        handles + Google account_id / pod ref). Empty when none are configured."""
         if not accounts:
             return ""
         lines = [
@@ -187,6 +193,34 @@ class EnvRegistryService:
         if len(lines) == 2:  # only headers, no configured accounts
             return ""
         return "\n".join(lines)
+
+    def render_accounts_for_planner(self, principal: str) -> str:
+        """Principal-filtered account text (no authority filter). Prefer
+        render_accounts_for_scope (the resource provider) which also applies the
+        per-account authority dial."""
+        return self._render_account_lines(principal, self.accounts_for_principal(principal))
+
+    def render_accounts_for_scope(self, scope: Any) -> str:
+        """Provider for the `resource_accounts` dynamic resource. Computes the
+        principal- AND per-account-authority-filtered account text from the live
+        scope: principal = acting_as; an account appears only if the caller's
+        authority clears the account's `authority` dial.
+        See docs/architecture/SECRETS_ACCOUNTS.md."""
+        if hasattr(scope, "model_dump"):
+            scope = scope.model_dump()
+        if not isinstance(scope, dict):
+            scope = {}
+        principal = str(scope.get("acting_as") or "user")
+        approval = scope.get("approval")
+        if isinstance(approval, dict):
+            caller_authority = int(approval.get("authority_level") or 0)
+        else:
+            caller_authority = int(getattr(approval, "authority_level", 0) or 0)
+        accounts = [
+            a for a in self.accounts_for_principal(principal)
+            if int(a.get("authority") or 99) <= caller_authority
+        ]
+        return self._render_account_lines(principal, accounts)
 
     def resolve_gmail_account_id(self, alias: Optional[str], *, scope_acting_as: Optional[str] = None) -> str:
         """Resolve a planner alias / scope principal to a Google OAuth account_id.
@@ -465,3 +499,78 @@ class EnvRegistryService:
         _USER_PATH.parent.mkdir(parents=True, exist_ok=True)
         _USER_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         return entry
+
+    # ── account creation (Accounts page) ──────────────────────────────────────
+    _FEATURE_BY_PLATFORM = {
+        "gmail": "email", "outlook": "email", "yahoo": "email", "icloud": "email",
+        "bluesky": "social", "twitter": "social", "x": "social",
+        "reddit": "social", "telegram": "social", "mastodon": "social",
+    }
+
+    @staticmethod
+    def _slug(s: str) -> str:
+        return re.sub(r"[^A-Za-z0-9]+", "_", str(s or "")).strip("_").upper()
+
+    def create_account(self, *, owner: str, platform: str, login: str, secret: str,
+                       authority: int = 99, label: str = "",
+                       accessible_by: Optional[list[str]] = None) -> dict[str, Any]:
+        """User-create an account in the UNIFIED registry (env_registry_user.json).
+
+        Generates name-neutral `.env` keys (VALUES ONLY), writes them, mints the
+        STANDARD auth.bearer pod (the mint is uniform — `authority` is NOT applied at
+        mint; it's a surfacing policy stored on the entry), and persists the
+        kind=account record. See docs/architecture/SECRETS_ACCOUNTS.md.
+        Returns the projected account.
+        """
+        from app.assistant.utils.identity_names import resolve_principal
+        owner = resolve_principal(owner) or "user"
+        platform = str(platform or "").strip().lower()
+        login = str(login or "").strip()
+        secret = str(secret or "")
+        if not platform:
+            raise ValueError("platform is required")
+        if not login:
+            raise ValueError("login name is required")
+        if not secret:
+            raise ValueError("password / secret is required")
+        authority = int(authority)
+        if not (0 <= authority <= 100):
+            raise ValueError("authority must be between 0 and 100")
+
+        base = f"{self._slug(owner)}_{self._slug(platform)}_{self._slug(login)}".strip("_")
+        handle_env = f"ACCT_{base}_HANDLE"
+        secret_env = f"ACCT_{base}_SECRET"
+        account_id = f"acct_{base.lower()}"
+        if self.get(account_id) is not None:
+            raise ValueError(f"account {account_id!r} already exists")
+
+        # 1. .env holds VALUES only (key=value); structure goes to the registry below.
+        from app.assistant.utils.env_writer import upsert_env
+        upsert_env(handle_env, login); os.environ[handle_env] = login
+        upsert_env(secret_env, secret); os.environ[secret_env] = secret
+
+        # 2. UNIFORM mint — standard auth.bearer pod, no per-account authority in the mint.
+        from app.assistant.pod_store.pod_store import PodStore
+        pod_id = PodStore().put_secret_pod(
+            pod_type="auth.bearer",
+            owner_subject_id=owner,
+            name=(label or f"{platform}:{login}"),
+            env_ref=secret_env,
+            scope=self._mint_scope(),
+        )
+
+        # 3. Structured record -> unified user registry (kind=account).
+        record = {
+            "kind": "account",
+            "owner": owner,
+            "platform": platform,
+            "label": label or f"{platform}:{login}",
+            "feature": self._FEATURE_BY_PLATFORM.get(platform, platform),
+            "handle_env": handle_env,
+            "accessible_by": accessible_by or [owner],   # sensible default; editable
+            "authority": authority,                       # surfacing policy, not mint
+            "auth": {"kind": "pod_ref", "pod_kind": "auth.bearer",
+                     "env_ref": secret_env, "pod_id": pod_id},
+        }
+        self._upsert_user_field(account_id, **record)
+        return self._project_account({"name": account_id, **record})

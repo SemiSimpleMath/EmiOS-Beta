@@ -2,7 +2,7 @@
 """
 User and Assistant preferences management
 """
-from flask import Blueprint, render_template, request, jsonify
+from flask import Blueprint, render_template, request, jsonify, redirect, url_for
 from pathlib import Path
 from app.assistant.utils.path_utils import get_resources_dir as _get_resources_dir
 from app.assistant.utils.path_utils import get_configs_dir
@@ -375,9 +375,30 @@ def google_accounts_settings_page():
 
 @preferences_bp.route('/settings/accounts', methods=['GET'])
 def accounts_settings_page():
-    """Render the assistant's own cross-platform accounts (Gmail, Bluesky, X, Reddit, ...)."""
+    """Render the managed accounts (the user's, the assistant's, or others')."""
     accounts = DI.env_registry.accounts()
-    return render_template('settings_accounts.html', accounts=accounts)
+    return render_template('settings_accounts.html', accounts=accounts, flash=request.args.get("msg"))
+
+
+@preferences_bp.route('/settings/accounts/create', methods=['POST'])
+def account_create():
+    """Create an account from a form (owner, platform, login, password, authority).
+    Generates name-neutral .env keys (values only), mints the UNIFORM pod, writes the
+    kind=account record to the unified registry. See docs/architecture/SECRETS_ACCOUNTS.md."""
+    f = request.form
+    try:
+        acct = DI.env_registry.create_account(
+            owner=f.get("owner") or "user",
+            platform=f.get("platform") or "",
+            login=f.get("login") or "",
+            secret=f.get("secret") or "",
+            authority=int(f.get("authority") or 99),
+            label=f.get("label") or "",
+        )
+        msg = f"Added {acct.get('id')}"
+    except Exception as e:
+        msg = f"Error: {e}"
+    return redirect(url_for("preferences.accounts_settings_page", msg=msg))
 
 
 @preferences_bp.route('/api/accounts/<account_id>/configure', methods=['POST'])

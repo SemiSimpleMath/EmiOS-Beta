@@ -9,14 +9,16 @@
 {% block content %}
 <div class="setup-container">
   <div class="setup-header">
-    <h1><i class="fas fa-user-circle"></i> {{ assistant_name }}'s Accounts</h1>
-    <p>{{ assistant_name }}'s own identities across platforms. Subsystems read this registry when they need to act <em>as {{ assistant_name }}</em> rather than as you. This is the richer editor for the account entries on the <a href="/settings/env">Environment</a> page.</p>
+    <h1><i class="fas fa-user-circle"></i> Accounts</h1>
+    <p>Login + credentials for accounts you manage — yours, the assistant's ({{ assistant_name }}'s), or other people's. Each password is minted into a confined pod whose value never reaches an agent; the per-account authority sets who can act as it.</p>
     <p class="acct-meta">
-      Source: the env registry (shipped defaults + your additions) &middot;
-      Handles: <code>*_HANDLE</code> env vars &middot;
-      Auth: <code>configs/oauth_accounts.json</code> for Google, <code>auth.*</code> pods otherwise
+      Stored in the env registry (shipped defaults + your additions) &middot;
+      Values in <code>.env</code>, structure in <code>env_registry_user.json</code> &middot;
+      Google uses OAuth; everything else mints an <code>auth.*</code> pod
     </p>
   </div>
+
+  {% if flash %}<div class="acct-flash">{{ flash }}</div>{% endif %}
 
   <div class="settings-section">
     <div class="acct-table-wrap">
@@ -95,14 +97,32 @@
     </div>
   </div>
 
-  <div class="settings-section acct-howto">
-    <h2><i class="fas fa-circle-info"></i> How to add an account</h2>
-    <ol>
-      <li>Add an account entry to the env registry declaring <code>platform</code>, <code>handle_env</code>, and <code>auth</code> (include <code>env_ref</code>, <code>secret_label</code>, <code>secret_hint</code>, and optionally <code>validator</code> for the configure UI).</li>
-      <li>For Google accounts: add an entry to <code>configs/oauth_accounts.json</code> and drop the OAuth client JSON at the <code>client_credentials</code> path.</li>
-      <li>Set the matching <code>*_HANDLE</code> env var in <code>.env</code> and restart so the row appears with handle resolved.</li>
-      <li>For non-Google: click <strong>Configure</strong> on the row, paste the platform-issued secret (app password / API token), and let {{ assistant_name }} mint the <code>auth.*</code> pod for you. No file editing or restart needed.</li>
-    </ol>
+  <div class="settings-section acct-add">
+    <h2><i class="fas fa-plus"></i> Add an account</h2>
+    <p>Login + password for an account you manage. The password is written to <code>.env</code> and minted into a confined pod — the value never reaches an agent. Authority sets who can act as the account (99 = user-equivalent; lower = freer; 100 = code-only). Google accounts connect via OAuth instead — use the <strong>OAuth</strong> action on their row.</p>
+    <form class="acct-add-form" method="post" action="/settings/accounts/create">
+      <label>Owner
+        <input name="owner" list="acct-owner-opts" value="user" placeholder="user / self / person's name">
+        <datalist id="acct-owner-opts"><option value="user"></option><option value="self"></option></datalist>
+      </label>
+      <label>Platform
+        <input name="platform" placeholder="gmail / bluesky / reddit / …" required>
+      </label>
+      <label>Login name
+        <input name="login" placeholder="username or email" required>
+      </label>
+      <label>Password / secret
+        <input name="secret" type="password" autocomplete="off" placeholder="app password / API token" required>
+      </label>
+      <label>Authority (0–100)
+        <input name="authority" type="number" min="0" max="100" value="99" list="acct-auth-bands">
+        <datalist id="acct-auth-bands"><option value="10"></option><option value="50"></option><option value="70"></option><option value="99"></option><option value="100"></option></datalist>
+      </label>
+      <label>Label (optional)
+        <input name="label" placeholder="e.g. Work Gmail">
+      </label>
+      <button type="submit" class="acct-btn acct-btn-primary"><i class="fas fa-key"></i> Add account</button>
+    </form>
   </div>
 </div>
 
