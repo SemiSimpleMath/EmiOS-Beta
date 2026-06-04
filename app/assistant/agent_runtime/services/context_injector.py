@@ -110,7 +110,6 @@ class ContextInjector:
 
     def _refresh_resource_cache_entry(self, agent, resource_id: str) -> None:
         try:
-            from app.assistant.ServiceLocator.service_locator import DI
 
             resource_manager = getattr(DI, "resource_manager", None)
             if resource_manager is None:
@@ -1061,7 +1060,6 @@ class ContextInjector:
 
             if key.startswith("geoguessr_"):
                 try:
-                    from app.assistant.ServiceLocator.service_locator import DI
                     from app.assistant.room_session_manager.services.geoguessr_session_service import GeoguessrSessionService
                     scope = getattr(message, "scope_context", None) if message is not None else None
                     if scope is None:
