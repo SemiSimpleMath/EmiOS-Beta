@@ -82,3 +82,17 @@ def env_settings_add():
     except Exception as e:
         msg = f"Error: {e}"
     return redirect(url_for("env_settings.env_settings_page", msg=msg))
+
+
+@env_settings_bp.route("/settings/env/classify", methods=["POST"])
+def env_settings_classify():
+    f = request.form
+    name = (f.get("name") or "").strip()
+    sensitivity = (f.get("sensitivity") or "").strip()
+    owner = f.get("owner") or "user"
+    try:
+        res = DI.env_registry.set_sensitivity(name, sensitivity, owner=owner)
+        msg = f"{name} -> {res['sensitivity']}" + (f" (pod {res['pod_id']})" if res.get("pod_id") else "")
+    except Exception as e:
+        msg = f"Error: {e}"
+    return redirect(url_for("env_settings.env_settings_page", msg=msg))

@@ -46,13 +46,18 @@ class EnvRegistryService:
         return [e for e in data["entries"] if isinstance(e, dict) and str(e.get("name") or "").strip()]
 
     def entries(self) -> list[dict[str, Any]]:
-        """Builtins (shipped) merged with user entries; user `name` wins on collision."""
+        """Builtins (shipped) merged with user entries. User fields OVERRIDE the
+        builtin's fields PER-FIELD (so a user override can add just `sensitivity`
+        or `pod_id` without dropping the builtin's label/feature)."""
+        builtin_names: set[str] = set()
         by_name: dict[str, dict[str, Any]] = {}
         for e in self._load(_BUILTINS_PATH, required=True):
-            by_name[str(e["name"])] = {**e, "builtin": True}
+            n = str(e["name"]); builtin_names.add(n)
+            by_name[n] = dict(e)
         for e in self._load(_USER_PATH, required=False):
-            by_name[str(e["name"])] = {**e, "builtin": False}
-        return list(by_name.values())
+            n = str(e["name"])
+            by_name[n] = {**by_name.get(n, {}), **e}
+        return [{**v, "builtin": (k in builtin_names)} for k, v in by_name.items()]
 
     def get(self, name: str) -> Optional[dict[str, Any]]:
         for e in self.entries():
@@ -220,35 +225,64 @@ class EnvRegistryService:
         return effective
 
     # ── .env file overview (central settings page) ────────────────────────────
+    # Per-var sensitivity (plain .env vars; accounts manage their own pods):
+    #   config  — non-secret config/allowlist; masked in UI, no pod
+    #   courier — secret only deterministic code reads; masked, no pod, never surfaced (100)
+    #   agent   — secret an agent references via pod-ref; minted pod, surfaced (99)
+    _SENSITIVITY = ("config", "courier", "agent")
+    _DEFAULT_SENSITIVITY = "courier"  # fail-closed: secret, no pod, invisible
+
+    def _entry_sensitivity(self, entry: Optional[dict[str, Any]]) -> str:
+        s = str((entry or {}).get("sensitivity") or "").strip().lower()
+        return s if s in self._SENSITIVITY else self._DEFAULT_SENSITIVITY
+
+    def _account_env_vars(self) -> set[str]:
+        """Env var names that back an account (handle / secret / pod-id). These are
+        managed on the Accounts page, never reclassified as plain vars on the dev page."""
+        names: set[str] = set()
+        for e in self.entries():
+            if e.get("kind") != "account":
+                continue
+            auth = e.get("auth") or {}
+            for v in (e.get("handle_env"), auth.get("env_ref"), auth.get("pod_id_env")):
+                v = str(v or "").strip()
+                if v:
+                    names.add(v)
+        return names
+
     def _registry_meta_by_env_name(self) -> dict[str, dict[str, Any]]:
         """Map every env var NAME the registry knows about -> display metadata
-        {label, hint, feature, owner}. Covers value/secret entries (the name IS
-        the env var) and account entries (their handle_env / auth.env_ref /
-        auth.pod_id_env). Used purely to overlay nicer labels on the real .env."""
+        {label, hint, feature, owner, sensitivity, pod_id}. Covers value/secret
+        entries (the name IS the env var) and account entries (their handle_env /
+        auth.env_ref / auth.pod_id_env). Overlays labels + sensitivity on the real .env."""
         meta: dict[str, dict[str, Any]] = {}
         for e in self.entries():
             owner = str(e.get("owner") or "other")
             feature = str(e.get("feature") or "general")
             label = str(e.get("label") or e.get("name"))
             kind = e.get("kind")
-            if kind in ("value", "secret"):
-                meta[str(e["name"])] = {"label": label, "hint": str(e.get("hint") or ""),
-                                        "feature": feature, "owner": owner}
-            elif kind == "account":
+            if kind == "account":
                 auth = e.get("auth") or {}
                 hv = str(e.get("handle_env") or "").strip()
                 if hv:
-                    meta[hv] = {"label": f"{label} — handle", "hint": "",
-                                "feature": feature, "owner": owner}
+                    meta[hv] = {"label": f"{label} — handle", "hint": "", "feature": feature,
+                                "owner": owner, "sensitivity": "config", "pod_id": ""}
                 er = str(auth.get("env_ref") or "").strip()
                 if er:
                     meta[er] = {"label": f"{label} — {auth.get('secret_label') or 'secret'}",
-                                "hint": str(auth.get("secret_hint") or ""),
-                                "feature": feature, "owner": owner}
+                                "hint": str(auth.get("secret_hint") or ""), "feature": feature,
+                                "owner": owner, "sensitivity": "agent",
+                                "pod_id": self._resolve_auth_pod_id(e)}
                 pe = str(auth.get("pod_id_env") or "").strip()
                 if pe:
-                    meta[pe] = {"label": f"{label} — auth pod id", "hint": "",
-                                "feature": feature, "owner": owner}
+                    meta[pe] = {"label": f"{label} — auth pod id", "hint": "", "feature": feature,
+                                "owner": owner, "sensitivity": "config", "pod_id": ""}
+            else:  # value / secret / classification-only user entries
+                meta[str(e["name"])] = {
+                    "label": label, "hint": str(e.get("hint") or ""), "feature": feature,
+                    "owner": owner, "sensitivity": self._entry_sensitivity(e),
+                    "pod_id": str(e.get("pod_id") or ""),
+                }
         return meta
 
     def env_overview(self) -> list[dict[str, Any]]:
@@ -262,6 +296,7 @@ class EnvRegistryService:
         env_path = get_repo_root() / ".env"
         file_vars = dotenv_values(env_path, interpolate=False) if env_path.exists() else {}
         meta = self._registry_meta_by_env_name()
+        account_vars = self._account_env_vars()
         by_owner: dict[str, dict[str, list[dict[str, Any]]]] = {}
         for name, value in file_vars.items():
             m = meta.get(name)
@@ -274,6 +309,9 @@ class EnvRegistryService:
                 "hint": (m or {}).get("hint") or "",
                 "owner": owner,
                 "feature": feature,
+                "sensitivity": (m or {}).get("sensitivity") or self._DEFAULT_SENSITIVITY,
+                "pod_id": (m or {}).get("pod_id") or "",
+                "managed": name in account_vars,        # account-backed: knob suppressed
                 "builtin": True,                        # suppress the "custom" badge here
                 "state": {"set": bool(value), "shown": "••••••" if value else ""},
             }
@@ -311,6 +349,96 @@ class EnvRegistryService:
         from app.assistant.utils.env_writer import upsert_env
         upsert_env(name, value)
         os.environ[name] = value
+
+    # ── sensitivity classification + pod minting (dev page) ───────────────────
+    def _mint_scope(self):
+        """AUTH_USER (99) scope — the floor put_secret_pod requires to mint."""
+        from app.assistant.utils.pydantic_classes import ScopeContext, ScopeApprovalPolicy
+        from app.assistant.utils.identity_names import PRINCIPAL_USER
+        return ScopeContext(
+            scope_id="env-settings::mint",
+            owner_id=PRINCIPAL_USER,
+            actor_id="env-settings-ui",
+            surface="internal",
+            approval=ScopeApprovalPolicy(authority_level=99),
+        )
+
+    def _upsert_user_field(self, name: str, **fields: Any) -> dict[str, Any]:
+        """Merge `fields` into the gitignored user-registry entry for `name`
+        (create it if absent). Returns the merged entry."""
+        data: dict[str, Any] = {"schema_version": 1, "entries": []}
+        if _USER_PATH.exists():
+            loaded = json.loads(_USER_PATH.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict) and isinstance(loaded.get("entries"), list):
+                data = loaded
+        target = None
+        for e in data["entries"]:
+            if str(e.get("name")) == name:
+                e.update(fields); target = e; break
+        if target is None:
+            target = {"name": name, **fields}
+            data["entries"].append(target)
+        _USER_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _USER_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        return target
+
+    def ensure_pod_for(self, name: str, *, owner: str = "user") -> str:
+        """Mint an auth.bearer pod for an agent-referenceable secret var if one
+        doesn't exist yet, recording the pod_id in the user registry. The pod POINTS
+        at the .env var (env_ref=name) — the value is read fresh at use, so re-setting
+        the value needs no re-mint. Returns the pod_id."""
+        entry = self.get(name) or {}
+        existing = str(entry.get("pod_id") or "").strip()
+        if existing:
+            return existing
+        from app.assistant.pod_store.pod_store import PodStore
+        from app.assistant.utils.identity_names import resolve_principal
+        pod_id = PodStore().put_secret_pod(
+            pod_type="auth.bearer",
+            owner_subject_id=resolve_principal(owner),
+            name=str(entry.get("label") or name),
+            env_ref=name,
+            scope=self._mint_scope(),
+        )
+        self._upsert_user_field(name, pod_id=pod_id)
+        return pod_id
+
+    def _revoke_pod_for(self, name: str) -> str:
+        """If a pod was minted for this var, hard-delete it and clear the link.
+        Returns the revoked pod_id (or "")."""
+        pod_id = str((self.get(name) or {}).get("pod_id") or "").strip()
+        if not pod_id:
+            return ""
+        from app.assistant.pod_store.pod_store import PodStore
+        PodStore().revoke_secret_pod(pod_id, scope=self._mint_scope())
+        self._upsert_user_field(name, pod_id="")
+        return pod_id
+
+    def set_sensitivity(self, name: str, sensitivity: str, *, owner: str = "user") -> dict[str, Any]:
+        """Classify a .env var (config | courier | agent). Promoting to 'agent' MINTS
+        its pod (agent-referenceable); demoting from 'agent' HARD-DELETES the pod so it
+        can no longer be dereferenced. Account-backing vars are managed on the Accounts
+        page, not here."""
+        name = str(name or "").strip()
+        if not name:
+            raise ValueError("env registry: a variable name is required")
+        s = str(sensitivity or "").strip().lower()
+        if s not in self._SENSITIVITY:
+            raise ValueError(f"env registry: sensitivity must be one of {self._SENSITIVITY}")
+        entry = self.get(name)
+        if (entry is not None and entry.get("kind") == "account") or name in self._account_env_vars():
+            raise ValueError(f"env registry: {name!r} backs an account; manage it on the Accounts page")
+        owner = str(owner or "user")
+        result: dict[str, Any] = {"name": name, "sensitivity": s}
+        if s == "agent":
+            self._upsert_user_field(name, sensitivity=s, owner=owner)
+            result["pod_id"] = self.ensure_pod_for(name, owner=owner)
+        else:
+            revoked = self._revoke_pod_for(name)   # fail-loud before relabeling
+            self._upsert_user_field(name, sensitivity=s, owner=owner)
+            if revoked:
+                result["revoked"] = revoked
+        return result
 
     def add_user_entry(self, *, name: str, owner: str = "user", feature: str = "general",
                        label: str = "", hint: str = "", secret: bool = False) -> dict[str, Any]:

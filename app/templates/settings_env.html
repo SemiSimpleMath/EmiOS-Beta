@@ -26,7 +26,7 @@
     {% for feat in group.features %}
     <div class="env-feature">
       <h3>{{ feat.feature }}</h3>
-      {{ env_entries(feat.entries) }}
+      {{ env_entries(feat.entries, show_class=True) }}
     </div>
     {% endfor %}
   </div>

@@ -84,3 +84,28 @@ body {
 }
 .env-add-secret { color: #6b7280; font-size: 0.85em; display: flex; align-items: center; gap: 5px; }
 .env-add-inline { margin-top: 10px; }
+
+/* ── sensitivity class + pod correspondence (dev page) ── */
+.env-class {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 8px; padding-top: 8px; border-top: 1px dashed #e5e7eb;
+}
+.env-band {
+  font-size: 0.72em; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;
+  border-radius: 999px; padding: 2px 9px;
+}
+.env-band-agent   { background: rgba(237, 137, 54, 0.18); color: #92400e; }   /* 99 — surfaced */
+.env-band-courier { background: rgba(107, 114, 128, 0.16); color: #374151; }  /* 100 — invisible */
+.env-band-config  { background: rgba(59, 130, 246, 0.12); color: #1e40af; }   /* no pod */
+.env-pod {
+  font-size: 0.74em; color: #6b7280;
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  background: rgba(0, 0, 0, 0.04); padding: 1px 6px; border-radius: 4px;
+}
+.env-class-form { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.env-class-form select {
+  padding: 4px 8px; border-radius: 5px; border: 1px solid #d1d5db;
+  background: #fff; color: #374151; font-size: 0.8em;
+}
+.env-managed { margin-left: auto; font-size: 0.78em; color: #9ca3af; }
+.env-managed a { color: #3b82f6; text-decoration: none; }

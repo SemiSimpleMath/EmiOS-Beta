@@ -521,6 +521,38 @@ class PodStore:
         finally:
             session.close()
 
+    def revoke_secret_pod(self, pod_id: str, *, scope) -> bool:
+        """Hard-delete a secret pod and ALL its projections — used when a var is
+        declassified from agent-referenceable, so the pod can no longer be
+        dereferenced by anyone holding the id. Gated at AUTH_USER (same floor as
+        minting) and written to the audit log. Returns True if a pod was deleted,
+        False if it didn't exist.
+        """
+        from app.assistant.pod_store.models import PodProjection
+        from app.assistant.pod_store.authority import check_authority, AUTH_USER
+        with self._lock:
+            session = get_session()
+            try:
+                check_authority(pod_id=pod_id, projection=None, required=AUTH_USER, scope=scope)
+                row = session.query(PodRow).filter_by(pod_id=pod_id).one_or_none()
+                if row is None:
+                    self._audit(session, pod_id=pod_id, projection=None, operation="revoke",
+                                scope=scope, outcome="noop", detail="pod not found")
+                    session.commit()
+                    return False
+                n = session.query(PodProjection).filter_by(pod_id=pod_id).delete()
+                session.delete(row)
+                self._audit(session, pod_id=pod_id, projection=None, operation="revoke",
+                            scope=scope, outcome="allowed",
+                            detail=f"hard-deleted pod + {n} projections")
+                session.commit()
+                return True
+            except Exception:
+                session.rollback()
+                raise
+            finally:
+                session.close()
+
     def _audit(
         self,
         session,

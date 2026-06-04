@@ -6,7 +6,7 @@
    kinds, or `account` (projected account) for kind=account. Pass `add_feature` to
    show an inline "add a <feature> variable" form pre-tagged to that feature.
    Edits POST to /settings/env/* and reload the page. #}
-{% macro env_entries(items, set_action='/settings/env/set', add_feature=None) %}
+{% macro env_entries(items, set_action='/settings/env/set', add_feature=None, show_class=False) %}
 <div class="env-entries">
   {% for it in items %}
   <div class="env-entry env-kind-{{ it.kind }}">
@@ -45,6 +45,26 @@
           <span class="env-flag env-flag-no">not set</span>
         {% endif %}
       </form>
+      {% if show_class %}
+      <div class="env-class">
+        <span class="env-band env-band-{{ it.sensitivity }}">{{ it.sensitivity }}</span>
+        {% if it.pod_id %}<code class="env-pod" title="pod handle — agents reference this; courier dereferences to the value">{{ it.pod_id }}</code>{% endif %}
+        {% if it.managed %}
+        <span class="env-managed">managed on <a href="/settings/accounts">Accounts</a></span>
+        {% else %}
+        <form class="env-class-form" method="post" action="/settings/env/classify">
+          <input type="hidden" name="name" value="{{ it.name }}">
+          <input type="hidden" name="owner" value="{{ it.owner }}">
+          <select name="sensitivity">
+            <option value="courier"{{ ' selected' if it.sensitivity == 'courier' else '' }}>courier-only — no pod, never surfaced</option>
+            <option value="agent"{{ ' selected' if it.sensitivity == 'agent' else '' }}>agent-referenceable — mint pod (value stays courier-only)</option>
+            <option value="config"{{ ' selected' if it.sensitivity == 'config' else '' }}>config — not a secret, no pod</option>
+          </select>
+          <button class="env-btn" type="submit">apply</button>
+        </form>
+        {% endif %}
+      </div>
+      {% endif %}
     {% endif %}
   </div>
   {% else %}
