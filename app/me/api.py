@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from app.assistant.utils.time_utils import to_rfc3339_z, utc_now
+from app.assistant.utils.identity_names import PRINCIPAL_USER
 
 from flask import Blueprint, jsonify, request
 
@@ -511,7 +512,7 @@ def parse_query():
 
         scope = ScopeContext(
             scope_id="scope::me::query_filter",
-            owner_id="jukka",
+            owner_id=PRINCIPAL_USER,
             actor_id="me_lens",
             surface="ui",
             room_id="me_lens",

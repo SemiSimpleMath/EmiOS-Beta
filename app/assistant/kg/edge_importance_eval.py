@@ -24,6 +24,7 @@ from typing import Dict, List, Optional, Tuple
 import yaml
 
 from app.assistant.kg.db.knowledge_graph_db_sqlite import Edge, Node
+from app.assistant.utils.identity_names import PRINCIPAL_USER
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.importance.scoring import _build_edge_block
 from app.models.db_manager import get_db_manager
@@ -114,7 +115,7 @@ def run_rater(
         kind="subsystem",
         source_id="edge_importance_eval",
         actor_id="me_edge_importance_eval",
-        identity_overrides={"owner_id": "jukka"},
+        identity_overrides={"owner_id": PRINCIPAL_USER},
     )
 
     agent = DI.agent_factory.create_agent("me::edge_importance_rater")

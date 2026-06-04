@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.scope.loader import load_scope_for_source
+from app.assistant.utils.identity_names import PRINCIPAL_USER
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import Message, ScopeContext
 from app.models.db_manager import get_db_manager
@@ -30,7 +31,7 @@ def _resolution_scope() -> ScopeContext:
         source_id="kg_resolution",
         actor_id="kg_resolution_manager",
         identity_overrides={
-            "owner_id": "jukka",
+            "owner_id": PRINCIPAL_USER,
             "actor_id": "kg_resolution_manager",
             "scope_id": "scope::kg_resolution::resolve_with_prose",
         },

@@ -21,6 +21,7 @@ from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
 from app.assistant.kg_investigator.finding_brief import build_finding_brief
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.scope.loader import load_scope_for_source
+from app.assistant.utils.identity_names import PRINCIPAL_USER
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import Message, ScopeContext
 from app.models.db_manager import get_db_manager
@@ -51,7 +52,7 @@ def _investigation_scope() -> ScopeContext:
         source_id="kg_investigator",
         actor_id="kg_finding_investigator",
         identity_overrides={
-            "owner_id": "jukka",
+            "owner_id": PRINCIPAL_USER,
             "actor_id": "kg_finding_investigator",
             "scope_id": "scope::kg_investigator::finding_processor",
         },
@@ -71,7 +72,7 @@ def _mutation_scope() -> ScopeContext:
         source_id="kg_investigator",
         actor_id="kg_finding_executor",
         identity_overrides={
-            "owner_id": "jukka",
+            "owner_id": PRINCIPAL_USER,
             "actor_id": "kg_finding_executor",
             "scope_id": "scope::kg_investigator::finding_executor",
         },

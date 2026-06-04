@@ -21,6 +21,7 @@ from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
 from app.assistant.utils.filename_safety import safe_filename
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.scope.loader import load_scope_for_source
+from app.assistant.utils.identity_names import PRINCIPAL_USER
 from app.assistant.utils.pydantic_classes import Message, ScopeContext
 from app.models.base import get_session
 
@@ -35,7 +36,7 @@ def _scope() -> ScopeContext:
         kind="subsystem",
         source_id="wiki_generator",
         actor_id="wiki_consistency_critic",
-        identity_overrides={"owner_id": "jukka", "actor_id": "wiki_consistency_critic"},
+        identity_overrides={"owner_id": PRINCIPAL_USER, "actor_id": "wiki_consistency_critic"},
     )
 
 

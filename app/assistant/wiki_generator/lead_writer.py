@@ -15,6 +15,7 @@ from typing import Optional
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.scope.loader import load_scope_for_source
+from app.assistant.utils.identity_names import PRINCIPAL_USER
 from app.assistant.utils.pydantic_classes import Message, ScopeContext
 
 logger = get_logger(__name__)
@@ -27,7 +28,7 @@ def _scope() -> ScopeContext:
         kind="subsystem",
         source_id="wiki_generator",
         actor_id="wiki_lead_writer",
-        identity_overrides={"owner_id": "jukka", "actor_id": "wiki_lead_writer"},
+        identity_overrides={"owner_id": PRINCIPAL_USER, "actor_id": "wiki_lead_writer"},
     )
 
 

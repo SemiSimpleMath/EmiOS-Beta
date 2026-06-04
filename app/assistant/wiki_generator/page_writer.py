@@ -39,6 +39,7 @@ from app.assistant.utils.filename_safety import safe_filename
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.wiki_generator.references import apply_references
 from app.assistant.scope.loader import load_scope_for_source
+from app.assistant.utils.identity_names import PRINCIPAL_USER
 from app.assistant.utils.pydantic_classes import Message
 
 logger = get_logger(__name__)
@@ -256,7 +257,7 @@ _SCOPE_SECTION_WRITER = load_scope_for_source(
     kind="subsystem",
     source_id="wiki_generator",
     actor_id="wiki_section_writer",
-    identity_overrides={"owner_id": "jukka", "actor_id": "wiki_section_writer"},
+    identity_overrides={"owner_id": PRINCIPAL_USER, "actor_id": "wiki_section_writer"},
 )
 
 

@@ -5,6 +5,7 @@ import uuid
 from typing import Any, Dict
 
 from app.assistant.rooms.room_resource_loader import load_room_context_for_manager
+from app.assistant.utils.identity_names import PRINCIPAL_USER
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import (
     Message,
@@ -235,7 +236,7 @@ class ScopeAdapter:
         tool_name: str,
         request_id: str | None = None,
         authority_level: int = 100,
-        owner_id: str = "jukka",
+        owner_id: str = PRINCIPAL_USER,
         actor_id_suffix: str | None = None,
         purpose: str = "courier",
     ) -> ScopeContext:
