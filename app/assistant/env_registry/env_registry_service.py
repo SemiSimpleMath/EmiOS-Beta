@@ -219,26 +219,95 @@ class EnvRegistryService:
             return str(auth.get("account_id") or "")
         return effective
 
+    # ── .env file overview (central settings page) ────────────────────────────
+    def _registry_meta_by_env_name(self) -> dict[str, dict[str, Any]]:
+        """Map every env var NAME the registry knows about -> display metadata
+        {label, hint, feature, owner}. Covers value/secret entries (the name IS
+        the env var) and account entries (their handle_env / auth.env_ref /
+        auth.pod_id_env). Used purely to overlay nicer labels on the real .env."""
+        meta: dict[str, dict[str, Any]] = {}
+        for e in self.entries():
+            owner = str(e.get("owner") or "other")
+            feature = str(e.get("feature") or "general")
+            label = str(e.get("label") or e.get("name"))
+            kind = e.get("kind")
+            if kind in ("value", "secret"):
+                meta[str(e["name"])] = {"label": label, "hint": str(e.get("hint") or ""),
+                                        "feature": feature, "owner": owner}
+            elif kind == "account":
+                auth = e.get("auth") or {}
+                hv = str(e.get("handle_env") or "").strip()
+                if hv:
+                    meta[hv] = {"label": f"{label} — handle", "hint": "",
+                                "feature": feature, "owner": owner}
+                er = str(auth.get("env_ref") or "").strip()
+                if er:
+                    meta[er] = {"label": f"{label} — {auth.get('secret_label') or 'secret'}",
+                                "hint": str(auth.get("secret_hint") or ""),
+                                "feature": feature, "owner": owner}
+                pe = str(auth.get("pod_id_env") or "").strip()
+                if pe:
+                    meta[pe] = {"label": f"{label} — auth pod id", "hint": "",
+                                "feature": feature, "owner": owner}
+        return meta
+
+    def env_overview(self) -> list[dict[str, Any]]:
+        """The ACTUAL .env file as grouped, all-masked rows. The source of truth
+        is the file, so a variable the user has not set never appears. Registry
+        labels/features are overlaid where a name is known; unknown vars land
+        under 'other'. Shape matches the central settings template:
+        [{owner, features: [{feature, entries: [row]}]}]."""
+        from dotenv import dotenv_values
+        from app.assistant.utils.path_utils import get_repo_root
+        env_path = get_repo_root() / ".env"
+        file_vars = dotenv_values(env_path, interpolate=False) if env_path.exists() else {}
+        meta = self._registry_meta_by_env_name()
+        by_owner: dict[str, dict[str, list[dict[str, Any]]]] = {}
+        for name, value in file_vars.items():
+            m = meta.get(name)
+            owner = (m or {}).get("owner") or "other"
+            feature = (m or {}).get("feature") or "other"
+            row = {
+                "name": name,
+                "kind": "secret",                       # everything masked
+                "label": (m or {}).get("label") or name,
+                "hint": (m or {}).get("hint") or "",
+                "owner": owner,
+                "feature": feature,
+                "builtin": True,                        # suppress the "custom" badge here
+                "state": {"set": bool(value), "shown": "••••••" if value else ""},
+            }
+            by_owner.setdefault(owner, {}).setdefault(feature, []).append(row)
+        order = ["user", "assistant"] + [o for o in by_owner if o not in ("user", "assistant")]
+        groups: list[dict[str, Any]] = []
+        for owner in order:
+            if owner not in by_owner:
+                continue
+            feats = [{"feature": f, "entries": sorted(items, key=lambda r: r["name"])}
+                     for f, items in sorted(by_owner[owner].items())]
+            groups.append({"owner": owner, "features": feats})
+        return groups
+
     # ── writes + display state (Phase 3 UI) ───────────────────────────────────
     def value_state(self, name: str) -> dict[str, Any]:
-        """Display state for a value/secret entry: {set: bool, shown: str}.
-        Secret values are masked (never echoed back to the page)."""
+        """Display state for an inline value/secret entry: {set: bool, shown: str}.
+        Every value is masked — .env is treated as all-secret, never echoed back."""
         entry = self.get(name)
         if entry is None:
             raise KeyError(f"env registry: no entry named {name!r}")
         current = str(os.getenv(name) or "")
-        if entry.get("kind") == "secret":
-            return {"set": bool(current), "shown": "••••••" if current else ""}
-        return {"set": bool(current), "shown": current}
+        return {"set": bool(current), "shown": "••••••" if current else ""}
 
     def set_value(self, name: str, value: str) -> None:
-        """Persist a value/secret entry to .env (and process env). Account
-        entries use the dedicated configure flow, not this."""
+        """Persist a plain .env variable (and process env). Account entries use
+        the dedicated configure flow; everything else — a registry value/secret
+        OR an unregistered .env var — is written straight to .env."""
+        name = str(name or "").strip()
+        if not name:
+            raise ValueError("env registry: a variable name is required")
         entry = self.get(name)
-        if entry is None:
-            raise KeyError(f"env registry: no entry named {name!r}")
-        if entry.get("kind") not in ("value", "secret"):
-            raise ValueError(f"env registry: {name!r} is kind={entry.get('kind')!r}; use the account configure flow")
+        if entry is not None and entry.get("kind") == "account":
+            raise ValueError(f"env registry: {name!r} is an account; use the account configure flow")
         from app.assistant.utils.env_writer import upsert_env
         upsert_env(name, value)
         os.environ[name] = value

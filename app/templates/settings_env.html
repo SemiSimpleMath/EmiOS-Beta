@@ -10,10 +10,11 @@
 {% from '_env_entries.html' import env_entries %}
 <div class="setup-container">
   <div class="setup-header">
-    <h1><i class="fas fa-sliders-h"></i> Environment &amp; Accounts</h1>
-    <p>The complete list of keys, handles, tokens, and accounts your assistant and
-       tools use. Set a value and it's written to <code>.env</code>. Accounts get a
-       richer editor on the <a href="/settings/accounts">Accounts</a> page.</p>
+    <h1><i class="fas fa-sliders-h"></i> Environment variables</h1>
+    <p>Every variable currently in your <code>.env</code>, values masked. Paste a new
+       value to replace one — it's written straight to <code>.env</code>. The
+       assistant's platform accounts have a guided editor on the
+       <a href="/settings/accounts">Accounts</a> page.</p>
     <a href="/settings/integrations" class="back-link"><i class="fas fa-arrow-left"></i> Back to Integrations</a>
   </div>
 
@@ -35,15 +36,14 @@
     <h2><i class="fas fa-plus"></i> Add a variable</h2>
     <form method="post" action="/settings/env/add" class="env-add-form">
       <input name="name" placeholder="ENV_VAR_NAME" required>
-      <input name="label" placeholder="Label">
-      <input name="feature" placeholder="feature (e.g. weather)">
+      <input name="value" type="password" placeholder="value" autocomplete="off">
+      <input name="label" placeholder="Label (optional)">
+      <input name="feature" placeholder="feature (optional)">
       <select name="owner">
         <option value="user">You</option>
         <option value="assistant">Assistant</option>
       </select>
-      <label class="env-add-secret"><input type="checkbox" name="secret" value="1"> secret</label>
-      <input name="hint" placeholder="hint (optional)">
-      <button type="submit" class="env-btn env-btn-primary">Add</button>
+      <button type="submit" class="env-btn env-btn-primary">Add to .env</button>
     </form>
   </div>
 </div>

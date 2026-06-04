@@ -3,13 +3,16 @@
    system. The class names are shared with the inline sections embedded on
    feature pages (features_settings, local_cameras), so they restyle in lockstep. */
 
-/* setup_wizard.css flex-centers the body for short setup cards. Override so a
-   tall registry page scrolls normally and uses the viewport width. */
+/* setup_wizard.css flex-centers the body for short setup cards, and base.css
+   sets body{overflow:hidden} for the chat shell. Override both so this tall
+   registry page scrolls normally and uses the viewport width. */
 body {
   display: block;
   align-items: initial;
   justify-content: initial;
   min-height: auto;
+  height: auto;
+  overflow-y: auto;
   padding: 24px;
 }
 
