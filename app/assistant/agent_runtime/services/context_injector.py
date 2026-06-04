@@ -730,22 +730,6 @@ class ContextInjector:
                 context[key] = agent_descriptions
                 continue
 
-            if key == "available_accounts":
-                # Scope-filtered account list. When scope.acting_as is set,
-                # render only the accounts that principal is allowed to use.
-                # When acting_as is "user" (default), most planners see nothing
-                # here since today's registry holds Emi-owned accounts only;
-                # the user-as-principal uses primary credentials via the
-                # existing OAuth/account_ids layer.
-                scope_context = agent.blackboard.get_state_value("scope_context", None)
-                principal = "user"
-                if isinstance(scope_context, dict):
-                    principal = str(scope_context.get("acting_as") or "user")
-                elif scope_context is not None:
-                    principal = str(getattr(scope_context, "acting_as", "user") or "user")
-                context[key] = DI.env_registry.render_accounts_for_planner(principal)
-                continue
-
             if key == "recent_history":
                 # recent_history is local-manager context only.
                 # Do not allow room/global scope overrides to change planner-local history resolution.

@@ -44,7 +44,7 @@ user_context_items:
   - referenced_pods_block
   - task_includes
   - task_resource_context
-  - available_accounts
+  - resource_accounts
 
 system_context_items:
   - tool_descriptions

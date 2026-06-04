@@ -24,27 +24,42 @@ never blur. If a change seems to move one layer's job into another, it's wrong.
   account's sensitivity. (Sensitivity is enforced in Layer 2, not here.) Changing the
   mint per-account is the one thing this design forbids.
 
-## Layer 2 — Access = PRINCIPAL **and** AUTHORITY (policy, not storage)
+## Layer 2 — Access via a scope-gated RESOURCE (policy, not storage)
 
-Enforced at the **surfacing/use** layer (where accounts are shown to / invoked by an
-agent), reading the account **entry** (metadata) and the **scope**. Never at the mint.
+Accounts reach an agent ONLY as a **dynamic resource** (e.g. `resource_accounts`),
+resolved through the same scope-gated path as every other resource — `resolve_resource`
+→ `ResourceResolver.get_global_resource(..., scope_context)`. They are **not**
+auto-injected. Two conditions, both required (the existing `resource_*` contract):
 
-An agent may see/use an account **iff BOTH gates pass**:
+1. **Opt-in** — the agent lists the resource in its `config.yaml` context items and
+   references it in its `.j2` template. No request → no accounts.
+2. **Scope grant** — the scope's resource policy must grant it (the **lock** in the
+   scope=key / resource=lock capability model). A scope that doesn't grant it gets
+   nothing (degrades to empty).
 
-1. **Principal — `accessible_by`.** The account lists which principals may use it
-   (`accessible_by`). The surfacing gate matches the scope's current acting-as principal
-   (set by `/actas`, canonicalized by `resolve_principal`) against that list.
-   (`accounts_for_principal` already does this filter.)
-   > `owner` (who the account is *for*) is **separate metadata** — not the same field as
-   > `accessible_by`. Whether acting-as the owner *grants* access is an explicit,
-   > undecided **policy**; do not weld `owner` into the access check.
-2. **Authority — the int dial.** `scope.authority_level ≥ account.authority`. Per-account
-   number (anchors `PUBLIC 10 / CHAT 50 / GATED 70 / USER 99 / COURIER 100`; typical
-   `master_room` = 99). A free/throwaway account may sit lower (less approval friction);
-   an ultra-sensitive one at 100 (no agent ever references it). *(This filter is the part
-   still to be added to the surfacing path.)*
+That outer gate **is** the access control. *Inside* the computed resource value, two
+filters shape WHICH accounts appear:
+- **Principal** — only accounts whose `accessible_by` includes the current acting-as
+  principal (`/actas`, via `resolve_principal`).
+  > `owner` (who the account is *for*) is **separate metadata** — not the same field as
+  > `accessible_by`. Whether acting-as the owner *grants* access is an explicit,
+  > undecided **policy**; do not weld `owner` into the access check.
+- **Per-account authority** — the account's `authority` int (anchors `PUBLIC 10 / CHAT 50
+  / GATED 70 / USER 99 / COURIER 100`; typical `master_room` 99). A free account may sit
+  lower; an ultra-sensitive one at 100.
 
-Neither gate touches the bytes-band (always 100) or the mint.
+None of this touches the bytes-band (always 100) or the mint. Accounts are a **dynamic**
+resource — same scope-gated path as a file resource, but the value is COMPUTED from the
+registry (`render_accounts_for_scope`), not read from disk.
+
+**Dynamic-resource registration (settled).** Resources become **lock-optional**, mirroring
+skills: a resource may declare a `requires_scope` lock evaluated by the SAME shared
+scope-gate primitive skills use (`utils/scope_gate.scope_gate_passes`) — **no lock = free**
+(backward-compatible; every existing file resource stays unlocked). `ResourceManager` gains
+a **provider registry** (computed value) and a **lock registry**, both optional; `get_resource`
+runs the lock (if any) → the existing `allowed_global_resources`/`denied` allowlist → then
+resolves the value (provider if registered, else file/cache). Accounts register a provider
+**+** a lock; the `available_accounts` special-case (context_injector) is deleted.
 
 **Why authority is an `int`, not an `enum`:** it's an ordered line and the gate is a
 single `caller ≥ required` comparison. The named bands are anchors; a pod/account can
@@ -100,9 +115,10 @@ Create: `owner + login → *_HANDLE`; `password → *_SECRET → standard pod (f
 `authority → on the entry`.
 
 - **Bytes path** (Layer 1): `.env` → pod pointer → courier@100 → tool. Uniform.
-- **Access path** (Layer 2): `/actas <principal>` sets the scope principal → surfacing
-  gate checks `principal ∈ accessible_by` **and** `scope.authority ≥ account.authority`
-  → approval gates the action.
+- **Access path** (Layer 2): the agent opts into the `resource_accounts` resource
+  (`config.yaml` + `.j2`); the scope's resource policy gates it; the computed value lists
+  only accounts where `principal ∈ accessible_by` **and** `scope.authority ≥ account.authority`;
+  the agent pastes a pod-ref into a tool call; the courier substitutes; approval gates the action.
 
 The two paths **never cross**. That is the whole design.
 
@@ -112,9 +128,11 @@ The two paths **never cross**. That is the whole design.
 
 1. Bytes never reach an LLM; `full`@100/courier; **the mint is uniform**.
 2. Pods are pointers to `.env` names, not bytes.
-3. Access = **principal (acting-as ∈ `accessible_by`) AND authority (dial)** — a
-   surfacing/use **policy**, never a mint variation. `owner` is metadata, distinct from
-   `accessible_by`; an owner→access rule is an explicit open policy, not identity.
+3. Accounts surface ONLY as a **scope-gated resource** (opt-in via config.yaml/.j2 + the
+   scope's resource policy) — never auto-injected. Principal (`accessible_by`) and
+   per-account authority filter WHICH accounts appear inside it. A surfacing **policy**,
+   never a mint variation. `owner` is metadata, distinct from `accessible_by`; an
+   owner→access rule is an open policy, not identity.
 4. `.env` = source of truth for values; registry = metadata; pages = projections.
 5. Authority is an `int` (ordered line), not an enum; the **99/100 cap** is the only
    categorical line.
@@ -124,8 +142,11 @@ The two paths **never cross**. That is the whole design.
 - **Built & committed:** env page reads the real `.env` masked (`105095e1`); pod
   lifecycle mint-on-`agent` / hard-delete-on-demote + per-var sensitivity on the env page
   (`91693b2e`).
-- **Designed, not built:** account creation (`owner/login/password/authority`) with the
-  **uniform** mint + `authority`/`accessible_by` on the entry; the **authority** half of
-  the Layer-2 surfacing gate (the principal half exists via `accounts_for_principal`).
+- **Built (uncommitted):** account creation `create_account()` (`owner/login/password/
+  authority`) — uniform mint, structured record to the unified registry, route + form.
+- **Designed, not built:** accounts as a **dynamic, scope-gated resource** — register a
+  computed `resource_accounts` that rides `get_global_resource(scope_context)`, and delete
+  the `available_accounts` special-case auto-inject. Dynamic-resource **registration** is
+  the open plumbing question (today "resources = files in a folder").
 - **Queued:** names (`PRIMARY_USER`/`ASSISTANT_NAME`) out of `.env` → resource files,
   fold the two name resolvers (separate change).

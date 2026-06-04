@@ -24,7 +24,7 @@ user_context_items:
   - action_count
   - entity_card
   - referenced_pods_block
-  - available_accounts
+  - resource_accounts
 
 system_context_items:
   - tool_descriptions

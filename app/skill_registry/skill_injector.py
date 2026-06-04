@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import List, Optional
 
 from app.assistant.utils.logging_config import get_logger
+from app.assistant.utils import scope_gate
 from app.skill_registry.skill_registry import SkillRegistry
 
 logger = get_logger(__name__)
@@ -144,48 +145,18 @@ class SkillInjector:
         return self._scope_gate_passes(req, live)
 
     # ── requires_scope gate ────────────────────────────────────────────
-    _GATE_FIELDS = ("acting_as", "surface", "room_id", "room_context_id", "visibility")
+    _GATE_FIELDS = scope_gate.GATE_FIELDS  # back-compat alias
 
     @staticmethod
     def _scope_identity(*, scope: object, scope_acting_as: Optional[str]) -> dict:
-        """Extract the gateable identity fields from the live scope (object or
-        dict). Falls back to scope_acting_as for the acting_as field when no
-        scope is supplied (back-compat for callers that only have the principal)."""
-        live: dict = {}
-        if scope is not None:
-            for fld in SkillInjector._GATE_FIELDS:
-                if isinstance(scope, dict):
-                    v = scope.get(fld)
-                else:
-                    v = getattr(scope, fld, None)
-                if v is not None and str(v).strip():
-                    live[fld] = str(v).strip()
-        if "acting_as" not in live and scope_acting_as is not None and str(scope_acting_as).strip():
-            live["acting_as"] = str(scope_acting_as).strip()
-        return live
+        """Delegates to the shared scope-gate primitive (utils/scope_gate)."""
+        return scope_gate.scope_identity(scope=scope, scope_acting_as=scope_acting_as)
 
     @staticmethod
     def _canon_field(field: str, value: str) -> str:
-        """Canonicalize a scope field value for gate comparison (per-field
-        resolver). Both the skill's required value and the live value go through
-        this, so a skill gating on acting_as=self matches any install's name."""
-        v = str(value or "").strip().lower()
-        if field == "acting_as":
-            from app.assistant.utils.identity_names import resolve_principal
-            return resolve_principal(v)
-        # surface/room_id/room_context_id/visibility: lowercased exact for now.
-        # (surface normalizer can be added here when surface aliases appear.)
-        return v
+        """Delegates to the shared scope-gate primitive (utils/scope_gate)."""
+        return scope_gate.canon_field(field, value)
 
     def _scope_gate_passes(self, requires_scope: dict, live: dict) -> bool:
-        """True iff EVERY required field matches the live scope (canonicalized).
-        Empty requires_scope → always passes (no gate)."""
-        if not requires_scope:
-            return True
-        for field, required in requires_scope.items():
-            live_val = live.get(field)
-            if live_val is None:
-                return False  # gated field absent from live scope → no match
-            if self._canon_field(field, required) != self._canon_field(field, live_val):
-                return False
-        return True
+        """Delegates to the shared scope-gate primitive (utils/scope_gate)."""
+        return scope_gate.scope_gate_passes(requires_scope, live)

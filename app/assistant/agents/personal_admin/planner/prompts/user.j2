@@ -17,6 +17,11 @@ Information:
 {% endif %}
 {% endif %}
 
+{% if resource_accounts %}
+## Accounts you can act as
+{{ resource_accounts }}
+{% endif %}
+
 {% if entity_card %}
 Entity context:
 {{ entity_card }}

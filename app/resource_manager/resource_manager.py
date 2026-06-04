@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Callable
 from jinja2 import Template, StrictUndefined
 import threading
 import tempfile
@@ -9,6 +9,7 @@ import os
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_repo_root
+from app.assistant.utils import scope_gate
 
 logger = get_logger(__name__)
 
@@ -34,6 +35,10 @@ class ResourceManager:
         # file's current mtime and auto-reloads if newer. Entries with no file
         # backing (synthetic updates) are absent from this map.
         self._cached_mtimes: Dict[str, float] = {}
+        # resource_id -> provider fn(scope_dict) -> value (DYNAMIC/computed resources)
+        self._resource_providers: Dict[str, Callable[[dict], Any]] = {}
+        # resource_id -> requires_scope lock (OPTIONAL; absent = free, shared with skills)
+        self._resource_locks: Dict[str, dict] = {}
         self._lock = threading.RLock()
         self._file_locks: Dict[Path, threading.RLock] = {}
 
@@ -183,6 +188,29 @@ class ResourceManager:
         denied = {str(x).strip() for x in denied_raw if isinstance(x, str) and str(x).strip()}
         return allowed, denied
 
+    def register_provider(self, resource_id: str, provider: Callable[[dict], Any], *,
+                          requires_scope: Optional[dict] = None) -> None:
+        """Register a DYNAMIC resource: its value is COMPUTED per read by
+        `provider(scope_dict)` rather than read from a file. Optionally lock it with
+        a `requires_scope` (the same shape skills use). Both ride the standard
+        scope-gated `get_resource` path."""
+        rid = str(resource_id or "").strip()
+        if not rid:
+            raise ValueError("resource_id must be a non-empty string.")
+        self._resource_providers[rid] = provider
+        if requires_scope:
+            self._resource_locks[rid] = dict(requires_scope)
+        logger.info("Registered dynamic resource provider '%s' (locked=%s)", rid, bool(requires_scope))
+
+    def register_lock(self, resource_id: str, requires_scope: dict) -> None:
+        """Attach a `requires_scope` lock to an existing (file-backed) resource —
+        no lock = free; with a lock the scope must satisfy it (shared scope-gate)."""
+        rid = str(resource_id or "").strip()
+        if not rid:
+            raise ValueError("resource_id must be a non-empty string.")
+        if requires_scope:
+            self._resource_locks[rid] = dict(requires_scope)
+
     def get_resource(self, *, scope_context: Any, resource_id: str, required: bool = False) -> Any:
         rid = str(resource_id or "").strip()
         if not rid:
@@ -199,14 +227,25 @@ class ResourceManager:
             )
             raise PermissionError(f"Resource '{rid}' is not allowed by scope policy.")
 
-        value = self._get_cached_resource(rid)
-        if value is None:
-            try:
-                value = self._read_resource_from_disk_if_known(rid)
-            except Exception as e:
-                logger.error("Failed lazy-loading resource '%s' from disk: %s", rid, e)
-                logger.debug("resource_manager lazy-load exception details", exc_info=True)
-                raise
+        # Lock-optional thing-side gate, shared with skills. No lock = free.
+        lock = self._resource_locks.get(rid)
+        if lock and not scope_gate.scope_gate_passes(lock, scope_gate.scope_identity(scope=scope_dict)):
+            raise PermissionError(f"Resource '{rid}' requires a scope its lock does not match.")
+
+        # Value: a registered provider COMPUTES it from the scope (dynamic
+        # resource); otherwise read the file-backed cache/disk.
+        provider = self._resource_providers.get(rid)
+        if provider is not None:
+            value = provider(scope_dict)
+        else:
+            value = self._get_cached_resource(rid)
+            if value is None:
+                try:
+                    value = self._read_resource_from_disk_if_known(rid)
+                except Exception as e:
+                    logger.error("Failed lazy-loading resource '%s' from disk: %s", rid, e)
+                    logger.debug("resource_manager lazy-load exception details", exc_info=True)
+                    raise
 
         if required and value is None:
             raise ValueError(f"Required resource '{rid}' is missing.")

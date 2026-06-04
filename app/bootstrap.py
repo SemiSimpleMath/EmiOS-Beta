@@ -176,6 +176,13 @@ def initialize_services(app):
     resource_manager = ResourceManager()
     ServiceLocator.register("resource_manager", resource_manager)
     resource_manager.load_all_from_directory("resources")
+    # Dynamic resource: accounts — value COMPUTED per scope (principal + authority
+    # filtered), gated by the standard resource path. Replaces the old
+    # available_accounts auto-inject. See docs/architecture/SECRETS_ACCOUNTS.md.
+    resource_manager.register_provider(
+        "resource_accounts",
+        lambda scope: DI.env_registry.render_accounts_for_scope(scope),
+    )
     # Skills are durable, hand-authored knowledge files (e.g. "when working
     # with Documents on this machine, also check OneDrive"). They live in a
     # separate top-level dir from `resources/` (which is mostly data and
