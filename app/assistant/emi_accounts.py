@@ -29,6 +29,7 @@ from typing import Any, Dict, List, Optional
 
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_repo_root
+from app.assistant.utils.identity_names import get_required_assistant_name
 
 logger = get_logger(__name__)
 
@@ -144,7 +145,7 @@ def get_accounts_for_principal(principal: str) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     target = (principal or "").strip().lower() or "user"
     for a in get_emi_accounts():
-        allowed = a.get("accessible_by") or ["emi"]
+        allowed = a.get("accessible_by") or [_assistant_self_principal()]
         allowed_lower = [str(p).strip().lower() for p in allowed if isinstance(p, str)]
         if target in allowed_lower:
             out.append(a)
@@ -213,16 +214,7 @@ def _assistant_self_principal() -> str:
     The name is read from disk once and cached; rename requires restart
     (intentional — same discipline as other resource loads).
     """
-    try:
-        path = get_repo_root() / "resources" / "assistant" / "resource_assistant_data.json"
-        with path.open(encoding="utf-8") as f:
-            data = json.load(f)
-        name = str(data.get("name") or "").strip()
-        if name:
-            return name.lower()
-    except Exception:
-        logger.warning("emi_accounts: could not read assistant name; falling back to 'emi'")
-    return "emi"
+    return get_required_assistant_name().lower()
 
 
 def resolve_gmail_account_id(
