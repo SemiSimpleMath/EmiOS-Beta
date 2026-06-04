@@ -46,7 +46,6 @@ def _seed_personal_resources() -> None:
         resources_dir / "assistant" / "resource_chat_guidelines_data.json",
         resources_dir / "assistant" / "resource_relationship_config.json",
         resources_dir / "assistant" / "assistant_core.json",
-        resources_dir / "resource_emi_accounts.json",
         resources_dir / "env_registry_user.json",
     ]
 

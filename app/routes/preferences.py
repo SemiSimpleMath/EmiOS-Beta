@@ -9,6 +9,7 @@ from app.assistant.utils.path_utils import get_configs_dir
 import json
 import os
 from app.assistant.ServiceLocator.service_locator import DI
+from app.assistant.utils.identity_names import PRINCIPAL_USER, PRINCIPAL_SELF
 from app.assistant.utils.logging_config import get_logger
 
 preferences_bp = Blueprint('preferences', __name__)
@@ -370,6 +371,127 @@ def google_oauth_settings_page():
 def google_accounts_settings_page():
     """Render additional Google accounts management."""
     return render_template('google_accounts_settings.html')
+
+
+@preferences_bp.route('/emi-accounts', methods=['GET'])
+def emi_accounts_page():
+    """Render the assistant's own cross-platform accounts (Gmail, Bluesky, X, Reddit, ...)."""
+    accounts = DI.env_registry.accounts()
+    return render_template('emi_accounts.html', accounts=accounts)
+
+
+@preferences_bp.route('/api/emi-accounts/<account_id>/configure', methods=['POST'])
+def emi_account_configure(account_id: str):
+    """Mint an auth pod for a pod_ref account from a user-supplied secret.
+
+    Body JSON: {"secret": "...", "test_first": bool}
+    Returns:   {"ok": bool, "pod_id": str|None, "message": str, "status": str|None}
+    """
+    from app.assistant.credential_validators import run_validator
+    from app.assistant.utils.env_writer import upsert_env
+    from app.assistant.pod_store.pod_store import PodStore
+    from app.assistant.utils.pydantic_classes import (
+        ScopeContext, ScopeApprovalPolicy,
+    )
+
+    account = DI.env_registry.account(account_id)
+    if account is None:
+        return jsonify({"ok": False, "message": f"unknown account id {account_id!r}"}), 404
+
+    auth = account.get("auth") or {}
+    if (auth.get("kind") or "").strip() != "pod_ref":
+        return jsonify({
+            "ok": False,
+            "message": (
+                f"account {account_id!r} uses auth.kind={auth.get('kind')!r}; "
+                f"this endpoint only configures pod_ref auth. For google_oauth "
+                f"accounts, visit /oauth/google/start?account_id=<google_account_id> instead."
+            ),
+        }), 400
+
+    env_ref = str(auth.get("env_ref") or "").strip()
+    pod_id_env = str(auth.get("pod_id_env") or "").strip()
+    pod_kind = str(auth.get("pod_kind") or "").strip()
+    if not env_ref or not pod_id_env or not pod_kind:
+        return jsonify({
+            "ok": False,
+            "message": (
+                f"account {account_id!r} is missing auth metadata "
+                f"(env_ref / pod_id_env / pod_kind); fix resource_emi_accounts.json"
+            ),
+        }), 500
+
+    body = request.get_json(silent=True) or {}
+    secret = str(body.get("secret") or "").strip()
+    test_first = bool(body.get("test_first", True))
+    if not secret:
+        return jsonify({"ok": False, "message": "secret is required"}), 400
+
+    handle = str(account.get("handle") or "").strip()
+    if not handle:
+        handle_env = account.get("handle_env") or "(none)"
+        return jsonify({
+            "ok": False,
+            "message": (
+                f"account handle is not set — populate {handle_env!r} in .env first; "
+                f"this endpoint configures the secret, not the handle."
+            ),
+        }), 400
+
+    # 1. Optional pre-mint live probe (skip silently if no validator registered).
+    if test_first:
+        ok, probe_msg = run_validator(auth.get("validator"), handle=handle, secret=secret)
+        if not ok:
+            return jsonify({
+                "ok": False,
+                "message": f"Credential test failed (not minting): {probe_msg}",
+            }), 400
+        logger.info("emi_account_configure: validator passed for %s — %s", account_id, probe_msg)
+
+    # 2. Persist the secret env var (.env on disk + os.environ in-process).
+    try:
+        upsert_env(env_ref, secret)
+    except Exception as e:
+        logger.exception("emi_account_configure: env_writer failed for %s", env_ref)
+        return jsonify({"ok": False, "message": f".env write failed: {e}"}), 500
+    os.environ[env_ref] = secret
+
+    # 3. Build an AUTH_USER scope and mint the pod.
+    scope = ScopeContext(
+        scope_id=f"emi-accounts-configure::{account_id}",
+        owner_id=PRINCIPAL_USER,
+        actor_id="emi-accounts-ui",
+        surface="internal",
+        approval=ScopeApprovalPolicy(authority_level=99),
+    )
+    pod_label = str(auth.get("pod_label") or account.get("display_name") or pod_kind).strip()
+    try:
+        pod_id = PodStore().put_secret_pod(
+            pod_type=pod_kind,
+            owner_subject_id=PRINCIPAL_SELF,
+            name=pod_label,
+            env_ref=env_ref,
+            scope=scope,
+        )
+    except Exception as e:
+        logger.exception("emi_account_configure: put_secret_pod failed for %s", account_id)
+        return jsonify({"ok": False, "message": f"pod mint failed: {e}"}), 500
+
+    # 4. Persist + in-process: the resource's pod_id_env now points at the new pod.
+    try:
+        upsert_env(pod_id_env, pod_id)
+    except Exception as e:
+        logger.exception("emi_account_configure: env_writer failed for %s", pod_id_env)
+        return jsonify({"ok": False, "message": f".env write for pod_id failed: {e}"}), 500
+    os.environ[pod_id_env] = pod_id
+
+    refreshed = DI.env_registry.account(account_id) or {}
+    return jsonify({
+        "ok": True,
+        "pod_id": pod_id,
+        "status": refreshed.get("status"),
+        "message": f"{account_id} configured. Pod minted: {pod_id}",
+    })
 
 
 @preferences_bp.route('/settings/integrations/nest', methods=['GET'])
@@ -1122,8 +1244,7 @@ def skills_social_list_api():
     # Platform enablement: is a Bluesky account registered for the assistant?
     bluesky_linked = False
     try:
-        from app.assistant.emi_accounts import get_emi_account_by_platform
-        acct = get_emi_account_by_platform("bluesky")
+        acct = DI.env_registry.account_by_platform("bluesky")
         bluesky_linked = bool(acct) and str((acct or {}).get("status") or "").strip().lower() == "configured"
     except Exception:
         pass

@@ -124,6 +124,8 @@ def initialize_services():
         blackboard=DI.global_blackboard,
     )
     ServiceLocator.register("agent_components_factory", agent_components_factory)
+    from app.assistant.env_registry import EnvRegistryService
+    ServiceLocator.register("env_registry", EnvRegistryService())
     logger.info("✅ AgentComponentsFactory initialized")
 
     # TaskIR timer scheduling requires DI.scheduler (production wires SchedulerService in

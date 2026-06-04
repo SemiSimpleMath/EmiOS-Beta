@@ -86,6 +86,7 @@ class SendEmail(BaseTool):
             subject = arguments.get('subject') or ""
             body = arguments.get('body') or ""
             to = arguments.get('to')
+            from_account_alias = arguments.get('from_account')
             raw_pod_ids = arguments.get('pod_ids') or []
             if isinstance(raw_pod_ids, str):
                 raw_pod_ids = [raw_pod_ids]
@@ -232,7 +233,26 @@ class SendEmail(BaseTool):
                 body = (body.rstrip() + "\n\n" + "\n\n".join(inline_blocks)).lstrip("\n")
 
             try:
-                gmail_client = GmailAPIClient()
+                scope_acting_as = None
+                scope_ctx = getattr(tool_message, "scope_context", None)
+                if scope_ctx is not None:
+                    scope_acting_as = getattr(scope_ctx, "acting_as", None)
+                try:
+                    resolved_account_id = DI.env_registry.resolve_gmail_account_id(
+                        from_account_alias,
+                        scope_acting_as=scope_acting_as,
+                    )
+                except ValueError as e:
+                    if tempdir:
+                        shutil.rmtree(tempdir, ignore_errors=True)
+                    return self.publish_msg(make_tool_error(
+                        error_code="invalid_from_account",
+                        message=str(e),
+                        abort_policy="abort_tool",
+                        retryable=False,
+                        details={"from_account": from_account_alias},
+                    ))
+                gmail_client = GmailAPIClient(account_id=resolved_account_id)
                 sent = gmail_client.send_email(
                     to=to,
                     subject=subject,

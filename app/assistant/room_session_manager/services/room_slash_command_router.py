@@ -252,8 +252,8 @@ class RoomSlashCommandRouter:
 
         # /actas self → set to the assistant's self principal (e.g. "emi")
         if arg == "self":
-            from app.assistant.emi_accounts import _assistant_self_principal
-            principal = _assistant_self_principal()
+            from app.assistant.utils.identity_names import get_required_assistant_name
+            principal = get_required_assistant_name().lower()
             self._actas.set_principal(
                 room_id=room_id, surface=surface, context_id=context_id,
                 principal=principal,
