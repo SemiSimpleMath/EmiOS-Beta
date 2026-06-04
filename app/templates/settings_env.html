@@ -1,0 +1,47 @@
+{% extends 'base.html' %}
+
+{% block optional_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/settings_env.css') }}?v={{ static_v }}">
+{% endblock %}
+
+{% block content %}
+{% from '_env_entries.html' import env_entries %}
+<div class="env-settings">
+  <header class="env-settings-header">
+    <h1>Environment &amp; accounts</h1>
+    <p>The keys, handles, and accounts your assistant and tools use. Set a value
+       and it's written to <code>.env</code>; add your own as you wire up new
+       functionality, and tag it with a <em>feature</em> to surface it on that page.</p>
+  </header>
+
+  {% if flash %}<div class="env-flash">{{ flash }}</div>{% endif %}
+
+  {% for group in groups %}
+  <section class="env-owner">
+    <h2>{{ 'You' if group.owner == 'user' else ('Assistant' if group.owner == 'assistant' else group.owner) }}</h2>
+    {% for feat in group.features %}
+    <div class="env-feature">
+      <h3>{{ feat.feature }}</h3>
+      {{ env_entries(feat.entries) }}
+    </div>
+    {% endfor %}
+  </section>
+  {% endfor %}
+
+  <section class="env-add">
+    <h2>Add a variable</h2>
+    <form method="post" action="/settings/env/add" class="env-add-form">
+      <input name="name" placeholder="ENV_VAR_NAME" required>
+      <input name="label" placeholder="Label">
+      <input name="feature" placeholder="feature (e.g. weather)">
+      <select name="owner">
+        <option value="user">You</option>
+        <option value="assistant">Assistant</option>
+      </select>
+      <label class="env-add-secret"><input type="checkbox" name="secret" value="1"> secret</label>
+      <input name="hint" placeholder="hint (optional)">
+      <button type="submit" class="env-btn env-btn-primary">Add</button>
+    </form>
+  </section>
+</div>
+{% endblock %}

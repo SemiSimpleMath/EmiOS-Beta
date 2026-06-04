@@ -1,0 +1,50 @@
+{# Reusable env-var entry renderer. Embed on any feature page:
+     {% from '_env_entries.html' import env_entries %}
+     {{ env_entries(items) }}
+   `items` is a list of registry entries, each enriched by the route with either
+   `state` ({set, shown}) for value/secret kinds, or `account` (projected account)
+   for kind=account. Edits POST to /settings/env/set and reload the page. #}
+{% macro env_entries(items, set_action='/settings/env/set') %}
+<div class="env-entries">
+  {% for it in items %}
+  <div class="env-entry env-kind-{{ it.kind }}">
+    <div class="env-entry-head">
+      <span class="env-entry-label">{{ it.label or it.name }}</span>
+      <code class="env-entry-name">{{ it.name }}</code>
+      {% if not it.builtin %}<span class="env-entry-user" title="user-added">custom</span>{% endif %}
+    </div>
+    {% if it.hint %}<div class="env-entry-hint">{{ it.hint }}</div>{% endif %}
+
+    {% if it.kind == 'account' %}
+      {% set a = it.account %}
+      <div class="env-account">
+        <span class="env-status env-status-{{ (a.status if a else 'unconfigured') }}">{{ a.status if a else 'unconfigured' }}</span>
+        {% if a and a.handle %}<code class="env-handle">{{ a.handle }}</code>{% endif %}
+        {% if a and a.auth.kind == 'google_oauth' %}
+          <a class="env-btn" href="/oauth/google/start?account_id={{ a.auth.account_id }}">Connect Google</a>
+        {% elif a and a.auth.kind == 'pod_ref' %}
+          <a class="env-btn" href="/emi-accounts">{{ 'Rotate' if a.status == 'configured' else 'Configure' }}</a>
+        {% endif %}
+      </div>
+    {% else %}
+      <form class="env-set-form" method="post" action="{{ set_action }}">
+        <input type="hidden" name="name" value="{{ it.name }}">
+        {% if it.kind == 'secret' %}
+          <input class="env-input" type="password" name="value" autocomplete="off"
+                 placeholder="{{ 'set — paste to replace' if it.state.set else 'not set — paste secret' }}">
+        {% else %}
+          <input class="env-input" type="text" name="value" value="{{ it.state.shown }}"
+                 placeholder="not set">
+        {% endif %}
+        <button class="env-btn env-btn-primary" type="submit">Save</button>
+        {% if it.state.set %}
+          <span class="env-flag env-flag-ok">✓ set</span>
+        {% else %}
+          <span class="env-flag env-flag-no">not set</span>
+        {% endif %}
+      </form>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endmacro %}

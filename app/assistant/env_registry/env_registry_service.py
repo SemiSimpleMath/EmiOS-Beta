@@ -218,3 +218,53 @@ class EnvRegistryService:
                 )
             return str(auth.get("account_id") or "")
         return effective
+
+    # ── writes + display state (Phase 3 UI) ───────────────────────────────────
+    def value_state(self, name: str) -> dict[str, Any]:
+        """Display state for a value/secret entry: {set: bool, shown: str}.
+        Secret values are masked (never echoed back to the page)."""
+        entry = self.get(name)
+        if entry is None:
+            raise KeyError(f"env registry: no entry named {name!r}")
+        current = str(os.getenv(name) or "")
+        if entry.get("kind") == "secret":
+            return {"set": bool(current), "shown": "••••••" if current else ""}
+        return {"set": bool(current), "shown": current}
+
+    def set_value(self, name: str, value: str) -> None:
+        """Persist a value/secret entry to .env (and process env). Account
+        entries use the dedicated configure flow, not this."""
+        entry = self.get(name)
+        if entry is None:
+            raise KeyError(f"env registry: no entry named {name!r}")
+        if entry.get("kind") not in ("value", "secret"):
+            raise ValueError(f"env registry: {name!r} is kind={entry.get('kind')!r}; use the account configure flow")
+        from app.assistant.utils.env_writer import upsert_env
+        upsert_env(name, value)
+        os.environ[name] = value
+
+    def add_user_entry(self, *, name: str, owner: str = "user", feature: str = "general",
+                       label: str = "", hint: str = "", secret: bool = False) -> dict[str, Any]:
+        """Append a user-defined entry to the gitignored user registry file."""
+        name = str(name or "").strip()
+        if not name:
+            raise ValueError("env registry: entry name is required")
+        if self.get(name) is not None:
+            raise ValueError(f"env registry: an entry named {name!r} already exists")
+        entry = {
+            "name": name,
+            "kind": "secret" if secret else "value",
+            "owner": str(owner or "user").strip() or "user",
+            "feature": str(feature or "general").strip() or "general",
+            "label": str(label or name).strip() or name,
+            "hint": str(hint or "").strip(),
+        }
+        data: dict[str, Any] = {"schema_version": 1, "entries": []}
+        if _USER_PATH.exists():
+            loaded = json.loads(_USER_PATH.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict) and isinstance(loaded.get("entries"), list):
+                data = loaded
+        data["entries"].append(entry)
+        _USER_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _USER_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        return entry

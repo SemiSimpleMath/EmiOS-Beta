@@ -169,6 +169,8 @@ def create_app(config_class="config.DevelopmentConfig"):
     app.register_blueprint(timeline_bp)
     app.register_blueprint(health_check_bp)
     app.register_blueprint(debug_status_bp)
+    from app.routes.env_settings import env_settings_bp
+    app.register_blueprint(env_settings_bp)
     app.register_blueprint(debug_logging_bp)
     from app.routes.agent_prompt_debug import agent_prompt_debug_bp
     app.register_blueprint(agent_prompt_debug_bp)
