@@ -14,6 +14,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
+from app.assistant.utils.identity_names import get_required_primary_user_name
+
 from app.assistant.subconscious.context_builder import (
     _build_calendar_today_tomorrow,
     _build_family_roster,
@@ -62,8 +64,7 @@ def _build_activity_log() -> str:
 
         session = get_session()
         try:
-            primary = _resolve_household_members()
-            primary_name = primary[0] if primary else "Jukka"
+            primary_name = get_required_primary_user_name()
             row = (
                 session.query(Node)
                 .filter(Node.label == primary_name)
@@ -101,8 +102,7 @@ def _build_sleep_log() -> str:
 
         session = get_session()
         try:
-            primary = _resolve_household_members()
-            primary_name = primary[0] if primary else "Jukka"
+            primary_name = get_required_primary_user_name()
             row = (
                 session.query(Node)
                 .filter(Node.label == primary_name)

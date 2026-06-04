@@ -600,10 +600,7 @@ def _resolve_default_seed_id() -> Optional[str]:
     """
     from app.assistant.utils.identity_names import get_required_primary_user_name
 
-    try:
-        user_first = get_required_primary_user_name()
-    except Exception:
-        user_first = "Jukka"
+    user_first = get_required_primary_user_name()
 
     with get_db_manager().read_session() as session:
         node = (

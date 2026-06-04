@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_repo_root
+from app.assistant.utils.identity_names import get_required_primary_user_name
 from app.assistant.utils.time_utils import get_local_time, get_local_time_str
 
 logger = get_logger(__name__)
@@ -76,28 +77,22 @@ def _resolve_household_members() -> List[str]:
 
     Future: refine with KG cohabits-with / lives-with / is-family-of edges.
     """
-    try:
-        user_data_path = get_repo_root() / "resources" / "user" / "resource_user_data.json"
-        if user_data_path.is_file():
-            data = json.loads(user_data_path.read_text(encoding="utf-8"))
-            first_name = data.get("first_name") or "User"
-            members = [first_name]
-            # important_people: [{name, relationship, birthdate}, ...]
-            household_relationships = {
-                "wife", "husband", "spouse", "partner",
-                "son", "daughter", "child", "kid",
-            }
-            for p in (data.get("important_people") or []):
-                if not isinstance(p, dict):
-                    continue
-                name = p.get("name")
-                rel = (p.get("relationship") or "").strip().lower()
-                if name and rel in household_relationships:
-                    members.append(str(name))
-            return members
-    except Exception as e:
-        logger.warning("[noticer.context] household_members resolution failed: %s", e)
-    return ["Jukka"]
+    user_data_path = get_repo_root() / "resources" / "user" / "resource_user_data.json"
+    data = json.loads(user_data_path.read_text(encoding="utf-8"))
+    members = [get_required_primary_user_name()]
+    # important_people: [{name, relationship, birthdate}, ...]
+    household_relationships = {
+        "wife", "husband", "spouse", "partner",
+        "son", "daughter", "child", "kid",
+    }
+    for p in (data.get("important_people") or []):
+        if not isinstance(p, dict):
+            continue
+        name = p.get("name")
+        rel = (p.get("relationship") or "").strip().lower()
+        if name and rel in household_relationships:
+            members.append(str(name))
+    return members
 
 
 def _build_diet_log() -> str:
@@ -145,16 +140,6 @@ def _build_recent_chat_clusters(*, now_utc: datetime, limit: int = 12) -> str:
     return "\n".join(lines)
 
 
-def _read_primary_first_name() -> Optional[str]:
-    try:
-        p = get_repo_root() / "resources" / "user" / "resource_user_data.json"
-        if p.is_file():
-            return (json.loads(p.read_text(encoding="utf-8")).get("first_name") or "").strip() or None
-    except Exception:
-        pass
-    return None
-
-
 def _build_recent_friction_signals(
     *,
     now_utc: datetime,
@@ -191,7 +176,7 @@ def _build_recent_friction_signals(
     if not results:
         return _NO_DATA_FMT.format(kind="recent friction signals")
 
-    primary = (primary_user_first_name or _read_primary_first_name() or "Jukka")
+    primary = primary_user_first_name or get_required_primary_user_name()
     self_aliases = {"self", "me", "i", "myself", primary.lower()}
 
     def _normalize_subject(raw: str) -> str:

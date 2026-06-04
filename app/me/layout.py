@@ -224,11 +224,8 @@ def _build_full_graph(
 
     with get_db_manager().read_session() as session:
         # Try to identify the user's own node — it sits at origin.
-        try:
-            from app.assistant.utils.identity_names import get_required_primary_user_name
-            user_first = get_required_primary_user_name()
-        except Exception:
-            user_first = "Jukka"
+        from app.assistant.utils.identity_names import get_required_primary_user_name
+        user_first = get_required_primary_user_name()
         seed_node = (
             session.query(Node)
             .filter(Node.label == user_first, Node.node_type == "Entity")
