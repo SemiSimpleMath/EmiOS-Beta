@@ -3,7 +3,7 @@ from typing import Any, Dict, List
 
 
 from app.assistant.entity_management.entity_card_injector import EntityCardInjector
-from app.assistant.utils.assistant_name import get_assistant_name
+from app.assistant.utils.identity_names import get_assistant_name
 from app.assistant.utils.logging_config import get_logger
 from app.models.base import get_session
 from app.assistant.entity_management.entity_cards import (

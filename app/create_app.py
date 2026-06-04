@@ -51,7 +51,7 @@ def create_app(config_class="config.DevelopmentConfig"):
     @app.context_processor
     def _inject_assistant_name():
         try:
-            from app.assistant.utils.assistant_name import get_assistant_name
+            from app.assistant.utils.identity_names import get_assistant_name
             return {"assistant_name": get_assistant_name()}
         except Exception:
             return {"assistant_name": "Emi"}

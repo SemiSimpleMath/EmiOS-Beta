@@ -558,7 +558,7 @@ class ConversationStarterStep(BaseStep):
     def _emit_to_user(self, text: str) -> None:
         try:
             from app.assistant.ServiceLocator.service_locator import DI
-            from app.assistant.utils.assistant_name import get_assistant_name
+            from app.assistant.utils.identity_names import get_assistant_name
             from app.assistant.utils.pydantic_classes import UserMessage, UserMessageData
 
             metadata = {"reply_to": {"type": "socketio", "room_id": "master_room"}}
@@ -624,7 +624,7 @@ class ConversationStarterStep(BaseStep):
                         self._emit_to_user(first_question)
                         try:
                             from app.assistant.ServiceLocator.service_locator import DI
-                            from app.assistant.utils.assistant_name import get_assistant_name
+                            from app.assistant.utils.identity_names import get_assistant_name
                             from app.assistant.utils.pydantic_classes import Message as _Msg
                             _assistant_name = get_assistant_name()
                             DI.global_blackboard.add_msg(
@@ -711,7 +711,7 @@ class ConversationStarterStep(BaseStep):
         # This makes it show up in "recent chat" excerpts and downstream context like normal Emi chat.
         try:
             from app.assistant.ServiceLocator.service_locator import DI
-            from app.assistant.utils.assistant_name import get_assistant_name
+            from app.assistant.utils.identity_names import get_assistant_name
             from app.assistant.utils.pydantic_classes import Message
 
             _assistant_name = get_assistant_name()

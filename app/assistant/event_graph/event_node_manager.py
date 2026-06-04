@@ -81,7 +81,7 @@ class EventNodeManager:
             Created node as dict, or None on error
         """
         if created_by is None:
-            from app.assistant.utils.assistant_name import get_assistant_name
+            from app.assistant.utils.identity_names import get_assistant_name
             created_by = get_assistant_name().lower()
 
         session = get_session()

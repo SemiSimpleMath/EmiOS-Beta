@@ -4,7 +4,7 @@ import os
 from flask import Blueprint, current_app, jsonify, redirect, render_template, request, url_for
 from pathlib import Path
 from app.assistant.utils.path_utils import get_resources_dir, setup_complete
-from app.assistant.utils.assistant_name import get_assistant_name
+from app.assistant.utils.identity_names import get_assistant_name
 import json
 from datetime import datetime, time, timedelta, timezone
 

@@ -237,7 +237,7 @@ def _seed_kg_core_nodes():
             return
 
         from app.assistant.utils.path_utils import get_resources_dir
-        from app.assistant.utils.assistant_name import get_assistant_name
+        from app.assistant.utils.identity_names import get_assistant_name
 
         user_data_file = get_resources_dir() / "user" / "resource_user_data.json"
         if user_data_file.exists():

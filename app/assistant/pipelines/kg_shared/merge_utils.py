@@ -203,7 +203,7 @@ def find_merge_candidates_semantic(
 ) -> List[Node]:
     candidates: Dict[str, Node] = {}
     from app.assistant.kg_core.user_identity import get_primary_user_name, get_primary_user_full_name
-    from app.assistant.utils.assistant_name import get_assistant_name
+    from app.assistant.utils.identity_names import get_assistant_name
     _user = get_primary_user_name().lower()
     _user_full = get_primary_user_full_name().lower()
     _asst = get_assistant_name().lower()

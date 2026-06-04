@@ -83,7 +83,7 @@ def _notify_user_of_findings(findings: list, overall_health: str) -> None:
     """Send findings to the user via chat message."""
     try:
         from app.assistant.ServiceLocator.service_locator import DI
-        from app.assistant.utils.assistant_name import get_assistant_name
+        from app.assistant.utils.identity_names import get_assistant_name
         from app.assistant.utils.pydantic_classes import UserMessage, UserMessageData
 
         # Build a concise message.

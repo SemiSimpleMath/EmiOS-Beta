@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from flask import Blueprint, render_template
 
-from app.assistant.utils.assistant_name import get_assistant_name
+from app.assistant.utils.identity_names import get_assistant_name
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)

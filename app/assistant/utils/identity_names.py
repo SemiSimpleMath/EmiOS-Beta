@@ -9,6 +9,38 @@ from app.assistant.utils.path_utils import get_resources_dir
 logger = get_logger(__name__)
 
 
+# ── Canonical stable principal ids ───────────────────────────────────────────
+# Returned by resolve_principal(). Name-neutral — they never contain a person's
+# or the assistant's configured name. Use these for scoping / ownership /
+# routing keys. For anything a human reads, use the *_name resolvers below.
+PRINCIPAL_SELF = "self"   # the assistant acting as itself
+PRINCIPAL_USER = "user"   # the primary human owner
+
+
+def get_assistant_name() -> str:
+    """Assistant display name, soft: ASSISTANT_NAME -> resource:name -> generic default.
+
+    For human-facing display. Falls back to a name-neutral default rather than
+    any specific persona name (origin is the public repo). Use
+    get_required_assistant_name() when a missing config should fail loudly
+    instead of silently defaulting.
+    """
+    env_val = os.environ.get("ASSISTANT_NAME", "").strip()
+    if env_val:
+        return env_val
+    resource_path = get_resources_dir() / "assistant" / "resource_assistant_data.json"
+    try:
+        if resource_path.exists():
+            payload = json.loads(resource_path.read_text(encoding="utf-8"))
+            if isinstance(payload, dict):
+                name = str(payload.get("name") or "").strip()
+                if name:
+                    return name
+    except Exception as e:
+        logger.error("Could not load assistant name from resource file: %s", e, exc_info=True)
+    return "Assistant"
+
+
 def get_required_assistant_name() -> str:
     env_val = str(os.environ.get("ASSISTANT_NAME") or "").strip()
     if env_val:

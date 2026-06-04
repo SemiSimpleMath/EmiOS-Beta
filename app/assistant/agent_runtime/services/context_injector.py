@@ -13,7 +13,7 @@ from app.assistant.agent_runtime.services.user_bio_context_service import UserBi
 from app.models.base import get_session
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.time_utils import get_local_time, get_local_time_str
-from app.assistant.utils.assistant_name import get_assistant_name
+from app.assistant.utils.identity_names import get_assistant_name
 
 logger = get_logger(__name__)
 

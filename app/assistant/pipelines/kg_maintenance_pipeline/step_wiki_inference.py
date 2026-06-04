@@ -195,7 +195,7 @@ def _resolve_vault_path() -> Optional[Path]:
     if override:
         return Path(override)
     try:
-        from app.assistant.utils.config_utils import get_assistant_name
+        from app.assistant.utils.identity_names import get_assistant_name
         name = get_assistant_name() or "Emi"
     except Exception:
         name = "Emi"
