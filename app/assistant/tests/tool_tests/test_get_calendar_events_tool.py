@@ -122,6 +122,38 @@ def test_content_surfaces_zoom_link_from_description(monkeypatch):
     )
 
 
+def test_content_surfaces_attendees(monkeypatch):
+    """The event's attendee list must appear in ``content``.
+
+    Regression context: the attendee list was fetched into ``data_list`` but
+    omitted from ``content`` (the only thing agents see). A 'who is in Friday
+    Night Meats?' lookup therefore couldn't read the participants from the
+    calendar and fell back to brute-force email mining — which exhausted the
+    manager's cycle budget (2026-06 incident). Lock attendees into content.
+    """
+    tool, _fake = build_calendar_tool(monkeypatch)
+    ev = _base_event(event_id="fnm1", summary="Friday Night Meats")
+    ev["attendees"] = [
+        {"email": "alice@example.com", "responseStatus": "needsAction"},
+        {"email": "bob@example.com", "responseStatus": "needsAction"},
+        {"email": "carol@example.com", "organizer": True, "self": True},
+    ]
+    _install_stub_get_events(monkeypatch, [ev])
+
+    result = tool.handle_get_calendar_events({
+        "start_date": "2026-04-24T00:00:00Z",
+        "end_date": "2026-04-25T00:00:00Z",
+        "calendar_names": ["primary"],
+        "single_events": True,
+    })
+    content = result.content or ""
+    assert "attendees=" in content, (
+        f"Attendee list missing from content. content was:\n{content}"
+    )
+    for email in ("alice@example.com", "bob@example.com", "carol@example.com"):
+        assert email in content, f"Attendee {email} missing from content:\n{content}"
+
+
 def test_content_surfaces_location_field(monkeypatch):
     """Event location should appear in ``content`` when present."""
     tool, _fake = build_calendar_tool(monkeypatch)

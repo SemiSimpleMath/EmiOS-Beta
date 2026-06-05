@@ -172,9 +172,9 @@ class FindCalendarEventByName(CalendarTool):
             # Extract just the events for data_list
             top_events = [item['event'] for item in top_k]
             
-            # Build a readable summary. Include id + location + meeting link so the
-            # agent can act on a match directly (fetch the event / use the link)
-            # instead of re-scanning the whole calendar.
+            # Build a readable summary. Include id + location + meeting link +
+            # attendees so the agent can answer "who's in this event?" and act on a
+            # match directly, instead of re-scanning the calendar or mining email.
             summary_lines = [f"Found {len(top_k)} matching events:"]
             for i, item in enumerate(top_k, 1):
                 ev = item['event']
@@ -182,10 +182,17 @@ class FindCalendarEventByName(CalendarTool):
                 line = f"{i}. '{title}' (id={ev.get('id', '')}, similarity: {item['similarity']:.4f})"
                 location = str(ev.get('location') or '').strip()
                 meeting_link = str(ev.get('meeting_link') or '').strip()
+                attendee_emails = [
+                    str(p.get('email') or '').strip()
+                    for p in (ev.get('participants') or ev.get('attendees') or [])
+                    if isinstance(p, dict) and str(p.get('email') or '').strip()
+                ]
                 if location:
                     line += f" location={location[:120]}"
                 if meeting_link:
                     line += f" meeting_link={meeting_link}"
+                if attendee_emails:
+                    line += f" attendees={', '.join(attendee_emails)}"
                 summary_lines.append(line)
             
             return ToolResult(

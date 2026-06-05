@@ -669,6 +669,11 @@ class CalendarTool(BaseTool):
             location = str(ev.get("location") or "").strip()
             meeting_link = str(ev.get("meeting_link") or "").strip()
             description = str(ev.get("description") or "").strip()
+            attendee_emails = [
+                str(p.get("email") or "").strip()
+                for p in (ev.get("participants") or [])
+                if isinstance(p, dict) and str(p.get("email") or "").strip()
+            ]
             line = f"- {title}"
             if start:
                 line += f" @ {start}"
@@ -676,11 +681,19 @@ class CalendarTool(BaseTool):
                 line += f"  location={location[:200]}"
             if meeting_link:
                 line += f"  meeting_link={meeting_link}"
+            # Attendees are the field agents most often need ("who's in X?") and
+            # are small (a handful of emails) — render the FULL list. Omitting
+            # them (data trapped in data_list, invisible in content) sent a
+            # participant lookup down a brute-force email-mining path that
+            # exhausted the manager's cycle budget (2026-06 Friday-Night-Meats).
+            if attendee_emails:
+                line += f"  attendees={', '.join(attendee_emails)}"
             if description:
-                # Keep descriptions bounded but include enough for a Zoom/Meet
-                # link to land inside the snippet.
+                # Generous cap: normal descriptions render in full; only a rare
+                # pasted wall-of-text gets clipped. The join URL is already lifted
+                # into meeting_link, so clipping never drops it.
                 snippet = description.replace("\n", " ").strip()
-                line += f"  description={snippet[:400]}"
+                line += f"  description={snippet[:1500]}"
             lines.append(line)
 
         summary = "\n".join(lines)
