@@ -63,6 +63,27 @@ def initialize_system():
     event_relay = EmiEventRelay()
     ServiceLocator.register('event_relay', event_relay)
 
+    from app.assistant.ticket_manager.ticket_dispatch import TicketDispatcherRegistry
+    from app.assistant.ticket_manager.ticket_dispatch.adapters.socketio import (
+        SocketIOTicketAdapter,
+    )
+    from app.assistant.ticket_manager.ticket_dispatch.adapters.telegram import (
+        TelegramTicketAdapter,
+    )
+    from app.assistant.ticket_manager.ticket_dispatch.adapters.slack import (
+        SlackTicketAdapter,
+    )
+    from app.assistant.ticket_manager.ticket_dispatch.adapters.sms import (
+        SmsTicketAdapter,
+    )
+    ticket_dispatcher = TicketDispatcherRegistry()
+    ticket_dispatcher.register(SocketIOTicketAdapter())
+    ticket_dispatcher.register(TelegramTicketAdapter())
+    ticket_dispatcher.register(SlackTicketAdapter())
+    ticket_dispatcher.register(SmsTicketAdapter())
+    ticket_dispatcher.subscribe_to_event_hub(DI.event_hub)
+    ServiceLocator.register('ticket_dispatcher', ticket_dispatcher)
+
     progress_curator = ProgressCurator()
     ServiceLocator.register("progress_curator", progress_curator)
     chat_narrator = ChatNarrator()

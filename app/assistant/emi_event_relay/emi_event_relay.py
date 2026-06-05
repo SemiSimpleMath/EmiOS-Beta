@@ -39,8 +39,6 @@ class EmiEventRelay:
 
         DI.event_hub.register_event('socket_emit', self.socket_emit_handler)
         DI.event_hub.register_event('repo_update', self.notify_ui_of_repo_update)
-        DI.event_hub.register_event('proactive_suggestion', self.proactive_suggestion_handler)
-        DI.event_hub.register_event('proactive_suggestion_update', self.proactive_suggestion_update_handler)
         DI.event_hub.register_event('agent_progress_emit', self.agent_progress_emit_handler)
 
     def socket_emit_handler(self, message: UserMessage):
@@ -75,21 +73,6 @@ class EmiEventRelay:
         """Notifies the UI about repository updates via WebSocket."""
         logger.debug("notify_ui_of_repo_update: sending repo update notification")
         self._emit_to_room("master_room", "repo_update_notification", msg.data)
-
-    def proactive_suggestion_handler(self, message: Message):
-        """Emit proactive suggestion to frontend via WebSocket."""
-        suggestion_data = message.data if hasattr(message, 'data') else {}
-        self._emit_to_room("master_room", "proactive_suggestion", suggestion_data)
-
-    def proactive_suggestion_update_handler(self, message: Message):
-        """Signal the frontend that a ticket's state changed (expired, etc.).
-
-        The frontend's `proactive_suggestion_update` handler re-fetches
-        `/api/tickets/pending` on receipt, so the stale ticket falls off
-        naturally once its DB state moves out of pending/proposed.
-        """
-        update_data = message.data if hasattr(message, 'data') else {}
-        self._emit_to_room("master_room", "proactive_suggestion_update", update_data)
 
     def agent_progress_emit_handler(self, message: Message):
         """

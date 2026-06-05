@@ -157,8 +157,8 @@ Handler exceptions never crash the hub — `_safe_invoke` logs `CRITICAL` and co
 |------------------------------------|-----------------------------------------------------------------|---------------------------------------------------------|
 | `socket_emit`                      | Many control nodes, `chat_publisher`, `NotifyUser`, `LLMClient` | `EmiEventRelay.socket_emit_handler`                     |
 | `repo_update`                      | `event_repository`, calendar/todo/scheduler tools               | `EmiEventRelay.notify_ui_of_repo_update`, `DayflowScheduler._on_repo_update` |
-| `proactive_suggestion`             | Suggestion producers                                            | `EmiEventRelay.proactive_suggestion_handler`            |
-| `proactive_suggestion_update`      | Suggestion producers                                            | `EmiEventRelay.proactive_suggestion_update_handler`     |
+| `proactive_suggestion`             | Suggestion producers                                            | `TicketDispatcherRegistry._on_proactive_suggestion` (fans out to every registered `TicketSurfaceAdapter.dispatch()`) |
+| `proactive_suggestion_update`      | Suggestion producers                                            | `TicketDispatcherRegistry._on_proactive_suggestion_update` (fans out to `TicketSurfaceAdapter.notify_update()`) |
 | `agent_progress_fact`              | `tool_caller`, `tool_result_handler`, `progress_emitter`        | `EmiEventRelay.agent_progress_emit_handler`             |
 | `agent_progress_emit`              | UI progress emitters                                            | `EmiEventRelay.agent_progress_emit_handler`             |
 | `afk_state_changed`                | `AFKMonitor`                                                    | `MusicAfkRelay`, `DayflowScheduler._on_afk_state_changed` |
