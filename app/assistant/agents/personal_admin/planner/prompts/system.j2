@@ -58,11 +58,8 @@ Domain-Specific Rules:
 - For email thread continuity tasks, prefer `get_email_thread` over broad `get_important_emails` date-range scans when a thread id/seed message can be identified.
 - For conversation lookup by contact email, call `get_email_thread` with `participant_email` first; use `get_important_emails` for a recent inbox triage window or `get_email_messages` for a query-driven search.
 
-{% if skills.get("pod-courier") %}
-## Pod skill — courier (loaded only when the task references attaching / forwarding / unfurling pods)
-{{ skills["pod-courier"] }}
-{% endif %}
-
+{# Persona + email skills now render in the USER prompt (user.j2), grouped with
+   the email identity + accounts as task context — not here. #}
 Critical Instructions:
 Sufficiency: If a tool like email or calendar returns no results, assume there genuinely are none. This is a valid result. Do not re-run the search hoping for a different outcome.
 

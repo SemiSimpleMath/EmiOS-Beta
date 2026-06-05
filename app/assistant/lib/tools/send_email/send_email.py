@@ -252,7 +252,22 @@ class SendEmail(BaseTool):
                         retryable=False,
                         details={"from_account": from_account_alias},
                     ))
-                gmail_client = GmailAPIClient(account_id=resolved_account_id)
+                expected_email = DI.env_registry.expected_email_for_account_id(resolved_account_id)
+                try:
+                    gmail_client = GmailAPIClient(
+                        account_id=resolved_account_id,
+                        expected_principal_email=expected_email or None,
+                    )
+                except PermissionError as e:
+                    if tempdir:
+                        shutil.rmtree(tempdir, ignore_errors=True)
+                    return self.publish_msg(make_tool_error(
+                        error_code="account_identity_mismatch",
+                        message=str(e),
+                        abort_policy="abort_tool",
+                        retryable=False,
+                        details={"account_id": resolved_account_id, "expected": expected_email},
+                    ))
                 sent = gmail_client.send_email(
                     to=to,
                     subject=subject,

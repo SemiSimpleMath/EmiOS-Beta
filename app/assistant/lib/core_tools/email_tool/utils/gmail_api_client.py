@@ -32,16 +32,18 @@ SCOPES = [
 class GmailAPIClient:
     """Gmail API client using OAuth2"""
     
-    def __init__(self, *, account_id: str | None = None):
+    def __init__(self, *, account_id: str | None = None, expected_principal_email: str | None = None):
         self.service = None
         self.account_id = str(account_id or "").strip() or GMAIL_GOOGLE_ACCOUNT_ID
+        self.expected_principal_email = str(expected_principal_email or "").strip() or None
         self._authenticate()
-    
+
     def _authenticate(self):
         """Authenticate with Gmail API using OAuth2"""
         creds = load_google_credentials(
             account_id=self.account_id,
             required_scopes=SCOPES,
+            expected_principal_email=self.expected_principal_email,
         )
         
         try:

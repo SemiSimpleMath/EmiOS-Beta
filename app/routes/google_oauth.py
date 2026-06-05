@@ -198,7 +198,10 @@ def start_oauth():
             authorization_url, state = flow.authorization_url(
                 access_type='offline',
                 include_granted_scopes='false',
-                prompt='consent',
+                # select_account forces Google's account chooser so a multi-account
+                # setup (e.g. emi_google_primary ≠ the user's Gmail) can pick the
+                # RIGHT identity instead of silently re-consenting the logged-in one.
+                prompt='select_account consent',
             )
 
         session['oauth_state'] = state
@@ -280,7 +283,10 @@ def start_oauth_redirect():
             authorization_url, state = flow.authorization_url(
                 access_type='offline',
                 include_granted_scopes='false',
-                prompt='consent',
+                # select_account forces Google's account chooser so a multi-account
+                # setup (e.g. emi_google_primary ≠ the user's Gmail) can pick the
+                # RIGHT identity instead of silently re-consenting the logged-in one.
+                prompt='select_account consent',
             )
 
         session['oauth_state'] = state

@@ -200,11 +200,25 @@ class EnvRegistryService:
         per-account authority dial."""
         return self._render_account_lines(principal, self.accounts_for_principal(principal))
 
-    def render_accounts_for_scope(self, scope: Any) -> str:
-        """Provider for the `resource_accounts` dynamic resource. Computes the
-        principal- AND per-account-authority-filtered account text from the live
-        scope: principal = acting_as; an account appears only if the caller's
-        authority clears the account's `authority` dial.
+    def _category_for_platform(self, platform: Any) -> str:
+        """Domain category for an account platform (email / social / ...), per
+        _FEATURE_BY_PLATFORM. Drives the resource_<category>_accounts relevance
+        filter. Unknown platforms fall to 'other' so they only ever surface in
+        the unfiltered (categories=None) view."""
+        return self._FEATURE_BY_PLATFORM.get(str(platform or "").strip().lower(), "other")
+
+    def render_accounts_for_scope(self, scope: Any, *, categories: Optional[set] = None) -> str:
+        """Provider for the `resource_accounts` family of dynamic resources.
+        Computes the principal- AND per-account-authority-filtered account text
+        from the live scope: principal = acting_as; an account appears only if the
+        caller's authority clears the account's `authority` dial.
+
+        ``categories`` (optional) further restricts to accounts whose platform
+        category (gmail->email, bluesky->social, …) is in the set — the DOMAIN
+        relevance filter. An email/calendar agent requests {"email"} so social
+        accounts never enter its prompt; None = no domain filter (every category).
+        This is RELEVANCE, not permission: scope + authority already gate access;
+        categories only gate what's pertinent to the agent's job.
         See docs/architecture/SECRETS_ACCOUNTS.md."""
         if hasattr(scope, "model_dump"):
             scope = scope.model_dump()
@@ -220,6 +234,12 @@ class EnvRegistryService:
             a for a in self.accounts_for_principal(principal)
             if int(a.get("authority") or 99) <= caller_authority
         ]
+        if categories is not None:
+            wanted = {str(c).strip().lower() for c in categories if str(c).strip()}
+            accounts = [
+                a for a in accounts
+                if self._category_for_platform(a.get("platform")) in wanted
+            ]
         return self._render_account_lines(principal, accounts)
 
     def resolve_gmail_account_id(self, alias: Optional[str], *, scope_acting_as: Optional[str] = None) -> str:
@@ -257,6 +277,19 @@ class EnvRegistryService:
                 )
             return str(auth.get("account_id") or "")
         return effective
+
+    def expected_email_for_account_id(self, account_id: str) -> str:
+        """The email/handle an OAuth account_id is SUPPOSED to authenticate as (the
+        registry account's resolved handle). Empty when no registry account claims
+        this id. Used to validate the consented identity matches what we expect —
+        see docs/architecture/SECRETS_ACCOUNTS.md."""
+        aid = str(account_id or "").strip()
+        if not aid:
+            return ""
+        for a in self.accounts():
+            if str((a.get("auth") or {}).get("account_id") or "").strip() == aid:
+                return str(a.get("handle") or "").strip()
+        return ""
 
     # ── .env file overview (central settings page) ────────────────────────────
     # Per-var sensitivity (plain .env vars; accounts manage their own pods):

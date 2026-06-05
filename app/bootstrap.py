@@ -183,6 +183,14 @@ def initialize_services(app):
         "resource_accounts",
         lambda scope: DI.env_registry.render_accounts_for_scope(scope),
     )
+    # Domain-scoped account views: an agent surfaces only the account CATEGORIES
+    # relevant to its function (relevance, NOT permission — scope + authority still
+    # gate access). personal_admin (email / calendar / todos) takes the email view,
+    # so social accounts (bluesky, etc.) never enter its prompt.
+    resource_manager.register_provider(
+        "resource_email_accounts",
+        lambda scope: DI.env_registry.render_accounts_for_scope(scope, categories={"email"}),
+    )
     # The user's email identity is user-mode only — lock it to acting_as=user so it
     # does not leak into self/assistant mode (where email-as-self governs instead).
     # acting_as defaults to "user", so this is safe; only /actas self withholds it.

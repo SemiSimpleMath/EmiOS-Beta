@@ -17,9 +17,19 @@ Information:
 {% endif %}
 {% endif %}
 
-{% if resource_accounts %}
-## Accounts you can act as
-{{ resource_accounts }}
+{% if resource_email_accounts %}
+## Accounts you have access to
+{{ resource_email_accounts }}
+{% endif %}
+
+{% if auto_injected_skill_names %}
+{# Persona + email skills admitted for this scope/task: "acting as <assistant>"
+   + emi-values (always-on in self mode) and "emailing as yourself" (email +
+   self). Each was gated by requires_scope upstream; render whatever survived.
+   Bluesky-specific skills live on the social manager, not here. #}
+{% for name in auto_injected_skill_names %}
+{{ skills[name] }}
+{% endfor %}
 {% endif %}
 
 {% if entity_card %}

@@ -67,6 +67,7 @@ def load_google_credentials(
     account_id: str = DEFAULT_GOOGLE_ACCOUNT_ID,
     required_scopes: Sequence[str],
     allow_refresh: bool = True,
+    expected_principal_email: str | None = None,
 ) -> Credentials:
     """
     Load OAuth credentials from encrypted account store and ensure required scopes are present.
@@ -86,6 +87,20 @@ def load_google_credentials(
             f"Google OAuth credentials not found for account_id={account_id!r}. "
             "Authenticate via the app Google OAuth flow for that account."
         )
+
+    # Identity guard: a configured account must authenticate as the identity it
+    # CLAIMS. Refuse if the consented principal_email mismatches the expected one
+    # (e.g. the assistant's account consented as the user's Gmail instead of her own), so a
+    # mis-consented account can't silently send as the wrong person.
+    # See docs/architecture/SECRETS_ACCOUNTS.md.
+    if expected_principal_email:
+        actual = str(stored.get("principal_email") or "").strip()
+        if actual and actual.lower() != str(expected_principal_email).strip().lower():
+            raise PermissionError(
+                f"account_id={account_id!r} is authenticated as {actual!r} but should be "
+                f"{expected_principal_email!r}. Re-consent at "
+                f"/oauth/google/start?account_id={account_id} signed in as {expected_principal_email}."
+            )
 
     raw_json = str(stored.get("credentials_json") or "").strip()
     if not raw_json:
