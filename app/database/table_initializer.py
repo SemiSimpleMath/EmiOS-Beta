@@ -371,22 +371,73 @@ def initialize_all_tables():
     Initialize ALL tables
     - Always-on tables (19)
     - Optional tables based on settings (0-13)
-    
+
     This is the main entry point called from create_app()
     """
     logger.info("=" * 60)
     logger.info("DATABASE INITIALIZATION")
     logger.info("=" * 60)
-    
+
+    # Capture freshness BEFORE create_all. On a brand-new DB, create_all builds
+    # every table at the LATEST schema, so historical "add column" migrations must
+    # be baseline-stamped (recorded, not run). See app/database/migration_runner.py.
+    fresh_db = _db_is_fresh()
+
     # Always create these
     initialize_always_on_tables()
-    
+
     # Optional based on settings
     initialize_optional_tables()
-    
+
+    # After create_all: apply pending schema migrations (ALTERATIONS to existing
+    # tables) + ensure the belief-engine schema is current. This is the authority
+    # for schema changes on auto-updated installs.
+    _run_schema_migrations(fresh_db=fresh_db)
+
     logger.info("=" * 60)
     logger.info("✅ Database initialization complete!")
     logger.info("=" * 60)
+
+
+def _db_is_fresh() -> bool:
+    """True if the DB has no app tables yet (brand-new / empty file).
+
+    MUST be called BEFORE create_all. Keys on table presence rather than the
+    file's existence/mtime, so it's robust to whatever may have already touched
+    the file. On any error, returns False (the safe default: pending idempotent
+    migrations run rather than being silently skipped on a real old DB).
+    """
+    from sqlalchemy import inspect
+    try:
+        names = [
+            t for t in inspect(get_current_engine()).get_table_names()
+            if not t.startswith("sqlite_")
+        ]
+        return len(names) == 0
+    except Exception:
+        logger.exception(
+            "[migrations] could not determine DB freshness; assuming NOT fresh"
+        )
+        return False
+
+
+def _run_schema_migrations(*, fresh_db: bool) -> None:
+    """Run the migration runner + belief-engine schema bootstrap, after create_all."""
+    from app.models.base import get_database_uri
+    uri = get_database_uri()
+    if not uri.startswith("sqlite:///"):
+        logger.warning("[migrations] non-sqlite URI %r — skipping file migrations", uri)
+        return
+    db_path = uri[len("sqlite:///"):]
+
+    from app.database.migration_runner import run_migrations
+    run_migrations(db_path, fresh_db=fresh_db)
+
+    # Belief-engine tables live in the SAME emi.db; ensure_schema is idempotent
+    # (CREATE TABLE IF NOT EXISTS). Fold it into the one startup schema path so
+    # both schemas are current before serving.
+    from belief_engine.db.ensure_schema import ensure_schema
+    ensure_schema()
 
 
 def check_missing_tables():
