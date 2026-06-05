@@ -1,0 +1,9 @@
+Capture a fresh snapshot from a Ring camera and mint a pod that's immediately usable.
+
+When to use this vs ring_camera_control.get_snapshot:
+- USE THIS when you need the image as a pod (to attach to email, pass to vision_image_describe, etc.). The pod_id is in result.data.pod_id.
+- USE ring_camera_control.get_snapshot when you just want a snapshot recorded for background analysis (motion polls, scheduled checks). That path lets the dispatcher's scene-classifier decide whether to mint — for routine captures most don't.
+
+The most common chain:
+  capture_camera_snapshot(camera_id=...)  →  {pod_id: "datapod:image:..."}
+  send_email(to=..., pod_ids=["datapod:image:..."], ...)

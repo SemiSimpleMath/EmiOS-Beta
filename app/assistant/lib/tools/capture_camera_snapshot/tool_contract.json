@@ -1,0 +1,36 @@
+{
+  "name": "capture_camera_snapshot",
+  "description": "Capture a fresh snapshot from a Ring camera and ALWAYS mint it as a pod the agent can immediately attach to email or pass to vision tools. Use this — not ring_camera_control.get_snapshot — when you need the resulting image as a usable pod (e.g. 'email me a current shot of the downstairs camera'). The background camera dispatcher's skip-unless-interesting pod policy doesn't apply here — the pod gets minted regardless of analyzed scene category.",
+  "inputs": [
+    {
+      "name": "camera_id",
+      "type": "string",
+      "required": true,
+      "description": "Ring camera id. Use ring_camera_control.list_cameras to look one up by name if you don't know it."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable confirmation including the minted pod_id."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "{ok, pod_id, camera_id, snapshot_path, captured_at, size_bytes, mime_type}. Use pod_id immediately in pod_ids=[...] for send_email or input_pod_ids=[...] for vision/execute_code tools."
+    }
+  ],
+  "arguments_prompt": "Arguments for capture_camera_snapshot:\n- camera_id (required): Ring camera id (e.g. '158991560' for Downstairs).",
+  "metadata": {
+    "domain": "smart_home",
+    "actions": ["read"],
+    "selectors": ["camera"],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": ["ring"],
+    "requires_network": true,
+    "cost_level": "low",
+    "latency_class": "medium"
+  }
+}
