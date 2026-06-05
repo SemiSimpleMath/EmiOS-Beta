@@ -1,14 +1,13 @@
 """
-Tests for GetEmailMessagesTool.execute — specifically that the ``content``
-field surfaces per-message detail and any obvious conference links.
+Tests for GetEmailMessagesTool.execute — the HEADERS-ONLY contract.
 
-Regression context: before, ``content`` was just a count — e.g. "Fetched 50
-message(s) matching query." Agents only see ``content`` in their turn-over-
-turn tool history, so they couldn't tell what any of the emails actually
-said. A search that returned 50 hits was information-equivalent to "we
-found some emails somewhere" — useless. The fix lists each message's
-subject/sender/date/snippet and pulls any Zoom/Meet/Teams link from the
-body inline. These tests lock that invariant in.
+This tool is the *search* half of two-phase retrieval: it returns per-message
+headers (subject/sender/date/message_id/snippet) plus the one high-signal
+body-derived field (a meeting link), but NEVER full bodies. Full bodies are
+hydrated on demand via get_email_thread(message_id). Returning full bodies
+inline was a context bomb (2026-06 Friday-Night-Meats incident). These tests
+lock in: headers + snippet + meeting_link are surfaced in ``content``; the
+message_id (hydrate handle) is present; and no full body is returned.
 """
 from __future__ import annotations
 
@@ -199,8 +198,9 @@ def test_content_header_reports_match_count():
     )
 
 
-def test_data_dict_still_populated_with_full_message_rows():
-    """``data.messages`` must still carry full rows for callers that read it."""
+def test_data_dict_carries_header_rows_not_bodies():
+    """``data.messages`` carries lightweight header rows — message_id (the hydrate
+    handle) + snippet + meeting_link — but NEVER a full body."""
     tool = _build_tool([
         _FakeEmail(
             uid="m1",
@@ -218,7 +218,10 @@ def test_data_dict_still_populated_with_full_message_rows():
     row = msgs[0]
     assert row["subject"] == "FNM"
     assert row["sender"] == "Bob"
-    assert "us02web.zoom.us/j/999" in row["body"]
+    assert row["message_id"] == "m1"            # hydrate handle present
+    assert "body" not in row                     # full body must NOT be returned
+    assert row["meeting_link"] == "https://us02web.zoom.us/j/999"
+    assert "us02web.zoom.us/j/999" in row["snippet"]
 
 
 def test_zero_hits_produces_clean_header():

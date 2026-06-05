@@ -1,6 +1,6 @@
 {
   "name": "get_email_messages",
-  "description": "Fetch full-fidelity Gmail messages that match a Gmail query. No importance/summarizer filtering is applied.",
+  "description": "Search Gmail by query and return lightweight per-message HEADERS only (subject, sender, date, message_id, a short snippet, and any meeting link). Does NOT return full bodies. To read a message's full body, call get_email_thread with that message's message_id. No importance/summarizer filtering is applied.",
   "inputs": [
     {
       "name": "query",
@@ -12,29 +12,17 @@
       "name": "max_results",
       "type": "integer",
       "required": false,
-      "description": "Maximum matched messages to return (default 25, max 200)."
-    },
-    {
-      "name": "include_body",
-      "type": "boolean",
-      "required": false,
-      "description": "Whether to include parsed body text (default true)."
-    },
-    {
-      "name": "include_headers",
-      "type": "boolean",
-      "required": false,
-      "description": "Whether to include normalized RFC headers (default true)."
+      "description": "Maximum messages to return (default 25). Returns the most relevant matches for the query."
     }
   ],
   "outputs": [
     {
       "path": "data.messages",
       "type": "array",
-      "description": "Matched messages with metadata and optional full body/headers."
+      "description": "Matched messages as header rows: message_id, thread_id, subject, sender, email_address, date, snippet, meeting_link. No full body — hydrate via get_email_thread(message_id)."
     }
   ],
-  "arguments_prompt": "{\n  \"query\": \"from:user@example.com newer_than:14d\",\n  \"account_id\": \"google_user_primary\",\n  \"max_results\": 50,\n  \"include_body\": true,\n  \"include_headers\": true\n}",
+  "arguments_prompt": "{\n  \"query\": \"from:user@example.com newer_than:14d\",\n  \"max_results\": 50\n}",
   "metadata": {
     "domain": "email",
     "actions": [
@@ -59,6 +47,6 @@
     "front_door": true,
     "room_visibility_default": "show",
     "approval_required": false,
-    "planner_description": "Fetch full Gmail messages matching a query (body + headers)."
+    "planner_description": "Search Gmail by query -> header rows (subject/sender/date/id/snippet/meeting_link), no bodies. Hydrate a chosen message's full body with get_email_thread(message_id)."
   }
 }

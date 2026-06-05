@@ -1,6 +1,6 @@
 {
   "name": "get_email_thread",
-  "description": "Fetch a full email conversation thread by Gmail thread id (or seed message id). Returns messages in chronological order.",
+  "description": "Fetch a full email conversation thread by Gmail thread id (or seed message id). Returns messages in chronological order with full bodies. This is the HYDRATE step for get_email_messages: pass a message_id from a get_email_messages header row here to read that message's full body.",
   "inputs": [
     {
       "name": "thread_id",

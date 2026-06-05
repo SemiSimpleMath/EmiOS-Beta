@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from email import message_from_string
 from email.utils import parsedate_to_datetime
 from datetime import timezone
@@ -17,12 +18,22 @@ logger = get_logger(__name__)
 
 class GetEmailMessagesTool(BaseTool):
     """
-    Full-fidelity email retrieval by Gmail query.
+    Search Gmail by query; return lightweight per-message HEADERS only.
 
-    Unlike get_email/fetch_email, this tool is not triage-summarized and does not
-    apply importance filtering. It returns all matched messages (subject to max_results),
-    including parsed bodies when requested.
+    Two-phase retrieval (search -> hydrate): this tool returns
+    id/subject/sender/date + a short snippet + any meeting link — never full
+    bodies. To read a message's full body, hydrate the specific message with
+    ``get_email_thread(message_id)``. This keeps a wide match (dozens of rows)
+    small enough to never overflow the manager's working context — full bodies
+    inline were a context bomb (2026-06 Friday-Night-Meats incident: 200 bodies
+    -> 94K-token context -> manager cycle-budget exhaustion).
     """
+
+    # A URL that points at a known video-meeting host. We surface this one
+    # body-derived signal (the join link) into the headers result so the agent
+    # can see "there's a Zoom here" without hydrating the whole body.
+    _URL_RE = re.compile(r"https?://[^\s<>\"']+")
+    _MEETING_HOSTS = ("zoom.us/j/", "meet.google.com/", "teams.microsoft.com/", "teams.live.com/")
 
     def __init__(self):
         super().__init__("get_email_messages")
@@ -52,22 +63,27 @@ class GetEmailMessagesTool(BaseTool):
             raise ValueError(f"max_results must be an integer, got {raw!r}") from e
         if value < 1:
             raise ValueError("max_results must be >= 1")
-        return min(value, 200)
+        # Hard cap: a large pull of full email bodies is a context bomb — one
+        # result can dwarf the manager's whole working context and defeat the
+        # summary compactor (which keeps the latest N results raw). Clamp to 50.
+        return min(value, 50)
 
     @staticmethod
-    def _header_map(email_message: Any) -> dict[str, str]:
-        out: dict[str, str] = {}
-        try:
-            for key, value in (email_message.items() if hasattr(email_message, "items") else []):
-                norm_key = str(key or "").strip().lower()
-                if not norm_key:
-                    continue
-                out[norm_key] = str(value or "").strip()
-        except Exception:
-            logger.error("Failed to collect message headers.")
-            logger.debug("get_email_messages header map exception details", exc_info=True)
-            raise
-        return out
+    def _snippet(body: str, limit: int = 240) -> str:
+        """Single-line preview: collapse whitespace/newlines, cap length."""
+        text = " ".join(str(body or "").split())
+        return text[:limit]
+
+    @classmethod
+    def _extract_meeting_link(cls, body: str) -> str:
+        """First URL in the body that points at a known video-meeting host, or ''."""
+        if not body:
+            return ""
+        for url in cls._URL_RE.findall(body):
+            u = url.rstrip(").,;>\"'")
+            if any(host in u.lower() for host in cls._MEETING_HOSTS):
+                return u
+        return ""
 
     @staticmethod
     def _to_utc_iso(raw_date: str) -> str:
@@ -91,8 +107,6 @@ class GetEmailMessagesTool(BaseTool):
 
             query = self._parse_query(args.get("query"))
             max_results = self._parse_max_results(args.get("max_results"))
-            include_body = bool(args.get("include_body", True))
-            include_headers = bool(args.get("include_headers", True))
 
             utils = self._utils()
             gmail_client = utils.get_gmail_client(None)
@@ -113,10 +127,14 @@ class GetEmailMessagesTool(BaseTool):
 
                 email_message = message_from_string(full_email["raw_email"])
                 metadata = EmailProcessor.extract_metadata(email_message)
-                headers = self._header_map(email_message) if include_headers else {}
-                body = EmailProcessor.extract_email_body(email_message) if include_body else ""
+                body = EmailProcessor.extract_email_body(email_message)
 
                 date_received = str(metadata.get("date_received") or "")
+                # HEADERS ONLY — never the full body. The agent picks interesting
+                # rows from these, then hydrates the chosen one(s) via
+                # get_email_thread(message_id). `meeting_link` is the single
+                # body-derived signal we lift up so a join link is visible without
+                # hydrating.
                 row = {
                     "message_id": message_id,
                     "thread_id": thread_id,
@@ -125,27 +143,20 @@ class GetEmailMessagesTool(BaseTool):
                     "email_address": str(metadata.get("email_address") or ""),
                     "date_received": date_received,
                     "date_received_utc_iso": self._to_utc_iso(date_received) if date_received else "",
-                    "snippet": body[:240] if body else "",
-                    "body": body if include_body else "",
-                    "headers": headers if include_headers else {},
-                    "internet_message_id": str(headers.get("message-id") or ""),
-                    "in_reply_to": str(headers.get("in-reply-to") or ""),
-                    "references": str(headers.get("references") or ""),
+                    "snippet": self._snippet(body),
+                    "meeting_link": self._extract_meeting_link(body),
                 }
                 rows.append(row)
 
-            # Render the full body of each message inline in `content`.
-            # Earlier versions emitted only `snippet[:240]` per row plus a
-            # 15000-char silent body slice in `data` — both invisible to
-            # the planner via the metadata-only summary. When the user
-            # asked for "the full email about X" the planner literally
-            # could not see the body and would report back the snippet.
-            # Same architectural shape as the http_request bug fixed
-            # 2026-05-25: useful data trapped in `data`, only metadata in
-            # `content`. Fix mirrors that one — full body inline, let the
-            # manager's summary_pre_node (trigger_on_large_result_chars:
-            # 5000) compact for downstream prompt budget if needed.
-            header = f"Fetched {len(rows)} message(s) matching query: {query!r}."
+            # Headers-only summary: one compact block per message (subject, sender,
+            # date, message_id, snippet, any meeting link). Full bodies are fetched
+            # on demand via get_email_thread(message_id) — this keeps even a wide
+            # (dozens-of-rows) match small enough that it never overflows the
+            # manager's working context or defeats the summary compactor.
+            header = (
+                f"Fetched {len(rows)} message(s) matching query: {query!r}. "
+                "To read a message's full body, call get_email_thread with its message_id."
+            )
             summary_lines = [header]
             for idx, r in enumerate(rows, start=1):
                 subject = str(r.get("subject") or "").strip() or "(no subject)"
@@ -156,15 +167,14 @@ class GetEmailMessagesTool(BaseTool):
                     head += f" — {sender}"
                 if date:
                     head += f" @ {date}"
+                head += f"  (id: {r.get('message_id')})"
                 summary_lines.append(head)
-                body_text = str(r.get("body") or "").strip()
-                if body_text:
-                    # Indent the body so the boundary between header and body
-                    # is unambiguous when multiple messages are rendered.
-                    indented = "\n".join("    " + line for line in body_text.split("\n"))
-                    summary_lines.append(indented)
-                else:
-                    summary_lines.append("    (empty body)")
+                snippet = str(r.get("snippet") or "").strip()
+                if snippet:
+                    summary_lines.append(f"    {snippet}")
+                link = str(r.get("meeting_link") or "").strip()
+                if link:
+                    summary_lines.append(f"    meeting link: {link}")
             summary = "\n".join(summary_lines)
 
             return ToolResult(
@@ -175,8 +185,6 @@ class GetEmailMessagesTool(BaseTool):
                     "max_results": max_results,
                     "message_count": len(rows),
                     "messages": rows,
-                    "include_body": include_body,
-                    "include_headers": include_headers,
                 },
             )
         except Exception as e:

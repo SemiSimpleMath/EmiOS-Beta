@@ -57,6 +57,7 @@ Domain-Specific Rules:
 - Treat email identity/instruction context in `resource_user_email` as authoritative for sender identity, recipient details, and signature style.
 - For email thread continuity tasks, prefer `get_email_thread` over broad `get_important_emails` date-range scans when a thread id/seed message can be identified.
 - For conversation lookup by contact email, call `get_email_thread` with `participant_email` first; use `get_important_emails` for a recent inbox triage window or `get_email_messages` for a query-driven search.
+- Email search is two-phase: `get_email_messages` returns header rows only (subject/sender/date/message_id/snippet/meeting_link), never full bodies. Scan the headers, then read a specific message's full body by calling `get_email_thread` with its `message_id`. Do not widen `max_results` to try to get bodies — hydrate the ones you actually care about instead.
 
 {# Persona + email skills now render in the USER prompt (user.j2), grouped with
    the email identity + accounts as task context — not here. #}

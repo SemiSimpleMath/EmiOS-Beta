@@ -6,8 +6,6 @@ from pydantic import BaseModel
 class get_email_messages_args(BaseModel):
     query: str
     max_results: Optional[int] = 25
-    include_body: Optional[bool] = True
-    include_headers: Optional[bool] = True
 
 
 class get_email_messages_arguments(BaseModel):
