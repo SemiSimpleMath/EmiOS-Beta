@@ -4,7 +4,7 @@ First-run setup wizard
 """
 from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for
 from pathlib import Path
-from app.assistant.utils.path_utils import get_resources_dir, setup_complete
+from app.assistant.utils.path_utils import get_resources_dir, setup_complete, get_env_file
 import json
 import uuid
 from datetime import datetime
@@ -291,7 +291,7 @@ def complete_setup():
         
         # 0. Save API key and settings to .env file
         project_root = Path(__file__).resolve().parents[2]
-        env_file = project_root / '.env'
+        env_file = get_env_file()
         
         # Read existing .env if it exists
         env_content = {}
@@ -554,7 +554,7 @@ def reset_setup():
 
         # Remove SETUP_COMPLETE from .env file
         project_root = Path(__file__).resolve().parents[2]
-        env_file = project_root / '.env'
+        env_file = get_env_file()
         if env_file.exists():
             lines = env_file.read_text(encoding="utf-8").splitlines()
             lines = [ln for ln in lines if not ln.strip().startswith("SETUP_COMPLETE")]

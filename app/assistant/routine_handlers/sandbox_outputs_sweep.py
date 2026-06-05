@@ -41,7 +41,8 @@ def sandbox_outputs_sweep(
     max_age_days = float(spec.get("max_age_days", 7))
     cutoff = time.time() - (max_age_days * 86400.0)
 
-    root = get_repo_root() / "data" / "sandbox_outputs"
+    from app.assistant.utils.path_utils import get_data_dir
+    root = get_data_dir() / "data" / "sandbox_outputs"
     if not root.exists():
         return {"status": "ok", "files_removed": 0, "dirs_removed": 0}
 

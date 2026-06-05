@@ -115,7 +115,8 @@ class UnicodeStreamHandler(logging.StreamHandler):
 
 def ensure_logs_directory():
     """Ensure the logs directory exists"""
-    logs_dir = os.path.join(os.getcwd(), 'logs')
+    from app.assistant.utils.path_utils import get_data_dir
+    logs_dir = str(get_data_dir() / "logs")
     if not os.path.exists(logs_dir):
         os.makedirs(logs_dir)
     return logs_dir

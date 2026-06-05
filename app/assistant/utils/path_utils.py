@@ -28,6 +28,60 @@ def get_app_root() -> Path:
     return get_repo_root() / "app"
 
 
+@lru_cache(maxsize=1)
+def get_data_dir() -> Path:
+    """Root for ALL user-writable runtime state (db, .env, chroma, resources,
+    configs, logs, uploads, ...).
+
+    The packaged launcher sets ``EMI_DATA_DIR`` to a per-user location
+    (e.g. ``%LOCALAPPDATA%\\EmiOS\\data``) that updates never touch. In dev it
+    defaults to the repo root, so when ``EMI_DATA_DIR`` is unset every derived path
+    is byte-for-byte the legacy location.
+    """
+    env_data = os.getenv("EMI_DATA_DIR")
+    if env_data:
+        return Path(env_data).expanduser().resolve()
+    return get_repo_root()
+
+
+@lru_cache(maxsize=1)
+def get_env_file() -> Path:
+    """Path to the ``.env`` file (secrets, ``key=value``). Writable, so it lives
+    under the data dir: ``EMI_ENV_FILE`` wins; else ``get_data_dir()/.env`` (which
+    is repo-root/.env in dev, so unchanged when ``EMI_DATA_DIR`` is unset)."""
+    env_file = os.getenv("EMI_ENV_FILE")
+    if env_file:
+        return Path(env_file).expanduser().resolve()
+    return get_data_dir() / ".env"
+
+
+@lru_cache(maxsize=1)
+def get_uploads_dir() -> Path:
+    """Writable scratch root for uploads + transient tool artifacts (screenshots,
+    tool-result blobs, slack image downloads).
+
+    Under the data dir: ``EMI_UPLOADS_DIR`` wins; else ``get_data_dir()/uploads``
+    (which is repo-root/uploads in dev). Callers usually append ``/'temp'/...``.
+    """
+    env_uploads = os.getenv("EMI_UPLOADS_DIR")
+    if env_uploads:
+        return Path(env_uploads).expanduser().resolve()
+    return get_data_dir() / "uploads"
+
+
+@lru_cache(maxsize=1)
+def get_seed_resources_dir() -> Path:
+    """Code-layer (read-only, bundled) source of first-run resource SEED templates
+    (the ``.example`` files).
+
+    Always the code-root ``resources/`` — NEVER the writable data dir — so the
+    packaged app reads templates from the app layer and writes the live files under
+    ``get_data_dir()``. In dev this equals ``get_resources_dir()`` (both repo-root),
+    so seeding behaves exactly as before.
+    """
+    return get_repo_root() / "resources"
+
+
 def _resolve_from_app_root(path_value: str) -> Path:
     p = Path(path_value).expanduser()
     if p.is_absolute():
@@ -66,6 +120,8 @@ def get_resources_dir() -> Path:
     env_resources = os.getenv("EMI_RESOURCES_DIR")
     if env_resources:
         return Path(env_resources).expanduser().resolve()
+    if os.getenv("EMI_DATA_DIR"):
+        return get_data_dir() / "resources"
     return get_repo_root() / "resources"
 
 
@@ -80,6 +136,8 @@ def get_configs_dir() -> Path:
     env_cfg = os.getenv("EMI_CONFIGS_DIR")
     if env_cfg:
         return Path(env_cfg).expanduser().resolve()
+    if os.getenv("EMI_DATA_DIR"):
+        return get_data_dir() / "configs"
     return get_repo_root() / "configs"
 
 
@@ -96,6 +154,8 @@ def get_chroma_kg_db_dir() -> Path:
     env_chroma = os.getenv("EMI_CHROMA_KG_DB_DIR")
     if env_chroma:
         return _resolve_from_app_root(env_chroma)
+    if os.getenv("EMI_DATA_DIR"):
+        return get_data_dir() / "chroma_db"
     return get_app_root() / "chroma_db"
 
 

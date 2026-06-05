@@ -17,7 +17,8 @@ def _repo_root_from_here() -> Path:
 
 
 def _tool_results_dir() -> Path:
-    return _repo_root_from_here() / "uploads" / "temp" / "tool_results"
+    from app.assistant.utils.path_utils import get_uploads_dir
+    return get_uploads_dir() / "temp" / "tool_results"
 
 
 def _safe_join_tool_result_path(tool_result_id: str) -> Path:

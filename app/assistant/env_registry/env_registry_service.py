@@ -359,8 +359,8 @@ class EnvRegistryService:
         under 'other'. Shape matches the central settings template:
         [{owner, features: [{feature, entries: [row]}]}]."""
         from dotenv import dotenv_values
-        from app.assistant.utils.path_utils import get_repo_root
-        env_path = get_repo_root() / ".env"
+        from app.assistant.utils.path_utils import get_env_file
+        env_path = get_env_file()
         file_vars = dotenv_values(env_path, interpolate=False) if env_path.exists() else {}
         meta = self._registry_meta_by_env_name()
         account_vars = self._account_env_vars()

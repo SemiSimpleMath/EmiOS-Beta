@@ -44,10 +44,12 @@ def get_database_uri():
             return explicit
         filename = 'emi.db'
 
-    # Use SQLite database in the project root
-    db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), filename)
+    # SQLite db lives under the writable data dir (EMI_DATA_DIR), which defaults to
+    # the repo root in dev — so this is byte-for-byte the legacy project-root path
+    # when EMI_DATA_DIR is unset. Local import keeps this low-level module cycle-free.
+    from app.assistant.utils.path_utils import get_data_dir
     # Convert to forward slashes for SQLite URI (required on all platforms)
-    db_path = db_path.replace('\\', '/')
+    db_path = str(get_data_dir() / filename).replace('\\', '/')
     return f'sqlite:///{db_path}'
 
 def get_session(force_test_db=False):

@@ -191,7 +191,8 @@ class SlackTool(BaseTool):
         return get_repo_root()
 
     def _image_download_dir(self) -> Path:
-        return self._repo_root() / "uploads" / "temp" / "slack_images"
+        from app.assistant.utils.path_utils import get_uploads_dir
+        return get_uploads_dir() / "temp" / "slack_images"
 
     def _sanitize_filename(self, name: str) -> str:
         safe = re.sub(r"[^a-zA-Z0-9._-]+", "_", name.strip())

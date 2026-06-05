@@ -34,6 +34,10 @@ def create_app(config_class="config.DevelopmentConfig"):
     import time as _time
     app = Flask(__name__)
     app.config.from_object(config_class)
+    # Uploads land under the writable data dir (EMI_DATA_DIR) so a packaged app
+    # never writes into its install dir. Unchanged in dev (data dir == repo root).
+    from app.assistant.utils.path_utils import get_data_dir
+    app.config["UPLOAD_FOLDER"] = str(get_data_dir() / "uploads")
     CORS(app, supports_credentials=True)
     JWTManager(app)
 
@@ -263,7 +267,8 @@ def create_app(config_class="config.DevelopmentConfig"):
         return jsonify({"error": "Recording is too large. Please keep voice messages under 3 minutes."}), 413
 
     # Serve files from uploads/temp/ (e.g. GeoGuessr screenshots, MCP tool images)
-    _uploads_temp_dir = str((Path(__file__).resolve().parent.parent / "uploads" / "temp").resolve())
+    from app.assistant.utils.path_utils import get_uploads_dir
+    _uploads_temp_dir = str((get_uploads_dir() / "temp").resolve())
 
     @app.route("/uploads/temp/<path:filename>")
     def serve_uploads_temp(filename):

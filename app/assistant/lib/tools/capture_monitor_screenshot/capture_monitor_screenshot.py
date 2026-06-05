@@ -23,7 +23,8 @@ def _repo_root() -> Path:
 
 
 def _uploads_temp_dir() -> Path:
-    return _repo_root() / "uploads" / "temp"
+    from app.assistant.utils.path_utils import get_uploads_dir
+    return get_uploads_dir() / "temp"
 
 
 def _env_truthy(name: str) -> bool:

@@ -21,7 +21,8 @@ logger = get_logger(__name__)
 
 
 def _tool_results_dir() -> Path:
-    return get_repo_root() / "uploads" / "temp" / "tool_results"
+    from app.assistant.utils.path_utils import get_uploads_dir
+    return get_uploads_dir() / "temp" / "tool_results"
 
 
 def _prune_tool_results_dir(*, tool_results_dir: Path, max_files: int = 500, max_age_hours: int = 72) -> None:

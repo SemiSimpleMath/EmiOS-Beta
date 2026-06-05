@@ -6,6 +6,7 @@ from flask import Blueprint, render_template, request, jsonify, redirect, url_fo
 from pathlib import Path
 from app.assistant.utils.path_utils import get_resources_dir as _get_resources_dir
 from app.assistant.utils.path_utils import get_configs_dir
+from app.assistant.utils.path_utils import get_env_file
 import json
 import os
 from app.assistant.ServiceLocator.service_locator import DI
@@ -148,7 +149,7 @@ def _sync_env_var(key: str, value: str) -> None:
     """
     import os
     project_root = get_project_root()
-    env_file = project_root / ".env"
+    env_file = get_env_file()
     env_content = _read_env_file(env_file)
     env_content[key] = value
     _write_env_file(env_file, env_content)
@@ -2096,7 +2097,7 @@ def get_env_settings():
     """Get environment settings (non-sensitive values only)"""
     try:
         project_root = get_project_root()
-        env_file = project_root / '.env'
+        env_file = get_env_file()
         env_content = _read_env_file(env_file)
 
         # Return non-sensitive values only
@@ -2122,7 +2123,7 @@ def update_env_settings():
         data = request.json
 
         project_root = get_project_root()
-        env_file = project_root / '.env'
+        env_file = get_env_file()
         env_content = _read_env_file(env_file)
 
         # Identity settings — also update os.environ for in-process effect

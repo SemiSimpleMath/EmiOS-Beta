@@ -72,14 +72,16 @@ _IMAGE = "emi-sandbox:v1"
 
 # Where per-call workspaces live on the host. Mounted into the container at
 # /workspace. Pruned daily by a routine (workspaces older than 24h).
+from app.assistant.utils.path_utils import get_data_dir
 _REPO_ROOT = Path(__file__).resolve().parents[5]
-_WORKSPACES_ROOT = _REPO_ROOT / "data" / "sandbox_workspaces"
+# Writable sandbox roots live under the data dir (EMI_DATA_DIR); == repo-root/data in dev.
+_WORKSPACES_ROOT = get_data_dir() / "data" / "sandbox_workspaces"
 
 # Where binary outputs are persisted so output pods can carry a real file
 # (referenced via metadata.stored_path, the same convention image/document/
 # audio/video pods use). Survives the per-call workspace teardown; swept by
 # the sandbox_outputs_sweep routine.
-_OUTPUTS_ROOT = _REPO_ROOT / "data" / "sandbox_outputs"
+_OUTPUTS_ROOT = get_data_dir() / "data" / "sandbox_outputs"
 
 
 class ExecuteCode(BaseTool):

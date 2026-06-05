@@ -57,7 +57,8 @@ def upsert_env(key: str, value: str, *, env_path: Optional[Path] = None) -> bool
     if "\n" in value:
         raise ValueError(f"env_writer.upsert_env: value for {key!r} contains a newline")
 
-    path = env_path or (get_repo_root() / ".env")
+    from app.assistant.utils.path_utils import get_env_file
+    path = env_path or get_env_file()
     if not path.exists():
         # Initialize an empty .env if missing — caller probably installed
         # the app without copying .env.example. Better than failing the whole

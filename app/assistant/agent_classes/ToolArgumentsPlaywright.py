@@ -267,8 +267,8 @@ class ToolArguments(PlaywrightAgent):
                         raise RuntimeError(
                             f"[{self.name}] Vision agent '{selected_node}' got invalid image value: {raw_image!r}"
                         )
-                    repo_root = get_repo_root()
-                    candidate = (repo_root / "uploads" / "temp" / fname).resolve()
+                    from app.assistant.utils.path_utils import get_uploads_dir
+                    candidate = (get_uploads_dir() / "temp" / fname).resolve()
                     result_dict["image"] = str(candidate)
                     img_path = candidate
 

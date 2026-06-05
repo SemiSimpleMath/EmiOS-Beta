@@ -219,7 +219,8 @@ class _GeoScreenshotTimer:
             idx = min(self.monitor_index - 1, len(monitors) - 1)
             bbox = monitors[idx]
 
-            tmp_dir = Path(get_repo_root()) / "uploads" / "temp"
+            from app.assistant.utils.path_utils import get_uploads_dir
+            tmp_dir = get_uploads_dir() / "temp"
             tmp_dir.mkdir(parents=True, exist_ok=True)
             timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
             filename = f"geo_{self.session_id}_{timestamp}_{uuid.uuid4().hex[:6]}.png"

@@ -21,24 +21,32 @@ if sys.version_info < (3, 10) or sys.version_info >= (3, 12):
     )
     sys.exit(1)
 
-# Load environment variables from .env file FIRST (before any other imports)
+# Load environment variables from .env FIRST (before any other imports). The .env
+# lives under the data dir (EMI_DATA_DIR) in the packaged app; in dev it defaults to
+# the repo root. Resolved inline (mirrors path_utils.get_env_file) because this runs
+# before any app import.
 from dotenv import load_dotenv
-dotenv_path = Path(__file__).resolve().parent / '.env'
-load_dotenv(dotenv_path=dotenv_path)
+if os.environ.get("EMI_ENV_FILE"):
+    _env_file = Path(os.environ["EMI_ENV_FILE"]).expanduser()
+elif os.environ.get("EMI_DATA_DIR"):
+    _env_file = Path(os.environ["EMI_DATA_DIR"]).expanduser() / ".env"
+else:
+    _env_file = Path(__file__).resolve().parent / ".env"
+load_dotenv(dotenv_path=_env_file)
 
 # ── Auto-generate secrets on first run (MUST happen before create_app) ────────
-_env_file = Path(__file__).resolve().parent / '.env'
 
 def _ensure_env_key(key: str) -> str:
-    """If env var is missing, generate it and persist to .env."""
+    """If env var is missing, generate it and persist to .env (under the data dir)."""
     val = os.environ.get(key)
     if val:
         return val
     val = secrets.token_hex(32)
     os.environ[key] = val
+    _env_file.parent.mkdir(parents=True, exist_ok=True)
     with open(_env_file, 'a', encoding='utf-8') as f:
         f.write(f"{key}={val}\n")
-    print(f"Generated {key} and saved to .env")
+    print(f"Generated {key} and saved to {_env_file}")
     return val
 
 _ensure_env_key('FLASK_SECRET_KEY')

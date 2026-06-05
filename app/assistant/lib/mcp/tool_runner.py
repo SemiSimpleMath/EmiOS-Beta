@@ -230,7 +230,8 @@ def _maybe_cleanup_playwright_user_data_dir(error_text: str) -> bool:
 
 def _uploads_temp_dir() -> Path:
     # Mirror existing UI upload flow: uploads/temp/
-    return get_repo_root() / "uploads" / "temp"
+    from app.assistant.utils.path_utils import get_uploads_dir
+    return get_uploads_dir() / "temp"
 
 
 def _prune_temp_mcp_images(*, tmp_dir: Path, max_files: int = 200, max_age_hours: int = 24) -> None:

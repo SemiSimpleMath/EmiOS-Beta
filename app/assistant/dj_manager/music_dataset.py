@@ -537,7 +537,8 @@ class SqliteMusicDataset(MusicDataset):
         prefilter_limit: int = 50000,
         refine_limit: int = 10000,
     ):
-        self._db_path = db_path or (get_repo_root() / "emi.db")
+        from app.assistant.utils.path_utils import get_data_dir
+        self._db_path = db_path or (get_data_dir() / "emi.db")
         self._table = table_name
         self._candidate_limit_min = int(candidate_limit_min)
         self._candidate_limit_factor = int(candidate_limit_factor)

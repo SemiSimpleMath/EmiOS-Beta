@@ -264,18 +264,23 @@ def instantiate_config_templates():
     automatically.
     """
     import shutil
-    templates_dir = Path("configs") / "templates"
+    from app.assistant.utils.path_utils import get_repo_root, get_configs_dir
+    # Templates are code-layer (read-only / bundled); live configs are written into
+    # the writable configs dir (the data dir when EMI_DATA_DIR is set, repo-root in dev).
+    templates_dir = get_repo_root() / "configs" / "templates"
     if not templates_dir.is_dir():
         return True  # nothing to instantiate
 
+    configs_dir = get_configs_dir()
     copied: list[str] = []
     skipped: list[str] = []
     for template in sorted(templates_dir.glob("*.template.json")):
         dest_name = template.name.replace(".template.json", ".json")
-        dest = Path("configs") / dest_name
+        dest = configs_dir / dest_name
         if dest.exists():
             skipped.append(dest_name)
             continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(template, dest)
         copied.append(dest_name)
 

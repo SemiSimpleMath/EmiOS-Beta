@@ -64,10 +64,14 @@ def _get_assistant_name() -> str:
 
 
 def _default_vault() -> Path:
-    """Per-assistant vault root, lazily evaluated. Override via EMI_WIKI_DIR."""
+    """Per-assistant vault root, lazily evaluated. Override via EMI_WIKI_DIR; else
+    under the data dir when EMI_DATA_DIR is set; else ~/<Name>Wiki (legacy/dev)."""
     override = os.environ.get("EMI_WIKI_DIR")
     if override:
         return Path(override)
+    if os.environ.get("EMI_DATA_DIR"):
+        from app.assistant.utils.path_utils import get_data_dir
+        return get_data_dir() / "wiki"
     return Path.home() / f"{_get_assistant_name()}Wiki"
 
 
