@@ -183,6 +183,10 @@ def initialize_services(app):
         "resource_accounts",
         lambda scope: DI.env_registry.render_accounts_for_scope(scope),
     )
+    # The user's email identity is user-mode only — lock it to acting_as=user so it
+    # does not leak into self/assistant mode (where email-as-self governs instead).
+    # acting_as defaults to "user", so this is safe; only /actas self withholds it.
+    resource_manager.register_lock("resource_user_email", {"acting_as": "user"})
     # Skills are durable, hand-authored knowledge files (e.g. "when working
     # with Documents on this machine, also check OneDrive"). They live in a
     # separate top-level dir from `resources/` (which is mostly data and
