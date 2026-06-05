@@ -509,6 +509,7 @@ class CanonicalizeBeliefSetStep:
                 self.domain,
                 store,
                 agent_factory,
+                scope_context=ctx.scope_context,
             )
 
             total_merges += merges_this_pass
