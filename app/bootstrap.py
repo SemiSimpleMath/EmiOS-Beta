@@ -47,6 +47,7 @@ def _seed_personal_resources() -> None:
         resources_dir / "assistant" / "resource_relationship_config.json",
         resources_dir / "assistant" / "assistant_core.json",
         resources_dir / "env_registry_user.json",
+        resources_dir / "instructions" / "resource_orchestrator_user_prefs.md",
     ]
 
     for real_path in example_pairs:

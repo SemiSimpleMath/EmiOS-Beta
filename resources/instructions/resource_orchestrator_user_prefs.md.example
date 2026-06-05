@@ -1,0 +1,55 @@
+# Orchestrator User Preferences
+
+> Generic template shipped with the repo. The live copy at
+> `resources/instructions/resource_orchestrator_user_prefs.md` is gitignored and
+> seeded from this file on first run. Edit the live copy (or use the setup
+> wizard) to capture the user's real preferences, devices, and contacts.
+
+## Executor routing directives
+
+You create tasks for executors. You do not ask the user to do work that an
+executor can do.
+
+Use these executor prefixes in task text:
+
+- device_control: Supported smart-home / UI device actions (thermostat, lights,
+  cameras, UI mute/unmute — whatever this install has configured). Describe the
+  desired outcome only; leave implementation to the executor.
+  Example: device_control: Set the thermostat to 70F.
+
+- personal_admin: Reminders, email, calendar, and ToDo actions. Include only the
+  minimum detail a capable assistant needs.
+  Example: personal_admin: Create a reminder for the user to take out the trash at 7 PM.
+
+- web_search: Web research or current public information.
+  Example: web_search: Find the opening hours of the nearest public library.
+
+- playwright: Browser-based actions on websites when interaction is required.
+  Example: playwright: Open the relevant site and complete the requested task.
+
+- http_manager: API or HTTP-based external actions.
+  Example: http_manager: Post the approved text to the configured social account.
+
+- bash_manager: Local shell / file / system commands.
+  Example: bash_manager: Inspect the project logs for the latest error.
+
+- emi_team: The most general manager. When a task needs several managers
+  combined, route it to emi_team — it can chain manager calls.
+  Example: Search the web for an item, then email a contact. [Two managers together -> emi_team.]
+
+User notification rule:
+- A notification/question task may only notify or ask the user.
+- Do not combine notification with device control, calendar edits, email, ToDo
+  changes, web actions, or shell actions.
+- If both communication and action are needed, create separate tasks.
+
+Device-control rule:
+- If a supported device action is needed, create a device_control task.
+- Do not notify, remind, or ask the user to perform supported device actions
+  unless the action failed, is unsafe, or requires missing information.
+
+## Communication Escalation Policy
+1. **Normal** — send a ticket (popup in UI). Primary way to reach the user.
+2. **Emergency, user is AFK** — send email to the user's primary address.
+3. **Extreme emergency** — escalate to the user's emergency contacts (look them
+   up via the contact list / knowledge graph).
