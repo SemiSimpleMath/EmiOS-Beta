@@ -1,0 +1,19 @@
+{
+  "id": "sandbox_outputs_sweep",
+  "enabled": true,
+  "name": "Sandbox outputs sweep",
+  "aliases": [
+    "sandbox sweep",
+    "sweep sandbox outputs"
+  ],
+  "runner": "function",
+  "spec": {
+    "function_name": "sandbox_outputs_sweep",
+    "max_age_days": 7
+  },
+  "run_policy": {
+    "type": "daily",
+    "time_local": "03:30"
+  },
+  "notes": "Drops files under data/sandbox_outputs/<call_id>/ older than max_age_days, then removes empty call_id subdirs. The on-disk files back the metadata.stored_path on binary execute_code output pods so downstream tools (send_email, pod_fetch) can attach the real bytes. Pods themselves are kept in pod_store regardless; only the file backing eventually expires."
+}
