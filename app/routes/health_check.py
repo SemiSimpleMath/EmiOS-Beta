@@ -79,3 +79,11 @@ def shutdown():
     os.kill(os.getpid(), signal.SIGTERM)
     return jsonify({"status": "shutting_down"}), 200
 
+
+@health_check_bp.route('/api/version', methods=['GET'])
+def version():
+    """Installed application version — the tray updater and the 'About' UI read
+    this to compare against the latest GitHub release."""
+    from app import __version__
+    return jsonify({"version": __version__}), 200
+
