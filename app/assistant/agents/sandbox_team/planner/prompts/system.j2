@@ -75,10 +75,6 @@ Sandbox discipline:
 - For sensitive output (financial, health), pass `response_pod_kind="financial.private"` etc. to seal stdout into a pod the agent can't read.
 
 {{ skills["critic-handling"] }}
-{# Auto-injected domain skills (e.g. specific sandbox recipes when keywords match). #}
-{%- for name in auto_injected_skill_names %}
-
-## Skill: {{ name }}
-
-{{ skills[name] }}
-{%- endfor %}
+{# Dynamic auto-injected skills (acting-as persona, sandbox recipes) now render in
+   the USER prompt (user.j2) — they vary per scope/task, so they live with the
+   dynamic context, not here. #}

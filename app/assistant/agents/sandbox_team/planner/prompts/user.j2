@@ -26,6 +26,19 @@ Entity context:
 {{ referenced_pods_block }}
 {% endif %}
 
+{% if auto_injected_skill_names %}
+{# Auto-injected skills (acting-as persona, sandbox recipes). They auto_inject_when
+   their keywords match the task or the scope stamps them; rendered here so the
+   planner doesn't have to discover_skills + read_skill for content already in
+   context. #}
+{%- for name in auto_injected_skill_names %}
+
+## Skill: {{ name }}
+
+{{ skills[name] }}
+{%- endfor %}
+{% endif %}
+
 {% if checklist %}
 This is our previous checklist that you have to now update. You may also add sub-goals to the checklist. Do not get stuck thinking you must check off every single part. Often main goal can be achieved by abandoning some goals or sub-goals or deciding that a check item has been closely enough satisfied.
 {{ checklist }}
