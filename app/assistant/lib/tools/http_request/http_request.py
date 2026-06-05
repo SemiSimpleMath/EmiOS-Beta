@@ -710,7 +710,28 @@ class HttpRequest(BaseTool):
             pods_used.append(ref)
             return resolved
 
-        return _POD_REF_SUBSTRING_RE.sub(_replace, value)
+        result = _POD_REF_SUBSTRING_RE.sub(_replace, value)
+
+        # Fail loud on a malformed/unresolved pod-ref. The value carried the
+        # `datapod:` prefix (so it was MEANT to be a pod-ref) but no well-formed
+        # `datapod:<kind>:<id>[/proj]` matched, so the prefix survives substitution.
+        # Abort rather than send the unresolved literal to the wire — a broken
+        # secret-ref must never leave the process. (A valid ref is substituted
+        # out, so a surviving prefix means it didn't resolve. `value` here is the
+        # original — it holds pod-REFS, never resolved secret bytes — so it's safe
+        # to echo in the error.)
+        if _POD_PREFIX in result:
+            raise _PodResolutionError(
+                error_code="invalid_pod_ref",
+                message=(
+                    f"unresolved/malformed pod reference in value: {value!r}. "
+                    "Expected datapod:<kind>:<id>[/<projection>]."
+                ),
+                pod_id=None,
+                projection=None,
+            )
+
+        return result
 
     def _resolve_body(
         self,
