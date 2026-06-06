@@ -70,6 +70,11 @@ control_nodes:
 tools:
   allowed_tools:
     - http_request
+    - bluesky_timeline
+    - bluesky_hydrate_post
+    - bluesky_post
+    - bluesky_reply
+    - bluesky_like
     - oauth_token_refresh
     - pod_search
     - pod_fetch

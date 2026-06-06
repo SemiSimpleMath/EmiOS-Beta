@@ -1,0 +1,39 @@
+{
+  "name": "bluesky_timeline",
+  "description": "Fetch the Bluesky home timeline as a compact, ref-anchored list. Each post is shown as [bN] @handle with its full text and image/quote markers, and can be replied to or liked by ref. Authentication is handled internally. Call this before bluesky_reply / bluesky_like / bluesky_hydrate_post.",
+  "inputs": [
+    {
+      "name": "limit",
+      "type": "integer",
+      "required": false,
+      "description": "How many recent posts to fetch (1-50). Default 20."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Numbered [bN] list of timeline posts."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "ref_count and the list of refs."
+    }
+  ],
+  "arguments_prompt": "Fetch the Bluesky home timeline.\n\nArguments schema:\n{{ user_context }}",
+  "metadata": {
+    "domain": "social",
+    "actions": ["read", "fetch", "list"],
+    "selectors": ["bluesky", "bsky", "atproto", "social", "timeline", "feed"],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": ["bluesky"],
+    "requires_network": true,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": true,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

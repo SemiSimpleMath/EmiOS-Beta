@@ -1,0 +1,39 @@
+{
+  "name": "bluesky_hydrate_post",
+  "description": "Open a single Bluesky post by its ref (from bluesky_timeline) in isolation, with its image shown directly to you when present. Use before replying to a post that has an image or quotes another post, so you react to what is actually there.",
+  "inputs": [
+    {
+      "name": "post_ref",
+      "type": "string",
+      "required": true,
+      "description": "The [bN] ref of the post to open (e.g. 'b1')."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "The post's full text, image alt, and an [emi_image: ...] marker when it has an image."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "post_ref, uri, has_image."
+    }
+  ],
+  "arguments_prompt": "Open one Bluesky post (with its image) by ref.\n\nArguments schema:\n{{ user_context }}",
+  "metadata": {
+    "domain": "social",
+    "actions": ["read", "fetch", "view"],
+    "selectors": ["bluesky", "bsky", "atproto", "social", "post", "image", "hydrate"],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": ["bluesky"],
+    "requires_network": true,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

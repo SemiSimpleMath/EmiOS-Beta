@@ -1,0 +1,39 @@
+{
+  "name": "bluesky_like",
+  "description": "Like a Bluesky post chosen by ref (from bluesky_timeline). No URL is copied, so the like always targets the post you name by ref.",
+  "inputs": [
+    {
+      "name": "post_ref",
+      "type": "string",
+      "required": true,
+      "description": "The [bN] ref of the post to like (e.g. 'b1')."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Echo-back of the post liked and the like uri."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "like_uri, liked_ref, liked_uri."
+    }
+  ],
+  "arguments_prompt": "Like a Bluesky post by ref.\n\nArguments schema:\n{{ user_context }}",
+  "metadata": {
+    "domain": "social",
+    "actions": ["write", "like"],
+    "selectors": ["bluesky", "bsky", "atproto", "social", "like"],
+    "risk_level": "low",
+    "side_effects": "write",
+    "requires_auth": ["bluesky"],
+    "requires_network": true,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

@@ -1,10 +1,10 @@
 ---
 name: bluesky
-description: How to read and post on Bluesky via the AT Protocol using http_request. Two-step auth (createSession → accessJwt as Bearer). Auth via auth.bearer pod containing Emi's app password — password never enters your transcript. Use for any "post on bluesky", "check bluesky", "reply on bluesky", "what's happening on bluesky", "bluesky thread" requests.
+description: How to read and act on Bluesky. The common verbs — read the timeline, open a post, post, reply, like — are dedicated ref-anchored tools (bluesky_timeline / bluesky_hydrate_post / bluesky_post / bluesky_reply / bluesky_like) that handle auth for you. Long-tail operations (repost, search, profiles, follow) go through http_request against AT Protocol XRPC endpoints. Use for any "post on bluesky", "check bluesky", "reply on bluesky", "what's happening on bluesky", "bluesky thread" request.
 license: Apache-2.0
 metadata:
   author: emi-team
-  version: "1.0"
+  version: "2.0"
   auto_inject_when:
     task_keywords:
       - "bluesky"
@@ -15,191 +15,114 @@ metadata:
       - "skeet"
 ---
 
-# Working with Bluesky via the AT Protocol
+# Working with Bluesky
 
-Bluesky's API is plain HTTPS over the AT Protocol. There is no Bluesky-specific manager — call `http_request` against `https://bsky.social/xrpc/...` endpoints. This SKILL is the index of what's available and how to authenticate.
+For the everyday verbs, use the **dedicated Bluesky tools**. They handle authentication internally (you never call createSession or touch a password), and — critically — actions are **anchored to a post ref**, so you never copy a post URL and a reply can never land on the wrong post.
 
-## How to format the http_request `body` argument
+The default identity: Bluesky is a public surface and **the assistant posts as itself** unless explicitly told otherwise.
 
-The `body` argument is **always a string**. For JSON endpoints (every Bluesky XRPC endpoint), pass a **JSON-encoded string** — the tool `json.loads` it at execute time and sends it as JSON. Per-field pod refs inside that JSON still resolve at courier scope (the recursion runs on the parsed structure).
+## The normal flow — dedicated tools
 
-The example bodies shown below are written in pretty-printed JSON for readability. When you actually call `http_request`, emit `body` as the JSON-encoded string equivalent — e.g. for createSession:
+1. **`bluesky_timeline`** — fetch the home timeline. Returns a compact numbered list:
+   ```
+   [b1] @werd.io · "Well, that was the first time I finished an open source event by dancing to Dancing Queen…"
+   [b2] @werd.io · "Such a big deal. I was excited to be in the room…"  [image: "A graphic announcing the Open Social Awards…"; quotes: "Winners of the first ever…"]
+   ```
+   Each post gets a stable ref (`b1`, `b2`, …). Call this **first** before replying to or liking anything.
 
-```
-body: "{\"identifier\":\"<handle>\",\"password\":\"datapod:auth.bearer:<id>/full\"}"
-```
+2. **`bluesky_hydrate_post post_ref=b2`** — open ONE post on its own. If it has an image, the **actual image is shown to you** (not just alt text). **Do this before replying to any post that has an image or quotes another post** — react to what is actually there, don't guess what an image shows. (This is the exact failure that motivated these tools: a post's image/quote was guessed at instead of read.)
 
-## When this skill applies
+3. **Act, by ref:**
+   - **`bluesky_post text="…"`** — publish an original top-level post.
+   - **`bluesky_reply post_ref=b1 text="…"`** — reply to a specific post. Pass the ref of the post your text is actually about; the reply binds to that ref and cannot drift to a sibling post.
+   - **`bluesky_like post_ref=b1`** — like a specific post.
 
-Any task involving Bluesky: reading the home or author timeline, posting / replying / liking / reposting, searching, looking up profiles. The default assumption: when posting, **`acting_as` should be `emi`** — Bluesky is a public surface and Emi posts as herself unless explicitly told otherwise.
+Text limit is **300 characters**. The reply/like tools echo back which post they hit — glance at that echo to confirm you targeted the right one.
 
-## Authentication — two-step
-
-Bluesky doesn't accept the app password as a Bearer directly. The flow is:
-
-1. **createSession** — POST `https://bsky.social/xrpc/com.atproto.server.createSession` with body `{"identifier": "<emi-handle>", "password": "<app-password-from-pod>"}`. Returns `{accessJwt, refreshJwt, did, handle}`.
-2. **Use `accessJwt`** as `Authorization: Bearer <accessJwt>` for every subsequent call.
-3. **`accessJwt` lasts ~2 hours**; on `401 ExpiredToken`, either call `refreshSession` with the `refreshJwt` (long-lived) or just re-do createSession from the app password.
-
-For a one-shot post, the simplest pattern is: createSession → post → done. Cache only across calls if the task is multi-step inside a single turn.
-
-## Step 1: createSession
-
-Read the **handle** and **secret ref** for Bluesky from the `available_accounts` block in your prompt (it lists them for the current scope). Use those values verbatim — do not invent pod_ids from environment variable names.
-
-**CRITICAL: always pass `seal_fields: ["accessJwt", "refreshJwt"]` on this call.** Bluesky returns JWTs in the response that the next call relays in `Authorization: Bearer …`. If you transcribe the JWT from the response body into the next call's header yourself, your LLM will silently corrupt it (long opaque base64 strings get one or two characters flipped during token prediction — same failure mode that motivates the password-pod pattern, just on the inbound side). With `seal_fields`, the JWTs land in their own pods, the response body has `datapod:auth.session:<id>/full` references where the JWTs would have been, and you relay those references verbatim in the next call — the courier resolver substitutes the real bytes at execute time.
-
-```
-http_request:
-  url:    https://bsky.social/xrpc/com.atproto.server.createSession
-  method: POST
-  headers: {"Content-Type": "application/json"}
-  body:   "{\"identifier\": \"<handle from available_accounts>\", \"password\": \"<secret ref from available_accounts>\"}"
-  seal_fields: ["accessJwt", "refreshJwt"]
-```
-
-Response you'll see (the JWTs are replaced with pod-refs; the rest is verbatim):
-```json
-{
-  "did": "did:plc:example0000000000000000",
-  "didDoc": {"service": [{"serviceEndpoint": "https://example.us-west.host.bsky.network"}, ...]},
-  "handle": "your-handle.bsky.social",
-  "accessJwt": "datapod:auth.session:<uuid-a>/full",
-  "refreshJwt": "datapod:auth.session:<uuid-b>/full",
-  "active": true
-}
-```
-
-The `did` and `serviceEndpoint` are still visible — you need them for subsequent calls.
-
-## Step 2: Use the accessJwt pod-ref as Bearer for every subsequent call
-
-```
-http_request:
-  url:    <serviceEndpoint>/xrpc/app.bsky.feed.getTimeline
-  method: GET
-  headers:
-    Authorization: "Bearer datapod:auth.session:<uuid-a>/full"   ← copy verbatim from createSession response
-  query_params: {"limit": "20"}
-```
-
-`accessJwt` lasts ~2 hours; on `401 ExpiredToken`, either call `refreshSession` (passing the `refreshJwt` pod-ref the same way) or just re-do createSession from the app password.
-
-For a one-shot post, the simplest pattern is: createSession → post → done. The pod-refs work across multiple http_request calls in the same task.
-
-## Common operations
-
-In every example below, `<accessJwt>` means the pod-ref string you got from createSession's response (`datapod:auth.session:<uuid>/full`) — relay it verbatim in the `Authorization: Bearer …` header; do NOT transcribe a raw JWT from anywhere.
-
-### Post a top-level skeet
-
-```
-POST https://bsky.social/xrpc/com.atproto.repo.createRecord
-Authorization: Bearer <accessJwt>
-Content-Type: application/json
-Body: {
-  "repo": "<did from createSession>",
-  "collection": "app.bsky.feed.post",
-  "record": {
-    "$type": "app.bsky.feed.post",
-    "text": "Hello from Emi.",
-    "createdAt": "<ISO-8601 UTC, e.g. 2026-05-23T20:00:00.000Z>"
-  }
-}
-```
-
-The `text` field is limited to **300 characters (graphemes)**. Newlines are literal `\n`.
-
-### Reply to a post
-
-Same `createRecord` call, but include a `reply` field in the record:
-
-```json
-"record": {
-  "$type": "app.bsky.feed.post",
-  "text": "Replying.",
-  "createdAt": "<ISO>",
-  "reply": {
-    "root":   {"uri": "at://...", "cid": "..."},
-    "parent": {"uri": "at://...", "cid": "..."}
-  }
-}
-```
-
-Fetch parent's `uri` + `cid` via `app.bsky.feed.getPostThread` or store them when reading the timeline.
-
-### Read the home timeline
-
-```
-GET https://bsky.social/xrpc/app.bsky.feed.getTimeline?limit=20
-Authorization: Bearer <accessJwt>
-```
-
-Returns `{feed: [{post: {uri, cid, author: {handle, displayName}, record: {text, createdAt, ...}, replyCount, likeCount, repostCount}}]}`.
-
-### Read a specific author's timeline
-
-```
-GET https://bsky.social/xrpc/app.bsky.feed.getAuthorFeed?actor=<handle-or-did>&limit=20
-Authorization: Bearer <accessJwt>
-```
-
-### Like a post
-
-```
-POST https://bsky.social/xrpc/com.atproto.repo.createRecord
-Authorization: Bearer <accessJwt>
-Body: {
-  "repo": "<emi's did>",
-  "collection": "app.bsky.feed.like",
-  "record": {
-    "$type": "app.bsky.feed.like",
-    "subject": {"uri": "<post uri>", "cid": "<post cid>"},
-    "createdAt": "<ISO>"
-  }
-}
-```
-
-### Repost
-
-Same as `like`, but `collection = "app.bsky.feed.repost"`.
-
-### Search posts
-
-```
-GET https://bsky.social/xrpc/app.bsky.feed.searchPosts?q=<query>&limit=25
-Authorization: Bearer <accessJwt>
-```
-
-### Lookup a profile
-
-```
-GET https://bsky.social/xrpc/app.bsky.actor.getProfile?actor=<handle-or-did>
-Authorization: Bearer <accessJwt>
-```
+### Picking the right ref
+When several posts are by the same author (or look similar), the ref is the contract: select the ref whose **text** matches what your reply is about. If a post has an image or a quote marker and your reply depends on what's in it, hydrate it first. Never reconstruct a post URI by hand — there is no field for that in these tools, by design.
 
 ## Identity discipline
 
-Bluesky is a public surface. Posts are permanent (technically retractable, but the network has likely already replicated them).
+Bluesky is public and posts are effectively permanent (technically retractable, but the network has likely already replicated them).
 
-- **Reads** (timeline, profile, search) — fine at AUTH_USER.
-- **Writes** (post, reply, like, repost, follow) — Emi acts directly. Do NOT route through ask_user / ticket approval for routine writes; the whole point of an autonomous agent is that the user shouldn't have to babysit. The judgment layer is the auto-injected safety/engagement/voice skills (`emi-bluesky-safety`, `emi-bluesky-engagement`, `emi-bluesky-voice`) — follow them and post. The user can delete or correct after the fact if needed.
+- **Reads** (timeline, hydrate, search, profile) — fine at AUTH_USER.
+- **Writes** (post, reply, like, repost, follow) — **the assistant acts directly.** Do NOT route routine writes through ask_user / ticket approval — the point of an autonomous agent is that the user shouldn't have to babysit. The judgment layer is the auto-injected safety/engagement/voice skills (`emi-bluesky-safety`, `emi-bluesky-engagement`, `emi-bluesky-voice`) — follow them and post. The user can delete or correct after the fact.
 
-The only writes that warrant a pre-send ticket are the genuinely high-stakes cases the safety skill flags (e.g. a top-level post calling out a specific person by handle, or anything that crosses one of `emi-bluesky-safety`'s hard rules). If the safety skill says go, go.
+The only writes that warrant a pre-send ticket are the genuinely high-stakes cases `emi-bluesky-safety` flags (e.g. a top-level post calling out a specific person by handle, or anything crossing one of its hard rules). If the safety skill says go, go.
 
 ## Rate limits
 
-Bluesky's documented limits are generous (~3000 req/5min per app password). Stay well under for safety. Don't burst-post; if posting multiple items, throttle to one per 5–10 seconds.
+Bluesky's limits are generous (~3000 req / 5 min). Don't burst-post; if posting multiple items, throttle to one per 5–10 seconds.
 
-## Error handling
+---
 
-- **401 ExpiredToken** — accessJwt aged out (>~2hr). Re-call createSession or use refreshSession.
-- **400 InvalidRequest** — schema error in your body. Common causes: text >300 chars, missing `$type`, malformed `createdAt`.
-- **429 RateLimitExceeded** — back off; honor `Retry-After` header.
-- **400 InvalidIdentifier** — wrong handle or DID. Re-resolve via `app.bsky.actor.getProfile`.
+## Long-tail operations — raw `http_request`
 
-## Identity defaults
+The dedicated tools cover timeline / hydrate / post / reply / like. For **repost, search, profile lookup, author feeds, follow**, there's no dedicated tool — call `http_request` against the AT Protocol XRPC endpoints. These need explicit auth.
 
-When the planner needs Emi's handle, use `emi_accounts.get_emi_handle("bluesky")`. When the planner needs to know which auth pod to use, resolve via `resource_emi_accounts.json` (platform=bluesky → `auth.pod_id` field, env-resolved).
+### Authentication for raw calls (two-step)
 
-Future principals (Katy, Peter) with their own Bluesky accounts would plug in as new entries in `resource_emi_accounts.json` and their own `auth.bearer` pods. The same SKILL applies regardless of which principal — only the handle + pod_id differ.
+Bluesky doesn't accept the app password as a Bearer directly:
+
+1. **createSession** — POST `https://bsky.social/xrpc/com.atproto.server.createSession`. Read the **handle** and **secret ref** from the `available_accounts` / `resource_accounts` block in your prompt (it lists them for the current scope) — use them verbatim, don't invent pod_ids from env-var names.
+
+   **Always pass `seal_fields: ["accessJwt", "refreshJwt"]`.** Bluesky returns JWTs the next call must relay in `Authorization: Bearer …`. If you transcribe a JWT yourself, your LLM silently corrupts one or two characters of the opaque base64 and the call fails. With `seal_fields`, the JWTs land in their own pods and the response shows `datapod:auth.session:<id>/full` references — relay those verbatim; the courier resolver substitutes the real bytes at execute time.
+
+   ```
+   http_request:
+     url:    https://bsky.social/xrpc/com.atproto.server.createSession
+     method: POST
+     headers: {"Content-Type": "application/json"}
+     body:   "{\"identifier\": \"<handle from available_accounts>\", \"password\": \"<secret ref from available_accounts>\"}"
+     seal_fields: ["accessJwt", "refreshJwt"]
+   ```
+
+   The response keeps `did` and `didDoc.service[].serviceEndpoint` visible — you need the serviceEndpoint (the user's PDS) as the base URL for subsequent calls, and `did` as `repo`.
+
+2. **Use the `accessJwt` pod-ref** as `Authorization: Bearer datapod:auth.session:<uuid>/full` (relay verbatim) for every subsequent call. It lasts ~2h; on `401 ExpiredToken`, re-call createSession.
+
+The `body` argument is **always a JSON-encoded string** — the tool `json.loads` it at execute time; per-field pod-refs inside still resolve at courier scope.
+
+### Repost
+```
+POST <serviceEndpoint>/xrpc/com.atproto.repo.createRecord
+Authorization: Bearer <accessJwt pod-ref>
+Body: {"repo":"<did>","collection":"app.bsky.feed.repost","record":{"$type":"app.bsky.feed.repost","subject":{"uri":"<post uri>","cid":"<post cid>"},"createdAt":"<ISO>"}}
+```
+(Get the target `uri` + `cid` from a prior `bluesky_timeline` ref via `bluesky_hydrate_post`, or from `getPostThread`.)
+
+### Search posts
+```
+GET https://bsky.social/xrpc/app.bsky.feed.searchPosts?q=<query>&limit=25
+Authorization: Bearer <accessJwt pod-ref>
+```
+
+### Author feed
+```
+GET <serviceEndpoint>/xrpc/app.bsky.feed.getAuthorFeed?actor=<handle-or-did>&limit=20
+Authorization: Bearer <accessJwt pod-ref>
+```
+
+### Lookup a profile
+```
+GET https://bsky.social/xrpc/app.bsky.actor.getProfile?actor=<handle-or-did>
+Authorization: Bearer <accessJwt pod-ref>
+```
+
+### Follow
+```
+POST <serviceEndpoint>/xrpc/com.atproto.repo.createRecord
+Authorization: Bearer <accessJwt pod-ref>
+Body: {"repo":"<did>","collection":"app.bsky.graph.follow","record":{"$type":"app.bsky.graph.follow","subject":"<did-to-follow>","createdAt":"<ISO>"}}
+```
+
+### Error handling (raw calls)
+- **401 ExpiredToken** — accessJwt aged out; re-call createSession.
+- **400 InvalidRequest** — body schema error (text >300 chars, missing `$type`, malformed `createdAt`).
+- **429 RateLimitExceeded** — back off; honor `Retry-After`.
+- **400 InvalidIdentifier** — wrong handle/DID; re-resolve via `app.bsky.actor.getProfile`.
+
+## Multiple principals
+
+The dedicated tools resolve the acting principal's Bluesky account internally (handle + app-password pod). Future principals with their own Bluesky accounts plug in as new account entries in the env registry plus their own `auth.bearer` pod — the same tools and this skill apply; only the account differs.

@@ -1,0 +1,39 @@
+{
+  "name": "bluesky_post",
+  "description": "Publish an original top-level post on Bluesky (max 300 characters). Authentication is internal. For replies use bluesky_reply (ref-anchored), not this tool.",
+  "inputs": [
+    {
+      "name": "text",
+      "type": "string",
+      "required": true,
+      "description": "The post text (max 300 characters)."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Confirmation with the new post uri."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "post_uri."
+    }
+  ],
+  "arguments_prompt": "Publish an original Bluesky post.\n\nArguments schema:\n{{ user_context }}",
+  "metadata": {
+    "domain": "social",
+    "actions": ["write", "post", "publish"],
+    "selectors": ["bluesky", "bsky", "atproto", "social", "post", "skeet"],
+    "risk_level": "medium",
+    "side_effects": "write",
+    "requires_auth": ["bluesky"],
+    "requires_network": true,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": true,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}
