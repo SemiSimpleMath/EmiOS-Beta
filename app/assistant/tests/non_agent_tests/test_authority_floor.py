@@ -186,6 +186,32 @@ def test_visibility_full_at_admin_authority():
     assert _visible(100) >= {"web_manager", "personal_admin_manager", "bash_manager", "get_weather", "ask_user"}
 
 
+# ── registry normalization must preserve min_authority (the REAL load path) ──
+# The bug this guards: ToolRegistry._normalize_tool_metadata whitelist-rebuilds the
+# metadata dict; it carried approval_min_authority but had DROPPED min_authority, so
+# at runtime every tool's floor read as None -> resolve_tool_min_authority returned its
+# fail-closed 99 -> EVERY sub-100 scope (slack 30, dayflow 95, telegram) was denied
+# ALL tools. The other tests above read the contract JSON directly and missed it.
+
+def test_registry_normalization_preserves_min_authority():
+    from app.assistant.lib.tool_registry.tool_registry import ToolRegistry
+    reg = ToolRegistry.__new__(ToolRegistry)  # _normalize_* use no instance state
+    for name, expect in (("web_manager", 30), ("personal_admin_manager", 90), ("bash_manager", 99)):
+        raw = json.loads((TOOLS_DIR / name / "tool_contract.json").read_text(encoding="utf-8"))
+        norm = reg._normalize_tool_contract(raw, name)
+        assert norm["metadata"].get("min_authority") == expect, f"{name}: min_authority dropped in normalization"
+        # ...and resolve reads the real value, not the fail-closed 99.
+        assert resolve_tool_min_authority(name, {"tool_contract": norm}) == expect
+
+
+def test_mcp_tools_exempt_from_authority_floor():
+    # MCP tools carry a GENERATED contract with no min_authority; they must be
+    # ceiling-gated (None), never fail-closed to 99 (which denied them to every
+    # sub-100 scope, e.g. slack's maps lookup).
+    assert resolve_tool_min_authority("mcp::npm/maps::distance", {"backend": "mcp", "tool_contract": {"metadata": {}}}) is None
+    assert resolve_tool_min_authority("mcp::x::y", {"tool_contract": {"metadata": {}}}) is None
+
+
 if __name__ == "__main__":
     import sys
     sys.exit(pytest.main([__file__, "-v"]))

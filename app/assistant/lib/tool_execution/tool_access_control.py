@@ -26,17 +26,26 @@ def resolve_tool_min_authority(tool_name: str, tool_config: dict | Any | None) -
     it carries no tool_contract at all (MCP/dynamic/core tools), in which case
     the allowed_tools ceiling is the only gate.
 
-    A tool that DOES carry a contract but omits ``metadata.min_authority`` fails
-    CLOSED at 99: a forgotten floor must never silently become wide-open
+    A FIRST-PARTY tool that carries a contract but omits ``metadata.min_authority``
+    fails CLOSED at 99: a forgotten floor must never silently become wide-open
     (matches the project's fail-loud stance). After the Phase-2 migration every
-    local contract declares it, so 99 is a guard for future contracts, not a
+    first-party contract declares it, so 99 is a guard for future contracts, not a
     value any current tool relies on.
     """
+    # MCP / dynamic tools carry a GENERATED contract that has no min_authority; they
+    # are bounded by the allowed_tools ceiling, not an L1 floor. Exempt them so the
+    # fail-closed 99 below applies only to first-party contracts that forgot the field
+    # (an MCP tool must not be denied to every sub-100 scope just for lacking a floor).
+    if isinstance(tool_name, str) and tool_name.startswith("mcp::"):
+        return None
+    if isinstance(tool_config, dict) and tool_config.get("backend") == "mcp":
+        return None
+
     contract = None
     if isinstance(tool_config, dict) and isinstance(tool_config.get("tool_contract"), dict):
         contract = tool_config["tool_contract"]
     if contract is None:
-        return None  # no contract -> ceiling-gated only (mcp/core/dynamic)
+        return None  # no contract -> ceiling-gated only (core/dynamic)
     metadata = contract.get("metadata") if isinstance(contract.get("metadata"), dict) else {}
     raw = metadata.get("min_authority")
     if raw is None:

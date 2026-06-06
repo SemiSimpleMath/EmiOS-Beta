@@ -490,6 +490,7 @@ class ToolRegistry:
         front_door_raw = raw.get("front_door")
         approval_required_raw = raw.get("approval_required")
         approval_min_authority_raw = raw.get("approval_min_authority")
+        min_authority_raw = raw.get("min_authority")
         planner_description = str(raw.get("planner_description") or "").strip()
 
         requires_auth: list[str] = []
@@ -510,6 +511,22 @@ class ToolRegistry:
                 raise ValueError("tool_contract.metadata.approval_min_authority must be between 0 and 100.")
             approval_min_authority = parsed_level
 
+        # L1 floor (min_authority) — the see+use gate. Mirror approval_min_authority's
+        # parse/validate. This MUST be preserved here: it lives in the contract JSON,
+        # but if it's dropped in normalization, resolve_tool_min_authority hits its
+        # fail-closed 99 default for every tool and denies all sub-100 scopes.
+        min_authority: int | None = None
+        if "min_authority" in raw and min_authority_raw is not None:
+            if isinstance(min_authority_raw, bool):
+                raise ValueError("tool_contract.metadata.min_authority must be an integer between 0 and 100.")
+            try:
+                parsed_floor = int(min_authority_raw)
+            except Exception:
+                raise ValueError("tool_contract.metadata.min_authority must be an integer between 0 and 100.")
+            if parsed_floor < 0 or parsed_floor > 100:
+                raise ValueError("tool_contract.metadata.min_authority must be between 0 and 100.")
+            min_authority = parsed_floor
+
         return {
             "domain": domain,
             "actions": actions,
@@ -529,6 +546,7 @@ class ToolRegistry:
             "room_visibility_default": room_visibility_default,
             "approval_required": bool(approval_required_raw),
             "approval_min_authority": approval_min_authority,
+            "min_authority": min_authority,
         }
 
 
