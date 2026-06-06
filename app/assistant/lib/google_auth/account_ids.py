@@ -3,6 +3,9 @@ from __future__ import annotations
 import os
 
 from app.assistant.lib.google_auth import oauth_registry
+from app.assistant.utils.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 def _env(name: str, default: str) -> str:
@@ -15,12 +18,18 @@ def _env(name: str, default: str) -> str:
 def _validated(env_name: str, default: str) -> str:
     value = _env(env_name, default)
     if not oauth_registry.is_known_account(value):
-        known = sorted(oauth_registry.list_accounts().keys())
         source = "environment" if os.getenv(env_name) else "default"
+        if source == "default":
+            # The account simply isn't configured yet — normal on a fresh install, or
+            # for an optional integration (e.g. Nest). Defer real validation to actual
+            # use (load_google_credentials raises a clear "authenticate" error there);
+            # don't crash boot at import time.
+            logger.warning("OAuth default account %r not configured yet — deferring.", value)
+            return value
+        known = sorted(oauth_registry.list_accounts().keys())
         raise RuntimeError(
-            f"{env_name}={value!r} (from {source}) is not in the OAuth registry. "
-            f"Either add it to configs/oauth_accounts.json or unset/correct the "
-            f"environment variable. Known accounts: {known}."
+            f"{env_name}={value!r} (from environment) is not in the OAuth registry. "
+            f"Add it to oauth_accounts.json or unset the var. Known accounts: {known}."
         )
     return value
 

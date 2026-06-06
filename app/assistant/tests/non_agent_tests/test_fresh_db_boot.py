@@ -89,6 +89,56 @@ def test_fresh_db_first_boot_builds_schema():
     assert proc.returncode == 0, f"boot exited {proc.returncode}\n{proc.stderr[-2000:]}"
 
 
+# Full fresh-install boot: create_app() against a clean EMI_DATA_DIR must reach a
+# SERVING server (GET /api/version -> 200), not just build tables. Guards the
+# Google/config blockers (config templates seeded at boot; oauth_registry tolerates a
+# missing file; account_ids defers unconfigured default accounts).
+_BOOT_FULL = textwrap.dedent(
+    """
+    import os, sys, tempfile
+    # Clean-install env: fresh data dir + strip any account/db env the runner may carry.
+    for k in list(os.environ):
+        if k.startswith("EMI_GOOGLE") or k in ("EMI_DATA_DIR",) or k.startswith("EMI_CONFIGS") or k.startswith("DEV_DATABASE_URI"):
+            os.environ.pop(k, None)
+    os.environ["EMI_DATA_DIR"] = tempfile.mkdtemp(prefix="emi_freshboot_")
+    os.environ.setdefault("FLASK_SECRET_KEY", "test_" + os.urandom(8).hex())
+    os.environ.setdefault("JWT_SECRET_KEY", "test_" + os.urandom(8).hex())
+    sys.path.insert(0, ".")
+    import os.path as p
+
+    from app.create_app import create_app
+    app, _socketio = create_app()                 # the create_app:86 init path, full boot
+    r = app.test_client().get("/api/version")
+    assert r.status_code == 200, f"/api/version -> {r.status_code}"
+    cfg = p.join(os.environ["EMI_DATA_DIR"], "configs")
+    assert p.exists(p.join(cfg, "oauth_accounts.json")), "oauth_accounts.json not seeded"
+    print(f"FRESH_BOOT_OK status={r.status_code} version={r.get_json()}")
+    sys.stdout.flush()
+    os._exit(0)  # create_app started background threads; don't wait on them
+    """
+)
+
+
+def test_fresh_install_boots_to_serving_server():
+    repo_root = _find_repo_root()
+    venv_py = repo_root / ".venv" / (
+        "Scripts/python.exe" if sys.platform == "win32" else "bin/python"
+    )
+    py = str(venv_py) if venv_py.exists() else sys.executable
+
+    proc = subprocess.run(
+        [py, "-c", _BOOT_FULL],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    assert "FRESH_BOOT_OK" in proc.stdout, (
+        "fresh install did not boot to a serving server.\n"
+        f"--- STDOUT (tail) ---\n{proc.stdout[-2000:]}\n--- STDERR (tail) ---\n{proc.stderr[-4000:]}"
+    )
+
+
 if __name__ == "__main__":
     import pytest
     sys.exit(pytest.main([__file__, "-v", "-s"]))

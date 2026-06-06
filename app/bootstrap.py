@@ -72,6 +72,30 @@ def _seed_personal_resources() -> None:
         logger.info("Seeded personal resource from template: %s", real_path.name)
 
 
+def _seed_config_templates() -> None:
+    """Copy configs/templates/*.template.json -> <configs_dir>/*.json on first run.
+
+    Templates are read-only (code tree); live configs go to the writable configs dir
+    (under EMI_DATA_DIR). Mirrors setup.py:instantiate_config_templates so a packaged
+    first run — which never executes setup.py — still gets oauth_accounts.json /
+    smart_home_tools.json before any consumer (tool loading, google_auth) reads them.
+    """
+    from pathlib import Path
+    from app.assistant.utils.path_utils import get_repo_root, get_configs_dir
+    import shutil
+
+    templates_dir = get_repo_root() / "configs" / "templates"
+    if not templates_dir.is_dir():
+        return
+    dest_dir = get_configs_dir()
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    for template in sorted(templates_dir.glob("*.template.json")):
+        dest = dest_dir / template.name.replace(".template.json", ".json")
+        if not dest.exists():
+            shutil.copyfile(template, dest)
+            logger.info("Seeded config from template: %s", dest.name)
+
+
 def _log_telegram_env_status() -> None:
     secret = str(os.environ.get("TELEGRAM_WEBHOOK_SECRET") or "").strip()
     token = str(os.environ.get("TELEGRAM_BOT_TOKEN") or "").strip()
@@ -113,6 +137,12 @@ def initialize_services(app):
     """
     Initializes core services like event bus, agent managers, data conversion, and scheduler.
     """
+
+    # First-run seeding (esp. a packaged install with no setup.py): copy config +
+    # personal-resource templates into the writable data dir BEFORE any consumer —
+    # tool/agent loading, google_auth, env registry — tries to read them.
+    _seed_config_templates()
+    _seed_personal_resources()
 
     # Auto-detect default LLM provider before any agents are loaded.
     _auto_detect_default_llm_provider()
@@ -177,8 +207,8 @@ def initialize_services(app):
     global_blackboard = GlobalBlackBoard()
     ServiceLocator.register("global_blackboard", global_blackboard)
 
-    # Seed personal resource files from .example templates on first run.
-    _seed_personal_resources()
+    # (personal resources were seeded at the top of initialize_services, before any
+    #  tool/agent/resource consumer — see _seed_config_templates/_seed_personal_resources)
 
     # Initialize ResourceManager and auto-load all resources
     resource_manager = ResourceManager()

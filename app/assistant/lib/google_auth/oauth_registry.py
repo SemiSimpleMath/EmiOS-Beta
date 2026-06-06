@@ -15,8 +15,15 @@ from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-_CONFIG_PATH = Path(__file__).resolve().parents[4] / "configs" / "oauth_accounts.json"
 _LIB_DIR = Path(__file__).resolve().parents[1]
+
+
+def _config_path() -> Path:
+    """Live oauth_accounts.json under the writable configs dir (honors EMI_DATA_DIR).
+    Computed lazily — not at import — so a launcher that sets EMI_DATA_DIR before
+    create_app is respected, and the packaged install reads from its data dir."""
+    from app.assistant.utils.path_utils import get_configs_dir
+    return get_configs_dir() / "oauth_accounts.json"
 
 _cache: Dict[str, Any] | None = None
 
@@ -25,12 +32,14 @@ def _load_config() -> Dict[str, Any]:
     global _cache
     if _cache is not None:
         return _cache
-    if not _CONFIG_PATH.exists():
-        raise FileNotFoundError(
-            f"OAuth accounts config not found: {_CONFIG_PATH}. "
-            "Create configs/oauth_accounts.json with account definitions."
-        )
-    raw = _CONFIG_PATH.read_text(encoding="utf-8")
+    path = _config_path()
+    if not path.exists():
+        # Normal on a fresh install before seeding / if Google was never set up.
+        # No accounts configured — degrade gracefully rather than crash boot.
+        logger.info("No oauth_accounts.json yet (%s) — no OAuth accounts configured.", path)
+        _cache = {"accounts": {}}
+        return _cache
+    raw = path.read_text(encoding="utf-8")
     data = json.loads(raw)
     if not isinstance(data, dict) or "accounts" not in data:
         raise ValueError(f"oauth_accounts.json must contain an 'accounts' key.")
