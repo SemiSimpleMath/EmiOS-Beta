@@ -408,12 +408,16 @@ class ToolScopeService:
             logger.error("[tool_scope] Failed reading scope_context for tool filtering: %s", e)
             logger.debug("[tool_scope] scope_context read exception details", exc_info=True)
         def _apply_scope_filters(items: list[str], stage: str) -> list[str]:
-            """Apply scope_contract allow/block + per_manager.allow/block rules.
+            """Filter to the scope's permission ceiling (allowed_tools / blocked_tools).
 
-            Called BEFORE the narrower (so narrower never evaluates already-blocked
-            tools) AND AFTER the narrower (so the narrower's expanded list can't
-            re-introduce scope-blocked tools — pre-existing design quirk where
-            narrower receives ranked_for_narrower, the pre-filter list).
+            These already reflect per_manager and the subtree-grant: they are computed
+            once at scope-narrowing time (ScopeAdapter._apply_manager_narrowing) and
+            this layer only derives a visible subset from them. Visibility is therefore
+            always a strict subset of what execution (check_tool_access) permits — the
+            scope is the single source of truth, not this prompt-shaping pass.
+
+            Called BEFORE the narrower (so it never evaluates already-blocked tools)
+            AND AFTER it (so its expanded list can't re-introduce scope-blocked tools).
             """
             if not (scope_contract_enforced and scope_context is not None):
                 return items
@@ -431,27 +435,10 @@ class ToolScopeService:
                 result = [t for t in result if t in allow_set]
             if block_set:
                 result = [t for t in result if t not in block_set]
-            # Per-manager rule for the current manager
-            per_manager_rules = scope_context.tools.per_manager or {}
-            rule = per_manager_rules.get(manager_name)
-            if rule is not None:
-                if rule.allow is not None:
-                    pm_allow = {str(x).strip() for x in rule.allow if isinstance(x, str) and str(x).strip()}
-                    before = len(result)
-                    result = [t for t in result if t in pm_allow]
-                    logger.info(
-                        "[tool_scope/%s] per_manager.allow manager=%s allow=%s before=%s after=%s",
-                        stage, manager_name, sorted(pm_allow), before, len(result),
-                    )
-                if rule.block:
-                    pm_block = {str(x).strip() for x in rule.block if isinstance(x, str) and str(x).strip()}
-                    if pm_block:
-                        before = len(result)
-                        result = [t for t in result if t not in pm_block]
-                        logger.info(
-                            "[tool_scope/%s] per_manager.block manager=%s block=%s before=%s after=%s",
-                            stage, manager_name, sorted(pm_block), before, len(result),
-                        )
+            # per_manager is NOT re-derived here — it is folded into allowed_tools /
+            # blocked_tools at narrowing time, so the allow_set/block_set checks above
+            # already reflect it (and the subtree-grant). This is the fix for the
+            # divergence where per_manager bound visibility but NOT execution.
             return result
 
         # Pre-narrower filter: keeps narrower from wasting tokens on blocked tools.
@@ -472,9 +459,10 @@ class ToolScopeService:
             )
 
         # Post-narrower filter: narrower's expanded output runs through scope
-        # again so it can't re-introduce blocked tools. This is the load-bearing
-        # apply — without it, per_manager.allow has no effect when use_narrower
-        # is True (which it is for emi_team and other broad managers).
+        # again so it can't re-introduce out-of-ceiling tools. This is the
+        # load-bearing apply — without it the narrowed allowed_tools ceiling has
+        # no effect when use_narrower is True (which it is for emi_team and other
+        # broad managers, whose narrower can surface anything in the registry).
         ranked = _apply_scope_filters(ranked, stage="post_narrower")
 
         visible: list[str] = []

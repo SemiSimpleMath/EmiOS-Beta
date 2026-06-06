@@ -508,29 +508,41 @@ class ScopeAdapter:
         manager_config: dict[str, Any],
     ) -> ScopeContext:
         narrowing = manager_config.get("scope_contract")
-        if not isinstance(narrowing, dict):
+        per_manager_rule = (scope.tools.per_manager or {}).get(manager_name)
+        # per_manager applies even when the manager declares no scope_contract of
+        # its own — it is the SCOPE's authoritative narrowing of this manager.
+        if not isinstance(narrowing, dict) and per_manager_rule is None:
             return scope
+        if not isinstance(narrowing, dict):
+            narrowing = {}
 
         try:
             payload = scope.model_dump()
             tools_cfg = narrowing.get("tools") if isinstance(narrowing.get("tools"), dict) else {}
             if tools_cfg:
                 if "allowed_tools" in tools_cfg:
-                    allowed = _as_str_list(tools_cfg.get("allowed_tools"))
-                    # Manager's own scope_contract is authoritative for its
-                    # own leaves. The parent's ``allowed_tools`` describes
-                    # what the PARENT directly calls — it should NOT
-                    # narrow what a sub-manager can do internally.
-                    # Allowing a manager implicitly allows the tools that
-                    # manager declares it uses.
-                    #
-                    # Restrictions still propagate via ``blocked_tools``:
-                    # parent denylist + sub-manager denylist + room policy
-                    # denylist all union below. So a Slack room can block
-                    # specific tools even inside a delegated web_manager
-                    # call, but it doesn't have to enumerate every leaf
-                    # the sub-manager uses just to allow the manager.
-                    payload["tools"]["allowed_tools"] = allowed
+                    manager_own = _as_str_list(tools_cfg.get("allowed_tools"))
+                    # The inherited allow-list is a CEILING — a manager's own
+                    # scope_contract may NARROW it but must never WIDEN it.
+                    # (The old unconditional REPLACE turned a fail-closed
+                    # `allowed_tools: []` room into a fully open one: its
+                    # switchboard reached emi_team -> personal_admin -> send_email
+                    # despite the room granting nothing.)
+                    #   - parent ["all"]          -> the manager's own surface stands.
+                    #   - manager_name in parent  -> the parent explicitly GRANTED
+                    #     this manager, so its whole declared subtree is allowed
+                    #     ("allow [personal_admin_manager]" => everything under it).
+                    #   - otherwise               -> bounded by the ceiling
+                    #     (intersection). Empty parent -> [] ("allow []" => nothing).
+                    # blocked_tools still UNION below, so denylists keep
+                    # propagating regardless of this allow logic.
+                    parent_allowed = _as_str_list(payload["tools"].get("allowed_tools") or [])
+                    if _is_all_marker(parent_allowed) or manager_name in set(parent_allowed):
+                        payload["tools"]["allowed_tools"] = manager_own
+                    else:
+                        payload["tools"]["allowed_tools"] = _intersect_allowed_tools(
+                            parent_allowed, manager_own
+                        )
                 if "blocked_tools" in tools_cfg:
                     blocked = _as_str_list(tools_cfg.get("blocked_tools"))
                     payload["tools"]["blocked_tools"] = list({*payload["tools"].get("blocked_tools", []), *blocked})
@@ -546,6 +558,31 @@ class ScopeAdapter:
                     tools_cfg.get("allow_external_side_effects", True)
                 ):
                     payload["tools"]["allow_external_side_effects"] = False
+
+            # Scope-level per_manager[M] override — the authoritative narrowing of
+            # THIS manager, folded into allowed_tools so it binds at EXECUTION
+            # (check_tool_access reads allowed_tools), not just visibility. allowed_tools
+            # becomes the single source of truth; the visibility layer derives from it
+            # instead of re-deriving per_manager.
+            #   allow -> intersect with the ceiling (replace when the ceiling is "all")
+            #   block -> subtract, and union into blocked_tools so it propagates to children
+            if per_manager_rule is not None:
+                cur = _as_str_list(payload["tools"].get("allowed_tools") or [])
+                if per_manager_rule.allow is not None:
+                    pm_allow = [str(x).strip() for x in per_manager_rule.allow
+                                if isinstance(x, str) and str(x).strip()]
+                    if _is_all_marker(cur):
+                        payload["tools"]["allowed_tools"] = pm_allow
+                    else:
+                        pm_set = set(pm_allow)
+                        payload["tools"]["allowed_tools"] = [t for t in cur if t in pm_set]
+                if per_manager_rule.block:
+                    pm_block = {str(x).strip() for x in per_manager_rule.block
+                                if isinstance(x, str) and str(x).strip()}
+                    payload["tools"]["allowed_tools"] = [
+                        t for t in payload["tools"]["allowed_tools"] if t not in pm_block]
+                    payload["tools"]["blocked_tools"] = sorted(
+                        set(payload["tools"].get("blocked_tools") or []) | pm_block)
 
             resources_cfg = narrowing.get("resources") if isinstance(narrowing.get("resources"), dict) else {}
             if resources_cfg:
