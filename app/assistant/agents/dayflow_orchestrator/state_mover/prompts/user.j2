@@ -72,6 +72,12 @@ Snoozed: {% for t in recent_responded_tickets.snoozed %}{{ t.get("title","") }}{
   {{ p.get("synopsis","") }}
 {%- endfor %}
 {%- endif %}
+{% if resource_dayflow_routine %}
+
+########## ROUTINE (today's cadence) ##########
+*Use this to judge when a waiting item's time/event condition is now met.*
+{{ resource_dayflow_routine }}
+{% endif %}
 
 ########## TRACKED ITEMS ##########
 {%- if active_dayflow_items %}

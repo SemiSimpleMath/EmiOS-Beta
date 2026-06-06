@@ -19,6 +19,7 @@ user_context_items:
   - active_plan_synopses
   - active_dayflow_items
   - resource_expected_calendar
+  - resource_dayflow_routine
   - resource_afk_statistics_output
   - recent_dayflow_chat_history
   - recent_responded_tickets
