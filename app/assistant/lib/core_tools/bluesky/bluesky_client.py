@@ -63,8 +63,13 @@ def _resolve_app_password(account: dict) -> str:
     pod_id_env = str(auth.get("pod_id_env") or "").strip()
     if not pod_id_env:
         raise BlueskyError("Bluesky account entry has no auth.pod_id_env")
-    pod_id = _required_env(pod_id_env)
-    full_pod_id = f"datapod:{pod_kind}:{pod_id}"
+    pod_id_raw = _required_env(pod_id_env).strip()
+    # The env var may hold a bare id OR a full "datapod:<kind>:<id>[/proj]" ref —
+    # the account-config layer stores the full ref. Don't double-prefix it.
+    if pod_id_raw.startswith("datapod:"):
+        full_pod_id = pod_id_raw.split("/", 1)[0]  # strip any trailing /projection
+    else:
+        full_pod_id = f"datapod:{pod_kind}:{pod_id_raw}"
 
     from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
     from app.assistant.pod_store.pod_store import PodStore
