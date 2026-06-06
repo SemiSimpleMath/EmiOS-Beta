@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
-from app.assistant.lib.core_tools.bluesky.bluesky_client import BlueskyError, get_timeline
+from app.assistant.lib.core_tools.bluesky.bluesky_client import BlueskyError, get_session, get_timeline
 from app.assistant.lib.core_tools.bluesky.bluesky_core import compact_timeline
 from app.assistant.lib.core_tools.tool_error_protocol import make_tool_error
 from app.assistant.utils.logging_config import get_logger
@@ -33,6 +33,7 @@ class BlueskyTimeline(BaseTool):
 
         try:
             feed = get_timeline(limit)
+            own = get_session()["handle"]  # cached from get_timeline's auth — no extra call
         except BlueskyError as e:
             return make_tool_error(
                 error_code="bluesky_error",
@@ -42,7 +43,8 @@ class BlueskyTimeline(BaseTool):
                 details={"limit": limit},
             )
 
-        rendered, ref_map = compact_timeline(feed, max_posts=limit)
+        # Exclude our own posts so the planner can't pick itself to reply to.
+        rendered, ref_map = compact_timeline(feed, max_posts=limit, own_handle=own)
         DI.global_blackboard.update_state_value(TIMELINE_REF_KEY, ref_map)
         logger.info("bluesky_timeline: %d posts, refs=%s", len(ref_map), list(ref_map))
 

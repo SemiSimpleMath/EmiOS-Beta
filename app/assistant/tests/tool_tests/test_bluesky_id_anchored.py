@@ -160,6 +160,21 @@ def test_extract_image_plain_images_embed():
     assert img == {"url": "https://cdn.example/x.jpg", "alt": "a cat"}
 
 
+def test_own_posts_excluded_from_engage_timeline():
+    """The home feed includes your own posts; offering them let the planner reply to
+    itself (a real public self-reply). Acting as @werd.io, both werd posts drop and
+    only the third-party post remains."""
+    rendered, ref_map = compact_timeline(_feed(), own_handle="werd.io")
+    authors = {v["author"] for v in ref_map.values()}
+    assert "werd.io" not in authors
+    assert ref_map["b1"]["author"] == "someone.bsky.social"  # refs renumber around the gap
+    assert len(ref_map) == 1
+    assert "2 of your own posts hidden" in rendered
+    # No own_handle -> legacy behavior, nothing filtered.
+    _, full = compact_timeline(_feed())
+    assert len(full) == 3
+
+
 def test_post_record_is_top_level_no_reply():
     rec = build_post_record("Friday brain off switch found.", created_at="2026-06-05T23:51:48.000Z")
     assert rec["$type"] == "app.bsky.feed.post"

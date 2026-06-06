@@ -100,21 +100,30 @@ def _root_ref(post: dict) -> tuple[str, str]:
     return str(post.get("uri") or "").strip(), str(post.get("cid") or "").strip()
 
 
-def compact_timeline(feed_response: dict, *, max_posts: int = 20) -> tuple[str, dict]:
+def compact_timeline(
+    feed_response: dict, *, max_posts: int = 20, own_handle: Optional[str] = None
+) -> tuple[str, dict]:
     """Render a getTimeline response into ``(compact_text, ref_map)``.
 
     ``ref_map``: ``{"b1": {uri, cid, root_uri, root_cid, author, text, has_image,
     image_url, image_alt}}`` — the canonical fields the action tools resolve against.
     ``compact_text``: one ``[bN] @handle · "text" [markers]`` line per post; the
     only thing the planner sees. Duplicate/repost URIs collapse to the first ref.
+
+    ``own_handle``: the acting account's handle. The home feed includes your OWN
+    posts; offering them as engagement targets let the planner reply to itself
+    (it did — a public self-reply). They are excluded here so it is structurally
+    impossible, with a count surfaced rather than silently dropped.
     """
     feed = feed_response.get("feed") if isinstance(feed_response, dict) else None
     if not isinstance(feed, list):
         feed = []
+    own = (own_handle or "").strip().lower()
 
     lines: list[str] = []
     ref_map: dict[str, dict] = {}
     seen_uris: set[str] = set()
+    hidden_own = 0
     n = 0
     for item in feed:
         if n >= max_posts:
@@ -127,10 +136,13 @@ def compact_timeline(feed_response: dict, *, max_posts: int = 20) -> tuple[str, 
         if not uri or not cid or uri in seen_uris:
             continue
         seen_uris.add(uri)
-        n += 1
-        ref = f"b{n}"
 
         handle = _author_handle(post)
+        if own and handle.lower() == own:
+            hidden_own += 1  # never offer your own posts as engagement targets
+            continue
+        n += 1
+        ref = f"b{n}"
         text = _post_text(post)
         img = extract_image(post)
         root_uri, root_cid = _root_ref(post)
@@ -158,8 +170,9 @@ def compact_timeline(feed_response: dict, *, max_posts: int = 20) -> tuple[str, 
         mark = f"  [{'; '.join(markers)}]" if markers else ""
         lines.append(f'[{ref}] @{handle} · "{snippet}"{mark}')
 
+    own_note = f" ({hidden_own} of your own posts hidden)" if hidden_own else ""
     header = (
-        f"Bluesky timeline — {len(ref_map)} posts. "
+        f"Bluesky timeline — {len(ref_map)} posts{own_note}. "
         "To like or reply, pass the post's ref (e.g. bluesky_reply post_ref=b1). "
         "To see a post's image before replying, bluesky_hydrate_post post_ref=b1."
     )
