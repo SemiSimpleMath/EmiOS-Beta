@@ -103,3 +103,16 @@ playwright>=1.59.0
 # /api/smart-home/ring endpoint. Auth is bootstrapped once via
 # scripts/ring_bootstrap.py — no plain API key, OAuth+2FA.
 ring-doorbell>=0.9.0
+
+# Previously imported but undeclared — a clean bundle installs STRICTLY from this
+# file, so an undeclared import crashes a fresh install. See scratch/FIX-missing-deps.md.
+# Pinned to the versions already running in dev.
+networkx==3.5          # app/me/pagerank.py / layout.py — on the create_app boot path
+Pillow==12.0.0         # imported as PIL — image handling
+psutil==7.1.3          # process / runtime monitoring
+python-kasa==0.10.2    # imported as kasa — TP-Link smart-home (optional)
+# Twilio SMS is off by default in v1 and imported lazily; declared so enabling it
+# works (and so a full import scan is clean). Lower bound — not pinned in dev.
+twilio>=9.0.0
+# matplotlib intentionally NOT added: its only importer (app/me/layout_sim.py, a dev
+# visualization) is never imported on the boot path and now imports it lazily.

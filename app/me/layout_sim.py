@@ -22,8 +22,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-import matplotlib.patches as mpatches
-import matplotlib.pyplot as plt
+# matplotlib is imported lazily inside render_grid() — it's a heavy dependency
+# (~tens of MB with fonts/contourpy/kiwisolver) used ONLY for this module's optional
+# dev visualization, and this module is not imported on the app boot path. Keeping
+# the import lazy lets the rest of the module's layout logic be used without pulling
+# matplotlib into the install. See scratch/FIX-missing-deps.md.
 
 
 # ---------- algorithm constants ----------
@@ -213,6 +216,9 @@ def render_grid(
     zoom_levels: Optional[List[float]] = None,
 ) -> None:
     """Render a grid of subplots, one per zoom level."""
+    import matplotlib.patches as mpatches
+    import matplotlib.pyplot as plt
+
     if zoom_levels is None:
         # Cover one geometric "octave" per importance step. With ratio
         # 1.6, six panels in geometric progression by 1.6 covers six
