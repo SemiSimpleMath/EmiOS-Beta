@@ -30,17 +30,17 @@ The default identity: Bluesky is a public surface and **the assistant posts as i
    ```
    Each post gets a stable ref (`b1`, `b2`, …). Call this **first** before replying to or liking anything.
 
-2. **`bluesky_hydrate_post post_ref=b2`** — open ONE post on its own. If it has an image, the **actual image is shown to you** (not just alt text). **Do this before replying to any post that has an image or quotes another post** — react to what is actually there, don't guess what an image shows. (This is the exact failure that motivated these tools: a post's image/quote was guessed at instead of read.)
+2. **`bluesky_hydrate_post post_ref=b2`** — open ONE post on its own, full and untruncated. The timeline list is only a **preview**: text is cut off, links show as bare snippets, images/quotes are summarized. **Always hydrate the post you intend to reply to before replying — every time, not only when it has an image.** Replying is consequential, and hydration is how you confirm you have the *right* post and its *complete* content (full text, the link/embed card's title + description, and the actual image if present — the real pixels are shown to you, not just alt text). Don't react to a truncated line or guess what an image shows. (This is the exact failure that motivated these tools: a post's content was guessed at instead of read.)
 
 3. **Act, by ref:**
    - **`bluesky_post text="…"`** — publish an original top-level post.
-   - **`bluesky_reply post_ref=b1 text="…"`** — reply to a specific post. Pass the ref of the post your text is actually about; the reply binds to that ref and cannot drift to a sibling post.
-   - **`bluesky_like post_ref=b1`** — like a specific post.
+   - **`bluesky_reply post_ref=b1 text="…"`** — reply to a specific post. **Hydrate `b1` first — `bluesky_reply` refuses a ref you haven't hydrated this session.** Pass the ref of the post your text is actually about; the reply binds to that ref and cannot drift to a sibling post.
+   - **`bluesky_like post_ref=b1`** — like a specific post. (A like doesn't require hydration; only a reply does.)
 
 Text limit is **300 characters**. The reply/like tools echo back which post they hit — glance at that echo to confirm you targeted the right one.
 
 ### Picking the right ref
-When several posts are by the same author (or look similar), the ref is the contract: select the ref whose **text** matches what your reply is about. If a post has an image or a quote marker and your reply depends on what's in it, hydrate it first. Never reconstruct a post URI by hand — there is no field for that in these tools, by design.
+When several posts are by the same author (or look similar), the ref is the contract: select the ref whose **text** matches what your reply is about, then **hydrate that ref before replying** so you react to the full post, not the truncated timeline line. Never reconstruct a post URI by hand — there is no field for that in these tools, by design.
 
 ## Identity discipline
 

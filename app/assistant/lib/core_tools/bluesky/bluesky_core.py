@@ -173,8 +173,9 @@ def compact_timeline(
     own_note = f" ({hidden_own} of your own posts hidden)" if hidden_own else ""
     header = (
         f"Bluesky timeline — {len(ref_map)} posts{own_note}. "
-        "To like or reply, pass the post's ref (e.g. bluesky_reply post_ref=b1). "
-        "To see a post's image before replying, bluesky_hydrate_post post_ref=b1."
+        "To like, pass the post's ref (e.g. bluesky_like post_ref=b1). "
+        "To reply, FIRST bluesky_hydrate_post post_ref=b1 (required — opens the full, "
+        "untruncated post), THEN bluesky_reply post_ref=b1."
     )
     body = "\n".join(lines) if lines else "(no posts)"
     return f"{header}\n{body}", ref_map

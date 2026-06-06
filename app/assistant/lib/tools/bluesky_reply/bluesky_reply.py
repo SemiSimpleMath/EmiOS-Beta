@@ -55,6 +55,23 @@ class BlueskyReply(BaseTool):
                 abort_policy="abort_tool", retryable=False, details={"post_ref": ref},
             )
 
+        # Hydration gate: replying is consequential, so the agent must have OPENED
+        # this post first (bluesky_hydrate_post) — that confirms it's the right target
+        # and that the agent read the full content (the timeline list is a truncated
+        # preview). The flag is set by bluesky_hydrate_post and reset by a fresh
+        # bluesky_timeline, so it always reflects the CURRENT post behind this ref.
+        if not target.get("hydrated"):
+            return make_tool_error(
+                error_code="post_not_hydrated",
+                message=(
+                    f"bluesky_reply: post_ref {ref!r} has not been hydrated. Replying is "
+                    f"consequential — call bluesky_hydrate_post post_ref={ref} first to "
+                    f"confirm it is the right post and read its full content (text, link/embed "
+                    f"card, image), then reply."
+                ),
+                abort_policy="abort_tool", retryable=False, details={"post_ref": ref},
+            )
+
         record = build_reply_record(text, target, created_at=now_iso())
         try:
             resp = create_record("app.bsky.feed.post", record)

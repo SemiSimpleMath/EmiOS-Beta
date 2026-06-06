@@ -40,6 +40,15 @@ class BlueskyHydratePost(BaseTool):
                 details={"post_ref": ref},
             )
 
+        # Mark this ref hydrated so bluesky_reply can REQUIRE it: replying is
+        # consequential, and hydration is the agent's confirmation that it has seen
+        # the FULL post (right target + complete content) before composing a reply.
+        # The flag lives in the ref-map entry, so a fresh bluesky_timeline (which
+        # rebuilds the map) resets it — a stale "hydrated b3" can never authorize a
+        # reply to a new b3 from a later timeline.
+        target["hydrated"] = True
+        DI.global_blackboard.update_state_value(TIMELINE_REF_KEY, ref_map)
+
         parts = [
             f"Bluesky post {ref} by @{target.get('author') or '?'}:",
             "",
