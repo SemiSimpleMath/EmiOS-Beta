@@ -675,8 +675,8 @@ if __name__ == "__main__":
         logger.error("Google Calendar service initialization failed.")
         print(f"\n{'=' * 80}")
         print(f"🛑 FATAL: Google Calendar service initialization failed")
-        print("   Check that credentials exist at: app/assistant/lib/credentials/credentials.json")
-        print("   Check that token exists at: app/assistant/lib/credentials/token.pickle")
+        print("   Authorize Google in-app (Settings → Accounts); tokens are stored")
+        print("   encrypted in the database, not in app/assistant/lib/credentials/.")
         print(f"{'=' * 80}\n")
         exit(1)
 

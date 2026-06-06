@@ -100,33 +100,18 @@ def install_dependencies():
     return True
 
 def check_credentials():
-    """Check if required credential files exist"""
+    """Note where Google OAuth is configured (no code-tree token files)."""
     print_step(4, 8, "Checking credentials...")
-    
-    creds_dir = Path("app/assistant/lib/credentials")
-    required_files = {
-        "credentials.json": "Google API credentials (for Calendar/Gmail)",
-        "token.pickle": "Google API token (will be created on first auth)"
-    }
-    
-    missing = []
-    for file, desc in required_files.items():
-        file_path = creds_dir / file
-        if not file_path.exists():
-            if file == "token.pickle":
-                print(f"⚠️  {file} - {desc} (will be created when you authorize)")
-            else:
-                print(f"❌ MISSING: {file} - {desc}")
-                missing.append(file)
-        else:
-            print(f"✅ {file} found")
-    
-    if missing:
-        print("\n⚠️  WARNING: Some credentials are missing.")
-        print("   You'll need to provide these before using Calendar/Gmail features.")
-        print("   See BETA.md for setup instructions.")
-    
-    return True  # Not critical, just warn
+
+    # Google OAuth no longer uses a token.pickle in the code tree. User tokens are
+    # stored encrypted in the database (emi.db, under EMI_DATA_DIR) and the OAuth
+    # client config lives in configs/oauth_accounts.json. Authorize Google accounts
+    # in-app via the Google OAuth flow (Settings -> Accounts) after first launch —
+    # nothing to place by hand here.
+    print("ℹ️  Google OAuth is configured in-app (Settings → Accounts) after launch;")
+    print("   tokens are stored encrypted in the database, not in code-tree files.")
+
+    return True  # informational only
 
 def create_directories():
     """Create necessary directories"""

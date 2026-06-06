@@ -104,6 +104,28 @@ def _resolve_port() -> int:
     return port
 
 
+def _resolve_host() -> str:
+    """Resolve the bind address from EMI_HOST (default 0.0.0.0).
+
+    The packaged launcher sets EMI_HOST=127.0.0.1 so the installed app is
+    loopback-only — the server is then unreachable from the LAN (a tester's
+    roommate/guest can't open the assistant, KG, or emails). Dev defaults to
+    0.0.0.0 so existing tunnel / cross-device workflows are unchanged; set
+    EMI_HOST=127.0.0.1 in dev too if you want loopback-only locally.
+
+    Minimal validation: a non-empty value with no whitespace; an obviously bad
+    value exits with a clear message rather than failing deep inside Werkzeug.
+    """
+    raw = (os.environ.get('EMI_HOST') or '').strip()
+    if not raw:
+        return '0.0.0.0'
+    if any(c.isspace() for c in raw):
+        print(f"\n❌ EMI_HOST={raw!r} contains whitespace — give a bare host/IP "
+              f"(e.g. 127.0.0.1 or 0.0.0.0).\n", file=sys.stderr)
+        sys.exit(1)
+    return raw
+
+
 def _port_is_already_serving(port: int) -> bool:
     """Probe-by-connect: True iff something on this machine accepts on
     127.0.0.1:port.
@@ -162,6 +184,7 @@ def _refuse_duplicate_start(port: int) -> None:
 
 if __name__ == '__main__':
     _port = _resolve_port()
+    _host = _resolve_host()
     _refuse_duplicate_start(_port)
 
     from app.create_app import create_app
@@ -171,7 +194,7 @@ if __name__ == '__main__':
     print(
         f"EmiAi starting  |  provider={_provider}  |  "
         f"timezone={os.environ.get('TIMEZONE', 'not set')}  |  "
-        f"port={_port}"
+        f"host={_host}  |  port={_port}"
     )
 
     app, socketio = create_app()
@@ -179,7 +202,7 @@ if __name__ == '__main__':
 
     socketio.run(
         app,
-        host='0.0.0.0',
+        host=_host,
         port=_port,
         debug=False,
         use_reloader=False,

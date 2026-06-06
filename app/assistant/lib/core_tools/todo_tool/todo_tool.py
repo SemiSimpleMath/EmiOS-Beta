@@ -560,7 +560,7 @@ class ToDoTool(BaseTool):
 def main():
 
     import app.assistant.tests.test_setup # This is just run for the import
-    # Initialize GoogleTasksService (shared OAuth: token.pickle under app/assistant/lib/credentials/)
+    # Initialize GoogleTasksService (shared OAuth via load_google_credentials: encrypted DB store)
     from app.assistant.lib.core_tools.todo_tool.utils.todo_functions import GoogleTasksService
     GoogleTasksService.get_service()
 
