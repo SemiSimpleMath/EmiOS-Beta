@@ -46,6 +46,26 @@ _INLINE_SURFACES = INLINE_APPROVAL_SURFACES
 _APPROVE_TOKENS = {"/approve", "approve", "yes", "y", "ok"}
 _DENY_TOKENS = {"/deny", "deny", "no", "n", "reject", "cancel"}
 
+# Tool approval is the owner's decision; every approval ticket is homed to the
+# owner's primary room so it surfaces in the owner's UI, never the requester's chat.
+_OWNER_ROOM_ID = "master_room"
+
+
+def _resolve_requester(scope_context: ScopeContext | None, blackboard: Any) -> str:
+    """Best-effort human-readable identity of who is asking, for the provenance
+    line on the approval. Prefers the room's contact name (the participant's
+    display name), then the scope actor_id, so the owner can tell a guest request
+    from their own."""
+    if blackboard is not None:
+        name = str(blackboard.get_state_value("room_contact_name") or "").strip()
+        if name:
+            return name
+    if isinstance(scope_context, ScopeContext):
+        actor = str(scope_context.actor_id or "").strip()
+        if actor:
+            return actor
+    return "unknown requester"
+
 
 def _resolve_surface(scope_context: ScopeContext | None, blackboard: Any) -> str:
     if isinstance(scope_context, ScopeContext):
@@ -118,15 +138,14 @@ def request(
         tool_name, surface, approval_reasons,
     )
 
-    if surface in _INLINE_SURFACES:
-        return _inline_approval(
-            tool_name=tool_name,
-            title=title,
-            scope_context=scope_context,
-            blackboard=blackboard,
-            timeout_seconds=timeout_seconds,
-        )
-
+    # Wall #3 — approval is the OWNER's decision, so it ALWAYS goes to the owner's
+    # ticket channel (globally visible in the master_room UI), never inline to the
+    # requesting surface. A non-owner room (a guest's telegram/slack) must never be
+    # asked to approve an action on the owner's resources — that was the breach: the
+    # prompt went to the guest's own chat (and failed "chat not found"). Any request
+    # that reaches this gate is, by construction, below the tool's no-approval floor
+    # (L2) — i.e. not the top-trust owner — so the owner ratifies it. (_inline_approval
+    # is kept dormant below for a possible future owner-on-their-own-surface path.)
     return _ticket_approval(
         tool_name=tool_name,
         title=title,
@@ -158,32 +177,45 @@ def _ticket_approval(
     if ticket_manager is None:
         raise RuntimeError("TicketManager not available for tool approval.")
 
-    room_id = _resolve_room_id(scope_context, blackboard)
-    if not room_id:
-        raise ValueError(
-            f"[ApprovalGateway] Cannot raise approval ticket for '{tool_name}': "
-            "no room_id available. Tool approval requires an active room session."
-        )
+    # Where the request actually came from (provenance only). The ticket itself is
+    # homed to the OWNER's room so it surfaces in the owner's UI regardless of origin —
+    # no "active room session" is required, because the owner is always the approver.
+    origin_room_id = _resolve_room_id(scope_context, blackboard)
+    requester = _resolve_requester(scope_context, blackboard)
+    authority = (
+        int(getattr(scope_context.approval, "authority_level", 0) or 0)
+        if isinstance(scope_context, ScopeContext) else 0
+    )
+    provenance = (
+        f"Requested by {requester} from {origin_room_id or 'an unknown room'} "
+        f"(authority {authority})."
+    )
+    owner_message = f"{provenance}\n\n{message}"
 
     now = datetime.now(timezone.utc)
     ticket = ticket_manager.create_ticket(
         ticket_type="tool_approval",
         suggestion_type="tool_approval",
         title=title,
-        message=message,
+        message=owner_message,
         action_type=f"tool_{tool_name}",
         action_params={
             "tool_name": tool_name,
             "requested_at": now.isoformat(),
             "approval_reasons": list(approval_reasons),
             "calling_agent": calling_agent,
+            "origin_room_id": origin_room_id,
+            "requested_by": requester,
+            "requester_authority": authority,
         },
         trigger_context={
             "source": f"approval_gateway:{tool_name}",
             "calling_agent": calling_agent,
             "tool_name": tool_name,
             "time": now.isoformat(),
-            "room_id": room_id,
+            "room_id": _OWNER_ROOM_ID,         # the OWNER decides -> home to master_room
+            "origin_room_id": origin_room_id,  # where the request came from (provenance)
+            "requested_by": requester,
         },
         valid_hours=1,
     )
