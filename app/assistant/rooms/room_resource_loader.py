@@ -28,6 +28,10 @@ from typing import Any, Dict, List, Tuple
 
 import frontmatter
 
+from app.assistant.utils.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 _SAFE_ROOM_ID_RE = re.compile(r"^[A-Za-z0-9._:/-]+$")
 _ROOM_FILE_NAME = "ROOM.md"
@@ -248,10 +252,28 @@ def _split_body_into_blackboard(body: str) -> Dict[str, str]:
     sections = _split_h1_sections(body)
     out: Dict[str, str] = {}
     header_lookup = {h: k for h, k in _HEADER_TO_BB_KEY}
+    last_key: str | None = None
     for header_text, content in sections:
         key = header_lookup.get(header_text.strip().lower())
         if key is None:
-            continue  # unknown header — silently ignored, not an error
+            # Unknown header. Do NOT silently drop authored prose — that hid
+            # whole personality/engagement-policy sections from room prompts.
+            # Fold it into the most-recent recognized section (so e.g. a
+            # '# Your personality/backstory' under '# Identity' lands in
+            # room_identity, '# Engagement Policy' after '# Conversation' lands
+            # in room_conversation). An unknown section before ANY recognized
+            # one has no anchor — warn and skip rather than guess.
+            if last_key is None:
+                logger.warning(
+                    "ROOM.md: section %r appears before any recognized section and "
+                    "was dropped. Place it under # Identity / # Conversation / # Safety / "
+                    "# Participant facts (or # Room context / # Room facts).",
+                    header_text.strip(),
+                )
+                continue
+            key = last_key
+        else:
+            last_key = key
         snippet = content.strip()
         if not snippet and not header_text.strip():
             continue
