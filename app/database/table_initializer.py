@@ -366,6 +366,53 @@ def _seed_kg_core_nodes():
         session.close()
 
 
+def _register_all_models() -> None:
+    """Import every ORM model module so the FULL schema is on Base.metadata BEFORE
+    any create_all() runs.
+
+    Fixes fresh-DB first boot: entity_card_v2 carries an FK -> kg_node_metadata, but
+    that KG table was only registered later (in the optional KG init, which runs
+    after the always-on entity-card init). On a brand-new DB the entity-card
+    create_all therefore raised NoReferencedTableError. The dev flow masked it
+    because setup.py imports the KG models before its create_all. Registering the
+    whole model set up front makes create_all's FK sort complete and forecloses any
+    other latent fresh-DB FK-ordering gap in one move. Mirrors setup.py's import set.
+    """
+    # Core
+    from app.assistant.database.db_handler import (  # noqa: F401
+        UnifiedLog2026, InfoDatabase, AgentActivityLog, RAGDatabase,
+        EventRepository, EmailCheckState, ExtractedFact, SwitchboardState,
+    )
+    from app.assistant.database.processed_entity_log import ProcessedEntityLog  # noqa: F401
+    from app.assistant.database.kg_node_verdict import KGNodeVerdict  # noqa: F401
+    from app.assistant.ticket_manager.ticket import Ticket  # noqa: F401
+    from app.models.llm_call_log import LLMCallLog  # noqa: F401
+    # Entity cards — FK -> kg_node_metadata, so the KG core below MUST register too.
+    from app.assistant.entity_management import entity_card_v2  # noqa: F401
+    # News
+    from app.assistant.news.news_schema import (  # noqa: F401
+        NewsCategory, NewsLabel, NewsScore, NewsArticle, NewsFeedback,
+    )
+    # Knowledge graph core — registers kg_node_metadata / kg_edge_metadata, the
+    # tables entity_card_v2's FK points at. This is the specific fix.
+    from app.assistant.kg.db.knowledge_graph_db_sqlite import (  # noqa: F401
+        Node, Edge, MessageSourceMapping,
+    )
+    from app.assistant.kg_core.taxonomy.models import (  # noqa: F401
+        Taxonomy, NodeTaxonomyLink, TaxonomySuggestion,
+        TaxonomySuggestions, NodeTaxonomyReviewQueue,
+    )
+    # KG pipeline + evidence-trail + maintenance/log modules (mirror setup.py).
+    from app.assistant.database.kg_chat_projection import (  # noqa: F401
+        KGNodeEvidence, KGEdgeEvidence,
+    )
+    from app.assistant.database import claim_proposals  # noqa: F401
+    from app.assistant.database import kg_maintenance_finding  # noqa: F401
+    from app.assistant.database import kg_merge_log  # noqa: F401
+    from app.assistant.database import kg_pipeline_models  # noqa: F401
+    from app.assistant.database import kg_revision_log  # noqa: F401
+
+
 def initialize_all_tables():
     """
     Initialize ALL tables
@@ -377,6 +424,12 @@ def initialize_all_tables():
     logger.info("=" * 60)
     logger.info("DATABASE INITIALIZATION")
     logger.info("=" * 60)
+
+    # Register the ENTIRE model set on Base.metadata before any create_all, so the
+    # FK sort is complete on a brand-new DB (fresh-install first boot). Without this,
+    # the always-on entity-card create_all fails on its FK to the not-yet-registered
+    # kg_node_metadata table. See _register_all_models.
+    _register_all_models()
 
     # Capture freshness BEFORE create_all. On a brand-new DB, create_all builds
     # every table at the LATEST schema, so historical "add column" migrations must

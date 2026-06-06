@@ -193,7 +193,6 @@ try:
     from app.assistant.database import kg_merge_log  # noqa: F401
     from app.assistant.database import kg_pipeline_models  # noqa: F401
     from app.assistant.database import kg_revision_log  # noqa: F401
-    from app.assistant.database import entity_card_maintenance_finding  # noqa: F401
     from app.assistant.database import processed_entity_log  # noqa: F401
     Base.metadata.create_all(engine, checkfirst=True)
     print("   Knowledge Graph tables created.")
