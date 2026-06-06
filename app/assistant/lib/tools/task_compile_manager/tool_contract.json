@@ -29,6 +29,8 @@
   ],
   "arguments_prompt": "Arguments to task_compile_manager are:\n- task: required task text to compile.\n- information: optional supporting context and constraints.",
   "metadata": {
+    "min_authority": 95,
+    "approval_min_authority": 95,
     "domain": "orchestration",
     "actions": [
       "compile",

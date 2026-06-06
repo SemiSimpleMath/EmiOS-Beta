@@ -4,6 +4,7 @@ import json
 import re
 from typing import Any
 
+from app.assistant.lib.tool_execution.tool_access_control import resolve_tool_min_authority
 from app.assistant.manager_runtime.services.tool_scope_state_manager import ToolScopeStateManager
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import Message, ScopeContext
@@ -439,6 +440,18 @@ class ToolScopeService:
             # blocked_tools at narrowing time, so the allow_set/block_set checks above
             # already reflect it (and the subtree-grant). This is the fix for the
             # divergence where per_manager bound visibility but NOT execution.
+            #
+            # L1 authority floor: hide any tool whose min_authority exceeds the
+            # scope's authority. This mirrors the execution gate (check_tool_access),
+            # so visibility stays a strict subset of what the scope can actually
+            # call — a below-floor tool is never shown to the planner.
+            authority_level = int(getattr(scope_context.approval, "authority_level", 0) or 0)
+            kept: list[str] = []
+            for t in result:
+                floor = resolve_tool_min_authority(t, all_tools_cfg.get(t) if isinstance(all_tools_cfg, dict) else None)
+                if floor is None or authority_level >= floor:
+                    kept.append(t)
+            result = kept
             return result
 
         # Pre-narrower filter: keeps narrower from wasting tokens on blocked tools.

@@ -23,6 +23,8 @@
   ],
   "arguments_prompt": "Arguments for capture_camera_snapshot:\n- camera_id (required): Ring camera id (e.g. '158991560' for Downstairs).",
   "metadata": {
+    "min_authority": 95,
+    "approval_min_authority": 95,
     "domain": "smart_home",
     "actions": ["read"],
     "selectors": ["camera"],

@@ -47,6 +47,8 @@
   ],
   "arguments_prompt": "The node_id to find edges for, plus optional filters like relationship type, text search, direction, and date range.",
   "metadata": {
+    "min_authority": 95,
+    "approval_min_authority": 95,
     "domain": "knowledge_graph",
     "actions": [
       "operate"

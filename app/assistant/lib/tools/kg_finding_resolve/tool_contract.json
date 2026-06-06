@@ -41,6 +41,8 @@
   ],
   "arguments_prompt": "Arguments for kg_finding_resolve:\n- finding_id (required)\n- action (optional): the op that was applied\n- notes (optional): any details\n- reason (required)",
   "metadata": {
+    "min_authority": 95,
+    "approval_min_authority": 95,
     "domain": "knowledge_graph",
     "actions": [
       "resolve"

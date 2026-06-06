@@ -29,6 +29,8 @@
   ],
   "arguments_prompt": "Arguments for kg_query:\n- sql (required): one SELECT or WITH ... SELECT statement\n- max_rows (optional): default 200, max 5000",
   "metadata": {
+    "min_authority": 95,
+    "approval_min_authority": 95,
     "domain": "knowledge_graph",
     "actions": [
       "read",

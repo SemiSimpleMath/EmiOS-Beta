@@ -35,6 +35,8 @@
   ],
   "arguments_prompt": "Arguments for kg_describe_node tool:\n\n- node_ids (required): List of node UUIDs to describe in detail\n- max_edges (optional): Maximum number of edges to return per node (default: 5)\n- include_raw (optional): Whether to return raw JSON data instead of formatted text (default: false)\n\nThis tool provides comprehensive node information for multiple nodes at once, including all properties, attributes, and connections. Returns a sample of edges for better performance.",
   "metadata": {
+    "min_authority": 95,
+    "approval_min_authority": 95,
     "domain": "knowledge_graph",
     "actions": [
       "operate"

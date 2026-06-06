@@ -19,6 +19,36 @@ from app.assistant.utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 
+def resolve_tool_min_authority(tool_name: str, tool_config: dict | Any | None) -> int | None:
+    """The L1 'see + use' authority floor for a tool.
+
+    Returns the integer floor, or ``None`` when the tool has no floor — i.e.
+    it carries no tool_contract at all (MCP/dynamic/core tools), in which case
+    the allowed_tools ceiling is the only gate.
+
+    A tool that DOES carry a contract but omits ``metadata.min_authority`` fails
+    CLOSED at 99: a forgotten floor must never silently become wide-open
+    (matches the project's fail-loud stance). After the Phase-2 migration every
+    local contract declares it, so 99 is a guard for future contracts, not a
+    value any current tool relies on.
+    """
+    contract = None
+    if isinstance(tool_config, dict) and isinstance(tool_config.get("tool_contract"), dict):
+        contract = tool_config["tool_contract"]
+    if contract is None:
+        return None  # no contract -> ceiling-gated only (mcp/core/dynamic)
+    metadata = contract.get("metadata") if isinstance(contract.get("metadata"), dict) else {}
+    raw = metadata.get("min_authority")
+    if raw is None:
+        return 99  # contract present but floor omitted -> fail closed
+    if isinstance(raw, bool):
+        raise ValueError(f"[{tool_name}] tool_contract.metadata.min_authority must be an integer 0-100.")
+    floor = int(raw)
+    if floor < 0 or floor > 100:
+        raise ValueError(f"[{tool_name}] tool_contract.metadata.min_authority must be between 0 and 100.")
+    return floor
+
+
 def check_tool_access(
     *,
     tool_name: str,
@@ -27,6 +57,7 @@ def check_tool_access(
     task_allowed_tools: list | None,
     task_except_tools: list | None,
     caller_name: str,
+    tool_min_authority: int | None = None,
 ) -> tuple[bool, str]:
     """Check whether *tool_name* is permitted.
 
@@ -51,6 +82,21 @@ def check_tool_access(
             return False, f"Tool '{tool_name}' is outside scope_contract allowed_tools."
         if tool_name in set(scope_blocked):
             return False, f"Tool '{tool_name}' is blocked by scope_contract."
+
+        # --- L1 authority floor (min_authority): see+use gate ---
+        # A tool is reachable only when the scope's authority clears the tool's
+        # floor. This is the wall the Telegram breach lacked: a 40-authority
+        # guest could reach personal_admin_manager (floor 90) because nothing
+        # checked authority at the access layer. authority >= 100 (admin) clears
+        # every floor naturally. None = tool has no floor (ceiling-gated only).
+        if tool_min_authority is not None:
+            authority_level = int(getattr(scope_context.approval, "authority_level", 0) or 0)
+            if authority_level < int(tool_min_authority):
+                return (
+                    False,
+                    f"Tool '{tool_name}' requires authority {int(tool_min_authority)}; "
+                    f"this scope has {authority_level}.",
+                )
 
     # --- Layer 2: Task-level restrictions ---
     allowset = None

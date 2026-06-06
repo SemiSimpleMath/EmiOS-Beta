@@ -44,6 +44,8 @@
   ],
   "arguments_prompt": "",
   "metadata": {
+    "min_authority": 90,
+    "approval_min_authority": 90,
     "domain": "doc",
     "actions": [
       "create"

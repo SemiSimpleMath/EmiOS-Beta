@@ -29,6 +29,8 @@
   ],
   "arguments_prompt": "The 'search_web' is a web search tool arguments have form:\nquery: str\ntask: str\n\nquery is what you would type into a search engine eg. sushi hours\nSearches with 2-3 keywords are best. Start with this. If it does not work, then try longer search queries.\ntask: is context for the agent that looks through search results to pick the most relevant ones.  You can give as much description here\nas need be.  What is the goal of the search?",
   "metadata": {
+    "min_authority": 30,
+    "approval_min_authority": 30,
     "domain": "web",
     "actions": [
       "search",

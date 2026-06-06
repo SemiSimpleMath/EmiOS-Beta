@@ -53,6 +53,8 @@
   ],
   "arguments_prompt": "Create a one-time reminder event.\n\nRequired fields:\n- title: short name for the reminder\n- start_date: when to fire, format YYYY-MM-DD HH:MM:SS (local time)\n- payload_message: what to remind about\n\nDefaults (omit unless you have a reason to change):\n- task_type: \"reminder\"\n- importance: 3\n- sound: \"default\"\n\nExample:\ntitle: Laundry reminder\nstart_date: 2024-11-05 14:30:00\npayload_message: Remind Bob to pick up laundry\ntask_type: reminder\nimportance: 3\nsound: default",
   "metadata": {
+    "min_authority": 90,
+    "approval_min_authority": 90,
     "domain": "reminder",
     "actions": [
       "create",

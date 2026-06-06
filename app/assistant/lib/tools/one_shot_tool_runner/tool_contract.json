@@ -29,6 +29,8 @@
   ],
   "arguments_prompt": "one_shot_tool_runner arguments:\ntask: the user request\ninformation: any extra context\nProvide the task and any additional information needed for the one_shot_tool_runner.",
   "metadata": {
+    "min_authority": 95,
+    "approval_min_authority": 95,
     "domain": "orchestration",
     "actions": [
       "operate"

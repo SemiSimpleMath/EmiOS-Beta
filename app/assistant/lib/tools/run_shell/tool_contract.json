@@ -29,6 +29,7 @@
   ],
   "arguments_prompt": "Arguments for run_shell:\n- command (required): single shell command, e.g. `ls -la ~/Documents`. No pipes, no redirects, no chaining.\n- reason (required): one-line intent.\n\nExample:\n{\n  \"command\": \"ls -la ~/Documents\",\n  \"reason\": \"User asked for the file listing of their Documents folder.\"\n}",
   "metadata": {
+    "min_authority": 99,
     "domain": "filesystem",
     "actions": [
       "read",

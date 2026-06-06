@@ -47,6 +47,8 @@
   ],
   "arguments_prompt": "Arguments for kg_rename_label:\n- node_id (required)\n- new_label (required)\n- reason (required)\n- dry_run (optional): preview only\n- finding_id (optional)",
   "metadata": {
+    "min_authority": 95,
+    "approval_min_authority": 95,
     "domain": "knowledge_graph",
     "actions": [
       "mutate",

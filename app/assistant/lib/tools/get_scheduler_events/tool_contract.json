@@ -29,6 +29,8 @@
   ],
   "arguments_prompt": "- **Arguments**:\n  - `start_date` (str, optional): Fetching reminders in date range.  Use ISO 8601 format (e.g., \"2024-12-31T17:00:00\").\n  - `end_date` (str, optional): Fetching reminders in date range.  Use ISO 8601 format (e.g., \"2024-12-31T17:00:00\").\n\n  Typically use a range of one week (One week starting from today).  Larger ranges than a week are not advisable. If you have a very good reason you can try a larger range.\n  If you only need reminders for one day then one day range is best.",
   "metadata": {
+    "min_authority": 90,
+    "approval_min_authority": 90,
     "domain": "reminder",
     "actions": [
       "read",

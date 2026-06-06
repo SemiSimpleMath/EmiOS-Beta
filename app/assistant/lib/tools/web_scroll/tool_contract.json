@@ -52,6 +52,8 @@
   ],
   "arguments_prompt": "Fill arguments for `web_scroll`.\n\nReturn ONLY a JSON object with:\n- direction (\"down\" | \"up\", default \"down\")\n- amount (integer > 0, default 420)\n- steps (integer > 0, default 1)\n- settle_ms (integer >= 0, default 120)\n- capture_snapshot (boolean, default true)\n\nExample:\n{\"direction\":\"down\",\"amount\":420,\"steps\":2,\"settle_ms\":120,\"capture_snapshot\":true}",
   "metadata": {
+    "min_authority": 70,
+    "approval_min_authority": 70,
     "domain": "browser",
     "actions": [
       "scroll"

@@ -34,6 +34,8 @@
   ],
   "arguments_prompt": "Use this tool to capture one frame from a configured LAN RTSP camera.\n\nRequired:\n- `camera_alias`: the alias (case-insensitive) of the configured device. The\n  planner-facing description for this tool lists the currently-configured\n  aliases. Do NOT invent aliases — they must match what's in\n  `configs/smart_home_tools.json[local_cameras][devices]`.\n\nOptional:\n- `timeout_seconds`: integer, default 15. Bumping helps slow networks; lowering\n  fails fast when the camera is offline.\n\nExamples:\n- `{\"camera_alias\": \"Bedroom\"}`\n- `{\"camera_alias\": \"Front Hall\", \"timeout_seconds\": 30}`",
   "metadata": {
+    "min_authority": 95,
+    "approval_min_authority": 95,
     "domain": "vision",
     "actions": [
       "capture",

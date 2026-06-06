@@ -77,6 +77,8 @@
   ],
   "arguments_prompt": "Arguments for kg_find_node tool:\n\n- text (required): The search text to find nodes\n- threshold (required): Similarity threshold (0.0 to 1.0)\n- k (required): Maximum number of nodes to return\n- node_id (required): UUID of a single node to restrict search to its neighborhood (use empty string \"\" for no restriction)\n- edges_k (required): Maximum number of edges to return per node\n- node_types (required): List of node types to search for (use empty list [] for no filter)\n- start_date (required): Start date filter (ISO format, use empty string \"\" for no filter)\n- end_date (required): End date filter (ISO format, use empty string \"\" for no filter)\n- max_hops (required): Maximum relationship hops from node_id to include (requires node_id to be set, use 0 for no limit)\n- taxonomy_paths (optional): List of taxonomy paths to filter by (e.g., 'entity > person', 'state > educational_status'). Returns union of nodes from all specified paths. Use empty list [] for no filter.\n\nUse empty strings or empty lists for parameters you don't want to filter by.",
   "metadata": {
+    "min_authority": 95,
+    "approval_min_authority": 95,
     "domain": "knowledge_graph",
     "actions": [
       "operate"

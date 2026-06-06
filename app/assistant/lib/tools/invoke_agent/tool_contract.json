@@ -34,6 +34,8 @@
   ],
   "arguments_prompt": "Fill arguments for `invoke_agent`.\n\nReturn ONLY a JSON object with:\n- agent_name (string, required)\n- agent_input (object, optional)\n\nExample:\n{\"agent_name\":\"sensei::analyst\",\"agent_input\":{\"task\":\"Analyze this trace\",\"information\":\"...\"}}",
   "metadata": {
+    "min_authority": 95,
+    "approval_min_authority": 95,
     "domain": "system",
     "actions": [
       "operate"

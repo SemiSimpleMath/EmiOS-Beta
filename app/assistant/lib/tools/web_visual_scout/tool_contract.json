@@ -29,6 +29,8 @@
   ],
   "arguments_prompt": "Fill arguments for `web_visual_scout`:\n\n- question (optional): a short question to focus the prose scout (e.g., \"Describe the restaurant menu UI and any carousels\").\n- full_page (optional): true only if you need below-the-fold elements; default false.\n\nReturn JSON like:\n{\n  \"tool_name\": \"web_visual_scout\",\n  \"arguments\": {\n    \"question\": \"Describe the page and any blockers. Do NOT give coordinates.\",\n    \"full_page\": false\n  }\n}",
   "metadata": {
+    "min_authority": 70,
+    "approval_min_authority": 70,
     "domain": "browser",
     "actions": [
       "describe",

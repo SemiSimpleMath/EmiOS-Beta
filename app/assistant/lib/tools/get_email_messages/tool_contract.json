@@ -24,6 +24,8 @@
   ],
   "arguments_prompt": "{\n  \"query\": \"from:user@example.com newer_than:14d\",\n  \"max_results\": 50\n}",
   "metadata": {
+    "min_authority": 90,
+    "approval_min_authority": 90,
     "domain": "email",
     "actions": [
       "search",

@@ -58,6 +58,8 @@
   ],
   "arguments_prompt": "Fill arguments for `web_fill_ref`.\n\nReturn ONLY a JSON object with:\n- ref (string, required)\n- text (string, required)\n- submit (boolean, default true)\n- clear_first (boolean, default true)\n- slowly (boolean, default false)\n- capture_snapshot (boolean, default true)\n\nExample:\n{\"ref\":\"e42\",\"text\":\"cheeseburger\",\"submit\":true,\"clear_first\":true,\"capture_snapshot\":true}",
   "metadata": {
+    "min_authority": 70,
+    "approval_min_authority": 70,
     "domain": "browser",
     "actions": [
       "fill",

@@ -58,6 +58,8 @@
   ],
   "arguments_prompt": "{\"tool_name\": \"mcp::npm/server-google-maps::maps_distance_matrix\", \"install_source\": \"agent\", \"timeout_s\": 15.0}",
   "metadata": {
+    "min_authority": 99,
+    "approval_min_authority": 99,
     "domain": "tooling",
     "actions": [
       "install"

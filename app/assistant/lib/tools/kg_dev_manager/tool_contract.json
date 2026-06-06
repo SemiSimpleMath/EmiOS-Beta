@@ -29,6 +29,8 @@
   ],
   "arguments_prompt": "kg_dev_manager arguments:\ntask: the fully disambiguated investigative question.\ninformation: supporting context (prior chat, evidence, constraints).",
   "metadata": {
+    "min_authority": 90,
+    "approval_min_authority": 90,
     "domain": "knowledge_graph",
     "actions": [
       "query",

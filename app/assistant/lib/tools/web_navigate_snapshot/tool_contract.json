@@ -28,6 +28,8 @@
   ],
   "arguments_prompt": "Return ONLY {\"url\":\"https://...\"}",
   "metadata": {
+    "min_authority": 70,
+    "approval_min_authority": 70,
     "domain": "browser",
     "actions": [
       "navigate"

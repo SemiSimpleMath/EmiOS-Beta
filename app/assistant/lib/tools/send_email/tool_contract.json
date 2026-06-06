@@ -48,6 +48,7 @@
   ],
   "arguments_prompt": "Arguments for sending an email:\nto: str\nsubject: Optional[str]\nbody: Optional[str]\npod_ids: Optional[List[str]]  # Pod URIs to ATTACH as files (file-backed pods → stored file; body-only pods → rendered .eml/.txt). Tool reads body, agent doesn't.\ninline_pod_ids: Optional[List[str]]  # Pod URIs to PASTE INLINE into the email body — email pods get a Gmail-style `----- Forwarded message -----` block; other kinds get a `---` separator. Tool reads body, agent doesn't. Pick pod_ids for attachments, inline_pod_ids for inline forwarding. Don't pod_fetch then handcraft `body` unless you actually need to edit/summarize the content.",
   "metadata": {
+    "min_authority": 90,
     "domain": "email",
     "actions": [
       "send",

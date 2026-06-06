@@ -23,6 +23,8 @@
   ],
   "arguments_prompt": "## cancel_event_tree\n\nCancel an event and all its children in the hierarchy.\n\n### Arguments:\n\n- **source** (required): Event reference in format \"source_system:source_id\"\n  - This event and ALL its descendants will be marked as cancelled\n\n### Example:\n\nUser says: \"Cancel my dentist appointment tomorrow\"\n\n1. First find the calendar event ID\n2. Get its hierarchy to see what's linked\n3. Cancel the tree:\n\n```json\n{\n  \"tool_name\": \"cancel_event_tree\",\n  \"arguments\": {\n    \"source\": \"google_calendar:abc123xyz\"\n  }\n}\n```\n\n4. Then use delete_calendar_event, delete_scheduler_event etc. to actually remove them\n\n### Important:\nThis tool marks events as cancelled in the event graph. You still need to actually \ndelete them from Google Calendar, Scheduler, etc. using the respective delete tools.",
   "metadata": {
+    "min_authority": 90,
+    "approval_min_authority": 90,
     "domain": "scheduler",
     "actions": [
       "delete"

@@ -34,6 +34,8 @@
   ],
   "arguments_prompt": "Return ONLY {\"ref\":\"e10\",\"element\":\"...optional...\"}",
   "metadata": {
+    "min_authority": 70,
+    "approval_min_authority": 70,
     "domain": "browser",
     "actions": [
       "click"

@@ -29,6 +29,7 @@
   ],
   "arguments_prompt": "Arguments for oauth_token_refresh:\npod_id: str          # the auth.oauth pod URI\nforce: bool = False  # refresh even if not near expiry",
   "metadata": {
+    "min_authority": 70,
     "domain": "web",
     "actions": ["refresh", "oauth"],
     "selectors": ["oauth", "token", "refresh"],

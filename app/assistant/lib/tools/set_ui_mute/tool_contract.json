@@ -23,6 +23,8 @@
   ],
   "arguments_prompt": "set_ui_mute arguments:\naction: one of mute, unmute, toggle",
   "metadata": {
+    "min_authority": 30,
+    "approval_min_authority": 30,
     "domain": "user_interaction",
     "actions": [
       "operate"

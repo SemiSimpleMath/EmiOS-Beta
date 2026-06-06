@@ -29,6 +29,8 @@
   ],
   "arguments_prompt": "{\"image_path\": \"...\", \"question\": \"Describe this image concisely.\"}",
   "metadata": {
+    "min_authority": 95,
+    "approval_min_authority": 95,
     "domain": "vision",
     "actions": [
       "operate"

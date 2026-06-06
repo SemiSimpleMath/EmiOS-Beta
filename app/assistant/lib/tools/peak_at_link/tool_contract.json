@@ -35,6 +35,8 @@
   ],
   "arguments_prompt": "{\n  \"url\": \"https://example.com\",\n  \"max_lines\": 8,\n  \"max_chars_per_line\": 220\n}",
   "metadata": {
+    "min_authority": 30,
+    "approval_min_authority": 30,
     "domain": "web",
     "actions": [
       "peek",

@@ -35,6 +35,8 @@
   ],
   "arguments_prompt": "Arguments are:\nstart_date: ISO 8601 datetime (e.g. \"2026-03-03T06:00:00+00:00\"). Defaults to 12 hours ago.\nend_date: Optional ISO 8601 datetime. Defaults to now.\nunseen: true/false \u2014 restrict to unread mail (default false).\n\nBehavior notes:\n- Only inbox mail is considered; bulk/sent/spam folders are excluded.\n- Each message is scored by an LLM (0-10 importance). Messages below 5 are not returned.\n- Results are ephemeral \u2014 nothing is stored in the repository.\n- The window is capped at 7 days maximum lookback.\n- For raw query-driven search, use get_email_messages instead.\n- For full thread context, use get_email_thread instead.",
   "metadata": {
+    "min_authority": 90,
+    "approval_min_authority": 90,
     "domain": "email",
     "actions": [
       "triage",

@@ -38,6 +38,8 @@
   ],
   "arguments_prompt": "Fill arguments for `web_get_content`.\n\nReturn ONLY a JSON object with:\n- max_chars (number, optional, default 15000)\n\nExample:\n{\"max_chars\": 15000}",
   "metadata": {
+    "min_authority": 70,
+    "approval_min_authority": 70,
     "domain": "browser",
     "actions": [
       "read",

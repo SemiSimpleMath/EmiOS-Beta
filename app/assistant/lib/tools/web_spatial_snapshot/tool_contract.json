@@ -52,6 +52,8 @@
   ],
   "arguments_prompt": "Fill arguments for `web_spatial_snapshot`:\n\n- question (optional): short bias prompt, e.g. \"close the cookie modal\", \"find Add to Cart\".\n- radius_px (optional): pixel radius for nearby text; default 160.\n- max_anchors (optional): cap interactive anchors returned; default 60.\n- per_anchor_nearby (optional): nearby text snippets per anchor; default 4.\n\nReturn JSON like:\n{\n  \"tool_name\": \"web_spatial_snapshot\",\n  \"arguments\": {\n    \"question\": \"Find the Add to Cart button for the cheeseburger item\",\n    \"radius_px\": 160,\n    \"max_anchors\": 60,\n    \"per_anchor_nearby\": 4,\n    \"max_text_candidates\": 900\n  }\n}",
   "metadata": {
+    "min_authority": 70,
+    "approval_min_authority": 70,
     "domain": "browser",
     "actions": [
       "describe",

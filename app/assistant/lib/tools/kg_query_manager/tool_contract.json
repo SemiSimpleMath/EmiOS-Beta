@@ -29,6 +29,8 @@
   ],
   "arguments_prompt": "Arguments are\ntask: The task we are asking of the knowledge graph query agents. This is in prose. They will interpret your task and look up information required and give you the answer.\ninformation: Any extra information provided to us that maybe helpful.",
   "metadata": {
+    "min_authority": 95,
+    "approval_min_authority": 95,
     "domain": "knowledge_graph",
     "actions": [
       "orchestrate"

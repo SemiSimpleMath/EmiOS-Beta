@@ -29,6 +29,8 @@
   ],
   "arguments_prompt": "EmiTeam arguments are\ntask: The problem that we are trying to solve.\ninformation: Any extra information provided to us that maybe helpful.",
   "metadata": {
+    "min_authority": 30,
+    "approval_min_authority": 30,
     "domain": "orchestration",
     "actions": [
       "orchestrate"

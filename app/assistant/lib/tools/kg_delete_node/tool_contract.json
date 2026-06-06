@@ -29,6 +29,8 @@
   ],
   "arguments_prompt": "Arguments for kg_delete_node:\n\nnode_id (required): The UUID of the node you want to delete\nconfirm (optional): Set to true to bypass safety checks\n\nExample (simple):\n{\n    \"node_id\": \"abc-123-def-456\"\n}\n\nExample (with confirmation):\n{\n    \"node_id\": \"abc-123-def-456\",\n    \"confirm\": true\n}",
   "metadata": {
+    "min_authority": 95,
+    "approval_min_authority": 95,
     "domain": "knowledge_graph",
     "actions": [
       "operate"

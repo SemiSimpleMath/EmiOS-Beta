@@ -73,6 +73,8 @@
   ],
   "arguments_prompt": "DIFF WORKFLOW:\n1. Call get_google_doc to read the current document text.\n2. Identify the exact block of text to replace (find). Include enough surrounding lines\n   (typically 2-4 lines before and after the change point) so the block is unique.\n3. Build replace_with: the full replacement \u2014 keep any existing lines you want plus add new content.\n4. Call edit_google_doc with operation=diff.\n\nError handling:\n- NO_MATCH: your find block doesn't match. Re-read the document and correct it.\n- AMBIGUOUS: find matched multiple locations. The error includes context excerpts around\n  each site. Extend the find block using those excerpts until it is unique, then retry.\n\nArguments:\n  document_id (required): Google Docs ID.\n  operation (required): diff | append.\n\n  For diff:\n    find (required): exact text to locate (include surrounding context lines for uniqueness).\n    replace_with: replacement text (empty string = delete the found block).\n\n  For append:\n    text (required): text to add at the end.\n    ensure_newline: true/false (default true).\n\n  account_id: optional (e.g. \"google_user_primary\").\n\nEXAMPLE \u2014 adding items to a Ralphs section:\n  find: \"- milk\\n- eggs\"\n  replace_with: \"- milk\\n- eggs\\n- butter\\n- bread\"\n  (The find block anchors to the existing end of the list; replace_with keeps existing items and appends new ones.)",
   "metadata": {
+    "min_authority": 90,
+    "approval_min_authority": 90,
     "domain": "doc",
     "actions": [
       "edit",

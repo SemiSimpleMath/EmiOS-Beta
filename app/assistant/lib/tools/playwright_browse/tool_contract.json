@@ -59,6 +59,8 @@
   ],
   "arguments_prompt": "Provide arguments for the `playwright_browse` tool.\n\nArguments:\n- url (required): page to open\n- query (optional): what to extract from the page (leave empty to return full page text)\n- wait_until (optional): Playwright navigation wait strategy (default: \"domcontentloaded\")\n- timeout_ms (optional): navigation timeout in ms (default: 30000)\n- post_wait_ms (optional): extra wait after navigation in ms (default: 0)\n- max_chars (optional): truncate output to this many chars (default: 50000)\n- dry_run (optional): if true, do NOT launch a browser (default: false)\n\nExample:\n{\"url\": \"https://example.com\", \"query\": \"Find hours and phone number\", \"dry_run\": true}",
   "metadata": {
+    "min_authority": 70,
+    "approval_min_authority": 70,
     "domain": "browser",
     "actions": [
       "browse",

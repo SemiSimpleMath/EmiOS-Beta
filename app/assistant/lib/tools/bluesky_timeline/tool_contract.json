@@ -23,6 +23,8 @@
   ],
   "arguments_prompt": "Fetch the Bluesky home timeline.\n\nArguments schema:\n{{ user_context }}",
   "metadata": {
+    "min_authority": 70,
+    "approval_min_authority": 70,
     "domain": "social",
     "actions": ["read", "fetch", "list"],
     "selectors": ["bluesky", "bsky", "atproto", "social", "timeline", "feed"],

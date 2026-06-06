@@ -35,6 +35,8 @@
   ],
   "arguments_prompt": "Fill arguments for `web_page_coords`:\n\n- question (optional): a short question to help vision focus (e.g., \"Find and close cookie modal\").\n- strict (recommended in dev): true to FAIL LOUD if marks/vision output is unexpected (default true).\n\nReturn JSON like:\n{\n  \"tool_name\": \"web_page_coords\",\n  \"arguments\": {\n    \"question\": \"Find and close the cookie modal\",\n    \"strict\": true\n  }\n}",
   "metadata": {
+    "min_authority": 70,
+    "approval_min_authority": 70,
     "domain": "browser",
     "actions": [
       "describe",

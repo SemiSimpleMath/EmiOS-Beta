@@ -29,6 +29,8 @@
   ],
   "arguments_prompt": "Arguments to devices_manager:\n- task: required description of the smart-home action(s) to perform.\n- information: optional supporting context (device IDs, constraints, safety preferences).",
   "metadata": {
+    "min_authority": 95,
+    "approval_min_authority": 95,
     "domain": "orchestration",
     "actions": [
       "orchestrate",

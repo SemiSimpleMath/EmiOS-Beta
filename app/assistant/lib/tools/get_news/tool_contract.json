@@ -22,6 +22,8 @@
     }
   ],
   "metadata": {
+    "min_authority": 10,
+    "approval_min_authority": 10,
     "domain": "news",
     "actions": [
       "read",

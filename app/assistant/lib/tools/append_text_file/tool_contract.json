@@ -35,6 +35,8 @@
   ],
   "arguments_prompt": "- file_path: str\n- content: str\n- ensure_newline: bool",
   "metadata": {
+    "min_authority": 95,
+    "approval_min_authority": 95,
     "domain": "files",
     "actions": [
       "write"

@@ -113,6 +113,8 @@
   ],
   "arguments_prompt": "Arguments for kg_create_state_node:\n- owner_node_id (required): the entity that owns the state\n- predicate (required): edge relationship_type, e.g. 'has_residence'\n- label (required): new node label\n- node_type (optional): 'State' (default) or 'Event'\n- category, description, original_sentence (optional)\n- start_date, end_date (optional, ISO dates)\n- start_date_confidence, end_date_confidence (optional)\n- sentence (optional): sentence on the owner→state edge\n- attributes (optional): extra JSON attrs\n- reason (required): why; goes into kg_revision_log\n- dry_run (optional): preview only\n- finding_id (optional): source finding id",
   "metadata": {
+    "min_authority": 95,
+    "approval_min_authority": 95,
     "domain": "knowledge_graph",
     "actions": [
       "mutate",

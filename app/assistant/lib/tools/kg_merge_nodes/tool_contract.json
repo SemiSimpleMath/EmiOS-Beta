@@ -47,6 +47,8 @@
   ],
   "arguments_prompt": "Arguments for kg_merge_nodes:\n- keep_id (required): surviving node id\n- fold_id (required): node to fold + delete\n- reason (required): why this merge is correct\n- dry_run (optional): preview only\n- finding_id (optional): source finding row id",
   "metadata": {
+    "min_authority": 95,
+    "approval_min_authority": 95,
     "domain": "knowledge_graph",
     "actions": [
       "mutate",

@@ -35,6 +35,8 @@
   ],
   "arguments_prompt": "Arguments for refresh_wiki_page:\n- entity_label (required): the entity whose page needs refreshing\n- run_critic (optional, default true): run the wiki consistency critic after\n- reason (optional)",
   "metadata": {
+    "min_authority": 95,
+    "approval_min_authority": 95,
     "domain": "knowledge_graph",
     "actions": ["mutate", "regenerate"],
     "selectors": ["wiki_page"],

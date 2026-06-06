@@ -83,6 +83,8 @@
   ],
   "arguments_prompt": "Arguments to this tool are the event ID and the fields you want to update. The supported fields are:\n\nsummary: The event's title.\ndescription: A description of the event.\nstart: The start time of the event\nend: The end time of the event\nrecurrence: A list specifying recurrence rules (e.g., [\"RRULE:FREQ=WEEKLY;COUNT=10\"]).\nlocation: The location of the event.\nemail: The organizer's email address.\nscope: For recurring events only. Use \"single\" to update just this one occurrence, or \"all\" to update the entire series. If not specified, defaults to \"single\" for recurring event instances and \"all\" for non-recurring events.\nflexibility: How moveable this event is. \"fixed\", \"flexible\", \"soft_block\", or \"aspirational\".\nblocking: True blocks time on calendar, False shows as available.\n\nExamples:\n- \"Move tomorrow's standup to 10am\" → scope=\"single\" (only that occurrence changes)\n- \"Change the weekly standup time to 10am\" → scope=\"all\" (all occurrences change)\n- \"Mark my gym session as flexible\" → flexibility=\"flexible\"",
   "metadata": {
+    "min_authority": 90,
+    "approval_min_authority": 90,
     "domain": "calendar",
     "actions": [
       "update"

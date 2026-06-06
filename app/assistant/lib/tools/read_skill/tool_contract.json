@@ -23,6 +23,8 @@
   ],
   "arguments_prompt": "Arguments for read_skill:\n- names (required): list of skill names from discover_skills. Cap 5.\nExample: {\"names\": [\"image-resize\"]}",
   "metadata": {
+    "min_authority": 10,
+    "approval_min_authority": 10,
     "domain": "tooling",
     "actions": ["read"],
     "selectors": ["skill"],

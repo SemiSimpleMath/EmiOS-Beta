@@ -4,7 +4,10 @@ import uuid
 from app.assistant.lib.core_tools.tool_error_protocol import make_tool_error
 from app.assistant.utils.pydantic_classes import Message, ScopeContext, ToolResult, ToolMessage
 from app.assistant.control_nodes.control_node import ControlNode
-from app.assistant.lib.tool_execution.tool_access_control import check_tool_access
+from app.assistant.lib.tool_execution.tool_access_control import (
+    check_tool_access,
+    resolve_tool_min_authority,
+)
 from app.assistant.lib.tool_execution.tool_approval import (
     compute_approval_reasons,
     request_approval,
@@ -140,7 +143,8 @@ class ToolCaller(ControlNode):
             task_except = None
 
         # Only enforce if the selected target is a tool (not an agent/control node).
-        is_known_tool = self.tool_registry.get_tool(selected_target) is not None
+        tool_cfg = self.tool_registry.get_tool(selected_target)
+        is_known_tool = tool_cfg is not None
         if is_known_tool:
             allowed, reason = check_tool_access(
                 tool_name=selected_target,
@@ -149,6 +153,7 @@ class ToolCaller(ControlNode):
                 task_allowed_tools=task_allowed,
                 task_except_tools=task_except,
                 caller_name=self.name,
+                tool_min_authority=resolve_tool_min_authority(selected_target, tool_cfg),
             )
             if not allowed:
                 logger.error(f"[{self.name}] {reason}")

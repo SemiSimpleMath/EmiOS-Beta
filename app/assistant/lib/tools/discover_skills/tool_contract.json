@@ -29,6 +29,8 @@
   ],
   "arguments_prompt": "Arguments for discover_skills:\n- query (optional): intent or keywords. Omit to browse.\n- limit (optional): default 5, max 50.\nExample: {\"query\": \"resize image\", \"limit\": 5}",
   "metadata": {
+    "min_authority": 10,
+    "approval_min_authority": 10,
     "domain": "tooling",
     "actions": ["search", "list"],
     "selectors": ["skill"],

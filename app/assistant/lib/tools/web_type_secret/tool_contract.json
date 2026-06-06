@@ -53,6 +53,7 @@
   ],
   "arguments_prompt": "Arguments for typing a pod value into a form field:\npod_id: str                   # `datapod:<kind>:<id>` of the pod whose value goes into the field\nprojection: str               # which projection to type (e.g., 'full')\nref: Optional[str]            # accessibility snapshot ref from web_modal_scan; if omitted, uses focused element\nelement: Optional[str]        # human-readable field name for MCP browser_type\nsubmit: bool = False          # press Enter after typing? Leave false for user review\nclear_first: bool = True      # clear field before typing",
   "metadata": {
+    "min_authority": 99,
     "domain": "web",
     "actions": ["type", "fill"],
     "selectors": ["form", "field", "secret"],

@@ -83,6 +83,7 @@
   ],
   "arguments_prompt": "Arguments for http_request:\nurl: str                           # target URL\nmethod: str = 'GET'                # GET/POST/PUT/PATCH/DELETE/HEAD\nheaders: Optional[dict]            # values may be `datapod:` refs (sealed auth)\nbody: Optional[str]                # JSON-encoded string for JSON APIs (parsed at execute), raw text, or `datapod:` ref\nquery_params: Optional[dict]\ntimeout_s: float = 30.0\nresponse_pod_kind: Optional[str]   # if set, seal response in pod with this class\nseal_fields: Optional[list[str]]   # top-level fields to seal into pods (e.g. ['accessJwt','refreshJwt']) — replaced in response body with pod-refs the next call can relay verbatim. LLM never sees the bytes.\nseal_pod_kind: Optional[str]       # pod kind for seal_fields. Default 'auth.session'.\nfollow_redirects: bool = True\nexpect_status: Optional[list[int]] # fail if status not in list",
   "metadata": {
+    "min_authority": 70,
     "domain": "web",
     "actions": ["fetch", "post", "api", "tweet", "skeet", "publish", "comment", "reply"],
     "selectors": ["http", "rest", "api", "json", "bluesky", "bsky", "atproto", "mastodon", "reddit", "github", "spotify", "whoop", "webhook", "oauth", "social"],

@@ -29,6 +29,8 @@
   ],
   "arguments_prompt": "## delete_scheduler_event\n\nDelete a scheduler event (reminder).\n\n### Arguments:\n\n- **event_id** (required): The scheduler event ID to delete\n\n- **cascade** (optional, default: false): If true, also delete all linked children \n  from the event hierarchy. Use this when deleting an event that has related \n  sub-events or reminders that should also be removed.\n\n### Example without cascade:\n```json\n{\n  \"tool_name\": \"delete_scheduler_event\",\n  \"arguments\": {\n    \"event_id\": \"reminder_001\"\n  }\n}\n```\n\n### Example with cascade:\n```json\n{\n  \"tool_name\": \"delete_scheduler_event\",\n  \"arguments\": {\n    \"event_id\": \"reminder_001\",\n    \"cascade\": true\n  }\n}\n```",
   "metadata": {
+    "min_authority": 90,
+    "approval_min_authority": 90,
     "domain": "reminder",
     "actions": [
       "delete",

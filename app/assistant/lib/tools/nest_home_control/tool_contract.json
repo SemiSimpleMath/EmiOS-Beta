@@ -53,6 +53,7 @@
   ],
   "arguments_prompt": "Read or change the Nest thermostat. Pass nothing (or get_status=true) to read current state.\n\nCommand execution order (when multiple fields set):\n  mode → target_temperature → fan_mode → eco_enabled\n\nFields (all optional):\n  - mode               — HEAT, COOL, or OFF. Uppercase. HEATCOOL NOT allowed.\n  - target_temperature — Fahrenheit. Requires HEAT or COOL (pass `mode` in same call if currently OFF).\n  - fan_mode           — Only 'on' works (auto/off reject).\n  - eco_enabled        — bool. true requires HEAT/COOL (FAILED_PRECONDITION from OFF).\n  - device_id          — usually omit (single thermostat).\n  - get_status         — true to read state.\n\nExamples:\n  Cool to 75F (works from OFF too):       { \"mode\": \"COOL\", \"target_temperature\": 75 }\n  Change setpoint (already in HEAT/COOL): { \"target_temperature\": 72 }\n  Turn off:                                { \"mode\": \"OFF\" }\n  Enable eco (must be HEAT/COOL):         { \"eco_enabled\": true }\n  Read state:                              {}\n\nWhen in doubt about current mode, read first ({}) then issue the change.",
   "metadata": {
+    "min_authority": 95,
     "domain": "smart_home",
     "actions": [
       "read",

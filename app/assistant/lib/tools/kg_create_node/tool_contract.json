@@ -89,6 +89,8 @@
   ],
   "arguments_prompt": "Arguments for kg_create_node:\n\nlabel (required): Name of the node\nsemantic_label (optional): Descriptive label with names in parentheses (e.g., \"Birthday Party (Jukka)\")\nnode_type (required): Type (Entity/Event/State/Goal/Property/Concept)\ndescription (optional): Description text\naliases (optional): List of alternative names\nattributes (optional): Additional key-value pairs\ncategory (optional): Category/subcategory (e.g., 'person', 'event')\nstart_date (optional): YYYY-MM-DD\nend_date (optional): YYYY-MM-DD\nstart_date_confidence (optional): 'inferred', 'actual', 'estimated'\nend_date_confidence (optional): 'inferred', 'actual', 'estimated'\nconfidence (optional): 0.0-1.0\nimportance (optional): 0.0-1.0\n\nExample:\n{\n    \"label\": \"Wedding Ceremony\",\n    \"node_type\": \"Event\",\n    \"description\": \"Jukka's wedding\",\n    \"start_date\": \"2023-06-15\",\n    \"confidence\": 0.9\n}",
   "metadata": {
+    "min_authority": 95,
+    "approval_min_authority": 95,
     "domain": "knowledge_graph",
     "actions": [
       "operate"

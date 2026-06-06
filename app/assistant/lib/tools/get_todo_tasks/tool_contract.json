@@ -35,6 +35,8 @@
   ],
   "arguments_prompt": "- **Purpose**: Fetch to-do tasks.\n- **Default behavior**: returns active (not completed) tasks across lists, including overdue items.\n- **Arguments**:\n  - `start_date` (str, optional): Start of due-date filter window (ISO 8601).\n  - `end_date` (str, optional): End of due-date filter window (ISO 8601).\n  - `include_completed` (bool, optional, default false): Set true only when explicitly asked to include completed tasks.",
   "metadata": {
+    "min_authority": 90,
+    "approval_min_authority": 90,
     "domain": "todo",
     "actions": [
       "read",

@@ -23,6 +23,8 @@
   ],
   "arguments_prompt": "Argument to pass_info to user is all the text provided in the BEGIN ARGUMENTS SECTION.  You must pass all this text verbatim in the \"text\" str.",
   "metadata": {
+    "min_authority": 0,
+    "approval_min_authority": 0,
     "domain": "user_interaction",
     "actions": [
       "ask",

@@ -29,6 +29,8 @@
   ],
   "arguments_prompt": "Arguments:\n{\n  \"image_path\": \"uploads/temp/monitor_1_20260208_141000_ab12cd.png\",\n  \"question\": \"Describe this screen in 1-2 sentences.\"\n}",
   "metadata": {
+    "min_authority": 95,
+    "approval_min_authority": 95,
     "domain": "vision",
     "actions": [
       "operate"

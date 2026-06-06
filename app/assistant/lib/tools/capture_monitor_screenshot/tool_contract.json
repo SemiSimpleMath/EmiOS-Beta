@@ -23,6 +23,8 @@
   ],
   "arguments_prompt": "{\"monitor_index\": 2}",
   "metadata": {
+    "min_authority": 95,
+    "approval_min_authority": 95,
     "domain": "vision",
     "actions": [
       "operate"

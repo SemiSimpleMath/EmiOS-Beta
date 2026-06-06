@@ -29,6 +29,8 @@
   ],
   "arguments_prompt": "{\n  \"url\": \"https://example.com\",\n  \"focus\": \"main takeaways\"\n}",
   "metadata": {
+    "min_authority": 30,
+    "approval_min_authority": 30,
     "domain": "web",
     "actions": [
       "summarize",

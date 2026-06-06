@@ -41,6 +41,8 @@
   ],
   "arguments_prompt": "{\"query\": \"capture screenshot\", \"tool_kind\": \"all\", \"limit\": 5}",
   "metadata": {
+    "min_authority": 10,
+    "approval_min_authority": 10,
     "domain": "tooling",
     "actions": [
       "search"

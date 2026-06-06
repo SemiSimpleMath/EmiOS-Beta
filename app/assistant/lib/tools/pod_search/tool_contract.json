@@ -65,6 +65,8 @@
   ],
   "arguments_prompt": "Arguments for pod_search:\n- query (optional): comma-separated search keywords for finding relevant pods\n- kind (optional): 'chat_cluster' | 'email' | 'image' — narrow to one source\n- linked_to_entity (optional): canonical entity label, e.g. 'Jukka', 'Peter'. Returns pods that entity has KG edges to (photos depicting them, etc.).\n- linked_via (optional): list of edge relationship_types when filtering by entity. e.g. ['depicted_in','has_profile_image']. Omit for any edge.\n- tags (optional): {food, entertainment, health, schedule, work} (chat_cluster pods only)\n- since (optional): '24h' / '3d' / '1w' / 'today' / ISO\n- limit (optional): default 20",
   "metadata": {
+    "min_authority": 0,
+    "approval_min_authority": 0,
     "domain": "pod_store",
     "actions": [
       "read"

@@ -92,6 +92,8 @@
   ],
   "arguments_prompt": "Arguments are:\nquery (required): Gmail query string. Examples:\n  - \"from:alice@example.com\" — all mail from Alice\n  - \"from:alice@example.com newer_than:90d\" — last 90 days from Alice\n  - \"from:alice@example.com after:1735689600\" — after unix timestamp\n  - \"label:inbox subject:invoice\" — inbox invoices\nmax_results: int, default 5000, max 50000. Controls how many IDs are counted. Sender/date breakdowns are always based on a 500-message sample; the total count is exact.\ngroup_by_sender: true/false (default true) — include sender breakdown.\ngroup_by_day: true/false (default false) — include daily count distribution.\ntop_senders_limit: int (default 10) — how many senders to return.",
   "metadata": {
+    "min_authority": 90,
+    "approval_min_authority": 90,
     "domain": "email",
     "actions": [
       "stats",

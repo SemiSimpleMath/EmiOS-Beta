@@ -29,6 +29,8 @@
   ],
   "arguments_prompt": "EntertainmentManager arguments are\ntask: What entertainment research to perform and for what time horizon.\ninformation: All relevant context about the user's current state, preferences, and constraints.",
   "metadata": {
+    "min_authority": 95,
+    "approval_min_authority": 95,
     "domain": "life_domain",
     "actions": [
       "research",

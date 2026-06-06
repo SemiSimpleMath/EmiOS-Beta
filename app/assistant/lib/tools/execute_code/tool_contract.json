@@ -65,6 +65,7 @@
   ],
   "arguments_prompt": "Arguments for execute_code:\nsource: str                                # the Python script\nlanguage: str = 'python'                   # python only in v1\ninput_pod_ids: list[str] = []              # pods mounted at /workspace/inputs/\nfs_allowlist: list[str] = []               # host dirs mounted READ-ONLY at /workspace/host_<basename>/ — your script must use the container path, not the host path\negress_allowlist: list[str] = []           # domains allowed (default deny)\ntimeout_s: float = 30.0                    # hard cap 300\nresponse_pod_kind: Optional[str] = None    # seal stdout in pod with this class\nrequirements: list[str] = []               # extra pip installs (slow)",
   "metadata": {
+    "min_authority": 99,
     "domain": "code_execution",
     "actions": ["execute", "run", "compute"],
     "selectors": ["python", "code", "script", "compute", "analysis"],

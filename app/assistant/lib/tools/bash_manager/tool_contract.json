@@ -29,6 +29,7 @@
   ],
   "arguments_prompt": "bash_manager arguments:\n- task: the disambiguated filesystem request.\n- information: supporting context. Empty string allowed.",
   "metadata": {
+    "min_authority": 99,
     "domain": "filesystem",
     "actions": [
       "read",

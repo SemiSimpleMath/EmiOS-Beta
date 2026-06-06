@@ -29,6 +29,7 @@
   ],
   "arguments_prompt": "sandbox_manager arguments:\n- task: the compute / processing task.\n- information: supporting context. Empty string allowed.",
   "metadata": {
+    "min_authority": 99,
     "domain": "compute",
     "actions": ["compute", "process", "transform", "resize", "extract", "generate", "analyze", "ocr"],
     "selectors": ["python", "sandbox", "script", "code", "pandas", "numpy", "image", "pdf", "document", "ocr", "data"],

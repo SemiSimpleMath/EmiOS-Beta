@@ -70,6 +70,8 @@
   ],
   "arguments_prompt": "{\n  \"participant_email\": \"contact@example.com\",\n  \"account_id\": \"google_user_primary\",\n  \"lookback_hours\": 10,\n  \"max_messages\": 50,\n  \"include_body\": true,\n  \"include_recent_messages\": true,\n  \"recent_message_limit\": 8\n}",
   "metadata": {
+    "min_authority": 90,
+    "approval_min_authority": 90,
     "domain": "email",
     "actions": [
       "read",

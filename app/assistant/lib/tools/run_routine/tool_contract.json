@@ -41,6 +41,8 @@
   ],
   "arguments_prompt": "{\n  \"routine_id\": \"daily_insights_pipeline\",\n  \"target_date\": \"2026-02-09\"\n}",
   "metadata": {
+    "min_authority": 95,
+    "approval_min_authority": 95,
     "domain": "orchestration",
     "actions": [
       "run"

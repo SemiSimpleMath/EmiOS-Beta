@@ -23,6 +23,8 @@
   ],
   "arguments_prompt": "Arguments for kg_delete_edge:\n\nedge_id (required): The UUID of the edge you want to delete\n\nExample:\n{\n    \"edge_id\": \"edge-abc-123-def-456\"\n}",
   "metadata": {
+    "min_authority": 95,
+    "approval_min_authority": 95,
     "domain": "knowledge_graph",
     "actions": [
       "operate"

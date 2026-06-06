@@ -23,6 +23,8 @@
   ],
   "arguments_prompt": "The UUID of the edge to describe in detail.",
   "metadata": {
+    "min_authority": 95,
+    "approval_min_authority": 95,
     "domain": "knowledge_graph",
     "actions": [
       "operate"

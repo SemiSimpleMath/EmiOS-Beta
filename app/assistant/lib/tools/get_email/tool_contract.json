@@ -41,6 +41,8 @@
   ],
   "arguments_prompt": "This is an internal background scheduler tool. Agents should use get_important_emails for inbox triage, or get_email_messages for query-driven search.",
   "metadata": {
+    "min_authority": 90,
+    "approval_min_authority": 90,
     "domain": "email",
     "actions": [
       "ingest",

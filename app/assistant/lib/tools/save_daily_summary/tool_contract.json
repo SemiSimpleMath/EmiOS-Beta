@@ -29,6 +29,8 @@
   ],
   "arguments_prompt": "Fill arguments for `save_daily_summary`.\n\nReturn ONLY a JSON object with:\n- summary_data (object, required — the daily summary dict)\n- date_str (string, optional — YYYY-MM-DD, defaults to today)\n\nExample:\n{\"summary_data\": {\"narrative\": \"...\", \"schedule\": []}, \"date_str\": \"2026-04-15\"}",
   "metadata": {
+    "min_authority": 90,
+    "approval_min_authority": 90,
     "domain": "daily_summary",
     "actions": [
       "save",

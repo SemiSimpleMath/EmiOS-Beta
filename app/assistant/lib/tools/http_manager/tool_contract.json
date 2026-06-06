@@ -29,6 +29,7 @@
   ],
   "arguments_prompt": "http_manager arguments:\n- task: the HTTP/REST request.\n- information: supporting context. Empty string allowed.",
   "metadata": {
+    "min_authority": 70,
     "domain": "web",
     "actions": ["api", "post", "fetch", "tweet", "skeet", "publish", "comment", "reply"],
     "selectors": ["http", "rest", "api", "json", "bluesky", "bsky", "atproto", "mastodon", "reddit", "github", "spotify", "whoop", "webhook", "oauth", "social"],
