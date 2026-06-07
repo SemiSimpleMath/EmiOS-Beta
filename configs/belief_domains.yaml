@@ -72,6 +72,19 @@ domains:
       - meal
       - snack
 
+  - id: meal
+    enabled: true
+    decay_enabled: false
+    # No tags / ticket_types on purpose. The meal domain exists so the nightly
+    # RecomputeBeliefSnapshot + Reevaluate steps cover beliefs the feedback_extractor
+    # writes under domain='meal' — they were ORPHANED (never weighted, never had
+    # contradictions reconciled). Empty tags means the daily_timeline_insights agent
+    # gains no new vocabulary and CollectEvidence finds nothing, so UpdateBeliefsStep
+    # cleanly skips (no LLM derivation lane); meal beliefs come from user feedback,
+    # not insight mining. Recompute/canonicalize still run on the existing rows.
+    tags: []
+    ticket_types: []
+
   - id: communication
     enabled: true
     decay_enabled: false

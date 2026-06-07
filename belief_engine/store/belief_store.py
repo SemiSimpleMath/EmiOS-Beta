@@ -346,6 +346,26 @@ class BeliefStore:
         )
         return belief
 
+    def add_evidence_to_existing(
+        self, belief_key: str, evidence: List[EvidenceInput]
+    ) -> Optional[BeliefRecord]:
+        """Attach evidence to an EXISTING, non-deprecated belief — never create one.
+
+        For contradicting signals: a 'contradicts' must only weaken a belief that
+        already exists, never mint a new affirmative belief. Minting one turns
+        "kids don't like zucchini" into a phantom "kids will eat zucchini" carrying
+        only negative evidence (see scratch/MEAL-PLANNING-AUDIT.md). Returns the
+        belief if found and active (evidence attached); None if absent or deprecated
+        so the caller can skip rather than fabricate.
+        """
+        belief = self.get_by_key(belief_key)
+        if belief is None or belief.status == "deprecated":
+            return None
+        now = _now_iso()
+        for ev in (evidence or []):
+            self._insert_evidence(belief.id, ev, now)
+        return belief
+
     def deprecate(self, belief_key: str, *, reason: str = "") -> None:
         """
         Flip a belief to status='deprecated' and record the reason as a

@@ -44,6 +44,7 @@ def apply_feedback_extractor_output(output: Dict[str, Any]) -> Dict[str, Any]:
 
     upserted: List[Dict[str, Any]] = []
     failed: List[Dict[str, Any]] = []
+    phantom_skipped: List[Dict[str, Any]] = []
 
     # 1. Upsert beliefs into the belief store
     store_unavailable = False
@@ -76,35 +77,52 @@ def apply_feedback_extractor_output(output: Dict[str, Any]) -> Dict[str, Any]:
             if store_unavailable or belief_store is None:
                 failed.append({"extraction": ext, "error": "belief_store_unavailable"})
                 continue
-            req = BeliefUpsertRequest(
-                domain=str(ext.get("domain") or "other"),
-                belief_key=str(ext.get("belief_key") or "").strip(),
-                statement=str(ext.get("statement") or "").strip(),
-                confidence=str(ext.get("confidence") or "medium"),
-                scope=str(ext.get("scope") or "chronic"),
-                status="active",
-                conditions=None,
-                first_observed=None,  # store fills in if new
-                last_confirmed=now_utc_iso,
-                kind=None,  # let heuristic classifier decide
-            )
+            belief_key = str(ext.get("belief_key") or "").strip()
+            signal_type = str(ext.get("signal_type") or "confirms")
             evidence = EvidenceInput(
                 source_type="user_comment",
                 source_date=ext.get("source_comment_submitted_at"),  # may be None — see below
                 source_ref=str(ext.get("source_comment_pod_id") or ""),
-                signal_type=str(ext.get("signal_type") or "confirms"),
+                signal_type=signal_type,
                 summary=str(ext.get("reasoning") or "")[:500],
                 raw_text=None,
                 weight=_weight_for_confidence(str(ext.get("confidence") or "medium")),
                 valence=None,  # derive from signal_type
                 extracted_by="feedback_extractor",
             )
-            record = belief_store.upsert_belief(req, evidence=[evidence])
+            if signal_type == "contradicts":
+                # A contradiction must only WEAKEN a belief that already exists — never
+                # mint a new affirmative one. Otherwise "kids don't like zucchini"
+                # fabricates a phantom "kids will eat zucchini" carrying only negative
+                # evidence (the paired 'confirms' extraction already records the real
+                # signal). See scratch/MEAL-PLANNING-AUDIT.md.
+                record = belief_store.add_evidence_to_existing(belief_key, [evidence])
+                if record is None:
+                    phantom_skipped.append({
+                        "belief_key": belief_key,
+                        "source_comment_pod_id": ext.get("source_comment_pod_id"),
+                        "reason": "contradicts with no existing active belief — not minting a phantom",
+                    })
+                    continue
+            else:
+                req = BeliefUpsertRequest(
+                    domain=str(ext.get("domain") or "other"),
+                    belief_key=belief_key,
+                    statement=str(ext.get("statement") or "").strip(),
+                    confidence=str(ext.get("confidence") or "medium"),
+                    scope=str(ext.get("scope") or "chronic"),
+                    status="active",
+                    conditions=None,
+                    first_observed=None,  # store fills in if new
+                    last_confirmed=now_utc_iso,
+                    kind=None,  # let heuristic classifier decide
+                )
+                record = belief_store.upsert_belief(req, evidence=[evidence])
             upserted.append({
                 "belief_id": record.id,
                 "belief_key": record.belief_key,
-                "signal_type": evidence.signal_type,
-                "comment_pod_id": req.belief_key,  # for logging (re-use key)
+                "signal_type": signal_type,
+                "comment_pod_id": belief_key,  # for logging (re-use key)
             })
         except Exception as e:
             logger.warning("[feedback_persist] belief upsert failed: %s — extraction: %r", e, ext)
@@ -171,8 +189,10 @@ def apply_feedback_extractor_output(output: Dict[str, Any]) -> Dict[str, Any]:
         "skipped_count": len(skipped),
         "upserted_count": len(upserted),
         "upsert_failed_count": len(failed),
+        "phantom_skipped_count": len(phantom_skipped),
         "comments_marked_processed": len(comment_pods_marked),
         "upserted": upserted,
+        "phantom_skipped": phantom_skipped,
         "failed": failed[:10],  # cap for readability
     }
 
