@@ -228,116 +228,29 @@ def _build_week_nav(viewing_week: date, *, today: date) -> Dict[str, Any]:
 def generate_plan_for_week(week_start: str) -> Dict[str, Any]:
     """Run the weekly meal planning chain for ``week_start`` and persist.
 
-    Returns ``{status: ok|error, week_start, plan_pod_id?, message?}``.
-    Wraps the same code path the CLI runner uses so the button on the
-    /meals empty state produces an identical pod.
+    Returns ``{status: ok|error, week_start, plan_pod_id?, message?}``. Thin wrapper over
+    the shared ``run_weekly_meal_planning_chain`` — the SAME path the Sunday cron and the
+    CLI use, so the button produces an identical, fully-distilled plan. The chain fails
+    loud; here (a user-facing route) we convert that to a status dict for the UI.
     """
     parsed = _parse_week_start(week_start)
     if parsed is None:
         return {"status": "error", "message": f"Invalid week_start: {week_start!r}"}
     week_iso = parsed.isoformat()
 
-    try:
-        from app.assistant.ServiceLocator.service_locator import DI, ServiceLocator
-        from app.assistant.subconscious.meal_context_builder import (
-            build_weekly_meal_planner_context,
-        )
-        from app.assistant.subconscious.meal_persist import (
-            apply_weekly_meal_planner_output,
-        )
-        from app.assistant.scope.loader import load_scope_for_source
-        from app.assistant.utils.pydantic_classes import Message
-    except Exception as e:
-        logger.exception("[meal_page_service] generate import failed")
-        return {"status": "error", "message": f"import failed: {type(e).__name__}: {e}"}
-
-    if not hasattr(DI, "mam_instance_manager") or DI.mam_instance_manager is None:
-        from app.assistant.manager_runtime.mam_instance_manager import (
-            MAMInstanceManager,
-        )
-        ServiceLocator.register(
-            "mam_instance_manager",
-            MAMInstanceManager(resource_manager=getattr(DI, "resource_manager", None)),
-        )
-
-    seed = build_weekly_meal_planner_context()
-    seed["week_start_date"] = week_iso
-    seed["horizon_days"] = "7"
-
-    distiller = DI.agent_factory.create_agent("meal_context_distiller")
-    if distiller is None:
-        return {"status": "error", "message": "meal_context_distiller unavailable"}
-    distiller_scope = load_scope_for_source(
-        kind="subsystem",
-        source_id="subconscious",
-        actor_id="meal_page_service",
-        identity_overrides={"owner_id": "system", "scope_id": "subconscious::meal_context_distiller", "surface": "internal"},
+    from app.assistant.subconscious.weekly_meal_planning_runner import (
+        run_weekly_meal_planning_chain,
     )
     try:
-        distiller_result = distiller.action_handler(
-            Message(agent_input=seed, scope_context=distiller_scope)
-        )
+        summary = run_weekly_meal_planning_chain(week_start=week_iso, persist=True)
     except Exception as e:
-        logger.exception("[meal_page_service] distiller raised")
-        return {"status": "error", "message": f"distiller raised: {type(e).__name__}: {e}"}
-    meal_context: Dict[str, Any] = (
-        distiller_result.data
-        if isinstance(getattr(distiller_result, "data", None), dict)
-        else {}
-    )
+        logger.exception("[meal_page_service] weekly planning chain failed")
+        return {"status": "error", "message": f"{type(e).__name__}: {e}"}
 
-    manager = DI.multi_agent_manager_factory.create_manager(
-        "weekly_meal_planning_manager"
-    )
-    if manager is None:
-        return {"status": "error", "message": "weekly_meal_planning_manager unavailable"}
-    mgr_scope = load_scope_for_source(
-        kind="subsystem",
-        source_id="subconscious",
-        actor_id="meal_page_service",
-        identity_overrides={"owner_id": "system", "scope_id": "subconscious::weekly_meal_planning_manager", "surface": "internal"},
-    )
-    manager_context: Dict[str, Any] = {
-        "date_time": seed.get("date_time"),
-        "day_of_week": seed.get("day_of_week"),
-        "week_start_date": week_iso,
-        "meal_context": meal_context,
-        "recent_planned_meals": seed.get("recent_planned_meals"),
-        "inventory_snapshot": seed.get("inventory_snapshot"),
-        "ralphs_standing_list": seed.get("ralphs_standing_list"),
-        "agent_weekly_list_state": seed.get("agent_weekly_list_state"),
-    }
-    bb = manager.blackboard
-    for k, v in manager_context.items():
-        bb.update_state_value(k, v)
-    try:
-        DI.manager_invoker.invoke(
-            manager, Message(agent_input=manager_context, scope_context=mgr_scope)
-        )
-    except Exception as e:
-        logger.exception("[meal_page_service] manager raised")
-        return {"status": "error", "message": f"manager raised: {type(e).__name__}: {e}"}
-
-    output: Dict[str, Any] = {}
-    try:
-        for m in bb.get_messages():
-            if str(getattr(m, "sender", "") or "") == "weekly_meal_planner":
-                data = getattr(m, "data", None) or {}
-                if isinstance(data, dict) and data:
-                    output = data
-                    break
-    except Exception as e:
-        logger.warning("[meal_page_service] blackboard read failed: %s", e)
-
-    if not output:
-        return {"status": "error", "message": "planner produced no output"}
-
-    summary = apply_weekly_meal_planner_output(output)
-    plan_pod_id = summary.get("plan_pod_id") or ""
     return {
         "status": "ok",
         "week_start": week_iso,
-        "plan_pod_id": plan_pod_id,
+        "plan_pod_id": summary.get("plan_pod_id") or "",
         "summary": summary,
     }
 

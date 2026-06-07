@@ -268,26 +268,25 @@ def weekly_meal_planner_run(
     routine: Any = None,
     event_message: Any = None,
 ) -> Dict[str, Any]:
-    """Sets the upcoming week's meal plan. Runs Sunday evening before
-    the new week starts."""
-    from app.assistant.subconscious.meal_context_builder import (
-        build_weekly_meal_planner_context,
-    )
-    from app.assistant.subconscious.meal_persist import apply_weekly_meal_planner_output
+    """Sets the UPCOMING week's meal plan (Sunday evening, before the new week starts).
 
-    context = build_weekly_meal_planner_context()
-    output = _run_subconscious_agent(
-        handler_label="weekly_meal_planner_run",
-        agent_name="weekly_meal_planner",
-        context=context,
-        scope_id="subconscious::weekly_meal_planner",
-        actor_id="routine::weekly_meal_planner_run",
+    Runs the full chain (distiller -> planning manager -> weekly_meal_planner) so the
+    autonomous plan gets the same distilled meal_context the /meals button does — the old
+    direct-agent call skipped the distiller, leaving the planner blind to dietary /
+    concerns / audience (see scratch/MEAL-PLANNING-AUDIT.md §6). Defaults to the upcoming
+    Monday (target_date overrides, e.g. for a manual/backfill run)."""
+    from app.assistant.subconscious.weekly_meal_planning_runner import (
+        run_weekly_meal_planning_chain,
+        upcoming_monday_iso,
     )
-    summary = apply_weekly_meal_planner_output(output) or {}
+
+    week_start = target_date or upcoming_monday_iso()
+    summary = run_weekly_meal_planning_chain(week_start=week_start, persist=True)
     logger.info(
-        "[weekly_meal_planner_run] meals=%d shopping_items=%d",
-        len(output.get("meal_plan") or []),
-        len(output.get("shopping_list") or []),
+        "[weekly_meal_planner_run] week_start=%s plan_pod=%s meal_context_days=%d",
+        summary.get("week_start_date"),
+        summary.get("plan_pod_id") or "(none)",
+        summary.get("meal_context_days") or 0,
     )
     return {"status": "ok", **summary}
 
