@@ -54,13 +54,14 @@ esac
 # ---------- Rule 2: only branch `main` may be pushed. ----------
 # Allow deletes (local_sha all zeros) so we can clean up stray branches that
 # already exist on the remote.
+pushing_commits=0   # set when a real (non-delete) commit push to main is seen
 while read -r local_ref local_sha remote_ref remote_sha; do
     [ -z "${remote_ref:-}" ] && continue
     case "$local_sha" in
         0000000000000000000000000000000000000000) continue ;;  # delete is fine
     esac
     case "$remote_ref" in
-        refs/heads/main) : ;;  # OK
+        refs/heads/main) pushing_commits=1 ;;  # OK — real commits to test below
         refs/heads/*)
             stray="${remote_ref#refs/heads/}"
             echo ""                                                                      >&2
@@ -84,5 +85,48 @@ while read -r local_ref local_sha remote_ref remote_sha; do
 done <<EOF
 $refs
 EOF
+
+# ---------- Rule 3: regression guard — run the fast security/boot smoke suites. ----------
+# Catches the class of silent regression that has bitten this repo (a scope change
+# that broke every sub-100 authority scope; fresh-DB / fresh-install boot blockers;
+# an imported-but-undeclared dependency). Runs ONLY when pushing real commits to main.
+# For a known-safe push (e.g. docs only) skip it with:
+#   EMI_SKIP_TESTS=1 git push
+if [ "${pushing_commits:-0}" = "1" ] && [ -z "${EMI_SKIP_TESTS:-}" ]; then
+    if [ -x ".venv/Scripts/python.exe" ]; then
+        PY=".venv/Scripts/python.exe"
+    elif [ -x ".venv/bin/python" ]; then
+        PY=".venv/bin/python"
+    else
+        PY=""
+        echo "pre-push: .venv interpreter not found — SKIPPING regression guard."        >&2
+        echo "          Create the venv (python setup.py) to enable it; push allowed."    >&2
+    fi
+    if [ -n "$PY" ]; then
+        echo "pre-push: running regression guard (set EMI_SKIP_TESTS=1 to skip)…"          >&2
+        guard_tests="
+app/assistant/tests/non_agent_tests/test_scope_ceiling.py
+app/assistant/tests/non_agent_tests/test_scope_per_manager.py
+app/assistant/tests/non_agent_tests/test_authority_floor.py
+app/assistant/tests/non_agent_tests/test_approval_routing.py
+app/assistant/tests/non_agent_tests/test_requirements_completeness.py
+app/assistant/tests/non_agent_tests/test_room_resource_loader.py
+app/assistant/tests/non_agent_tests/test_tracked_room_scope_yaml.py
+app/assistant/tests/non_agent_tests/test_template_scope_yaml.py
+app/assistant/tests/non_agent_tests/test_migration_runner.py
+app/assistant/tests/non_agent_tests/test_fresh_db_boot.py
+"
+        # $guard_tests is intentionally unquoted: whitespace-split into path args.
+        if ! "$PY" -m pytest $guard_tests -q -p no:cacheprovider < /dev/null; then
+            echo ""                                                                        >&2
+            echo "BLOCKED: regression guard failed — push aborted."                        >&2
+            echo "Fix the failing test(s). For a known-safe (e.g. docs-only) push:"        >&2
+            echo "  EMI_SKIP_TESTS=1 git push"                                             >&2
+            echo ""                                                                        >&2
+            exit 1
+        fi
+        echo "pre-push: regression guard passed."                                          >&2
+    fi
+fi
 
 exit 0
