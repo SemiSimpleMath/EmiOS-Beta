@@ -1,0 +1,30 @@
+{
+  "id": "subconscious_grocery_sync",
+  "enabled": true,
+  "name": "Subconscious grocery inventory sync",
+  "runner": "function",
+  "spec": {
+    "function_name": "grocery_sync_run"
+  },
+  "run_policy": {
+    "type": "interval",
+    "min_interval_seconds": 86400
+  },
+  "trigger": {
+    "type": "time",
+    "active_window": {
+      "from": "04:30",
+      "to": "05:00",
+      "local": true
+    }
+  },
+  "max_run_seconds": 300,
+  "on_error": {
+    "max_failures": 3,
+    "backoff_base_seconds": 300,
+    "backoff_max_seconds": 3600,
+    "then": "disable_with_ticket",
+    "auto_retry_after_seconds": 3600
+  },
+  "notes": "Daily: scans recent user chat for grocery intents (bought / ran out / consumed), applies them to the inventory, and runs decay. Runs in the 04:30-05:00 window so inventory_snapshot is fresh for the 05:00 daily_meal_proposer. CLI equivalent: python -m app.assistant.subconscious.run_grocery_sync."
+}

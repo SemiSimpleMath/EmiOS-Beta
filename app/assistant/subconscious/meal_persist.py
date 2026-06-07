@@ -63,7 +63,9 @@ def _apply_meal_proposer_output(output: Dict[str, Any], *, agent_name: str) -> D
 
     # 2. Shopping run pod (if any)
     if isinstance(shopping_run, dict) and shopping_run.get("items"):
-        shopping_pod_id = _mint_intention_shopping_pod(store, shopping_run, now_utc_iso)
+        shopping_pod_id = _mint_intention_shopping_pod(
+            store, shopping_run, now_utc_iso, agent_name=agent_name
+        )
 
     # 3. Summary pod — captures the proposer's narrative + advisory
     set_pod_id = _mint_intention_meal_set_pod(
@@ -334,9 +336,6 @@ def _mint_intention_meal_pod(
         if novelty_rationale:
             body_parts += ["", "**Why this novel pick:**", novelty_rationale]
 
-        if addresses:
-            body_parts += ["", "**Addresses concerns:** " + ", ".join(addresses)]
-
         body = "\n".join(body_parts)
         tags = ["intention", "meal_proposal", meal_window]
         if novelty == "novel":
@@ -370,15 +369,19 @@ def _mint_intention_meal_pod(
         )
         store.put(pod)
         return pod_id
-    except Exception as e:
-        logger.warning("[meal_persist] mint intention.meal failed: %s", e)
-        return None
+    except Exception:
+        # Fail loud — a swallowed warning here hid a NameError that silently dropped
+        # EVERY meal pod in production (see scratch/MEAL-PLANNING-AUDIT.md).
+        logger.exception("[meal_persist] mint intention.meal failed")
+        raise
 
 
 def _mint_intention_shopping_pod(
     store: PodStore,
     shopping_run: Dict[str, Any],
     now_utc_iso: str,
+    *,
+    agent_name: str,
 ) -> Optional[str]:
     try:
         pod_id = f"datapod:intention.shopping:{uuid.uuid4().hex[:24]}"
@@ -413,9 +416,9 @@ def _mint_intention_shopping_pod(
         )
         store.put(pod)
         return pod_id
-    except Exception as e:
-        logger.warning("[meal_persist] mint intention.shopping failed: %s", e)
-        return None
+    except Exception:
+        logger.exception("[meal_persist] mint intention.shopping failed")
+        raise
 
 
 def _mint_intention_meal_set_pod(
@@ -483,9 +486,9 @@ def _mint_intention_meal_set_pod(
         )
         store.put(pod)
         return pod_id
-    except Exception as e:
-        logger.warning("[meal_persist] mint intention.meal_set failed: %s", e)
-        return None
+    except Exception:
+        logger.exception("[meal_persist] mint intention.meal_set failed")
+        raise
 
 
 def _mint_weekly_plan_pod(
@@ -562,6 +565,6 @@ def _mint_weekly_plan_pod(
         )
         store.put(pod)
         return pod_id
-    except Exception as e:
-        logger.warning("[meal_persist] mint plan.weekly_meals failed: %s", e)
-        return None
+    except Exception:
+        logger.exception("[meal_persist] mint plan.weekly_meals failed")
+        raise

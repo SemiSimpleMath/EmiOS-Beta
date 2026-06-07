@@ -144,8 +144,33 @@ def daily_meal_proposer_run(
     )
     summary = apply_daily_meal_proposer_output(output) or {}
     logger.info(
-        "[daily_meal_proposer_run] intentions=%d",
-        len(output.get("intentions") or []),
+        "[daily_meal_proposer_run] proposals=%d shopping_pod=%s set_pod=%s",
+        summary.get("proposal_pod_count") or 0,
+        summary.get("shopping_pod_id") or "(none)",
+        summary.get("set_pod_id") or "(none)",
+    )
+    return {"status": "ok", **summary}
+
+
+@routine_handler(name="grocery_sync_run")
+def grocery_sync_run(
+    *,
+    target_date: Optional[str] = None,
+    routine: Any = None,
+    event_message: Any = None,
+) -> Dict[str, Any]:
+    """Daily: scan recent chat for grocery intents (bought / ran out / consumed), apply
+    them to the inventory, and run decay — so the inventory_snapshot fed to the meal
+    planners stays fresh. Was CLI-only before, so inventory never updated and decay never
+    ran (see scratch/MEAL-PLANNING-AUDIT.md)."""
+    from app.assistant.subconscious.grocery_sync_runner import run_grocery_sync_pass
+
+    summary = run_grocery_sync_pass(hours=48)
+    logger.info(
+        "[grocery_sync_run] intents_detected=%d intents_applied=%d decay=%s",
+        summary.get("intents_detected") or 0,
+        summary.get("intents_applied") or 0,
+        summary.get("decay"),
     )
     return {"status": "ok", **summary}
 
