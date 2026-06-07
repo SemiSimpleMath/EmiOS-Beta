@@ -116,6 +116,7 @@ app/assistant/tests/non_agent_tests/test_template_scope_yaml.py
 app/assistant/tests/non_agent_tests/test_migration_runner.py
 app/assistant/tests/non_agent_tests/test_fresh_db_boot.py
 app/assistant/tests/non_agent_tests/test_meal_pod_mint_guard.py
+app/assistant/tests/non_agent_tests/test_meal_food_beliefs_recency.py
 "
         # $guard_tests is intentionally unquoted: whitespace-split into path args.
         if ! "$PY" -m pytest $guard_tests -q -p no:cacheprovider < /dev/null; then

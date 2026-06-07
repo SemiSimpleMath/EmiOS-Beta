@@ -291,55 +291,103 @@ _FOOD_BELIEF_KEY_PREFIXES = (
 
 
 def _build_food_beliefs() -> str:
-    """Pull food-domain beliefs from BeliefStore (user_beliefs table).
+    """Pull food-domain beliefs from BeliefStore (user_beliefs table), in two lanes.
 
-    Filter is structural: belief_key starts with one of the food-domain
-    prefixes that belief_engine.belief_updater already assigned at
-    write time. First dot-segment of belief_key is the domain the
-    writing LLM classified into; we just match prefix.
+    Ranking by net_weight alone buries fresh feedback: a brand-new
+    "kids won't eat zucchini" has near-zero weight (NULL until the nightly
+    recompute) and never clears the established top-N, so the planner never
+    sees it. So we add a RECENCY lane — food beliefs backed by a user comment
+    in the last RECENT_FEEDBACK_DAYS days — and surface it AHEAD of the
+    weight-ranked lane (deduped by belief_key).
 
-    Order: by current_net_weight DESC (most-supported first).
-    Top N=30 shown; runaway count surfaced past that.
+    The recency lane keys on recent user_comment EVIDENCE, not last_confirmed:
+    the nightly belief pipeline re-confirms beliefs from insights and bumps
+    last_confirmed broadly (~64/103 food beliefs in 21d), which would flood the
+    lane. A recent user_comment is the precise "the user just told us this" signal.
+
+    Established lane filter is structural: belief_key starts with a food-domain
+    prefix belief_engine assigned at write time. Top N=30 shown per lane.
     """
     from app.models.base import get_session
     from sqlalchemy import text as sql_text
 
-    RUNAWAY_THRESHOLD = 30
+    RUNAWAY_THRESHOLD = 30        # established (weight-ranked) lane cap
+    RECENT_FEEDBACK_DAYS = 21     # recency lane window
+    RECENT_CAP = 25              # recency lane cap (its own runaway guard)
+    ACTIVE = ("status IN ('active','high_confidence','medium_confidence','low_confidence') "
+              "OR status IS NULL")
+
+    def _is_food(key: str) -> bool:
+        return any((key or "").startswith(p) for p in _FOOD_BELIEF_KEY_PREFIXES)
 
     try:
+        cutoff_iso = (datetime.now(timezone.utc) - timedelta(days=RECENT_FEEDBACK_DAYS)).isoformat()
         session = get_session()
         try:
-            rows = session.execute(sql_text("""
+            established_rows = session.execute(sql_text(f"""
                 SELECT belief_key, statement, current_net_weight, confidence
                 FROM user_beliefs
-                WHERE status IN ('active','high_confidence','medium_confidence','low_confidence')
-                   OR status IS NULL
+                WHERE {ACTIVE}
                 ORDER BY current_net_weight DESC
                 LIMIT 500
             """)).fetchall()
+            # Recency lane keyed on recent user-comment evidence — weight-independent,
+            # so NULL-weight fresh beliefs are included (the weight-ordered query above
+            # can't reach them while there are >500 non-null beliefs).
+            # signal_type<>'contradicts': a belief whose only recent comment REFUTED it
+            # (e.g. the stale "kids will eat zucchini") must not surface as current
+            # intent — its positive counterpart ("kids dislike zucchini") carries that.
+            recent_rows = session.execute(sql_text(f"""
+                SELECT b.belief_key, b.statement, b.current_net_weight, b.confidence,
+                       MAX(COALESCE(e.created_at, e.source_date)) AS last_feedback
+                FROM user_beliefs b
+                JOIN belief_evidence e ON e.belief_id = b.id
+                WHERE ({ACTIVE})
+                  AND e.source_type = 'user_comment'
+                  AND e.signal_type <> 'contradicts'
+                  AND COALESCE(e.created_at, e.source_date, '') >= :cutoff
+                GROUP BY b.id
+                ORDER BY last_feedback DESC
+            """), {"cutoff": cutoff_iso}).fetchall()
         finally:
             session.close()
 
-        food = []
-        for r in rows:
-            key = r[0] or ''
-            if any(key.startswith(p) for p in _FOOD_BELIEF_KEY_PREFIXES):
-                stmt = r[1] or ''
-                weight = r[2] if r[2] is not None else 0.0
-                conf = r[3]
-                food.append((key, stmt, weight, conf))
+        established = [
+            (r[0], r[1] or "", r[2] if r[2] is not None else 0.0, r[3])
+            for r in established_rows if _is_food(r[0] or "")
+        ]
+        recent = [
+            (r[0], r[1] or "", r[2] if r[2] is not None else 0.0, r[3])
+            for r in recent_rows if _is_food(r[0] or "")
+        ]
 
-        if not food:
+        if not established and not recent:
             return "(no food-relevant beliefs in store yet)"
 
-        lines = ["Food-relevant beliefs (from BeliefStore, sorted by net_weight desc):"]
-        for key, stmt, weight, conf in food[:RUNAWAY_THRESHOLD]:
+        recent_keys = {row[0] for row in recent}
+        lines = []
+
+        if recent:
+            lines.append(
+                f"Recent user feedback ({RECENT_FEEDBACK_DAYS}d) — the user said these "
+                f"directly; treat as current intent and let them override older preferences:"
+            )
+            for key, stmt, weight, conf in recent[:RECENT_CAP]:
+                lines.append(f"- [{key}] (recent feedback, conf={conf or 'n/a'})")
+                lines.append(f"  {stmt}")
+            if len(recent) > RECENT_CAP:
+                lines.append(f"- (… plus {len(recent) - RECENT_CAP} more recent-feedback beliefs not shown)")
+            lines.append("")
+
+        established_deduped = [t for t in established if t[0] not in recent_keys]
+        lines.append("Established food beliefs (BeliefStore, by net_weight desc):")
+        for key, stmt, weight, conf in established_deduped[:RUNAWAY_THRESHOLD]:
             lines.append(f"- [{key}] (net={weight:.1f}, conf={conf or 'n/a'})")
             lines.append(f"  {stmt}")
-        if len(food) > RUNAWAY_THRESHOLD:
+        if len(established_deduped) > RUNAWAY_THRESHOLD:
             lines.append(
-                f"- (… plus {len(food) - RUNAWAY_THRESHOLD} more food-relevant beliefs "
-                f"not shown — runaway signal density; consider tightening filter or "
+                f"- (… plus {len(established_deduped) - RUNAWAY_THRESHOLD} more food-relevant "
+                f"beliefs not shown — runaway signal density; consider tightening filter or "
                 f"adding a real domain='food' tag at write time)"
             )
         return "\n".join(lines)
