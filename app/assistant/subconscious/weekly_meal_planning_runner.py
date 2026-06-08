@@ -120,6 +120,7 @@ def run_weekly_meal_planning_chain(
         "meal_context": meal_context,
         # 4-week history (variety + cadence) + shopping-list mechanics (raw).
         "recent_planned_meals": seed.get("recent_planned_meals"),
+        "easy_meals_rotation": seed.get("easy_meals_rotation"),
         "inventory_snapshot": seed.get("inventory_snapshot"),
         "ralphs_standing_list": seed.get("ralphs_standing_list"),
         "agent_weekly_list_state": seed.get("agent_weekly_list_state"),

@@ -58,6 +58,7 @@ def build_weekly_meal_planner_context() -> Dict[str, str]:
         "recipes_house": _build_recipes_house_reference(),
         "dietary_context": _build_dietary_context(household_members),
         "food_beliefs": _build_food_beliefs(),
+        "easy_meals_rotation": _build_easy_meals_rotation(),
         "general_calendar_week": _build_calendar_week_summary(now_local=now_local),
         "family_roster": _build_family_roster(household_members),
         "addressable_concerns": _build_addressable_concerns(),
@@ -81,6 +82,7 @@ def build_daily_meal_proposer_context() -> Dict[str, str]:
         "recipes_house": _build_recipes_house_reference(),
         "dietary_context": _build_dietary_context(household_members),
         "food_beliefs": _build_food_beliefs(),
+        "easy_meals_rotation": _build_easy_meals_rotation(),
         "food_calendar": _build_food_calendar(now_local=now_local),
         "general_calendar": _build_calendar_today_tomorrow(now_local=now_local),
         "family_roster": _build_family_roster(household_members),
@@ -117,6 +119,18 @@ def _build_recipes_house_reference() -> str:
     """The actual recipe list lives in the system_context_items
     (resource_meal_proposer_house_rules). We just point to it here."""
     return "(see resource_meal_proposer_house_rules in your system context for the full recipe vocabulary this family cooks regularly)"
+
+
+def _build_easy_meals_rotation() -> str:
+    """Render the easy-meals cadence/rotation block — go-to dishes flagged DUE to
+    come back vs RESTING (served too recently). Source: the easy_meals registry +
+    planned history (see subconscious/easy_meals.py)."""
+    from app.assistant.subconscious.easy_meals import render_easy_meals_for_planner
+    try:
+        return render_easy_meals_for_planner()
+    except Exception as e:
+        logger.warning("[meal_context] easy_meals rotation render failed: %s", e)
+        return "(error reading easy-meals rotation)"
 
 
 # Substring keywords for State node LABELS that strongly suggest dietary
