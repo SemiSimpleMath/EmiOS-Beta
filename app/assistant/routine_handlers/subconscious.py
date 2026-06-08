@@ -152,6 +152,32 @@ def daily_meal_proposer_run(
     return {"status": "ok", **summary}
 
 
+@routine_handler(name="meal_feedback_run")
+def meal_feedback_run(
+    *,
+    target_date: Optional[str] = None,
+    routine: Any = None,
+    event_message: Any = None,
+) -> Dict[str, Any]:
+    """Proactively ask how recent meals went + ingest the replies into beliefs.
+
+    PRODUCE: enqueue "How was <dish>?" pending_questions for recent past meals (the
+    conversation_starter bridge surfaces them). INGEST: turn the user's chat reply
+    into a feedback.comment pod -> feedback_extractor -> beliefs. Closes the
+    ask->answer->belief loop so the meal model learns without the user volunteering
+    comments on /meals (see scratch/MEAL-PLANNING-AUDIT.md)."""
+    from app.assistant.subconscious.meal_feedback_runner import run_meal_feedback_pass
+
+    summary = run_meal_feedback_pass()
+    logger.info(
+        "[meal_feedback_run] asked=%d ingested=%d dropped=%d",
+        summary.get("asked") or 0,
+        summary.get("ingested") or 0,
+        summary.get("dropped") or 0,
+    )
+    return {"status": "ok", **summary}
+
+
 @routine_handler(name="grocery_sync_run")
 def grocery_sync_run(
     *,

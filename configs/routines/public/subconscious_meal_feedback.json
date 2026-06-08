@@ -1,0 +1,30 @@
+{
+  "id": "subconscious_meal_feedback",
+  "enabled": true,
+  "name": "Subconscious meal feedback (ask + ingest)",
+  "runner": "function",
+  "spec": {
+    "function_name": "meal_feedback_run"
+  },
+  "run_policy": {
+    "type": "interval",
+    "min_interval_seconds": 3600
+  },
+  "trigger": {
+    "type": "time",
+    "active_window": {
+      "from": "07:00",
+      "to": "21:00",
+      "local": true
+    }
+  },
+  "max_run_seconds": 120,
+  "on_error": {
+    "max_failures": 3,
+    "backoff_base_seconds": 600,
+    "backoff_max_seconds": 3600,
+    "then": "disable_with_ticket",
+    "auto_retry_after_seconds": 3600
+  },
+  "notes": "Hourly during waking hours. PRODUCE: enqueue 'How was <dish>?' pending_questions for recent past meals (the conversation_starter bridge asks them proactively). INGEST: turn the user's chat reply into a feedback.comment pod -> feedback_extractor -> beliefs. Closes the ask->answer->belief loop. CLI: python -m app.assistant.subconscious.run_meal_feedback."
+}

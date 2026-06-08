@@ -256,6 +256,7 @@ resources/subconscious/resource_digest_state.json
 resources/subconscious/resource_grocery_inventory.json
 resources/subconscious/resource_grocery_sync_state.json
 resources/subconscious/resource_easy_meals.json
+resources/subconscious/resource_meal_feedback_state.json
 resources/subconscious/resource_meal_proposer_external_lists.json
 resources/subconscious/resource_meal_proposer_weekly_doc_state.json
 app/subconscious_digests/
