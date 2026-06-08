@@ -106,6 +106,8 @@ CREATE TABLE IF NOT EXISTS beliefs (
     net            REAL NOT NULL DEFAULT 0,
     status         TEXT NOT NULL,                -- active | contested | dormant  (derived from justifications, #4)
     confidence     REAL NOT NULL DEFAULT 0,      -- |net| / total evidence (#4)
+    valid_from     TEXT,                         -- world-time the claim began holding (#7)
+    valid_to       TEXT,                         -- world-time it lapsed (NULL while active/contested) (#7)
     first_observed TEXT,
     last_observed  TEXT,
     obs_count      INTEGER NOT NULL DEFAULT 0
@@ -202,16 +204,23 @@ class Store:
         ).fetchall()
 
     # ── read side (rebuildable projection) ───────────────────────────────────
-    def rebuild_projection(self, now=None) -> int:
-        """Fold the log into `beliefs` as of `now` (default: current UTC). Drop + rebuild = the
-        cache is a pure function of (log, now). Cadence-aware decay (#5) ages each justification's
-        weight by `now`, so the projection is a time-stamped snapshot — the log itself is immutable.
-        Returns the belief count."""
-        now_dt = _resolve_now(now)
+    def _project(self, now_dt: datetime, as_of: Optional[str] = None):
+        """Pure fold of the log → (belief_dicts, justification_rows). Honors consolidation
+        redirects (#6). For transaction-time travel (#7), an `as_of` cutoff keeps only observations
+        RECORDED at or before it — so you see what the engine believed as it knew things then; a
+        contradiction recorded later isn't in scope yet. Cadence decay (#5) ages weights as of
+        `now_dt` (the world clock), giving the bitemporal pair: as_of = system time, now = valid
+        time. No writes — both rebuild and beliefs_as_of() consume this."""
+        cutoff = str(as_of) if as_of is not None else None
+
+        def _in_tx(rec) -> bool:
+            return cutoff is None or (rec is not None and str(rec) <= cutoff)
+
         retracted = {
             r["retract_of"] for r in self.conn.execute(
-                "SELECT retract_of FROM observations WHERE polarity='retract' AND retract_of IS NOT NULL"
-            )
+                "SELECT retract_of, recorded_at FROM observations "
+                "WHERE polarity='retract' AND retract_of IS NOT NULL"
+            ) if _in_tx(r["recorded_at"])
         }
         merges = {r["belief_id"]: r["merged_into"] for r in   # consolidation redirects (#6)
                   self.conn.execute("SELECT belief_id, merged_into FROM belief_merges")}
@@ -225,6 +234,8 @@ class Store:
 
         acc: Dict[str, Dict[str, Any]] = {}
         for r in self.conn.execute("SELECT * FROM observations ORDER BY recorded_at, observation_id"):
+            if not _in_tx(r["recorded_at"]):
+                continue
             if r["polarity"] == "retract" or r["observation_id"] in retracted:
                 continue
             bid = _final(r["resolves_to"]) if r["resolves_to"] else None
@@ -264,7 +275,7 @@ class Store:
             if r["occurred_at"] and (b["last_observed"] is None or r["occurred_at"] > b["last_observed"]):
                 b["last_observed"] = r["occurred_at"]
 
-        rows = []
+        belief_dicts: List[Dict[str, Any]] = []
         just_rows = []
         for bid, b in acc.items():
             if b["support"] <= 0:          # no surviving affirmation → not a belief
@@ -282,19 +293,38 @@ class Store:
                 decayed.append({**j, "raw_weight": j["weight"], "weight": w})
 
             st = derive_status(decayed, min_support=MIN_ACTIVE_SUPPORT)   # status from DECAYED set (#4+#5)
+            valid_to = None if st.status in ("active", "contested") else b["last_observed"]
             for j in decayed:
                 just_rows.append((bid, j["observation_id"], j["sign"], j["raw_weight"], j["weight"],
                                   j["occurred_at"], j["source"]))
-            rows.append((bid, b["subject"], b["predicate"], b["object"], b["statement_nl"],
-                         json.dumps(b["applies_when"]) if b["applies_when"] is not None else None,
-                         b["kind"], st.pos, st.neg, st.net, st.status, st.confidence,
-                         b["first_observed"], b["last_observed"], b["obs_count"]))
+            belief_dicts.append({
+                "belief_id": bid, "subject": b["subject"], "predicate": b["predicate"],
+                "object": b["object"], "statement_nl": b["statement_nl"],
+                "applies_when": json.dumps(b["applies_when"]) if b["applies_when"] is not None else None,
+                "kind": b["kind"], "support": st.pos, "contradiction": st.neg, "net": st.net,
+                "status": st.status, "confidence": st.confidence,
+                "valid_from": b["first_observed"], "valid_to": valid_to,
+                "first_observed": b["first_observed"], "last_observed": b["last_observed"],
+                "obs_count": b["obs_count"],
+            })
+        return belief_dicts, just_rows
+
+    _BELIEF_COLS = ("belief_id", "subject", "predicate", "object", "statement_nl", "applies_when",
+                    "kind", "support", "contradiction", "net", "status", "confidence",
+                    "valid_from", "valid_to", "first_observed", "last_observed", "obs_count")
+
+    def rebuild_projection(self, now=None, as_of=None) -> int:
+        """Fold the log into `beliefs` as of `now` (and optionally a transaction-time `as_of`).
+        Drop + rebuild = the cache is a pure function of (log, now, as_of); the log is immutable.
+        Returns the belief count."""
+        now_dt = _resolve_now(now)
+        belief_dicts, just_rows = self._project(now_dt, as_of)
+        rows = [tuple(b[c] for c in self._BELIEF_COLS) for b in belief_dicts]
         self.conn.execute("DELETE FROM beliefs")
         self.conn.execute("DELETE FROM justifications")
         self.conn.executemany(
-            "INSERT INTO beliefs (belief_id,subject,predicate,object,statement_nl,applies_when,kind,"
-            "support,contradiction,net,status,confidence,first_observed,last_observed,obs_count) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows,
+            f"INSERT INTO beliefs ({','.join(self._BELIEF_COLS)}) "
+            f"VALUES ({','.join('?' for _ in self._BELIEF_COLS)})", rows,
         )
         self.conn.executemany(
             "INSERT INTO justifications (belief_id,observation_id,sign,raw_weight,weight,occurred_at,source) "
@@ -302,6 +332,14 @@ class Store:
         )
         self.conn.commit()
         return len(rows)
+
+    def beliefs_as_of(self, as_of, now=None) -> List[Dict[str, Any]]:
+        """Transaction-time travel (#7): what the engine believed as of system time `as_of`,
+        WITHOUT touching the live projection. Replays the immutable log up to `as_of` — event
+        sourcing makes this free, so no SCD-2 version table is needed."""
+        now_dt = _resolve_now(now)
+        belief_dicts, _ = self._project(now_dt, as_of)
+        return belief_dicts
 
     def justifications_for(self, belief_id: str) -> List[sqlite3.Row]:
         """The signed justification set behind a belief — the 'why' of its status (#4)."""
