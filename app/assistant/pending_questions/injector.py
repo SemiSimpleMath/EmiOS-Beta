@@ -39,7 +39,7 @@ from app.assistant.utils.time_utils import utc_now
 logger = get_logger(__name__)
 
 
-DEFAULT_DAILY_BUDGET = 5
+DEFAULT_DAILY_BUDGET = 6
 DEFAULT_MIN_MINUTES_BETWEEN = 10.0
 
 

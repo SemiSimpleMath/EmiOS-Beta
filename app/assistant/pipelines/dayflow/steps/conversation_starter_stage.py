@@ -578,6 +578,62 @@ class ConversationStarterStep(BaseStep):
         except Exception as e:
             logger.warning("ConversationStarterStage: failed to emit to user: %s", e)
 
+    def _finalize_proactive(self, ctx, *, text: str, sid: str, source: str,
+                            boundary_date_local: str) -> None:
+        """Record a proactively-sent message (global blackboard + unified_log +
+        frequency/rate-limit pointer) so it shows in chat history and counts
+        toward the daily cap. Mirrors the LLM-starter success path; used by the
+        non-LLM fast-paths (e.g. the pending-questions bridge)."""
+        try:
+            from app.assistant.ServiceLocator.service_locator import DI
+            from app.assistant.utils.identity_names import get_assistant_name
+            from app.assistant.utils.pydantic_classes import Message
+            _assistant_name = get_assistant_name()
+            DI.global_blackboard.add_msg(
+                Message(
+                    data_type="user_msg", sender=_assistant_name, content=text,
+                    is_chat=True, role="assistant",
+                    sub_data_type=["proactive", source],
+                    room_id="master_room", room_surface="ui", room_context_id="main",
+                    room_visibility="owner_only", room_message_direction="outbound",
+                    room_speaker_id="system:proactive", room_speaker_name=_assistant_name,
+                    room_speaker_role="assistant",
+                    metadata={"source": source, "starter_id": sid,
+                              "boundary_date_local": boundary_date_local},
+                )
+            )
+            from app.assistant.message_manager.save_to_unified_db import save_proactive_chat_message
+            save_proactive_chat_message(
+                content=text, sender=_assistant_name, sub_data_type=["proactive", source],
+            )
+        except Exception as e:
+            logger.warning("ConversationStarterStage: failed to record proactive msg: %s", e)
+
+        try:
+            pointer = self._load_latest_pointer(ctx)
+            last_boundary = pointer.get("boundary_date_local")
+            sent_today = int(pointer.get("sent_today", 0) or 0) if last_boundary == boundary_date_local else 0
+            sent_today += 1
+            recent_list = pointer.get("recent_starters", [])
+            if not isinstance(recent_list, list):
+                recent_list = []
+            recent_list.append({
+                "starter_id": sid, "timestamp_utc": ctx.now_utc.isoformat(),
+                "intent": source, "topics": [], "text": text,
+            })
+            recent_list = recent_list[-30:]
+            self._save_latest_pointer(ctx, {
+                "schema_version": 1,
+                "boundary_date_local": boundary_date_local,
+                "last_sent_utc": ctx.now_utc.isoformat(),
+                "last_sent_local": ctx.now_local.strftime("%Y-%m-%d %H:%M"),
+                "last_starter_id": sid,
+                "sent_today": sent_today,
+                "recent_starters": recent_list,
+            })
+        except Exception as e:
+            logger.warning("ConversationStarterStage: failed to update pointer: %s", e)
+
     def run(self, ctx: StepContext) -> StepResult:
         boundary_date_local = self._boundary_date_local(ctx)
         stage_cfg = ctx.step_config or {}
@@ -668,6 +724,34 @@ class ConversationStarterStep(BaseStep):
             logger.debug("ConversationStarterStage: context_activation memo exception details", exc_info=True)
             raise
         # ── End memo fast-path ─────────────────────────────────────────────────
+
+        # ── Pending-questions fast-path (proactive data-gathering) ────────────
+        # The subconscious noticer + meal-feedback producer enqueue real questions
+        # worth asking. Surface the highest-priority one here instead of waiting
+        # for the user to open a chat — this is the bridge that makes those queued
+        # questions actually reach the user proactively. Reuses the reply-time
+        # injector's budget + dedup (pick marks the question asked). Preferred over
+        # the generic LLM starter below because these are the real data-gathering
+        # asks. should_run() has already applied the AFK / quiet-hours / calendar /
+        # rate-limit gates, so this respects them too.
+        try:
+            from app.assistant.pending_questions.injector import pick_question_for_nudge
+            picked = pick_question_for_nudge()
+            if picked:
+                _qid, q_text = picked
+                q_text = (q_text or "").strip()
+                if q_text:
+                    sid = _starter_id(q_text)
+                    self._emit_to_user(q_text)
+                    self._finalize_proactive(
+                        ctx, text=q_text, sid=sid, source="pending_question",
+                        boundary_date_local=boundary_date_local,
+                    )
+                    logger.info("ConversationStarterStage: surfaced pending question id=%s", _qid[:8])
+                    return StepResult(output={"status": "sent", "source": "pending_question", "starter_id": sid})
+        except Exception as e:
+            logger.warning("ConversationStarterStage: pending-question fast-path failed: %s", e)
+        # ── End pending-questions fast-path ───────────────────────────────────
 
         context = self._build_context(ctx, boundary_date_local)
         try:
