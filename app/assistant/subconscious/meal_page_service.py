@@ -9,7 +9,7 @@ The route layer (app/routes/meals.py) is a thin wrapper around this.
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from app.assistant.pod_store.contracts import Pod
@@ -194,6 +194,55 @@ def build_page_view_model(week_start: Optional[str] = None) -> Dict[str, Any]:
         "ad_hoc_count": len(consolidate_intention_shopping(ad_hoc_pods)),
         "viewing_week": viewing_week_iso,
         "nav": nav,
+    }
+
+
+def build_inventory_view_model() -> Dict[str, Any]:
+    """Everything the /meals/inventory editor needs: active items with a
+    computed freshness (days until decay), sorted soonest-to-expire first,
+    plus the category vocabulary for the add form."""
+    from app.assistant.subconscious.grocery_inventory import (
+        load_inventory,
+        CATEGORY_DECAY_DAYS,
+    )
+
+    inv = load_inventory()
+    now = datetime.now(timezone.utc)
+    rows: List[Dict[str, Any]] = []
+    for it in (inv.get("items") or []):
+        if it.get("consumed_at_utc"):
+            continue
+        days_left: Optional[int] = None
+        try:
+            decay = datetime.fromisoformat((it.get("decay_at_utc") or "").replace("Z", "+00:00"))
+            days_left = (decay - now).days
+        except Exception:
+            pass
+        if days_left is None:
+            freshness = "unknown"
+        elif days_left < 0:
+            freshness = "expired"
+        elif days_left <= 2:
+            freshness = "soon"
+        else:
+            freshness = "fresh"
+        rows.append({
+            "id": it.get("id"),
+            "name": it.get("name"),
+            "category": it.get("category") or "unknown",
+            "days_left": days_left,
+            "decay_date": (it.get("decay_at_utc") or "")[:10],
+            "acquired_date": (it.get("acquired_at_utc") or "")[:10],
+            "freshness": freshness,
+        })
+    # Soonest-to-expire first (None/unknown sink to the bottom).
+    rows.sort(key=lambda r: r["days_left"] if r["days_left"] is not None else 9999)
+
+    return {
+        "items": rows,
+        "count": len(rows),
+        "categories": sorted(CATEGORY_DECAY_DAYS.keys()),
+        "last_updated": (inv.get("last_updated_utc") or "")[:19].replace("T", " "),
     }
 
 

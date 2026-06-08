@@ -38,6 +38,8 @@ body {
 }
 .back-link:hover { color: #1a202c; }
 
+.meals-header-links { display: flex; gap: 16px; align-items: center; }
+
 .meals-plan-section,
 .meals-shopping-section,
 .meals-actions,

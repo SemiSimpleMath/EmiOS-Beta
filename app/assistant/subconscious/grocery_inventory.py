@@ -294,6 +294,29 @@ def manual_consume(items: Iterable[str], *, reason: str = "manual") -> Dict[str,
     return {"status": "applied", "consumed": len(consumed), "consumed_items": consumed, "missing": missing}
 
 
+def remove_item(item_id: str, *, reason: str = "manual_ui") -> Dict[str, Any]:
+    """Remove one active item by id (the user says it isn't in the fridge).
+
+    Marks it consumed with a reason and moves it to history — the canonical
+    mutation behind the inventory-editor UI's per-row delete, so routes never
+    hand-edit the JSON. Idempotent: a missing/already-removed id is a no-op.
+    """
+    inv = load_inventory()
+    now_utc = datetime.now(timezone.utc)
+    target = next(
+        (i for i in inv["items"] if i.get("id") == item_id and i.get("consumed_at_utc") is None),
+        None,
+    )
+    if target is None:
+        return {"status": "not_found", "removed": 0}
+    target["consumed_at_utc"] = now_utc.isoformat()
+    target["consumed_reason"] = reason
+    inv["items"] = [i for i in inv["items"] if i.get("consumed_at_utc") is None]
+    inv["history"].append(target)
+    save_inventory(inv)
+    return {"status": "removed", "removed": 1, "name": target.get("name")}
+
+
 def apply_decay() -> Dict[str, Any]:
     """Move items past decay_at to history. Idempotent."""
     inv = load_inventory()
