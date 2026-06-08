@@ -264,6 +264,15 @@ _PINNED_BELIEF_KEYS = {
 
 _CONFIDENCE_RANK = {"high": 0, "medium": 1, "low": 2}
 
+# The daily routine is a SCHEDULE. Only schedule/routine-shaping beliefs belong in
+# the writer's context. `kind` already classifies this, so we feed routine_pattern
+# (recurring routines / wall-clock anchors) + durable_fact, and drop
+# stable_preference (background tastes), episodic_context (one-off past events),
+# transient_state, etc. — which were drowning the real routine items (826 active
+# beliefs collapse to ~290). Pinned belief keys bypass this filter (explicit
+# must-haves). Widen this set if a genuinely schedule-shaping kind shows up.
+_ROUTINE_RELEVANT_KINDS = {"routine_pattern", "durable_fact"}
+
 
 def _format_beliefs(day_of_week: str) -> str:
     if not _BELIEFS_PATH.exists():
@@ -279,10 +288,26 @@ def _format_beliefs(day_of_week: str) -> str:
         logger.error("[DayFlowRoutine] Failed reading beliefs: %s", exc, exc_info=True)
         return ""
 
+    return _render_belief_block(entries)
+
+
+def _render_belief_block(entries: list) -> str:
+    """Render the routine writer's belief context from raw export entries.
+
+    Scopes to schedule/routine-shaping beliefs via `kind` (see
+    _ROUTINE_RELEVANT_KINDS) so background preferences + one-off episodic facts
+    don't drown the actual routine items. Pinned belief keys are always kept,
+    regardless of kind. Extracted from _format_beliefs so it's unit-testable
+    without the live export file.
+    """
     active = [e for e in entries if e.get("statement") and e.get("status", "active") == "active"]
 
     pinned = [e for e in active if e.get("belief_key", "") in _PINNED_BELIEF_KEYS]
-    rest = [e for e in active if e.get("belief_key", "") not in _PINNED_BELIEF_KEYS]
+    rest = [
+        e for e in active
+        if e.get("belief_key", "") not in _PINNED_BELIEF_KEYS
+        and e.get("kind") in _ROUTINE_RELEVANT_KINDS
+    ]
 
     def _sort_key(e: dict) -> tuple:
         domain_rank = _DOMAIN_ORDER.index(e.get("domain", "")) if e.get("domain", "") in _DOMAIN_ORDER else len(_DOMAIN_ORDER)
