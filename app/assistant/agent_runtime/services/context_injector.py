@@ -388,14 +388,9 @@ class ContextInjector:
         for ts_utc, sender, content in combined:
             if ts_utc:
                 try:
-                    from app.assistant.utils.time_utils import utc_to_local
+                    from app.assistant.utils.time_utils import format_history_local
 
-                    local_dt = utc_to_local(ts_utc)
-                    now_local = utc_to_local(datetime.now(timezone.utc))
-                    if local_dt.date() == now_local.date():
-                        local = local_dt.strftime("%H:%M")
-                    else:
-                        local = local_dt.strftime("%Y-%m-%d %H:%M")
+                    local = format_history_local(ts_utc)
                     lines.append(f"[{local}] {sender}: {content}")
                     continue
                 except Exception as e:

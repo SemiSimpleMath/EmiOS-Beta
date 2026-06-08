@@ -23,7 +23,7 @@ class PromptBuilder:
     def construct_prompt(self, agent, message=None, entity_injection_keys: set[str] | None = None) -> List[Dict[str, str]]:
         system_prompt = self.get_system_prompt(agent, message, entity_injection_keys)
         user_prompt = self.get_user_prompt(agent, message, entity_injection_keys)
-        user_prompt = self._append_runtime_injections(agent, user_prompt)
+        user_prompt = self._append_runtime_injections(agent, user_prompt, message)
 
         if not system_prompt:
             logger.error("[%s] Error forming the system prompt.", agent.name)
@@ -148,23 +148,20 @@ class PromptBuilder:
             logger.debug("[%s] system prompt render exception details", agent.name, exc_info=True)
             raise
 
-    def _append_runtime_injections(self, agent, user_prompt: str) -> str:
-        """If anything has been delivered to the agent's runtime-injection slot
-        via the manager mailbox, append it to the rendered user prompt.
+    def _append_runtime_injections(self, agent, user_prompt: str, message=None) -> str:
+        """Append mid-task @-messages (delivered via the manager mailbox) to the
+        rendered user prompt as a time-ordered, attributed block with explicit
+        precedence: a later message SUPERSEDES/amends/adds to anything before it
+        (including the original task); a user message outranks system/agent; the
+        most recent user message is final.
 
-        Sender owns the framing (``+++++ Latest instruction from user +++ ...``)
-        — this just concatenates whatever's there, in posting order. Never
-        clears the slot; subsequent activations see the same accumulated
-        history, like chat messages.
+        Each entry is ``{text, posted_at_utc, from_who}`` (legacy bare strings
+        still render, unstamped). Times are LOCAL and use the same formatter as
+        chat history, so a steering message reads like a normal turn. Append-only
+        — never cleared; subsequent activations see the same accumulated history.
         """
-        # Reserved blackboard slot maintained by MailboxDispatcher: per-agent
-        # runtime injection lists. Append-only — each item is a sender-wrapped
-        # block of text that should be visible to the agent on its NEXT
-        # activation and every subsequent one (chat-style accumulation, never
-        # cleared).
-        from app.assistant.manager_runtime.mailbox import (
-            _RUNTIME_INJECTIONS_BB_KEY,
-        )
+        from app.assistant.manager_runtime.mailbox import _RUNTIME_INJECTIONS_BB_KEY
+        from app.assistant.utils.time_utils import format_history_local
         try:
             store = agent.blackboard.get_state_value(_RUNTIME_INJECTIONS_BB_KEY) or {}
         except Exception:
@@ -174,11 +171,48 @@ class PromptBuilder:
         items = store.get(agent.name)
         if not isinstance(items, list) or not items:
             return user_prompt or ""
-        addition = "\n\n".join(str(x) for x in items if isinstance(x, str) and x.strip())
-        if not addition:
+
+        lines: list[str] = []
+        for entry in items:
+            if isinstance(entry, dict):
+                text = str(entry.get("text") or "").strip()
+                if not text:
+                    continue
+                who = str(entry.get("from_who") or "system")
+                ts = entry.get("posted_at_utc")
+                stamp = ""
+                if ts:
+                    try:
+                        stamp = format_history_local(ts)
+                    except Exception:
+                        stamp = ""
+                lines.append(f"[{stamp}] {who}: {text}" if stamp else f"{who}: {text}")
+            elif isinstance(entry, str) and entry.strip():
+                lines.append(entry.strip())  # legacy bare string — already sender-framed
+        if not lines:
             return user_prompt or ""
+
+        # Baseline the messages below supersede: when this task was dispatched.
+        dispatched = ""
+        ts0 = getattr(message, "timestamp", None) if message is not None else None
+        if ts0:
+            try:
+                dispatched = format_history_local(ts0)
+            except Exception:
+                dispatched = ""
+
+        header = ["### Out-of-band messages (delivered after this task started — newest is authoritative)"]
+        if dispatched:
+            header.append(f"Original task dispatched: {dispatched}.")
+        header.append(
+            "The messages below arrived mid-task, in time order. A later message "
+            "SUPERSEDES, amends, or adds to anything before it (including the original "
+            "task) where they conflict. A message from the user outranks system/agent "
+            "messages; treat the most recent user message as final."
+        )
+        block = "\n".join(header) + "\n" + "\n".join(lines)
         base = (user_prompt or "").rstrip()
-        return f"{base}\n\n{addition}\n" if base else f"{addition}\n"
+        return f"{base}\n\n{block}\n" if base else f"{block}\n"
 
     def get_user_prompt(self, agent, message=None, entity_injection_keys: set[str] | None = None) -> str:
         user_prompt_template = agent.config.get("prompts", {}).get("user", "")

@@ -246,7 +246,11 @@ class MailboxDispatcher:
             return
 
         if mtype == "agent_inject":
-            self._apply_agent_inject(payload, blackboard, role_resolver)
+            self._apply_agent_inject(
+                payload, blackboard, role_resolver,
+                posted_at_utc=getattr(msg, "posted_at_utc", None),
+                from_who=getattr(msg, "from_who", "system"),
+            )
             return
 
         if mtype == "blackboard_write":
@@ -256,7 +260,10 @@ class MailboxDispatcher:
         logger.warning("MailboxDispatcher: unknown message_type=%r — dropped", mtype)
 
     @staticmethod
-    def _apply_agent_inject(payload: dict, blackboard, role_resolver) -> None:
+    def _apply_agent_inject(
+        payload: dict, blackboard, role_resolver,
+        *, posted_at_utc=None, from_who: str = "system",
+    ) -> None:
         for role_or_name, content in payload.items():
             target = role_or_name
             if callable(role_resolver):
@@ -275,6 +282,7 @@ class MailboxDispatcher:
                 continue
             MailboxDispatcher._append_runtime_injection(
                 blackboard, target.strip(), content.strip(),
+                posted_at_utc=posted_at_utc, from_who=from_who,
             )
 
     @staticmethod
@@ -285,10 +293,16 @@ class MailboxDispatcher:
             blackboard.update_state_value(key.strip(), value)
 
     @staticmethod
-    def _append_runtime_injection(blackboard, agent_name: str, text: str) -> None:
-        """Append ``text`` to the named agent's runtime-injection slot
-        on ``blackboard``. Append-only — accumulates like chat history.
-        Agent prompt assembly renders its own slot during each activation.
+    def _append_runtime_injection(
+        blackboard, agent_name: str, text: str,
+        *, posted_at_utc=None, from_who: str = "system",
+    ) -> None:
+        """Append one entry to the named agent's runtime-injection slot on
+        ``blackboard``. Append-only — accumulates like chat history. Each entry
+        keeps its arrival time + sender so prompt assembly can render it
+        time-ordered with precedence (a later message supersedes earlier ones;
+        a user message outranks system/agent). Agent prompt assembly renders its
+        own slot during each activation.
         """
         store = blackboard.get_state_value(_RUNTIME_INJECTIONS_BB_KEY) or {}
         if not isinstance(store, dict):
@@ -296,10 +310,15 @@ class MailboxDispatcher:
         existing = store.get(agent_name)
         if not isinstance(existing, list):
             existing = []
-        existing.append(text)
+        entry = {
+            "text": text,
+            "posted_at_utc": posted_at_utc.isoformat() if hasattr(posted_at_utc, "isoformat") else posted_at_utc,
+            "from_who": (from_who or "system"),
+        }
+        existing.append(entry)
         store[agent_name] = existing
         blackboard.update_state_value(_RUNTIME_INJECTIONS_BB_KEY, store)
         logger.info(
-            "runtime_injection appended for agent=%s len=%d (total=%d)",
-            agent_name, len(text), len(existing),
+            "runtime_injection appended for agent=%s from=%s len=%d (total=%d)",
+            agent_name, entry["from_who"], len(text), len(existing),
         )

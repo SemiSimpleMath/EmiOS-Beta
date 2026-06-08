@@ -369,6 +369,20 @@ def get_local_time_str() -> str:
     return local_time.strftime("%Y-%m-%d %H:%M:%S %Z")
 
 
+def format_history_local(ts_utc: Union[str, datetime]) -> str:
+    """Format a timestamp the way agent-facing chat history shows it: LOCAL time,
+    ``%H:%M`` when it's today, else ``%Y-%m-%d %H:%M``.
+
+    Agents reason purely in local time, so this is the single source of truth for
+    message-like entries — chat history AND mailbox @-message injections render
+    identically through it, so a steering message never looks different from a
+    normal turn."""
+    local_dt = utc_to_local(ts_utc)
+    now_local = utc_to_local(datetime.now(timezone.utc))
+    fmt = "%H:%M" if local_dt.date() == now_local.date() else "%Y-%m-%d %H:%M"
+    return local_dt.strftime(fmt)
+
+
 def to_rfc3339_z(dt: datetime) -> str:
     """
     Returns UTC time in RFC 3339 format with Z suffix.
