@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from belief_engine_v2.identity import identity_of
+from belief_engine_v2.status import derive_status
 
 
 def _now() -> str:
@@ -77,11 +78,25 @@ CREATE TABLE IF NOT EXISTS beliefs (
     support        REAL NOT NULL DEFAULT 0,
     contradiction  REAL NOT NULL DEFAULT 0,
     net            REAL NOT NULL DEFAULT 0,
-    status         TEXT NOT NULL,                -- active | dormant  (basic; #4 makes it justification-proper)
+    status         TEXT NOT NULL,                -- active | contested | dormant  (derived from justifications, #4)
+    confidence     REAL NOT NULL DEFAULT 0,      -- |net| / total evidence (#4)
     first_observed TEXT,
     last_observed  TEXT,
     obs_count      INTEGER NOT NULL DEFAULT 0
 );
+
+-- The justification set (#4): one row per surviving observation that supports/contradicts a
+-- belief. status + confidence are RECOMPUTED from this set, never mutated. Rebuilt each fold.
+CREATE TABLE IF NOT EXISTS justifications (
+    belief_id      TEXT NOT NULL,
+    observation_id TEXT NOT NULL,
+    sign           INTEGER NOT NULL,             -- +1 supports | -1 contradicts
+    weight         REAL NOT NULL,                -- magnitude (decayed weight lands here in #5)
+    occurred_at    TEXT,
+    source         TEXT,
+    PRIMARY KEY (belief_id, observation_id)
+);
+CREATE INDEX IF NOT EXISTS ix_just_belief ON justifications(belief_id);
 """
 
 _RESOLVER_VERSION = "v0-stub"
@@ -169,11 +184,13 @@ class Store:
                 "belief_id": bid, "subject": claim.get("subject", ""),
                 "predicate": claim.get("predicate", ""), "object": claim.get("object", ""),
                 "statement_nl": "", "applies_when": None, "kind": None,
-                "support": 0.0, "contradiction": 0.0, "obs_count": 0,
+                "support": 0.0, "contradiction": 0.0, "obs_count": 0, "justifications": [],
                 "first_observed": r["occurred_at"], "last_observed": r["occurred_at"],
             })
             s = r["strength"] if r["strength"] is not None else 1.0
+            sign = 0
             if r["polarity"] == "affirm":
+                sign = 1
                 b["support"] += s
                 if claim.get("statement_nl"):
                     b["statement_nl"] = claim["statement_nl"]   # latest affirm wins (fold order)
@@ -183,7 +200,13 @@ class Store:
                 if k:
                     b["kind"] = k
             elif r["polarity"] == "contradict":
+                sign = -1
                 b["contradiction"] += s
+            if sign:
+                b["justifications"].append({                    # the JTMS justification set (#4)
+                    "observation_id": r["observation_id"], "sign": sign, "weight": s,
+                    "occurred_at": r["occurred_at"], "source": r["source"],
+                })
             b["obs_count"] += 1
             if r["occurred_at"] and (b["first_observed"] is None or r["occurred_at"] < b["first_observed"]):
                 b["first_observed"] = r["occurred_at"]
@@ -191,23 +214,38 @@ class Store:
                 b["last_observed"] = r["occurred_at"]
 
         rows = []
+        just_rows = []
         for bid, b in acc.items():
             if b["support"] <= 0:          # no surviving affirmation → not a belief
                 continue
-            net = b["support"] - b["contradiction"]
-            status = "active" if net > 0 else "dormant"
+            st = derive_status(b["justifications"])   # status + confidence DERIVED from the set (#4)
+            for j in b["justifications"]:
+                just_rows.append((bid, j["observation_id"], j["sign"], j["weight"],
+                                  j["occurred_at"], j["source"]))
             rows.append((bid, b["subject"], b["predicate"], b["object"], b["statement_nl"],
                          json.dumps(b["applies_when"]) if b["applies_when"] is not None else None,
-                         b["kind"], b["support"], b["contradiction"], net, status,
+                         b["kind"], st.pos, st.neg, st.net, st.status, st.confidence,
                          b["first_observed"], b["last_observed"], b["obs_count"]))
         self.conn.execute("DELETE FROM beliefs")
+        self.conn.execute("DELETE FROM justifications")
         self.conn.executemany(
             "INSERT INTO beliefs (belief_id,subject,predicate,object,statement_nl,applies_when,kind,"
-            "support,contradiction,net,status,first_observed,last_observed,obs_count) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows,
+            "support,contradiction,net,status,confidence,first_observed,last_observed,obs_count) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows,
+        )
+        self.conn.executemany(
+            "INSERT INTO justifications (belief_id,observation_id,sign,weight,occurred_at,source) "
+            "VALUES (?,?,?,?,?,?)", just_rows,
         )
         self.conn.commit()
         return len(rows)
+
+    def justifications_for(self, belief_id: str) -> List[sqlite3.Row]:
+        """The signed justification set behind a belief — the 'why' of its status (#4)."""
+        return self.conn.execute(
+            "SELECT * FROM justifications WHERE belief_id=? ORDER BY occurred_at, observation_id",
+            (belief_id,),
+        ).fetchall()
 
     def beliefs(self) -> List[sqlite3.Row]:
         return self.conn.execute("SELECT * FROM beliefs ORDER BY belief_id").fetchall()
