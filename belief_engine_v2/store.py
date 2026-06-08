@@ -124,6 +124,17 @@ CREATE TABLE IF NOT EXISTS justifications (
     PRIMARY KEY (belief_id, observation_id)
 );
 CREATE INDEX IF NOT EXISTS ix_just_belief ON justifications(belief_id);
+
+-- Consolidation (#6): a REVERSIBLE redirect from a duplicate belief to its survivor. The fold
+-- attributes a redirected belief's observations to the survivor, so their justifications union;
+-- deleting the row un-merges them. Populated by consolidate() (embedding NN proposes, LLM verifies).
+CREATE TABLE IF NOT EXISTS belief_merges (
+    belief_id   TEXT PRIMARY KEY,             -- the duplicate (redirected away)
+    merged_into TEXT NOT NULL,                -- the survivor it folds into
+    method      TEXT,                         -- llm_verified | manual
+    detail      TEXT,                         -- JSON (verifier reason, similarity)
+    created_at  TEXT
+);
 """
 
 _RESOLVER_VERSION = "v0-stub"
@@ -202,11 +213,21 @@ class Store:
                 "SELECT retract_of FROM observations WHERE polarity='retract' AND retract_of IS NOT NULL"
             )
         }
+        merges = {r["belief_id"]: r["merged_into"] for r in   # consolidation redirects (#6)
+                  self.conn.execute("SELECT belief_id, merged_into FROM belief_merges")}
+
+        def _final(bid: str) -> str:                          # follow the redirect chain (cycle-safe)
+            seen = set()
+            while bid in merges and bid not in seen:
+                seen.add(bid)
+                bid = merges[bid]
+            return bid
+
         acc: Dict[str, Dict[str, Any]] = {}
         for r in self.conn.execute("SELECT * FROM observations ORDER BY recorded_at, observation_id"):
             if r["polarity"] == "retract" or r["observation_id"] in retracted:
                 continue
-            bid = r["resolves_to"]
+            bid = _final(r["resolves_to"]) if r["resolves_to"] else None
             if not bid:
                 continue
             claim = json.loads(r["claim_json"]) if r["claim_json"] else {}
@@ -291,6 +312,27 @@ class Store:
 
     def beliefs(self) -> List[sqlite3.Row]:
         return self.conn.execute("SELECT * FROM beliefs ORDER BY belief_id").fetchall()
+
+    # ── consolidation (#6) — reversible belief merges ────────────────────────
+    def merge_beliefs(self, loser: str, survivor: str, *, method: str = "llm_verified",
+                      detail: Optional[dict] = None, commit: bool = True) -> None:
+        """Redirect `loser` into `survivor`. The next rebuild folds loser's observations into the
+        survivor (justifications union). Reversible: drop the row to split them again."""
+        if not loser or not survivor or loser == survivor:
+            return
+        self.conn.execute(
+            "INSERT OR REPLACE INTO belief_merges (belief_id, merged_into, method, detail, created_at) "
+            "VALUES (?,?,?,?,?)",
+            (loser, survivor, method, json.dumps(detail) if detail else None, _now()),
+        )
+        if commit:
+            self.conn.commit()
+
+    def unmerge_belief(self, loser: str, *, commit: bool = True) -> None:
+        """Withdraw a consolidation redirect; the belief splits back out on the next rebuild."""
+        self.conn.execute("DELETE FROM belief_merges WHERE belief_id=?", (loser,))
+        if commit:
+            self.conn.commit()
 
     def close(self) -> None:
         self.conn.close()
