@@ -246,6 +246,24 @@ def build_inventory_view_model() -> Dict[str, Any]:
     }
 
 
+def build_easy_meals_view_model() -> Dict[str, Any]:
+    """Everything the /meals/easy-meals editor needs: each go-to dish with its
+    cadence + derived 'days since last' + rotation status (due / resting / never),
+    most-overdue first."""
+    from app.assistant.subconscious.easy_meals import (
+        build_easy_meals_rotation,
+        load_easy_meals,
+    )
+    rows = build_easy_meals_rotation()
+    data = load_easy_meals()
+    return {
+        "meals": rows,
+        "count": len(rows),
+        "default_max_days": 7,
+        "last_updated": (data.get("last_updated_utc") or "")[:19].replace("T", " "),
+    }
+
+
 def _parse_week_start(s: str) -> Optional[date]:
     try:
         d = datetime.strptime(s, "%Y-%m-%d").date()

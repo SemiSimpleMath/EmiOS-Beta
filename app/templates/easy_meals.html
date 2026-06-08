@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Easy Meals — {{ assistant_name }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/easy_meals.css') }}?v={{ static_v }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="em-container">
+        <header class="em-header">
+            <h1><i class="fas fa-rotate"></i> Easy Meals</h1>
+            <a href="/meals" class="em-back-link"><i class="fas fa-arrow-left"></i> Back to Meals</a>
+        </header>
+
+        <p class="em-intro">
+            Your go-to dishes the family is happy with. Set how often each is OK
+            (cadence), and the planner rotates them — bringing back ones that are
+            <strong>due</strong> and resting ones served too recently. "Last" is
+            taken from recent plans.
+            {% if last_updated %}<span class="em-updated">Last updated {{ last_updated }} UTC</span>{% endif %}
+        </p>
+
+        <form class="em-add" method="POST" action="/meals/easy-meals/add">
+            <input type="text" name="name" class="em-add-name" placeholder="Dish name — e.g. Pork chops" autocomplete="off" required>
+            <label class="em-add-cadence">OK every
+                <input type="number" name="max_days" min="1" value="{{ default_max_days }}"> days
+            </label>
+            <input type="text" name="notes" class="em-add-notes" placeholder="Notes (optional) — e.g. kids love" autocomplete="off">
+            <button type="submit" class="em-add-btn"><i class="fas fa-plus"></i> Add</button>
+        </form>
+
+        {% if meals %}
+        <table class="em-table">
+            <thead>
+                <tr><th>Dish</th><th>Cadence &amp; notes</th><th>Status</th><th></th></tr>
+            </thead>
+            <tbody>
+                {% for m in meals %}
+                <tr class="em-row em-row-{{ m.status }}">
+                    <td class="em-name">{{ m.name }}</td>
+                    <td>
+                        <form method="POST" action="/meals/easy-meals/update" class="em-update-form">
+                            <input type="hidden" name="meal_id" value="{{ m.id }}">
+                            <span class="em-cadence">every
+                                <input type="number" name="max_days" min="1" value="{{ m.max_days }}"> d
+                            </span>
+                            <input type="text" name="notes" class="em-notes" value="{{ m.notes }}" placeholder="notes">
+                            <button type="submit" class="em-save-btn" title="Save">Save</button>
+                        </form>
+                    </td>
+                    <td>
+                        {% if m.status == 'due' %}
+                            <span class="em-badge em-badge-due">due</span>
+                            <span class="em-last">{{ m.days_since }}d ago</span>
+                        {% elif m.status == 'resting' %}
+                            <span class="em-badge em-badge-resting">resting</span>
+                            <span class="em-last">{{ m.days_since }}d ago</span>
+                        {% else %}
+                            <span class="em-badge em-badge-never">not recent</span>
+                        {% endif %}
+                    </td>
+                    <td class="em-actions">
+                        <form method="POST" action="/meals/easy-meals/remove" class="em-remove-form">
+                            <input type="hidden" name="meal_id" value="{{ m.id }}">
+                            <button type="submit" class="em-remove-btn" title="Remove"><i class="fas fa-trash"></i></button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <p class="em-count">{{ count }} easy meal{{ '' if count == 1 else 's' }}</p>
+        {% else %}
+        <div class="em-empty">
+            <i class="fas fa-utensils"></i>
+            <p>No easy meals yet. Add the dishes your family is reliably happy with above —
+               the planner will rotate them in on the cadence you set.</p>
+        </div>
+        {% endif %}
+    </div>
+</body>
+</html>
