@@ -62,6 +62,7 @@ class Registry:
                  threshold: float = 0.86,
                  max_candidates: int = 5) -> None:
         self.conn = conn
+        conn.row_factory = sqlite3.Row    # named access for concept/alias rows (#8 review)
         self.embedder = embedder
         self.verifier = verifier          # verifier(phrase, candidate_label, ctype) -> bool
         self.threshold = float(threshold)  # candidate-RECALL gate (not a merge decision)
@@ -179,3 +180,34 @@ class Registry:
         if ctype:
             return self.conn.execute("SELECT COUNT(*) FROM concepts WHERE ctype=?", (ctype,)).fetchone()[0]
         return self.conn.execute("SELECT COUNT(*) FROM concepts").fetchone()[0]
+
+    # ── emergent-vocabulary support (#8) ─────────────────────────────────────
+    def concepts_by_status(self, status: str, ctype: Optional[str] = None) -> List[sqlite3.Row]:
+        if ctype:
+            return self.conn.execute(
+                "SELECT * FROM concepts WHERE status=? AND ctype=? ORDER BY created_at, concept_id",
+                (status, ctype)).fetchall()
+        return self.conn.execute(
+            "SELECT * FROM concepts WHERE status=? ORDER BY created_at, concept_id", (status,)).fetchall()
+
+    def alias_count(self, concept_id: str) -> int:
+        return self.conn.execute(
+            "SELECT COUNT(*) FROM aliases WHERE concept_id=?", (concept_id,)).fetchone()[0]
+
+    def promote(self, concept_id: str, *, commit: bool = True) -> None:
+        """A candidate concept that has proven itself becomes part of the canonical vocabulary."""
+        self.conn.execute("UPDATE concepts SET status='active' WHERE concept_id=?", (concept_id,))
+        if commit:
+            self.conn.commit()
+
+    def merge_concepts(self, loser: str, survivor: str, *, commit: bool = True) -> None:
+        """Fold a duplicate concept into the survivor: repoint its aliases (so future phrases
+        resolve to the survivor) and mark it merged_into. Reload vectors so the loser drops out
+        of candidate generation."""
+        if not loser or not survivor or loser == survivor:
+            return
+        self.conn.execute("UPDATE aliases SET concept_id=? WHERE concept_id=?", (survivor, loser))
+        self.conn.execute("UPDATE concepts SET status='merged_into' WHERE concept_id=?", (loser,))
+        if commit:
+            self.conn.commit()
+            self._load_vectors()
