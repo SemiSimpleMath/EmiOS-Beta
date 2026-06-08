@@ -21,12 +21,38 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from belief_engine_v2.decay import interval_from_cue, interval_from_spacing, survival
 from belief_engine_v2.identity import identity_of
 from belief_engine_v2.status import derive_status
+
+# Surviving support at/below this (after decay) → the belief has faded to dormant (#5).
+MIN_ACTIVE_SUPPORT = 0.05
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _resolve_now(now) -> datetime:
+    if now is None:
+        return datetime.now(timezone.utc)
+    if isinstance(now, datetime):
+        return now
+    return datetime.fromisoformat(str(now))
+
+
+def _age_days(now_dt: datetime, occurred_iso: Optional[str]) -> float:
+    """Age of an observation in days. Compared tz-naively so a mix of aware/naive timestamps
+    (e.g. UTC-stamped appends vs naive test fixtures) never raises — decay is day-scale."""
+    if not occurred_iso:
+        return 0.0
+    try:
+        occ = datetime.fromisoformat(str(occurred_iso))
+    except Exception:
+        return 0.0
+    a = now_dt.replace(tzinfo=None)
+    b = occ.replace(tzinfo=None)
+    return max(0.0, (a - b).total_seconds() / 86400.0)
 
 
 @dataclass
@@ -91,7 +117,8 @@ CREATE TABLE IF NOT EXISTS justifications (
     belief_id      TEXT NOT NULL,
     observation_id TEXT NOT NULL,
     sign           INTEGER NOT NULL,             -- +1 supports | -1 contradicts
-    weight         REAL NOT NULL,                -- magnitude (decayed weight lands here in #5)
+    raw_weight     REAL NOT NULL,                -- the observation's original strength
+    weight         REAL NOT NULL,                -- effective weight = raw_weight × survival(...)  (#5)
     occurred_at    TEXT,
     source         TEXT,
     PRIMARY KEY (belief_id, observation_id)
@@ -164,9 +191,12 @@ class Store:
         ).fetchall()
 
     # ── read side (rebuildable projection) ───────────────────────────────────
-    def rebuild_projection(self) -> int:
-        """Deterministically fold the log into `beliefs`. Drop + rebuild = the cache is a
-        pure function of the log. Returns the belief count."""
+    def rebuild_projection(self, now=None) -> int:
+        """Fold the log into `beliefs` as of `now` (default: current UTC). Drop + rebuild = the
+        cache is a pure function of (log, now). Cadence-aware decay (#5) ages each justification's
+        weight by `now`, so the projection is a time-stamped snapshot — the log itself is immutable.
+        Returns the belief count."""
+        now_dt = _resolve_now(now)
         retracted = {
             r["retract_of"] for r in self.conn.execute(
                 "SELECT retract_of FROM observations WHERE polarity='retract' AND retract_of IS NOT NULL"
@@ -218,9 +248,21 @@ class Store:
         for bid, b in acc.items():
             if b["support"] <= 0:          # no surviving affirmation → not a belief
                 continue
-            st = derive_status(b["justifications"])   # status + confidence DERIVED from the set (#4)
+            # --- cadence-aware decay (#5): age each justification's weight as of `now` ---
+            kind = b["kind"]
+            ages = {j["observation_id"]: _age_days(now_dt, j["occurred_at"]) for j in b["justifications"]}
+            interval = None
+            if (kind or "").strip().lower() == "procedural_routine":
+                affirm_ages = [ages[j["observation_id"]] for j in b["justifications"] if j["sign"] > 0]
+                interval = interval_from_cue(b["applies_when"]) or interval_from_spacing(affirm_ages)
+            decayed = []
             for j in b["justifications"]:
-                just_rows.append((bid, j["observation_id"], j["sign"], j["weight"],
+                w = j["weight"] * survival(kind, ages[j["observation_id"]], interval_days=interval)
+                decayed.append({**j, "raw_weight": j["weight"], "weight": w})
+
+            st = derive_status(decayed, min_support=MIN_ACTIVE_SUPPORT)   # status from DECAYED set (#4+#5)
+            for j in decayed:
+                just_rows.append((bid, j["observation_id"], j["sign"], j["raw_weight"], j["weight"],
                                   j["occurred_at"], j["source"]))
             rows.append((bid, b["subject"], b["predicate"], b["object"], b["statement_nl"],
                          json.dumps(b["applies_when"]) if b["applies_when"] is not None else None,
@@ -234,8 +276,8 @@ class Store:
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows,
         )
         self.conn.executemany(
-            "INSERT INTO justifications (belief_id,observation_id,sign,weight,occurred_at,source) "
-            "VALUES (?,?,?,?,?,?)", just_rows,
+            "INSERT INTO justifications (belief_id,observation_id,sign,raw_weight,weight,occurred_at,source) "
+            "VALUES (?,?,?,?,?,?,?)", just_rows,
         )
         self.conn.commit()
         return len(rows)

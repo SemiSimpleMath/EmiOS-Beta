@@ -30,9 +30,11 @@ class StatusResult:
     net: float
 
 
-def derive_status(justifications: Iterable[Mapping]) -> StatusResult:
+def derive_status(justifications: Iterable[Mapping], *, min_support: float = 0.0) -> StatusResult:
     """Fold a belief's justification set into (status, confidence). `sign` > 0 supports,
-    `sign` < 0 contradicts; `weight` is the (optionally decayed — #5) magnitude."""
+    `sign` < 0 contradicts; `weight` is the (optionally decayed — #5) magnitude. `min_support` is
+    the faded floor: surviving support at or below it counts as no support (a belief decayed to
+    near-nothing goes dormant; #4 callers leave it 0.0)."""
     js = list(justifications)
     pos = sum(float(j["weight"]) for j in js if j["sign"] > 0)
     neg = sum(float(j["weight"]) for j in js if j["sign"] < 0)
@@ -40,8 +42,8 @@ def derive_status(justifications: Iterable[Mapping]) -> StatusResult:
     total = pos + neg
     confidence = (abs(net) / total) if total > 0 else 0.0
 
-    if pos <= 0:
-        status = "dormant"                                    # never affirmed / support withdrawn
+    if pos <= min_support:
+        status = "dormant"                                    # never affirmed / withdrawn / faded
     elif neg > 0 and min(pos, neg) >= CONTESTED_RATIO * max(pos, neg):
         status = "contested"                                  # both sides substantial and close
     elif net > 0:
