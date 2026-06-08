@@ -14,7 +14,7 @@
     "type": "time",
     "active_window": {
       "from": "04:00",
-      "to": "05:00",
+      "to": "22:00",
       "local": true
     }
   },
@@ -26,5 +26,5 @@
     "then": "disable_with_ticket",
     "auto_retry_after_seconds": 3600
   },
-  "notes": "Single daily noticer pass (Pass A inward pattern detection + Pass B outward opportunity scouting). Runs early enough that the day's concerns are ready by the time the proposers fire at 05:00. Architecture says 2-4x/day eventually; starting daily to keep cost predictable and build signal-volume baseline. Output: concerns_register + belief_updates + escalations to dayflow."
+  "notes": "Single daily noticer pass (Pass A inward pattern detection + Pass B outward opportunity scouting). run_policy interval=86400 => once per day; the wide 04:00-22:00 local window means it runs at ~04:00 when the machine is on (concerns ready before the 05:00 proposers) but FALLS BACK to the first tick during waking hours if the machine was off overnight, so it no longer silently skips days (it missed 2026-06-06 under the old 1h window). Output: concerns_register + belief_updates + pending_questions + escalations to dayflow."
 }
