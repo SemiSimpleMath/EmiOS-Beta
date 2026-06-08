@@ -1,0 +1,216 @@
+"""Event-sourcing core (#1).
+
+Two tables:
+- `observations` — append-only log, the SOURCE OF TRUTH. Each row records its resolved
+  identity (`resolves_to`) + how it was resolved (`resolution_method`, `resolver_version`)
+  and the extractor version, so a rebuild REPLAYS persisted decisions rather than
+  re-adjudicating (per scratch/BELIEF-ENGINE-NEW.md §1).
+- `beliefs` — a derived, rebuildable PROJECTION (a cache). `rebuild_projection()` folds the
+  log deterministically; dropping + rebuilding it is the correctness test.
+
+Reversibility: a `retract` observation (polarity='retract', retract_of=<observation_id>)
+withdraws an earlier observation; the fold simply skips withdrawn observations, so a belief
+whose only support is retracted disappears on rebuild.
+"""
+from __future__ import annotations
+
+import json
+import sqlite3
+import uuid
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
+from belief_engine_v2.identity import identity_of
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+@dataclass
+class Claim:
+    """The structured candidate meaning the extractor produces. In #1 subject/predicate/
+    object are free strings (the stub identity hashes them); #2 makes them canonical IDs.
+    raw_text + statement_nl + interpretation preserve the language (the hybrid record)."""
+    subject: str = ""
+    predicate: str = ""
+    object: str = ""
+    qualifiers: Dict[str, Any] = field(default_factory=dict)
+    applies_when: Optional[dict] = None
+    statement_nl: str = ""
+    raw_text: str = ""
+    interpretation: str = ""
+    extra: Dict[str, Any] = field(default_factory=dict)
+
+
+_DDL = """
+CREATE TABLE IF NOT EXISTS observations (
+    observation_id    TEXT PRIMARY KEY,
+    user_id           TEXT NOT NULL DEFAULT 'default',
+    occurred_at       TEXT,                      -- valid-time (when it happened)
+    recorded_at       TEXT NOT NULL,             -- transaction-time (when appended); fold order
+    source            TEXT,
+    polarity          TEXT NOT NULL,             -- affirm | contradict | retract
+    strength          REAL NOT NULL DEFAULT 1.0,
+    claim_json        TEXT,                      -- the extracted claim (null for retracts)
+    raw_text          TEXT,
+    extractor_version TEXT,
+    resolves_to       TEXT,                      -- belief identity (persisted resolver decision)
+    resolution_method TEXT,                      -- canonical | stub | override | retract
+    resolver_version  TEXT,
+    resolution_detail TEXT,                      -- JSON: chosen canonical concept ids
+    retract_of        TEXT                       -- observation_id this withdraws
+);
+CREATE INDEX IF NOT EXISTS ix_obs_recorded ON observations(recorded_at);
+CREATE INDEX IF NOT EXISTS ix_obs_resolves ON observations(resolves_to);
+CREATE INDEX IF NOT EXISTS ix_obs_retract  ON observations(retract_of);
+
+CREATE TABLE IF NOT EXISTS beliefs (
+    belief_id      TEXT PRIMARY KEY,
+    subject        TEXT,
+    predicate      TEXT,
+    object         TEXT,
+    statement_nl   TEXT,
+    applies_when   TEXT,                         -- JSON RRULE-like temporal cue (retrieval gate; #3)
+    kind           TEXT,                         -- semantic_fact|preference|procedural_routine|episodic
+    support        REAL NOT NULL DEFAULT 0,
+    contradiction  REAL NOT NULL DEFAULT 0,
+    net            REAL NOT NULL DEFAULT 0,
+    status         TEXT NOT NULL,                -- active | dormant  (basic; #4 makes it justification-proper)
+    first_observed TEXT,
+    last_observed  TEXT,
+    obs_count      INTEGER NOT NULL DEFAULT 0
+);
+"""
+
+_RESOLVER_VERSION = "v0-stub"
+
+
+class Store:
+    def __init__(self, db_path: str) -> None:
+        self.conn = sqlite3.connect(db_path)
+        self.conn.row_factory = sqlite3.Row
+        self.conn.executescript(_DDL)
+        self.conn.commit()
+        self.resolver = None    # set to a Resolver (#2) to use canonical identity
+
+    # ── write side (log only) ────────────────────────────────────────────────
+    def append(
+        self,
+        claim: Optional[Claim],
+        *,
+        source: str,
+        polarity: str = "affirm",
+        occurred_at: Optional[str] = None,
+        recorded_at: Optional[str] = None,
+        strength: float = 1.0,
+        user_id: str = "default",
+        extractor_version: str = "v0",
+        retract_of: Optional[str] = None,
+        identity_override: Optional[str] = None,
+        commit: bool = True,
+    ) -> str:
+        """Append one immutable observation. Returns its observation_id.
+
+        Resolution is persisted at append time: `identity_override` (a known resolution,
+        e.g. seeding from the old store) wins; else the stub `identity_of(claim)`; a
+        `retract` resolves to nothing (it acts on `retract_of`)."""
+        oid = uuid.uuid4().hex
+        rec = recorded_at or _now()
+        occ = occurred_at or rec
+        detail = None
+        if polarity == "retract":
+            resolves_to, method = None, "retract"
+        elif identity_override is not None:
+            resolves_to, method = identity_override, "override"
+        elif self.resolver is not None and claim is not None:
+            resolves_to, detail = self.resolver.resolve(claim)   # canonical concept resolution (#2)
+            method = "canonical"
+        else:
+            resolves_to, method = (identity_of(claim) if claim else None), "stub"
+        self.conn.execute(
+            "INSERT INTO observations (observation_id,user_id,occurred_at,recorded_at,source,"
+            "polarity,strength,claim_json,raw_text,extractor_version,resolves_to,resolution_method,"
+            "resolver_version,resolution_detail,retract_of) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (oid, user_id, occ, rec, source, polarity, float(strength),
+             json.dumps(asdict(claim)) if claim else None,
+             (claim.raw_text if claim else None), extractor_version,
+             resolves_to, method, _RESOLVER_VERSION,
+             json.dumps(detail) if detail else None, retract_of),
+        )
+        if commit:
+            self.conn.commit()
+        return oid
+
+    def all_observations(self) -> List[sqlite3.Row]:
+        return self.conn.execute(
+            "SELECT * FROM observations ORDER BY recorded_at, observation_id"
+        ).fetchall()
+
+    # ── read side (rebuildable projection) ───────────────────────────────────
+    def rebuild_projection(self) -> int:
+        """Deterministically fold the log into `beliefs`. Drop + rebuild = the cache is a
+        pure function of the log. Returns the belief count."""
+        retracted = {
+            r["retract_of"] for r in self.conn.execute(
+                "SELECT retract_of FROM observations WHERE polarity='retract' AND retract_of IS NOT NULL"
+            )
+        }
+        acc: Dict[str, Dict[str, Any]] = {}
+        for r in self.conn.execute("SELECT * FROM observations ORDER BY recorded_at, observation_id"):
+            if r["polarity"] == "retract" or r["observation_id"] in retracted:
+                continue
+            bid = r["resolves_to"]
+            if not bid:
+                continue
+            claim = json.loads(r["claim_json"]) if r["claim_json"] else {}
+            b = acc.setdefault(bid, {
+                "belief_id": bid, "subject": claim.get("subject", ""),
+                "predicate": claim.get("predicate", ""), "object": claim.get("object", ""),
+                "statement_nl": "", "applies_when": None, "kind": None,
+                "support": 0.0, "contradiction": 0.0, "obs_count": 0,
+                "first_observed": r["occurred_at"], "last_observed": r["occurred_at"],
+            })
+            s = r["strength"] if r["strength"] is not None else 1.0
+            if r["polarity"] == "affirm":
+                b["support"] += s
+                if claim.get("statement_nl"):
+                    b["statement_nl"] = claim["statement_nl"]   # latest affirm wins (fold order)
+                if claim.get("applies_when") is not None:
+                    b["applies_when"] = claim["applies_when"]
+                k = (claim.get("extra") or {}).get("kind")
+                if k:
+                    b["kind"] = k
+            elif r["polarity"] == "contradict":
+                b["contradiction"] += s
+            b["obs_count"] += 1
+            if r["occurred_at"] and (b["first_observed"] is None or r["occurred_at"] < b["first_observed"]):
+                b["first_observed"] = r["occurred_at"]
+            if r["occurred_at"] and (b["last_observed"] is None or r["occurred_at"] > b["last_observed"]):
+                b["last_observed"] = r["occurred_at"]
+
+        rows = []
+        for bid, b in acc.items():
+            if b["support"] <= 0:          # no surviving affirmation → not a belief
+                continue
+            net = b["support"] - b["contradiction"]
+            status = "active" if net > 0 else "dormant"
+            rows.append((bid, b["subject"], b["predicate"], b["object"], b["statement_nl"],
+                         json.dumps(b["applies_when"]) if b["applies_when"] is not None else None,
+                         b["kind"], b["support"], b["contradiction"], net, status,
+                         b["first_observed"], b["last_observed"], b["obs_count"]))
+        self.conn.execute("DELETE FROM beliefs")
+        self.conn.executemany(
+            "INSERT INTO beliefs (belief_id,subject,predicate,object,statement_nl,applies_when,kind,"
+            "support,contradiction,net,status,first_observed,last_observed,obs_count) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows,
+        )
+        self.conn.commit()
+        return len(rows)
+
+    def beliefs(self) -> List[sqlite3.Row]:
+        return self.conn.execute("SELECT * FROM beliefs ORDER BY belief_id").fetchall()
+
+    def close(self) -> None:
+        self.conn.close()
