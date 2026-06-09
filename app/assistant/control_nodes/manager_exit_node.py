@@ -14,7 +14,7 @@ class ManagerExitNode(ControlNode):
         try:
             existing_final = self.blackboard.get_state_value("final_answer")
             if existing_final is None:
-                state_candidate = {
+                final_fields = {
                     "final_answer_task": self.blackboard.get_state_value("final_answer_task"),
                     "final_answer_answer": self.blackboard.get_state_value("final_answer_answer"),
                     "final_answer_no_op": self.blackboard.get_state_value("final_answer_no_op"),
@@ -23,11 +23,13 @@ class ManagerExitNode(ControlNode):
                     "final_answer_sources": self.blackboard.get_state_value("final_answer_sources"),
                     "final_answer_detail_level": self.blackboard.get_state_value("final_answer_detail_level"),
                     "final_answer_data_list": self.blackboard.get_state_value("final_answer_data_list"),
-                    "result_summary": self.blackboard.get_state_value("result_summary"),
-                    "pod_references": self.blackboard.get_state_value("pod_references"),
                 }
-                has_state_final = any(v not in (None, "", [], {}) for v in state_candidate.values())
-                source_payload = state_candidate if has_state_final else self.blackboard.get_state_value("result")
+                # The carry-through fields (pod_references/result_summary) must NOT decide whether we
+                # have a real final answer — else a pod-bearing dispatch with no final_answer_* set
+                # would discard the dispatched manager's `result` answer text.
+                has_state_final = any(v not in (None, "", [], {}) for v in final_fields.values())
+                source_payload = final_fields if has_state_final else self.blackboard.get_state_value("result")
+                source_payload = FinalAnswerNormalizer.attach_carry_through(source_payload, self.blackboard)
                 if source_payload is not None:
                     normalized = FinalAnswerNormalizer.normalize(source_payload)
                     self.blackboard.update_state_value("final_answer", normalized)

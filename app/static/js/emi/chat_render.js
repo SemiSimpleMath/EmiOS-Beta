@@ -154,7 +154,7 @@
             lastEnd = match.index + uri.length;
         }
         if (lastEnd === 0) return;  // only image (or no) matches — leave as-is
-        if (lastEnd < text.length) pieces.push(document.createTextNode(text.slice(lastEnd)));
+        if (lastEnd < text.length) pieces.push(d.createTextNode(text.slice(lastEnd)));
         var parent = textNode.parentNode;
         if (!parent) return;
         for (var j = 0; j < pieces.length; j++) parent.insertBefore(pieces[j], textNode);
@@ -216,8 +216,13 @@
         return modal;
     }
 
+    var _podViewerReq = 0;
+
     function _openPodViewer(podId) {
         var modal = _podModal();
+        // Per-request token: the modal elements are shared, so if a newer click arrives while an
+        // older fetch is in flight, only the newest response is allowed to write the modal.
+        var myReq = ++_podViewerReq;
         var titleEl = modal.querySelector(".pod-viewer-title");
         var metaEl = modal.querySelector(".pod-viewer-meta");
         var bodyEl = modal.querySelector(".pod-viewer-body");
@@ -230,6 +235,7 @@
         fetch("/api/pods/" + encodeURIComponent(podId))
             .then(function (r) { if (!r.ok) throw new Error("unavailable"); return r.json(); })
             .then(function (data) {
+                if (myReq !== _podViewerReq) return;  // superseded by a newer click
                 titleEl.textContent = data.one_liner || data.pod_id || podId;
                 metaEl.textContent = data.pod_id || podId;
                 var body = String(data.body || "");
@@ -261,6 +267,7 @@
                 }
             })
             .catch(function () {
+                if (myReq !== _podViewerReq) return;  // superseded by a newer click
                 titleEl.textContent = "Finding not available";
                 bodyEl.textContent = "This pod could not be loaded (it may be private or no longer stored).";
             });

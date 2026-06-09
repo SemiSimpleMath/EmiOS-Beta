@@ -13,7 +13,7 @@ user_context_items:
   - task
   - information
   - tool_result_for_formatter
-  - pod_references
+  - accumulated_pod_references
 
 system_context_items:
   - resource_user_data

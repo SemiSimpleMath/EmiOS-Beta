@@ -6,10 +6,10 @@ Context: {{ information }}
 
 Raw result:
 {{ tool_result_for_formatter }}
-{%- if pod_references %}
+{%- if accumulated_pod_references %}
 
 Saved findings (pods — the full research/work behind this answer is stored in these):
-{%- for p in pod_references %}
+{%- for p in accumulated_pod_references %}
 - {{ p.pod_id }} — {{ p.one_liner }}
 {%- endfor %}
 {%- endif %}

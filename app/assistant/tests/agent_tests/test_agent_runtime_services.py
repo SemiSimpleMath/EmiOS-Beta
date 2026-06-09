@@ -191,6 +191,38 @@ def test_manager_exit_materializes_final_answer_from_state_fields():
     assert final_answer.get("final_answer_answer") == "Hello"
 
 
+def test_manager_exit_preserves_result_answer_when_only_pods_set():
+    """Regression (audit): pod_references/result_summary must NOT flip has_state_final, else a
+    pod-bearing dispatch with no final_answer_* set would drop the dispatched manager's `result`
+    answer text (the dayflow path)."""
+    bb = Blackboard()
+    bb.update_state_value("result", {"final_answer_answer": "The dispatched answer.", "final_answer_sources": []})
+    bb.update_state_value("accumulated_pod_references", [{"pod_id": "datapod:research_finding:aaaaaa", "one_liner": "A"}])
+    bb.update_state_value("result_summary", "did the thing")
+    node = ManagerExitNode(name="manager_exit_node", blackboard=bb, agent_registry=AgentRegistry(), tool_registry=object())
+    node.action_handler(message=None)
+    fa = bb.get_state_value("final_answer")
+    assert fa.get("final_answer_answer") == "The dispatched answer."  # not dropped
+    assert [r["pod_id"] for r in fa.get("pod_references")] == ["datapod:research_finding:aaaaaa"]
+    assert fa.get("result_summary") == "did the thing"
+
+
+def test_manager_exit_unions_relayed_pods_over_empty_form():
+    """Regression (audit): a final-answer agent emitting an EMPTY pod_references form field must not
+    clobber the accumulated relay — the harvest unions the relay key with the form key."""
+    bb = Blackboard()
+    bb.update_state_value("final_answer_answer", "Web summary.")
+    bb.update_state_value("final_answer_sources", [])
+    bb.update_state_value("final_answer_detail_level", "brief")
+    bb.update_state_value("final_answer_data_list", [])
+    bb.update_state_value("pod_references", [])  # final_answer_lite emitted its default-empty field
+    bb.update_state_value("accumulated_pod_references", [{"pod_id": "datapod:research_finding:bbbbbb", "one_liner": "B"}])
+    node = ManagerExitNode(name="manager_exit_node", blackboard=bb, agent_registry=AgentRegistry(), tool_registry=object())
+    node.action_handler(message=None)
+    fa = bb.get_state_value("final_answer")
+    assert [r["pod_id"] for r in fa.get("pod_references")] == ["datapod:research_finding:bbbbbb"]  # relay survived
+
+
 def test_flow_controller_nested_return_control_defers_routing_to_handler():
     class _Blackboard:
         def __init__(self):

@@ -24,7 +24,7 @@ class FinalAnswerNode(ControlNode):
         # fields directly to the blackboard as final_answer_* keys. Only a
         # planner-style flow routes its whole output dict into `result`.
         # Prefer the field-level keys when present, then fall back to `result`.
-        state_candidate = {
+        final_fields = {
             "final_answer_task": self.blackboard.get_state_value("final_answer_task"),
             "final_answer_answer": self.blackboard.get_state_value("final_answer_answer"),
             "final_answer_no_op": self.blackboard.get_state_value("final_answer_no_op"),
@@ -33,11 +33,12 @@ class FinalAnswerNode(ControlNode):
             "final_answer_sources": self.blackboard.get_state_value("final_answer_sources"),
             "final_answer_detail_level": self.blackboard.get_state_value("final_answer_detail_level"),
             "final_answer_data_list": self.blackboard.get_state_value("final_answer_data_list"),
-            "result_summary": self.blackboard.get_state_value("result_summary"),
-            "pod_references": self.blackboard.get_state_value("pod_references"),
         }
-        has_state_final = any(v not in (None, "", [], {}) for v in state_candidate.values())
-        raw_result = state_candidate if has_state_final else self.blackboard.get_state_value("result")
+        # Carry-through fields (pod_references/result_summary) must not flip has_state_final — else a
+        # pod-bearing dispatch with no final_answer_* set would drop the dispatched manager's answer.
+        has_state_final = any(v not in (None, "", [], {}) for v in final_fields.values())
+        raw_result = final_fields if has_state_final else self.blackboard.get_state_value("result")
+        raw_result = FinalAnswerNormalizer.attach_carry_through(raw_result, self.blackboard)
         normalized = FinalAnswerNormalizer.normalize(raw_result)
 
         self.blackboard.update_state_value("final_answer", normalized)

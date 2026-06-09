@@ -228,7 +228,11 @@ class Planner(Agent):
         from app.assistant.pod_store.pod_store import PodStore
 
         sc = self.blackboard.get_state_value("scope_context", None)
-        run = self._slug(getattr(sc, "scope_id", None) or self.blackboard.get_state_value("task", "") or "web")
+        # scope_context is stored as a model_dump() DICT, so getattr(sc, "scope_id") always missed —
+        # use the call-stack scope id (the canonical session key, same one the flush below uses), with
+        # a dict-aware read second, so findings from different research sessions don't collide on `run`.
+        sc_id = self.blackboard.get_current_scope_id() or (sc.get("scope_id") if isinstance(sc, dict) else None)
+        run = self._slug(sc_id or self.blackboard.get_state_value("task", "") or "web")
         store = PodStore()
 
         notebook = self.blackboard.get_state_value("research_notebook", None)

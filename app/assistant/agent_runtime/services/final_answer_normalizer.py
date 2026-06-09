@@ -78,6 +78,8 @@ class FinalAnswerNormalizer:
             "action_input",
             "result",
             "exit",
+            "pod_references",
+            "result_summary",
         }
         lifted: List[Dict[str, str]] = []
         for key, value in result_dict.items():
@@ -174,3 +176,39 @@ class FinalAnswerNormalizer:
             if pid:
                 out.append({"pod_id": pid, "one_liner": one})
         return out
+
+    @classmethod
+    def merge_pod_references(cls, *values: Any) -> list:
+        """Union pod_references from several sources (a final-answer form field, the accumulated
+        relay, a result payload), normalized to {pod_id, one_liner} and deduped by pod_id with
+        first-seen order preserved. So a relayed sub-manager pod can't be lost when a final-answer
+        agent also emits its own (possibly empty) pod_references list."""
+        out: list = []
+        seen: set = set()
+        for value in values:
+            for ref in cls.to_pod_references(value):
+                if ref["pod_id"] not in seen:
+                    seen.add(ref["pod_id"])
+                    out.append(ref)
+        return out
+
+    @classmethod
+    def attach_carry_through(cls, payload: Any, blackboard: Any) -> Any:
+        """Attach the carry-through fields onto the winning final-answer payload before normalize:
+        result_summary, and the UNION of pod_references from (the payload's own refs, a final-answer
+        form field, the accumulated relay). Keeping these off the has_state_final decision and merging
+        the relay here is what prevents both the dropped-answer and the clobbered-relay bugs."""
+        if not isinstance(payload, dict):
+            return payload
+        payload = dict(payload)
+        rs = blackboard.get_state_value("result_summary")
+        if rs and not payload.get("result_summary"):
+            payload["result_summary"] = rs
+        pods = cls.merge_pod_references(
+            payload.get("pod_references"),
+            blackboard.get_state_value("pod_references"),
+            blackboard.get_state_value("accumulated_pod_references"),
+        )
+        if pods:
+            payload["pod_references"] = pods
+        return payload
