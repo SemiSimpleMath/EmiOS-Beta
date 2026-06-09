@@ -21,54 +21,11 @@ logger = get_logger(__name__)
 
 
 def _resolve_pod_allowed_scopes(tool_message: ToolMessage) -> List[str]:
-    """Return the concrete pod scope_ids the caller can read.
-
-    Reads ``scope_context.pods.allowed_scopes`` (default ``["self"]``) and
-    expands the ``"self"`` token to the caller's room_id. Returns either:
-
-    - ``["all"]`` — owner-wide; tool should not filter by scope_id
-    - A list of explicit scope_ids — tool should restrict to those
-
-    When scope_context is missing or has no room_id, falls back to
-    unrestricted (``["all"]``) — this preserves behavior for system-
-    internal callers (routines, dayflow ticks) that invoke pod tools
-    without a room context.
-    """
-    scope_ctx = getattr(tool_message, "scope_context", None)
-    if scope_ctx is None:
-        return ["all"]
-    # Defensive: scope_context might come through as dict on some paths.
-    if isinstance(scope_ctx, dict):
-        pods_block = scope_ctx.get("pods") or {}
-        raw = pods_block.get("allowed_scopes") if isinstance(pods_block, dict) else None
-        room_id = scope_ctx.get("room_id")
-    else:
-        pods_obj = getattr(scope_ctx, "pods", None)
-        raw = getattr(pods_obj, "allowed_scopes", None) if pods_obj is not None else None
-        room_id = getattr(scope_ctx, "room_id", None)
-    if not isinstance(raw, list) or not raw:
-        raw = ["self"]
-    if "all" in raw:
-        return ["all"]
-    out: List[str] = []
-    for s in raw:
-        s_str = str(s).strip()
-        if not s_str:
-            continue
-        if s_str == "self":
-            if isinstance(room_id, str) and room_id.strip():
-                expanded = room_id.strip()
-                if expanded not in out:
-                    out.append(expanded)
-            # If self is requested but no room_id is set, skip silently —
-            # the caller has no room identity to bind to.
-            continue
-        if s_str not in out:
-            out.append(s_str)
-    # If we ended up with nothing concrete, return [self]-shaped empty
-    # (no readable scope) so the query filter genuinely returns nothing.
-    # A sentinel "__none__" makes this unambiguous in the multi-scope path.
-    return out or ["__none__"]
+    """Thin tool-message-shaped wrapper over the SSOT ``pod_utils.resolve_allowed_scopes``
+    (pod scope resolution lives in one place now). Returns ``["all"]`` (unrestricted), a list of
+    concrete scope_ids, or ``["__none__"]`` (no readable scope)."""
+    from app.assistant.pod_store.pod_utils import resolve_allowed_scopes
+    return resolve_allowed_scopes(getattr(tool_message, "scope_context", None))
 
 
 def _pod_to_header(pod: Pod) -> Dict[str, Any]:
@@ -229,9 +186,17 @@ class PodStoreTool(BaseTool):
         unrestricted = allowed_scopes == ["all"]
         allowed_set = set(allowed_scopes) if not unrestricted else set()
 
+        # Authority wall — the universal pod gate. A scoped caller must also clear each pod's
+        # min_authority (same check_authority primitive as fetch_projection / read_pod_gated). A
+        # None scope = trusted system caller with no authority context → scope-only, as before.
+        from app.assistant.pod_store import pod_utils
+        from app.assistant.pod_store.authority import PodAuthorityError
+        scope_obj = pod_utils.as_scope_object(getattr(tool_message, "scope_context", None))
+
         store = self._ensure_store()
         fetched: List[Dict[str, Any]] = []
         missing: List[str] = []
+        denied: List[str] = []
         for pid in raw_ids:
             pod = store.get(str(pid))
             if pod is None:
@@ -241,10 +206,22 @@ class PodStoreTool(BaseTool):
                 # Cross-scope pod_id — not visible from this scope, treat as missing.
                 missing.append(str(pid))
                 continue
+            if scope_obj is not None:
+                try:
+                    pod_utils.check_authority(
+                        pod_id=str(pid), projection=None,
+                        required=pod_utils.pod_min_authority(pod), scope=scope_obj,
+                    )
+                except PodAuthorityError:
+                    denied.append(str(pid))
+                    continue
             fetched.append(_pod_to_full(pod))
 
-        data: Dict[str, Any] = {"pods": fetched, "missing": missing}
-        content_parts = [f"Fetched {len(fetched)} pod(s); {len(missing)} missing."]
+        data: Dict[str, Any] = {"pods": fetched, "missing": missing, "denied": denied}
+        content_parts = [
+            f"Fetched {len(fetched)} pod(s); {len(missing)} missing; "
+            f"{len(denied)} denied (insufficient authority)."
+        ]
         for p in fetched:
             content_parts.append(
                 f"\n--- {p['pod_id']} "
@@ -257,6 +234,8 @@ class PodStoreTool(BaseTool):
             )
         if missing:
             content_parts.append(f"\n\nMissing pod_ids: {missing}")
+        if denied:
+            content_parts.append(f"\n\nDenied (need higher authority): {denied}")
         return self.publish_result(
             ToolResult(
                 result_type="pod_fetch",

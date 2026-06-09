@@ -223,16 +223,20 @@ class Planner(Agent):
         if not isinstance(findings, list) or not findings:
             return
 
-        import hashlib
         from app.assistant.pod_store.contracts import Pod
         from app.assistant.pod_store.pod_store import PodStore
+        from app.assistant.pod_store import pod_utils
 
         sc = self.blackboard.get_state_value("scope_context", None)
-        # scope_context is stored as a model_dump() DICT, so getattr(sc, "scope_id") always missed —
-        # use the call-stack scope id (the canonical session key, same one the flush below uses), with
-        # a dict-aware read second, so findings from different research sessions don't collide on `run`.
+        # `run` is the session/dedup key for the pod id: scope_context is a model_dump DICT so
+        # getattr(scope_id) would miss — use the call-stack scope id with a dict-aware read second,
+        # so findings from different research sessions don't collide.
         sc_id = self.blackboard.get_current_scope_id() or (sc.get("scope_id") if isinstance(sc, dict) else None)
         run = self._slug(sc_id or self.blackboard.get_state_value("task", "") or "web")
+        # Pods are minted FOR the room: scope_id = the originating room_id (stamped on the blackboard
+        # at manager ingress, carried down the dispatch chain). None for ownerless system contexts →
+        # those pods are owner-only (readable by "all"-scope rooms like master_room).
+        room_scope = pod_utils.current_room_scope_id(self.blackboard)
         store = PodStore()
 
         notebook = self.blackboard.get_state_value("research_notebook", None)
@@ -244,12 +248,9 @@ class Planner(Agent):
             if not isinstance(f, dict):
                 continue
             unit = str(f.get("unit") or "").strip().lower() or self._slug(f.get("one_liner"))
-            # Canonical pod URI: datapod:<snake_kind>:<[a-z0-9]{6,}>. The id is a
-            # deterministic hash of (run, unit) so re-emitting a unit upserts the same
-            # pod, while staying a valid pod URI matched by pod_uri.POD_URI_RE — so the
-            # PodInjector and the chat linkifier recognize it. run/unit kept in metadata.
-            token = hashlib.blake2b(f"{run}|{unit}".encode("utf-8"), digest_size=6).hexdigest()
-            pod_id = f"datapod:research_finding:{token}"
+            # Canonical id via the SSOT builder: datapod:research_finding:<hash(run,unit)>,
+            # deterministic per (run, unit) so re-emitting a unit upserts the same pod.
+            pod_id = pod_utils.canonical_pod_id("research_finding", run, unit)
             urls = [s for s in (f.get("source_refs") or []) if isinstance(s, str)]
             pod = Pod(
                 pod_id=pod_id,
@@ -259,7 +260,7 @@ class Planner(Agent):
                 body=str(f.get("body") or ""),
                 source_refs=[],                      # PodSourceRef is {kind,id}, not a URL
                 for_agents=[],
-                scope_id=None,
+                scope_id=room_scope,
                 created_by=self.name,
                 metadata={"unit": unit, "run": run, "source_urls": urls},
             )

@@ -121,7 +121,20 @@ class RoomSlashCommandRouter:
                 context_id=context_id, meta=meta,
             )
 
+        # --- pod expansion (deterministic, scope+authority gated) ---
+        if cmd_name == "pod":
+            return self._handle_pod(
+                cmd_payload=cmd_payload, room_id=room_id, surface=surface, context_id=context_id,
+            )
+
         return None  # unknown — caller handles as normal message
+
+    def _handle_pod(self, *, cmd_payload, room_id, surface, context_id) -> SlashCommandResult:
+        """`/pod expand <prefix>` — delegates to the deterministic pod_command service (gated read)."""
+        from app.assistant.room_session_manager.services.pod_command import handle_pod_command
+        return handle_pod_command(
+            cmd_payload=cmd_payload, room_id=room_id, surface=surface, context_id=context_id,
+        )
 
     # ------------------------------------------------------------------
     # Planning

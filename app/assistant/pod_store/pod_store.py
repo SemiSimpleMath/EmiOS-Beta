@@ -610,4 +610,5 @@ class PodStore:
             created_by=row.created_by,
             created_at=row.created_at,
             metadata=dict(row.metadata_json or {}),
+            min_authority=row.min_authority,
         )

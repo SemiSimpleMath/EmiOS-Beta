@@ -13,6 +13,7 @@ user_context_items:
   - task
   - information
   - tool_result_for_formatter
+  - accumulated_pod_references
 
 system_context_items:
   - room_participant_facts
