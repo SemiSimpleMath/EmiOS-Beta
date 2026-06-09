@@ -64,6 +64,8 @@ def test_multi_tool_list_validation_allows_allowed_nodes():
 
 
 def test_llm_client_raises_on_structured_output_failure():
+    from pydantic import BaseModel
+
     class _Blackboard:
         @staticmethod
         def get_state_value(_key):
@@ -76,23 +78,23 @@ def test_llm_client_raises_on_structured_output_failure():
 
     class _Agent:
         name = "test::agent"
+        config = {}  # client reads agent.config for prompt-debug flags
         llm_params = {"llm_provider": "openai", "engine": "gpt-5-mini"}
         blackboard = _Blackboard()
-        llm_interface = _FailingInterface()
 
-        @staticmethod
-        def _resolve_prompt_debug_flags():
-            return False, False
-
-        def get_llm_interface(self):
-            return self.llm_interface
+    class _Fmt(BaseModel):
+        ok: str = ""
 
     client = LLMClient()
+    # The client resolves the interface via its OWN get_llm_interface (not agent.get_llm_interface);
+    # point it at the failing interface so the structured_output error must propagate (re-raised, not
+    # swallowed). response_format must be non-None (the client rejects None up front).
+    client.get_llm_interface = lambda agent: _FailingInterface()
     with pytest.raises(RuntimeError, match="boom"):
         client.call_structured_output(
             agent=_Agent(),
             messages=[{"role": "user", "content": "hello"}],
-            response_format=None,
+            response_format=_Fmt,
             use_json=False,
         )
 
@@ -334,6 +336,13 @@ def test_agent_get_tools_supports_list_all_sentinel():
     a.agent_registry = _AgentRegistry()
     a.tool_registry = _ToolRegistry()
     a.blackboard = None
+    # Agent.get_tools() delegates to the tool-policy component (built in __init__, which __new__
+    # skips); construct it from the stub registries.
+    from app.assistant.agent_runtime.services.tool_policy_resolver import ToolPolicyResolver
+    a._tool_policy = ToolPolicyResolver(
+        agent_name=a.name, agent_registry=a.agent_registry,
+        tool_registry=a.tool_registry, blackboard=a.blackboard,
+    )
 
     tools = set(a.get_tools())
     assert "find_tool" in tools
@@ -391,6 +400,7 @@ def test_context_injector_uses_custom_agent_history_builder():
 
     class _Agent:
         name = "emi_agent"
+        config = {}  # context_injector reads agent.config
         blackboard = _Blackboard()
 
         @staticmethod
@@ -423,6 +433,7 @@ def test_context_injector_prefers_injected_history_over_builder():
 
     class _Agent:
         name = "emi_agent"
+        config = {}  # context_injector reads agent.config
         blackboard = _Blackboard()
 
         @staticmethod
@@ -441,7 +452,8 @@ def test_critic_pre_node_intercepts_planner_to_critic_and_builds_payload():
 
     bb = Blackboard()
     bb.update_state_value("last_agent", "playwright::planner")
-    bb.update_state_value("playwright::planner_action_count", 5)
+    # Subject step count now lives in the manager_agent_steps dict (cadence reads it from there).
+    bb.update_state_value("manager_agent_steps", {"playwright::planner": 5})
     bb.update_state_value(
         "manager_flow_config",
         {
@@ -469,6 +481,13 @@ def test_critic_pre_node_intercepts_planner_to_critic_and_builds_payload():
         arguments=None,
         kind="tool",
     )
+    # critic_pre_node now resolves the planned call from the blackboard action + tool_arguments
+    # (tool_arguments.target_name must equal action; .arguments holds the call args).
+    bb.update_state_value("action", "mcp::npm/playwright-mcp::browser_click")
+    bb.update_state_value("tool_arguments", {
+        "target_name": "mcp::npm/playwright-mcp::browser_click",
+        "arguments": {"element": "submit"},
+    })
 
     node = CriticPreNode(
         name="critic_pre_node",
@@ -535,7 +554,23 @@ def test_scope_adapter_strict_mode_rejects_missing_scope(monkeypatch):
         adapter.apply(manager_name="test_manager", manager_config={}, message=msg)
 
 
-def test_manager_invoker_with_scope_projected_data_sets_scope_enforcement():
+def test_manager_invoker_with_scope_projected_data_sets_scope_enforcement(monkeypatch):
+    from app.assistant.ServiceLocator.service_locator import DI
+
+    # invoke() registers/unregisters the run with DI.mam_instance_manager (worker tracking);
+    # stub it so the test exercises scope enforcement, not the DI infra.
+    class _Record:
+        invocation_id = "inv-test"
+
+    class _Mam:
+        def register(self, **kwargs):
+            return _Record()
+
+        def unregister(self, invocation_id):
+            pass
+
+    monkeypatch.setattr(DI, "mam_instance_manager", _Mam(), raising=False)
+
     class _Manager:
         name = "test_manager"
         manager_config = {}
@@ -580,6 +615,10 @@ def test_agent_enforced_scope_requires_effective_scope():
     agent = Agent.__new__(Agent)
     agent.name = "test::agent"
     agent.blackboard = _Blackboard()
+    # _update_blackboard_state delegates to the input-applier component (built in __init__, which
+    # __new__ skips); it runs enforce_scope_contract -> raises when enforced + no scope.
+    from app.assistant.agent_runtime.services.agent_input_applier import AgentInputApplier
+    agent._input_applier = AgentInputApplier(agent_name=agent.name, blackboard=agent.blackboard)
 
     with pytest.raises(ValueError, match="Missing scope_context"):
         agent._update_blackboard_state(Message(data_type="agent_activation"))
