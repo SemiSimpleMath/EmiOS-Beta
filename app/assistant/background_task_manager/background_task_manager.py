@@ -160,17 +160,21 @@ class BackgroundTask:
             self._execute()
 
     def _execute(self) -> None:
+        from app.services.scheduler_heartbeat import record_tick
         try:
             self.func()
             now = datetime.now(timezone.utc)
             with self._lock:
                 self._last_run = now
                 self._run_count += 1
-        except Exception:
+            record_tick(f"bgtask:{self.name}", ok=True)
+        except Exception as e:
             with self._lock:
                 self._error_count += 1
             logger.error("Background task '%s' failed during execution", self.name)
             logger.debug("background task '' failed during execution %s exception details", self.name, exc_info=True)
+            # No-silent-death (R3): every background task's tick liveness is visible on the health surface.
+            record_tick(f"bgtask:{self.name}", ok=False, error=e)
 
 
 class BackgroundTaskManager:

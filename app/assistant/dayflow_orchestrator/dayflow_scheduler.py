@@ -22,6 +22,7 @@ from app.assistant.dayflow_orchestrator.contracts import get_meta
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import setup_complete
 from app.assistant.utils.pydantic_classes import Message
+from app.services.scheduler_heartbeat import record_tick
 
 logger = get_logger(__name__)
 
@@ -40,6 +41,9 @@ ANCIENT_ITEM_OVERDUE_SECONDS = 24 * 3600  # 24 hours
 
 
 class DayflowScheduler:
+
+    # Surface an owner-visible ticket once dayflow ticks have failed this many times in a row.
+    _FAILURE_NOTIFY_THRESHOLD = 3
 
     def __init__(self, *, timing_engine: Any, app: Any) -> None:
         self._timing_engine = timing_engine
@@ -144,6 +148,50 @@ class DayflowScheduler:
             logger.debug("[DayflowScheduler] schedule tick exception details", exc_info=True)
             raise
 
+    def _maybe_notify_repeated_failure(
+        self, *, consecutive_errors: int, error: Exception, run_id: str,
+    ) -> None:
+        """When dayflow ticks fail repeatedly, surface ONE owner-visible ticket so the autonomy layer
+        doesn't die silently. Fires only AT the threshold crossing (de-duped — the health surface
+        carries the persistent count). Uses the ticket manager's direct write, which does NOT run the
+        dayflow pipeline, so it works even when that pipeline is the thing failing. Best-effort: a
+        notify failure must never break the tick's own error handling.
+        """
+        if consecutive_errors != self._FAILURE_NOTIFY_THRESHOLD:
+            return
+        msg = (
+            f"The dayflow orchestrator has failed {consecutive_errors} ticks in a row "
+            f"(last run_id={run_id}). Autonomy (proactive nudges, item processing) is degraded until "
+            f"this clears. Last error: {str(error)[:300]}"
+        )
+        logger.error("[DayflowScheduler] %s", msg)
+        try:
+            from app.assistant.ServiceLocator.service_locator import DI
+            tm = getattr(DI, "ticket_manager", None)
+            if tm is None:
+                return
+            ticket = tm.create_ticket(
+                ticket_type="dayflow_notify",
+                suggestion_type="dayflow_scheduler_failure",
+                title="Dayflow autonomy is failing",
+                message=msg,
+                action_type="none",
+                trigger_context={
+                    "consecutive_errors": consecutive_errors,
+                    "run_id": run_id,
+                    "last_error": str(error)[:500],
+                },
+                trigger_reason="dayflow_scheduler_repeated_tick_failure",
+                valid_hours=24,
+            )
+            if ticket is not None and hasattr(tm, "mark_proposed"):
+                tm.mark_proposed(ticket.ticket_id)
+        except Exception as notify_err:
+            logger.error(
+                "[DayflowScheduler] Failed to surface repeated-tick-failure ticket: %s", notify_err,
+            )
+            logger.debug("[DayflowScheduler] repeated-failure notify exception details", exc_info=True)
+
     def _execute_tick(self, reason: str, triggered_item_id: Optional[str] = None) -> None:
         if not setup_complete():
             logger.info("[DayflowScheduler] Setup not complete; skipping tick.")
@@ -189,11 +237,17 @@ class DayflowScheduler:
                     fast_tick=fast_tick,
                     triggered_item_id=triggered_item_id,
                 )
+            record_tick("dayflow_scheduler", ok=True)
         except Exception as e:
+            # No-silent-death (R3): APScheduler swallows the re-raise below, so without this a failing
+            # dayflow tick would lose autonomy with NO signal. Record the failure for the health
+            # surface and, on repeated failures, surface an owner-visible ticket.
+            consecutive = record_tick("dayflow_scheduler", ok=False, error=e)
             logger.error(
-                "[DayflowScheduler] Tick failed run_id=%s: %s", run_id, e,
+                "[DayflowScheduler] Tick failed run_id=%s (consecutive=%d): %s", run_id, consecutive, e,
             )
             logger.debug("[DayflowScheduler] tick exception details", exc_info=True)
+            self._maybe_notify_repeated_failure(consecutive_errors=consecutive, error=e, run_id=run_id)
             raise
         finally:
             with self._lock:
