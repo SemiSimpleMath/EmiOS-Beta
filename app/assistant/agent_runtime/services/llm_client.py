@@ -365,10 +365,22 @@ class LLMClient:
                 caller_scope_id=_scope_id,
             )
             try:
-                response = llm_interface.structured_output(
-                    messages,
-                    use_json=use_json,
-                    **params,
+                from app.services.llm_resilience import retry_transient
+
+                def _invoke(msgs):
+                    return llm_interface.structured_output(msgs, use_json=use_json, **params)
+
+                # R2: bounded retry on TRANSIENT infra failures only (the classifier is the SSOT),
+                # then one re-ask if a Pydantic-model output fails validation. Both fail loud if they
+                # don't recover — retry/re-ask buy resilience, never silence.
+                response = retry_transient(lambda: _invoke(messages), label=f"{agent.name}:{engine}")
+                response = self._revalidate_or_reask(
+                    agent=agent,
+                    response=response,
+                    response_format=response_format,
+                    invoke=_invoke,
+                    messages=messages,
+                    engine=engine,
                 )
             finally:
                 set_current_call_context(**_prev_ctx)
@@ -404,4 +416,40 @@ class LLMClient:
                 except Exception as e:
                     logger.error("[%s] Failed to cleanup image path '%s': %s", agent.name, path, e)
                     logger.debug("[%s] image cleanup exception details", agent.name, exc_info=True)
+
+    def _revalidate_or_reask(self, *, agent, response, response_format, invoke, messages, engine):
+        """R2: one bounded re-ask when a Pydantic-model structured output fails validation.
+
+        OpenAI returns an already-validated model instance, so it passes straight through. Gemini and
+        Anthropic return a raw dict; if it fails to validate against the agent's response_format, we
+        re-ask ONCE with the validation error fed back, then return whatever that produces. A still-bad
+        result is returned unchanged so the normal downstream validation fails loud — no new masking.
+        The return SHAPE is never changed (dict stays a dict); model_validate here is only a gate.
+        """
+        from pydantic import BaseModel, ValidationError
+
+        if not (isinstance(response_format, type) and issubclass(response_format, BaseModel)):
+            return response  # dict-schema / json / str outputs: nothing to validate against
+        if not isinstance(response, dict):
+            return response  # already a model instance (e.g. OpenAI) — nothing to gate on
+
+        try:
+            response_format.model_validate(response)
+            return response
+        except ValidationError as ve:
+            logger.warning(
+                "[%s] structured output failed schema validation; re-asking once: %s", agent.name, ve
+            )
+            correction = {
+                "role": "user",
+                "content": (
+                    "Your previous response did not match the required JSON schema and failed "
+                    f"validation with these errors:\n{ve}\n\n"
+                    "Respond again with ONLY a single valid JSON object that matches the schema "
+                    "exactly — no markdown, no commentary."
+                ),
+            }
+            from app.services.llm_resilience import retry_transient
+            reask_messages = list(messages) + [correction]
+            return retry_transient(lambda: invoke(reask_messages), label=f"{agent.name}:{engine}:reask")
 

@@ -1029,6 +1029,9 @@ class GeminiLLM(BaseLLMProvider):
                 response_json_schema=json_schema,
                 temperature=temperature,
                 safety_settings=self._permissive_safety_settings(),
+                # Per-call timeout (google-genai HttpOptions.timeout is MILLISECONDS). Without this
+                # Gemini had no request timeout and could wedge a turn forever (reliability R2).
+                http_options=self.types.HttpOptions(timeout=int(timeout * 1000)),
             )
             # Optional thinking control — only present if an agent opted in; absent
             # => Gemini default thinking (unchanged behavior for every other agent).
@@ -1164,6 +1167,7 @@ class AnthropicLLM(BaseLLMProvider):
         response_format = send_params.get('response_format')
         model_name = send_params.get('engine', self.engine)
         temperature = send_params.get('temperature', self.temperature)
+        timeout = send_params.get('timeout', 240)
 
         if response_format is None:
             logger.error("Response format is None for Anthropic structured output.")
@@ -1198,6 +1202,9 @@ class AnthropicLLM(BaseLLMProvider):
                 temperature=temperature,
                 system=full_system,
                 messages=chat_messages,
+                # Per-call timeout (seconds). Without this Anthropic had no request timeout and
+                # could wedge a turn forever (reliability R2).
+                timeout=timeout,
             )
             _telemetry_usage = getattr(response, "usage", None)
 
