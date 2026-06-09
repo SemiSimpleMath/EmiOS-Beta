@@ -26,4 +26,15 @@ Durability rules (critical):
   - Either omit it (preferred) or label it as non-durable with `temporal_scope="daily"` and phrase the fact as "Today the user..." or "Sometimes the user...".
 - `temporal_scope="historical"` for facts that should go to KG/history only (no preference update).
 
-Output must match the JSON schema, including `fact_summary`.
+Structured claim (for the belief engine):
+- For each item, also fill `extracted_claim`: the SAME insight as subject / predicate / object
+  phrases, plus optional qualifiers, an optional `applies_when` cue, and a polarity.
+- Write natural phrases, not codes — e.g. subject "the kids", predicate "won't eat", object
+  "zucchini". A registry canonicalizes them later, so don't worry about matching exact wording.
+- `applies_when` is OPTIONAL and soft: fill it only when the claim is genuinely time- or
+  context-bound (e.g. "weekday mornings", "after 16:00", "first business day of the month"); leave
+  it null otherwise — never force a cue that isn't really there.
+- `polarity`: use "contradict" when the evidence shows the user changing a previously-held
+  preference, "retract" when they explicitly withdraw it, otherwise "affirm".
+
+Output must match the JSON schema, including `fact_summary` and `extracted_claim`.
