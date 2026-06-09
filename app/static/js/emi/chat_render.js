@@ -95,8 +95,6 @@
     // fetching /api/pods/<id>. Only kinds the server allowlists return
     // content; anything else shows a "not available" message.
 
-    var _POD_VIEWER_INSTALLED = false;
-
     function _linkifyPods(html) {
         try {
             var doc = new DOMParser().parseFromString(
@@ -156,19 +154,26 @@
         if (!parent) return;
         for (var j = 0; j < pieces.length; j++) parent.insertBefore(pieces[j], textNode);
         parent.removeChild(textNode);
-        _installPodViewer();
     }
 
-    function _installPodViewer() {
-        if (_POD_VIEWER_INSTALLED) return;
-        _POD_VIEWER_INSTALLED = true;
-        document.addEventListener("click", function (e) {
-            var link = e.target && e.target.closest ? e.target.closest(".chat-pod-link") : null;
-            if (!link) return;
-            e.preventDefault();
-            var podId = link.getAttribute("data-pod-id");
-            if (podId) _openPodViewer(podId);
-        });
+    function _wirePodLinks(container) {
+        // Attach the click handler DIRECTLY to each pod link in the live DOM
+        // (the linkify step builds the markup inside a detached document, so a
+        // delegated listener and the data-pod-id attribute both proved unreliable).
+        if (!container || !container.querySelectorAll) return;
+        var links = container.querySelectorAll(".chat-pod-link");
+        for (var i = 0; i < links.length; i++) {
+            (function (a) {
+                if (a._podWired) return;
+                a._podWired = true;
+                a.addEventListener("click", function (e) {
+                    e.preventDefault();
+                    // id is in the attribute; use the visible <code> text if it's missing
+                    var id = (a.getAttribute("data-pod-id") || a.textContent || "").trim();
+                    if (id) _openPodViewer(id);
+                });
+            })(links[i]);
+        }
     }
 
     function _podModal() {
@@ -270,6 +275,7 @@
         const bubble = document.createElement("div");
         const contentDiv = document.createElement("div");
         contentDiv.innerHTML = _renderMarkdown(text);
+        _wirePodLinks(contentDiv);
         bubble.appendChild(contentDiv);
         bubble.className = bubbleClass;
 
