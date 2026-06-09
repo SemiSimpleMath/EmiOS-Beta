@@ -77,6 +77,17 @@ function createUserBubble(message) {
 }
 
 function createBotBubble(message) {
+  // Prefer the shared renderer — same as desktop — so mobile gets markdown rendering,
+  // image-pod expansion, and clickable pod chips (tap → /api/pods viewer modal).
+  if (window.EmiChatRender && typeof window.EmiChatRender.createBotBubble === "function") {
+    window.EmiChatRender.createBotBubble(message, {
+      chatBoxId: "chat-box",
+      bubbleClass: "chat-box-bot-bubble",
+      scrollToBottom: scrollToBottom,
+    });
+    return;
+  }
+  // Shared renderer not loaded — bare render (original behavior).
   const chatBox = el("chat-box");
   if (!chatBox) return;
   const bubble = document.createElement("div");

@@ -10,10 +10,13 @@ import pytest
 from flask import Flask
 
 import app.routes.pod_api as pod_api
+from app.assistant.pod_store import pod_utils
 from app.assistant.pod_store.contracts import Pod
+from app.assistant.room_session_manager.services import pod_command
+from app.assistant.utils.pydantic_classes import ScopeContext, ScopeApprovalPolicy, ScopePodPolicy
 
 
-def _pod(pod_id: str, kind: str) -> Pod:
+def _pod(pod_id: str, kind: str, min_authority=None) -> Pod:
     return Pod(
         pod_id=pod_id,
         kind=kind,
@@ -25,12 +28,14 @@ def _pod(pod_id: str, kind: str) -> Pod:
         scope_id=None,
         created_by="web::planner",
         metadata={"unit": "j martin", "run": "irvine_hvac", "source_urls": ["https://example.com/jmartin"]},
+        min_authority=min_authority,
     )
 
 
 _RESEARCH_ID = "datapod:research_finding:3519561be7b1"
 _IMAGE_ID = "datapod:image:abcdef123456"
 _SECRET_ID = "datapod:secret:0011aabbccdd"
+_COURIER_ID = "datapod:research_finding:cc00cc00cc00"  # displayable kind but courier-band authority
 
 
 class _FakeStore:
@@ -39,6 +44,7 @@ class _FakeStore:
         _RESEARCH_ID: _pod(_RESEARCH_ID, "research_finding"),
         _IMAGE_ID: _pod(_IMAGE_ID, "image"),
         _SECRET_ID: _pod(_SECRET_ID, "secret"),
+        _COURIER_ID: _pod(_COURIER_ID, "research_finding", min_authority=100),
     }
 
     def get(self, pod_id):
@@ -47,10 +53,21 @@ class _FakeStore:
 
 @pytest.fixture
 def client(monkeypatch):
-    monkeypatch.setattr(pod_api, "PodStore", _FakeStore)
+    # The route reads through the universal gate (pod_utils.read_pod_gated) with the master_room
+    # scope, so patch the gate's store + the shared scope builder.
+    monkeypatch.setattr(pod_utils, "PodStore", _FakeStore)
+    monkeypatch.setattr(pod_command, "build_room_scope", lambda room_id, surface: ScopeContext(
+        scope_id="s", owner_id="user", actor_id="t", surface="ui", room_id="master_room",
+        approval=ScopeApprovalPolicy(authority_level=99), pods=ScopePodPolicy(allowed_scopes=["all"]),
+    ))
     app = Flask(__name__)
     app.register_blueprint(pod_api.pod_api_bp)
     return app.test_client()
+
+
+def test_courier_band_pod_denied_even_if_displayable(client):
+    # research_finding kind passes the allowlist, but min_authority 100 > master_room 99 → gate denies.
+    assert client.get(f"/api/pods/{_COURIER_ID}").status_code == 404
 
 
 def test_research_pod_served(client):

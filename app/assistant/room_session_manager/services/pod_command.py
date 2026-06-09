@@ -30,8 +30,9 @@ def _token(pod_id: str) -> str:
     return pod_id.rsplit(":", 1)[-1]
 
 
-def _build_room_scope(room_id: str, surface: str):
-    """The room's read scope: authority from ROOM.md policy, pod_scopes from permissions."""
+def build_room_scope(room_id: str, surface: str):
+    """The room's read scope: authority from ROOM.md policy, pod_scopes from permissions. Shared
+    so the /api/pods web route and the /pod command build the gating scope the same way."""
     from app.assistant.rooms.room_resource_loader import load_room_context_for_manager
     from app.assistant.room_session_manager.services.room_policy_service import resolve_room_authority_level
     from app.assistant.utils.pydantic_classes import ScopeContext, ScopeApprovalPolicy, ScopePodPolicy
@@ -114,7 +115,7 @@ def handle_pod_command(*, cmd_payload: str, room_id: str, surface: str, context_
         return _reply(f"That matches several findings — add a few more characters:\n{lines}")
 
     pod_id = matches[0]
-    scope = _build_room_scope(room_id, surface)
+    scope = build_room_scope(room_id, surface)
     try:
         pod = pod_utils.read_pod_gated(pod_id, scope)
     except pod_utils.PodNotFound:

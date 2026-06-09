@@ -150,6 +150,8 @@ def read_pod_gated(pod_id: str, scope: Any) -> Dict[str, Any]:
         "kind": pod.kind,
         "one_liner": pod.one_liner or "",
         "body": pod.body or "",
+        "tags": list(pod.tags or []),
+        "created_at": getattr(pod, "created_at", "") or "",
         "source_urls": list(meta.get("source_urls") or []),
         "scope_id": pod.scope_id,
     }

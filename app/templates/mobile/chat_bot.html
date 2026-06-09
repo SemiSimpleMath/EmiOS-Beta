@@ -113,7 +113,13 @@
     document.addEventListener("touchend", unlock, true);
   }
 </script>
-<script src="{{ url_for('static', filename='mobile/js/emi_mobile.js', v='20260213b') }}"></script>
+<!-- Markdown + sanitizer + the shared chat renderer (gives mobile clickable pods,
+     image-pod expansion, and the /api/pods viewer modal — same as desktop). Loaded
+     BEFORE emi_mobile.js so window.EmiChatRender is available when it renders. -->
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+<script src="{{ url_for('static', filename='js/emi/chat_render.js') }}?v={{ static_v }}"></script>
+<script src="{{ url_for('static', filename='mobile/js/emi_mobile.js', v='20260609a') }}"></script>
 <script>window.EMI_ASSISTANT_NAME = {{ assistant_name | tojson }};</script>
 <script src="{{ url_for('static', filename='js/proactive_popup.js') }}?v={{ static_v }}"></script>
 {% endblock %}

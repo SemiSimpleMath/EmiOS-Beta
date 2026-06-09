@@ -83,7 +83,7 @@ class TestPodExpand:
 
     def test_one_match_posts_body(self, monkeypatch):
         monkeypatch.setattr(pod_command, "_recent_pod_ids", lambda *a, **k: ["datapod:research_finding:d24abc"])
-        monkeypatch.setattr(pod_command, "_build_room_scope", lambda room_id, surface: _scope(99, ["all"]))
+        monkeypatch.setattr(pod_command, "build_room_scope", lambda room_id, surface: _scope(99, ["all"]))
         monkeypatch.setattr(pod_command.pod_utils, "read_pod_gated",
                             lambda pid, scope: {"one_liner": "Bob", "body": "Body!", "source_urls": ["https://s"]})
         r = pod_command.handle_pod_command(cmd_payload="expand d24", room_id="r", surface="ui", context_id="m")
@@ -104,7 +104,7 @@ class TestPodExpand:
 
     def test_authority_denied(self, monkeypatch):
         monkeypatch.setattr(pod_command, "_recent_pod_ids", lambda *a, **k: ["datapod:research_finding:d24abc"])
-        monkeypatch.setattr(pod_command, "_build_room_scope", lambda room_id, surface: _scope(30, ["self"]))
+        monkeypatch.setattr(pod_command, "build_room_scope", lambda room_id, surface: _scope(30, ["self"]))
 
         def _deny(pid, scope):
             raise PodAuthorityError(pod_id=pid, projection=None, required=50, actual=30)
