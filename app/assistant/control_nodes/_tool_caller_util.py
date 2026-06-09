@@ -111,6 +111,23 @@ def execute_dispatch(
     # Place result on blackboard for downstream nodes.
     blackboard.update_state_value("result", result_payload)
 
+    # Carry research pods up the manager chain. A sub-manager's result may carry
+    # pod_references (the durable findings/work behind its answer). Merge them into
+    # THIS scope's running list (dedup by pod_id) so manager_exit_node surfaces them
+    # in this manager's final answer too. Pods are global; this is a reference relay,
+    # not a re-mint — leaf tool results have no pod_references and no-op here.
+    if isinstance(result_payload, dict):
+        incoming = result_payload.get("pod_references")
+        if isinstance(incoming, list) and incoming:
+            merged = list(blackboard.get_state_value("pod_references") or [])
+            seen = {r.get("pod_id") for r in merged if isinstance(r, dict)}
+            for r in incoming:
+                pid = r.get("pod_id") if isinstance(r, dict) else None
+                if pid and pid not in seen:
+                    merged.append({"pod_id": pid, "one_liner": r.get("one_liner", "")})
+                    seen.add(pid)
+            blackboard.update_state_value("pod_references", merged)
+
     # Extract clean answer text for the response formatter.
     if isinstance(result_payload, dict):
         answer = str(result_payload.get("final_answer_answer") or "").strip()

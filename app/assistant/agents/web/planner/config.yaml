@@ -46,6 +46,7 @@ user_context_items:
   - checklist
   - action_count
   - progress_report
+  - research_notebook
 
 system_context_items:
   - tool_descriptions

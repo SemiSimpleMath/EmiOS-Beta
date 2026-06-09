@@ -541,8 +541,9 @@ def _build_dayflow_recent(*, now_utc: datetime, hours: int = 48, limit: int = 10
     """Recent dayflow_item entries from unified_log — filtered to signal-worthy rows.
 
     Filters out internal bookkeeping:
-    - action_log:* / action_dispatch:* / action_result:* — dayflow's internal
-      mechanism, not user-facing signal.
+    - action_log:* (except "Result: ..." outcome lines) / action_dispatch:* /
+      action_result:* — dayflow's internal mechanism. Outcome lines are KEPT so the
+      noticer can see what dayflow accomplished and move handled concerns to addressing.
     - state=artifact — intermediate chat snapshots that already appear elsewhere
       in passing_mentions / chat_clusters.
 
@@ -593,10 +594,13 @@ def _build_dayflow_recent(*, now_utc: datetime, hours: int = 48, limit: int = 10
         state = meta.get("state", "?")
         short_id = str(meta.get("short_id") or meta.get("item_id") or "")
 
-        # Skip dayflow's internal bookkeeping rows
-        if short_id.startswith(_DAYFLOW_INTERNAL_ID_PREFIXES):
+        # Skip dayflow's internal bookkeeping rows — EXCEPT outcome lines ("Result: ...") from
+        # action_log, which tell the noticer what dayflow actually ACCOMPLISHED. Seeing these lets
+        # it move an already-handled concern to `addressing` instead of reinforcing it as ignored.
+        is_outcome = short_id.startswith("action_log:") and msg.startswith("Result:")
+        if short_id.startswith(_DAYFLOW_INTERNAL_ID_PREFIXES) and not is_outcome:
             continue
-        if state in _DAYFLOW_BOOKKEEPING_STATES:
+        if state in _DAYFLOW_BOOKKEEPING_STATES and not is_outcome:
             continue
         # Dedup by short_id — keep only the most-recent row per item
         if short_id and short_id in seen_short_ids:

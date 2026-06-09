@@ -6,5 +6,12 @@ Context: {{ information }}
 
 Raw result:
 {{ tool_result_for_formatter }}
+{%- if pod_references %}
+
+Saved findings (pods — the full research/work behind this answer is stored in these):
+{%- for p in pod_references %}
+- {{ p.pod_id }} — {{ p.one_liner }}
+{%- endfor %}
+{%- endif %}
 
 Format this as a response for the user.

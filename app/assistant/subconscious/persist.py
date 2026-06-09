@@ -27,20 +27,27 @@ _REGISTER_REL = "resources/subconscious/resource_concerns_register.json"
 _TICK_LOG_REL = "resources/subconscious/resource_subconscious_tick_log.jsonl"
 
 
-def apply_noticer_output(output: Dict[str, Any]) -> Dict[str, Any]:
+def apply_noticer_output(
+    output: Dict[str, Any],
+    *,
+    register_path: Optional[Path] = None,
+    tick_log_path: Optional[Path] = None,
+) -> Dict[str, Any]:
     """Apply one noticer tick to the concerns_register on disk.
 
     Accepts the raw dict shape (what JSON-roundtrip of AgentForm produces).
-    Returns a small summary dict for the runner to print.
+    Returns a small summary dict for the runner to print. `register_path`/`tick_log_path`
+    default to the real resource files; tests pass temp paths to avoid touching them.
     """
-    register_path = get_repo_root() / _REGISTER_REL
-    tick_log_path = get_repo_root() / _TICK_LOG_REL
+    register_path = register_path or (get_repo_root() / _REGISTER_REL)
+    tick_log_path = tick_log_path or (get_repo_root() / _TICK_LOG_REL)
 
     register = _load_register(register_path)
     now_utc_iso = datetime.now(timezone.utc).isoformat()
 
     new_concerns = output.get("new_concerns") or []
     reinforced_concerns = output.get("reinforced_concerns") or []
+    addressing_concerns = output.get("addressing_concerns") or []
     resolved_concerns = output.get("resolved_concerns") or []
     escalated_concerns = output.get("escalated_concerns") or []
     belief_updates = output.get("belief_updates") or []
@@ -80,6 +87,27 @@ def apply_noticer_output(output: Dict[str, Any]) -> Dict[str, Any]:
         notes = r.get("notes")
         if notes:
             existing["reinforcement_notes"] = (existing.get("reinforcement_notes") or "") + f"\n[{now_utc_iso}] {notes}"
+
+    # 2b. Addressing → move active → addressing. Work is in flight (e.g. the dayflow orchestrator
+    # already researched it) but the concern is NOT resolved yet (no booking/appointment). Moving
+    # it out of `active` stops it nagging the planner (project_concerns reads only `active`) while
+    # keeping it tracked. This is owner-driven: the noticer decides this from reading dayflow's
+    # public outcomes; dayflow never writes the register.
+    for a in addressing_concerns:
+        cid = a.get("concern_id")
+        if not cid or cid not in by_id:
+            logger.warning("[noticer.persist] addressing targets unknown concern %s", cid)
+            continue
+        existing = by_id[cid]
+        existing["addressing_since_utc"] = now_utc_iso
+        note = a.get("notes")
+        if note:
+            existing["reinforcement_notes"] = (
+                (existing.get("reinforcement_notes") or "") + f"\n[{now_utc_iso}] addressing: {note}"
+            )
+        register["active"] = [c for c in register.get("active", []) if c.get("concern_id") != cid]
+        if not any(c.get("concern_id") == cid for c in register.get("addressing", [])):
+            register.setdefault("addressing", []).append(existing)
 
     # 3. Resolutions → move active/addressing → resolved
     for r in resolved_concerns:
@@ -139,6 +167,7 @@ def apply_noticer_output(output: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "new_concerns_count": len(new_concerns),
         "reinforced_count": len(reinforced_concerns),
+        "addressing_count": len(addressing_concerns),
         "resolved_count": len(resolved_concerns),
         "escalated_count": len(escalated_concerns),
         "belief_updates_count": len(belief_updates),

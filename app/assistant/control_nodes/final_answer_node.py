@@ -33,6 +33,8 @@ class FinalAnswerNode(ControlNode):
             "final_answer_sources": self.blackboard.get_state_value("final_answer_sources"),
             "final_answer_detail_level": self.blackboard.get_state_value("final_answer_detail_level"),
             "final_answer_data_list": self.blackboard.get_state_value("final_answer_data_list"),
+            "result_summary": self.blackboard.get_state_value("result_summary"),
+            "pod_references": self.blackboard.get_state_value("pod_references"),
         }
         has_state_final = any(v not in (None, "", [], {}) for v in state_candidate.values())
         raw_result = state_candidate if has_state_final else self.blackboard.get_state_value("result")

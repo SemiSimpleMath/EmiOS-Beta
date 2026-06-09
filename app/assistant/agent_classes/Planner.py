@@ -156,6 +156,11 @@ class Planner(Agent):
         # --- Call the shared logic from the parent class ---
         self._apply_llm_result_to_state(result_dict)
 
+        # Research notebook (B): mint any findings the planner emitted into pods, de-duped by
+        # `unit` so refining the same thing UPDATES one pod instead of duplicating. No-op for
+        # planners whose form has no findings_to_pod.
+        self._mint_research_findings(result_dict)
+
         action = str(result_dict.get("action") or "").strip()
         _skip_actions = {"return_control", "done", "none", "step_complete", ""}
         _has_tool_action = action and action not in _skip_actions
@@ -202,6 +207,80 @@ class Planner(Agent):
         except Exception:
             pass
 
+
+    @staticmethod
+    def _slug(text) -> str:
+        import re
+        s = re.sub(r"[^a-z0-9]+", "_", str(text or "").strip().lower()).strip("_")
+        return s or "unit"
+
+    def _mint_research_findings(self, result_dict: dict) -> None:
+        """Mint findings_to_pod entries into durable pods (kind=research_finding), one pod per
+        `unit` (re-emitting a unit upserts the same pod_id). Accumulate a `research_notebook` of
+        headers (unit / one_liner / pod_id) on the blackboard so the planner sees what it has
+        already captured and stops re-podding. Then clear findings_to_pod."""
+        findings = result_dict.get("findings_to_pod") if isinstance(result_dict, dict) else None
+        if not isinstance(findings, list) or not findings:
+            return
+
+        import hashlib
+        from app.assistant.pod_store.contracts import Pod
+        from app.assistant.pod_store.pod_store import PodStore
+
+        sc = self.blackboard.get_state_value("scope_context", None)
+        run = self._slug(getattr(sc, "scope_id", None) or self.blackboard.get_state_value("task", "") or "web")
+        store = PodStore()
+
+        notebook = self.blackboard.get_state_value("research_notebook", None)
+        by_unit = {n["unit"]: n for n in notebook if isinstance(n, dict) and n.get("unit")} \
+            if isinstance(notebook, list) else {}
+
+        minted = 0
+        for f in findings:
+            if not isinstance(f, dict):
+                continue
+            unit = str(f.get("unit") or "").strip().lower() or self._slug(f.get("one_liner"))
+            # Canonical pod URI: datapod:<snake_kind>:<[a-z0-9]{6,}>. The id is a
+            # deterministic hash of (run, unit) so re-emitting a unit upserts the same
+            # pod, while staying a valid pod URI matched by pod_uri.POD_URI_RE — so the
+            # PodInjector and the chat linkifier recognize it. run/unit kept in metadata.
+            token = hashlib.blake2b(f"{run}|{unit}".encode("utf-8"), digest_size=6).hexdigest()
+            pod_id = f"datapod:research_finding:{token}"
+            urls = [s for s in (f.get("source_refs") or []) if isinstance(s, str)]
+            pod = Pod(
+                pod_id=pod_id,
+                kind="research_finding",
+                tags=[t for t in (f.get("tags") or []) if isinstance(t, str)],
+                one_liner=str(f.get("one_liner") or unit),
+                body=str(f.get("body") or ""),
+                source_refs=[],                      # PodSourceRef is {kind,id}, not a URL
+                for_agents=[],
+                scope_id=None,
+                created_by=self.name,
+                metadata={"unit": unit, "run": run, "source_urls": urls},
+            )
+            store.put(pod)                                  # upsert by pod_id → de-dup per unit
+            by_unit[unit] = {"unit": unit, "one_liner": pod.one_liner, "pod_id": pod_id}
+            minted += 1
+
+        self.blackboard.update_state_value("research_notebook", list(by_unit.values()))
+        self.blackboard.update_state_value("findings_to_pod", [])   # consumed
+
+        # FLUSH (B): the raw tool results that fed these findings are now captured durably in pods.
+        # Suppress them from the planner's working history (format_recent_history skips
+        # context_suppressed) so its context shrinks as it moves to the next unit — it works from
+        # the research_notebook + checklist, not the raw scrapes.
+        flushed = 0
+        if minted:
+            scope_id = self.blackboard.get_current_scope_id()
+            for m in (self.blackboard.get_messages_for_scope(scope_id) or []):
+                if getattr(m, "data_type", None) == "tool_result":
+                    meta = getattr(m, "metadata", None)
+                    if isinstance(meta, dict) and not meta.get("context_suppressed"):
+                        meta["context_suppressed"] = True
+                        flushed += 1
+        logger.info("[%s] research notebook: minted/updated %d pod(s), %d unit(s); flushed %d tool result(s).",
+                    self.name, minted, len(by_unit), flushed)
 
     def _publish_orchestrator_progress(self, result_dict: dict) -> None:
         if not isinstance(result_dict, dict):

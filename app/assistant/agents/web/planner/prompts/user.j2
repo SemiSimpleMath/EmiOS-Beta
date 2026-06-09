@@ -37,6 +37,14 @@ This is our previous checklist that you have to now update. You may also add sub
 This is our first action. We have not done anything yet. So summary will be blank. We just need to come up with a plan and action.
 {% endif %}
 
+{% if research_notebook %}
+## Research notebook — units you have ALREADY captured to pods (do NOT re-pod these; full details are saved and recoverable)
+{% for n in research_notebook %}
+- {{ n.unit }}: {{ n.one_liner }}  [pod: {{ n.pod_id }}]
+{% endfor %}
+If a checklist item is about a unit already listed here, treat it DONE and move on. Only emit findings_to_pod for a unit NOT already here (or to correct one with materially new data).
+{% endif %}
+
 {% if recent_history %}
 Things that happened since last time you made a plan from oldest to latest. Last thing is most recent tool result that you have to evaluate:
 {{ recent_history }}

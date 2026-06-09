@@ -486,3 +486,6 @@ tasks/allowlist_test_output.txt
 # Pre-commit forbidden-strings list — contains the very PII/secrets it blocks;
 # never commit it. The .example is tracked.
 scripts/git-hooks/forbidden_strings.txt
+
+# web_manager test harness run output (regenerated each run)
+app/assistant/tests/manager_tests/web_manager/last_run_transcript.md

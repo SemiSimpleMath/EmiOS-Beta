@@ -264,6 +264,7 @@ def _build_recent_dispatch_results(
             ),
             "dispatched_at": str(meta.get("dispatched_at_local") or meta.get("dispatched_at") or "").strip(),
             "execution_result": execution_result,
+            "pod_references": meta.get("pod_references") or [],
         })
 
     out.sort(key=lambda r: r.get("dispatched_at") or "", reverse=True)

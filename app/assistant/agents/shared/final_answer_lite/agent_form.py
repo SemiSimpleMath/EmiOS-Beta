@@ -15,11 +15,24 @@ class FinalAnswerDataItem(BaseModel):
     timestamp: Optional[str] = None
 
 
+class PodReference(BaseModel):
+    pod_id: str = Field(description="Pod id holding the full finding / work behind the answer.")
+    one_liner: str = Field(default="", description="Headline of what's in this pod.")
+
+
 class AgentForm(BaseModel):
     final_answer_answer: str
     result_summary: str = Field(
         default="",
         description="One-sentence outcome for downstream agents (max ~150 chars).",
+    )
+    pod_references: List[PodReference] = Field(
+        default_factory=list,
+        description=(
+            "When a research notebook is provided, list the pods that hold the full findings / "
+            "work behind this answer (pod_id + one_liner). The reader opens these for complete "
+            "detail; do not dump full pod bodies into final_answer_answer."
+        ),
     )
     final_answer_sources: List[str] = Field(default_factory=list)
     final_answer_detail_level: str = "brief"

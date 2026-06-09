@@ -84,6 +84,12 @@ I dispatched **{{ r.task_id }}** to `{{ r.dispatched_to }}`{% if r.dispatched_to
 **Task:** {{ r.summary }}
 **Manager returned:**
 {{ r.execution_result }}
+{%- if r.pod_references %}
+**Durable findings saved as pods** (the full research + work is already done and stored — reference these pods instead of re-dispatching the same research):
+{%- for p in r.pod_references %}
+- `{{ p.pod_id }}` — {{ p.one_liner }}
+{%- endfor %}
+{%- endif %}
 
 {% endfor %}
 {%- endif %}

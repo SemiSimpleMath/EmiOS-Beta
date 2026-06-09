@@ -6,5 +6,10 @@ Rules:
 - Output MUST be valid structured JSON per the schema.
 - Keep `final_answer_answer` concise. Do not include long reports.
 - Include only URLs you actually used in `final_answer_sources`.
-- Do NOT invent facts; rely on recent_history / final_answer_content.
+- Do NOT invent facts; rely on recent_history / final_answer_content / the research notebook.
+- If a Research notebook is provided, the full findings and work are already saved in those pods.
+  Build `final_answer_answer` as a BRIEF summary that answers the task, and populate
+  `pod_references` with each relevant pod's `pod_id` + `one_liner`. The reader (the user or another
+  agent) opens those pods for the complete detail and the work already done — so do NOT paste full
+  pod bodies into `final_answer_answer`.
 

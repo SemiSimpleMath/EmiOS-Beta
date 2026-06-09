@@ -74,6 +74,18 @@ class ConcernReinforcement(BaseModel):
     notes: Optional[str] = Field(default=None, max_length=300)
 
 
+class ConcernAddressing(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    concern_id: str
+    notes: Optional[str] = Field(
+        default=None, max_length=300,
+        description="What was already done about it (e.g. dayflow researched it / asked the user).",
+    )
+    evidence: List[Evidence] = Field(
+        description="Items showing it is being handled internally (e.g. dayflow action results)."
+    )
+
+
 class ConcernResolution(BaseModel):
     model_config = ConfigDict(extra="forbid")
     concern_id: str
@@ -127,6 +139,15 @@ class AgentForm(BaseModel):
     model_config = ConfigDict(extra="forbid")
     new_concerns: List[Concern] = Field(default_factory=list)
     reinforced_concerns: List[ConcernReinforcement] = Field(default_factory=list)
+    addressing_concerns: List[ConcernAddressing] = Field(
+        default_factory=list,
+        description=(
+            "Concerns already being handled internally (e.g. the dayflow orchestrator researched "
+            "or acted on it) but not yet resolved. Moves them out of `active` so they stop nagging "
+            "the planner, while keeping them tracked. Use instead of reinforcing when you see from "
+            "recent dayflow outcomes that the concern is being worked, not ignored."
+        ),
+    )
     resolved_concerns: List[ConcernResolution] = Field(default_factory=list)
     escalated_concerns: List[ConcernEscalation] = Field(default_factory=list)
     belief_updates: List[BeliefUpdate] = Field(default_factory=list)

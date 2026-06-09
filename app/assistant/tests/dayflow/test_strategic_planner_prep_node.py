@@ -7,6 +7,7 @@ from app.assistant.control_nodes.strategic_planner_prep_node import (
     StrategicPlannerPrepNode,
     _build_plan_task_status,
     _build_recent_changes,
+    _build_recent_dispatch_results,
 )
 from app.assistant.tests.dayflow.conftest import (
     FakeBlackboard,
@@ -109,6 +110,43 @@ class TestBuildPlanTaskStatus:
         result = _build_plan_task_status(items, synopses)
         task = result[0]["remaining_tasks"][0]
         assert not task.get("execution_result")
+
+
+# ── _build_recent_dispatch_results ───────────────────────────────
+
+class TestRecentDispatchResultsPods:
+    """A dispatched manager that minted research findings stamps pod_references
+    onto the plan step; the planner-facing dispatch record must carry them so
+    the planner references the pods instead of re-dispatching the research.
+    """
+
+    def _item(self, now_utc, *, pod_references):
+        meta = {
+            "source_type": "plan_task",
+            "item_id": "t1",
+            "short_id": 1,
+            "state": "closed",
+            "summary": "Research Irvine HVAC providers",
+            "dispatched_to": "emi_team_manager",
+            "dispatched_at": now_utc.isoformat(),
+            "execution_result": "Found 2 HVAC providers in Irvine.",
+        }
+        if pod_references is not None:
+            meta["pod_references"] = pod_references
+        return {"metadata": meta}
+
+    def test_pod_references_threaded_into_record(self):
+        now = datetime.now(timezone.utc)
+        pods = [{"pod_id": "datapod:research_finding:3519561be7b1", "one_liner": "Acme Air — IAQ"}]
+        out = _build_recent_dispatch_results([self._item(now, pod_references=pods)], now)
+        assert len(out) == 1
+        assert out[0]["pod_references"] == pods
+
+    def test_no_pods_yields_empty_list(self):
+        now = datetime.now(timezone.utc)
+        out = _build_recent_dispatch_results([self._item(now, pod_references=None)], now)
+        assert len(out) == 1
+        assert out[0]["pod_references"] == []
 
 
 # ── _build_recent_changes ────────────────────────────────────────

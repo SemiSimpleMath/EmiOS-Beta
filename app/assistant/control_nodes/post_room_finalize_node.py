@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import hashlib
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from app.assistant.control_nodes.control_node import ControlNode
 from app.assistant.dayflow_orchestrator.contracts import get_meta
@@ -89,6 +89,31 @@ def _extract_full_result_text(action_result_event: Dict[str, Any]) -> str:
     if isinstance(info, str) and info.strip():
         return info
     return str(action_result_event.get("action_type") or "")
+
+
+def _collect_pod_references(action_results: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    """Collect (deduped) pod_references from a list of action_result_events.
+
+    A dispatched manager that minted research findings returns pod_references
+    on its final answer (the durable findings/work behind the answer). Surfacing
+    them onto the dayflow action_result + plan step lets the strategic_planner
+    reference the existing pods next tick instead of re-dispatching the research.
+    """
+    out: List[Dict[str, str]] = []
+    seen: set = set()
+    for event in (action_results or []):
+        if not isinstance(event, dict):
+            continue
+        payload = event.get("result_payload")
+        refs = payload.get("pod_references") if isinstance(payload, dict) else None
+        for ref in (refs or []):
+            if not isinstance(ref, dict):
+                continue
+            pid = str(ref.get("pod_id") or "").strip()
+            if pid and pid not in seen:
+                out.append({"pod_id": pid, "one_liner": str(ref.get("one_liner") or "").strip()})
+                seen.add(pid)
+    return out
 
 
 def _format_compact_outcome(*, task: str, action: str, full_result: str) -> str:
@@ -294,6 +319,11 @@ class PostRoomFinalizeNode(ControlNode):
                 full_result=full_result_text,
             )
 
+        # Pods minted by the dispatched manager (durable findings behind the
+        # answer). Surfaced onto the plan step + action_result so the planner
+        # references them next tick instead of re-dispatching the research.
+        dispatch_pod_references = _collect_pod_references(action_results)
+
         if acted_on_ids and dispatch_acted_ids and set(acted_on_ids) != dispatch_acted_ids:
             raise ValueError(
                 f"[{self.name}] acted_on_item_ids mismatch between selector and dispatch records: "
@@ -328,6 +358,7 @@ class PostRoomFinalizeNode(ControlNode):
                 all_known_items,
                 acted_on_ids=acted_on_ids,
                 result_summary=execution_result_summary,
+                pod_references=dispatch_pod_references,
                 now_utc=now_utc,
             )
 
@@ -496,6 +527,70 @@ class PostRoomFinalizeNode(ControlNode):
                 "[%s] plan synopses: %d emitted, %d changed, %d persisted.",
                 self.name, len(plan_synopses_raw), len(changed_synopses), plan_synopsis_count,
             )
+
+        # Safety-net: a plan created implicitly via a task's plan_id (no matching plan_synopses
+        # entry) leaves NO memory — when its tasks close and get suppressed, the plan vanishes and
+        # a persistent concern re-creates it from scratch (the HVAC re-research loop). If any
+        # planned_task references a plan_id with no existing synopsis and none emitted this pass,
+        # auto-write a minimal synopsis from the task text(s) so the plan is remembered.
+        have_synopsis: set = set()
+        for item in all_known_items:
+            if not isinstance(item, dict):
+                continue
+            m = get_meta(item)
+            if str(m.get("source_type") or "").strip().lower() == "plan_synopsis":
+                pid = str(m.get("plan_id") or "").strip()
+                if pid:
+                    have_synopsis.add(pid)
+        emitted_pids = {
+            str(s.get("plan_id") or "").strip()
+            for s in plan_synopses_raw if isinstance(s, dict) and str(s.get("plan_id") or "").strip()
+        }
+        referenced_plan_tasks: Dict[str, List[str]] = {}
+        for raw in planned_tasks:
+            if not isinstance(raw, dict):
+                continue
+            pid = str(raw.get("plan_id") or "").strip()
+            if not pid:
+                continue                          # standalone task — no plan, nothing to record
+            txt = str(raw.get("task") or "").strip()
+            if txt:
+                referenced_plan_tasks.setdefault(pid, []).append(txt)
+        missing_synopsis = [
+            pid for pid in referenced_plan_tasks
+            if pid not in have_synopsis and pid not in emitted_pids
+        ]
+        if missing_synopsis:
+            auto_synopses = []
+            for pid in missing_synopsis:
+                tasks_txt = referenced_plan_tasks[pid]
+                objective = (tasks_txt[0] if tasks_txt else pid)[:300]
+                synopsis = (
+                    "Auto-recorded so this plan is remembered and not re-created: "
+                    + "; ".join(tasks_txt)
+                )[:600] or f"Auto-recorded plan {pid}."
+                auto_synopses.append({
+                    "plan_id": pid, "is_new": True, "changed": True,
+                    "objective": objective, "synopsis": synopsis,
+                    "success_criteria": "", "step_outline": tasks_txt,
+                })
+            auto_messages = build_plan_synopsis_messages(auto_synopses)
+            if auto_messages:
+                from app.assistant.dayflow_orchestrator.dayflow_item_writer import write_dayflow_items_batch as _write_batch
+                auto_dicts = []
+                for msg in auto_messages:
+                    meta = dict(msg.metadata) if isinstance(msg.metadata, dict) else {}
+                    meta.setdefault("item_id", msg.id)
+                    meta.setdefault("summary", msg.content or "")
+                    meta.setdefault("source_type", "plan_synopsis")
+                    auto_dicts.append(meta)
+                _write_batch(auto_dicts, caller=self.name)
+                plan_synopsis_count += len(auto_dicts)
+                logger.warning(
+                    "[%s] auto-synopsis: %d plan(s) created via task plan_id had no synopsis (%s); "
+                    "wrote a minimal one so they are not re-created from scratch.",
+                    self.name, len(auto_dicts), ", ".join(missing_synopsis),
+                )
 
         completed_plan_ids_raw = self.blackboard.get_state_value("completed_plan_ids", [])
         if completed_plan_ids_raw is None:
@@ -707,6 +802,8 @@ class PostRoomFinalizeNode(ControlNode):
 
         reasoning = str(self.blackboard.get_state_value("reasoning", "") or "").strip()
 
+        result_pod_references = _collect_pod_references(action_results)
+
         created_ticket_id = ""
         result_payload = result.get("result_payload")
         if isinstance(result_payload, dict):
@@ -762,6 +859,8 @@ class PostRoomFinalizeNode(ControlNode):
                 "reasoning": reasoning,
                 "created_ticket_id": created_ticket_id,
             }
+            if result_pod_references:
+                result_meta["pod_references"] = result_pod_references
             result_messages.append(
                 Message(
                     id=result_item_id,
@@ -834,6 +933,7 @@ class PostRoomFinalizeNode(ControlNode):
         acted_on_ids: List[str],
         result_summary: str,
         now_utc: datetime,
+        pod_references: Optional[List[Dict[str, str]]] = None,
     ) -> None:
         """Stamp execution_result onto plan steps that were just executed
         and close them via write_dayflow_item.
@@ -851,21 +951,22 @@ class PostRoomFinalizeNode(ControlNode):
             if item_id not in acted_set:
                 continue
 
-            write_dayflow_item(
-                item_id,
-                state="closed",
-                updates={
-                    "execution_result": result_summary,
-                    "executed_at": now_utc.isoformat(),
-                    "planner_reviewed": False,
-                },
-                reason="dispatch_completed",
-                caller=f"{self.name}::attach_execution_results",
-            )
-            meta.update({
+            updates: Dict[str, Any] = {
                 "execution_result": result_summary,
                 "executed_at": now_utc.isoformat(),
                 "planner_reviewed": False,
+            }
+            if pod_references:
+                updates["pod_references"] = pod_references
+            write_dayflow_item(
+                item_id,
+                state="closed",
+                updates=updates,
+                reason="dispatch_completed",
+                caller=f"{self.name}::attach_execution_results",
+            )
+            meta.update(updates)
+            meta.update({
                 "state": "closed",
                 "state_reason": "dispatch_completed",
             })

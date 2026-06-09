@@ -78,6 +78,15 @@ outcomes per concern:
                `reinforced_concerns` with severity_change="raised" and
                extend addressable_by if new domains should help.
 
+  ADDRESSED    Recent dayflow outcomes (the "Result: ..." lines under "Recent
+               dayflow items") show a concern was already researched or acted on
+               but is NOT yet resolved (e.g. providers found, nothing booked; or
+               the user was asked and hasn't decided). Add it to
+               `addressing_concerns` (with the dayflow result as evidence) INSTEAD
+               of reinforcing it. This moves it out of `active` so the planner
+               stops re-doing the work, while keeping it tracked until it truly
+               resolves. Do NOT mark it resolved — the underlying need still stands.
+
 Verification is NOT optional. Skipping it lets stale concerns pile up.
 
 A2. NEW PATTERNS

@@ -34,6 +34,8 @@ Notifications and user questions are always their own task node. Do not bundle a
 
 Create a new plan only for a distinct tracked objective with its own success condition.
 
+When you create a new plan, you MUST emit a matching `plan_synopses` entry (`is_new: true`) in the SAME response — including when the plan is introduced only by a task's `plan_id`. The synopsis is the plan's memory: it is what later appears under CURRENT PLANS and RECENTLY CLOSED PLANS. A plan with no synopsis is invisible to your future self — when its tasks close it vanishes, and any standing concern will make you re-create the plan and redo the work from scratch. Never attach a task to a new `plan_id` without also emitting its synopsis.
+
 Revise an existing plan when the new information changes timing, scope, or next steps for the same objective.
 
 Create a standalone task for a useful one-off action that does not need ongoing tracking.

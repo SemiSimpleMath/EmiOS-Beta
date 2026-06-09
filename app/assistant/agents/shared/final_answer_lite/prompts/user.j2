@@ -23,8 +23,16 @@ Collected final_answer_content:
 {{ final_answer_content }}
 {% endif %}
 
+{% if research_notebook %}
+Research notebook — pods already created holding the FULL findings + work (reference these in pod_references):
+{% for n in research_notebook %}
+- {{ n.unit }}: {{ n.one_liner }}  [pod: {{ n.pod_id }}]
+{% endfor %}
+{% endif %}
+
 Return canonical fields:
-- `final_answer_answer` (required)
+- `final_answer_answer` (required; a BRIEF summary answering the task)
+- `pod_references` (when a research notebook is present: each relevant pod's pod_id + one_liner)
 - `final_answer_sources` (array; can be empty)
 - `final_answer_detail_level` = "brief"
 - `final_answer_data_list` = []

@@ -153,4 +153,24 @@ class FinalAnswerNormalizer:
             "final_answer_sources": sources,
             "final_answer_detail_level": detail_level,
             "final_answer_data_list": data_list,
+            # Carry the research-pod fields through the canonical envelope so they reach the human
+            # (response_formatter) and dayflow (action_result) instead of being dropped at exit.
+            "result_summary": cls.to_string(result_dict.get("result_summary") or ""),
+            "pod_references": cls.to_pod_references(result_dict.get("pod_references")),
         }
+
+    @staticmethod
+    def to_pod_references(value: Any) -> list:
+        """Normalize pod_references to a list of {pod_id, one_liner} dicts (accepts dicts or
+        pydantic PodReference objects). Drops entries without a pod_id."""
+        out = []
+        for r in (value or []):
+            if isinstance(r, dict):
+                pid = str(r.get("pod_id") or "").strip()
+                one = str(r.get("one_liner") or "").strip()
+            else:
+                pid = str(getattr(r, "pod_id", "") or "").strip()
+                one = str(getattr(r, "one_liner", "") or "").strip()
+            if pid:
+                out.append({"pod_id": pid, "one_liner": one})
+        return out
