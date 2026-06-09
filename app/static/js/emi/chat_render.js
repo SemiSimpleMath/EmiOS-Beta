@@ -142,8 +142,13 @@
             a.className = "chat-pod-link";
             a.setAttribute("data-pod-id", uri);
             a.title = "Open saved finding";
+            a.style.cssText = "cursor:pointer;text-decoration:none;";
             var code = d.createElement("code");
             code.textContent = uri;
+            // Inline chip style so the pill reads as clickable even if emi.css is stale.
+            code.style.cssText = "background:rgba(59,130,246,.1);color:#2563eb;" +
+                "border:1px solid rgba(59,130,246,.25);border-radius:5px;padding:1px 5px;" +
+                "font-size:.85em;word-break:break-all;";
             a.appendChild(code);
             pieces.push(a);
             lastEnd = match.index + uri.length;
@@ -182,14 +187,24 @@
         modal = document.createElement("div");
         modal.id = "pod-viewer-modal";
         modal.className = "pod-viewer-overlay";
-        modal.style.display = "none";
+        // Critical layout is inlined so the modal is visible even when emi.css
+        // is stale/unloaded; the class only adds polish on top when present.
+        modal.style.cssText =
+            "position:fixed;top:0;left:0;right:0;bottom:0;display:none;" +
+            "align-items:center;justify-content:center;background:rgba(0,0,0,0.45);" +
+            "z-index:2147483000;padding:16px;";
         modal.innerHTML =
-            '<div class="pod-viewer-card" role="dialog" aria-modal="true">' +
-            '  <button class="pod-viewer-close" aria-label="Close">×</button>' +
-            '  <div class="pod-viewer-title"></div>' +
-            '  <div class="pod-viewer-meta"></div>' +
-            '  <div class="pod-viewer-body"></div>' +
-            '  <div class="pod-viewer-sources"></div>' +
+            '<div class="pod-viewer-card" role="dialog" aria-modal="true" style="' +
+            'position:relative;background:#fff;color:#111827;border-radius:12px;' +
+            'box-shadow:0 10px 40px rgba(0,0,0,.25);max-width:640px;width:100%;' +
+            'max-height:80vh;overflow-y:auto;padding:24px 28px;">' +
+            '  <button class="pod-viewer-close" aria-label="Close" style="position:absolute;' +
+            'top:8px;right:12px;background:none;border:none;font-size:1.6rem;line-height:1;' +
+            'color:#6b7280;cursor:pointer;">×</button>' +
+            '  <div class="pod-viewer-title" style="font-size:1.15rem;font-weight:600;margin-right:24px;"></div>' +
+            '  <div class="pod-viewer-meta" style="font-family:monospace;font-size:.75rem;color:#9ca3af;margin:4px 0 16px;word-break:break-all;"></div>' +
+            '  <div class="pod-viewer-body" style="font-size:.95rem;line-height:1.55;"></div>' +
+            '  <div class="pod-viewer-sources" style="margin-top:16px;"></div>' +
             "</div>";
         document.body.appendChild(modal);
         function close() { modal.style.display = "none"; }
