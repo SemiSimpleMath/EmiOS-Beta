@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify, current_app
 
-from app.assistant.agent_flow_manager.agent_flow_manager import AgentFlowManager
+from app.assistant.agent_flow_manager.agent_flow_manager import AgentFlowManager, AGENT_DISK_PATH
 from app.assistant.utils.logging_config import get_logger
 
 agent_flow_route_bp = Blueprint('agent_flow', __name__)
@@ -65,7 +65,8 @@ def save_agent_config():
         agent_name = config['name']
         logger.debug("Saving agent config for: %s", agent_name)
         agent_flow_manager = AgentFlowManager()
-        agent_flow_manager.save_agent_config(config)
+        # Save to the real agents dir so the edit round-trips with the registry that loads from it.
+        agent_flow_manager.save_agent_config(config, str(AGENT_DISK_PATH))
         return jsonify({'status': 'success'}), 200
 
     except Exception as e:

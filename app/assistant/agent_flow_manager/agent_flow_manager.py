@@ -273,8 +273,13 @@ class AgentFlowManager:
         system_prompt = prompts.get("system", "")
         user_prompt = prompts.get("user", "")
 
-        # Save inside manager's agent folder
+        # Save inside manager's agent folder. agent_name comes from caller-supplied config['name'],
+        # so require the resolved dir to stay under agents_base_path (no ../ / absolute escape).
         save_dir = os.path.join(agents_base_path, agent_name_to_path(agent_name))
+        try:
+            Path(save_dir).resolve().relative_to(Path(agents_base_path).resolve())
+        except ValueError:
+            raise ValueError(f"Invalid agent name (escapes base dir): {agent_name!r}")
         os.makedirs(save_dir, exist_ok=True)
         prompt_dir = os.path.join(save_dir, "prompts")
         os.makedirs(prompt_dir, exist_ok=True)
