@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict
 
 from app.assistant.message_manager.save_to_unified_db import save_to_unified_db
-from app.assistant.room_session_manager.contracts import InboundEnvelope
+from app.assistant.room_session_manager.contracts import InboundEnvelope, OutboundIntent
 from app.assistant.room_session_manager.services import (
     PostRoomService,
     QuestionAnswerIngressService,
@@ -625,6 +625,70 @@ class RoomSessionManager:
             response["dry_run"] = True
         return response
 
+    def _handle_turn_failure(
+            self,
+            *,
+            envelope: InboundEnvelope,
+            adapter: InboundSurfaceAdapter,
+            send_reply: bool,
+            message_persistence_mode: str,
+            persist_unified_log: bool,
+            persist_reason: str,
+            error: Exception,
+    ) -> Dict[str, Any]:
+        """The turn body crashed. Turn the (otherwise silent) failure into a fail-loud the user sees.
+
+        The caller logs ERROR + traceback (the loud signal for the dev). Here we surface a short,
+        non-leaky error on the SAME transport (the loud signal for the user), persist it to history,
+        and return a coherent turn response. This does NOT swallow the failure into a guessed result —
+        the user is explicitly told the turn failed; it just makes the existing crash visible instead
+        of leaving the assistant silent. Delivery/persist sub-failures are contained so the path always returns.
+        """
+        ref = str(envelope.request_id or "")[:8]
+        error_text = (
+            f"⚠️ I ran into an error handling that ({type(error).__name__}). "
+            f"It's been logged{f' (ref {ref})' if ref else ''}."
+        )
+        intent = OutboundIntent(
+            request_id=envelope.request_id,
+            room_id=envelope.room_id,
+            room_surface=envelope.surface,
+            room_context_id=envelope.context_id,
+            reply_text=error_text,
+            send=bool(send_reply),
+            delivery_mode="error",
+            reply_to=envelope.reply_to if isinstance(envelope.reply_to, dict) else {},
+            payload={"error": True, "error_type": type(error).__name__},
+        )
+        outbound_result = self._deliver_outbound(
+            envelope=envelope,
+            adapter=adapter,
+            reply_text=intent.reply_text,
+            should_send=intent.send,
+        )
+        try:
+            self._persist_outbound_turn(
+                adapter=adapter,
+                persist_unified_log=persist_unified_log,
+                reply_text=intent.reply_text,
+                outbound_result=outbound_result,
+            )
+        except Exception as persist_err:
+            logger.error(
+                "Failed persisting error turn for request_id=%s: %s", envelope.request_id, persist_err
+            )
+            logger.debug("error-turn persist exception details", exc_info=True)
+        return self._build_turn_response(
+            envelope=envelope,
+            adapter=adapter,
+            message_persistence_mode=message_persistence_mode,
+            persist_unified_log=persist_unified_log,
+            persist_reason=persist_reason,
+            send_reply=send_reply,
+            outbound_intent=intent,
+            outbound_result=outbound_result,
+        )
+
     def _maybe_trigger_room_summary(self, *, room_id: str, room_ctx: Dict[str, Any] | None) -> None:
         if not isinstance(room_id, str) or not room_id.strip():
             return
@@ -708,62 +772,83 @@ class RoomSessionManager:
                 room_id=str(envelope.room_id or ""),
             )
 
-        request_data, manager_name = self._prepare_turn_context(
-            envelope=envelope,
-            room_ctx=room_ctx,
-            room_contact_name=room_contact_name,
-            adapter=adapter,
-        )
+        # Turn body wrapped so a crash anywhere here becomes a fail-loud the user can SEE.
+        # The UI path is fire-and-forget on a daemon thread (process_request) whose only handler
+        # logs and dies, so an uncaught exception here = the assistant goes silent forever. We convert that
+        # into a logged error + a short error reply on the same transport. Transient-retry of the
+        # underlying infra failure is a separate layer (R2); this is the surface safety net only.
+        try:
+            request_data, manager_name = self._prepare_turn_context(
+                envelope=envelope,
+                room_ctx=room_ctx,
+                room_contact_name=room_contact_name,
+                adapter=adapter,
+            )
 
-        outbound_intent = self._run_room_controller(
-            envelope=envelope,
-            request_data=request_data,
-            manager_name=manager_name,
-            send_reply=send_reply,
-        )
-        outbound_result = self._deliver_outbound(
-            envelope=envelope,
-            adapter=adapter,
-            reply_text=outbound_intent.reply_text,
-            should_send=bool(outbound_intent.send),
-        )
-        self._persist_outbound_turn(
-            adapter=adapter,
-            persist_unified_log=persist_unified_log,
-            reply_text=outbound_intent.reply_text,
-            outbound_result=outbound_result,
-        )
-        maybe_write_mode_exit_summary(
-            blackboard=self._blackboard,
-            envelope=envelope,
-            payload=outbound_intent.payload,
-            reply_text=outbound_intent.reply_text,
-        )
-        # Only trigger room summary for normal mode — task creation, doc creation,
-        # planning mode messages should not be compressed into the room history.
-        envelope_mode = ""
-        if isinstance(envelope.metadata, dict):
-            envelope_mode = str(envelope.metadata.get("room_mode") or "").strip().lower()
-        if envelope_mode in ("", "normal"):
-            self._maybe_trigger_room_summary(room_id=envelope.room_id, room_ctx=room_ctx)
-        ensure_request_room_metadata(
-            blackboard=self._blackboard,
-            request_id=envelope.request_id,
-            room_id=envelope.room_id,
-            room_surface=envelope.surface,
-            room_context_id=envelope.context_id,
-            manager_name=manager_name,
-        )
-        return self._build_turn_response(
-            envelope=envelope,
-            adapter=adapter,
-            message_persistence_mode=message_persistence_mode,
-            persist_unified_log=persist_unified_log,
-            persist_reason=persist_reason,
-            send_reply=send_reply,
-            outbound_intent=outbound_intent,
-            outbound_result=outbound_result,
-        )
+            outbound_intent = self._run_room_controller(
+                envelope=envelope,
+                request_data=request_data,
+                manager_name=manager_name,
+                send_reply=send_reply,
+            )
+            outbound_result = self._deliver_outbound(
+                envelope=envelope,
+                adapter=adapter,
+                reply_text=outbound_intent.reply_text,
+                should_send=bool(outbound_intent.send),
+            )
+            self._persist_outbound_turn(
+                adapter=adapter,
+                persist_unified_log=persist_unified_log,
+                reply_text=outbound_intent.reply_text,
+                outbound_result=outbound_result,
+            )
+            maybe_write_mode_exit_summary(
+                blackboard=self._blackboard,
+                envelope=envelope,
+                payload=outbound_intent.payload,
+                reply_text=outbound_intent.reply_text,
+            )
+            # Only trigger room summary for normal mode — task creation, doc creation,
+            # planning mode messages should not be compressed into the room history.
+            envelope_mode = ""
+            if isinstance(envelope.metadata, dict):
+                envelope_mode = str(envelope.metadata.get("room_mode") or "").strip().lower()
+            if envelope_mode in ("", "normal"):
+                self._maybe_trigger_room_summary(room_id=envelope.room_id, room_ctx=room_ctx)
+            ensure_request_room_metadata(
+                blackboard=self._blackboard,
+                request_id=envelope.request_id,
+                room_id=envelope.room_id,
+                room_surface=envelope.surface,
+                room_context_id=envelope.context_id,
+                manager_name=manager_name,
+            )
+            return self._build_turn_response(
+                envelope=envelope,
+                adapter=adapter,
+                message_persistence_mode=message_persistence_mode,
+                persist_unified_log=persist_unified_log,
+                persist_reason=persist_reason,
+                send_reply=send_reply,
+                outbound_intent=outbound_intent,
+                outbound_result=outbound_result,
+            )
+        except Exception as turn_error:
+            logger.error(
+                "Room turn failed for room_id=%s surface=%s request_id=%s: %s",
+                envelope.room_id, envelope.surface, envelope.request_id, turn_error,
+            )
+            logger.debug("room turn exception details", exc_info=True)
+            return self._handle_turn_failure(
+                envelope=envelope,
+                adapter=adapter,
+                send_reply=send_reply,
+                message_persistence_mode=message_persistence_mode,
+                persist_unified_log=persist_unified_log,
+                persist_reason=persist_reason,
+                error=turn_error,
+            )
 
     # ------------------------------------------------------------------
     # Surface adapter builders
