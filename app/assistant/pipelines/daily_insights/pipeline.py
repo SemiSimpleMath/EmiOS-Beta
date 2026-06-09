@@ -13,6 +13,7 @@ from .steps import (
     ArchiveDailyInsightsStep,
     ArchiveDailyTicketsStep,
     ArchiveDailyTimelineStep,
+    BeliefV2ShadowIngestStep,
 )
 
 logger = get_logger(__name__)
@@ -28,6 +29,7 @@ class DailyInsightsPipeline:
                 ArchiveDailyTicketsStep(),
                 ArchiveDailyTimelineStep(),
                 ArchiveDailyInsightsStep(),
+                BeliefV2ShadowIngestStep(),     # §3a seam step 2: shadow-ingest enriched items into v2
                 ArchiveDailyAssessmentStep(),
                 ArchiveDailyAssessmentSummaryStep(),
             ]
