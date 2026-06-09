@@ -6,6 +6,10 @@ from app.assistant.utils.logging_config import get_logger
 agent_flow_route_bp = Blueprint('agent_flow', __name__)
 logger = get_logger(__name__)
 
+# Agent-flow editor reads/writes agent configs — local-developer-only.
+from app.routes._security import reject_if_not_local
+agent_flow_route_bp.before_request(reject_if_not_local)
+
 
 @agent_flow_route_bp.route('/agent_flow', methods=['POST'])
 def agent_flow_route():

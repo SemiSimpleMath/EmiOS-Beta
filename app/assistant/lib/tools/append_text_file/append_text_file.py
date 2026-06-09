@@ -14,18 +14,16 @@ def _repo_root() -> Path:
 
 
 def _resolve_path(path_str: str) -> Path | None:
+    """Resolve under the repo root and REQUIRE containment — for BOTH relative and absolute inputs.
+
+    The old version only lexically checked absolute paths (``..``-bypassable) and never checked
+    relative ones, so ``../../etc`` escaped (a WRITE primitive, so worse). resolve_repo_child
+    resolves first, then enforces relative_to; returns None on traversal/escape so the tool refuses."""
+    from app.assistant.utils.path_utils import resolve_repo_child
     try:
-        raw = Path(path_str)
+        return resolve_repo_child(path_str)
     except Exception:
         return None
-    root = _repo_root()
-    if raw.is_absolute():
-        try:
-            raw.relative_to(root)
-        except Exception:
-            return None
-        return raw
-    return (root / raw).resolve()
 
 
 def _is_allowed(resolved: Path, allowed: list[str] | None) -> bool:

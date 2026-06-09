@@ -21,6 +21,10 @@ from app.assistant.utils.logging_config import (
 
 debug_logging_bp = Blueprint("debug_logging", __name__)
 
+# Debug logging controls are local-developer-only — reject non-loopback / tunneled requests.
+from app.routes._security import reject_if_not_local
+debug_logging_bp.before_request(reject_if_not_local)
+
 
 @debug_logging_bp.route("/debug/logging")
 def logging_page():

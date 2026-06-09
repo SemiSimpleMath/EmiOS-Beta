@@ -3,6 +3,10 @@ from flask import Blueprint, jsonify, request, render_template_string, send_file
 
 subsystem_route_bp = Blueprint("subsystem_controls", __name__)
 
+# All /dev/* routes here are local-developer-only — reject non-loopback / tunneled requests.
+from app.routes._security import reject_if_not_local
+subsystem_route_bp.before_request(reject_if_not_local)
+
 # Friendly labels for each subsystem.
 _SUBSYSTEM_LABELS = {
     "dayflow_scheduler": "Dayflow Scheduler",
@@ -59,15 +63,42 @@ def toggle_subsystem(name: str):
         return jsonify({"success": False, "message": str(e)}), 500
 
 
+def _path_under(path, root) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+_SECRET_SUFFIXES = {".db", ".sqlite", ".sqlite3", ".key", ".pem", ".env"}
+
+
 @subsystem_route_bp.route("/dev/file/<path:filepath>", methods=["GET"])
 def serve_dev_file(filepath: str):
-    """Serve a file from the repo root. Used for playwright screenshots in daily summary."""
-    from pathlib import Path
-    from app.assistant.utils.path_utils import get_repo_root
-    repo_root = Path(get_repo_root())
-    full_path = (repo_root / filepath).resolve()
-    # Security: must be within repo root.
-    if not str(full_path).startswith(str(repo_root.resolve())):
+    """Serve a daily-summary artifact (e.g. a news screenshot).
+
+    Hardened: (1) the path must resolve INSIDE the repo via relative_to (not the old str.startswith,
+    which a sibling dir defeats), blocking ``..`` / absolute escapes; (2) it must land in an
+    allowlisted artifact dir (uploads / data / logs) — never repo root, where .env and emi.db live;
+    (3) a secret/db file is refused even from an artifact dir. The blueprint is already local-only.
+    """
+    from app.assistant.utils.path_utils import (
+        resolve_repo_child, get_uploads_dir, get_data_dir, get_repo_root,
+    )
+    try:
+        full_path = resolve_repo_child(filepath)
+    except ValueError:
+        abort(403)
+
+    artifact_roots = [
+        get_uploads_dir().resolve(),
+        get_data_dir().resolve(),
+        (get_repo_root() / "logs").resolve(),
+    ]
+    if not any(_path_under(full_path, root) for root in artifact_roots):
+        abort(403)
+    if full_path.name.startswith(".env") or full_path.suffix.lower() in _SECRET_SUFFIXES:
         abort(403)
     if not full_path.is_file():
         abort(404)

@@ -9,6 +9,8 @@ import signal
 import sys
 import os
 
+from app.routes._security import local_only
+
 health_check_bp = Blueprint('health_check', __name__)
 
 
@@ -73,8 +75,9 @@ def health_check():
 
 
 @health_check_bp.route('/api/shutdown', methods=['POST'])
+@local_only
 def shutdown():
-    """Gracefully shut down the server from the UI."""
+    """Gracefully shut down the server from the UI (local only — never over a tunnel)."""
     current_app.logger.info("Shutdown requested from UI")
     os.kill(os.getpid(), signal.SIGTERM)
     return jsonify({"status": "shutting_down"}), 200

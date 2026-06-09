@@ -115,6 +115,18 @@ def is_within_repo(path_value: str | Path) -> bool:
         return False
 
 
+def resolve_repo_child(path_value: str | Path) -> Path:
+    """Resolve a caller-supplied path under the repo root and REQUIRE it to stay inside.
+
+    The safe primitive for serving/reading/writing a path that came from outside (a route arg, a
+    tool argument). Uses ``relative_to`` (NEVER ``str.startswith`` — a sibling dir like
+    ``<root>_evil`` defeats startswith) and raises ``ValueError`` on traversal / escape (``..``,
+    absolute paths outside the repo). Callers should catch and 403/refuse."""
+    resolved = resolve_repo_path(path_value)
+    resolved.relative_to(get_repo_root())  # raises ValueError if outside the repo
+    return resolved
+
+
 @lru_cache(maxsize=1)
 def get_resources_dir() -> Path:
     env_resources = os.getenv("EMI_RESOURCES_DIR")

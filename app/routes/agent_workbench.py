@@ -23,6 +23,10 @@ logger = get_logger(__name__)
 
 agent_workbench_bp = Blueprint("agent_workbench", __name__)
 
+# The workbench can RUN agents — local-developer-only (reject non-loopback / tunneled requests).
+from app.routes._security import reject_if_not_local
+agent_workbench_bp.before_request(reject_if_not_local)
+
 
 def _list_agents() -> List[Dict[str, Any]]:
     """Return a list of all registered agents with their config metadata."""

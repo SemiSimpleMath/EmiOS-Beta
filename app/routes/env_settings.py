@@ -15,6 +15,10 @@ from app.assistant.ServiceLocator.service_locator import DI
 
 env_settings_bp = Blueprint("env_settings", __name__)
 
+# The env editor reads/writes .env — local-only (reject non-loopback / tunneled requests).
+from app.routes._security import reject_if_not_local
+env_settings_bp.before_request(reject_if_not_local)
+
 
 def enrich_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Attach per-entry display state: `account` for kind=account, else `state`."""

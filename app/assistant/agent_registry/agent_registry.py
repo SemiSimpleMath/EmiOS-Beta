@@ -486,8 +486,14 @@ class AgentRegistry:
             ) from e
 
     def get_agent_config(self, name):
-        """Retrieve a specific agent's config."""
-        return self.configs.get(name, None)
+        """Retrieve a specific agent's config as a SHALLOW COPY.
+
+        Returning the live stored dict let a caller that pops/edits top-level keys (e.g. the
+        agent-flow debug read path, which pops 'class'/'structured_output') silently damage the
+        running registry. A shallow copy isolates top-level mutations while preserving the live
+        'instance'/'class' object refs the config carries (so a deep copy would be wrong here)."""
+        cfg = self.configs.get(name, None)
+        return dict(cfg) if isinstance(cfg, dict) else cfg
 
     def get_agent_class(self, name):
         """Retrieve the registered class reference for an agent."""
