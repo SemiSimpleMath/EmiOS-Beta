@@ -142,3 +142,58 @@ def test_new_migration_on_baselined_db_runs(tmp_path):
     assert "extra2" in _cols(db, "widgets")
     assert _markers(db) == ["0002"]                            # 0001 baselined (never ran)
     assert _recorded(db) == ["0001_add_extra", "0002_add_extra2"]
+
+
+# ── backup-before-migration (R5): snapshot only when a real ALTER hits an existing db ──
+def _patch_backup(monkeypatch):
+    """Record backup_database calls without touching the real emi.db / backups dir."""
+    import app.assistant.database.migration_backup as mb
+    calls = []
+    monkeypatch.setattr(mb, "backup_database", lambda *a, **k: calls.append(k.get("reason", "?")))
+    return calls
+
+
+def test_backup_runs_before_applying_to_existing_db(tmp_path, monkeypatch):
+    migs = tmp_path / "migrations"; migs.mkdir()
+    _write(migs, "0001_add_extra.py", _MIG_0001)
+    db = str(tmp_path / "old.db")
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE widgets (id INTEGER PRIMARY KEY)")    # old schema, missing `extra`
+    con.commit(); con.close()
+    calls = _patch_backup(monkeypatch)
+
+    run_migrations(db, fresh_db=False, migrations_dir=migs)
+
+    assert len(calls) == 1                                          # snapshotted once, before the ALTER
+    assert "extra" in _cols(db, "widgets")                          # and the migration still applied
+
+
+def test_no_backup_on_fresh_db(tmp_path, monkeypatch):
+    migs = tmp_path / "migrations"; migs.mkdir()
+    _write(migs, "0001_add_extra.py", _MIG_0001)
+    db = str(tmp_path / "fresh.db")
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE widgets (id INTEGER PRIMARY KEY, extra TEXT)")
+    con.commit(); con.close()
+    calls = _patch_backup(monkeypatch)
+
+    run_migrations(db, fresh_db=True, migrations_dir=migs)          # baseline-stamp only
+
+    assert calls == []                                             # nothing to lose -> no backup
+
+
+def test_no_backup_when_up_to_date(tmp_path, monkeypatch):
+    migs = tmp_path / "migrations"; migs.mkdir()
+    _write(migs, "0001_add_extra.py", _MIG_0001)
+    db = str(tmp_path / "current.db")
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE widgets (id INTEGER PRIMARY KEY)")
+    con.commit(); con.close()
+    calls = _patch_backup(monkeypatch)   # patch BEFORE any run so the real backups dir is never touched
+
+    run_migrations(db, fresh_db=False, migrations_dir=migs)         # applies 0001 -> one backup
+    assert len(calls) == 1
+    calls.clear()
+
+    second = run_migrations(db, fresh_db=False, migrations_dir=migs)  # nothing pending now
+    assert second == [] and calls == []                            # no pending -> no backup

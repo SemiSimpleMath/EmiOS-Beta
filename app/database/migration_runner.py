@@ -93,6 +93,16 @@ def run_migrations(
         applied = {row[0] for row in conn.execute("SELECT id FROM schema_migrations")}
         migrations = _discover(migrations_dir)
 
+        # Backup-before-migration (R5): snapshot the DB only when REAL ALTER steps will run — an
+        # EXISTING (non-fresh) db with pending migrations. A fresh db just baseline-stamps (no data to
+        # lose) and an up-to-date db applies nothing, so neither needs a backup. This is the one place
+        # a schema change touches a populated db (an updated user on an older DB); snapshot first so a
+        # failed/destructive ALTER is recoverable. A backup failure aborts startup (fail loud).
+        pending_ids = [mig_id for mig_id, _ in migrations if mig_id not in applied]
+        if pending_ids and not fresh_db:
+            from app.assistant.database.migration_backup import backup_database
+            backup_database(reason=f"pre_migration_{pending_ids[0]}", db_path=db_path)
+
         for mig_id, up in migrations:
             if mig_id in applied:
                 continue

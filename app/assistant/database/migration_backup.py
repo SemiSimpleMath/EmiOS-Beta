@@ -1,11 +1,18 @@
 """Backup-before-migration hook (reliability R5).
 
 A schema migration can corrupt or destroy data, so emi.db is snapshotted to a restorable copy BEFORE
-any migration runs. backup_database() takes a SQLite-consistent online snapshot (safe even while the
-app is writing — unlike a raw file copy, which can tear a WAL-mode DB) into the gitignored backups/
-dir. run_with_backup() is the wrapper each migration's __main__ routes through: if the snapshot fails
-we ABORT rather than migrate a DB we can't roll back (fail loud). Snapshots live in repo_root/backups/
-(gitignored: contains the full user DB = PII; never committed) and are pruned to the last few.
+a migration alters an existing db. backup_database() takes a SQLite-consistent online snapshot (safe
+even while the app is writing — unlike a raw file copy, which can tear a WAL-mode db) into the
+gitignored repo_root/backups/ dir (contains the full user DB = PII; never committed), pruned to the
+last few.
+
+PRIMARY integration: the schema migration runner (app/database/migration_runner.py) calls
+backup_database() before applying pending ALTER steps to an EXISTING db. A fresh install builds the
+current schema directly via create_all and baseline-stamps the migrations (no data at risk, no
+backup), so the snapshot only happens on the one path that matters — an updated user on an older db.
+
+run_with_backup() is a convenience for ad-hoc / standalone migration scripts run by hand: backup
+THEN run; a backup failure aborts (we never migrate a db we can't roll back — fail loud).
 """
 from __future__ import annotations
 
