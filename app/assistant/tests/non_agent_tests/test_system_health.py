@@ -80,3 +80,21 @@ def test_tunneled_request_blocked(client):
 def test_non_loopback_blocked(client):
     r = client.get("/api/system/health", environ_overrides={"REMOTE_ADDR": "192.168.1.50"})
     assert r.status_code == 403
+
+
+# ── public /health is lean; internals moved behind the gate ───────
+def test_public_health_does_not_leak_internals(client, monkeypatch):
+    monkeypatch.setattr("app.routes.health_check._event_repo_counts", lambda: ({"email": 3}, True, None))
+    r = client.get("/health")   # public — no gate, any caller
+    assert r.status_code in (200, 503)
+    data = r.get_json()
+    assert "python_version" not in data
+    assert "event_counts" not in str(data)        # no per-category DB counts anywhere
+    assert "database_reachable" in data            # just the safe boolean
+
+
+def test_system_health_carries_moved_internals(client, monkeypatch):
+    monkeypatch.setattr("app.routes.health_check._event_repo_counts", lambda: ({"email": 3}, True, None))
+    data = _get(client).get_json()                  # gated, loopback
+    assert "python_version" in data["process"]
+    assert data["database"]["event_counts"] == {"email": 3}

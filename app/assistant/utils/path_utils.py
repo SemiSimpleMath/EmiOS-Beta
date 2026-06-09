@@ -127,6 +127,47 @@ def resolve_repo_child(path_value: str | Path) -> Path:
     return resolved
 
 
+def resolve_data_child(path_value: str | Path) -> Path:
+    """Like resolve_repo_child, but REQUIRE the path under the data dir (get_data_dir()).
+
+    For serving/reading files that must live in the data tree (image pods, stored artifacts). Uses
+    relative_to (never startswith). A file sitting directly in the repo root (.env, *.db) is rejected
+    even though get_data_dir() resolves to the repo root in a default install — those are never data
+    files. Raises ValueError on escape."""
+    resolved = resolve_repo_path(path_value)
+    if resolved.parent == get_repo_root().resolve():
+        raise ValueError(f"path is a repo-root file, not a data file: {path_value!r}")
+    resolved.relative_to(get_data_dir().resolve())  # raises ValueError if outside data/
+    return resolved
+
+
+def resolve_artifact_child(path_value: str | Path) -> Path:
+    """Resolve and REQUIRE the path under an allowlisted ARTIFACT dir (uploads / data / logs) — never
+    the repo root itself, where .env and *.db live.
+
+    The safe primitive for serving a generated artifact by a caller-supplied path. Uses relative_to
+    (never startswith). Because get_data_dir() resolves to the repo root in a default install, a file
+    directly in the repo root would otherwise slip through the 'under data' check — so a direct
+    repo-root file is rejected up front. Raises ValueError if the path is a repo-root file, a
+    traversal, or under none of the artifact dirs."""
+    resolved = resolve_repo_path(path_value)
+    repo_root = get_repo_root().resolve()
+    if resolved.parent == repo_root:
+        raise ValueError(f"path is a repo-root file, not an artifact: {path_value!r}")
+    roots = [
+        get_uploads_dir().resolve(),
+        get_data_dir().resolve(),
+        (repo_root / "logs").resolve(),
+    ]
+    for root in roots:
+        try:
+            resolved.relative_to(root)
+            return resolved
+        except ValueError:
+            continue
+    raise ValueError(f"path is not under an allowlisted artifact dir: {path_value!r}")
+
+
 @lru_cache(maxsize=1)
 def get_resources_dir() -> Path:
     env_resources = os.getenv("EMI_RESOURCES_DIR")

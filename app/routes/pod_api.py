@@ -12,14 +12,12 @@ Safety:
 - 404 when the pod is missing OR not an image OR the file is gone.
 """
 import mimetypes
-from pathlib import Path
 
 from flask import Blueprint, abort, jsonify, send_file
 
 from app.assistant.pod_store.pod_store import PodStore
 from app.assistant.pod_store.pod_uri import POD_URI_RE
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.path_utils import get_repo_root
 
 logger = get_logger(__name__)
 
@@ -102,10 +100,12 @@ def get_pod_image(pod_id: str):
         logger.warning("[pod_api] pod %s has no stored_path", pod_id_clean)
         abort(404)
 
-    repo_root = Path(get_repo_root()).resolve()
-    target = (repo_root / rel_path).resolve()
-    if not str(target).startswith(str(repo_root)):
-        # Path-traversal guard
+    try:
+        # Path-traversal guard via relative_to (NOT str.startswith — a sibling like <root>_evil
+        # defeats startswith). Raises if stored_path escapes the repo root.
+        from app.assistant.utils.path_utils import resolve_repo_child
+        target = resolve_repo_child(rel_path)
+    except ValueError:
         logger.warning("[pod_api] pod %s stored_path escapes repo root: %s", pod_id_clean, rel_path)
         abort(403)
     if not target.is_file():

@@ -6,6 +6,9 @@ refused), and registry-mutation isolation (a config read can't damage the live r
 """
 from __future__ import annotations
 
+import os
+
+import pytest
 from flask import Blueprint, Flask
 
 from app.routes import _security
@@ -111,3 +114,82 @@ class TestRegistryCopy:
         # The live registry config must be untouched by the caller's pops.
         assert "class" in reg.configs["a"]
         assert "structured_output" in reg.configs["a"]
+
+
+# ── /api/shutdown gate ────────────────────────────────────────────
+class TestShutdownGate:
+    def _client(self):
+        import app.routes.health_check as hc
+        app = Flask(__name__)
+        app.register_blueprint(hc.health_check_bp)
+        return app.test_client()
+
+    # NOTE: only the BLOCKED paths are exercised — a successful (loopback) shutdown would os.kill the
+    # test process. The decorator's allow-path is covered by TestLocalGate.
+
+    def test_shutdown_blocked_non_local(self):
+        r = self._client().post("/api/shutdown", environ_overrides={"REMOTE_ADDR": "192.168.1.50"})
+        assert r.status_code == 403
+
+    def test_shutdown_blocked_tunneled(self):
+        r = self._client().post(
+            "/api/shutdown",
+            environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
+            headers={"CF-Connecting-IP": "203.0.113.5"},
+        )
+        assert r.status_code == 403
+
+
+# ── named path helpers ────────────────────────────────────────────
+class TestPathHelpers:
+    def test_artifact_child_rejects_repo_root_and_traversal(self):
+        from app.assistant.utils.path_utils import resolve_artifact_child
+        with pytest.raises(ValueError):
+            resolve_artifact_child(".env")               # repo root is NOT an artifact dir
+        with pytest.raises(ValueError):
+            resolve_artifact_child("../../etc/passwd")    # traversal
+
+    def test_artifact_child_allows_data_path(self):
+        from app.assistant.utils.path_utils import resolve_artifact_child, get_data_dir
+        candidate = get_data_dir().resolve() / "images" / "x.png"
+        assert resolve_artifact_child(candidate) == candidate.resolve()
+
+    def test_data_child_rejects_outside_data(self):
+        from app.assistant.utils.path_utils import resolve_data_child
+        with pytest.raises(ValueError):
+            resolve_data_child(".env")
+        with pytest.raises(ValueError):
+            resolve_data_child("../../etc/passwd")
+
+    def test_data_child_allows_data_path(self):
+        from app.assistant.utils.path_utils import resolve_data_child, get_data_dir
+        candidate = get_data_dir().resolve() / "images" / "x.png"
+        assert resolve_data_child(candidate) == candidate.resolve()
+
+
+# ── regression guard: no ad-hoc startswith path checks ────────────
+class TestNoAdhocStartswith:
+    def test_no_startswith_str_path_checks_in_app(self):
+        """Ban str.startswith(str(...)) containment checks across app/ (a sibling like <root>_evil
+        defeats them) — use resolve_repo_child / resolve_data_child / resolve_artifact_child /
+        relative_to instead. Tests are excluded (they may reference the banned pattern as a string)."""
+        from app.assistant.utils.path_utils import get_repo_root
+        app_dir = get_repo_root() / "app"
+        needle = ".startswith(str("
+        offenders = []
+        for root, dirs, files in os.walk(app_dir):
+            dirs[:] = [d for d in dirs if d not in {"__pycache__", "tests", "test", "node_modules"}]
+            for fname in files:
+                if not fname.endswith(".py"):
+                    continue
+                fpath = os.path.join(root, fname)
+                try:
+                    with open(fpath, encoding="utf-8") as fh:
+                        text = fh.read()
+                except Exception:
+                    continue
+                if needle in text:
+                    offenders.append(os.path.relpath(fpath, app_dir))
+        assert offenders == [], (
+            f"ad-hoc startswith(str(...)) path checks found (use resolve_*_child / relative_to): {offenders}"
+        )

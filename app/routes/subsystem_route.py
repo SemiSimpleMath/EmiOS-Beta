@@ -63,14 +63,6 @@ def toggle_subsystem(name: str):
         return jsonify({"success": False, "message": str(e)}), 500
 
 
-def _path_under(path, root) -> bool:
-    try:
-        path.relative_to(root)
-        return True
-    except ValueError:
-        return False
-
-
 _SECRET_SUFFIXES = {".db", ".sqlite", ".sqlite3", ".key", ".pem", ".env"}
 
 
@@ -83,21 +75,14 @@ def serve_dev_file(filepath: str):
     allowlisted artifact dir (uploads / data / logs) — never repo root, where .env and emi.db live;
     (3) a secret/db file is refused even from an artifact dir. The blueprint is already local-only.
     """
-    from app.assistant.utils.path_utils import (
-        resolve_repo_child, get_uploads_dir, get_data_dir, get_repo_root,
-    )
+    from app.assistant.utils.path_utils import resolve_artifact_child
     try:
-        full_path = resolve_repo_child(filepath)
+        # Must resolve INSIDE an allowlisted artifact dir (uploads / data / logs) — never repo root,
+        # where .env and emi.db live. resolve_artifact_child uses relative_to, not str.startswith.
+        full_path = resolve_artifact_child(filepath)
     except ValueError:
         abort(403)
-
-    artifact_roots = [
-        get_uploads_dir().resolve(),
-        get_data_dir().resolve(),
-        (get_repo_root() / "logs").resolve(),
-    ]
-    if not any(_path_under(full_path, root) for root in artifact_roots):
-        abort(403)
+    # Secret/db file refused even from an artifact dir (defense in depth).
     if full_path.name.startswith(".env") or full_path.suffix.lower() in _SECRET_SUFFIXES:
         abort(403)
     if not full_path.is_file():

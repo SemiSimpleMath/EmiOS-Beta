@@ -14,63 +14,44 @@ from app.routes._security import local_only
 health_check_bp = Blueprint('health_check', __name__)
 
 
+def _event_repo_counts():
+    """Return (counts, healthy, error) from the event repository. The per-category COUNTS are internal
+    detail (admin-only); the healthy bool is safe to expose. Used by both /health (bool only) and the
+    gated /api/system/health (full counts)."""
+    import json
+    from app.assistant.event_repository.event_repository import EventRepositoryManager
+    event_repo = EventRepositoryManager()
+    categories = ["calendar", "scheduler", "email", "weather", "todo_task", "news"]
+    counts, healthy, error = {}, True, None
+    for category in categories:
+        try:
+            counts[category] = len(json.loads(event_repo.search_events(data_type=category)))
+        except Exception as e:
+            counts[category] = f"ERROR: {str(e)}"
+            healthy = False
+            error = str(e)
+    return counts, healthy, error
+
+
 @health_check_bp.route('/health', methods=['GET'])
 def health_check():
-    """
-    Quick health check - returns basic app status.
+    """Public liveness probe — intentionally LEAN. It reports only whether the app is up and the DB is
+    reachable. Internal detail (python_version, per-category DB counts, memory, scheduler/loop health)
+    is admin-only and lives behind the local-only /api/system/health — leaking it to any caller is a
+    recon aid with no upside for an unauthenticated probe.
     """
     try:
-        from app.assistant.event_repository.event_repository import EventRepositoryManager
-        
-        # Test database connectivity
-        event_repo = EventRepositoryManager()
-        
-        # Try to count events in each category
-        categories = ["calendar", "scheduler", "email", "weather", "todo_task", "news"]
-        counts = {}
-        db_healthy = True
-        db_error = None
-        
-        for category in categories:
-            try:
-                import json
-                events = event_repo.search_events(data_type=category)
-                events = json.loads(events)
-                counts[category] = len(events)
-            except Exception as e:
-                counts[category] = f"ERROR: {str(e)}"
-                db_healthy = False
-                db_error = str(e)
-        
-        # Get process info
-        import psutil
-        process = psutil.Process(os.getpid())
-        memory_mb = process.memory_info().rss / 1024 / 1024
-        
-        # Get uptime (approximate - based on process start time)
-        start_time = datetime.fromtimestamp(process.create_time(), tz=timezone.utc)
-        uptime_seconds = (datetime.now(timezone.utc) - start_time).total_seconds()
-        uptime_hours = uptime_seconds / 3600
-        
+        _counts, db_healthy, _db_error = _event_repo_counts()
         return jsonify({
             "status": "healthy" if db_healthy else "degraded",
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "uptime_hours": round(uptime_hours, 2),
-            "memory_mb": round(memory_mb, 2),
-            "database": {
-                "healthy": db_healthy,
-                "error": db_error,
-                "event_counts": counts
-            },
-            "python_version": sys.version
-        }), 200 if db_healthy else 500
-        
+            "database_reachable": db_healthy,
+        }), 200 if db_healthy else 503
     except Exception as e:
         current_app.logger.error(f"Health check failed: {e}")
         return jsonify({
             "status": "unhealthy",
-            "error": str(e),
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }), 500
 
 
@@ -120,6 +101,15 @@ def system_health():
     except Exception as e:
         out["db_writer"] = {"error": str(e)}
 
+    # Per-category event counts — the internal DB detail that used to leak from the public /health.
+    try:
+        counts, db_healthy, db_error = _event_repo_counts()
+        out["database"] = {"healthy": db_healthy, "error": db_error, "event_counts": counts}
+        if not db_healthy:
+            degraded_reasons.append("event repository unhealthy")
+    except Exception as e:
+        out["database"] = {"error": str(e)}
+
     try:
         import psutil
         process = psutil.Process(os.getpid())
@@ -128,6 +118,7 @@ def system_health():
             "uptime_hours": round((datetime.now(timezone.utc) - start_time).total_seconds() / 3600, 2),
             "memory_mb": round(process.memory_info().rss / 1024 / 1024, 2),
             "pid": os.getpid(),
+            "python_version": sys.version,
         }
     except Exception as e:
         out["process"] = {"error": str(e)}

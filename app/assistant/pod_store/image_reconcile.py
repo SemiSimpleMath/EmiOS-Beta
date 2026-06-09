@@ -164,8 +164,11 @@ def reconcile_directory(
             continue
         summary["scanned"] += 1
 
-        rel_stored_path = str(path.resolve().relative_to(repo_root)) \
-            if str(path.resolve()).startswith(str(repo_root)) else str(path.resolve())
+        resolved = path.resolve()
+        try:
+            rel_stored_path = str(resolved.relative_to(repo_root))   # repo-relative when inside
+        except ValueError:
+            rel_stored_path = str(resolved)                          # else keep the absolute path
 
         stamp = read_stamp(path)
         stamped_pod_id = (stamp or {}).get("pod_id")
