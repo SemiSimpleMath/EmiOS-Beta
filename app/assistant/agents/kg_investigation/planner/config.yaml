@@ -29,13 +29,14 @@ user_context_items:
   - progress_report
   - entity_card
 
-system_context_items:
-  - tool_descriptions
-  - task
-  - resource_kg_node_reading
-  - action_count
-  - date_time
-  - max_action_count
+# The system prompt is deliberately STATIC (cache-stable across cycles and
+# runs): no task, no date_time, no action counter. All dynamic context goes
+# through the user prompt. `skills` is a framework builtin, so the template
+# can render the kg-conflict-triage skill without declaring it here. The
+# kg_query contract + schema cheatsheet are written inline in system.j2
+# (single copy) instead of injecting tool_descriptions; the node-reading
+# doctrine lives in the skill, so resource_kg_node_reading is not injected.
+system_context_items: []
 
 # Same triage doctrine as kg_resolution::planner: three-bucket triage,
 # data-quality sanity check, stop-early convergence, provenance JOIN

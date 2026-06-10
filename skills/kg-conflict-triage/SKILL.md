@@ -4,8 +4,8 @@ description: Combined doctrine + playbook for triaging a reported KG/wiki/card c
 license: Apache-2.0
 metadata:
   author: jukka
-  version: "2.1"
-  applies_when: "kg_resolution_manager (or any agent acting as KG repair surface)"
+  version: "3.0"
+  applies_when: "kg_resolution_manager / kg_investigation_manager (any agent acting as KG repair or triage surface)"
   auto_inject_when:
     task_keywords:
       - "kg_maintenance_finding"
@@ -23,161 +23,103 @@ metadata:
 
 ## Meta-principle
 
-**KG is the source of truth. Wiki pages and entity cards are
-projections.** A reported conflict can only be:
+**KG is the source of truth; wiki pages and entity cards are projections.**
+Every reported conflict is exactly one of:
 
-1. **KG bug** — node wrong (open era should be closed, dates inverted,
-   missing edge). Mutate KG → regen → resolve.
-2. **Derivative staleness** — KG correct, wiki/card didn't refresh.
-   Regen only → resolve.
-3. **Investigator misunderstanding** — schema misread (present-tense
-   canonical, validity windows, recurring events, property scoping).
-   Dismiss with educational reason.
+1. **KG bug** — a node/edge is wrong (open era should be closed, dates
+   inverted, missing edge). Recommend the smallest KG mutation.
+2. **Stale projection** — KG correct; the wiki/card hasn't refreshed.
+   No mutation needed; regen happens downstream.
+3. **False positive** — the texts don't actually conflict, or the reporter
+   misread the schema. Dismiss with an educational reason.
 
-Never the fourth — derivative is right because it says so. KG wins.
+Never a fourth ("the projection is right because it says so") — KG wins.
+
+## Step 0 — is the conflict real?
+
+Before any SQL: put the two allegedly-conflicting statements side by side
+with the context you were already handed (quoted texts, subject node +
+edge neighborhood, entity one-liners). If they reconcile on plain reading,
+that is bucket 3 — at most ONE confirming query, then stop. Reconciling
+patterns (all bucket 3):
+
+- **Same thing, two names** — the "two activities/venues/groups" are one
+  thing described twice (e.g. a weekly gathering that IS the Zoom call).
+- Closed era read as current — "X takes Y" vs "X stopped Y"; check `end_date`.
+- Date precision mismatch (`2024-03-15` vs "around 2024").
+- Source-relative phrasing ("last year") with no anchor.
+- Two same-label States, different windows = sequential eras, both correct.
+- Recurring same-label Events = separate occurrences (the recurring-event
+  trap) — never a merge target just because labels match.
+- Same-label Properties on different subjects = correctly separate.
 
 ## Schema essentials
 
-**Node types.** Entity / Concept = timeless identity. State = ongoing
-era with validity window (`end_date IS NULL` ⇒ open). Event =
-point-in-time / bounded. Goal has `goal_status` column. Property is
-subject-scoped (never global).
+- Entity / Concept = timeless identity. State = era with a validity window
+  (`end_date IS NULL` = open). Event = point-in-time / bounded. Goal carries
+  `goal_status`. Property is subject-scoped, never global.
+- `label` and `original_sentence` are present-tense BY FORM. Truth-as-of-now
+  lives in `start_date`/`end_date`: end in past = historical; end null +
+  start set = open; both null = soft claim (don't assume current); future
+  start = planned.
+- Date confidence: `auto_decay` = a decay guess, re-openable; `user_set` /
+  `explicit` = authoritative. `*_prose` carries the fuzzy form.
 
-**Present-tense canonical.** `label` and `original_sentence` are
-present-tense BY FORM. Truth-as-of-now lives in `start_date` /
-`end_date`. End in past = historical. End null + start set = open.
-Both null = soft claim. Future start = planned.
+## Projection rules
 
-**Validity confidence.** `auto_decay` is a `state_decay` guess,
-re-openable. `user_set` / `explicit` are authoritative. `*_prose`
-carries fuzzy form when exact dates unknown.
+- Cards and wiki pages regenerate automatically after KG mutations — never
+  recommend regen explicitly, and always mutate KG before any regen happens.
+- Closed States render past tense on cards; they don't disappear. A card
+  fact contradicting a *closed* State is staleness (bucket 2); a card
+  reflecting a *still-open* State that prose says ended means the KG is
+  wrong (bucket 1: close the State).
 
-**Same-label rules.** Different dates, same person = sequential, both
-correct. Recurring same-label Events = separate occurrences — do NOT
-recommend merging just because labels match (the recurring-event
-trap). Same-label Properties on different subjects = correctly
-separate.
+## Data-quality red flags (check on every cited node)
 
-## Executor capability (what your recommendation can ask for)
-
-The executor can apply any KG mutation (close states, update fields,
-merge or delete nodes, add or remove edges, rename labels, create
-new states/edges) and refresh derived content (entity cards, wiki
-pages). Write recommendations as plain prose that names *what should
-change and why*, citing specific node ids and dates — the executor
-picks the right tool.
-
-## Wiki + entity card rules
-
-Wiki pages and entity cards both project from the KG.
-
-**Wiki dirty detection** = bullet-text-diff vs `bullet_index` sidecar
-(NOT `updated_at`). `description` updates and importance bumps don't
-change bullets ⇒ no refresh.
-
-**Common wiki-critic false positives** (all → dismiss bucket 3):
-- "X takes Y" + "X stopped Y" without checking `end_date`
-- Date precision mismatch (`2024-03-15` vs "around 2024")
-- Source-relative phrases ("last year") without anchor
-- Two same-label States with different dates = distinct eras
-
-**Entity cards.** Card regeneration is single-slot — serialize.
-Three card-staleness patterns:
-
-| Pattern | Cause | Fix |
-|---|---|---|
-| Card key_fact contradicts a *closed* State | Card hasn't refreshed | regen only |
-| Card reflects *still-open* State that prose says ended | KG wrong | close State first, THEN regen |
-| Missing recent fact | Stale OR below importance cut | regen; importance ranking decides |
-
-Closed States render past tense, don't disappear from cards.
-
-**Order:** mutate KG first, regen second. Don't blanket-refresh
-neighbors — only entities whose bullets actually used the changed fact.
-
-## Data quality red flags
-
-**Sanity-check dates on every cited node.** Common KG bugs that look
-superficially valid:
-
-- `start_date > end_date` (inverted interval — usually a legacy
-  import where a default-now timestamp got written)
-- Future `start_date` on a past-tense `original_sentence`
+- `start_date > end_date` (inverted interval — usually a legacy import)
+- future `start_date` on a past-tense `original_sentence`
 - `start_date` exactly equal to `created_at` (defaulted, not observed)
 
-If you find any of these, that's the real KG bug — promote to bucket 1
-regardless of what the original investigator was reporting.
+Any of these on a cited node IS the real bug — bucket 1, regardless of
+what the finding claimed.
 
 ## Triage flow
 
-1. **Read the finding's actual disagreeing texts** (not just `reason`).
-2. **`kg_query` the cited nodes**: `id`, `label`, `original_sentence`,
-   `start_date`, `end_date`, `*_confidence`, `*_prose`, `created_at`.
-   Sanity-check the dates per "Data quality red flags".
-3. **Apply schema invariants.** If any explains the contradiction
-   (present-tense + closed era / recurring events / property scoping
-   / date precision mismatch) → bucket 3.
-4. **Otherwise** bucket 1 (KG bug, recommend a mutation) or
-   bucket 2 (regen only).
-5. **Write the verdict.**
-   - Bucket 1: name the smallest change that fixes it (close this
-     state, edit this date, merge these two ids, etc.) — the
-     executor operationalizes.
-   - Bucket 2: recommend regen of the affected card or wiki page.
-   - Bucket 3: dismiss with a reason citing the invariant + node
-     fields, readable to the next investigator hitting the pattern.
+0. Step 0 above — most findings die here.
+1. Read the finding's actual disagreeing texts, not just its `reason`.
+2. Query the cited nodes (label, sentence, dates + confidence + prose,
+   created_at); run the red-flag check.
+3. A schema invariant explains the conflict → bucket 3. Otherwise bucket 1
+   (name the smallest mutation: ids, fields, dates — the executor picks the
+   tool) or bucket 2 (no mutation; data correct).
+4. Write the verdict so the next investigator hitting the pattern learns it.
 
-## Walking back to source messages (for high-stakes calls)
-
-For same-node merges, narrow-precision timelines, suspected extractor
-misreads, near-irreversible mutations — read the verbatim source via
-SQL JOIN:
-
-```sql
-SELECT u.timestamp, u.role, u.speaker_name, u.message,
-       e.raw_text, e.observed_at, e.extractor_agent_name
-FROM kg_node_evidence ne
-JOIN claim_proposal_evidence e ON e.proposal_id = ne.claim_proposal_id
-JOIN unified_log_2026 u ON u.id = e.unified_log_id
-WHERE ne.node_id = '<node_id>'
-ORDER BY u.timestamp ASC;
-```
-
-Skip for low-stakes triage.
+High-stakes calls only (merges, near-irreversible mutations): walk
+provenance to the verbatim source — `kg_node_evidence.window_id` →
+`kg_window_message` → `unified_log_2026` — before recommending. Skip for
+low-stakes triage.
 
 ## Stop early
 
-After every tool result: **"Could I write the verdict (bucket + cited
-evidence) NOW, AND have I sanity-checked dates on every cited node?"**
-Both yes → `return_control` immediately.
+After every result ask: "could I write the verdict NOW, with dates
+sanity-checked on every cited node?" Both yes → stop immediately. 2-4
+actions typical; a step-0 false positive should close by action 2; 8 is
+the ceiling. Stop signals: re-querying nodes already cited, repeating an
+earlier query, "just one more check", schema archaeology (PRAGMA /
+sqlite_master) on tables outside your cheatsheet.
 
-Convergence is NOT just "I have a plausible answer." It's "I've ruled
-out data-quality bugs on the cited nodes." Bugs hide on the OTHER
-nodes you didn't sanity-check.
+## Escalate when
 
-Stop signals: rehashing nodes you've already cited / "just one more
-thing to check" / verdict has been defensible 3+ cycles.
+- Prose contradicts existing dates and authority is unclear.
+- The fix is near-irreversible and needs user approval (merging two
+  evidence-rich nodes; deleting a connected hub).
+- Cluster findings point opposite directions, or blast radius is unclear.
 
-Typical: 2-4 reads → bucket → resolve. **8 actions plenty, 12 cap, do
-NOT push toward 60.**
-
-## Needs escalation when
-
-- Prose contradicts existing dates and authority unclear.
-- The fix would require a near-irreversible mutation the user should
-  approve (merging two nodes that both have rich evidence; deleting
-  a connected hub).
-- Findings in a cluster point opposite directions.
-- Blast radius unclear.
-
-`return_control` with verdict `needs_escalation` and a reason that
-poses a specific question the user can arbitrate.
+Escalations must pose ONE specific question the user can arbitrate.
 
 ## Discipline
 
-Read before recommending. One mutation per recommendation step
-(own `kg_revision_log` row). Mutation BEFORE regen. Educate in
-dismiss reasons. Investigators (wiki critic, state_ttl_estimator,
-cluster resolver, wiki connection investigator) propose findings;
-they don't mutate — your job includes deciding when their finding is
-the schema misread, not the bug.
+Read before recommending. One mutation per recommendation step. Educate in
+dismiss reasons. Finding producers (wiki critic, scanners, ttl estimator)
+propose but don't mutate — deciding when the FINDING is the misread is
+part of your job.

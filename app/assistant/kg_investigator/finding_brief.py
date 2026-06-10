@@ -17,6 +17,7 @@ planner can read it as a normal task description.
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import text as sql_text
@@ -176,14 +177,27 @@ def _format_prior_verdicts_block(node_ids: List[str]) -> str:
              "consult before re-deriving. Confirm + dismiss if still "
              "valid; supersede if your investigation changes the "
              "verdict._", ""]
-    for v in rows[:8]:
-        when = v.created_at.isoformat()[:10] if v.created_at else "?"
+    # Collapse repeats: nano-triage writes the same generic memo per pair,
+    # so 8 near-identical lines used to render as pure prompt noise. Group
+    # by (verdict_type, memo) and list the pairs once with a count.
+    grouped: dict[tuple, list] = {}
+    for v in rows:
+        grouped.setdefault((v.verdict_type, v.memo), []).append(v)
+    for (vtype, memo), vs in list(grouped.items())[:8]:
+        latest = max(vs, key=lambda v: (v.created_at is not None, v.created_at or datetime.min))
+        when = latest.created_at.isoformat()[:10] if latest.created_at else "?"
+        pair_ids = sorted({
+            f"{(v.node_id_a or '')[:8]}↔{(v.node_id_b or '')[:8]}" if v.node_id_b
+            else (v.node_id_a or "")[:8]
+            for v in vs
+        })
+        count = f" ×{len(vs)}" if len(vs) > 1 else ""
         lines.append(
-            f"- **{v.verdict_type}** ({when}, conf={v.confidence}): "
-            f"{v.memo}"
+            f"- **{vtype}**{count} (latest {when}, conf={latest.confidence}): {memo}"
+            f" [{', '.join(pair_ids[:8])}]"
         )
-        if v.source_finding_id:
-            lines.append(f"  source_finding: `{v.source_finding_id}`")
+        if len(vs) == 1 and latest.source_finding_id:
+            lines.append(f"  source_finding: `{latest.source_finding_id}`")
     lines.append("")
     return "\n".join(lines)
 

@@ -87,11 +87,14 @@ class AgentForm(BaseModel):
     verdict_node_ids: List[str] = Field(
         default_factory=list,
         description=(
-            "REQUIRED when take_action=False (1-3 ids). The node ids this "
-            "verdict pertains to. Future agents (duplicate-finder, "
-            "investigator, proposal_promoter) look up these ids to find "
-            "prior verdicts and skip already-decided cases. When "
-            "take_action=True, leave empty."
+            "REQUIRED when take_action=False (1 or 2 ids — NEVER more; a "
+            "verdict row holds a single node or a pair). Usually the "
+            "finding's primary + secondary node ids. If more nodes were "
+            "involved, name the extras in verdict_memo prose instead. "
+            "Future agents (duplicate-finder, investigator, "
+            "proposal_promoter) look up these ids to find prior verdicts "
+            "and skip already-decided cases. When take_action=True, "
+            "leave empty."
         ),
     )
     recommendation: str = Field(
@@ -202,6 +205,13 @@ class AgentForm(BaseModel):
                 raise ValueError(
                     f"take_action=False requires {missing}; the verdict "
                     f"is the durable record. Fill them or set take_action=True."
+                )
+            if len(self.verdict_node_ids) > 2:
+                raise ValueError(
+                    "verdict_node_ids holds at most 2 ids (a verdict row is "
+                    "a single node or a pair — verdict_store rejects more). "
+                    "Keep the finding's primary + secondary ids and name "
+                    "any extra nodes in verdict_memo prose."
                 )
         elif self.take_action is True:
             if (self.disposition or "").strip() == "needs_user_review" and not (self.user_question or "").strip():
