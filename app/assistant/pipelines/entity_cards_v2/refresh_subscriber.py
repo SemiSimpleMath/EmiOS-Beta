@@ -117,14 +117,18 @@ def run_card_refresh(*, cooldown_days: int = DEFAULT_COOLDOWN_DAYS,
 
     session = get_session()
     try:
-        from app.assistant.pipelines.entity_cards_v2.builder import _is_user_self_entity
+        from app.assistant.utils.identity_names import get_required_primary_user_name
         raw_stale = session.execute(
             sql_text(_STALE_SQL), {"cooldown_cutoff": cutoff, "cap": max_rebuilds + 5}
         ).fetchall()
         # build_card always skips the user-self entity; its node updates daily,
         # so without this filter it would pin a rebuild slot every night.
+        # Matched via the canonical name resolver — builder._is_user_self_entity
+        # reads a scope-gated resource and silently returns False outside a
+        # room context, which is exactly how the slot got wasted.
+        user_name = get_required_primary_user_name().strip().lower()
         stale = [r for r in raw_stale
-                 if not _is_user_self_entity(session.get(Node, r[1]))][:max_rebuilds]
+                 if (r[2] or "").strip().lower() != user_name][:max_rebuilds]
         orphans = [r[0] for r in session.execute(sql_text(_ORPHAN_SQL)).fetchall()]
         candidates = session.execute(sql_text(_NEW_CANDIDATE_SQL)).fetchall()
 
