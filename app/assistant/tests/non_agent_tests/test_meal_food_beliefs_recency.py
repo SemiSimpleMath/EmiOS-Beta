@@ -88,7 +88,10 @@ def test_recent_feedback_reaches_block_even_when_outranked(monkeypatch):
     # time, so patching the attribute on the module redirects it to our in-mem DB.
     monkeypatch.setattr("app.models.base.get_session", lambda: Session())
 
-    block = mcb._build_food_beliefs()
+    # Target the LEGACY lane directly: the dispatcher routes to the v2 lane
+    # when subsystem flag meal_beliefs_v2 is on (the default); this test
+    # covers v1's recency-lane semantics.
+    block = mcb._build_food_beliefs_v1()
     recency = block.split("Established food beliefs")[0]
 
     # Core fix: a NULL-weight fresh 'confirms' belief reaches the planner, via the

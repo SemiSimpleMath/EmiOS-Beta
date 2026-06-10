@@ -57,7 +57,7 @@ def build_weekly_meal_planner_context() -> Dict[str, str]:
         "inventory_snapshot": _build_inventory_snapshot(),
         "recipes_house": _build_recipes_house_reference(),
         "dietary_context": _build_dietary_context(household_members),
-        "food_beliefs": _build_food_beliefs(),
+        "food_beliefs": _build_food_beliefs(agent="weekly_meal_planner"),
         "easy_meals_rotation": _build_easy_meals_rotation(),
         "general_calendar_week": _build_calendar_week_summary(now_local=now_local),
         "family_roster": _build_family_roster(household_members),
@@ -81,7 +81,7 @@ def build_daily_meal_proposer_context() -> Dict[str, str]:
         "inventory_snapshot": _build_inventory_snapshot(),
         "recipes_house": _build_recipes_house_reference(),
         "dietary_context": _build_dietary_context(household_members),
-        "food_beliefs": _build_food_beliefs(),
+        "food_beliefs": _build_food_beliefs(agent="daily_meal_proposer"),
         "easy_meals_rotation": _build_easy_meals_rotation(),
         "food_calendar": _build_food_calendar(now_local=now_local),
         "general_calendar": _build_calendar_today_tomorrow(now_local=now_local),
@@ -304,8 +304,100 @@ _FOOD_BELIEF_KEY_PREFIXES = (
 )
 
 
-def _build_food_beliefs() -> str:
-    """Pull food-domain beliefs from BeliefStore (user_beliefs table), in two lanes.
+def _build_food_beliefs(agent: str = "meal_planner") -> str:
+    """Food-belief lane for the meal agents — belief-engine v2 cutover pilot.
+
+    With subsystem flag `meal_beliefs_v2` ON (the default), beliefs come from
+    the v2 store via the context-scoped retrieval API (`beliefs_for_context`):
+    ranked by temporal-applicability + recency + frequency + relevance instead
+    of belief_key prefix matching, with every surfacing logged (the bandit
+    seed). Flip the flag in /dev/subsystems to return to the legacy v1
+    two-lane table read (`_build_food_beliefs_v1`).
+
+    A v2 lane failure is LOUD: ERROR log + an explicit failure marker in the
+    prompt (never a silent swap to v1 — the flag is the human's switch).
+    """
+    from app.assistant.utils.subsystem_flags import is_subsystem_enabled
+
+    if not is_subsystem_enabled("meal_beliefs_v2"):
+        return _build_food_beliefs_v1()
+    try:
+        return _build_food_beliefs_v2(agent=agent)
+    except Exception as e:
+        logger.error(
+            "[meal_context] belief v2 lane failed (flag meal_beliefs_v2 is ON): %s", e,
+        )
+        logger.debug("[meal_context] belief v2 lane exception", exc_info=True)
+        return (
+            "(BELIEF LANE ERROR: belief-engine v2 store unavailable — see server "
+            "log. Flip subsystem flag 'meal_beliefs_v2' off to use the legacy lane.)"
+        )
+
+
+_MEAL_BELIEFS_QUERY = (
+    "food meals cooking dining snacks groceries dietary restrictions "
+    "preferences dislikes and eating routines for the user and household"
+)
+_V2_RECENT_DAYS = 21      # mark beliefs observed this recently as current intent
+_V2_K = 40                # candidate-set size (the planner LLM judges relevance)
+
+
+def _build_food_beliefs_v2(*, agent: str, db_path: Optional[str] = None,
+                           embedder=None, now=None) -> str:
+    """Context-scoped v2 lane. `db_path`/`embedder`/`now` are injectable for
+    tests; production resolves the live shadow store + app embedder."""
+    from belief_engine_v2.ingest import open_live_store
+    from belief_engine_v2.retrieval import beliefs_for_context
+    from belief_engine_v2.surfacing import log_surfaced
+
+    if embedder is None:
+        from app.assistant.embeddings.embedder import embed_texts
+        embedder = lambda t: embed_texts([t])[0]  # noqa: E731
+    if db_path is None:
+        db_path = str(get_repo_root() / "belief_engine_v2" / "data" / "belief_v2_live.db")
+        if not Path(db_path).exists():
+            raise FileNotFoundError(f"belief v2 live store missing: {db_path}")
+    # Naive local time: belief timestamps are stored naive; retrieval's
+    # recency math subtracts directly.
+    now = now or get_local_time().replace(tzinfo=None)
+
+    store = open_live_store(db_path, with_verifier=False)   # read path: no LLM
+    try:
+        rows = beliefs_for_context(
+            store, now, agent=agent, query=_MEAL_BELIEFS_QUERY,
+            embedder=embedder, k=_V2_K, horizon="day",
+        )
+        log_surfaced(store.conn, agent=agent, rows=rows)
+    finally:
+        store.close()
+
+    if not rows:
+        return "(belief v2 store has no active beliefs yet)"
+
+    cutoff = (now - timedelta(days=_V2_RECENT_DAYS)).isoformat()
+    lines = [
+        f"Food & household beliefs (belief-engine v2, context-ranked, top {len(rows)}). "
+        f"Items marked (recent) were observed in the last {_V2_RECENT_DAYS} days — "
+        f"treat those as current intent and let them override older preferences:",
+    ]
+    for r in rows:
+        stmt = (r.get("statement_nl") or "").strip()
+        if not stmt:
+            continue
+        recent = (r.get("last_observed") or "") >= cutoff
+        meta = [k for k in ((r.get("kind") or ""),) if k]
+        if r.get("obs_count") and int(r["obs_count"]) > 1:
+            meta.append(f"observed {int(r['obs_count'])}x")
+        if recent:
+            meta.append("recent")
+        suffix = f"  [{', '.join(meta)}]" if meta else ""
+        lines.append(f"- {stmt}{suffix}")
+    return "\n".join(lines)
+
+
+def _build_food_beliefs_v1() -> str:
+    """LEGACY lane (old belief engine). Pull food-domain beliefs from
+    BeliefStore (user_beliefs table), in two lanes.
 
     Ranking by net_weight alone buries fresh feedback: a brand-new
     "kids won't eat zucchini" has near-zero weight (NULL until the nightly
