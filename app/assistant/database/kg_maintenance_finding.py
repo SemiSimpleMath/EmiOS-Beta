@@ -35,12 +35,21 @@ finding_type values:
                            of the group applied); a human/investigator picks
                            the right target.
 
+  "synthetic_fact_proposal" — wiki_connection_investigator proposes a NEW
+                           KG fact inferred from a wiki page. Reviewed via
+                           the synthetic_fact_review inbox (manual; the
+                           approved→extracted→promoted pipeline is TBD).
+                           Excluded from the general backlog drain.
+
   Historical (not produced today):
     "suspect_node" — per-node LLM quality scan, sunsetted 2026-04-27. Existing
                      rows of this type may still exist in DB and remain valid;
                      no new ones are produced. Same diagnosis is now reached
                      via wiki_contradiction (the wiki critic sees the node in
                      context and flags issues holistically).
+    "event_series_link" — series-link scan, producers deleted 2026-06-10
+                     (audit P3.6). ~105 legacy rows remain valid; the
+                     executor's _execute_series_link branch stays for them.
 
 status values:
   "pending"        — awaiting investigation or human review

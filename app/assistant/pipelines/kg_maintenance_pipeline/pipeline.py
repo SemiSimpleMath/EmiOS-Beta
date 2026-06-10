@@ -16,11 +16,10 @@ was wired here but conflicts with the correct flow — wiki page lead
 paragraphs are the authoritative source of node.description (synced
 back by page_writer._sync_lead_to_node_description). Non-wiki nodes
 should simply have empty descriptions, not fabricated ones. Removed
-from the pipeline 2026-05-16. Existing fabricated descriptions in the
-DB are left in place as legacy noise; no rollback. step_description_fill.py
-and description_creator.py are kept on disk in case the back-sync
-direction (find nodes whose wiki lead never landed and pull it in) is
-ever wanted, but neither runs as part of this pipeline.
+from the pipeline 2026-05-16; step_description_fill.py DELETED
+2026-06-10 (audit P3.6). Existing fabricated descriptions in the DB are
+left in place as legacy noise; no rollback. description_creator.py
+stays — page_writer imports it.
 
 Execution of findings is NOT automatic — findings land in kg_maintenance_finding
 for human review in the /kg-maintenance UI.  The user approves or rejects, then
@@ -44,7 +43,6 @@ class KGMaintenancePipeline:
         self,
         *,
         skip_steps: Optional[list[str]] = None,
-        description_max_nodes: int = 50,
         target_date: Optional[str] = None,
         run_id: Optional[str] = None,
         only_steps: Optional[list[str]] = None,
@@ -58,7 +56,6 @@ class KGMaintenancePipeline:
 
         skip_steps: list of step names to skip.
         only_steps: if provided, only these steps run (overrides skip_steps).
-        description_max_nodes: cap on how many nodes get descriptions per run.
         """
         skip = set(skip_steps or [])
         ctx = PipelineContext.for_date(

@@ -78,6 +78,12 @@ tools:
     - kg_delete_edge
     - kg_delete_node
     - kg_merge_nodes
+    # Finding lifecycle (audit P3.4): the prose-resolve task instructs the
+    # planner to close findings with kg_finding_resolve — it was never in
+    # the allowlist, so the instruction silently no-oped and the route's
+    # sibling-cascade papered over it.
+    - kg_finding_resolve
+    - kg_finding_escalate
   except_tools: []
 
 scope_contract:
@@ -92,6 +98,8 @@ scope_contract:
       - kg_delete_edge
       - kg_delete_node
       - kg_merge_nodes
+      - kg_finding_resolve
+      - kg_finding_escalate
     blocked_tools:
       - install_tool
       - mcp::npm/playwright-mcp::browser_run_code

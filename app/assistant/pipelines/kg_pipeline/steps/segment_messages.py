@@ -42,10 +42,10 @@ MIN_MESSAGES_TO_SEGMENT = 6   # gate: at least this many resolved-unsegmented be
 
 # Match the resolver's chat-eligibility filter so the "is this day fully
 # resolved?" check uses the same denominator. Keep this set in sync with
-# resolve_messages.CHAT_SOURCES.
+# resolve_messages.CHAT_SOURCES (kg_maintenance_resolution removed
+# 2026-06-10 — no producer ever wrote that source; see resolve_messages).
 CHAT_SOURCES = {
     "chat", "room_slack", "room_sms", "room_ui",
-    "kg_maintenance_resolution",
 }
 CHAT_ROLES = {"user", "assistant"}
 ALLOWED_ROOMS = {"master_room"}

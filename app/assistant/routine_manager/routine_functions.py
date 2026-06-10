@@ -79,14 +79,11 @@ kg_finding_backlog_drain = _lazy_kg_finding_backlog_drain
 
 
 def _lazy_kg_date_gap_drain(*, target_date=None, routine=None):
-    """Daily: pick 1-3 highest-priority state_missing_dates findings to ask
-    the user about, marking them as queued so they aren't re-picked
-    immediately.
-
-    v1 stops at marking — the actual push-question-to-chat wiring (via
-    questioner_manager or a proactive_suggestion ticket) is a follow-up.
-    Until that lands, the user-facing surface is /kg-maintenance/date-gaps,
-    where the queued items show up first by priority.
+    """Daily: pick 1-3 highest-priority state_missing_dates findings, mark
+    them queued, and ENQUEUE each as a pending question (audit P3.5) — the
+    conversation-starter bridge surfaces those under its own daily nudge
+    budget, speaking in persona. /kg-maintenance/date-gaps remains the
+    pull-based surface (queued items sort first by priority).
 
     Routine spec:
       limit          — max findings to queue this run (default 3)
@@ -104,6 +101,7 @@ def _lazy_kg_date_gap_drain(*, target_date=None, routine=None):
     cutoff = datetime.now(timezone.utc) - timedelta(days=cooldown_days)
 
     queued_ids: list[str] = []
+    question_payloads: list[tuple[str, str]] = []  # (question_text, priority)
     skipped_in_cooldown = 0
     with get_db_manager().transaction(op="kg_date_gap_drain") as session:
         rows = (
@@ -142,19 +140,49 @@ def _lazy_kg_date_gap_drain(*, target_date=None, routine=None):
             f.evidence_json = ev
             queued_ids.append(f.id)
 
+            label = ev.get("label") or "this"
+            entities = ev.get("connected_entity_labels") or []
+            if len(entities) >= 2:
+                scope_txt = f" between {entities[0]} and {entities[1]}"
+            elif entities:
+                scope_txt = f" for {entities[0]}"
+            else:
+                scope_txt = ""
+            question_payloads.append((
+                f"Memory date gap: roughly when did the '{label}' "
+                f"state{scope_txt} begin? A loose answer like 'around 2003' "
+                f"or 'since birth' is plenty.",
+                f.priority or "medium",
+            ))
+
+    # Deliver AFTER the write transaction (enqueue_question opens its own
+    # session; SQLite is single-writer). The conversation-starter bridge
+    # picks these up under its daily nudge budget; the 72h question expiry
+    # sits well inside the 7-day re-ask cooldown, so at most one live
+    # question exists per finding.
+    questions_enqueued = 0
+    if question_payloads:
+        from app.assistant.pending_questions.store import enqueue_question
+        for qtext, pri in question_payloads:
+            if enqueue_question(
+                question_text=qtext,
+                topical_tag="kg_date_gap",
+                priority=pri,
+                created_by="kg_date_gap_drain",
+            ):
+                questions_enqueued += 1
+
     logger.info(
-        "[kg_date_gap_drain] queued=%d skipped_in_cooldown=%d (limit=%d, cooldown_days=%d)",
-        len(queued_ids), skipped_in_cooldown, limit, cooldown_days,
+        "[kg_date_gap_drain] queued=%d questions_enqueued=%d "
+        "skipped_in_cooldown=%d (limit=%d, cooldown_days=%d)",
+        len(queued_ids), questions_enqueued, skipped_in_cooldown,
+        limit, cooldown_days,
     )
     return {
         "queued": len(queued_ids),
+        "questions_enqueued": questions_enqueued,
         "skipped_in_cooldown": skipped_in_cooldown,
         "queued_finding_ids": queued_ids,
-        # TODO: actually push these as questions to the user's chat. Today
-        # this routine only marks them as queued so the cooldown works and
-        # the /kg-maintenance/date-gaps page sorts queued items first. Real
-        # chat delivery via questioner_manager or a proactive_suggestion
-        # ticket is the next piece.
     }
 
 

@@ -450,18 +450,26 @@ def investigate_one(finding_id: str) -> Dict[str, Any]:
         verdict_node_ids = report.get("verdict_node_ids") or []
         if not isinstance(verdict_node_ids, list):
             verdict_node_ids = []
-        # Fall back to the finding's own subject node ids ONLY when the
+        # Use the finding's own subject node ids ONLY when the
         # investigator gave us a verdict_type + memo but forgot the ids.
         # Don't synthesize verdicts when the investigator skipped the
         # whole contract — that's an investigator bug we want surfaced,
         # not papered over.
+        # PAIR verdicts only for pairwise finding types (audit P3.5): a
+        # single-node finding can carry an incidental secondary id, and
+        # minting a (primary, secondary) pair verdict from it would be an
+        # assertion the investigator never made.
+        _PAIRWISE_FINDING_TYPES = {"duplicate_node", "duplicate_edge"}
         if not verdict_node_ids and verdict_type and memo:
             with get_db_manager().read_session() as session:
                 f = session.query(KGMaintenanceFinding).filter_by(id=finding_id).first()
                 if f is not None:
-                    verdict_node_ids = [
-                        nid for nid in (f.primary_node_id, f.secondary_node_id) if nid
-                    ]
+                    if (f.finding_type or "") in _PAIRWISE_FINDING_TYPES:
+                        verdict_node_ids = [
+                            nid for nid in (f.primary_node_id, f.secondary_node_id) if nid
+                        ]
+                    else:
+                        verdict_node_ids = [f.primary_node_id] if f.primary_node_id else []
 
         # Hallucinated ids must not become durable "prior verdicts" that
         # future agents consult (audit P1.4). Validate liveness before

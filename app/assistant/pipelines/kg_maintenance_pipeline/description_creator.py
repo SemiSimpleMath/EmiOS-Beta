@@ -1,8 +1,8 @@
 """
 description_creator.py — core logic for generating node descriptions via LLM.
 
-Called by step_description_fill.  Separated here so the agent runner is
-testable in isolation from the pipeline step.
+Live caller: wiki_generator/page_writer.py (step_description_fill, the
+original caller, was deleted 2026-06-10 — audit P3.6).
 
 Session discipline mirrors the original archived implementation:
   - Read phase: short-lived session, closed before any LLM call.

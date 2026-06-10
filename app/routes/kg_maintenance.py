@@ -867,21 +867,18 @@ def api_run():
                             is always skipped from the UI).
                             Defaults to skipping LLM-heavy steps for a fast
                             structural-only scan.
-      description_max_nodes — cap for description_fill step (default 50).
     """
     data = request.get_json(force=True) or {}
     skip_steps = data.get(
         "skip_steps",
-        ["duplicate_scan", "description_fill"],
+        ["duplicate_scan"],
     )
     if "execute_findings" not in skip_steps:
         skip_steps.append("execute_findings")
-    description_max_nodes = int(data.get("description_max_nodes", 50))
     try:
         from app.assistant.pipelines.kg_maintenance_pipeline.pipeline import KGMaintenancePipeline
         result = KGMaintenancePipeline().run(
             skip_steps=skip_steps,
-            description_max_nodes=description_max_nodes,
         )
         return jsonify(result)
     except Exception:

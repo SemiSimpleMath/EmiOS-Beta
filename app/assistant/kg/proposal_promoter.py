@@ -1892,7 +1892,7 @@ class _NodeOutcome:
     __slots__ = ("pnode_id", "action", "resolved_node_id", "reason")
     def __init__(self, pnode_id, action, resolved_node_id=None, reason=""):
         self.pnode_id = pnode_id
-        self.action = action  # matched_existing | created_new | skipped_locked | held_needs_existing
+        self.action = action  # matched_existing | created_new | skipped_locked | skipped_conflict
         self.resolved_node_id = resolved_node_id
         self.reason = reason
 

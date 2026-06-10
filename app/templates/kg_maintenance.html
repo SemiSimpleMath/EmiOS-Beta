@@ -956,7 +956,7 @@
       const res = await fetch('/kg-maintenance/api/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ skip_steps: ['duplicate_scan', 'description_fill'] })
+        body: JSON.stringify({ skip_steps: ['duplicate_scan'] })
       });
       const data = await res.json();
       showToast('Structural scan complete');

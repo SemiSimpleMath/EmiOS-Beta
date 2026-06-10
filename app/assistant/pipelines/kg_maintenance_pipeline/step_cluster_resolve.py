@@ -278,36 +278,6 @@ def _apply_verdict(
         session.close()
 
 
-def cascade_status_to_siblings(lead_id: str, new_status: str) -> int:
-    """When a cluster lead's status changes (executed/rejected/investigated),
-    propagate the same status to every finding superseded_by lead_id.
-
-    Returns the number of siblings updated. Called from the maintenance API
-    after the lead's status is set, NOT inside the action handler — keeps
-    the cascade explicit and skippable in tests."""
-    from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
-
-    session = get_session()
-    try:
-        sibs = (
-            session.query(KGMaintenanceFinding)
-            .filter(KGMaintenanceFinding.superseded_by == lead_id)
-            .filter(KGMaintenanceFinding.status == "pending")
-            .all()
-        )
-        if not sibs:
-            return 0
-        now = datetime.now(timezone.utc)
-        for s in sibs:
-            s.status = new_status
-            s.executed_by = "cluster_cascade"
-            s.executed_at = now
-            s.execution_notes = f"Cascaded from cluster lead {lead_id} (status={new_status})."
-        session.commit()
-        return len(sibs)
-    except Exception:
-        session.rollback()
-        logger.error("[cluster_resolve] cascade failed for lead=%s", lead_id, exc_info=True)
-        raise
-    finally:
-        session.close()
+# cascade_status_to_siblings was deleted 2026-06-10 (audit P3.6): zero
+# callers — its docstring claimed the maintenance API called it, but the
+# real sibling cascade lives in kg_maintenance.store.set_status.

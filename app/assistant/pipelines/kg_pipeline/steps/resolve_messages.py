@@ -40,18 +40,19 @@ from app.models.db_manager import get_db_manager
 logger = get_logger(__name__)
 
 
-# Sources eligible for KG ingestion. The user-authored prose-resolution
-# source IS auto-ingested (the user typed it to answer a question — it's
-# trusted input, conceptually identical to a chat message).
-#   kg_maintenance_resolution — prose-resolution answers from the cluster
-#                               resolver UI; user-authored.
+# Sources eligible for KG ingestion.
+# kg_maintenance_resolution was REMOVED 2026-06-10 (audit P3.5): it was
+# whitelisted here and in segment_messages but NO producer ever wrote that
+# source — resolve_with_prose hands the prose to kg_resolution_manager
+# directly and never logs it to unified_log. If that producer ever lands
+# (it would need decisions about room attribution + chat-history
+# rendering), re-add the source to BOTH whitelists.
 # wiki_inference is NOT here — agent-inferred sentences route to the
-# wiki-review queue (kg_maintenance_finding type='wiki_inferred_edge')
+# review queue (kg_maintenance_finding type='synthetic_fact_proposal')
 # for user approval before any ingestion. They will eventually flow
 # through a wiki-specific pipeline (TBD), not this chat path.
 CHAT_SOURCES = {
     "chat", "room_slack", "room_sms", "room_ui",
-    "kg_maintenance_resolution",
 }
 CHAT_ROLES = {"user", "assistant"}
 ALLOWED_ROOMS = {"master_room"}

@@ -302,16 +302,21 @@ def run_consistency_critic(
     *,
     entity_label: str,
     vault_path: Path,
-    investigate_immediately: bool = True,
+    investigate_immediately: bool = False,
     max_investigations: int = 5,
 ) -> Dict[str, Any]:
     """Run the critic on ``<vault>/prose/<entity_label>.md`` and file any
     findings. Returns a small summary dict (counts + saved finding ids).
 
-    When ``investigate_immediately`` is True (default), every newly-saved
-    finding is also handed to ``kg_investigation_manager`` in the same call so
-    a structured investigation report is ready when a human (or a future
-    mutator) looks at the queue. ``max_investigations`` caps per-page LLM cost.
+    ``investigate_immediately`` defaults to False (audit P3.3, write-only):
+    the nightly refresh runs the critic on UNBOUNDED pages — at up to 5
+    immediate investigations per page that dwarfed the investigator's
+    5/day budget AND starved the 03:30 cluster resolver of exactly the
+    redundant per-entity findings it exists to distill. Nightly paths file
+    findings only; the cluster resolver + backlog drain investigate the
+    distilled leads under their own budgets. The manual single-page
+    regenerate route passes True (one page, user is waiting, cost bounded
+    by ``max_investigations``).
     """
     page = _read_prose_page(vault_path, entity_label)
     if page is None:

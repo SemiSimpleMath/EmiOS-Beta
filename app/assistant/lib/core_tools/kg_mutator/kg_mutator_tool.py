@@ -1190,7 +1190,11 @@ class KGMutatorTool(BaseTool):
     def handle_kg_finding_escalate(self, arguments: Dict[str, Any], tool_message: ToolMessage) -> ToolResult:
         return self._finding_status_change(
             arguments, tool_message,
-            new_status="approved",  # 'approved' = queued for human review per existing vocab
+            # 'escalated' = routed to human review, matching the tool's name
+            # (audit P3.4). The old 'approved' write meant a tool named
+            # "escalate" silently QUEUED the finding for execution — the
+            # approved queue is the auto-apply lane, the opposite intent.
+            new_status="escalated",
             op="finding_escalate",
             note_field="execution_notes",
             extra_fields=("summary", "suggested_action"),
@@ -1219,10 +1223,20 @@ class KGMutatorTool(BaseTool):
                 extras.append(f"{f}={v}")
         composed_notes = " ".join([notes] + extras).strip() or reason
 
+        from app.assistant.kg_maintenance.store import TERMINAL_STATUSES
+
         with get_db_manager().transaction(op=f"kg_mutator.{op}") as session:
             f = session.query(KGMaintenanceFinding).filter(KGMaintenanceFinding.id == finding_id).first()
             if f is None:
                 raise ValueError(f"finding {finding_id!r} not found")
+            if f.status in TERMINAL_STATUSES:
+                # Same invariant as store.set_status (audit P0.4): terminal
+                # work must never be silently relabeled — this path writes
+                # f.status directly, so it needs its own guard.
+                raise ValueError(
+                    f"finding {finding_id!r} is already terminal "
+                    f"(status={f.status!r}); refusing {op}."
+                )
             before = {"status": f.status, "execution_notes": f.execution_notes}
             f.status = new_status
             setattr(f, note_field, composed_notes[:2000])

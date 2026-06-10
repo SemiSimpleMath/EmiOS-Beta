@@ -544,8 +544,15 @@ def wiki_article_regenerate(entity: str):
                     "section call returned empty. Check the server log for details."
                 ),
             }), 500
-        # Step 3: run the consistency critic; auto-investigate any new findings.
-        crit = run_consistency_critic(entity_label=label, vault_path=vault_path)
+        # Step 3: run the consistency critic; auto-investigate any new
+        # findings. Immediate investigation is the MANUAL-route exception
+        # (one page, user waiting) — the nightly paths are write-only and
+        # let the cluster resolver + backlog drain budget the LLM spend
+        # (audit P3.3).
+        crit = run_consistency_critic(
+            entity_label=label, vault_path=vault_path,
+            investigate_immediately=True,
+        )
     except Exception as exc:
         logger.exception("Regenerate failed for %s", label)
         return jsonify({"ok": False, "error": str(exc)}), 500

@@ -82,12 +82,14 @@ NODE_TYPES = ["Entity", "State", "Event", "Goal", "Concept", "Property"]
 
 
 # Resolution actions recorded on each proposal_node after promotion phase 1.
+# (held_needs_existing removed 2026-06-10, audit P3.6: zero writers, zero
+# rows in the live DB — P2.1's succession hold uses proposal status
+# 'pending' + re-evaluation instead.)
 RESOLUTION_ACTIONS = [
     "pending",              # not yet processed
     "matched_existing",     # found an existing KG node, resolved_node_id set
     "created_new",          # created a fresh KG node (typical for State/Event)
     "skipped_locked",       # target was locked + conflicting; do not overwrite
-    "held_needs_existing",  # Entity has no match and policy forbids creation
 ]
 
 

@@ -1,0 +1,20 @@
+{
+  "id": "kg_date_gap_drain",
+  "enabled": true,
+  "name": "KG date gap drain",
+  "aliases": [
+    "date gaps",
+    "ask date gaps"
+  ],
+  "runner": "function",
+  "spec": {
+    "function_name": "kg_date_gap_drain",
+    "limit": 2,
+    "cooldown_days": 7
+  },
+  "run_policy": {
+    "type": "daily",
+    "time_local": "09:00"
+  },
+  "notes": "[Created 2026-06-10, audit P3.5: the function was registered in routine_functions.py since the date-gaps feature landed but never had a routine config, so the ~150 pending state_missing_dates findings never reached the user.] Daily 09:00: pick the 2 highest-priority state_missing_dates findings (7-day re-ask cooldown per finding) and enqueue each as a pending question (topical_tag=kg_date_gap). The conversation-starter bridge surfaces them in persona under its own daily nudge budget; /kg-maintenance/date-gaps stays the pull-based review surface."
+}
