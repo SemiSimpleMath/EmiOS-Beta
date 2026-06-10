@@ -296,7 +296,87 @@ def _load_db_alias_cache() -> dict[str, str]:
 
 
 def reset_db_alias_cache() -> None:
-    """Force the DB alias cache to reload on next normalize_predicate call.
-    Call after seeding new aliases in a long-running process."""
-    global _DB_ALIAS_CACHE
+    """Force the DB-backed caches (aliases, symmetry, spelling classes) to
+    reload on next use. Call after seeding/curating edge_canon or
+    edge_alias in a long-running process."""
+    global _DB_ALIAS_CACHE, _SYMMETRY_CACHE, _REVERSE_ALIAS_CACHE
     _DB_ALIAS_CACHE = None
+    _SYMMETRY_CACHE = None
+    _REVERSE_ALIAS_CACHE = None
+
+
+# ── Predicate semantics, derived from data (audit P2.4) ──────────────────
+#
+# Symmetry lives in edge_canon.is_symmetric (curated by the
+# edge_canon_curator agent); synonym spelling classes are the reverse
+# image of the alias maps (in-code PREDICATE_ALIASES + DB edge_alias).
+# Nothing here is hardcoded per-predicate — adding an alias or curating a
+# canon row extends dedup/conflict behavior with zero code change.
+
+_SYMMETRY_CACHE: dict[str, bool] | None = None
+_REVERSE_ALIAS_CACHE: dict[str, set[str]] | None = None
+
+
+def _load_symmetry_cache() -> dict[str, bool]:
+    """edge_type → is_symmetric from edge_canon. Empty dict when the table
+    is missing (fresh test DBs): predicates then read as directional —
+    the conservative direction (worst case a mirror-twin edge, the
+    pre-P2.4 behavior; never a wrong dedup)."""
+    try:
+        from app.models.base import get_session
+        from app.assistant.kg.db.knowledge_graph_db_sqlite import EdgeCanon
+    except Exception:
+        return {}
+    try:
+        session = get_session()
+        try:
+            rows = session.query(EdgeCanon.edge_type, EdgeCanon.is_symmetric).all()
+        finally:
+            session.close()
+    except Exception as exc:
+        logger.warning(
+            "[predicate_vocabulary] edge_canon symmetry lookup unavailable: %s",
+            exc,
+        )
+        return {}
+    return {et: bool(sym) for et, sym in rows if et}
+
+
+def is_symmetric_predicate(predicate: str) -> bool:
+    """True when edge_canon marks this predicate's canonical form as
+    direction-free (A —p→ B asserts the same fact as B —p→ A)."""
+    if not predicate:
+        return False
+    canonical, _ = normalize_predicate(predicate)
+    global _SYMMETRY_CACHE
+    if _SYMMETRY_CACHE is None:
+        _SYMMETRY_CACHE = _load_symmetry_cache()
+    return _SYMMETRY_CACHE.get(canonical, False)
+
+
+def _build_reverse_alias_cache() -> dict[str, set[str]]:
+    """canonical → every known spelling that normalizes to it, from the
+    in-code alias map and the DB edge_alias table."""
+    global _DB_ALIAS_CACHE
+    if _DB_ALIAS_CACHE is None:
+        _DB_ALIAS_CACHE = _load_db_alias_cache()
+    reverse: dict[str, set[str]] = {}
+    for raw, canon in PREDICATE_ALIASES.items():
+        reverse.setdefault(canon, set()).add(_basic_normalize(raw))
+    for raw, canon in (_DB_ALIAS_CACHE or {}).items():
+        reverse.setdefault(canon, set()).add(_basic_normalize(raw))
+    return reverse
+
+
+def predicate_spelling_class(predicate: str) -> list[str]:
+    """Every known spelling of this predicate's fact: the canonical form
+    plus all alias spellings that normalize to it. For SQL filters that
+    must also match legacy rows written before an alias existed
+    (edge dedup, single-target conflict checks — audit P2.4)."""
+    if not predicate:
+        return []
+    canonical, _ = normalize_predicate(predicate)
+    global _REVERSE_ALIAS_CACHE
+    if _REVERSE_ALIAS_CACHE is None:
+        _REVERSE_ALIAS_CACHE = _build_reverse_alias_cache()
+    return sorted({canonical, *_REVERSE_ALIAS_CACHE.get(canonical, ())})

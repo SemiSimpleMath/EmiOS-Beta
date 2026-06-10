@@ -217,6 +217,24 @@ def test_existing_edge_matches_synonym_class():
 
 
 def test_existing_edge_reversed_for_symmetric_predicate():
+    # Symmetry is DATA, not code: edge_canon.is_symmetric (curated by the
+    # edge_canon_curator agent) drives the reversed-triple check. Seed the
+    # canon row the way the curator would, then reset the read cache.
+    from app.assistant.kg.db.knowledge_graph_db_sqlite import EdgeCanon
+    from app.assistant.kg.predicate_vocabulary import reset_db_alias_cache
+
+    session = get_session()
+    try:
+        if session.query(EdgeCanon).filter_by(edge_type="is_sibling_in").count() == 0:
+            session.add(EdgeCanon(
+                edge_type="is_sibling_in", domain_type="Entity",
+                range_type="Entity", is_symmetric=True,
+            ))
+            session.commit()
+    finally:
+        session.close()
+    reset_db_alias_cache()
+
     a, b = _mk_node("Sib1"), _mk_node("Sib2")
     _mk_edge(a, b, "is_sibling_in")
     session = get_session()
@@ -224,7 +242,7 @@ def test_existing_edge_reversed_for_symmetric_predicate():
         # Reversed re-assertion of a symmetric predicate finds the edge…
         assert _existing_kg_edge(session, b, a, "is_sibling_in") is not None
         # …a directional predicate doesn't, unless flagged bidirectional.
-        _mk_edge_id = _mk_edge(a, b, "works_for")
+        _mk_edge(a, b, "works_for")
         assert _existing_kg_edge(session, b, a, "works_for") is None
         assert _existing_kg_edge(
             session, b, a, "works_for", bidirectional=True) is not None

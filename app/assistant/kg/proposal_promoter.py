@@ -1622,34 +1622,24 @@ def _write_edge_evidence(
     ))
 
 
-# Predicates whose meaning is direction-free: A —p→ B asserts the same
-# fact as B —p→ A. A reversed re-assertion must reinforce the existing
-# edge, not mint a mirror twin (audit P2.4). The writer's per-edge
-# ``bidirectional`` flag extends this set case-by-case.
-SYMMETRIC_PREDICATES = frozenset({
-    "is_sibling_in", "is_spouse_in", "colleague_of",
-})
-
-# Synonym classes: predicates that spell the same fact. Members dedup and
-# conflict-check against the whole class, not just their own spelling
-# (audit P2.4 — works_for vs employed_by dodged the single-target check).
-# employed_by is alias-mapped to works_for at write time; the class keeps
-# matching any legacy/sideways-written rows.
-_PREDICATE_SYNONYM_CLASSES: dict[str, tuple[str, ...]] = {
-    "works_for": ("works_for", "employed_by"),
-    "employed_by": ("works_for", "employed_by"),
-}
-
-
-def _predicate_class(predicate: str) -> list[str]:
-    return list(_PREDICATE_SYNONYM_CLASSES.get(predicate, (predicate,)))
-
-
 def _existing_kg_edge(
     session, src_id: str, tgt_id: str, predicate: str,
     *, bidirectional: bool = False,
 ) -> Optional[Edge]:
-    members = _predicate_class(predicate)
+    """Find an existing edge asserting the same fact (audit P2.4).
+
+    Matches the predicate's whole spelling class (canonical + every known
+    alias — derived from the alias maps, so legacy rows written before an
+    alias existed still dedup), and for direction-free predicates
+    (edge_canon.is_symmetric, or the writer's per-edge ``bidirectional``
+    flag) also the reversed triple — a reversed re-assertion must
+    reinforce, not mint a mirror twin.
+    """
+    from app.assistant.kg.predicate_vocabulary import (
+        is_symmetric_predicate,
+        predicate_spelling_class,
+    )
+    members = predicate_spelling_class(predicate)
     hit = (
         session.query(Edge)
         .filter(
@@ -1661,7 +1651,7 @@ def _existing_kg_edge(
     )
     if hit is not None:
         return hit
-    if bidirectional or predicate in SYMMETRIC_PREDICATES:
+    if bidirectional or is_symmetric_predicate(predicate):
         return (
             session.query(Edge)
             .filter(
@@ -1705,7 +1695,10 @@ def _is_durable_conflict(
     }
     # Normalize so raw spellings (employed_by, is_married) land on their
     # canonical class even when a caller bypassed the writer.
-    from app.assistant.kg.predicate_vocabulary import normalize_predicate
+    from app.assistant.kg.predicate_vocabulary import (
+        normalize_predicate,
+        predicate_spelling_class,
+    )
     canonical, _ = normalize_predicate(predicate)
     if canonical not in SINGLE_TARGET_PREDICATES:
         return None
@@ -1713,7 +1706,7 @@ def _is_durable_conflict(
         session.query(Edge)
         .filter(
             Edge.source_id == src_id,
-            Edge.relationship_type.in_(_predicate_class(canonical)),
+            Edge.relationship_type.in_(predicate_spelling_class(canonical)),
         )
         .first()
     )
