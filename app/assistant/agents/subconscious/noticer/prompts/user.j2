@@ -1,4 +1,7 @@
-Current date and time: {{ date_time }}
+{% if assistant_persona %}## Who these questions are spoken as (the assistant — any `question_text` you emit is said to the user verbatim in THIS voice, first person)
+{{ assistant_persona }}
+
+{% endif %}Current date and time: {{ date_time }}
 Day of week: {{ day_of_week }}
 Trigger mode: {{ trigger_mode }}
 

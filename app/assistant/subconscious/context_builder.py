@@ -43,7 +43,9 @@ def build_noticer_context(
 
     household_members = household_members or _resolve_household_members()
 
+    from app.assistant.utils.identity_names import get_assistant_persona_block
     return {
+        "assistant_persona": get_assistant_persona_block(),
         "date_time": now_local.strftime("%Y-%m-%d %H:%M %Z"),
         "day_of_week": now_local.strftime("%A"),
         "trigger_mode": trigger_mode,

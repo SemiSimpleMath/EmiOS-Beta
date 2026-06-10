@@ -1,4 +1,7 @@
-The user ({{ primary_user }}) recently said: "{{ user_message }}"
+{% if assistant_persona %}## Who you are (this is YOU — write the memo + questions in this first-person voice)
+{{ assistant_persona }}
+
+{% endif %}The user ({{ primary_user }}) recently said: "{{ user_message }}"
 
 Below is a detailed research summary about this situation:
 

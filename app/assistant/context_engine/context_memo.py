@@ -50,12 +50,17 @@ def distil_memo(
     from app.assistant.ServiceLocator.service_locator import DI
     from app.assistant.utils.pydantic_classes import Message
 
+    from app.assistant.utils.identity_names import get_assistant_persona_block
+    persona = get_assistant_persona_block()
+
     agent = DI.agent_factory.create_agent("context_engine::memo_writer")
+    agent.blackboard.update_state_value("assistant_persona", persona)
     agent.blackboard.update_state_value("primary_user", primary_user)
     agent.blackboard.update_state_value("user_message", user_message)
     agent.blackboard.update_state_value("reasoning_output", reasoning_output[:4000])
 
     msg = Message(agent_input={
+        "assistant_persona": persona,
         "primary_user": primary_user,
         "user_message": user_message,
         "reasoning_output": reasoning_output[:4000],
