@@ -413,7 +413,9 @@ class ConversationStarterStep(BaseStep):
         # Very lightweight hints
         day_type_hints = "workday" if ctx.now_local.weekday() < 5 else "weekend"
 
+        from app.assistant.utils.identity_names import get_assistant_persona_block
         return {
+            "assistant_persona": get_assistant_persona_block(),
             "boundary_date_local": boundary_date_local,
             "day_of_week": ctx.now_local.strftime("%A"),
             "history_scope": resolve_room_scope(pipeline_config=ctx.pipeline_config, step_config=ctx.step_config),

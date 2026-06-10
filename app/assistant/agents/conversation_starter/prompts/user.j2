@@ -1,8 +1,12 @@
-**Boundary date (local):** {{ boundary_date_local }}
+{%- set assistant_name = resource_assistant_data.name if resource_assistant_data else "the assistant" %}
+{% if assistant_persona %}## Who you are (this is YOU — write as this person, first person)
+{{ assistant_persona }}
+
+{% endif %}**Boundary date (local):** {{ boundary_date_local }}
 **Day:** {{ day_of_week }}
 {% if day_type_hints %}**Day type hints:** {{ day_type_hints }}{% endif %}
 
-Write a conversation starter for {{ resource_user_data.first_name }}.
+You are {{ assistant_name }}. Write a conversation starter for {{ resource_user_data.first_name }} in your own first-person voice. In the recent chat excerpts below, the turns labeled "{{ assistant_name }}" are your own words — reference that shared history as "we"/"I", never as "you and {{ assistant_name }}".
 
 Context you may use:
 {% if weather_summary %}- Weather: {{ weather_summary }}{% endif %}

@@ -65,6 +65,52 @@ def get_required_assistant_name() -> str:
     )
 
 
+def get_assistant_persona_block() -> str:
+    """Compact persona + basic-info block from resources/assistant/assistant_core.json
+    for the PROACTIVE agents (conversation starter, subconscious noticer, memo
+    distiller) so they speak AS the assistant — right name, voice, personality,
+    relationship — instead of narrating about it in the third person ("you and
+    <assistant>", "you two").
+
+    Soft: returns "" if the file is missing/unparseable, since this is optional
+    voice-grounding context (the consuming prompt's name-neutral first-person
+    rules still apply). Use the *_required name resolvers when absence must fail.
+    """
+    core_path = get_resources_dir() / "assistant" / "assistant_core.json"
+    try:
+        if not core_path.exists():
+            return ""
+        data = json.loads(core_path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return ""
+    except Exception as e:
+        logger.debug("Could not load assistant persona block: %s", e)
+        return ""
+
+    ident = data.get("assistant_identity") or {}
+    rel = data.get("relationship") or {}
+    guide = data.get("chat_guidelines") or {}
+    lines: list[str] = []
+    name = str(ident.get("name") or "").strip()
+    persona_name = str(ident.get("persona_name") or "").strip()
+    if name:
+        suffix = f" (roleplaying as {persona_name})" if persona_name and persona_name != name else ""
+        lines.append(f"- Name: {name}{suffix}")
+    if ident.get("personality"):
+        lines.append(f"- Personality: {ident['personality']}")
+    if ident.get("backstory"):
+        lines.append(f"- Backstory: {ident['backstory']}")
+    for d in (ident.get("core_directives") or []):
+        lines.append(f"- {d}")
+    for v in (ident.get("voice_rules") or []):
+        lines.append(f"- Voice: {v}")
+    if rel.get("description"):
+        lines.append(f"- Relationship with the user: {rel['description']}")
+    if guide.get("guidelines"):
+        lines.append(f"- Chat style: {guide['guidelines']}")
+    return "\n".join(lines)
+
+
 def get_required_primary_user_name() -> str:
     env_val = str(os.environ.get("PRIMARY_USER") or "").strip()
     if env_val:
