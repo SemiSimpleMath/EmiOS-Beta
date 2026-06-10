@@ -1717,6 +1717,63 @@ def _is_durable_conflict(
     return hit
 
 
+def _incoming_era_start(pnodes_by_id, pe) -> Optional[datetime]:
+    """The proposal-side era start for an incoming single-target edge: the
+    ``valid_from`` of the relationship-like pnode at either endpoint (the
+    spouse shape puts the State on the target, the employment shape on the
+    source). None when the proposal carries no dates."""
+    for endpoint_id in (pe.source_node_id, pe.target_node_id):
+        pn = pnodes_by_id.get(endpoint_id)
+        if pn is not None and pn.node_type in RELATIONSHIP_LIKE_TYPES \
+                and pn.valid_from is not None:
+            return pn.valid_from
+    return None
+
+
+def _classify_durable_conflict(
+    session, conflict: Edge, src_id: str,
+    incoming_era_start: Optional[datetime],
+) -> tuple[str, Optional[Node]]:
+    """Temporal triage of a single-target conflict (audit P2.1).
+
+    The era of the EXISTING assertion lives on the State/Event endpoint of
+    the conflicting edge — the old-target side in the spouse shape
+    (person → Marriage State), the shared source side in the employment
+    shape (Employment State → employer).
+
+    Returns (kind, era_node):
+      - "closed_era"  — the existing era has end_date set; the new
+        assertion is history-compatible, NOT a conflict. (Remarriage after
+        a closed marriage; new job after a closed employment.)
+      - "succession"  — the existing era is open but the proposal's dates
+        postdate its start; likely a real-life change the KG hasn't closed
+        yet. Conservative path: hold + route to the user (P4.4 decision).
+      - "same_era"    — undatable or overlapping double assertion; a
+        genuine contradiction at edge granularity.
+    """
+    era_node: Optional[Node] = None
+    old_tgt = session.get(Node, conflict.target_id)
+    if old_tgt is not None and (old_tgt.node_type or "") in ("State", "Event"):
+        era_node = old_tgt
+    else:
+        src_node = session.get(Node, src_id)
+        if src_node is not None and (src_node.node_type or "") in ("State", "Event"):
+            era_node = src_node
+
+    if era_node is not None and era_node.end_date is not None:
+        return "closed_era", era_node
+
+    old_start = era_node.start_date if era_node is not None else None
+    if (
+        incoming_era_start is not None
+        and old_start is not None
+        and incoming_era_start > old_start
+    ):
+        return "succession", era_node
+
+    return "same_era", era_node
+
+
 # ---------------------------------------------------------------------------
 # Decision container
 # ---------------------------------------------------------------------------
@@ -1740,13 +1797,20 @@ class _EdgeOutcome:
 
 
 class _ProposalDecision:
-    __slots__ = ("proposal_id", "final_status", "node_outcomes", "edge_outcomes", "error")
+    __slots__ = ("proposal_id", "final_status", "node_outcomes", "edge_outcomes",
+                 "error", "followup_findings")
     def __init__(self, proposal_id):
         self.proposal_id = proposal_id
         self.final_status = "pending"
         self.node_outcomes: List[_NodeOutcome] = []
         self.edge_outcomes: List[_EdgeOutcome] = []
         self.error: Optional[str] = None
+        # kg_maintenance_finding payloads (kwargs for upsert_finding) the
+        # caller writes AFTER its write transaction commits — single_target
+        # succession/conflict routing (audit P2.1). Must reference only
+        # PRE-EXISTING node ids: on 'held' the savepoint rolls freshly
+        # minted nodes back.
+        self.followup_findings: List[Dict[str, Any]] = []
 
     def summary(self) -> Dict[str, Any]:
         return {
@@ -2419,6 +2483,8 @@ def _evaluate_and_apply(
             return f"pod {pn_id[:50]} not admissible (missing or kind not kg_admissible)"
         return None
 
+    pnodes_by_id = {pn.id: pn for pn in pnodes}
+
     for pe in pedges:
         src_kg = _resolve_endpoint(pe.source_node_id)
         tgt_kg = _resolve_endpoint(pe.target_node_id)
@@ -2461,27 +2527,102 @@ def _evaluate_and_apply(
             )
             continue
 
-        # Check durable single-target conflict (e.g., second spouse).
+        # Durable single-target conflict (e.g., second spouse) — temporally
+        # aware since audit P2.1. The old behavior auto-`contradicted` the
+        # WHOLE group forever, freezing the KG on first-asserted values for
+        # exactly the facts that change in real life (job change,
+        # remarriage), and `contradicted` was a verified dead end.
         conflict = _is_durable_conflict(session, src_kg, pe.predicate, tgt_kg)
         if conflict is not None:
-            src_node = session.get(Node, src_kg)
-            if src_node and src_node.locked_by_user_at is not None:
-                dec.edge_outcomes.append(
-                    _EdgeOutcome(pe.id, "skipped_locked", None,
-                                 f"locked {src_node.label!r} already has "
-                                 f"{pe.predicate!r} edge to {conflict.target_id[:8]}")
-                )
-                dec.final_status = "contradicted"
-                dec.error = f"lock conflict on {pe.predicate}"
-                return dec
-            dec.edge_outcomes.append(
-                _EdgeOutcome(pe.id, "skipped_conflict", None,
-                             f"existing {pe.predicate!r} edge to "
-                             f"{conflict.target_id[:8]} conflicts with proposed {tgt_kg[:8]}")
+            kind, era_node = _classify_durable_conflict(
+                session, conflict, src_kg,
+                _incoming_era_start(pnodes_by_id, pe),
             )
-            dec.final_status = "contradicted"
-            dec.error = f"conflict on {pe.predicate}"
-            return dec
+            src_node = session.get(Node, src_kg)
+            src_label = src_node.label if src_node else src_kg[:8]
+            old_tgt_node = session.get(Node, conflict.target_id)
+            old_label = old_tgt_node.label if old_tgt_node else conflict.target_id[:8]
+            new_tgt_node = session.get(Node, tgt_kg)
+            new_label = new_tgt_node.label if new_tgt_node else tgt_kg[:8]
+
+            if kind == "closed_era":
+                # The existing era ended — sequential facts coexist
+                # (remarriage, career history). Fall through to creation.
+                logger.info(
+                    "[promoter] %s conflict bypassed — existing era %r is "
+                    "closed (end_date set); creating successor edge to %r",
+                    pe.predicate, old_label, new_label,
+                )
+            elif kind == "succession":
+                # Conservative path (P4.4 decision 2026-06-10): hold the
+                # whole proposal and route the close-the-old-era question
+                # to the user. The proposal stays 'pending', re-evaluates
+                # every run, and promotes cleanly once the era is closed;
+                # finding dedup stops duplicate findings meanwhile.
+                old_start = era_node.start_date if era_node is not None else None
+                new_start = _incoming_era_start(pnodes_by_id, pe)
+                dec.followup_findings.append({
+                    "finding_type": "single_target_succession",
+                    "primary_node_id": src_kg,
+                    "secondary_node_id": conflict.target_id,
+                    "suggested_action": "review",
+                    "priority": "high",
+                    "confidence": 0.8,
+                    "agent_name": "proposal_promoter",
+                    "reason": (
+                        f"Proposed {pe.predicate!r} for {src_label!r} → "
+                        f"{new_label!r} postdates the still-open era "
+                        f"{old_label!r} (existing start {old_start}, proposed "
+                        f"start {new_start}). Likely real-life succession (job "
+                        f"change / remarriage): close the old era, then the "
+                        f"held proposal promotes on a later run."
+                    ),
+                    "evidence": {
+                        "predicate": pe.predicate,
+                        "proposal_id": proposal.id,
+                        "era_node_id": era_node.id if era_node is not None else None,
+                        "existing_start": str(old_start) if old_start else None,
+                        "proposed_start": str(new_start) if new_start else None,
+                        "new_target_label": new_label,
+                    },
+                })
+                dec.final_status = "held"
+                dec.error = f"succession candidate on {pe.predicate} — held for review"
+                return dec
+            else:  # same_era — genuine double assertion, edge granularity.
+                locked = src_node is not None and src_node.locked_by_user_at is not None
+                action = "skipped_locked" if locked else "skipped_conflict"
+                dec.edge_outcomes.append(
+                    _EdgeOutcome(pe.id, action, None,
+                                 f"existing {pe.predicate!r} edge to "
+                                 f"{old_label!r} conflicts with proposed {new_label!r}"
+                                 + (" (source node user-locked)" if locked else "")
+                                 + " — edge skipped, finding raised")
+                )
+                dec.followup_findings.append({
+                    "finding_type": "single_target_conflict",
+                    "primary_node_id": src_kg,
+                    "secondary_node_id": conflict.target_id,
+                    "suggested_action": "review",
+                    "priority": "high",
+                    "confidence": 0.8,
+                    "agent_name": "proposal_promoter",
+                    "reason": (
+                        f"Same-era double assertion: {src_label!r} already has "
+                        f"{pe.predicate!r} → {old_label!r}; proposal "
+                        f"{proposal.id} asserts → {new_label!r} with no dates "
+                        f"establishing an order. The conflicting edge was "
+                        f"skipped; the rest of the group applied."
+                        + (" Source node is user-locked." if locked else "")
+                    ),
+                    "evidence": {
+                        "predicate": pe.predicate,
+                        "proposal_id": proposal.id,
+                        "new_target_label": new_label,
+                        "source_locked": locked,
+                    },
+                })
+                continue
 
         # Green light to create.
         if commit:
@@ -2547,6 +2688,8 @@ def run_promoter(*, limit: int = 100, commit: bool = False) -> Dict[str, Any]:
         "evaluated": 0,
         "promoted": 0,
         "contradicted": 0,
+        "held": 0,
+        "findings_raised": 0,
         "errors": 0,
         "nodes_matched": 0,
         "nodes_created": 0,
@@ -2623,6 +2766,16 @@ def run_promoter(*, limit: int = 100, commit: bool = False) -> Dict[str, Any]:
                         p.status = "contradicted"
                         p.retraction_reason = dec.error or "conflict"
                     stats["contradicted"] += 1
+                elif dec.final_status == "held":
+                    # Succession candidate (audit P2.1, conservative path):
+                    # roll back this proposal's partial writes and leave
+                    # status='pending' DELIBERATELY — it re-evaluates every
+                    # run and promotes cleanly once the old era is closed
+                    # (the single_target_succession finding routes that
+                    # decision to the user; upsert_finding's dedup prevents
+                    # a fresh finding per run).
+                    sp.rollback()
+                    stats["held"] += 1
                 else:
                     if commit:
                         p.status = "promoted"
@@ -2638,6 +2791,26 @@ def run_promoter(*, limit: int = 100, commit: bool = False) -> Dict[str, Any]:
                     samples.append(dec.summary())
                 # outer transaction commits at end of `with` — status update
                 # only when commit=True. Dry-run commits an empty transaction.
+
+            # Post-commit: route succession/conflict findings through the
+            # maintenance store. OUTSIDE the write transaction above —
+            # upsert_finding opens its own session and SQLite is
+            # single-writer. Skipped in dry-run (rolled-back work must not
+            # mint real findings).
+            if commit and dec.followup_findings:
+                from app.assistant.kg_maintenance.store import upsert_finding
+                for payload in dec.followup_findings:
+                    try:
+                        _, created = upsert_finding(
+                            **payload, pipeline_run_id=None,
+                        )
+                        if created:
+                            stats["findings_raised"] += 1
+                    except Exception:
+                        logger.exception(
+                            "[promoter] failed to write %s finding for "
+                            "proposal %s", payload.get("finding_type"), pid,
+                        )
         except Exception:
             stats["errors"] += 1
             logger.exception("[promoter] outer handler on proposal %s", pid)

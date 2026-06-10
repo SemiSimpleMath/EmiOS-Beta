@@ -23,6 +23,17 @@ finding_type values:
                            questioner_manager. Priority bin = top-2 sum of
                            connected entity pageranks; auto-promoted to high
                            if directly connected to the primary user.
+  "single_target_succession" — proposal_promoter (audit P2.1): a proposed
+                           single-target fact (spouse/employer/...) postdates
+                           a still-open era. The proposal stays 'pending'
+                           (re-evaluates each run); resolving = close the old
+                           era, after which the held proposal promotes.
+                           primary=subject node, secondary=existing target.
+  "single_target_conflict" — proposal_promoter (audit P2.1): same-era double
+                           assertion of a single-target fact with no dates to
+                           order them. The conflicting edge was skipped (rest
+                           of the group applied); a human/investigator picks
+                           the right target.
 
   Historical (not produced today):
     "suspect_node" — per-node LLM quality scan, sunsetted 2026-04-27. Existing
