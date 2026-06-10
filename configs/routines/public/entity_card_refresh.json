@@ -1,0 +1,21 @@
+{
+  "id": "entity_card_refresh",
+  "enabled": true,
+  "name": "Entity card refresh",
+  "aliases": [
+    "refresh cards",
+    "card refresh"
+  ],
+  "runner": "function",
+  "spec": {
+    "function_name": "entity_card_refresh",
+    "cooldown_days": 7,
+    "max_rebuilds": 10,
+    "max_new": 5
+  },
+  "run_policy": {
+    "type": "daily",
+    "time_local": "04:30"
+  },
+  "notes": "[Created 2026-06-10, entity-cards audit: the v2 design's kg-change-driven refresh (design doc step 5) was never wired — zero callers of the refresh entry points, roster frozen since 2026-05-22, 84% of cards had newer neighbor facts.] Nightly 04:30 (after the KG drains): rebuild up to 10 stale cards (entity or neighbor updated since last build, per-card 7-day cooldown so cards never churn — changes accumulate and trigger one rebuild when the cooldown expires), build up to 5 newly card-worthy entities (post-build critic veto kills noise L0s), deactivate orphaned cards."
+}

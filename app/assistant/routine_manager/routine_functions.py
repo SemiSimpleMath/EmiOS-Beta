@@ -189,6 +189,27 @@ def _lazy_kg_date_gap_drain(*, target_date=None, routine=None):
 kg_date_gap_drain = _lazy_kg_date_gap_drain
 
 
+def _lazy_entity_card_refresh(*, target_date=None, routine=None):
+    """Nightly: keep entity cards live (audit 2026-06-10 — the v2 design's
+    refresh loop was never wired; cards sat frozen for weeks). Stale cards
+    rebuild on a per-card cooldown + nightly cap so cards never churn; newly
+    card-worthy entities get cards (critic-vetoed if content is noise);
+    orphaned cards deactivate.
+
+    Routine spec: cooldown_days (default 7), max_rebuilds (10), max_new (5).
+    """
+    from app.assistant.pipelines.entity_cards_v2.refresh_subscriber import run_card_refresh
+    spec = (routine.spec if routine and hasattr(routine, "spec") else {}) or {}
+    return run_card_refresh(
+        cooldown_days=int(spec.get("cooldown_days", 7)),
+        max_rebuilds=int(spec.get("max_rebuilds", 10)),
+        max_new=int(spec.get("max_new", 5)),
+    )
+
+
+entity_card_refresh = _lazy_entity_card_refresh
+
+
 def _lazy_kg_state_decay(*, target_date=None, routine=None):
     """Nightly: auto-close State/Event nodes whose TTL has elapsed.
 
