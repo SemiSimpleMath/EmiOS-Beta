@@ -1,12 +1,21 @@
 """
 Step: context_embedding_backfill
 
-Computes and stores context embeddings for nodes that lack them.
-The context embedding captures the node's original_sentence — a much richer
-semantic signal than the label-only embedding used for fuzzy search.
+Computes and stores the embeddings nodes are missing, for BOTH Chroma
+collections:
+  - node_context_embeddings — the node's original_sentence (rich signal)
+  - node_embeddings         — the node's label (identity signal)
 
-Runs in batches to avoid memory pressure.  Each node's embedding is stored
-via ChromaDB's upsert (idempotent, safe to re-run).
+The label half was added 2026-06-10 (audit P1.5(1) prerequisite): the
+node_embeddings collection was found EMPTY in the live store — an old
+embedding-schema reset wiped it and the promoter's embed-at-write only
+covered context vectors — leaving the duplicate scan's tier 3 and the
+promoter's entity semantic tier running on context vectors alone. This
+step self-heals that in-process on the nightly kg_maintenance run (no
+second PersistentClient touching the chroma dir).
+
+Runs in batches to avoid memory pressure.  Each embedding is stored via
+ChromaDB's upsert (idempotent, safe to re-run).
 
 Session / LLM contract
 -----------------------
@@ -23,10 +32,22 @@ logger = get_logger(__name__)
 BATCH_SIZE = 200
 
 
+def _missing_ids(collection, all_ids: list[str]) -> set[str]:
+    """Ids from ``all_ids`` that have no vector in ``collection``."""
+    existing: set[str] = set()
+    for start in range(0, len(all_ids), 5000):
+        batch = all_ids[start: start + 5000]
+        result = collection.get(ids=batch, include=[])
+        existing.update(result.get("ids") or [])
+    return set(all_ids) - existing
+
+
 def run(ctx: PipelineContext, *, max_nodes: int = 5000) -> dict:
     """
-    Backfill context embeddings for nodes missing them.
-    Returns {"total_nodes": int, "already_have": int, "embedded": int, "errors": int}.
+    Backfill label + context embeddings for nodes missing them.
+    Returns {"total_nodes": int, "context_already_have": int,
+    "context_embedded": int, "label_already_have": int,
+    "label_embedded": int, "errors": int}.
     """
     from app.assistant.kg.db.knowledge_graph_db import Node
     from app.assistant.kg.chroma.chroma_embedding_manager import get_chroma_manager
@@ -38,61 +59,75 @@ def run(ctx: PipelineContext, *, max_nodes: int = 5000) -> dict:
     try:
         rows = (
             session.query(Node.id, Node.label, Node.original_sentence)
-            .filter(Node.original_sentence.isnot(None), Node.original_sentence != "")
-            .limit(max_nodes + 1000)
             .all()
         )
     finally:
         session.close()
 
     if not rows:
-        logger.info("[context_embedding_backfill] No nodes with original_sentence found")
-        return {"total_nodes": 0, "already_have": 0, "embedded": 0, "errors": 0}
+        logger.info("[context_embedding_backfill] No nodes found")
+        return {"total_nodes": 0, "context_already_have": 0, "context_embedded": 0,
+                "label_already_have": 0, "label_embedded": 0, "errors": 0}
 
     cm = get_chroma_manager()
-
-    all_ids = [str(r.id) for r in rows]
-    existing_ids: set[str] = set()
-    for start in range(0, len(all_ids), 5000):
-        batch = all_ids[start: start + 5000]
-        result = cm.node_context_collection.get(ids=batch, include=[])
-        existing_ids.update(result.get("ids") or [])
-
-    need_embedding = [(str(r.id), r.label or "", r.original_sentence) for r in rows if str(r.id) not in existing_ids]
-    need_embedding = need_embedding[:max_nodes]
-
-    logger.info(
-        "[context_embedding_backfill] %d nodes total, %d already have context embeddings, %d to embed",
-        len(rows), len(existing_ids), len(need_embedding),
-    )
-
-    embedded = 0
     errors = 0
 
-    for i in range(0, len(need_embedding), BATCH_SIZE):
-        batch = need_embedding[i: i + BATCH_SIZE]
-        for node_id, label, sentence in batch:
+    # ── Context embeddings (original_sentence) ──────────────────────────
+    ctx_rows = [
+        (str(r.id), r.label or "", r.original_sentence)
+        for r in rows
+        if r.original_sentence and str(r.original_sentence).strip()
+    ]
+    ctx_ids = [nid for nid, _, _ in ctx_rows]
+    ctx_missing = _missing_ids(cm.node_context_collection, ctx_ids)
+    need_context = [t for t in ctx_rows if t[0] in ctx_missing][:max_nodes]
+
+    context_embedded = 0
+    for i in range(0, len(need_context), BATCH_SIZE):
+        for node_id, label, sentence in need_context[i: i + BATCH_SIZE]:
             try:
-                emb = _do_embed(sentence)
-                cm.store_node_context_embedding(node_id, sentence, emb)
-                embedded += 1
+                cm.store_node_context_embedding(node_id, sentence, _do_embed(sentence))
+                context_embedded += 1
             except Exception as exc:
                 logger.error(
-                    "[context_embedding_backfill] Failed node_id=%s label=%s: %s",
+                    "[context_embedding_backfill] context failed node_id=%s label=%s: %s",
                     node_id, label[:30], exc,
                 )
-                logger.debug("[context_embedding_backfill] Exception details", exc_info=True)
                 errors += 1
-
         logger.info(
-            "[context_embedding_backfill] Progress: %d/%d embedded, %d errors",
-            embedded, len(need_embedding), errors,
+            "[context_embedding_backfill] context progress: %d/%d",
+            context_embedded, len(need_context),
+        )
+
+    # ── Label embeddings ─────────────────────────────────────────────────
+    lbl_rows = [(str(r.id), r.label) for r in rows if r.label and str(r.label).strip()]
+    lbl_ids = [nid for nid, _ in lbl_rows]
+    lbl_missing = _missing_ids(cm.node_collection, lbl_ids)
+    need_label = [t for t in lbl_rows if t[0] in lbl_missing][:max_nodes]
+
+    label_embedded = 0
+    for i in range(0, len(need_label), BATCH_SIZE):
+        for node_id, label in need_label[i: i + BATCH_SIZE]:
+            try:
+                cm.store_node_embedding(node_id, label, _do_embed(label))
+                label_embedded += 1
+            except Exception as exc:
+                logger.error(
+                    "[context_embedding_backfill] label failed node_id=%s label=%s: %s",
+                    node_id, label[:30], exc,
+                )
+                errors += 1
+        logger.info(
+            "[context_embedding_backfill] label progress: %d/%d",
+            label_embedded, len(need_label),
         )
 
     result = {
         "total_nodes": len(rows),
-        "already_have": len(existing_ids),
-        "embedded": embedded,
+        "context_already_have": len(ctx_ids) - len(ctx_missing),
+        "context_embedded": context_embedded,
+        "label_already_have": len(lbl_ids) - len(lbl_missing),
+        "label_embedded": label_embedded,
         "errors": errors,
     }
     logger.info("[context_embedding_backfill] Done: %s", result)

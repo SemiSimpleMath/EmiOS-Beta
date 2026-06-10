@@ -77,22 +77,41 @@ def _is_placeholder_label(label: str) -> bool:
 
 _ENTITY_LIKE_MATCH_TYPES = ["Entity", "Concept", "Goal"]
 
+# Cross-type binding allowlist (audit P2.3): which OTHER node_types a
+# proposal of a given type may bind to by exact label. DELIBERATELY EMPTY —
+# the old behavior (any entity-like type binds to any other: a Goal could
+# silently bind to a same-label Concept) was an accident of the union
+# filter, not a decision. Add pairs here intentionally if type-evolution
+# tolerance is ever wanted.
+_CROSS_TYPE_BIND_ALLOWLIST: dict[str, tuple[str, ...]] = {}
 
-def _resolve_entity_like(session, label: str) -> Optional[Node]:
+# Same-label binding to a well-connected person is the two-Alexes trap:
+# different people share names, and a silent bind merges their lives. At
+# or above this edge count the bind requires node_merger confirmation
+# (audit P2.3 fix 3).
+_PERSON_CONFIRM_MIN_EDGES = 5
+
+# Semantic candidate tier (audit P2.3 fix 2) — same bar as the duplicate
+# scan's tier 3.
+_ENTITY_SEMANTIC_SIM_THRESHOLD = 0.88
+_ENTITY_SEMANTIC_TOP_K = 8
+
+
+def _resolve_entity_like(session, label: str, node_type: str) -> Optional[Node]:
     """Match an Entity/Concept/Goal node by canonical label or alias.
 
     Prefers locked + higher pagerank when multiple match.
 
-    Hard-gated to {Entity, Concept, Goal}. Type mismatch is the #1
-    rejection criterion — an Entity proposal must never bind to a
-    State/Event/Property canonical, regardless of label or pagerank.
+    Hard-gated to the proposal's OWN node_type (+ explicit allowlist —
+    currently empty). The pre-P2.3 filter used the {Entity, Concept, Goal}
+    union, so a Goal proposal could silently bind to a same-label Concept.
     State/Event resolution goes through the separate relationship-like
     path (Jaccard participant overlap + LLM merger). Property goes
     through `_resolve_property` (subject-scoped match).
 
     Disambiguation precedence: if a Disambiguation node exists at this
     label, follow its `disambiguates_to` edge to the canonical FIRST
-    (provided the canonical is an entity-like type). This lets a
+    (provided the canonical passes the same type gate). This lets a
     learned correction persist — once any pass has decided "label X
     really means canonical Y," subsequent proposals at label X bind to
     Y without re-deriving the call.
@@ -102,17 +121,18 @@ def _resolve_entity_like(session, label: str) -> Optional[Node]:
     label_lower = label.lower().strip()
     if not label_lower:
         return None
+    allowed_types = [node_type, *_CROSS_TYPE_BIND_ALLOWLIST.get(node_type, ())]
 
     # Disambiguation FIRST — learned correction beats default resolution.
     from app.assistant.kg.disambiguation import resolve_through_disambiguation
     redirected = resolve_through_disambiguation(session, label)
-    if redirected is not None and (redirected.node_type or "") in _ENTITY_LIKE_MATCH_TYPES:
+    if redirected is not None and (redirected.node_type or "") in allowed_types:
         return redirected
 
     hit = (
         session.query(Node)
         .filter(func.lower(Node.label) == label_lower)
-        .filter(Node.node_type.in_(_ENTITY_LIKE_MATCH_TYPES))
+        .filter(Node.node_type.in_(allowed_types))
         .order_by(Node.locked_by_user_at.desc().nulls_last(),
                   Node.pagerank_score.desc().nulls_last())
         .first()
@@ -123,12 +143,95 @@ def _resolve_entity_like(session, label: str) -> Optional[Node]:
     like_pat = f'%"{label_lower}"%'
     return (
         session.query(Node)
-        .filter(Node.node_type.in_(_ENTITY_LIKE_MATCH_TYPES))
+        .filter(Node.node_type.in_(allowed_types))
         .filter(func.lower(func.coalesce(func.cast(Node.aliases, type_=__import__("sqlalchemy").String), "")).like(like_pat))
         .order_by(Node.locked_by_user_at.desc().nulls_last(),
                   Node.pagerank_score.desc().nulls_last())
         .first()
     )
+
+
+def _needs_person_confirm(session, node: Node) -> bool:
+    """True when an exact-label bind to this node is risky enough to need
+    node_merger confirmation: a person-category node with substantial
+    edges (audit P2.3 fix 3 — the two-Alexes collision). A wrong bind
+    merges two people's lives; a duplicate is fixable by the dup scan."""
+    if (node.category or "").strip().lower() != "person":
+        return False
+    edge_count = (
+        session.query(Edge.id)
+        .filter(or_(Edge.source_id == node.id, Edge.target_id == node.id))
+        .count()
+    )
+    return edge_count >= _PERSON_CONFIRM_MIN_EDGES
+
+
+def _semantic_entity_candidates(
+    session, label: str, node_type: str,
+) -> List[Dict[str, Any]]:
+    """Chroma-similarity candidates for an entity-like proposal that found
+    no exact label/alias match (audit P2.3 fix 2): cosine >=
+    _ENTITY_SEMANTIC_SIM_THRESHOLD against the label + context collections
+    (the duplicate scan's tier-3 bar), filtered to the proposal's own
+    node_type, snapshotted for the post-session node_merger confirm.
+    Catches "the user's mom" vs "the user's mother" before it mints a twin.
+
+    Failure-isolated: chroma/embedder down → empty list (the proposal just
+    creates, the dup scan remains the safety net)."""
+    if not label or not label.strip():
+        return []
+    try:
+        import numpy as np
+        from app.assistant.embeddings.embedder import embed_text
+        from app.assistant.kg.chroma.chroma_embedding_manager import get_chroma_manager
+    except Exception as exc:
+        logger.warning("[promoter] entity semantic tier unavailable: %s", exc)
+        return []
+
+    try:
+        query_emb = np.array(embed_text(label.strip()), dtype=float)
+        query_n = float(np.linalg.norm(query_emb))
+        if query_n == 0.0:
+            return []
+        cm = get_chroma_manager()
+
+        # Top-K from both collections, then exact cosine per candidate
+        # (collection.query distances are L2 — same recompute pattern as
+        # the scan's tier 3 and the label-relax filter).
+        cand_ids: set[str] = set()
+        for collection in (cm.node_collection, cm.node_context_collection):
+            try:
+                res = collection.query(
+                    query_embeddings=[query_emb.tolist()],
+                    n_results=_ENTITY_SEMANTIC_TOP_K,
+                    include=["embeddings"],
+                )
+            except Exception:
+                continue
+            ids0 = (res.get("ids") or [[]])[0]
+            embs0 = (res.get("embeddings") or [[]])[0]
+            for cid, emb in zip(ids0, embs0):
+                if emb is None or len(emb) == 0:
+                    continue
+                v = np.array(emb, dtype=float)
+                n = float(np.linalg.norm(v))
+                if n == 0.0:
+                    continue
+                if float(np.dot(query_emb, v) / (query_n * n)) >= _ENTITY_SEMANTIC_SIM_THRESHOLD:
+                    cand_ids.add(str(cid))
+        if not cand_ids:
+            return []
+
+        cands = (
+            session.query(Node)
+            .filter(Node.id.in_(list(cand_ids)))
+            .filter(Node.node_type == node_type)
+            .all()
+        )
+        return [_snapshot_state_candidate(session, c) for c in cands[:5]]
+    except Exception as exc:
+        logger.warning("[promoter] entity semantic tier failed for %r: %s", label, exc)
+        return []
 
 
 def _park_on_disambiguation_if_present(
@@ -1142,20 +1245,25 @@ def _create_kg_node_from_proposal(
     # Failure-isolated — chroma down / model unavailable / embedding error
     # all log a warning and let the node persist. The backfill step
     # remains the safety net.
-    _embed_and_store_node(new.id, sentence_for_node)
+    _embed_and_store_node(new.id, new.label, sentence_for_node)
     return new
 
 
-def _embed_and_store_node(node_id: str, sentence: str) -> None:
-    """Compute the context embedding for a freshly-written node and store
-    it in ChromaDB's node_context_collection. No-op + warn on any failure.
+def _embed_and_store_node(node_id: str, label: str, sentence: str) -> None:
+    """Compute the label + context embeddings for a freshly-written node
+    and store them in ChromaDB. No-op + warn on any failure.
+
+    The label embedding was historically only written by
+    KnowledgeGraphUtils.add_node — a path the promoter doesn't use — which
+    is how the node_embeddings collection ended up EMPTY after the
+    embedding-schema reset (found 2026-06-10): the promoter creates nearly
+    every node now and only wrote context vectors. Both collections feed
+    the duplicate scan's tier 3 and the entity semantic tier (P2.3).
 
     Single responsibility: don't query, don't decide; just persist the
-    embedding for the given (node_id, sentence). The dedup pipelines that
-    consume these embeddings remain the policy layer.
+    embeddings. The dedup pipelines that consume them remain the policy
+    layer.
     """
-    if not sentence or not str(sentence).strip():
-        return
     try:
         from app.assistant.embeddings.embedder import embed_text
         from app.assistant.kg.chroma.chroma_embedding_manager import get_chroma_manager
@@ -1163,13 +1271,15 @@ def _embed_and_store_node(node_id: str, sentence: str) -> None:
         logger.warning("[promoter] embedding modules unavailable: %s", exc)
         return
     try:
-        emb = embed_text(sentence)
         cm = get_chroma_manager()
-        cm.store_node_context_embedding(node_id, sentence, emb)
+        if label and str(label).strip():
+            cm.store_node_embedding(node_id, label, embed_text(label))
+        if sentence and str(sentence).strip():
+            cm.store_node_context_embedding(node_id, sentence, embed_text(sentence))
     except Exception as exc:
         logger.warning(
             "[promoter] failed to embed/store node %s: %s "
-            "(falls back to periodic backfill)",
+            "(the periodic backfill step is the safety net)",
             node_id[:8] if node_id else "?", exc,
         )
 
@@ -1945,6 +2055,10 @@ def _prepare_proposal_plan(proposal_id: str) -> Optional[_PromoterPlan]:
     pedge_relations: List[Tuple[Optional[str], Optional[str]]] = []  # (source_pn_id, target_pn_id) per edge for state participants
     entity_resolutions: Dict[str, Optional[str]] = {}
     candidate_lists: Dict[str, List[Dict[str, Any]]] = {}
+    # Entity-like pnodes whose bind needs post-session node_merger
+    # confirmation (audit P2.3): person-category same-label hits with
+    # substantial edges + semantic near-matches with no exact hit.
+    entity_confirm_lists: Dict[str, List[Dict[str, Any]]] = {}
     representative_sentence: str = ""
     group_entity_labels: List[str] = []
     proposal_window_id: Optional[str] = None
@@ -2015,8 +2129,32 @@ def _prepare_proposal_plan(proposal_id: str) -> Optional[_PromoterPlan]:
         # already-resolved entity ids.
         for pn in pnodes:
             if pn.node_type in ENTITY_LIKE_TYPES and pn.node_type != "Property":
-                m = _resolve_entity_like(session, pn.label)
-                entity_resolutions[pn.id] = m.id if m else None
+                m = _resolve_entity_like(session, pn.label, pn.node_type)
+                if m is not None and _needs_person_confirm(session, m):
+                    # Two-Alexes guard (audit P2.3): a same-label bind to a
+                    # well-connected person needs node_merger confirmation
+                    # (post-session). Unconfirmed → create; a duplicate is
+                    # fixable, a wrong person-merge is not.
+                    # Known tradeoff: while unconfirmed, this entity is
+                    # absent from entity_resolutions, so THIS proposal's
+                    # State/Event participant fingerprints (computed below,
+                    # in-session) don't include it. Edges still resolve
+                    # correctly at apply time via the post-session decision.
+                    entity_resolutions[pn.id] = None
+                    entity_confirm_lists[pn.id] = [
+                        _snapshot_state_candidate(session, m)
+                    ]
+                elif m is not None:
+                    entity_resolutions[pn.id] = m.id
+                else:
+                    entity_resolutions[pn.id] = None
+                    # Semantic tier (audit P2.3): no exact label/alias hit —
+                    # near-matches ("the user's mom" vs "...mother") go to
+                    # the post-session node_merger instead of silently
+                    # minting a twin.
+                    sem = _semantic_entity_candidates(session, pn.label, pn.node_type)
+                    if sem:
+                        entity_confirm_lists[pn.id] = sem
 
         for pn in pnodes:
             if pn.node_type != "Property":
@@ -2177,11 +2315,26 @@ def _prepare_proposal_plan(proposal_id: str) -> Optional[_PromoterPlan]:
     # ---- Read session closed. Phase 2: LLM calls, no session held. ----
     nodes: Dict[str, _PreparedNode] = {}
 
-    # Entity-like nodes: decision is just match-or-create, no LLM.
+    # Entity-like nodes: exact resolutions are match-or-create with no LLM;
+    # confirm-tier pnodes (person same-label guard / semantic near-match,
+    # audit P2.3) go through node_merger — same machinery as State/Event.
     for pn_id, snap in pnode_snaps.items():
         if snap["node_type"] not in ENTITY_LIKE_TYPES:
             continue
         match_id = entity_resolutions.get(pn_id)
+        if match_id is None and entity_confirm_lists.get(pn_id):
+            new_node_ctx = {
+                "label": snap["label"],
+                "node_type": snap["node_type"],
+                "category": snap["category"],
+                "description": snap["description_draft"],
+                "original_sentence": snap["sentence"],
+                "source_window_id": proposal_window_id,
+                "source_window_text": proposal_window_text,
+            }
+            match_id = _call_node_merger_for_state_match(
+                new_node_ctx, entity_confirm_lists[pn_id],
+            )
         nodes[pn_id] = _PreparedNode(
             pn_id=pn_id,
             pn_label=snap["label"] or "",
@@ -2346,6 +2499,35 @@ def _evaluate_and_apply(
             ))
         else:
             if commit:
+                # Mint/match race guard (audit P2.6): the plan decided
+                # "create" against a read snapshot taken before the LLM
+                # calls; a concurrent run or manual approve may have minted
+                # this entity meanwhile. Cheap re-check inside the write
+                # txn; on hit, convert to match instead of double-minting.
+                # Property stays out: it is subject-scoped (never bound by
+                # global label) and resolves via _resolve_property only.
+                raced = (
+                    _resolve_entity_like(session, pn.label, pn.node_type)
+                    if pn.node_type != "Property" else None
+                )
+                if raced is not None and not _needs_person_confirm(session, raced):
+                    pn.resolved_node_id = raced.id
+                    pn.resolution_action = "matched_existing"
+                    _refresh_on_reobservation(raced, proposal, proposal_node=pn)
+                    _write_node_evidence(
+                        session,
+                        node_id=raced.id,
+                        proposal=proposal,
+                        proposal_node=pn,
+                        merge_action="confirmed",
+                    )
+                    dec.node_outcomes.append(_NodeOutcome(
+                        pn.id, "matched_existing", raced.id,
+                        f"{pn.node_type} {pn.label!r} matched {raced.id[:8]} "
+                        f"(created concurrently — race guard converted to match)",
+                    ))
+                    continue
+
                 new = _create_kg_node_from_proposal(session, pn, proposal.id)
                 pn.resolved_node_id = new.id
                 pn.resolution_action = "created_new"
