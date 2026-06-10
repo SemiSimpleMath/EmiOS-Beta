@@ -1,50 +1,10 @@
-kg_create_edge: Creates a relationship (edge) between two nodes in the knowledge graph.
+Create one relationship (edge) between two EXISTING nodes. Common
+relationship types: attended, located_at, works_for, has_child,
+part_of, occurred_at.
 
-**Purpose:** Establish a connection or relationship between two existing nodes.
-
-**Parameters:**
-- source_id (required): UUID of the source node
-- target_id (required): UUID of the target node
-- relationship_type (required): Type of relationship. Common types:
-  * attended: For event participation
-  * located_at: For location relationships
-  * works_for: For employment
-  * has_child / has_parent: For family relationships
-  * friend_of / spouse: For social relationships
-  * part_of: For hierarchical relationships
-  * occurred_at: For time/place of events
-- attributes (optional): Additional key-value pairs for the relationship
-- sentence (optional): Natural language description
-- confidence (optional): Confidence score (0.0-1.0)
-- importance (optional): Importance score (0.0-1.0)
-
-**Returns:**
-- success: Whether the creation succeeded
-- edge_id: UUID of the created edge
-- relationship_type: Type of the relationship
-- status: "created" or "found" (if edge already existed)
-- message: Description of what was done
-
-**Example Usage:**
-
-Connect person to event:
-```
-kg_create_edge(
-    source_id="person-uuid",
-    target_id="event-uuid",
-    relationship_type="attended",
-    sentence="Alex attended the wedding ceremony"
-)
-```
-
-Connect person to organization:
-```
-kg_create_edge(
-    source_id="person-uuid",
-    target_id="company-uuid",
-    relationship_type="works_for",
-    attributes={"role": "Software Engineer", "since": "2020-01-15"}
-)
-```
-
-**Note:** Both source and target nodes must already exist. Use kg_create_node first if needed.
+Audited: requires a non-empty `reason`; refuses missing endpoints,
+self-loops, and exact-duplicate edges (same source, target,
+relationship_type — use kg_delete_edge first if you mean to replace);
+writes the new edge to kg_revision_log so it can be reverted. Pass
+`dry_run: true` to preview without committing. Both nodes must already
+exist — use kg_create_node first if needed.

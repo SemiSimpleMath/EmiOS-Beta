@@ -1,51 +1,64 @@
 {
   "name": "kg_delete_node",
-  "description": "kg_delete_node: Deletes a node and all its connected edges from the knowledge graph.\n\n**Purpose:** Permanently remove a node from the knowledge graph. This is a DESTRUCTIVE operation.\n\n**⚠️ SAFETY CHECKS:** This tool has built-in safety checks to prevent accidental deletion of important nodes:\n1. **Edge Count Check**: Nodes with >10 edges require confirmation\n2. **Protected Types**: Person and Entity nodes require confirmation (personal data)\n3. **High Importance**: Nodes with importance >0.8 require confirmation\n\n**Parameters:**\n- node_id (required): UUID of the node to delete\n- confirm (optional, default=false): Set to true to bypass safety checks\n\n**Returns:**\n- success: Whether the deletion succeeded\n- node_id: UUID of the deleted node\n- deleted_label: Label of the deleted node\n- deleted_type: Type of the deleted node\n- edges_deleted: Number of edges removed\n- message: Description of what happened\n\n**Safety Check Response:**\nIf safety checks fail, you'll receive:\n- requires_confirmation: true\n- edge_count: Number of connections\n- node_label: Name of the node\n- node_type: Type of the node\n- message: Explanation of why confirmation is needed\n\n**Example Usage:**\n\nSimple deletion (low-risk node):\n```\nkg_delete_node(\n    node_id=\"abc-123-def-456\"\n)\n```\n\nDelete with confirmation (bypasses safety checks):\n```\nkg_delete_node(\n    node_id=\"abc-123-def-456\",\n    confirm=true\n)\n```\n\n**Best Practices:**\n1. Always describe the node first to verify you're deleting the right one\n2. Check edge count before deletion\n3. For highly connected nodes, consider if edges should be redirected first\n4. Use confirm=true only after careful consideration\n5. **ALWAYS use ask_user tool before deleting important nodes**",
+  "description": "Permanently delete a KG node AND all its edges. DESTRUCTIVE. Audited: requires a non-empty `reason`, refuses user-locked nodes (and nodes with user-locked edges), snapshots the node + every attached edge into kg_revision_log so the deletion can be reverted, and removes the node's label/context embeddings from Chroma. Pass `dry_run: true` to preview the node + edge count without committing. Best practice: describe the node first to confirm it's the right one; for duplicates prefer kg_merge_nodes (preserves history instead of destroying it).",
   "inputs": [
     {
       "name": "node_id",
       "type": "string",
       "required": true,
-      "description": ""
+      "description": "UUID of the node to delete."
     },
     {
-      "name": "confirm",
-      "type": "boolean",
+      "name": "reason",
+      "type": "string",
       "required": true,
-      "description": ""
+      "description": "Why this deletion is correct. Goes into kg_revision_log."
+    },
+    {
+      "name": "dry_run",
+      "type": "boolean",
+      "required": false,
+      "description": "Preview what would be deleted; do not commit. Default false."
+    },
+    {
+      "name": "finding_id",
+      "type": "string",
+      "required": false,
+      "description": "Source kg_maintenance_finding.id, if any."
     }
   ],
   "outputs": [
     {
       "path": "content",
       "type": "text",
-      "description": "Human-readable tool result text."
+      "description": "One-line summary of what happened."
     },
     {
       "path": "data",
       "type": "object",
-      "description": "Structured tool result payload."
+      "description": "{ok, revision_log_id, deleted_node_id, edges_deleted, chroma_cleaned} on commit; {ok, dry_run, before, after} on dry_run."
     }
   ],
-  "arguments_prompt": "Arguments for kg_delete_node:\n\nnode_id (required): The UUID of the node you want to delete\nconfirm (optional): Set to true to bypass safety checks\n\nExample (simple):\n{\n    \"node_id\": \"abc-123-def-456\"\n}\n\nExample (with confirmation):\n{\n    \"node_id\": \"abc-123-def-456\",\n    \"confirm\": true\n}",
+  "arguments_prompt": "Arguments for kg_delete_node:\n- node_id (required): UUID of the node to delete\n- reason (required): why this deletion is correct\n- dry_run (optional): preview only\n- finding_id (optional): source finding row id\n\nExample:\n{\n    \"node_id\": \"abc-123-def-456\",\n    \"reason\": \"Hallucinated node — no evidence row references it\"\n}",
   "metadata": {
     "min_authority": 95,
     "approval_min_authority": 95,
     "domain": "knowledge_graph",
     "actions": [
-      "operate"
+      "mutate",
+      "delete"
     ],
     "selectors": [
+      "node",
       "edge",
-      "graph",
-      "node"
+      "graph"
     ],
-    "risk_level": "low",
-    "side_effects": "read_only",
+    "risk_level": "high",
+    "side_effects": "write",
     "requires_auth": [],
-    "requires_network": true,
-    "cost_level": "medium",
-    "latency_class": "moderate",
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "fast",
     "front_door": false,
     "room_visibility_default": "conditional",
     "approval_required": false

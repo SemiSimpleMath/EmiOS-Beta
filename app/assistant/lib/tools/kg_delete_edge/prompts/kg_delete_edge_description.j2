@@ -1,20 +1,7 @@
-kg_delete_edge: Deletes a relationship (edge) from the knowledge graph.
+Delete one relationship (edge) from the knowledge graph. Does NOT
+delete the endpoint nodes.
 
-**Purpose:** Remove a specific connection between two nodes. This does NOT delete the nodes themselves.
-
-**Parameters:**
-- edge_id (required): UUID of the edge to delete
-
-**Returns:**
-- success: Whether the deletion succeeded
-- edge_id: UUID of the deleted edge
-- message: Description of what happened
-
-**Example Usage:**
-```
-kg_delete_edge(
-    edge_id="edge-uuid-here"
-)
-```
-
-**Note:** This is a low-risk operation compared to kg_delete_node. Deleting an edge only removes the relationship, not the nodes themselves.
+Audited: requires a non-empty `reason`; refuses user-locked edges and
+edges whose endpoint nodes are user-locked; snapshots the edge into
+kg_revision_log so the deletion can be reverted. Pass `dry_run: true`
+to preview without committing.

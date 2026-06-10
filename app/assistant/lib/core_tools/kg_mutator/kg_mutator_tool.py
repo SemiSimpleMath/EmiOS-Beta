@@ -1,10 +1,11 @@
 """KGMutatorTool — narrow typed mutators against the live KG, audit-wired.
 
-Backs nine tool names (one BaseTool, dispatched on tool_name):
+Backs ten tool names (one BaseTool, dispatched on tool_name):
 
   kg_merge_nodes(keep_id, fold_id, reason, dry_run=False)
   kg_rename_label(node_id, new_label, reason, dry_run=False)
   kg_update_node_field(node_id, field, value, reason, dry_run=False)
+  kg_delete_node(node_id, reason, dry_run=False)
   kg_delete_edge(edge_id, reason, dry_run=False)
   kg_create_state_node(owner_node_id, predicate, label, ..., reason, dry_run=False)
   kg_create_edge(source_id, target_id, relationship_type, ..., reason, dry_run=False)
@@ -20,6 +21,9 @@ Common contract:
     touching the KG.
   - Optional ``finding_id`` ties the revision back to its source
     kg_maintenance_finding row.
+  - Destructive ops refuse user-locked rows (``locked_by_user_at``,
+    the axiom layer): merge, rename, update_field, close_state,
+    delete_node, delete_edge. Additive ops (create_*) are exempt.
 
 Errors are surfaced as ToolResult(content="…", data={"ok": False, ...})
 rather than raised exceptions so the caller agent can react.
@@ -30,6 +34,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
+from sqlalchemy import or_
 from sqlalchemy import text as sql_text
 
 from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
@@ -126,6 +131,42 @@ def _edge_snapshot(edge: Edge) -> Dict[str, Any]:
         "sentence": getattr(edge, "sentence", None),
         "window_id": getattr(edge, "window_id", None),
     }
+
+
+def _refuse_if_locked(obj: Any, op: str) -> None:
+    """Axiom-layer guard: a non-NULL ``locked_by_user_at`` means the row is
+    user-locked and immune to automatic override (see the Node/Edge model
+    comments). Raises ValueError — execute() converts it into a refusal
+    ToolResult the calling agent can react to."""
+    locked_at = getattr(obj, "locked_by_user_at", None)
+    if locked_at is None:
+        return
+    kind = "edge" if isinstance(obj, Edge) else "node"
+    name = getattr(obj, "label", None) or getattr(obj, "relationship_type", None) or ""
+    raise ValueError(
+        f"Refusing {op}: {kind} {getattr(obj, 'id', '?')!r} ({name!r}) is user-locked "
+        f"(locked_by_user_at={locked_at.isoformat()}). Locked rows are immune to "
+        f"automatic override; the user must unlock it first."
+    )
+
+
+def _delete_chroma_vectors(node_id: str) -> bool:
+    """Remove a deleted node's label + context embeddings from Chroma.
+    Runs AFTER the SQLite commit (Chroma is not transactional with the DB),
+    so a failure here leaves ghost vectors — surface it loudly and report
+    the outcome in the tool result instead of pretending it worked."""
+    try:
+        from app.assistant.kg.chroma.chroma_embedding_manager import get_chroma_manager
+        cm = get_chroma_manager()
+        cm.delete_node_embedding(node_id)
+        cm.delete_node_context_embedding(node_id)
+        return True
+    except Exception as exc:
+        logger.error(
+            "Chroma embedding cleanup failed for deleted node %s — ghost vectors "
+            "remain in the label/context collections: %s", node_id, exc,
+        )
+        return False
 
 
 def _write_revision_log(
@@ -242,6 +283,8 @@ class KGMutatorTool(BaseTool):
                     f"node_type mismatch: keep={keep.node_type!r} fold={fold.node_type!r}; "
                     "merging across types is not allowed."
                 )
+            _refuse_if_locked(keep, "kg_merge_nodes")
+            _refuse_if_locked(fold, "kg_merge_nodes")
 
             # Edges to rewrite from fold → keep.
             in_edges = session.query(Edge).filter(Edge.target_id == fold_id).all()
@@ -393,6 +436,7 @@ class KGMutatorTool(BaseTool):
             node = session.query(Node).filter(Node.id == node_id).first()
             if node is None:
                 raise ValueError(f"node {node_id!r} not found")
+            _refuse_if_locked(node, "kg_rename_label")
             old_label = node.label
             if old_label == new_label:
                 return self.publish_result(ToolResult(
@@ -470,6 +514,7 @@ class KGMutatorTool(BaseTool):
             node = session.query(Node).filter(Node.id == node_id).first()
             if node is None:
                 raise ValueError(f"node {node_id!r} not found")
+            _refuse_if_locked(node, "kg_update_node_field")
 
             before = _node_snapshot(node)
             old_value = before.get(field)
@@ -542,6 +587,12 @@ class KGMutatorTool(BaseTool):
             edge = session.query(Edge).filter(Edge.id == edge_id).first()
             if edge is None:
                 raise ValueError(f"edge {edge_id!r} not found")
+            _refuse_if_locked(edge, "kg_delete_edge")
+            # An edge of a locked node is part of that node's locked facts.
+            for endpoint_id in (edge.source_id, edge.target_id):
+                endpoint = session.query(Node).filter(Node.id == endpoint_id).first()
+                if endpoint is not None:
+                    _refuse_if_locked(endpoint, "kg_delete_edge")
             before = _edge_snapshot(edge)
 
             if dry_run:
@@ -569,6 +620,93 @@ class KGMutatorTool(BaseTool):
                 content=f"Deleted edge {edge_id[:8]} ({before['relationship_type']}). revision_log_id={rid}",
                 data={"ok": True, "revision_log_id": rid, "deleted": before},
             ))
+
+    def handle_kg_delete_node(self, arguments: Dict[str, Any], tool_message: ToolMessage) -> ToolResult:
+        """Delete a node AND all its edges, snapshotting everything first.
+
+        The DB-level ON DELETE CASCADE from Edge.{source,target}_id to Node
+        was dropped 2026-05-10, so edges must be deleted explicitly here or
+        they orphan. The node's label + context embeddings are removed from
+        Chroma after the commit (Chroma is not transactional with SQLite).
+
+        Required: node_id, reason.
+        Optional: finding_id, dry_run.
+        Refuses: missing node, user-locked node, node with user-locked edges.
+        """
+        node_id = str(arguments.get("node_id") or "").strip()
+        if not node_id:
+            raise ValueError("`node_id` is required.")
+        reason = self._require_reason(arguments)
+        dry_run = bool(arguments.get("dry_run", False))
+        finding_id = arguments.get("finding_id") or None
+
+        with get_db_manager().transaction(op="kg_mutator.delete_node") as session:
+            node = session.query(Node).filter(Node.id == node_id).first()
+            if node is None:
+                raise ValueError(f"node {node_id!r} not found")
+            _refuse_if_locked(node, "kg_delete_node")
+
+            edges = (
+                session.query(Edge)
+                .filter(or_(Edge.source_id == node_id, Edge.target_id == node_id))
+                .all()
+            )
+            # Deleting the node would destroy any locked edge attached to it.
+            for e in edges:
+                _refuse_if_locked(e, "kg_delete_node")
+
+            before = {
+                "node": _node_snapshot(node),
+                "edges": [_edge_snapshot(e) for e in edges],
+            }
+            label = node.label
+
+            if dry_run:
+                return self.publish_result(ToolResult(
+                    result_type="kg_delete_node",
+                    content=(
+                        f"DRY RUN: would delete node {label!r} ({node_id[:8]}) "
+                        f"and its {len(edges)} edge(s), plus its Chroma embeddings."
+                    ),
+                    data={"ok": True, "dry_run": True, "before": before, "after": "DELETED"},
+                ))
+
+            for e in edges:
+                session.delete(e)
+            session.flush()
+            session.delete(node)
+
+            rid = _write_revision_log(
+                session=session,
+                op="delete_node",
+                args={"node_id": node_id, "finding_id": finding_id},
+                before=before,
+                after="DELETED",
+                reason=reason,
+                finding_id=finding_id,
+                agent_id=self._agent_id(tool_message),
+            )
+            edge_count = len(edges)
+
+        # Post-commit: Chroma cleanup (best-effort by necessity; failures are
+        # logged at ERROR and reported in the result, never hidden).
+        chroma_cleaned = _delete_chroma_vectors(node_id)
+
+        return self.publish_result(ToolResult(
+            result_type="kg_delete_node",
+            content=(
+                f"Deleted node {label!r} ({node_id[:8]}) and {edge_count} edge(s). "
+                f"Chroma embeddings {'removed' if chroma_cleaned else 'CLEANUP FAILED — ghost vectors remain'}. "
+                f"revision_log_id={rid}"
+            ),
+            data={
+                "ok": True,
+                "revision_log_id": rid,
+                "deleted_node_id": node_id,
+                "edges_deleted": edge_count,
+                "chroma_cleaned": chroma_cleaned,
+            },
+        ))
 
     # ---- create-side mutations (option-A leeway, 2026-04-30) -------------------
 
@@ -726,7 +864,7 @@ class KGMutatorTool(BaseTool):
         already exists between them.
 
         Required: source_id, target_id, relationship_type, reason.
-        Optional: sentence, relationship_descriptor, finding_id, dry_run.
+        Optional: sentence, finding_id, dry_run.
         """
         source_id = str(arguments.get("source_id") or "").strip()
         target_id = str(arguments.get("target_id") or "").strip()
@@ -739,7 +877,6 @@ class KGMutatorTool(BaseTool):
         dry_run = bool(arguments.get("dry_run", False))
         finding_id = arguments.get("finding_id") or None
         sentence = arguments.get("sentence")
-        descriptor = arguments.get("relationship_descriptor")
 
         with get_db_manager().transaction(op="kg_mutator.create_edge") as session:
             src = session.query(Node).filter(Node.id == source_id).first()
@@ -772,7 +909,6 @@ class KGMutatorTool(BaseTool):
                 "target_id": target_id,
                 "relationship_type": relationship_type,
                 "sentence": sentence,
-                "relationship_descriptor": descriptor,
             }
             before = "ABSENT"
 
@@ -792,7 +928,6 @@ class KGMutatorTool(BaseTool):
                 target_id=target_id,
                 relationship_type=relationship_type,
                 sentence=sentence,
-                relationship_descriptor=descriptor,
             )
             session.add(new_edge)
             session.flush()
@@ -856,6 +991,7 @@ class KGMutatorTool(BaseTool):
                     f"node_type={node.node_type!r} is not closeable; "
                     f"close_state expects one of {sorted(self._ALLOWED_NEW_NODE_TYPES)}."
                 )
+            _refuse_if_locked(node, "kg_close_state")
             if node.end_date is not None and not force:
                 raise ValueError(
                     f"node {node_id!r} already has end_date={node.end_date.isoformat()}. "

@@ -9,7 +9,11 @@ op vocabulary (current):
   - "merge_nodes"          fold one node into another
   - "rename_label"         change a node's label (typo fix; never collides)
   - "update_node_field"    narrow per-field edit (alias add, date fix, etc.)
+  - "delete_node"          remove a node + all its edges (full snapshot)
   - "delete_edge"          remove a single edge
+  - "create_edge"          add one edge between existing nodes
+  - "create_state_node"    add a State/Event node + its owner edge
+  - "close_state"          set end_date on a State/Event node
   - "split_state"          undo a wrong-merge: replace one State/Event hub
                            with N new nodes, rerouting each edge to the
                            right new node. before_json captures the old

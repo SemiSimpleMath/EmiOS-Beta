@@ -1,52 +1,11 @@
-kg_delete_node: Deletes a node and all its connected edges from the knowledge graph.
+Permanently delete a KG node AND all its edges. DESTRUCTIVE — prefer
+kg_merge_nodes for duplicates (it preserves history instead of
+destroying it).
 
-**Purpose:** Permanently remove a node from the knowledge graph. This is a DESTRUCTIVE operation.
+Audited: requires a non-empty `reason`; refuses user-locked nodes and
+nodes with user-locked edges; snapshots the node + every attached edge
+into kg_revision_log so the deletion can be reverted; removes the
+node's embeddings. Pass `dry_run: true` to preview the node + edge
+count without committing.
 
-**⚠️ SAFETY CHECKS:** This tool has built-in safety checks to prevent accidental deletion of important nodes:
-1. **Edge Count Check**: Nodes with >10 edges require confirmation
-2. **Protected Types**: Person and Entity nodes require confirmation (personal data)
-3. **High Importance**: Nodes with importance >0.8 require confirmation
-
-**Parameters:**
-- node_id (required): UUID of the node to delete
-- confirm (optional, default=false): Set to true to bypass safety checks
-
-**Returns:**
-- success: Whether the deletion succeeded
-- node_id: UUID of the deleted node
-- deleted_label: Label of the deleted node
-- deleted_type: Type of the deleted node
-- edges_deleted: Number of edges removed
-- message: Description of what happened
-
-**Safety Check Response:**
-If safety checks fail, you'll receive:
-- requires_confirmation: true
-- edge_count: Number of connections
-- node_label: Name of the node
-- node_type: Type of the node
-- message: Explanation of why confirmation is needed
-
-**Example Usage:**
-
-Simple deletion (low-risk node):
-```
-kg_delete_node(
-    node_id="abc-123-def-456"
-)
-```
-
-Delete with confirmation (bypasses safety checks):
-```
-kg_delete_node(
-    node_id="abc-123-def-456",
-    confirm=true
-)
-```
-
-**Best Practices:**
-1. Always describe the node first to verify you're deleting the right one
-2. Check edge count before deletion
-3. For highly connected nodes, consider if edges should be redirected first
-4. Use confirm=true only after careful consideration
-5. **ALWAYS use ask_user tool before deleting important nodes**
+Best practice: describe the node first to confirm it's the right one.

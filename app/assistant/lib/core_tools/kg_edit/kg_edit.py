@@ -1,8 +1,11 @@
 """
 KG Edit Tool
 
-Unified tool for editing and deleting knowledge graph nodes and edges.
-Similar to kg_search but for write operations.
+Backs the kg_create_node and kg_update_node tool names. The destructive
+ops (kg_delete_node, kg_delete_edge) and kg_create_edge moved to
+KGMutatorTool 2026-06-10 — that path is audited (kg_revision_log,
+required reason, dry_run, locked_by_user_at enforcement); this one
+is not.
 """
 from typing import Dict, Any
 import uuid
@@ -145,19 +148,6 @@ class KGEdit(BaseTool):
         # For create operations, we need to implement this
         return self.handle_kg_node_create(arguments, tool_message)
 
-    def handle_kg_create_edge(self, arguments: Dict[str, Any], tool_message: ToolMessage) -> ToolResult:
-        """Handle kg_create_edge tool calls."""
-        # For create operations, we need to implement this
-        return self.handle_kg_edge_create(arguments, tool_message)
-
-    def handle_kg_delete_node(self, arguments: Dict[str, Any], tool_message: ToolMessage) -> ToolResult:
-        """Handle kg_delete_node tool calls."""
-        return self.handle_kg_delete_node(arguments, tool_message)
-
-    def handle_kg_delete_edge(self, arguments: Dict[str, Any], tool_message: ToolMessage) -> ToolResult:
-        """Handle kg_delete_edge tool calls."""
-        return self.handle_kg_delete_edge(arguments, tool_message)
-
     # ---------------------- NODE CREATE OPERATIONS ----------------------
 
     def handle_kg_node_create(self, arguments: Dict[str, Any], tool_message: ToolMessage) -> ToolResult:
@@ -239,94 +229,6 @@ class KGEdit(BaseTool):
                 ToolResult(
                     result_type="kg_create_node_error",
                     content=f"Failed to create node: {e}",
-                    data={"success": False, "error": str(e)}
-                )
-            )
-
-    def handle_kg_edge_create(self, arguments: Dict[str, Any], tool_message: ToolMessage) -> ToolResult:
-        """Create a new edge in the knowledge graph."""
-        try:
-            logger.debug(f"[kg_edge_create] Received arguments: {json.dumps(arguments, ensure_ascii=False)}")
-            
-            # Extract required fields
-            source_id = arguments.get("source_id")
-            target_id = arguments.get("target_id")
-            relationship_type = arguments.get("relationship_type")
-            
-            if not all([source_id, target_id, relationship_type]):
-                raise ValueError("Missing required fields: source_id, target_id, relationship_type")
-
-            # Convert to UUIDs
-            try:
-                source_id = uuid.UUID(source_id)
-                target_id = uuid.UUID(target_id)
-            except ValueError as e:
-                raise ValueError(f"Invalid UUID format: {e}")
-
-            # Extract optional fields
-            attributes = arguments.get("attributes", {})
-            sentence = arguments.get("sentence")
-            confidence = arguments.get("confidence")
-            importance = arguments.get("importance")
-            source = arguments.get("source")
-
-            # Build edge data
-            edge_data = {
-                "source_id": source_id,
-                "target_id": target_id,
-                "relationship_type": relationship_type,
-                "attributes": attributes,
-                "sentence": sentence,
-                "confidence": confidence,
-                "importance": importance,
-                "source": source,
-            }
-
-            # Remove None values
-            edge_data = {k: v for k, v in edge_data.items() if v is not None}
-
-            # Convert UUIDs to strings for logging
-            log_data = edge_data.copy()
-            if 'source_id' in log_data:
-                log_data['source_id'] = str(log_data['source_id'])
-            if 'target_id' in log_data:
-                log_data['target_id'] = str(log_data['target_id'])
-            
-            logger.debug(f"[kg_edge_create] Creating edge with data: {json.dumps(log_data, ensure_ascii=False)}")
-            
-            # Create the edge
-            new_edge, status = self.kg_utils.safe_add_relationship_by_id(**edge_data)
-            
-            # Commit changes
-            self.session.commit()
-            logger.info(f"✅ Successfully created edge '{relationship_type}' (ID: {new_edge.id})")
-
-            result_payload = {
-                "success": True,
-                "edge_id": str(new_edge.id),
-                "source_id": str(source_id),
-                "target_id": str(target_id),
-                "relationship_type": relationship_type,
-                "status": status,
-                "message": f"Successfully created edge '{relationship_type}' (status: {status})"
-            }
-
-            return self.publish_result(
-                ToolResult(
-                    result_type="kg_create_edge",
-                    content=f"Created edge '{relationship_type}'",
-                    data=result_payload
-                )
-            )
-
-        except Exception as e:
-            self.session.rollback()
-            logger.error("❌ Failed to create edge: %s", e)
-            logger.debug("failed to create edge exception details", exc_info=True)
-            return self.publish_error(
-                ToolResult(
-                    result_type="kg_create_edge_error",
-                    content=f"Failed to create edge: {e}",
                     data={"success": False, "error": str(e)}
                 )
             )
@@ -562,122 +464,6 @@ class KGEdit(BaseTool):
                 ToolResult(
                     result_type="kg_edge_edit_error",
                     content=f"Failed to edit edge: {e}",
-                    data={"success": False, "error": str(e)}
-                )
-            )
-
-    def handle_kg_delete_node(self, arguments: Dict[str, Any], tool_message: ToolMessage) -> ToolResult:
-        """Delete a node from the knowledge graph."""
-        try:
-            logger.debug(f"[kg_delete_node] Received arguments: {json.dumps(arguments, ensure_ascii=False)}")
-            
-            node_id_str = arguments.get("node_id")
-            if not node_id_str:
-                raise ValueError("Missing required field: node_id")
-
-            # Convert to UUID
-            try:
-                node_id = uuid.UUID(node_id_str)
-            except ValueError:
-                raise ValueError(f"Invalid node_id format: {node_id_str}")
-
-            # Get the node first
-            node = self.kg_utils.get_node_by_id(node_id)
-            if not node:
-                raise ValueError(f"Node not found: {node_id}")
-
-            node_label = node.label
-            logger.info(f"🗑️ Deleting node '{node_label}' (ID: {node_id})")
-
-            # Use the existing kg_tools.delete_node function which handles CASCADE properly
-            from app.assistant.kg_core.kg_utils.kg_tools import delete_node
-            delete_node(node_id, self.session)
-
-            # Commit changes
-            self.session.commit()
-            logger.info(f"✅ Successfully deleted node '{node_label}' and all its edges")
-
-            result_payload = {
-                "success": True,
-                "node_id": str(node_id),
-                "label": node_label,
-                "message": f"Successfully deleted node '{node_label}'"
-            }
-
-            return self.publish_result(
-                ToolResult(
-                    result_type="kg_delete_node",
-                    content=f"Deleted node '{node_label}'",
-                    data=result_payload
-                )
-            )
-
-        except Exception as e:
-            self.session.rollback()
-            logger.error("❌ Failed to delete node: %s", e)
-            logger.debug("failed to delete node exception details", exc_info=True)
-            return self.publish_error(
-                ToolResult(
-                    result_type="kg_delete_node_error",
-                    content=f"Failed to delete node: {e}",
-                    data={"success": False, "error": str(e)}
-                )
-            )
-
-    def handle_kg_delete_edge(self, arguments: Dict[str, Any], tool_message: ToolMessage) -> ToolResult:
-        """Delete an edge from the knowledge graph."""
-        try:
-            logger.debug(f"[kg_delete_edge] Received arguments: {json.dumps(arguments, ensure_ascii=False)}")
-            
-            edge_id_str = arguments.get("edge_id")
-            if not edge_id_str:
-                raise ValueError("Missing required field: edge_id")
-
-            # Convert to UUID
-            try:
-                edge_id = uuid.UUID(edge_id_str)
-            except ValueError:
-                raise ValueError(f"Invalid edge_id format: {edge_id_str}")
-
-            # Get the edge first using direct SQLAlchemy query
-            from app.assistant.kg.db.knowledge_graph_db_sqlite import Edge
-            edge = self.session.query(Edge).filter(Edge.id == edge_id).first()
-            if not edge:
-                raise ValueError(f"Edge not found: {edge_id}")
-
-            edge_type = edge.relationship_type
-            logger.info(f"🗑️ Deleting edge '{edge_type}' (ID: {edge_id})")
-
-            # Delete the edge using direct SQLAlchemy
-            self.session.delete(edge)
-
-            # Commit changes
-            self.session.commit()
-            logger.info(f"✅ Successfully deleted edge '{edge_type}'")
-
-            result_payload = {
-                "success": True,
-                "edge_id": str(edge_id),
-                "relationship_type": edge_type,
-                "message": f"Successfully deleted edge '{edge_type}'"
-            }
-
-            return self.publish_result(
-                ToolResult(
-                    result_type="kg_delete_edge",
-                    content=f"Deleted edge '{edge_type}'",
-                    data=result_payload
-                )
-            )
-
-        except Exception as e:
-            self.session.rollback()
-            logger.error("❌ Failed to delete edge: %s", e)
-            logger.debug("failed to delete edge exception details", exc_info=True)
-            return self.publish_error(
-                ToolResult(
-                    result_type="kg_delete_edge_error",
-                    content=f"Failed to delete edge: {e}",
                     data={"success": False, "error": str(e)}
                 )
             )

@@ -1,75 +1,81 @@
 {
   "name": "kg_create_edge",
-  "description": "kg_create_edge: Creates a relationship (edge) between two nodes in the knowledge graph.\n\n**Purpose:** Establish a connection or relationship between two existing nodes.\n\n**Parameters:**\n- source_id (required): UUID of the source node\n- target_id (required): UUID of the target node\n- relationship_type (required): Type of relationship. Common types:\n  * attended: For event participation\n  * located_at: For location relationships\n  * works_for: For employment\n  * has_child / has_parent: For family relationships\n  * friend_of / spouse: For social relationships\n  * part_of: For hierarchical relationships\n  * occurred_at: For time/place of events\n- attributes (optional): Additional key-value pairs for the relationship\n- sentence (optional): Natural language description\n- confidence (optional): Confidence score (0.0-1.0)\n- importance (optional): Importance score (0.0-1.0)\n\n**Returns:**\n- success: Whether the creation succeeded\n- edge_id: UUID of the created edge\n- relationship_type: Type of the relationship\n- status: \"created\" or \"found\" (if edge already existed)\n- message: Description of what was done\n\n**Example Usage:**\n\nConnect person to event:\n```\nkg_create_edge(\n    source_id=\"person-uuid\",\n    target_id=\"event-uuid\",\n    relationship_type=\"attended\",\n    sentence=\"Jukka attended the wedding ceremony\"\n)\n```\n\nConnect person to organization:\n```\nkg_create_edge(\n    source_id=\"person-uuid\",\n    target_id=\"company-uuid\",\n    relationship_type=\"works_for\",\n    attributes={\"role\": \"Software Engineer\", \"since\": \"2020-01-15\"}\n)\n```\n\n**Note:** Both source and target nodes must already exist. Use kg_create_node first if needed.",
+  "description": "Create one relationship (edge) between two EXISTING nodes. Audited: requires a non-empty `reason`, refuses missing endpoints, self-loops, and exact-duplicate edges (same source, target, relationship_type — use kg_delete_edge first if you mean to replace), and writes the new edge to kg_revision_log so it can be reverted. Common relationship types: attended, located_at, works_for, has_child, part_of, occurred_at. Pass `dry_run: true` to preview without committing. Both nodes must already exist — use kg_create_node first if needed.",
   "inputs": [
     {
       "name": "source_id",
       "type": "string",
       "required": true,
-      "description": ""
+      "description": "UUID of the source node."
     },
     {
       "name": "target_id",
       "type": "string",
       "required": true,
-      "description": ""
+      "description": "UUID of the target node."
     },
     {
       "name": "relationship_type",
       "type": "string",
       "required": true,
-      "description": ""
+      "description": "Predicate, e.g. 'works_for', 'attended', 'located_at'."
+    },
+    {
+      "name": "reason",
+      "type": "string",
+      "required": true,
+      "description": "Why this edge is correct. Goes into kg_revision_log."
     },
     {
       "name": "sentence",
       "type": "string",
-      "required": true,
-      "description": ""
+      "required": false,
+      "description": "Natural-language statement of the relationship."
     },
     {
-      "name": "confidence",
-      "type": "number",
-      "required": true,
-      "description": ""
+      "name": "dry_run",
+      "type": "boolean",
+      "required": false,
+      "description": "Preview the edge; do not commit. Default false."
     },
     {
-      "name": "importance",
-      "type": "number",
-      "required": true,
-      "description": ""
+      "name": "finding_id",
+      "type": "string",
+      "required": false,
+      "description": "Source kg_maintenance_finding.id, if any."
     }
   ],
   "outputs": [
     {
       "path": "content",
       "type": "text",
-      "description": "Human-readable tool result text."
+      "description": "One-line summary of what happened."
     },
     {
       "path": "data",
       "type": "object",
-      "description": "Structured tool result payload."
+      "description": "{ok, revision_log_id, new_edge_id} on commit; {ok, dry_run, before, after} on dry_run."
     }
   ],
-  "arguments_prompt": "Arguments for kg_create_edge:\n\nsource_id (required): UUID of the source node\ntarget_id (required): UUID of the target node\nrelationship_type (required): Type of relationship (e.g., 'attended', 'works_for', 'located_at')\nattributes (optional): Additional key-value pairs for the relationship\nsentence (optional): Natural language description of the relationship\nconfidence (optional): Confidence score 0.0-1.0\nimportance (optional): Importance score 0.0-1.0\n\nExample:\n{\n    \"source_id\": \"abc-123-def-456\",\n    \"target_id\": \"xyz-789-uvw-012\",\n    \"relationship_type\": \"attended\",\n    \"sentence\": \"Jukka attended the wedding\"\n}",
+  "arguments_prompt": "Arguments for kg_create_edge:\n- source_id (required): UUID of the source node\n- target_id (required): UUID of the target node\n- relationship_type (required): predicate, e.g. 'works_for'\n- reason (required): why this edge is correct\n- sentence (optional): natural-language statement\n- dry_run (optional): preview only\n- finding_id (optional): source finding row id\n\nExample:\n{\n    \"source_id\": \"person-uuid\",\n    \"target_id\": \"company-uuid\",\n    \"relationship_type\": \"works_for\",\n    \"reason\": \"User stated employment in chat on 2026-06-01\",\n    \"sentence\": \"Alex works for Acme\"\n}",
   "metadata": {
     "min_authority": 95,
     "approval_min_authority": 95,
     "domain": "knowledge_graph",
     "actions": [
-      "operate"
+      "mutate",
+      "create"
     ],
     "selectors": [
       "edge",
-      "graph",
-      "node"
+      "graph"
     ],
-    "risk_level": "low",
-    "side_effects": "read_only",
+    "risk_level": "medium",
+    "side_effects": "write",
     "requires_auth": [],
-    "requires_network": true,
-    "cost_level": "medium",
-    "latency_class": "moderate",
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "fast",
     "front_door": false,
     "room_visibility_default": "conditional",
     "approval_required": false

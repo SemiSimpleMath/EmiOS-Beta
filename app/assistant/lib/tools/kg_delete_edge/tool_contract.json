@@ -1,45 +1,63 @@
 {
   "name": "kg_delete_edge",
-  "description": "kg_delete_edge: Deletes a relationship (edge) from the knowledge graph.\n\n**Purpose:** Remove a specific connection between two nodes. This does NOT delete the nodes themselves.\n\n**Parameters:**\n- edge_id (required): UUID of the edge to delete\n\n**Returns:**\n- success: Whether the deletion succeeded\n- edge_id: UUID of the deleted edge\n- message: Description of what happened\n\n**Example Usage:**\n```\nkg_delete_edge(\n    edge_id=\"edge-uuid-here\"\n)\n```\n\n**Note:** This is a low-risk operation compared to kg_delete_node. Deleting an edge only removes the relationship, not the nodes themselves.",
+  "description": "Delete one relationship (edge) from the knowledge graph. Does NOT delete the endpoint nodes. Audited: requires a non-empty `reason`, refuses user-locked edges and edges whose endpoint nodes are user-locked, and snapshots the edge into kg_revision_log so the deletion can be reverted. Pass `dry_run: true` to preview without committing.",
   "inputs": [
     {
       "name": "edge_id",
       "type": "string",
       "required": true,
-      "description": ""
+      "description": "UUID of the edge to delete."
+    },
+    {
+      "name": "reason",
+      "type": "string",
+      "required": true,
+      "description": "Why this deletion is correct. Goes into kg_revision_log."
+    },
+    {
+      "name": "dry_run",
+      "type": "boolean",
+      "required": false,
+      "description": "Preview the deletion; do not commit. Default false."
+    },
+    {
+      "name": "finding_id",
+      "type": "string",
+      "required": false,
+      "description": "Source kg_maintenance_finding.id, if any."
     }
   ],
   "outputs": [
     {
       "path": "content",
       "type": "text",
-      "description": "Human-readable tool result text."
+      "description": "One-line summary of what happened."
     },
     {
       "path": "data",
       "type": "object",
-      "description": "Structured tool result payload."
+      "description": "{ok, revision_log_id, deleted} on commit; {ok, dry_run, before, after} on dry_run."
     }
   ],
-  "arguments_prompt": "Arguments for kg_delete_edge:\n\nedge_id (required): The UUID of the edge you want to delete\n\nExample:\n{\n    \"edge_id\": \"edge-abc-123-def-456\"\n}",
+  "arguments_prompt": "Arguments for kg_delete_edge:\n- edge_id (required): UUID of the edge to delete\n- reason (required): why this deletion is correct\n- dry_run (optional): preview only\n- finding_id (optional): source finding row id\n\nExample:\n{\n    \"edge_id\": \"edge-abc-123-def-456\",\n    \"reason\": \"Duplicate of edge xyz — same fact asserted twice\"\n}",
   "metadata": {
     "min_authority": 95,
     "approval_min_authority": 95,
     "domain": "knowledge_graph",
     "actions": [
-      "operate"
+      "mutate",
+      "delete"
     ],
     "selectors": [
       "edge",
-      "graph",
-      "node"
+      "graph"
     ],
-    "risk_level": "low",
-    "side_effects": "read_only",
+    "risk_level": "high",
+    "side_effects": "write",
     "requires_auth": [],
-    "requires_network": true,
-    "cost_level": "medium",
-    "latency_class": "moderate",
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "fast",
     "front_door": false,
     "room_visibility_default": "conditional",
     "approval_required": false
