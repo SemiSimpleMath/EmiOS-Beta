@@ -49,13 +49,17 @@ def upsert_finding(
     initial_status: str = "pending",
 ) -> tuple[str, bool]:
     """
-    Insert a new finding, or skip if a pending/approved one already exists for
-    the same (finding_type, primary_node_id, secondary_node_id) triple.
+    Insert a new finding, or skip if a pending/approved/investigated one
+    already exists for the same (finding_type, primary_node_id,
+    secondary_node_id) triple.
 
-    "Approved" findings count as open work (the user has flagged them for
-    action but they haven't been resolved yet), so re-raising them as fresh
-    pending rows would just flood the queue. Rejected and executed rows do
-    NOT block re-raising — if the issue comes back, the scan should catch it.
+    "Approved" and "investigated" findings count as open work (the issue is
+    flagged or its fix is queued for the executor but hasn't been resolved
+    yet), so re-raising them as fresh pending rows would just flood the
+    queue — e.g. the nightly wiki critic re-flagging the same contradiction
+    every refresh while the first finding waits out its 24h grace window.
+    Rejected and executed rows do NOT block re-raising — if the issue comes
+    back, the scan should catch it.
 
     Normalises node pair ordering so (A,B) and (B,A) produce the same dedup key.
     Returns (finding_id, created) where created=False means it was a duplicate skip.
@@ -73,7 +77,7 @@ def upsert_finding(
                 KGMaintenanceFinding.finding_type == finding_type,
                 KGMaintenanceFinding.primary_node_id == primary_node_id,
                 KGMaintenanceFinding.secondary_node_id == secondary_node_id,
-                KGMaintenanceFinding.status.in_(("pending", "approved")),
+                KGMaintenanceFinding.status.in_(("pending", "approved", "investigated")),
             )
             .first()
         )
