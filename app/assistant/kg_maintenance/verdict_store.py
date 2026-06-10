@@ -18,7 +18,7 @@ Single-node verdicts ('verified', 'false_positive', 'irrelevant',
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Tuple
 
 from sqlalchemy import and_, or_
@@ -38,6 +38,13 @@ VALID_VERDICT_TYPES = {
     "obsolete",          # single-node: finding refers to since-superseded data
     "irrelevant",        # single-node: finding type doesn't apply
 }
+
+# Nano-tier (triage) verdicts expire: a wrong nano "distinct" must not
+# suppress a true duplicate forever (audit P1.4; 90d default per P4.3).
+# Expiry happens in the LOADER — rows are never deleted, and verdicts from
+# the investigator / cluster resolver / user stay permanent.
+NANO_TRIAGE_DECIDED_BY = "kg_maintenance::duplicate_triage"
+NANO_VERDICT_TTL_DAYS = 90
 
 
 def canonical_pair(node_id_a: str, node_id_b: Optional[str]) -> Tuple[str, Optional[str]]:
@@ -66,18 +73,21 @@ def record_verdict(
 ) -> Optional[str]:
     """Insert a new verdict row. Returns the new verdict's id.
 
-    node_ids: 1-3 ids. For pairwise verdicts (verdict_type='distinct'),
+    node_ids: 1-2 ids. For pairwise verdicts (verdict_type='distinct'),
     pass exactly 2; the helper canonicalizes their order. For single-node
-    verdicts, pass 1 (or more — only the first is used as node_id_a; the
-    rest are ignored since the schema is single+pair).
+    verdicts, pass 1. More than 2 is rejected (the row holds at most a
+    pair; the final_answer form enforces the same cap).
 
-    Caller responsibilities:
-    - Validate verdict_type in VALID_VERDICT_TYPES (we log a warning
-      but accept unknown types so the LLM can extend the vocabulary
-      without blocking the write).
-    - Pass a non-empty memo and at least one node_id.
+    verdict_type is a CLOSED vocabulary (VALID_VERDICT_TYPES) — unknown
+    types are rejected with None, not accepted, because downstream
+    filters match on these exact strings.
 
-    Returns None if the input is malformed (no node_ids, blank memo).
+    Uniqueness (audit P1.4): at most one ACTIVE verdict per
+    (node_id_a, node_id_b, verdict_type). An existing active row for the
+    same key is superseded by the new write — newer investigation wins.
+
+    Returns None if the input is malformed (no node_ids, blank memo,
+    unknown type, >2 ids).
     """
     if not node_ids:
         logger.warning("[verdict_store] record_verdict skipped — no node_ids")
@@ -117,6 +127,25 @@ def record_verdict(
     a, b = canonical_pair(a, b)
 
     with get_db_manager().transaction(op="verdict_store.record") as session:
+        # Active-uniqueness: supersede any live verdict for the same
+        # (a, b, type) so exactly one active row answers each question.
+        # Supersede (not skip) — the new verdict carries newer evidence.
+        stale_q = (
+            session.query(KGNodeVerdict)
+            .filter(
+                KGNodeVerdict.node_id_a == a,
+                (KGNodeVerdict.node_id_b == b) if b is not None
+                else KGNodeVerdict.node_id_b.is_(None),
+                KGNodeVerdict.verdict_type == verdict_type,
+                KGNodeVerdict.superseded_at.is_(None),
+            )
+        )
+        for stale in stale_q.all():
+            stale.superseded_at = utc_now()
+            stale.superseded_reason = (
+                f"superseded by newer {verdict_type} verdict from {decided_by}"
+            )
+
         v = KGNodeVerdict(
             node_id_a=a,
             node_id_b=b,
@@ -139,7 +168,7 @@ def record_verdict(
 
 
 def record_distinct_pairs_bulk(
-    pairs: List[Tuple[str, str]],
+    pairs: List[Tuple[str, str]] | List[Tuple[str, str, Optional[str]]],
     *,
     decided_by: str,
     memo: str,
@@ -152,13 +181,29 @@ def record_distinct_pairs_bulk(
     maintenance run. Without this, the scan paid full LLM cost on the same
     ~24k pairs week after week.
 
+    Each pair is (a, b) or (a, b, reasoning) — the optional third element
+    persists the decider's per-pair reason into the reasoning column
+    (audit P1.4: these are long-lived decisions and used to carry no audit
+    trail). The shared ``reasoning`` kwarg applies to pairs without one.
+
     Skips pairs that already have a non-superseded 'distinct' verdict
     (no point bloating the verdict table with duplicate rows).
 
     Returns the count of newly-inserted verdicts.
     """
-    canon = [canonical_pair(a, b) for a, b in pairs if a and b]
-    canon = [(a, b) for a, b in canon if b is not None]
+    canon: List[Tuple[str, str]] = []
+    reason_by_pair: dict[Tuple[str, str], str] = {}
+    for p in pairs:
+        a, b = p[0], p[1]
+        if not a or not b:
+            continue
+        ca, cb = canonical_pair(a, b)
+        if cb is None:
+            continue
+        canon.append((ca, cb))
+        per_pair = p[2] if len(p) > 2 else None
+        if per_pair:
+            reason_by_pair[(ca, cb)] = str(per_pair)
     if not canon:
         return 0
 
@@ -188,7 +233,7 @@ def record_distinct_pairs_bulk(
                     node_id_b=b,
                     verdict_type="distinct",
                     memo=memo,
-                    reasoning=reasoning,
+                    reasoning=reason_by_pair.get((a, b), reasoning),
                     decided_by=decided_by,
                 )
             )
@@ -286,13 +331,26 @@ def load_distinct_pairs() -> set[Tuple[str, str]]:
     so callers can do `(a, b) in distinct_pairs` after canonicalizing
     locally. Used by duplicate_scan to filter hundreds of candidate
     pairs against the verdict table without N round-trips.
+
+    Nano-triage verdicts older than NANO_VERDICT_TTL_DAYS are treated as
+    expired here (audit P1.4): a wrong nano "distinct" must not suppress a
+    true duplicate forever. The rows stay in the table (the investigator's
+    brief still shows them as history); only this scan filter ages them
+    out. Investigator / cluster-resolver / user verdicts never expire.
     """
+    nano_cutoff = utc_now() - timedelta(days=NANO_VERDICT_TTL_DAYS)
     with get_db_manager().read_session() as session:
         rows = (
             session.query(KGNodeVerdict.node_id_a, KGNodeVerdict.node_id_b)
             .filter(KGNodeVerdict.verdict_type == "distinct")
             .filter(KGNodeVerdict.superseded_at.is_(None))
             .filter(KGNodeVerdict.node_id_b.isnot(None))
+            .filter(
+                or_(
+                    KGNodeVerdict.decided_by != NANO_TRIAGE_DECIDED_BY,
+                    KGNodeVerdict.created_at >= nano_cutoff,
+                )
+            )
             .all()
         )
     # Stored canonically (a < b), so no re-sort needed.

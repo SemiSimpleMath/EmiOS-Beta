@@ -469,6 +469,9 @@ class KGMutatorTool(BaseTool):
             keep.aliases = new_aliases
             for f, v in filled_fields.items():
                 setattr(keep, f, v)
+            # The survivor's identity grew (fold's label + aliases + edges):
+            # its dupe-scan watermark is stale (audit P1.2).
+            keep.last_dupe_scanned_at = None
             session.flush()
 
             # Rebind dependent-table pointers (entity_cards, evidence,
@@ -586,6 +589,14 @@ class KGMutatorTool(BaseTool):
 
             node.label = new_label
             node.aliases = new_aliases
+            # Identity changed: the dupe-scan watermark is stale (the node
+            # can pair differently under its new name) and prior verdicts
+            # naming it may no longer hold (audit P1.2/P1.4).
+            node.last_dupe_scanned_at = None
+            supersede_verdicts_for_node(
+                session, node_id,
+                reason=f"node_renamed: {old_label!r} → {new_label!r}",
+            )
             after = _node_snapshot(node)
 
             rid = _write_revision_log(
@@ -665,6 +676,14 @@ class KGMutatorTool(BaseTool):
                 ))
 
             setattr(node, field, computed_value)
+            # Identity-bearing fields invalidate the dupe-scan watermark;
+            # alias changes also invalidate prior verdicts (audit P1.2/P1.4).
+            if field in ("aliases", "category"):
+                node.last_dupe_scanned_at = None
+            if field == "aliases":
+                supersede_verdicts_for_node(
+                    session, node_id, reason="node aliases changed",
+                )
             after = _node_snapshot(node)
 
             rid = _write_revision_log(

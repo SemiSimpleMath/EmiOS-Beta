@@ -376,9 +376,12 @@ class KnowledgeGraphUtils:
             logger.warning(f"Could not find node with ID {node_id} to update.")
             return None
 
+        identity_changed = False
+
         # Update label if provided
         if "label" in updates:
             node.label = updates["label"]
+            identity_changed = True
 
         # Update semantic_label if provided
         if "semantic_label" in updates:
@@ -396,6 +399,20 @@ class KnowledgeGraphUtils:
 
             # Union the sets and convert back to a sorted list for canonical storage
             node.aliases = sorted(list(existing_aliases.union(new_aliases)))
+            identity_changed = True
+
+        if identity_changed:
+            # Label/alias changes invalidate the dupe-scan watermark and any
+            # prior duplicate verdicts naming this node (audit P1.2/P1.4) —
+            # the renamed-placeholder case must be re-pairable.
+            node.last_dupe_scanned_at = None
+            from app.assistant.kg_core.kg_utils.node_merge import (
+                supersede_verdicts_for_node,
+            )
+            supersede_verdicts_for_node(
+                self.session, str(node.id),
+                reason="node identity updated (label/aliases)",
+            )
 
         # Update any other generic attributes
         if "attributes" in updates:

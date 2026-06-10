@@ -463,6 +463,48 @@ def investigate_one(finding_id: str) -> Dict[str, Any]:
                         nid for nid in (f.primary_node_id, f.secondary_node_id) if nid
                     ]
 
+        # Hallucinated ids must not become durable "prior verdicts" that
+        # future agents consult (audit P1.4). Validate liveness before
+        # persisting; dead ids → escalate like any other contract breach.
+        if verdict_node_ids:
+            from sqlalchemy import text as sql_text
+            with get_db_manager().read_session() as session:
+                placeholders = ", ".join(
+                    f":id{i}" for i in range(len(verdict_node_ids))
+                )
+                live = {
+                    str(r[0]) for r in session.execute(
+                        sql_text(
+                            f"SELECT id FROM kg_node_metadata "
+                            f"WHERE id IN ({placeholders})"
+                        ),
+                        {f"id{i}": nid for i, nid in enumerate(verdict_node_ids)},
+                    )
+                }
+            dead_ids = [nid for nid in verdict_node_ids if nid not in live]
+            if dead_ids:
+                logger.error(
+                    "[finding_processor] verdict_node_ids contain non-live "
+                    "node id(s) %s on finding %s — escalating instead of "
+                    "recording a verdict about nothing",
+                    dead_ids, finding_id,
+                )
+                set_status(
+                    finding_id,
+                    "escalated",
+                    executed_by="agent:kg_investigation",
+                    execution_notes=(
+                        f"Investigator's verdict_node_ids include id(s) not "
+                        f"present in kg_node_metadata: {dead_ids}. No verdict "
+                        f"recorded; escalated for human review."
+                    ),
+                )
+                return {
+                    "status": "escalated",
+                    "finding_id": finding_id,
+                    "reason": "verdict_node_ids_not_live",
+                }
+
         if not (verdict_type and memo and verdict_node_ids):
             # Investigator violated the take_action=False contract. Escalate
             # rather than dismiss — silently dropping a finding with no

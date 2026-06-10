@@ -36,7 +36,22 @@ from app.models.base import get_session
 
 
 def _seed_finding(*, primary="X", secondary="Y", finding_type="duplicate_node"):
-    """Create a pending finding for the test to investigate."""
+    """Create a pending finding for the test to investigate.
+
+    Real Node rows back the ids: upsert_finding refuses duplicate_node
+    findings whose ids aren't live, and investigate_one refuses verdicts
+    naming non-live ids (audit P1.1/P1.4)."""
+    from app.assistant.kg.db.knowledge_graph_db_sqlite import Node
+
+    s = get_session()
+    try:
+        for nid in (primary, secondary):
+            if nid and s.query(Node).filter_by(id=nid).count() == 0:
+                s.add(Node(id=nid, label=f"test-{nid}", node_type="Entity"))
+        s.commit()
+    finally:
+        s.close()
+
     fid, _ = upsert_finding(
         finding_type=finding_type,
         primary_node_id=primary,

@@ -337,16 +337,31 @@ def update_node(node_id):
             return jsonify({'error': 'Node not found'}), 404
         
         data = request.json
-        
+
         # Update allowed fields
+        identity_changed = False
         if 'label' in data:
             node.label = data['label']
+            identity_changed = True
         if 'description' in data:
             node.description = data['description']
         if 'category' in data:
             node.category = data['category']
+            node.last_dupe_scanned_at = None  # re-pairable under new category
         if 'aliases' in data:
             node.aliases = data['aliases']
+            identity_changed = True
+        if identity_changed:
+            # Label/alias edits invalidate the dupe-scan watermark and prior
+            # duplicate verdicts naming this node (audit P1.2/P1.4).
+            node.last_dupe_scanned_at = None
+            from app.assistant.kg_core.kg_utils.node_merge import (
+                supersede_verdicts_for_node,
+            )
+            supersede_verdicts_for_node(
+                session, str(node.id),
+                reason="node identity updated via graph visualizer",
+            )
         if 'attributes' in data:
             node.attributes = data['attributes']
         if 'confidence' in data:

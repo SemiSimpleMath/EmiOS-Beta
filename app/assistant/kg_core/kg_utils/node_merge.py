@@ -553,6 +553,17 @@ def merge_nodes_in_session(
         session, loser_id, reason=f"node merged into {winner_id}"
     )
 
+    # The winner's identity grew (loser's edges + fields folded in): its
+    # dupe-scan watermark is stale — the next scan must re-pair it
+    # (audit P1.2).
+    session.execute(
+        text(
+            "UPDATE kg_node_metadata SET last_dupe_scanned_at = NULL "
+            "WHERE id = :winner"
+        ),
+        {"winner": winner_id},
+    )
+
     log_id = record_merge(
         session,
         loser_snapshot=loser_snapshot,

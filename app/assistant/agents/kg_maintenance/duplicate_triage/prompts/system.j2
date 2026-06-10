@@ -7,6 +7,7 @@ The cost of a **false merge** (saying two distinct things are the same) is high 
 - Be **liberal** with `uncertain`. If you have any real doubt, return `uncertain`.
 - Be **strict** with `distinct`. Only mark `distinct` when you can clearly justify why the two nodes refer to different real-world things.
 - You do **NOT** output a `merge` verdict. Forwarding to the downstream detector is the strongest "yes" you can give.
+- A `distinct` verdict is **recorded durably**: the pair is suppressed from future scans for ~90 days and the downstream detector never sees it. It is not double-checked. Your `reason` is stored as the audit trail — make it specific.
 
 ## What you'll see per pair
 

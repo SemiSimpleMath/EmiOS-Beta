@@ -79,6 +79,30 @@ def upsert_finding(
 
     session = get_session()
     try:
+        # duplicate_node findings drive merges — hallucinated or stale ids
+        # must not become findings the executor later launders as
+        # "already deleted → executed" (audit P1.1).
+        if finding_type == "duplicate_node":
+            from sqlalchemy import text as _sql_text
+            ids = [i for i in (primary_node_id, secondary_node_id) if i]
+            live = {
+                str(r[0]) for r in session.execute(
+                    _sql_text(
+                        "SELECT id FROM kg_node_metadata "
+                        "WHERE id IN (:a, :b)"
+                    ),
+                    {"a": primary_node_id, "b": secondary_node_id or ""},
+                )
+            }
+            dead = [i for i in ids if i not in live]
+            if dead:
+                logger.warning(
+                    "[KGMaintenanceStore] refusing duplicate_node finding — "
+                    "node id(s) not in kg_node_metadata: %s (agent=%s)",
+                    dead, agent_name,
+                )
+                return "", False
+
         existing = (
             session.query(KGMaintenanceFinding.id)
             .filter(

@@ -59,7 +59,10 @@ SIMILARITY_THRESHOLD = 0.88
 
 MAX_CLUSTER_SIZE = 8
 
-MAX_PAIRS_PER_RUN = 30000  # one-time catch-up cap; drop back to 120 after the backlog clears
+# Steady-state cap (was 30000 during the one-time 2026-05 backlog catch-up;
+# the backlog cleared 2026-06-09 via the duplicate-cluster resolver). Pairs
+# cut by this cap leave their nodes UNSTAMPED so the next run retries them.
+MAX_PAIRS_PER_RUN = 120
 
 MAX_EDGE_SENTENCES = 5
 
@@ -86,7 +89,7 @@ def _load_node_descriptors() -> dict[str, dict[str, Any]]:
         nodes = session.query(
             Node.id, Node.label, Node.description, Node.node_type,
             Node.aliases, Node.category, Node.semantic_label,
-            Node.original_sentence,
+            Node.original_sentence, Node.start_date, Node.end_date,
         ).all()
 
         edges = (
@@ -159,6 +162,10 @@ def _load_node_descriptors() -> dict[str, dict[str, Any]]:
             "category": r.category or "",
             "semantic_label": r.semantic_label or "",
             "original_sentence": (r.original_sentence or ""),
+            # The detector's doctrine says "read the dates BEFORE deciding";
+            # without these it couldn't follow it (audit P1.3).
+            "start_date": str(r.start_date)[:10] if r.start_date else None,
+            "end_date": str(r.end_date)[:10] if r.end_date else None,
             "edge_sentences": sentence_index.get(nid, []),
             "edge_count": edge_count_index.get(nid, 0),
             "neighborhood": neighbor_index.get(nid, []),
@@ -558,7 +565,17 @@ def _build_candidate_pairs(
         return ec_a + ec_b
 
     candidates.sort(key=_pair_priority, reverse=True)
-    return candidates[:MAX_PAIRS_PER_RUN], pair_anchor_context
+    kept = candidates[:MAX_PAIRS_PER_RUN]
+    cut = candidates[MAX_PAIRS_PER_RUN:]
+    # Nodes whose pairs were cut by the cap were NOT adjudicated this run —
+    # they must stay unstamped so the next run retries them (audit P1.2).
+    capped_node_ids = {n for a, b, _t in cut for n in (a, b)}
+    if cut:
+        logger.warning(
+            "[duplicate_scan] MAX_PAIRS_PER_RUN cut %d pair(s); %d node(s) "
+            "stay unstamped for the next run", len(cut), len(capped_node_ids),
+        )
+    return kept, pair_anchor_context, capped_node_ids
 
 
 def _embedding_similarity_pairs(all_node_ids: list[str]) -> list[tuple[str, str]]:
@@ -731,6 +748,7 @@ def _triage_filter_pairs(
         return pairs
 
     distinct_indices: set[int] = set()  # global 0-based indices into `pairs`
+    distinct_reasons: dict[int, str] = {}  # global idx → triage's reason prose
     n_batches = (len(pairs) + TRIAGE_BATCH_SIZE - 1) // TRIAGE_BATCH_SIZE
     n_batches_failed = 0
 
@@ -787,6 +805,9 @@ def _triage_filter_pairs(
             if verdict == "distinct" and 1 <= local_idx_1based <= len(batch):
                 global_idx = batch_start + (local_idx_1based - 1)
                 distinct_indices.add(global_idx)
+                reason = str(v.get("reason") or "").strip()
+                if reason:
+                    distinct_reasons[global_idx] = reason
 
     survivors = [p for i, p in enumerate(pairs) if i not in distinct_indices]
     if n_batches_failed:
@@ -804,8 +825,12 @@ def _triage_filter_pairs(
             from app.assistant.kg_maintenance.verdict_store import (
                 record_distinct_pairs_bulk,
             )
+            # 3-tuples carry the triage's per-pair reason into the verdict's
+            # reasoning column — these are permanent-ish decisions and used
+            # to have no audit trail at all (audit P1.4).
             distinct_pair_ids = [
-                (pairs[i][0], pairs[i][1]) for i in distinct_indices
+                (pairs[i][0], pairs[i][1], distinct_reasons.get(i))
+                for i in distinct_indices
             ]
             record_distinct_pairs_bulk(
                 distinct_pair_ids,
@@ -833,15 +858,19 @@ def _confirm_pairs_with_llm(
     descriptors: dict[str, dict],
     scope_context,
     pair_anchor_context: dict[tuple[str, str], dict] | None = None,
-) -> list[dict]:
+) -> tuple[list[dict], set[str]]:
     """
     Calls kg_maintenance::duplicate_detector for each candidate pair.
-    Sends rich context including aliases, category, and neighborhood.
+    Sends rich context including aliases, category, dates, and neighborhood.
     For Tier 4 (anchor-propagation) pairs, additionally includes the shared
     anchor entity + edge sentences on both legs in `analysis_context.shared_anchor`
     so the agent can decide via direct edge-sentence comparison.
 
-    Returns a flat list of merge_action dicts.
+    Returns (merge_actions, failed_node_ids). Each merge_action is tagged
+    with its source pair under ``_source_pair`` so _write_findings can drop
+    actions naming foreign ids (audit P1.1). failed_node_ids are the nodes
+    of pairs whose detector call errored — they were NOT adjudicated and
+    must not be stamped as scanned (audit P1.2).
 
     No DB session is open during this function.
     """
@@ -852,14 +881,26 @@ def _confirm_pairs_with_llm(
     # we accept its NO, never its YES (the detector still owns the merge call).
     pairs = _triage_filter_pairs(pairs, descriptors, scope_context, pair_anchor_context)
 
-    agent = DI.agent_factory.create_agent("kg_maintenance::duplicate_detector")
     merge_actions: list[dict] = []
+    failed_node_ids: set[str] = set()
 
     for idx, (nid_a, nid_b, tier) in enumerate(pairs):
         desc_a = descriptors.get(nid_a)
         desc_b = descriptors.get(nid_b)
         if not desc_a or not desc_b:
             continue
+
+        # Fresh agent instance per pair so blackboard state can't carry over
+        # between pairs (the old shared instance enabled cross-pair ID
+        # transposition; triage already works per-batch this way). A None
+        # here means EVERY pair would silently fail and the run would still
+        # stamp the whole graph as scanned — abort loudly instead.
+        agent = DI.agent_factory.create_agent("kg_maintenance::duplicate_detector")
+        if agent is None:
+            raise RuntimeError(
+                "[duplicate_scan] duplicate_detector agent failed to "
+                "instantiate — aborting before any nodes get stamped as scanned"
+            )
 
         node_data = []
         for d in (desc_a, desc_b):
@@ -883,6 +924,9 @@ def _confirm_pairs_with_llm(
                 "node_id": d["node_id"],
                 "label": d["label"],
                 "node_type": d["node_type"],
+                "original_sentence": d.get("original_sentence") or "",
+                "start_date": d.get("start_date"),
+                "end_date": d.get("end_date"),
                 "context": context,
                 "edge_count": d["edge_count"],
                 "neighborhood_sample": neighborhood_sample,
@@ -928,6 +972,10 @@ def _confirm_pairs_with_llm(
             )
             if response and response.data:
                 actions = response.data.get("merge_actions") or []
+                for a in actions:
+                    if isinstance(a, dict):
+                        # Provenance for _write_findings' foreign-id check.
+                        a["_source_pair"] = [nid_a, nid_b]
                 merge_actions.extend(actions)
                 logger.info(
                     "[duplicate_scan] Pair %d/%d '%s' vs '%s' [%s] → %d merge actions",
@@ -936,12 +984,16 @@ def _confirm_pairs_with_llm(
                     tier, len(actions),
                 )
         except Exception:
-            logger.debug(
-                "[duplicate_scan] LLM call failed for pair %d — continuing",
-                idx, exc_info=True,
+            # This pair was NOT adjudicated — keep its nodes unstamped so
+            # the next run retries them instead of permanently skipping.
+            failed_node_ids.update((nid_a, nid_b))
+            logger.warning(
+                "[duplicate_scan] detector call failed for pair %d (%s vs %s) "
+                "— nodes stay unstamped", idx + 1, nid_a[:8], nid_b[:8],
+                exc_info=True,
             )
 
-    return merge_actions
+    return merge_actions, failed_node_ids
 
 
 # ── Phase 4: write findings ───────────────────────────────────────────────────
@@ -952,6 +1004,12 @@ def _write_findings(merge_actions: list[dict], pipeline_run_id: str) -> int:
     Each action that covers N nodes becomes N-1 pairwise findings
     (primary=most-connected by agent ordering, secondary=each other node).
     Returns count of new findings created.
+
+    Guard (audit P1.1): an action may only name ids from the pair the
+    detector was shown (``_source_pair``, stamped by _confirm_pairs_with_llm).
+    Echoed prompt examples, transposed ids from earlier pairs, and
+    hallucinated UUIDs are dropped here with a warning instead of becoming
+    findings the executor would later launder.
     """
     new_findings = 0
     for action in merge_actions:
@@ -960,6 +1018,15 @@ def _write_findings(merge_actions: list[dict], pipeline_run_id: str) -> int:
         reason = action.get("reason") or "LLM duplicate detector flagged these as likely duplicates."
 
         if len(node_ids) < 2:
+            continue
+
+        source_pair = set(action.get("_source_pair") or [])
+        if not source_pair or not set(node_ids) <= source_pair:
+            logger.warning(
+                "[duplicate_scan] dropping merge action naming ids outside "
+                "its candidate pair: got %s, pair was %s",
+                node_ids, sorted(source_pair) or "<untagged>",
+            )
             continue
 
         primary = node_ids[0]
@@ -1010,7 +1077,9 @@ def run(ctx: PipelineContext) -> dict:
 
     # Phase 2 — four-tier candidate generation (no LLM; Tier 4 takes one
     # extra read session for the anchor-propagation graph walk)
-    pairs, pair_anchor_context = _build_candidate_pairs(descriptors, unscanned_ids)
+    pairs, pair_anchor_context, capped_node_ids = _build_candidate_pairs(
+        descriptors, unscanned_ids
+    )
     if not pairs:
         logger.info("[duplicate_scan] No candidate pairs found")
         # Still stamp — no work needed means every node is current.
@@ -1021,8 +1090,10 @@ def run(ctx: PipelineContext) -> dict:
             "nodes_stamped": n_stamped,
         }
 
-    # Phase 3 — LLM confirmation (no session open)
-    merge_actions = _confirm_pairs_with_llm(
+    # Phase 3 — LLM confirmation (no session open). Raises (no stamping at
+    # all) when the detector agent can't even be instantiated — previously
+    # that case silently failed every pair and still stamped the graph.
+    merge_actions, failed_node_ids = _confirm_pairs_with_llm(
         pairs, descriptors, scope_context,
         pair_anchor_context=pair_anchor_context,
     )
@@ -1030,13 +1101,16 @@ def run(ctx: PipelineContext) -> dict:
     # Phase 4 — write findings (store manages its own sessions)
     new_findings = _write_findings(merge_actions, pipeline_run_id=ctx.run_id)
 
-    # Phase 5 — stamp every node as scanned. This is the watermark that
-    # lets the next run's pair generator skip pairs of two already-
-    # scanned nodes via `_add_pair`. Stamping all nodes (not just those
-    # in pair candidates) is correct: a node that produced zero pairs
-    # was still evaluated by the tier 1-4 generators against every
-    # other node — finding no candidates IS a complete scan result.
-    n_stamped = _stamp_nodes_scanned(list(descriptors.keys()))
+    # Phase 5 — stamp ADJUDICATED nodes as scanned. This is the watermark
+    # that lets the next run's pair generator skip pairs of two already-
+    # scanned nodes via `_add_pair`. A node with zero candidate pairs WAS
+    # evaluated by the tier 1-4 generators against every other node, so it
+    # stamps too. Excluded (audit P1.2): nodes of pairs cut by
+    # MAX_PAIRS_PER_RUN and nodes of pairs whose detector call errored —
+    # stamping those would permanently blind the scanner to them.
+    excluded = capped_node_ids | failed_node_ids
+    stamp_ids = [nid for nid in descriptors.keys() if nid not in excluded]
+    n_stamped = _stamp_nodes_scanned(stamp_ids)
 
     result = {
         "nodes_loaded": len(descriptors),
@@ -1044,6 +1118,7 @@ def run(ctx: PipelineContext) -> dict:
         "llm_confirmed_actions": len(merge_actions),
         "new_findings": new_findings,
         "nodes_stamped": n_stamped,
+        "nodes_excluded_from_stamp": len(excluded),
     }
     logger.info("[duplicate_scan] Done: %s", result)
     return result
