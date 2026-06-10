@@ -30,10 +30,18 @@ def consolidate(
     max_pairs: int = 500,
     statuses=("active", "contested"),
     require_same_predicate: bool = True,
+    pair_same_subject_predicate: bool = False,
 ) -> Dict[str, Any]:
     """Merge duplicate beliefs. Returns {candidates, verified, merges}. Mutates via redirects +
     a final rebuild. `require_same_predicate` blocks cross-predicate merges when predicates are
-    known (they're empty in the whole-statement seed, so it no-ops there)."""
+    known (they're empty in the whole-statement seed, so it no-ops there).
+
+    Recall has TWO sources (the verifier still decides every pair — nothing merges on recall alone):
+    (a) embedding NN ≥ threshold, and (b) `pair_same_subject_predicate` — beliefs sharing the same
+    canonical subject+predicate. (b) is the load-bearing one for STRUCTURED beliefs: two phrasings of
+    the same preference ("standing-break nudges" vs "standing break reminders") embed at only ~0.6 but
+    share subject+predicate, so embedding alone would never propose them. It no-ops on the seed (empty
+    subject/predicate)."""
     if np is None:
         raise RuntimeError("consolidate requires numpy")
 
@@ -51,17 +59,21 @@ def consolidate(
     mat = mat / np.where(norms > 0, norms, 1.0)
     sims = mat @ mat.T
 
-    # Candidate pairs: i<j above the recall threshold, strongest first (proposals only).
+    # Candidate pairs (proposals only — the verifier decides each): i<j that are EITHER embedding-near
+    # (sim ≥ threshold) OR share the same canonical subject+predicate. Strongest first.
     pairs = []
     n = len(items)
     for i in range(n):
+        pi, si = items[i]["predicate"] or "", items[i]["subject"] or ""
         for j in range(i + 1, n):
             s = float(sims[i, j])
-            if s >= threshold:
-                if require_same_predicate and (items[i]["predicate"] or "") and (items[j]["predicate"] or ""):
-                    if items[i]["predicate"] != items[j]["predicate"]:
-                        continue
-                pairs.append((s, i, j))
+            pj, sj = items[j]["predicate"] or "", items[j]["subject"] or ""
+            same_sp = bool(pair_same_subject_predicate and si and pi and si == sj and pi == pj)
+            if s < threshold and not same_sp:
+                continue
+            if require_same_predicate and pi and pj and pi != pj:
+                continue
+            pairs.append((s, i, j))
     pairs.sort(reverse=True)
     pairs = pairs[:max_pairs]
 

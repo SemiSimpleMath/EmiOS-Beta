@@ -70,6 +70,30 @@ def test_non_candidates_are_never_checked():
     assert len(st.beliefs()) == 2                         # merged veg + standalone onions
 
 
+def test_structural_recall_catches_framing_divergent_dups():
+    # Same subject+predicate, different object, statements that embed FAR apart (orthogonal) — exactly
+    # the case sentence-embedding recall misses. pair_same_subject_predicate proposes them anyway; the
+    # verifier still decides. (This is what makes the live sweep collapse "standing-break nudges" vs
+    # "standing break reminders", which score only ~0.6 cosine.)
+    st = _store()
+    st.append(Claim(subject="user", predicate="finds_frequent", object="standing nudges",
+                    statement_nl="standing-break nudges are too frequent"), source="daily_insight")
+    st.append(Claim(subject="user", predicate="finds_frequent", object="stand reminders",
+                    statement_nl="reduce the cadence of stand reminders"), source="daily_insight")
+    st.rebuild_projection()
+    assert len(st.beliefs()) == 2
+
+    emb = lambda t: [1.0, 0.0] if "nudge" in t else [0.0, 1.0]   # the two statements are orthogonal
+    yes = lambda a, b, k: True
+
+    off = consolidate(st, embedder=emb, verifier=yes, threshold=0.9)            # default: structural OFF
+    assert off["candidates"] == 0 and len(st.beliefs()) == 2                    # embedding misses them
+
+    on = consolidate(st, embedder=emb, verifier=yes, threshold=0.9, pair_same_subject_predicate=True)
+    assert on["candidates"] == 1 and on["merges"] == 1                          # proposed via subject+predicate
+    assert len(st.beliefs()) == 1                                              # collapsed
+
+
 def test_merge_is_reversible():
     st = _store(); _seed_veg_dupes(st)
     consolidate(st, embedder=_emb, verifier=_verify_same_group, threshold=0.9)

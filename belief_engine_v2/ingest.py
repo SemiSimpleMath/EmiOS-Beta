@@ -110,13 +110,48 @@ def ingest_items(store, items: List[Dict[str, Any]], *, occurred_at: Optional[st
     return {"appended": appended, "skipped": skipped}
 
 
+def consolidate_live_store(store, *, embedder=None, verifier=None, tau: float = _TAU,
+                           max_pairs: int = 500) -> Dict[str, Any]:
+    """#6 concept-to-concept consolidation sweep: collapse the RESIDUAL near-duplicate beliefs the
+    greedy write-time pass can't ("standing-break nudges" vs "standing break reminders" — minted
+    separately, never compared to each other). Embedding proposes candidate belief pairs; the LLM
+    verifier decides; a verified merge is a REVERSIBLE redirect (belief_merges). Returns
+    {candidates, verified, merges}. Reuses the store's verifier when present."""
+    from belief_engine_v2.consolidate import consolidate
+
+    emb = embedder or _default_embedder()
+    if verifier is None:
+        reg = getattr(store.resolver, "registry", None)
+        verifier = getattr(reg, "verifier", None)
+        if verifier is None:
+            from belief_engine_v2.merge_verifier import LLMMergeVerifier
+            verifier = LLMMergeVerifier(engine="gpt-5.4-mini")
+    # Structural recall ON: production beliefs carry canonical subject+predicate, so two phrasings of
+    # one preference (embedding only ~0.6 apart) are proposed via their shared subject+predicate —
+    # the verifier still decides. Without this the sweep misses framing-divergent duplicates.
+    return consolidate(store, embedder=emb, verifier=verifier, threshold=tau, max_pairs=max_pairs,
+                       pair_same_subject_predicate=True)
+
+
 def ingest_actionable_information(actionable_information: List[Dict[str, Any]], *,
                                   occurred_at: Optional[str] = None,
-                                  db_path: str = LIVE_DB) -> Dict[str, int]:
-    """Top-level: open the shadow store, ingest a day's enriched items, return a summary."""
+                                  db_path: str = LIVE_DB,
+                                  consolidate_after: bool = True) -> Dict[str, Any]:
+    """Top-level: open the shadow store, ingest a day's enriched items, then run the consolidation
+    sweep so the store stays collapsed. Returns the ingest summary (+ consolidation result)."""
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     store = open_live_store(db_path)
     try:
-        return ingest_items(store, actionable_information, occurred_at=occurred_at)
+        summary: Dict[str, Any] = dict(ingest_items(store, actionable_information, occurred_at=occurred_at))
+        if consolidate_after:
+            # Best-effort: the ingest is already durable, so a sweep failure must not lose it —
+            # log loud and carry the ingest result; the next night's sweep retries.
+            try:
+                summary["consolidation"] = consolidate_live_store(store)
+            except Exception as e:
+                logger.error("[belief_v2] consolidation sweep failed (ingest kept): %s", e)
+                logger.debug("[belief_v2] consolidation exception details", exc_info=True)
+                summary["consolidation"] = {"error": str(e)}
+        return summary
     finally:
         store.close()

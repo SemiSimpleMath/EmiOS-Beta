@@ -7,7 +7,7 @@ Writes to a temp db so the real shadow store is never touched.
 """
 from __future__ import annotations
 
-from belief_engine_v2.ingest import ingest_items, open_live_store
+from belief_engine_v2.ingest import consolidate_live_store, ingest_items, open_live_store
 
 
 def _store(tmp_path):
@@ -59,6 +59,36 @@ def test_distinct_claims_stay_distinct(tmp_path):
         _item("the kids", "wont eat", "zucchini"),
     ]
     ingest_items(store, items, occurred_at="2026-06-09")
+    assert len(store.beliefs()) == 2
+    store.close()
+
+
+def test_consolidation_sweep_merges_residual_near_dups(tmp_path):
+    # Two different object phrasings of the same belief -> write-time (no verifier) mints TWO beliefs;
+    # the #6 consolidation sweep (embedding proposes the pair, verifier says "same") collapses them.
+    store = _store(tmp_path)
+    items = [
+        _item("the user", "prefers", "coffee in the morning"),
+        _item("the user", "prefers", "a morning cup of coffee"),
+    ]
+    ingest_items(store, items, occurred_at="2026-06-09")
+    assert len(store.beliefs()) == 2                       # residual fragmentation at write time
+    res = consolidate_live_store(store, embedder=lambda t: [1.0, 0.0], verifier=lambda a, b, k: True)
+    assert res["merges"] == 1
+    assert len(store.beliefs()) == 1                       # collapsed to one canonical belief
+    store.close()
+
+
+def test_consolidation_leaves_distinct_beliefs_alone(tmp_path):
+    # Verifier says "not the same" -> nothing merges (safe: similarity alone never merges).
+    store = _store(tmp_path)
+    items = [
+        _item("the user", "prefers", "coffee in the morning"),
+        _item("the user", "prefers", "a morning cup of coffee"),
+    ]
+    ingest_items(store, items, occurred_at="2026-06-09")
+    res = consolidate_live_store(store, embedder=lambda t: [1.0, 0.0], verifier=lambda a, b, k: False)
+    assert res["merges"] == 0
     assert len(store.beliefs()) == 2
     store.close()
 
