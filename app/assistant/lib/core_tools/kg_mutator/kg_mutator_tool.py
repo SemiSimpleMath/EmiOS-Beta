@@ -40,6 +40,12 @@ from sqlalchemy import text as sql_text
 from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
 from app.assistant.database.kg_revision_log import KGRevisionLog
 from app.assistant.kg.db.knowledge_graph_db_sqlite import Edge, Node
+from app.assistant.kg_core.kg_utils.node_merge import (
+    delete_node_chroma_vectors,
+    migrate_section_tags,
+    rebind_node_references,
+    supersede_verdicts_for_node,
+)
 from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
 from app.assistant.lib.core_tools.tool_error_protocol import make_tool_error
 from app.assistant.utils.logging_config import get_logger
@@ -101,7 +107,14 @@ def _parse_date(s: Any) -> Optional[datetime]:
 # ---- snapshot helpers -------------------------------------------------------
 
 
+def _iso(dt: Any) -> Optional[str]:
+    if dt is None:
+        return None
+    return dt.isoformat() if hasattr(dt, "isoformat") else str(dt)
+
+
 def _node_snapshot(node: Node) -> Dict[str, Any]:
+    """Full row dict — before_json must let a revert restore EVERY column."""
     return {
         "id": node.id,
         "label": node.label,
@@ -110,26 +123,54 @@ def _node_snapshot(node: Node) -> Dict[str, Any]:
         "aliases": list(node.aliases or []),
         "description": node.description,
         "original_sentence": node.original_sentence,
-        "start_date": node.start_date.isoformat() if node.start_date else None,
-        "end_date": node.end_date.isoformat() if node.end_date else None,
+        "attributes": node.attributes,
+        "start_date": _iso(node.start_date),
+        "end_date": _iso(node.end_date),
+        "start_date_confidence": node.start_date_confidence,
+        "end_date_confidence": node.end_date_confidence,
         "start_date_prose": node.start_date_prose,
         "end_date_prose": node.end_date_prose,
         "valid_during": getattr(node, "valid_during", None),
+        "valid_currently": getattr(node, "valid_currently", None),
+        "validity_reason": getattr(node, "validity_reason", None),
+        "confidence": node.confidence,
+        "confidence_tier": getattr(node, "confidence_tier", None),
         "importance": getattr(node, "importance", None),
+        "source": node.source,
         "goal_status": getattr(node, "goal_status", None),
         "semantic_label": getattr(node, "semantic_label", None),
         "hash_tags": list(getattr(node, "hash_tags", None) or []),
+        "first_observed": _iso(getattr(node, "first_observed", None)),
+        "last_observed": _iso(getattr(node, "last_observed", None)),
+        "observation_count": getattr(node, "observation_count", None),
+        "last_pursued_at": _iso(getattr(node, "last_pursued_at", None)),
+        "last_dupe_scanned_at": _iso(getattr(node, "last_dupe_scanned_at", None)),
+        "pagerank_score": getattr(node, "pagerank_score", None),
+        "locked_by_user_at": _iso(getattr(node, "locked_by_user_at", None)),
+        "created_from_proposal_id": getattr(node, "created_from_proposal_id", None),
+        "created_at": _iso(getattr(node, "created_at", None)),
+        "updated_at": _iso(getattr(node, "updated_at", None)),
     }
 
 
 def _edge_snapshot(edge: Edge) -> Dict[str, Any]:
+    """Full row dict — see _node_snapshot."""
     return {
         "id": edge.id,
         "source_id": edge.source_id,
         "target_id": edge.target_id,
         "relationship_type": edge.relationship_type,
+        "attributes": edge.attributes,
         "sentence": getattr(edge, "sentence", None),
+        "confidence": edge.confidence,
+        "confidence_tier": getattr(edge, "confidence_tier", None),
+        "importance": getattr(edge, "importance", None),
+        "source": edge.source,
+        "locked_by_user_at": _iso(getattr(edge, "locked_by_user_at", None)),
+        "created_from_proposal_id": getattr(edge, "created_from_proposal_id", None),
         "window_id": getattr(edge, "window_id", None),
+        "created_at": _iso(getattr(edge, "created_at", None)),
+        "updated_at": _iso(getattr(edge, "updated_at", None)),
     }
 
 
@@ -150,23 +191,11 @@ def _refuse_if_locked(obj: Any, op: str) -> None:
     )
 
 
-def _delete_chroma_vectors(node_id: str) -> bool:
-    """Remove a deleted node's label + context embeddings from Chroma.
-    Runs AFTER the SQLite commit (Chroma is not transactional with the DB),
-    so a failure here leaves ghost vectors — surface it loudly and report
-    the outcome in the tool result instead of pretending it worked."""
-    try:
-        from app.assistant.kg.chroma.chroma_embedding_manager import get_chroma_manager
-        cm = get_chroma_manager()
-        cm.delete_node_embedding(node_id)
-        cm.delete_node_context_embedding(node_id)
-        return True
-    except Exception as exc:
-        logger.error(
-            "Chroma embedding cleanup failed for deleted node %s — ghost vectors "
-            "remain in the label/context collections: %s", node_id, exc,
-        )
-        return False
+# Chroma cleanup for removed nodes lives in node_merge (shared by every
+# merge/delete path). Here it runs AFTER the SQLite commit — Chroma is not
+# transactional with the DB — and the boolean outcome is reported in the
+# tool result instead of pretending it worked.
+_delete_chroma_vectors = delete_node_chroma_vectors
 
 
 def _write_revision_log(
@@ -269,6 +298,7 @@ class KGMutatorTool(BaseTool):
             raise ValueError("`keep_id` and `fold_id` must differ.")
         reason = self._require_reason(arguments)
         dry_run = bool(arguments.get("dry_run", False))
+        force = bool(arguments.get("force", False))
         finding_id = arguments.get("finding_id") or None
 
         with get_db_manager().transaction(op="kg_mutator.merge_nodes") as session:
@@ -298,14 +328,57 @@ class KGMutatorTool(BaseTool):
             #   (b) the fold edge connects fold↔keep — rewriting both/one
             #       endpoint would create a self-loop (source==target).
             # In both cases we drop the redundant fold edge instead of rewriting.
+            keep_in_edges = session.query(Edge).filter(Edge.target_id == keep_id).all()
+            keep_out_edges = session.query(Edge).filter(Edge.source_id == keep_id).all()
             keep_in_keys = {
                 (e.source_id, (e.relationship_type or "").strip().lower())
-                for e in session.query(Edge).filter(Edge.target_id == keep_id).all()
+                for e in keep_in_edges
             }
             keep_out_keys = {
                 (e.target_id, (e.relationship_type or "").strip().lower())
-                for e in session.query(Edge).filter(Edge.source_id == keep_id).all()
+                for e in keep_out_edges
             }
+
+            # Wrong-survivor guard: the merge direction comes from LLM prose
+            # twice-removed (investigator → planner → tool args) and nothing
+            # else checks it. When fold outranks keep on pagerank or edge
+            # count, refuse unless the caller explicitly forces.
+            survivor_warning = None
+            fold_edge_count = len(in_edges) + len(out_edges)
+            keep_edge_count = len(keep_in_edges) + len(keep_out_edges)
+            fold_pr = getattr(fold, "pagerank_score", None)
+            keep_pr = getattr(keep, "pagerank_score", None)
+            outranks_pr = fold_pr is not None and keep_pr is not None and fold_pr > keep_pr
+            if outranks_pr or fold_edge_count > keep_edge_count:
+                survivor_warning = (
+                    f"fold node {fold.label!r} outranks keep node {keep.label!r}: "
+                    f"edges {fold_edge_count} vs {keep_edge_count}, "
+                    f"pagerank {fold_pr} vs {keep_pr}. The merge direction may be "
+                    f"backwards (the better-connected node usually survives)."
+                )
+                if not force:
+                    raise ValueError(
+                        f"Refusing kg_merge_nodes: {survivor_warning} "
+                        f"Swap keep_id/fold_id, or pass force=true if the "
+                        f"direction is intentional."
+                    )
+
+            # Fill keep's NULL/empty scalar fields from fold before discarding
+            # it — without this, only aliases survive the fold. Never
+            # overwrites a non-empty keep value.
+            def _empty(v: Any) -> bool:
+                return v is None or (isinstance(v, str) and not v.strip())
+
+            _FILL_FIELDS = (
+                "description", "category", "semantic_label",
+                "start_date", "end_date",
+                "start_date_confidence", "end_date_confidence",
+                "start_date_prose", "end_date_prose",
+            )
+            filled_fields: Dict[str, Any] = {}
+            for f in _FILL_FIELDS:
+                if _empty(getattr(keep, f, None)) and not _empty(getattr(fold, f, None)):
+                    filled_fields[f] = getattr(fold, f)
 
             in_edges_to_rewrite: List[Edge] = []
             in_edges_to_drop: List[Edge] = []
@@ -340,15 +413,19 @@ class KGMutatorTool(BaseTool):
                 ],
             }
 
-            # Build the after preview: aliases unioned, edges rewritten.
+            # Build the after preview: aliases unioned, edges rewritten,
+            # NULL scalars filled from fold.
             new_aliases = list(dict.fromkeys(
                 list(keep.aliases or []) + [fold.label] + list(fold.aliases or [])
             ))
             # Drop the keep node's own label out of its aliases if it slipped in.
             new_aliases = [a for a in new_aliases if a and a != keep.label]
 
+            filled_preview = {
+                k: (_iso(v) if k in _DATE_FIELDS else v) for k, v in filled_fields.items()
+            }
             after_preview = {
-                "keep": {**_node_snapshot(keep), "aliases": new_aliases},
+                "keep": {**_node_snapshot(keep), "aliases": new_aliases, **filled_preview},
                 "fold": "DELETED",
                 "rewritten_in_edges": [
                     {**_edge_snapshot(e), "target_id": keep_id} for e in in_edges_to_rewrite
@@ -370,9 +447,13 @@ class KGMutatorTool(BaseTool):
                         f"rewrite {len(in_edges_to_rewrite)} incoming + "
                         f"{len(out_edges_to_rewrite)} outgoing edges; "
                         f"drop {len(in_edges_to_drop) + len(out_edges_to_drop)} redundant edge(s); "
-                        f"add {len(new_aliases) - len(keep.aliases or [])} alias(es)."
+                        f"add {len(new_aliases) - len(keep.aliases or [])} alias(es); "
+                        f"fill {sorted(filled_fields) or 'no'} empty keep field(s) from fold; "
+                        f"rebind dependent rows, migrate section tags, supersede "
+                        f"verdicts naming fold, and delete fold's Chroma embeddings."
                     ),
-                    data={"ok": True, "dry_run": True, "before": before, "after": after_preview},
+                    data={"ok": True, "dry_run": True, "before": before, "after": after_preview,
+                          "survivor_warning": survivor_warning},
                 ))
 
             # Drop redundant edges first so the rewrite below can't collide
@@ -386,6 +467,21 @@ class KGMutatorTool(BaseTool):
             for e in out_edges_to_rewrite:
                 e.source_id = keep_id
             keep.aliases = new_aliases
+            for f, v in filled_fields.items():
+                setattr(keep, f, v)
+            session.flush()
+
+            # Rebind dependent-table pointers (entity_cards, evidence,
+            # taxonomy links, proposal refs, …) from fold → keep, migrate
+            # fold's section tags keep lacks, and supersede verdicts naming
+            # fold — all in this transaction.
+            rebinds = rebind_node_references(session, fold_id, keep_id)
+            tag_migration = migrate_section_tags(session, fold_id, keep_id)
+            before["fold_section_tags"] = tag_migration["snapshots"]
+            verdicts_superseded = supersede_verdicts_for_node(
+                session, fold_id, reason=f"node merged into {keep_id}"
+            )
+
             # Flush BEFORE delete so the FK CASCADE on Edge.{source,target}_id
             # sees edges already pointing at keep, not still-pointing-at-fold.
             # Without this, SQLite cascades fold's deletion and nulls out the
@@ -396,7 +492,8 @@ class KGMutatorTool(BaseTool):
             rid = _write_revision_log(
                 session=session,
                 op="merge_nodes",
-                args={"keep_id": keep_id, "fold_id": fold_id, "finding_id": finding_id},
+                args={"keep_id": keep_id, "fold_id": fold_id, "finding_id": finding_id,
+                      "force": force},
                 before=before,
                 after=after_preview,
                 reason=reason,
@@ -404,24 +501,41 @@ class KGMutatorTool(BaseTool):
                 agent_id=self._agent_id(tool_message),
             )
 
+            keep_label = keep.label
+            fold_label = fold.label
             rewritten_count = len(in_edges_to_rewrite) + len(out_edges_to_rewrite)
             dropped_count = len(in_edges_to_drop) + len(out_edges_to_drop)
-            return self.publish_result(ToolResult(
-                result_type="kg_merge_nodes",
-                content=(
-                    f"Merged {fold.label!r} into {keep.label!r}. "
-                    f"Rewrote {rewritten_count} edge(s), dropped {dropped_count} redundant; "
-                    f"aliases now {new_aliases}. "
-                    f"revision_log_id={rid}"
-                ),
-                data={
-                    "ok": True,
-                    "revision_log_id": rid,
-                    "edges_rewritten": rewritten_count,
-                    "edges_dropped_redundant": dropped_count,
-                    "new_aliases": new_aliases,
-                },
-            ))
+
+        # Post-commit: Chroma cleanup (best-effort by necessity; failures are
+        # logged at ERROR and reported in the result, never hidden).
+        chroma_cleaned = _delete_chroma_vectors(fold_id)
+
+        return self.publish_result(ToolResult(
+            result_type="kg_merge_nodes",
+            content=(
+                f"Merged {fold_label!r} into {keep_label!r}. "
+                f"Rewrote {rewritten_count} edge(s), dropped {dropped_count} redundant; "
+                f"rebound {sum(r['count'] for r in rebinds)} dependent row(s); "
+                f"migrated {len(tag_migration['migrated_ids'])} section tag(s); "
+                f"superseded {verdicts_superseded} verdict(s); "
+                f"aliases now {new_aliases}. "
+                f"Chroma embeddings {'removed' if chroma_cleaned else 'CLEANUP FAILED — ghost vectors remain'}. "
+                f"revision_log_id={rid}"
+            ),
+            data={
+                "ok": True,
+                "revision_log_id": rid,
+                "edges_rewritten": rewritten_count,
+                "edges_dropped_redundant": dropped_count,
+                "dependent_rebinds": rebinds,
+                "section_tags_migrated": len(tag_migration["migrated_ids"]),
+                "verdicts_superseded": verdicts_superseded,
+                "filled_fields": sorted(filled_fields),
+                "new_aliases": new_aliases,
+                "chroma_cleaned": chroma_cleaned,
+                "survivor_warning": survivor_warning,
+            },
+        ))
 
     def handle_kg_rename_label(self, arguments: Dict[str, Any], tool_message: ToolMessage) -> ToolResult:
         node_id = str(arguments.get("node_id") or "").strip()

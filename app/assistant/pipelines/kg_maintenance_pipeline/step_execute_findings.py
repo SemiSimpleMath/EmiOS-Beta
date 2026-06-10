@@ -199,8 +199,7 @@ def _execute_duplicate(finding: dict) -> dict:
     finally:
         session.close()
 
-    _delete_node_embedding(loser_id)
-
+    # Chroma cleanup for the loser happens inside merge_nodes_in_session.
     merge_method = "LLM" if merged_fields else "field-copy"
     return {
         "executed": True,

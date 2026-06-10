@@ -35,11 +35,13 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple
 
-from sqlalchemy import text
+from sqlalchemy import or_, text
 from sqlalchemy.orm import Session
 
 from app.assistant.database.kg_merge_log import KGMergeLog
+from app.assistant.database.kg_node_verdict import KGNodeVerdict
 from app.assistant.utils.logging_config import get_logger
+from app.assistant.utils.time_utils import utc_now
 from app.models.base import Base
 
 logger = get_logger(__name__)
@@ -346,6 +348,119 @@ def rebind_node_references(
     return rebinds
 
 
+def _table_exists(session: Session, table_name: str) -> bool:
+    return session.execute(
+        text("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = :t"),
+        {"t": table_name},
+    ).fetchone() is not None
+
+
+def migrate_section_tags(
+    session: Session, loser_id: str, winner_id: str
+) -> Dict[str, Any]:
+    """
+    Move loser's ``kg_node_section_tag`` rows to winner where winner lacks
+    that (namespace, section_name); rows winner already covers are left on
+    loser to FK-cascade away with it. Not in NODE_ID_REFERENCES because a
+    blind rebind would hit the (node_id, namespace, section_name) unique
+    constraint whenever both nodes carry the same tag.
+
+    Returns {"snapshots": [all loser tag rows pre-migration],
+             "migrated_ids": [...], "cascaded_count": N}.
+    """
+    loser_id = str(loser_id)
+    winner_id = str(winner_id)
+    empty = {"snapshots": [], "migrated_ids": [], "cascaded_count": 0}
+    if not _table_exists(session, "kg_node_section_tag"):
+        return empty
+
+    rows = session.execute(
+        text(
+            "SELECT id, node_id, namespace, section_name, tagged_at, "
+            "tagger_version, dropped_at, dropped_at_node_content_hash, "
+            "dropped_by_version "
+            "FROM kg_node_section_tag WHERE node_id = :loser"
+        ),
+        {"loser": loser_id},
+    ).mappings().fetchall()
+    if not rows:
+        return empty
+
+    snapshots = [{k: (str(v) if v is not None else None) for k, v in r.items()} for r in rows]
+
+    migratable = session.execute(
+        text(
+            "SELECT t.id FROM kg_node_section_tag t WHERE t.node_id = :loser "
+            "AND NOT EXISTS (SELECT 1 FROM kg_node_section_tag k2 "
+            "WHERE k2.node_id = :winner AND k2.namespace = t.namespace "
+            "AND k2.section_name = t.section_name)"
+        ),
+        {"loser": loser_id, "winner": winner_id},
+    ).fetchall()
+    migrated_ids = [str(r[0]) for r in migratable]
+    for tag_id in migrated_ids:
+        session.execute(
+            text("UPDATE kg_node_section_tag SET node_id = :winner WHERE id = :tid"),
+            {"winner": winner_id, "tid": tag_id},
+        )
+    session.flush()
+
+    cascaded = len(rows) - len(migrated_ids)
+    if migrated_ids or cascaded:
+        logger.info(
+            "[node_merge] section tags: migrated %d, leaving %d to cascade (%s → %s)",
+            len(migrated_ids), cascaded, loser_id[:8], winner_id[:8],
+        )
+    return {"snapshots": snapshots, "migrated_ids": migrated_ids, "cascaded_count": cascaded}
+
+
+def supersede_verdicts_for_node(session: Session, node_id: str, *, reason: str) -> int:
+    """
+    Mark every active kg_node_verdict row naming ``node_id`` as superseded.
+    Supersede, NOT rebind: rewriting (X, fold) → (X, keep) could wrongly
+    suppress a real (X, keep) duplicate question later. Returns rows updated.
+    """
+    if not _table_exists(session, "kg_node_verdict"):
+        return 0
+    node_id = str(node_id)
+    count = (
+        session.query(KGNodeVerdict)
+        .filter(or_(KGNodeVerdict.node_id_a == node_id, KGNodeVerdict.node_id_b == node_id))
+        .filter(KGNodeVerdict.superseded_at.is_(None))
+        .update(
+            {KGNodeVerdict.superseded_at: utc_now(), KGNodeVerdict.superseded_reason: reason},
+            synchronize_session=False,
+        )
+    )
+    if count:
+        logger.info(
+            "[node_merge] superseded %d verdict(s) naming %s (%s)",
+            count, node_id[:8], reason,
+        )
+    return count
+
+
+def delete_node_chroma_vectors(node_id: str) -> bool:
+    """
+    Remove a node's label + context embeddings from Chroma. Best-effort by
+    necessity — Chroma is not transactional with SQLite — so failures are
+    logged at ERROR (ghost vectors feed the duplicate scan false candidates
+    until swept) and reported via the return value, never raised.
+    """
+    try:
+        from app.assistant.kg.chroma.chroma_embedding_manager import get_chroma_manager
+        cm = get_chroma_manager()
+        cm.delete_node_embedding(node_id)
+        cm.delete_node_context_embedding(node_id)
+        return True
+    except Exception as exc:
+        logger.error(
+            "[node_merge] Chroma cleanup failed for node %s — ghost vectors "
+            "remain in the label/context collections: %s", node_id, exc,
+        )
+        return False
+
+
 def record_merge(
     session: Session,
     *,
@@ -398,10 +513,17 @@ def merge_nodes_in_session(
          the current winner state, which already reflects the merge).
       2. Reroute edges (loser → winner), capturing dropped duplicates.
       3. Rebind dependent-table pointers via the registry.
-      4. Write merge-log row.
-      5. Delete the loser node.
+      4. Migrate loser's section tags winner lacks; supersede verdicts
+         naming loser.
+      5. Write merge-log row.
+      6. Delete the loser node + its Chroma label/context embeddings.
 
-    Does NOT commit — caller controls transaction boundary.
+    Does NOT commit — caller controls transaction boundary. The Chroma
+    cleanup therefore runs pre-commit: if the caller rolls back, the loser
+    keeps its SQLite row but has lost its vectors. That failure mode
+    self-heals (label re-embeds lazily on read; context backfills nightly),
+    whereas the inverse — committing the merge and leaving loser's vectors
+    behind — mints permanent ghost candidates for the duplicate scan.
     Returns the merge_log row id.
     """
     loser_id = str(loser_node.id)
@@ -413,6 +535,23 @@ def merge_nodes_in_session(
 
     rerouted, dropped = reroute_edges(session, loser_id, winner_id)
     rebinds = rebind_node_references(session, loser_id, winner_id)
+
+    tag_migration = migrate_section_tags(session, loser_id, winner_id)
+    loser_snapshot["section_tags"] = tag_migration["snapshots"]
+    if tag_migration["migrated_ids"]:
+        # Same record shape as rebind_node_references entries so a future
+        # unmerge can inverse-update these rows alongside the registry tables.
+        rebinds.append({
+            "table": "kg_node_section_tag",
+            "column": "node_id",
+            "row_ids": tag_migration["migrated_ids"],
+            "row_ids_truncated": False,
+            "count": len(tag_migration["migrated_ids"]),
+        })
+
+    supersede_verdicts_for_node(
+        session, loser_id, reason=f"node merged into {winner_id}"
+    )
 
     log_id = record_merge(
         session,
@@ -444,4 +583,6 @@ def merge_nodes_in_session(
         {"id": loser_id},
     )
     session.flush()
+
+    delete_node_chroma_vectors(loser_id)
     return log_id

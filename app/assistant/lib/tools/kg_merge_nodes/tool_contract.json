@@ -1,6 +1,6 @@
 {
   "name": "kg_merge_nodes",
-  "description": "Merge two KG nodes of the same node_type. The `fold_id` node is folded into `keep_id`: every edge pointing at `fold_id` gets rewritten to point at `keep_id`, the fold node's label + aliases are added to keep's aliases, and the fold node is deleted. Atomic. Reversible via the kg_revision_log entry. Refuses to merge across different node_types. Use this for the duplicate / typo-variant case (e.g. 'Aleks' should be merged into 'Alex'). Always pass a non-empty `reason`. Pass `dry_run: true` to see the diff without committing.",
+  "description": "Merge two KG nodes of the same node_type. The `fold_id` node is folded into `keep_id`: every edge pointing at `fold_id` gets rewritten to point at `keep_id`, dependent rows (entity cards, evidence, taxonomy links, proposal refs) are rebound, fold's section tags keep lacks are migrated, verdicts naming fold are superseded, the fold node's label + aliases are added to keep's aliases, keep's empty scalar fields (description, dates, category, semantic_label) are filled from fold, and the fold node + its Chroma embeddings are deleted. Atomic. Reversible via the kg_revision_log entry. Refuses to merge across different node_types, and refuses when fold outranks keep on edge count or pagerank (the merge direction is probably backwards — swap the ids, or pass `force: true` if intentional). Use this for the duplicate / typo-variant case (e.g. 'Aleks' should be merged into 'Alex'). Always pass a non-empty `reason`. Pass `dry_run: true` to see the diff without committing.",
   "inputs": [
     {
       "name": "keep_id",
@@ -27,6 +27,12 @@
       "description": "Preview the diff; do not commit. Default false."
     },
     {
+      "name": "force",
+      "type": "boolean",
+      "required": false,
+      "description": "Override the wrong-survivor guard when fold legitimately outranks keep (e.g. the correct label lost the popularity contest). Default false."
+    },
+    {
       "name": "finding_id",
       "type": "string",
       "required": false,
@@ -42,10 +48,10 @@
     {
       "path": "data",
       "type": "object",
-      "description": "{ok, revision_log_id, edges_rewritten, new_aliases} on commit; {ok, dry_run, before, after} on dry_run."
+      "description": "{ok, revision_log_id, edges_rewritten, dependent_rebinds, section_tags_migrated, verdicts_superseded, filled_fields, new_aliases, chroma_cleaned, survivor_warning} on commit; {ok, dry_run, before, after, survivor_warning} on dry_run."
     }
   ],
-  "arguments_prompt": "Arguments for kg_merge_nodes:\n- keep_id (required): surviving node id\n- fold_id (required): node to fold + delete\n- reason (required): why this merge is correct\n- dry_run (optional): preview only\n- finding_id (optional): source finding row id",
+  "arguments_prompt": "Arguments for kg_merge_nodes:\n- keep_id (required): surviving node id\n- fold_id (required): node to fold + delete\n- reason (required): why this merge is correct\n- dry_run (optional): preview only\n- force (optional): override the wrong-survivor guard (refuses when fold outranks keep on edges/pagerank)\n- finding_id (optional): source finding row id",
   "metadata": {
     "min_authority": 95,
     "approval_min_authority": 95,
