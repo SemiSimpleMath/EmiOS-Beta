@@ -312,6 +312,34 @@ def get_verdicts_for_node(
         return rows
 
 
+def load_distinct_verdicts_among(node_ids: List[str]) -> List[Tuple[str, str, str, str]]:
+    """Active 'distinct' verdicts whose BOTH endpoints are in ``node_ids``.
+
+    Returns [(node_id_a, node_id_b, memo, decided_by), ...]. Used by the
+    proposal_promoter ("Reader #3", audit P2.5): when two merge CANDIDATES
+    were already ruled distinct from each other, the node_merger should
+    know it before binding a new observation into either twin. The memos
+    are injected into the candidate payload — never used to silently drop
+    a candidate (deterministic proposes, LLM decides).
+    """
+    ids = [i for i in (node_ids or []) if i]
+    if len(ids) < 2:
+        return []
+    with get_db_manager().read_session() as session:
+        rows = (
+            session.query(
+                KGNodeVerdict.node_id_a, KGNodeVerdict.node_id_b,
+                KGNodeVerdict.memo, KGNodeVerdict.decided_by,
+            )
+            .filter(KGNodeVerdict.verdict_type == "distinct")
+            .filter(KGNodeVerdict.superseded_at.is_(None))
+            .filter(KGNodeVerdict.node_id_a.in_(ids))
+            .filter(KGNodeVerdict.node_id_b.in_(ids))
+            .all()
+        )
+    return [(a, b, memo or "", decided_by or "") for a, b, memo, decided_by in rows]
+
+
 def is_pair_marked_distinct(node_id_a: str, node_id_b: str) -> bool:
     """Convenience predicate for the duplicate-scan filter and
     proposal_promoter merge filter.

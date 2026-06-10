@@ -886,6 +886,39 @@ def _call_node_merger_for_state_match(
         logger.warning("[promoter] could not create node_merger agent")
         return None
 
+    # "Reader #3" (audit P2.5): when the maintenance loop already ruled two
+    # of these candidates DISTINCT from each other, tell the merger — it
+    # would otherwise happily re-bind a new observation into the wrong
+    # twin, undoing maintenance work indefinitely. Memo-inject rather than
+    # drop: the verdict says the CANDIDATES differ from each other, not
+    # which (if either) matches the new observation — that judgment stays
+    # with the LLM (deterministic proposes, LLM decides).
+    try:
+        from app.assistant.kg_maintenance.verdict_store import (
+            load_distinct_verdicts_among,
+        )
+        cand_ids = [str(c.get("node_id") or "") for c in candidate_payload]
+        verdicts = load_distinct_verdicts_among(cand_ids)
+        if verdicts:
+            notes_by_id: Dict[str, List[str]] = {}
+            for a, b, memo, decided_by in verdicts:
+                line = (
+                    f"prior verdict ({decided_by}): DISTINCT from candidate "
+                    f"{{other}} — {memo}"
+                )
+                notes_by_id.setdefault(a, []).append(line.format(other=b[:8]))
+                notes_by_id.setdefault(b, []).append(line.format(other=a[:8]))
+            for c in candidate_payload:
+                notes = notes_by_id.get(str(c.get("node_id") or ""))
+                if notes:
+                    c["prior_distinct_verdicts"] = notes
+            logger.info(
+                "[promoter] injected %d distinct-verdict note(s) into "
+                "node_merger candidates", len(verdicts),
+            )
+    except Exception as exc:
+        logger.warning("[promoter] verdict-store consult failed: %s", exc)
+
     scope = load_scope_for_source(
         kind="pipeline", source_id="kg_pipeline", actor_id="proposal_promoter",
     )
@@ -1199,7 +1232,10 @@ def _estimate_state_ttl(
     }
 
 
-def _refresh_on_reobservation(node: Node, proposal: ClaimProposal) -> None:
+def _refresh_on_reobservation(
+    node: Node, proposal: ClaimProposal,
+    proposal_node: Optional[ClaimProposalNode] = None,
+) -> None:
     """Bump the matched node's observation-tracking columns + attributes.
 
     Called on ``matched_existing`` in the promoter. Without this the decay
@@ -1207,32 +1243,64 @@ def _refresh_on_reobservation(node: Node, proposal: ClaimProposal) -> None:
     in 6 months" — the ``updated_at`` column doesn't distinguish.
 
     Updates first-class columns (promoted from JSON 2026-05-11):
-      - ``Node.last_observed`` — always overwrite with this proposal's
-        observation timestamp (decay reads this).
+      - ``Node.last_observed`` — monotonic max(existing, observed); decay
+        reads ONLY this column, and a blind overwrite while promoting a
+        backlog of OLDER windows used to rewind it on a live state, which
+        decay then auto-closed (audit P2.2).
       - ``Node.first_observed`` — only set if missing (back-compat for
         legacy nodes pre-attribute-tracking).
       - ``Node.observation_count`` — increment by 1.
       - ``Node.confidence`` — gentle bump (+0.05, capped at 1.0) but
         only if already set; don't invent a confidence from nothing.
 
-    Goal lifecycle (also first-class as of 2026-05-11):
-      - ``Node.last_pursued_at`` — bumped on every Goal re-observation.
+    A proposal with no observation timestamps (the writer's window anchor
+    can legitimately come back empty) still IS a re-observation — the
+    stamp anchors on the earliest evidence row's observed_at, else now.
+    Silently skipping the stamp let decay close states the user had just
+    re-confirmed (audit P2.2).
 
-    CRITICAL: must NOT bump Node.updated_at. Re-observation is bookkeeping
-    on existing claims — the underlying KG content didn't change. Bumping
-    updated_at marks every wiki + entity card whose neighborhood includes
-    this node as "changed" (see kg_projection.change_detection), cascading
-    refreshes on no semantic change. Mutating ``node.attributes`` via ORM
-    would trigger SQLAlchemy's onupdate=func.now() hook on commit, so we
-    issue an explicit UPDATE with ``updated_at = Node.updated_at`` self-ref
-    to preserve the timestamp verbatim. Same pattern as persist_description.
+    Refinement (audit P2.2(c), needs ``proposal_node``): the matched node's
+    NULL validity fields fill from the proposal (never overwriting non-NULL
+    values — decay otherwise anchors on created_at forever), and the
+    proposal's label folds into aliases when it differs from the node's
+    label (feeds tier-1 of the duplicate scan). Refinement IS a content
+    change, so when it fires updated_at bumps normally; pure re-observation
+    bookkeeping still preserves updated_at verbatim.
+
+    Goal lifecycle (also first-class as of 2026-05-11):
+      - ``Node.last_pursued_at`` — monotonic, bumped on Goal re-observation.
+
+    CRITICAL: pure bookkeeping must NOT bump Node.updated_at. Bumping it
+    marks every wiki + entity card whose neighborhood includes this node
+    as "changed" (see kg_projection.change_detection), cascading refreshes
+    on no semantic change. Mutating ``node.attributes`` via ORM would
+    trigger SQLAlchemy's onupdate=func.now() hook on commit, so we issue
+    an explicit UPDATE with ``updated_at = Node.updated_at`` self-ref to
+    preserve the timestamp verbatim. Same pattern as persist_description.
     """
+    from sqlalchemy.orm import object_session as _object_session
+    _session_for_anchor = _object_session(node)
+
     observed = proposal.last_observed_at or proposal.first_observed_at
     if observed is None:
-        return
+        ev = (
+            _earliest_proposal_evidence(_session_for_anchor, proposal.id)
+            if _session_for_anchor is not None else None
+        )
+        observed = (
+            getattr(ev, "observed_at", None)
+            or getattr(ev, "created_at", None)
+            or utc_now()
+        )
 
-    # Compute the column updates from the existing values
-    new_last_observed = observed
+    # Compute the column updates from the existing values.
+    # Monotonic: promoting an older backlog window must never rewind the
+    # recency signal on a node that was re-observed more recently.
+    existing_last = node.last_observed
+    new_last_observed = (
+        observed if (existing_last is None or observed > existing_last)
+        else existing_last
+    )
     new_first_observed = node.first_observed or observed
     new_observation_count = int(node.observation_count or 1) + 1
     new_confidence = node.confidence
@@ -1251,16 +1319,41 @@ def _refresh_on_reobservation(node: Node, proposal: ClaimProposal) -> None:
     revive_to_active = False
     new_last_pursued_at = node.last_pursued_at
     if (node.node_type or "") == "Goal":
-        new_last_pursued_at = observed
+        # Monotonic for the same backlog-rewind reason as last_observed.
+        if new_last_pursued_at is None or observed > new_last_pursued_at:
+            new_last_pursued_at = observed
         cur_status = (node.goal_status or "").lower()
         if cur_status not in ("completed", "abandoned"):
             revive_to_active = True
+
+    # Refinement (audit P2.2(c)): fill the matched node's NULL validity
+    # fields from the proposal and fold a differing proposal label into
+    # aliases. Never overwrites a non-NULL value.
+    refinement: Dict[str, Any] = {}
+    if proposal_node is not None:
+        for field, value in (
+            ("start_date", proposal_node.valid_from),
+            ("end_date", proposal_node.valid_to),
+            ("start_date_prose", proposal_node.valid_from_prose),
+            ("end_date_prose", proposal_node.valid_to_prose),
+            ("start_date_confidence", proposal_node.start_date_confidence),
+            ("end_date_confidence", proposal_node.end_date_confidence),
+        ):
+            if value is not None and getattr(node, field, None) is None:
+                refinement[field] = value
+        p_label = (proposal_node.label or "").strip()
+        if p_label and p_label.lower() != (node.label or "").strip().lower():
+            aliases = list(node.aliases or [])
+            if p_label.lower() not in {str(a).lower() for a in aliases if a}:
+                refinement["aliases"] = aliases + [p_label]
+                # A new alias means new pairing potential for the dupe scan.
+                refinement["last_dupe_scanned_at"] = None
 
     from sqlalchemy import update as sql_update
     from sqlalchemy.orm import object_session
     session = object_session(node)
     if session is None:
-        # Defensive fallback: no session in scope means we can't issue our
+        # Defensive branch: no session in scope means we can't issue our
         # explicit UPDATE. Leave the ORM-tracked mutation as the write path;
         # caller's commit will flush it (with the unwanted updated_at bump).
         # This branch shouldn't fire in production — _refresh_on_reobservation
@@ -1274,13 +1367,21 @@ def _refresh_on_reobservation(node: Node, proposal: ClaimProposal) -> None:
             node.last_pursued_at = new_last_pursued_at
         if revive_to_active:
             node.goal_status = "active"
+        for field, value in refinement.items():
+            setattr(node, field, value)
         return
     update_values = {
         "last_observed": new_last_observed,
         "first_observed": new_first_observed,
         "observation_count": new_observation_count,
-        "updated_at": Node.updated_at,
     }
+    if refinement:
+        # Refinement is a real content change — let the column-level
+        # onupdate bump updated_at so wiki/card change detection sees it.
+        update_values.update(refinement)
+    else:
+        # Pure bookkeeping — preserve updated_at verbatim via self-ref.
+        update_values["updated_at"] = Node.updated_at
     if new_confidence is not None:
         update_values["confidence"] = new_confidence
     if new_last_pursued_at is not None:
@@ -1297,6 +1398,8 @@ def _refresh_on_reobservation(node: Node, proposal: ClaimProposal) -> None:
     session.expire(node, [
         "last_observed", "first_observed", "observation_count",
         "confidence", "last_pursued_at",
+        "start_date", "end_date", "start_date_prose", "end_date_prose",
+        "start_date_confidence", "end_date_confidence", "aliases",
     ])
 
 
@@ -1519,16 +1622,56 @@ def _write_edge_evidence(
     ))
 
 
-def _existing_kg_edge(session, src_id: str, tgt_id: str, predicate: str) -> Optional[Edge]:
-    return (
+# Predicates whose meaning is direction-free: A —p→ B asserts the same
+# fact as B —p→ A. A reversed re-assertion must reinforce the existing
+# edge, not mint a mirror twin (audit P2.4). The writer's per-edge
+# ``bidirectional`` flag extends this set case-by-case.
+SYMMETRIC_PREDICATES = frozenset({
+    "is_sibling_in", "is_spouse_in", "colleague_of",
+})
+
+# Synonym classes: predicates that spell the same fact. Members dedup and
+# conflict-check against the whole class, not just their own spelling
+# (audit P2.4 — works_for vs employed_by dodged the single-target check).
+# employed_by is alias-mapped to works_for at write time; the class keeps
+# matching any legacy/sideways-written rows.
+_PREDICATE_SYNONYM_CLASSES: dict[str, tuple[str, ...]] = {
+    "works_for": ("works_for", "employed_by"),
+    "employed_by": ("works_for", "employed_by"),
+}
+
+
+def _predicate_class(predicate: str) -> list[str]:
+    return list(_PREDICATE_SYNONYM_CLASSES.get(predicate, (predicate,)))
+
+
+def _existing_kg_edge(
+    session, src_id: str, tgt_id: str, predicate: str,
+    *, bidirectional: bool = False,
+) -> Optional[Edge]:
+    members = _predicate_class(predicate)
+    hit = (
         session.query(Edge)
         .filter(
             Edge.source_id == src_id,
             Edge.target_id == tgt_id,
-            Edge.relationship_type == predicate,
+            Edge.relationship_type.in_(members),
         )
         .first()
     )
+    if hit is not None:
+        return hit
+    if bidirectional or predicate in SYMMETRIC_PREDICATES:
+        return (
+            session.query(Edge)
+            .filter(
+                Edge.source_id == tgt_id,
+                Edge.target_id == src_id,
+                Edge.relationship_type.in_(members),
+            )
+            .first()
+        )
+    return None
 
 
 def _is_durable_conflict(
@@ -1544,10 +1687,14 @@ def _is_durable_conflict(
     """
     SINGLE_TARGET_PREDICATES = {
         # Marriage is single-target by definition (polygamy not supported).
-        "is_spouse_in", "is_married", "married_to",
+        # (is_married / married_to are normalized to is_spouse_in by the
+        # writer AND by the normalize call below — dead entries removed,
+        # audit P3.6.)
+        "is_spouse_in",
         # Primary employer — debatable for contractors but usually
-        # single-target in a biographical graph.
-        "works_for", "employed_by",
+        # single-target in a biographical graph. employed_by collapses to
+        # works_for; the synonym CLASS is checked below (audit P2.4).
+        "works_for",
         # Hard biological facts — single-target.
         "born_in",           # one birthplace
         "has_birthday",      # one date of birth
@@ -1556,11 +1703,18 @@ def _is_durable_conflict(
         # locations, habits) need LLM judgment — deliberately NOT covered
         # here. A perplexity-check agent is the right home for those.
     }
-    if predicate not in SINGLE_TARGET_PREDICATES:
+    # Normalize so raw spellings (employed_by, is_married) land on their
+    # canonical class even when a caller bypassed the writer.
+    from app.assistant.kg.predicate_vocabulary import normalize_predicate
+    canonical, _ = normalize_predicate(predicate)
+    if canonical not in SINGLE_TARGET_PREDICATES:
         return None
     hit = (
         session.query(Edge)
-        .filter(Edge.source_id == src_id, Edge.relationship_type == predicate)
+        .filter(
+            Edge.source_id == src_id,
+            Edge.relationship_type.in_(_predicate_class(canonical)),
+        )
         .first()
     )
     if hit is None:
@@ -2121,7 +2275,7 @@ def _evaluate_and_apply(
             if commit:
                 match_node = session.get(Node, prepared.matched_node_id)
                 if match_node is not None:
-                    _refresh_on_reobservation(match_node, proposal)
+                    _refresh_on_reobservation(match_node, proposal, proposal_node=pn)
                 _write_node_evidence(
                     session,
                     node_id=prepared.matched_node_id,
@@ -2174,7 +2328,7 @@ def _evaluate_and_apply(
             if commit:
                 match_node = session.get(Node, prepared.matched_node_id)
                 if match_node is not None:
-                    _refresh_on_reobservation(match_node, proposal)
+                    _refresh_on_reobservation(match_node, proposal, proposal_node=pn)
                 _write_node_evidence(
                     session,
                     node_id=prepared.matched_node_id,
@@ -2288,7 +2442,13 @@ def _evaluate_and_apply(
             )
             continue
 
-        existing = _existing_kg_edge(session, src_kg, tgt_kg, pe.predicate)
+        existing = _existing_kg_edge(
+            session, src_kg, tgt_kg, pe.predicate,
+            # The writer stamps bidirectional=True for symmetric phrasings;
+            # honoring it here stops reversed re-assertions from minting a
+            # mirror edge (the flag was previously never read — audit P2.4).
+            bidirectional=bool(getattr(pe, "bidirectional", False)),
+        )
         if existing is not None:
             pe.resolved_edge_id = existing.id
             # Evidence cascade: record this reinforcement observation on

@@ -14,6 +14,7 @@ You receive `new_node_context` (a node to insert) and `existing_node_candidates`
 4. **Category mismatches are not blockers.** Categories evolve (Project->Application) and can be synonymous (Company/Organization). Weight label + context over category.
 5. **Synthesize context.** "Jamie is {{ resource_user_data.preferred_name }}'s son" and an existing Jamie connected to "Jamie is Riley's brother" are the same Jamie -- complementary family facts, not contradictions.
 6. **Ranking is a hint, not a decision.** Reject all candidates if none truly match.
+7. **Prior distinct verdicts are authoritative.** A candidate may carry `prior_distinct_verdicts`: durable rulings from past investigations that it is NOT the same thing as another listed candidate. The new observation may still match ONE of them, but if you cannot tell which twin it refers to, do not merge.
 
 ### Output
 

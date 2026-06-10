@@ -160,7 +160,13 @@ class TestEntityLikeCreate:
             assert ev.merge_action == "created"
             assert ev.window_id == window_id
             assert ev.source_text == raw_text
-            assert ev.source_table == "unified_log_2026"
+            # Provenance is window-level only since the belief-v2 seam: the
+            # legacy source_table/source_id pair always pointed at the
+            # window's FIRST message regardless of which claim, so the
+            # promoter now deliberately writes NULL (walk window_id →
+            # kg_window_message → unified_log_2026 for context).
+            assert ev.source_table is None
+            assert ev.source_id is None
             # SQLite strips tzinfo on round-trip; compare on the value itself.
             assert ev.message_timestamp.replace(tzinfo=None) == observed_at.replace(tzinfo=None)
             # node_id should match the freshly-created Node.

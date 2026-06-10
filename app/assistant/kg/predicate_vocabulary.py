@@ -55,8 +55,10 @@ CANONICAL_PREDICATES: frozenset[str] = frozenset({
     # Family (preserve directionality)
     "is_parent_in", "is_child_in", "is_spouse_in", "is_sibling_in",
     "is_grandparent_in", "is_grandchild_in",
-    # Work
-    "works_for", "employed_by", "colleague_of", "reports_to",
+    # Work. NOTE: employed_by is an ALIAS of works_for (audit P2.4) — two
+    # canonical spellings of one fact let the same employment dodge both
+    # edge dedup and the single-target conflict check.
+    "works_for", "colleague_of", "reports_to",
     # Meta / provenance
     "source", "evidence_for", "example_of", "references",
     # Common nav/IO
@@ -132,6 +134,11 @@ PREDICATE_ALIASES: dict[str, str] = {
     "is_sibling": "is_sibling_in",
     "is_grandparent": "is_grandparent_in",
     "is_grandchild": "is_grandchild_in",
+    # Employment synonyms — one canonical spelling (audit P2.4). Verified
+    # 2026-06-10: zero employed_by edges existed in the live KG, so this
+    # is purely forward-looking (no migration needed).
+    "employed_by": "works_for",
+    "Employed_By": "works_for",
     # Causal variants the extractor invents.
     "because_of": "caused_by",
     "triggered_by": "caused_by",
