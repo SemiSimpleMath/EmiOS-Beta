@@ -376,18 +376,26 @@ def _build_food_beliefs_v2(*, agent: str, db_path: Optional[str] = None,
 
     cutoff = (now - timedelta(days=_V2_RECENT_DAYS)).isoformat()
     lines = [
-        f"Food & household beliefs (belief-engine v2, context-ranked, top {len(rows)}). "
-        f"Items marked (recent) were observed in the last {_V2_RECENT_DAYS} days — "
-        f"treat those as current intent and let them override older preferences:",
+        f"Food & household beliefs (belief-engine v2, context-ranked, top {len(rows)}, "
+        f"today is {now.strftime('%A %Y-%m-%d')}). Each item shows when it was last "
+        f"observed. Items observed in the last {_V2_RECENT_DAYS} days are current "
+        f"intent — let them override older preferences. TIME-SCOPE the transient/"
+        f"episodic ones with common sense: they describe a passing situation, so "
+        f"judge from the observed date whether it still applies (a stomach bug "
+        f"observed 3+ days ago is probably over — plan normal food unless something "
+        f"says otherwise; one observed yesterday still governs today's meals).",
     ]
     for r in rows:
         stmt = (r.get("statement_nl") or "").strip()
         if not stmt:
             continue
-        recent = (r.get("last_observed") or "") >= cutoff
+        last = (r.get("last_observed") or "")
+        recent = last >= cutoff
         meta = [k for k in ((r.get("kind") or ""),) if k]
+        if last:
+            meta.append(f"observed {last[:10]}")
         if r.get("obs_count") and int(r["obs_count"]) > 1:
-            meta.append(f"observed {int(r['obs_count'])}x")
+            meta.append(f"{int(r['obs_count'])}x")
         if recent:
             meta.append("recent")
         suffix = f"  [{', '.join(meta)}]" if meta else ""

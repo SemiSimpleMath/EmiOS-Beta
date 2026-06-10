@@ -69,6 +69,14 @@ def test_v2_lane_renders_and_logs_surfacing(v2_store_path):
     assert "recent" in banana_line
     assert "recent" not in salmon_line
     assert "preference" in banana_line          # kind is visible to the planner
+    # Observed DATE is visible — this is what lets the planner LLM time-scope
+    # transient facts ("sick Monday" governs Tue, not Thu).
+    assert "observed 2026-06-08" in banana_line
+    assert "observed 2026-02-" in salmon_line
+    # The header carries today's date + the time-scoping doctrine.
+    header = block.splitlines()[0]
+    assert "2026-06-10" in header
+    assert "stomach bug" in header
 
     con = sqlite3.connect(v2_store_path)
     rows = con.execute(
