@@ -1,6 +1,6 @@
 {
   "id": "kg_state_date_drain",
-  "enabled": false,
+  "enabled": true,
   "name": "KG state/event date investigator (drain)",
   "aliases": [
     "state date drain",
@@ -16,5 +16,5 @@
     "time_local": "03:15",
     "quiet_hours_ok": true
   },
-  "notes": "[DISABLED 2026-05-10 POST-NUKE \u2014 re-enable when KG pipeline rebuilt] Drains pending state_missing_dates findings through kg_investigation_manager with the specialized state-dates brief (dated neighbors, conversation-evidence window, sibling states). Investigator emits proposed_action.op='fill_dates' with confidence; high-confidence ones get auto-applied by kg_finding_executor_drain. Limit 8/day keeps LLM cost bounded \u2014 raise if the backlog (hundreds today) doesn't shrink fast enough."
+  "notes": "[Re-enabled 2026-06-10 — full healing-loop enablement (audit follow-up): the 2026-05-10 POST-NUKE pause is over; pipeline rebuilt, scanner live since 2026-05-12, finding drains live since 2026-06-09.] Drains pending state_missing_dates findings through kg_investigation_manager with the specialized state-dates brief (dated neighbors, conversation-evidence window, sibling states). Investigator emits proposed_action.op='fill_dates' with confidence; high-confidence ones get auto-applied by kg_finding_executor_drain. Limit 8/day keeps LLM cost bounded — raise if the backlog (hundreds today) doesn't shrink fast enough."
 }

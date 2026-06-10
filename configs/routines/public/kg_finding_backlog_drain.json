@@ -11,11 +11,15 @@
   "spec": {
     "function_name": "kg_finding_backlog_drain",
     "limit": 20,
-    "exclude_finding_types": ["duplicate_node"]
+    "exclude_finding_types": [
+      "duplicate_node",
+      "state_missing_dates",
+      "synthetic_fact_proposal"
+    ]
   },
   "run_policy": {
     "type": "daily",
     "time_local": "03:00"
   },
-  "notes": "[Re-enabled 2026-06-09: the 2026-05-10 KG pipeline overhaul (3ee79038) is rebuilt and its scanner has run since 2026-05-12; these two finding-drain routines were simply missed by the partial re-enable (5d1356ba covered the scanner + wiki only), so the new pipeline detected but never drained -> ~1408 pending duplicate_node. 2026-06-09: duplicate_node EXCLUDED here (exclude_finding_types) -- per-pair investigation is ~4.5 min/finding (~100h for the backlog); duplicates now go EXCLUSIVELY through kg_dup_cluster_drain (cluster-level adjudication, keeps recurring occurrences distinct). This drain handles the non-duplicate finding types.] Daily: investigate up to 20 oldest pending kg_maintenance_findings (drain by node importance), excluding duplicate_node. Picks from the global pending queue, complementing the weekly kg_maintenance_pipeline which only investigates findings produced by its own run."
+  "notes": "[Re-enabled 2026-06-09: the 2026-05-10 KG pipeline overhaul (3ee79038) is rebuilt and its scanner has run since 2026-05-12; these two finding-drain routines were simply missed by the partial re-enable (5d1356ba covered the scanner + wiki only), so the new pipeline detected but never drained -> ~1408 pending duplicate_node. 2026-06-09: duplicate_node EXCLUDED here (exclude_finding_types) -- per-pair investigation is ~4.5 min/finding (~100h for the backlog); duplicates now go EXCLUSIVELY through kg_dup_cluster_drain (cluster-level adjudication, keeps recurring occurrences distinct). This drain handles the non-duplicate finding types.] Daily: investigate up to 20 oldest pending kg_maintenance_findings (drain by node importance), excluding duplicate_node. Picks from the global pending queue, complementing the weekly kg_maintenance_pipeline which only investigates findings produced by its own run. 2026-06-10: also excluded state_missing_dates (dedicated kg_state_date_drain, specialized brief, re-enabled today) and synthetic_fact_proposal (has its own review inbox which only lists status='pending' rows — investigating one here made it vanish from that inbox)."
 }

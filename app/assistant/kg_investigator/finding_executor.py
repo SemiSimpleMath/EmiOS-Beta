@@ -70,6 +70,7 @@ def _claim_executable_finding_ids(*, limit: int) -> List[str]:
     - investigation_report_json non-null
     - disposition='auto_apply' (not 'needs_user_review' — those wait for the user)
     - investigated_at older than now - 24h (grace expired)
+    - superseded_by IS NULL (siblings close via their cluster lead's cascade)
 
     Wedding-vs-backpack ordering: a finding's importance is the max
     importance across its primary node and one-hop neighbors. Date is
@@ -89,6 +90,10 @@ def _claim_executable_finding_ids(*, limit: int) -> List[str]:
             .filter(KGMaintenanceFinding.status == "investigated")
             .filter(KGMaintenanceFinding.investigation_report_json.isnot(None))
             .filter(KGMaintenanceFinding.investigated_at < cutoff)
+            # Superseded siblings are closed by their cluster lead's
+            # cascade — executing them independently double-applies
+            # against the same root cause.
+            .filter(KGMaintenanceFinding.superseded_by.is_(None))
             .all()
         )
 

@@ -1,6 +1,6 @@
 {
   "id": "kg_goal_outcome_detect",
-  "enabled": false,
+  "enabled": true,
   "name": "KG goal outcome detector (achieved / abandoned)",
   "aliases": [
     "goal outcomes",
@@ -16,5 +16,5 @@
     "time_local": "02:55",
     "quiet_hours_ok": true
   },
-  "notes": "[DISABLED 2026-05-10 POST-NUKE \u2014 re-enable when KG pipeline rebuilt] Scans recent chat for explicit 'I did X' / 'I gave up X' statements about active Goal nodes. Closes matching Goals as terminal (achieved/abandoned) with end_date set. Conservative \u2014 only fires on direct user statements at confidence >= 0.7. Silent abandonment is goal_dormancy_sweep's job. Limit 10 Goals/day to keep LLM cost bounded."
+  "notes": "[Re-enabled 2026-06-10 — full healing-loop enablement (audit follow-up): the 2026-05-10 POST-NUKE pause is over; pipeline rebuilt, scanner live since 2026-05-12, finding drains live since 2026-06-09.] Scans recent chat for explicit 'I did X' / 'I gave up X' statements about active Goal nodes. Closes matching Goals as terminal (achieved/abandoned) with end_date set. Conservative — only fires on direct user statements at confidence >= 0.7. Silent abandonment is goal_dormancy_sweep's job. Limit 10 Goals/day to keep LLM cost bounded."
 }

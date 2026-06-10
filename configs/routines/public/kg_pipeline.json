@@ -1,6 +1,6 @@
 {
   "id": "kg_pipeline",
-  "enabled": false,
+  "enabled": true,
   "name": "KG pipeline",
   "aliases": [
     "kg pipeline",
@@ -20,5 +20,5 @@
     "active_window": "kg_active"
   },
   "run_policy": {},
-  "notes": "[DISABLED 2026-05-10 POST-NUKE \u2014 re-enable when KG pipeline rebuilt] Ingests chat messages into the knowledge graph (2026-04-25 refactor \u2014 bucket-per-stage architecture). Runs once per day at 23:00 inside the kg_active window (configs/windows.json). Tune the window itself, not the time_local \u2014 the window is the active period; time_local just says 'fire at the start of it.'"
+  "notes": "[Re-enabled 2026-06-10 — full healing-loop enablement (audit follow-up): the 2026-05-10 POST-NUKE pause is over; pipeline rebuilt, scanner live since 2026-05-12, finding drains live since 2026-06-09.] Ingests chat messages into the knowledge graph (2026-04-25 refactor — bucket-per-stage architecture). Runs once per day at 23:00 inside the kg_active window (configs/windows.json). Tune the window itself, not the time_local — the window is the active period; time_local just says 'fire at the start of it.'"
 }

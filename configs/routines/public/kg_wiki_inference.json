@@ -1,6 +1,6 @@
 {
   "id": "kg_wiki_inference",
-  "enabled": false,
+  "enabled": true,
   "name": "Wiki connection investigator (suggest new KG edges)",
   "aliases": [
     "wiki inference",
@@ -16,5 +16,5 @@
     "time_local": "04:15",
     "quiet_hours_ok": true
   },
-  "notes": "[DISABLED 2026-05-10 POST-NUKE \u2014 re-enable when KG pipeline rebuilt] Reads the 10 freshest wiki pages and runs wiki_connection_investigator to propose edges (and sometimes new target nodes) the page implies but the KG doesn't yet have. Proposals flow through the standard claim_proposal pipeline so the promoter's merge gates apply. Runs after wiki_nightly_refresh (03:00) and the cluster/executor drains so it sees the freshest pages and only generates novel proposals."
+  "notes": "[Re-enabled 2026-06-10 — full healing-loop enablement (audit follow-up): the 2026-05-10 POST-NUKE pause is over; pipeline rebuilt, scanner live since 2026-05-12, finding drains live since 2026-06-09.] Reads the 10 freshest wiki pages and runs wiki_connection_investigator to propose edges (and sometimes new target nodes) the page implies but the KG doesn't yet have. Proposals flow through the standard claim_proposal pipeline so the promoter's merge gates apply. Runs after wiki_nightly_refresh (03:00) and the cluster/executor drains so it sees the freshest pages and only generates novel proposals."
 }

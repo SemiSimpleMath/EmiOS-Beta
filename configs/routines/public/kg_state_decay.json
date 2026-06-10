@@ -1,6 +1,6 @@
 {
   "id": "kg_state_decay",
-  "enabled": false,
+  "enabled": true,
   "name": "KG state decay (nightly auto-close)",
   "aliases": [],
   "runner": "function",
@@ -12,5 +12,5 @@
     "time_local": "02:45",
     "quiet_hours_ok": true
   },
-  "notes": "[DISABLED 2026-05-10 POST-NUKE \u2014 re-enable when KG pipeline rebuilt] Auto-closes State/Event nodes whose TTL has elapsed (uses attributes.last_observed + attributes.ttl, GRACE_DAYS=3). Runs after proposal_promoter (02:30) so freshly-promoted nodes are in the candidate set, and before wiki_nightly_refresh (03:00) so closures flow into the wiki the same night. Nightly cadence so the graph doesn't accumulate ghost-open states between weekly maintenance runs."
+  "notes": "[Re-enabled 2026-06-10 — full healing-loop enablement (audit follow-up): the 2026-05-10 POST-NUKE pause is over; pipeline rebuilt, scanner live since 2026-05-12, finding drains live since 2026-06-09.] Auto-closes State/Event nodes whose TTL has elapsed (uses attributes.last_observed + attributes.ttl, GRACE_DAYS=3). Runs after proposal_promoter (02:30) so freshly-promoted nodes are in the candidate set, and before wiki_nightly_refresh (03:00) so closures flow into the wiki the same night. Nightly cadence so the graph doesn't accumulate ghost-open states between weekly maintenance runs."
 }

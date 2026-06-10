@@ -239,6 +239,10 @@ def _claim_pending_finding_ids(
                 KGMaintenanceFinding.created_at,
             )
             .filter(KGMaintenanceFinding.status == "pending")
+            # Superseded siblings are resolved by their cluster lead's
+            # cascade — investigating them independently duplicates LLM
+            # spend and can produce conflicting verdicts.
+            .filter(KGMaintenanceFinding.superseded_by.is_(None))
         )
         if finding_types:
             q = q.filter(KGMaintenanceFinding.finding_type.in_(finding_types))

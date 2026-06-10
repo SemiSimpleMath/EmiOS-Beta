@@ -1,6 +1,6 @@
 {
   "id": "kg_finding_cluster_resolve",
-  "enabled": false,
+  "enabled": true,
   "name": "KG finding cluster resolver (distill redundant findings)",
   "aliases": [],
   "runner": "function",
@@ -12,5 +12,5 @@
     "time_local": "03:30",
     "quiet_hours_ok": true
   },
-  "notes": "[DISABLED 2026-05-10 POST-NUKE \u2014 re-enable when KG pipeline rebuilt] Reads pending findings, groups by primary_node_id, calls kg_finding_cluster_resolver to verify which candidate clusters share ONE root question. Confirmed leads get synthesized root_question; siblings get superseded_by stamped (hidden from default UI). Resolving a lead cascades to its siblings. Runs after wiki_nightly_refresh (03:00) so wiki_contradiction findings of the same night are eligible for clustering."
+  "notes": "[Re-enabled 2026-06-10 — full healing-loop enablement (audit follow-up): the 2026-05-10 POST-NUKE pause is over; pipeline rebuilt, scanner live since 2026-05-12, finding drains live since 2026-06-09.] Reads pending findings, groups by primary_node_id, calls kg_finding_cluster_resolver to verify which candidate clusters share ONE root question. Confirmed leads get synthesized root_question; siblings get superseded_by stamped (hidden from default UI). Resolving a lead cascades to its siblings. Runs after wiki_nightly_refresh (03:00) so wiki_contradiction findings of the same night are eligible for clustering."
 }
