@@ -1,6 +1,6 @@
 {
   "id": "kg_finding_backlog_drain",
-  "enabled": false,
+  "enabled": true,
   "name": "KG finding backlog drain",
   "aliases": [
     "drain findings",
@@ -10,11 +10,11 @@
   "runner": "function",
   "spec": {
     "function_name": "kg_finding_backlog_drain",
-    "limit": 5
+    "limit": 20
   },
   "run_policy": {
     "type": "daily",
     "time_local": "03:00"
   },
-  "notes": "[DISABLED 2026-05-10 POST-NUKE \u2014 re-enable when KG pipeline rebuilt] Daily: investigate up to 5 oldest pending kg_maintenance_findings (FIFO drain). Picks from the global pending queue, complementing the weekly kg_maintenance_pipeline which only investigates findings produced by its own run."
+  "notes": "[Re-enabled 2026-06-09: the 2026-05-10 KG pipeline overhaul (3ee79038) is rebuilt and its scanner has run since 2026-05-12; these two finding-drain routines were simply missed by the partial re-enable (5d1356ba covered the scanner + wiki only), so the new pipeline detected but never drained -> ~1408 pending duplicate_node. Investigator now runs gpt-5.4 (cluster-level), so each run clears more than one finding. Limit raised 5 -> 20 to drain the backlog in reasonable time; tune down if cost/quality warrants.] Daily: investigate up to 20 oldest pending kg_maintenance_findings (drain by node importance). Picks from the global pending queue, complementing the weekly kg_maintenance_pipeline which only investigates findings produced by its own run."
 }
