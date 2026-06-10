@@ -80,6 +80,10 @@ def _claim_from_item(item: Dict[str, Any]):
             "applies_when_cue": ec.get("applies_when"),     # keep the string cue for later parsing
             "temporal_scope": item.get("temporal_scope"),
             "change_recommended": item.get("change_recommended"),
+            # Memory class from the extractor — the projection folds it into
+            # beliefs.kind, which is what #5's cadence-aware decay keys on.
+            # Without it every belief is fail-open evergreen (decay inert).
+            "kind": (str(ec.get("kind")).strip().lower() or None) if ec.get("kind") else None,
         },
     )
     return claim, polarity

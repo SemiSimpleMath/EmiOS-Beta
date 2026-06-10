@@ -28,9 +28,22 @@ Durability rules (critical):
 
 Structured claim (for the belief engine):
 - For each item, also fill `extracted_claim`: the SAME insight as subject / predicate / object
-  phrases, plus optional qualifiers, an optional `applies_when` cue, and a polarity.
+  phrases, plus optional qualifiers, an optional `applies_when` cue, a polarity, and a `kind`.
 - Write natural phrases, not codes — e.g. subject "the kids", predicate "won't eat", object
   "zucchini". A registry canonicalizes them later, so don't worry about matching exact wording.
+- KEEP THE SLOTS ATOMIC. `object_phrase` is a SHORT noun phrase ("bananas", "the evening dog
+  walk"), NEVER a clause or sentence. Conditions go in `qualifiers`, behavioral consequences in
+  `llm_interpretation`. If one observation carries two facts ("ribs made him sick, fish sticks
+  were fine"), emit TWO actionable items, each with its own atomic claim — a clause stuffed into
+  `object_phrase` can never be matched against anything later.
+- Use PLAIN, REUSABLE predicates: prefer "prefers" / "avoids" / "dislikes" / "does the routine" /
+  "knows" / "has" over inventive one-off phrasings ("finds suboptimal", "is partial to").
+  Different wording for the same relation fragments the registry.
+- `kind` (how the memory should age): 'semantic_fact' (stable world-fact about the user or
+  household), 'preference' (like/dislike/want) — neither fades from silence;
+  'procedural_routine' (recurring practice — fades only when expected occurrences are missed);
+  'episodic' (tied to a specific situation, e.g. "during this stomach bug" — fades over weeks);
+  'transient_state' (true today, gone in days). When unsure pick the longer-lived class.
 - `applies_when` is OPTIONAL and soft: fill it only when the claim is genuinely time- or
   context-bound (e.g. "weekday mornings", "after 16:00", "first business day of the month"); leave
   it null otherwise — never force a cue that isn't really there.

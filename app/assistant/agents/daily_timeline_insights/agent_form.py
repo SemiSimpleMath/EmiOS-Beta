@@ -39,6 +39,17 @@ class ExtractedClaim(BaseModel):
                     "(the user changed their mind); retract = the user explicitly withdrew it. "
                     "Default 'affirm'.",
     )
+    kind: Optional[str] = Field(
+        default=None,
+        description="Memory class — drives how the belief engine forgets. One of: "
+                    "'semantic_fact' (stable world-fact about the user/household — a health "
+                    "condition, a child's school), 'preference' (likes/dislikes/wants — both never "
+                    "decay from silence), 'procedural_routine' (a recurring practice — weekly "
+                    "call, monthly timesheet — decays only when expected occurrences are missed), "
+                    "'episodic' (tied to a specific situation or period — during an illness, while "
+                    "on a trip — fades over weeks), 'transient_state' (true right now, gone in "
+                    "days — feeling sick today). When unsure choose the LONGER-lived class.",
+    )
     llm_interpretation: Optional[str] = Field(
         default=None,
         description="One short line: what this claim means for how the assistant should behave.",
