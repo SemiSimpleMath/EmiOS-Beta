@@ -2,8 +2,8 @@ name: kg_investigation::planner
 class_name: Planner
 llm_params:
   llm_provider: "openai"
-  engine: "gpt-5.1"
-  model_tier: "smart"
+  engine: "gpt-5.4"
+  model_tier: "powerful"
 
 # Curated to kg_query only — see manager config rationale.
 # Read-only investigator; SQLite reaches everything via SQL.
