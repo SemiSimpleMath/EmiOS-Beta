@@ -16,6 +16,14 @@ from app.models.base import get_session
 
 logger = get_logger(__name__)
 
+# Statuses that end a finding's lifecycle. Once a row lands here it must
+# never be silently overwritten — a second executor pass re-labeling
+# 'executed' as 'escalated' mislabels applied work (audit P0.4). Explicit
+# re-queues (a future UI affordance) pass allow_terminal_transition=True.
+TERMINAL_STATUSES = frozenset({
+    "executed", "dismissed", "escalated", "rejected", "execute_error",
+})
+
 
 def _priority_order_expr():
     """
@@ -123,8 +131,14 @@ def set_status(
     executed_by: Optional[str] = None,
     execution_notes: Optional[str] = None,
     cascade_to_siblings: bool = True,
+    allow_terminal_transition: bool = False,
 ) -> int:
     """Update a finding's status, optionally recording execution metadata.
+
+    Refuses to overwrite a terminal status (executed / dismissed /
+    escalated / rejected / execute_error) unless
+    ``allow_terminal_transition=True`` — a blind second write mislabeling
+    already-applied work was audit finding P0.4.
 
     If the finding is a cluster lead (other findings have superseded_by ==
     this id) and ``cascade_to_siblings`` is True, every still-pending
@@ -137,6 +151,12 @@ def set_status(
         finding = session.query(KGMaintenanceFinding).filter_by(id=finding_id).first()
         if finding is None:
             raise ValueError(f"[KGMaintenanceStore] Finding {finding_id} not found")
+        if finding.status in TERMINAL_STATUSES and not allow_terminal_transition:
+            raise ValueError(
+                f"[KGMaintenanceStore] refusing to overwrite terminal status "
+                f"{finding.status!r} with {status!r} on finding {finding_id} — "
+                f"pass allow_terminal_transition=True for an explicit re-queue."
+            )
         finding.status = status
         if executed_by:
             finding.executed_by = executed_by
@@ -190,6 +210,22 @@ def execute_finding(finding_id: str) -> dict:
     finding = get_finding(finding_id)
     if finding is None:
         raise ValueError(f"Finding {finding_id!r} not found")
+
+    # Race guard (audit P0.4): this route runs on a request thread OUTSIDE
+    # the routine lock, so it can collide with the executor drain. A row
+    # that's terminal or claimed ('executing') must not be re-executed —
+    # the mutation would double-apply and the status write would mislabel
+    # finished work.
+    current = (finding.get("status") or "").strip()
+    if current in TERMINAL_STATUSES or current == "executing":
+        return {
+            "action": finding.get("suggested_action", ""),
+            "executed": False,
+            "detail": (
+                f"Refused: finding is {current!r} (already terminal or "
+                f"currently being executed)."
+            ),
+        }
 
     try:
         result = execute_single_finding(finding)

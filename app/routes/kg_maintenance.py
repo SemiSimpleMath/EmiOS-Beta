@@ -169,7 +169,11 @@ def api_action():
         finding = get_finding(finding_id)
         if finding is None:
             return jsonify({"error": "Finding not found"}), 404
-        set_status(finding_id, new_status, executed_by="ui")
+        try:
+            set_status(finding_id, new_status, executed_by="ui")
+        except ValueError as ve:
+            # Terminal-status guard fired (finding already closed).
+            return jsonify({"error": str(ve)}), 409
         return jsonify(get_finding(finding_id))
     except Exception:
         logger.debug("[kg_maintenance] api_action failed id=%s", finding_id, exc_info=True)

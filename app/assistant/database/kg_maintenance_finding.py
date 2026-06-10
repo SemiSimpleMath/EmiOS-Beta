@@ -34,9 +34,21 @@ finding_type values:
 status values:
   "pending"        — awaiting investigation or human review
   "investigated"   — kg_investigation_manager has produced a report (see investigation_report_json)
+  "executing"      — claimed by the finding executor; mutation in flight
+                     (atomic investigated→executing claim prevents double
+                     execution; stale claims >2h are released back)
   "approved"       — human approved the suggested_action; queued for execution
-  "rejected"       — human dismissed this finding
-  "executed"       — action has been carried out
+  "rejected"       — human dismissed this finding (terminal)
+  "executed"       — action has been carried out (terminal)
+  "dismissed"      — investigator verdict: no action needed; durable verdict
+                     recorded in kg_node_verdict (terminal)
+  "escalated"      — routed to human review: planner declined/failed,
+                     self-report uncorroborated, stale recommendation, or
+                     repeated investigation failures (terminal)
+  "execute_error"  — legacy/UI execution path raised (terminal)
+
+Terminal statuses are never overwritten by set_status without an explicit
+allow_terminal_transition=True (see kg_maintenance.store.TERMINAL_STATUSES).
 """
 from __future__ import annotations
 

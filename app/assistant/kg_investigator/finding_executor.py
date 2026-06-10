@@ -28,7 +28,10 @@ import json as _json
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy import text as sql_text
+
 from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
+from app.assistant.database.kg_revision_log import KGRevisionLog
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.scope.loader import load_scope_for_source
 from app.assistant.utils.identity_names import PRINCIPAL_USER
@@ -41,6 +44,10 @@ logger = get_logger(__name__)
 
 MANAGER_NAME = "kg_resolution_manager"
 GRACE_WINDOW_HOURS = 24
+
+# A claim ('executing') older than this is assumed orphaned by a process
+# crash mid-run and is released back to 'investigated' on the next sweep.
+STALE_CLAIM_HOURS = 2
 
 
 def _executor_scope() -> ScopeContext:
@@ -224,6 +231,128 @@ def _build_brief(finding_id: str) -> Optional[Dict[str, Any]]:
     return {"task": task, "information": "\n".join(info_parts)}
 
 
+def _claim_for_execution(finding_id: str) -> bool:
+    """Atomic claim: investigated → executing. Returns False when the row
+    is anything else (terminal, already claimed by a concurrent caller, or
+    still pending) — the caller must skip without touching it. This is the
+    single gate that makes double-execution impossible (audit P0.4)."""
+    with get_db_manager().transaction(op="finding_executor.claim") as session:
+        res = session.execute(
+            sql_text(
+                "UPDATE kg_maintenance_finding SET status = 'executing' "
+                "WHERE id = :fid AND status = 'investigated'"
+            ),
+            {"fid": finding_id},
+        )
+        return (res.rowcount or 0) == 1
+
+
+def _release_claim(finding_id: str) -> None:
+    """Return a claimed row to 'investigated' (manager error → retry on a
+    later sweep). No-op unless the row is still 'executing'."""
+    with get_db_manager().transaction(op="finding_executor.release") as session:
+        session.execute(
+            sql_text(
+                "UPDATE kg_maintenance_finding SET status = 'investigated' "
+                "WHERE id = :fid AND status = 'executing'"
+            ),
+            {"fid": finding_id},
+        )
+
+
+def _current_status(finding_id: str) -> Optional[str]:
+    with get_db_manager().read_session() as session:
+        row = (
+            session.query(KGMaintenanceFinding.status)
+            .filter(KGMaintenanceFinding.id == finding_id)
+            .first()
+        )
+    return row[0] if row else None
+
+
+def _revision_rows_since(finding_id: str, watermark) -> tuple[int, int]:
+    """Ground truth for "did the executor actually mutate anything":
+    successful kg_revision_log rows written after ``watermark``. Returns
+    (tagged, untagged) — tagged rows carry this finding_id; untagged rows
+    are mutations the planner applied without passing finding_id."""
+    with get_db_manager().read_session() as session:
+        tagged = (
+            session.query(KGRevisionLog.id)
+            .filter(KGRevisionLog.finding_id == finding_id)
+            .filter(KGRevisionLog.succeeded == 1)
+            .filter(KGRevisionLog.created_at >= watermark)
+            .count()
+        )
+        untagged = (
+            session.query(KGRevisionLog.id)
+            .filter(KGRevisionLog.finding_id.is_(None))
+            .filter(KGRevisionLog.succeeded == 1)
+            .filter(KGRevisionLog.created_at >= watermark)
+            .count()
+        )
+    return tagged, untagged
+
+
+def _drift_reason(finding_id: str) -> Optional[str]:
+    """Compare the node snapshot persisted at investigation time against
+    the current rows. The 24h grace guarantees the recommendation is at
+    least a day stale; if a cited node's substance (label / validity
+    window) changed — or the node vanished — executing the old plan is
+    unsafe. Returns a human-readable reason, or None when no drift.
+
+    Substance fields only: ``updated_at``/``last_observed`` move on every
+    re-observation stamp, so gating on them would escalate perfectly
+    valid recommendations about active nodes. (The snapshot still stores
+    updated_at for telemetry.)
+    """
+    with get_db_manager().read_session() as session:
+        f = (
+            session.query(KGMaintenanceFinding)
+            .filter(KGMaintenanceFinding.id == finding_id)
+            .first()
+        )
+        if f is None:
+            return None
+        report = f.investigation_report_json or {}
+        if isinstance(report, str):
+            try:
+                report = _json.loads(report)
+            except Exception:
+                return None
+        snap = report.get("node_snapshot_at_investigation")
+        if not isinstance(snap, dict) or not snap:
+            return None  # pre-drift-guard report; nothing to compare
+
+        drifts: List[str] = []
+        for node_id, then in snap.items():
+            if not isinstance(then, dict):
+                continue
+            row = session.execute(
+                sql_text(
+                    "SELECT label, start_date, end_date FROM kg_node_metadata "
+                    "WHERE id = :nid"
+                ),
+                {"nid": node_id},
+            ).fetchone()
+            if row is None:
+                drifts.append(f"node {node_id[:8]} no longer exists")
+                continue
+            now_vals = {
+                "label": row[0],
+                "start_date": str(row[1]) if row[1] is not None else None,
+                "end_date": str(row[2]) if row[2] is not None else None,
+            }
+            for field in ("label", "start_date", "end_date"):
+                then_v = then.get(field)
+                then_v = str(then_v) if then_v is not None else None
+                if then_v != now_vals[field]:
+                    drifts.append(
+                        f"node {node_id[:8]} {field} changed "
+                        f"({then_v!r} → {now_vals[field]!r})"
+                    )
+    return "; ".join(drifts) if drifts else None
+
+
 def _extract_outcome_from_audit(blackboard) -> Optional[Dict[str, Any]]:
     """Pull the structured outcome from the kg_resolution::final_answer audit message."""
     try:
@@ -250,13 +379,55 @@ def execute_one(finding_id: str) -> Dict[str, Any]:
     Used by:
     - Accept button on the dev page (immediate run, bypasses 24h gate)
     - run_executable_findings cron loop (which has already filtered for grace expiry)
+
+    Integrity contract (audit P0.4):
+    - Atomic claim investigated → executing; any concurrent second call
+      returns ``skipped`` without touching the row.
+    - Drift guard: if a cited node's substance changed since investigation,
+      escalate as stale_recommendation instead of executing a stale plan.
+    - Outcome is decided from kg_revision_log ground truth, not the
+      planner's self-report (which stays as telemetry).
     """
-    brief = _build_brief(finding_id)
+    from app.assistant.kg_maintenance.store import set_status
+
+    if not _claim_for_execution(finding_id):
+        current = _current_status(finding_id)
+        return {
+            "status": "skipped",
+            "finding_id": finding_id,
+            "reason": f"not claimable (status={current!r}; needs 'investigated')",
+        }
+
+    try:
+        brief = _build_brief(finding_id)
+    except Exception:
+        _release_claim(finding_id)
+        raise
     if brief is None:
-        return {"status": "not_found_or_no_recommendation", "finding_id": finding_id}
+        # Claimed, but the report carries no recommendation prose — this
+        # row can never execute; park it for human review instead of
+        # letting every sweep re-claim it forever.
+        set_status(
+            finding_id, "escalated",
+            executed_by="agent:kg_resolution_executor",
+            execution_notes="No recommendation prose in investigation report — cannot execute.",
+        )
+        return {"status": "escalated", "finding_id": finding_id,
+                "reason": "no_recommendation"}
+
+    drift = _drift_reason(finding_id)
+    if drift:
+        set_status(
+            finding_id, "escalated",
+            executed_by="agent:kg_resolution_executor",
+            execution_notes=f"stale_recommendation: {drift}",
+        )
+        return {"status": "escalated", "finding_id": finding_id,
+                "reason": "stale_recommendation", "drift": drift}
 
     mgr = DI.multi_agent_manager_factory.create_manager(MANAGER_NAME)
     if mgr is None:
+        _release_claim(finding_id)
         return {"status": "error", "finding_id": finding_id,
                 "error": f"manager {MANAGER_NAME} not registered"}
 
@@ -265,41 +436,72 @@ def execute_one(finding_id: str) -> Dict[str, Any]:
         information=brief["information"],
         scope_context=_executor_scope(),
     )
+    watermark = utc_now()
     try:
         DI.manager_invoker.invoke(mgr, msg)
     except Exception as e:
         logger.error("resolution manager invocation failed for finding %s: %s", finding_id, e)
         logger.debug("resolution manager exception details", exc_info=True)
+        # Release so a later sweep can retry — the claim must not orphan
+        # the row on transient manager/LLM failures.
+        _release_claim(finding_id)
         return {"status": "error", "finding_id": finding_id, "error": str(e)}
 
     outcome = _extract_outcome_from_audit(mgr.blackboard) or {}
-
-    # Detect "ran but couldn't actually do anything" — manager returned
-    # without any mutations or regenerations recorded. The executor has
-    # the full mutator suite, so the cause now is recommendation prose
-    # the planner couldn't safely operationalize (ambiguous ids, data
-    # shifted between investigation and execution, or the planner
-    # decided the recommendation no longer applies). Escalate so the
-    # finding doesn't sit in 'investigated' forever; user can re-run
-    # via /kg-dev with fresh context.
     mutations = outcome.get("mutations") or []
     regens = outcome.get("regenerations") or []
-    no_op = (
-        not mutations
-        and not regens
-        and not outcome.get("findings_resolved")
-    )
-    from app.assistant.kg_maintenance.store import set_status
+    summary = outcome.get("result_summary") or outcome.get("summary") or ""
 
-    if no_op:
-        summary = outcome.get("result_summary") or outcome.get("summary") or ""
+    # A resolution tool (kg_finding_resolve / kg_finding_escalate) may have
+    # moved the row itself during the run — respect that; don't overwrite.
+    current = _current_status(finding_id)
+    if current != "executing":
+        return {
+            "status": current or "unknown",
+            "finding_id": finding_id,
+            "outcome": outcome,
+            "terminal_status": current,
+            "note": "status set by a resolution tool during the run",
+        }
+
+    # Ground truth: successful kg_revision_log rows written during this
+    # run. The self-reported mutations list is telemetry only — a
+    # hallucinated list must never mark 'executed' (audit P0.4).
+    tagged, untagged = _revision_rows_since(finding_id, watermark)
+
+    if tagged > 0 or (untagged > 0 and mutations):
+        corroboration = (
+            f"{tagged} revision-log row(s) tagged with this finding"
+            if tagged > 0
+            else f"{untagged} untagged revision-log row(s) during the run "
+                 f"(planner omitted finding_id)"
+        )
+        set_status(
+            finding_id, "executed",
+            executed_by="agent:kg_resolution_executor",
+            execution_notes=(
+                f"Executor applied mutations — {corroboration}. "
+                f"Self-report: {len(mutations)} mutation(s), "
+                f"{len(regens)} regeneration(s). Manager said: {summary}"
+            ),
+        )
+        return {
+            "status": "executed",
+            "finding_id": finding_id,
+            "outcome": outcome,
+            "terminal_status": "executed",
+            "revision_rows": {"tagged": tagged, "untagged": untagged},
+        }
+
+    if mutations:
+        # Planner CLAIMED mutations but the revision log shows none — the
+        # self-report is not corroborated. Never mark executed on word alone.
         set_status(
             finding_id, "escalated",
             executed_by="agent:kg_resolution_executor",
             execution_notes=(
-                f"Executor ran but applied no mutations — planner declined "
-                f"to operationalize the recommendation (data may have "
-                f"shifted, ids may be stale, or the case became ambiguous). "
+                f"Self-reported {len(mutations)} mutation(s) not corroborated "
+                f"by kg_revision_log (0 rows written during the run). "
                 f"Manager said: {summary}"
             ),
         )
@@ -307,44 +509,70 @@ def execute_one(finding_id: str) -> Dict[str, Any]:
             "status": "escalated",
             "finding_id": finding_id,
             "outcome": outcome,
-            "result_summary": "Escalated — executor's planner declined to mutate. Re-investigate via /kg-dev.",
             "terminal_status": "escalated",
+            "reason": "self_report_not_corroborated",
         }
 
-    # Positive close: executor applied mutations. Without this the finding
-    # stays in 'investigated' forever and the cron sweep re-picks it on
-    # every run. The executor's planner has no kg_finding_resolve tool, so
-    # the driver owns the close.
-    summary = outcome.get("result_summary") or outcome.get("summary") or ""
-    mutation_count = len(mutations)
-    regen_count = len(regens)
+    # True no-op: planner declined to operationalize the recommendation
+    # (data shifted, ids stale, case ambiguous). Escalate so the finding
+    # doesn't sit in 'investigated' forever.
     set_status(
-        finding_id, "executed",
+        finding_id, "escalated",
         executed_by="agent:kg_resolution_executor",
         execution_notes=(
-            f"Executor applied {mutation_count} mutation(s), "
-            f"{regen_count} regeneration(s). Manager said: {summary}"
+            f"Executor ran but applied no mutations — planner declined "
+            f"to operationalize the recommendation (data may have "
+            f"shifted, ids may be stale, or the case became ambiguous). "
+            f"Manager said: {summary}"
         ),
     )
     return {
-        "status": "executed",
+        "status": "escalated",
         "finding_id": finding_id,
         "outcome": outcome,
-        "terminal_status": "executed",
+        "result_summary": "Escalated — executor's planner declined to mutate. Re-investigate via /kg-dev.",
+        "terminal_status": "escalated",
     }
+
+
+def _reclaim_stale_executions() -> int:
+    """Release 'executing' rows older than STALE_CLAIM_HOURS back to
+    'investigated'. A claim only sticks this long when the process died
+    mid-run; without this sweep such rows would be invisible to every
+    queue forever."""
+    cutoff = utc_now() - timedelta(hours=STALE_CLAIM_HOURS)
+    with get_db_manager().transaction(op="finding_executor.reclaim_stale") as session:
+        stale = (
+            session.query(KGMaintenanceFinding)
+            .filter(KGMaintenanceFinding.status == "executing")
+            .filter(KGMaintenanceFinding.updated_at < cutoff)
+            .all()
+        )
+        for f in stale:
+            f.status = "investigated"
+            f.execution_notes = (
+                f"Stale 'executing' claim released after {STALE_CLAIM_HOURS}h "
+                f"(process likely died mid-run). "
+                + (f.execution_notes or "")
+            )[:500]
+        n = len(stale)
+    if n:
+        logger.warning("[finding_executor] released %d stale 'executing' claim(s)", n)
+    return n
 
 
 def run_executable_findings(*, limit: int = 5) -> Dict[str, Any]:
     """Pick up auto-apply investigated findings whose 24h grace has expired
     and execute them sequentially. Wired to the kg_finding_executor_drain
     routine (03:45 daily)."""
+    _reclaim_stale_executions()
     ids = _claim_executable_finding_ids(limit=limit)
     if not ids:
         return {"status": "no_executable_findings", "processed": 0, "results": []}
 
     # execute_one() returns one of: "executed", "escalated", "error",
-    # "not_found_or_no_recommendation". Bucket these explicitly so the
-    # log reflects reality instead of marking every escalation as an error.
+    # "skipped". Bucket these explicitly so the log reflects reality
+    # instead of marking every escalation as an error.
     results: List[Dict[str, Any]] = []
     executed = escalated = errors = skipped = 0
     for fid in ids:

@@ -251,7 +251,17 @@ def _claim_pending_finding_ids(
         rows = q.all()
 
     candidates = [(r[0], r[1], r[2]) for r in rows]
-    return order_by_importance(candidates)[:limit]
+    claimed = order_by_importance(candidates)[:limit]
+
+    # Fairness (audit P3.1): importance-DESC alone starves low-importance
+    # findings forever. Reserve one slot for the oldest pending candidate.
+    if claimed and len(candidates) > len(claimed):
+        oldest_fid = min(
+            candidates, key=lambda c: (c[2] is None, c[2] or "")
+        )[0]
+        if oldest_fid not in claimed:
+            claimed[-1] = oldest_fid
+    return claimed
 
 
 def _extract_report_from_audit(blackboard) -> Optional[Dict[str, Any]]:
@@ -299,6 +309,37 @@ def _extract_report_from_audit(blackboard) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _node_drift_snapshot(session, node_ids) -> Dict[str, Any]:
+    """Compact per-node snapshot persisted with the report so the executor
+    can detect drift before applying a ≥24h-old recommendation (audit
+    P0.4). Reads via raw SQL + str() so the executor's comparison (same
+    read) is byte-for-byte comparable. updated_at is captured for
+    telemetry only — it moves on every re-observation stamp, so the
+    executor does NOT gate on it."""
+    from sqlalchemy import text as sql_text
+
+    snap: Dict[str, Any] = {}
+    for nid in node_ids:
+        if not nid:
+            continue
+        row = session.execute(
+            sql_text(
+                "SELECT label, start_date, end_date, updated_at "
+                "FROM kg_node_metadata WHERE id = :nid"
+            ),
+            {"nid": nid},
+        ).fetchone()
+        if row is None:
+            continue
+        snap[nid] = {
+            "label": row[0],
+            "start_date": str(row[1]) if row[1] is not None else None,
+            "end_date": str(row[2]) if row[2] is not None else None,
+            "updated_at": str(row[3]) if row[3] is not None else None,
+        }
+    return snap
+
+
 def _persist_report(*, finding_id: str, report: Dict[str, Any]) -> None:
     with get_db_manager().transaction(op="finding_processor.persist_report") as session:
         f = (
@@ -309,9 +350,60 @@ def _persist_report(*, finding_id: str, report: Dict[str, Any]) -> None:
         if f is None:
             logger.warning("persist_report: finding %s vanished", finding_id)
             return
+        report = dict(report)
+        report["node_snapshot_at_investigation"] = _node_drift_snapshot(
+            session, (f.primary_node_id, f.secondary_node_id)
+        )
         f.investigation_report_json = report
         f.investigated_at = datetime.now(timezone.utc)
         f.status = "investigated"
+
+
+MAX_INVESTIGATION_ATTEMPTS = 3
+
+
+def _record_failed_attempt(finding_id: str, *, reason: str) -> int:
+    """Poison-pill quarantine (audit P3.1): count failed investigation
+    attempts in evidence_json. Errors and no-report runs used to leave the
+    row 'pending' with no counter — a crashing high-importance finding
+    re-claimed the drain budget every day forever. Returns the new count;
+    the caller escalates at MAX_INVESTIGATION_ATTEMPTS."""
+    with get_db_manager().transaction(op="finding_processor.failed_attempt") as session:
+        f = (
+            session.query(KGMaintenanceFinding)
+            .filter(KGMaintenanceFinding.id == finding_id)
+            .first()
+        )
+        if f is None:
+            return 0
+        evidence = dict(f.evidence_json or {})
+        attempts = int(evidence.get("investigation_attempts") or 0) + 1
+        evidence["investigation_attempts"] = attempts
+        evidence["last_investigation_error"] = (reason or "")[:300]
+        f.evidence_json = evidence
+    return attempts
+
+
+def _quarantine_if_exhausted(finding_id: str, attempts: int, *, reason: str) -> bool:
+    """Escalate after MAX_INVESTIGATION_ATTEMPTS failed runs. Returns True
+    when the finding was parked."""
+    if attempts < MAX_INVESTIGATION_ATTEMPTS:
+        return False
+    from app.assistant.kg_maintenance.store import set_status
+    set_status(
+        finding_id,
+        "escalated",
+        executed_by="agent:kg_investigation",
+        execution_notes=(
+            f"investigation_failed_repeatedly: {attempts} attempt(s) "
+            f"errored or produced no report; last: {reason[:200]}"
+        ),
+    )
+    logger.warning(
+        "[finding_processor] finding %s escalated after %d failed "
+        "investigation attempts", finding_id, attempts,
+    )
+    return True
 
 
 def investigate_one(finding_id: str) -> Dict[str, Any]:
@@ -328,12 +420,20 @@ def investigate_one(finding_id: str) -> Dict[str, Any]:
     except Exception as e:
         logger.error("investigation failed for finding %s: %s", finding_id, e)
         logger.debug("investigation exception details", exc_info=True)
-        return {"status": "error", "finding_id": finding_id, "error": str(e)}
+        attempts = _record_failed_attempt(finding_id, reason=str(e))
+        quarantined = _quarantine_if_exhausted(finding_id, attempts, reason=str(e))
+        return {"status": "error", "finding_id": finding_id, "error": str(e),
+                "attempts": attempts, "quarantined": quarantined}
 
     report = _extract_report_from_audit(mgr.blackboard)
     if report is None:
         logger.warning("no structured report produced for finding %s", finding_id)
-        return {"status": "no_report", "finding_id": finding_id}
+        attempts = _record_failed_attempt(finding_id, reason="no structured report produced")
+        quarantined = _quarantine_if_exhausted(
+            finding_id, attempts, reason="no structured report produced"
+        )
+        return {"status": "no_report", "finding_id": finding_id,
+                "attempts": attempts, "quarantined": quarantined}
 
     _persist_report(finding_id=finding_id, report=report)
 
@@ -458,7 +558,9 @@ def drain_pending_findings(
     exclude_finding_types: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
-    Drain the oldest `limit` pending findings from the backlog (FIFO).
+    Drain up to `limit` pending findings from the backlog, ordered by
+    importance of the touched nodes (high first; one slot reserved for
+    the oldest pending row so low-importance findings can't starve).
 
     Routine entry-point — different from the pipeline's
     ``_investigate_findings_for_run`` which only sees that run's own findings.
