@@ -1,0 +1,20 @@
+{
+  "id": "kg_dup_cluster_drain",
+  "enabled": true,
+  "name": "KG duplicate cluster drain (adjudicate + keep distinct)",
+  "aliases": [
+    "resolve duplicate clusters",
+    "drain duplicate findings"
+  ],
+  "runner": "function",
+  "spec": {
+    "function_name": "kg_dup_cluster_drain",
+    "limit": 50,
+    "dry_run": false
+  },
+  "run_policy": {
+    "type": "daily",
+    "time_local": "03:15"
+  },
+  "notes": "[Added 2026-06-09; enabled daily 2026-06-09 after a one-time backlog clear of ~1400 pending duplicate_node findings] Collapses pending duplicate_node findings into connected components (union-find on the pairs) and adjudicates each in ONE kg_maintenance::duplicate_cluster_resolver (gpt-5.4) call: merge true label/coreference variants, keep recurring-event occurrences DISTINCT. Distinct verdicts are written to the durable verdict store (record_distinct_pairs_bulk) so the scanner's load_distinct_pairs short-circuit never re-compares them; true dups are merged via the revertible node_merge path (kg_merge_log / unmerge); every finding in the cluster is closed in one pass. This is the canonical duplicate_node resolver: kg_finding_backlog_drain excludes duplicate_node (exclude_finding_types) so dups go EXCLUSIVELY through this fast cluster path. Runs daily after the weekly kg_maintenance_pipeline scanner mints new candidates; limit=50 clusters/run bounds cost (a surge drains over a few days). dry_run:true + run-now writes scratch/dup_cluster_report.json for review WITHOUT mutating the KG."
+}

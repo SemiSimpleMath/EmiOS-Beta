@@ -218,10 +218,17 @@ def apply_one(finding_id: str) -> Dict[str, Any]:
     }
 
 
-def _claim_pending_finding_ids(*, limit: int, finding_types: Optional[List[str]] = None) -> List[str]:
+def _claim_pending_finding_ids(
+    *,
+    limit: int,
+    finding_types: Optional[List[str]] = None,
+    exclude_finding_types: Optional[List[str]] = None,
+) -> List[str]:
     """Pick up to `limit` pending findings, ordered by max importance of
-    touched nodes (high first), date as tie-breaker. Optionally filtered
-    to specific finding types."""
+    touched nodes (high first), date as tie-breaker. Optionally restricted
+    to specific finding types (`finding_types`) or with some types excluded
+    (`exclude_finding_types`, e.g. ['duplicate_node'] which are resolved by
+    the dedicated kg_dup_cluster_drain cluster path, not the per-pair drain)."""
     from app.assistant.kg_investigator.finding_priority import order_by_importance
 
     with get_db_manager().read_session() as session:
@@ -235,6 +242,8 @@ def _claim_pending_finding_ids(*, limit: int, finding_types: Optional[List[str]]
         )
         if finding_types:
             q = q.filter(KGMaintenanceFinding.finding_type.in_(finding_types))
+        if exclude_finding_types:
+            q = q.filter(~KGMaintenanceFinding.finding_type.in_(exclude_finding_types))
         rows = q.all()
 
     candidates = [(r[0], r[1], r[2]) for r in rows]
@@ -442,6 +451,7 @@ def drain_pending_findings(
     *,
     limit: int = 5,
     finding_types: Optional[List[str]] = None,
+    exclude_finding_types: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
     Drain the oldest `limit` pending findings from the backlog (FIFO).
@@ -451,10 +461,16 @@ def drain_pending_findings(
     This function picks from the global pending queue regardless of which
     pipeline run produced them, so old findings don't sit forever.
 
-    Optional ``finding_types`` filter restricts to specific types
-    (e.g. ['duplicate_node', 'orphan_node']).
+    Optional ``finding_types`` restricts to specific types
+    (e.g. ['orphan_node']); ``exclude_finding_types`` drops types handled
+    elsewhere (e.g. ['duplicate_node'], which kg_dup_cluster_drain resolves
+    at cluster scale so the per-pair investigator never touches them).
     """
-    ids = _claim_pending_finding_ids(limit=limit, finding_types=finding_types)
+    ids = _claim_pending_finding_ids(
+        limit=limit,
+        finding_types=finding_types,
+        exclude_finding_types=exclude_finding_types,
+    )
     if not ids:
         logger.info("[finding_processor] drain: no pending findings")
         return {"status": "empty_queue", "processed": 0, "results": []}

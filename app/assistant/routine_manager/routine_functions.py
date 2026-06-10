@@ -67,7 +67,12 @@ def _lazy_kg_finding_backlog_drain(*, target_date=None, routine=None):
     spec = (routine.spec if routine and hasattr(routine, "spec") else {}) or {}
     limit = int(spec.get("limit", 5))
     finding_types = spec.get("finding_types") or None
-    return drain_pending_findings(limit=limit, finding_types=finding_types)
+    exclude_finding_types = spec.get("exclude_finding_types") or None
+    return drain_pending_findings(
+        limit=limit,
+        finding_types=finding_types,
+        exclude_finding_types=exclude_finding_types,
+    )
 
 
 kg_finding_backlog_drain = _lazy_kg_finding_backlog_drain
@@ -257,6 +262,45 @@ def _lazy_kg_finding_executor_drain(*, target_date=None, routine=None):
 
 
 kg_finding_executor_drain = _lazy_kg_finding_executor_drain
+
+
+def _lazy_kg_dup_cluster_drain(*, target_date=None, routine=None):
+    """Cluster-resolve the pending duplicate_node backlog.
+
+    Union-finds the pending duplicate_node findings into connected components
+    and adjudicates each (merge true variants / keep recurring occurrences
+    distinct) in ONE LLM call per cluster — vs the per-pair investigator that
+    cannot drain ~1400 findings serially. Dry-run by default; writes a full
+    JSON report to scratch/dup_cluster_report.json for review.
+    """
+    import json
+
+    from app.assistant.kg_investigator.duplicate_cluster_drain import (
+        drain_duplicate_clusters,
+    )
+    from app.assistant.utils.path_utils import get_repo_root
+
+    spec = (routine.spec if routine and hasattr(routine, "spec") else {}) or {}
+    raw_limit = spec.get("limit")
+    limit = int(raw_limit) if raw_limit else None
+    dry_run = bool(spec.get("dry_run", True))
+
+    result = drain_duplicate_clusters(limit=limit, dry_run=dry_run)
+
+    # Persist the full report (carries node labels -> PII; scratch is gitignored).
+    try:
+        out = get_repo_root() / "scratch" / "dup_cluster_report.json"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(result, indent=2, default=str), encoding="utf-8")
+    except Exception:
+        logger.warning("[kg_dup_cluster_drain] could not write report file", exc_info=True)
+
+    # Return a compact summary; keep the PII-bearing per-cluster reports out of
+    # the routine decision log.
+    return {k: v for k, v in result.items() if k != "reports"}
+
+
+kg_dup_cluster_drain = _lazy_kg_dup_cluster_drain
 
 
 def _lazy_kg_state_date_drain(*, target_date=None, routine=None):
@@ -467,6 +511,7 @@ ROUTINE_FUNCTION_REGISTRY = {
     "kg_goal_outcome_detect": kg_goal_outcome_detect,
     "kg_finding_cluster_resolve": kg_finding_cluster_resolve,
     "kg_finding_executor_drain": kg_finding_executor_drain,
+    "kg_dup_cluster_drain": kg_dup_cluster_drain,
     "kg_state_date_drain": kg_state_date_drain,
     "kg_wiki_inference": kg_wiki_inference,
     "kg_importance_rater": kg_importance_rater,

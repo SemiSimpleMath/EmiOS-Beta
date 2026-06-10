@@ -1,0 +1,12 @@
+name: kg_maintenance::duplicate_cluster_resolver
+class_name: Agent
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.4"
+  model_tier: "powerful"
+allowed_tools: []
+except_tools: []
+user_context_items:
+  - cluster_brief
+system_context_items: []
+type: agent
