@@ -564,6 +564,7 @@ ROUTINE_FUNCTION_REGISTRY = {
     "kg_state_date_drain": kg_state_date_drain,
     "kg_wiki_inference": kg_wiki_inference,
     "kg_importance_rater": kg_importance_rater,
+    "entity_card_refresh": entity_card_refresh,
     "sleep_camera_tick_local": sleep_camera_tick_local,
 }
 
