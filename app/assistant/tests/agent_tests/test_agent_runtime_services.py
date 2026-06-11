@@ -384,7 +384,10 @@ def test_manager_factory_supports_list_all_sentinel_for_manager_tools(monkeypatc
 
     tool_registry = _ToolRegistry()
     factory = ManagerFactory(registry=_Registry(), tool_registry=tool_registry, agent_registry=object())
-    monkeypatch.setattr(factory, "_import_class", lambda _class_name: _DummyManager)
+    monkeypatch.setattr(
+        "app.assistant.multi_agent_manager_factory.MultiAgentManagerFactory.load_class_from_prefix",
+        lambda _prefix, _class_name: _DummyManager,
+    )
 
     _ = factory.create("emi_team_manager")
     assert tool_registry.filtered_arg == {"find_tool", "install_tool"}

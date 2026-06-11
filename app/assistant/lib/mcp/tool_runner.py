@@ -13,6 +13,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Optional
 
+from app.assistant.lib.mcp.env_placeholders import resolve_env_placeholders
 from app.assistant.lib.mcp.stdio_client import StdioJsonRpcClient
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_repo_root
@@ -87,7 +88,7 @@ def _start_stdio_server_process(server_entry: dict[str, Any]) -> _StdioSession:
     env = os.environ.copy()
     env.pop("PYTHONPATH", None)
     if isinstance(launch.get("env"), dict):
-        env.update(_resolve_env_placeholders(launch["env"]))
+        env.update(resolve_env_placeholders(launch["env"]))
 
     # IMPORTANT: run MCP servers from a neutral cwd to avoid repo-local packages shadowing deps.
     cwd = launch.get("cwd") or launch.get("working_directory") or tempfile.gettempdir()
@@ -487,28 +488,6 @@ def _select_stdio_launch_option(server_entry: dict[str, Any]) -> dict[str, Any]:
 
     detail = ("\n- " + "\n- ".join(errors)) if errors else ""
     raise ValueError("No usable stdio launch option found for MCP server entry." + detail)
-
-
-def _resolve_env_placeholders(raw_env: dict[str, Any]) -> dict[str, str]:
-    out: dict[str, str] = {}
-    pattern = re.compile(r"\$\{([A-Z0-9_]+)\}")
-    for k, v in raw_env.items():
-        key = str(k)
-        val = str(v)
-        matches = pattern.findall(val)
-        if not matches:
-            out[key] = val
-            continue
-        resolved = val
-        for env_key in matches:
-            env_val = os.environ.get(env_key)
-            if env_val is None:
-                raise ValueError(
-                    f"Missing required environment variable '{env_key}' for MCP launch env key '{key}'."
-                )
-            resolved = resolved.replace(f"${{{env_key}}}", env_val)
-        out[key] = resolved
-    return out
 
 
 def mcp_stdio_call_tool(

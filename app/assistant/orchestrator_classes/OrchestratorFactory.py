@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import copy
-import importlib
 
 from app.assistant.ServiceLocator.service_locator import DI
+from app.assistant.utils.dynamic_import import load_class_from_prefix
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -29,7 +29,7 @@ class OrchestratorFactory:
         if not class_name:
             raise ValueError(f"Missing 'class_name' in config for '{orchestrator_type}'")
 
-        orch_class = self._import_class(class_name)
+        orch_class = load_class_from_prefix("app.assistant.orchestrator_classes", class_name)
 
         name = name or orchestrator_type
         # Guard against duplicate names (can silently overwrite otherwise).
@@ -75,12 +75,4 @@ class OrchestratorFactory:
             pass
         self._instances[name] = instance
         return instance
-
-    def _import_class(self, class_name: str):
-        try:
-            module_path = f"app.assistant.orchestrator_classes.{class_name}"
-            module = importlib.import_module(module_path)
-            return getattr(module, class_name)
-        except Exception as e:
-            raise ImportError(f"❌ Could not import orchestrator class '{class_name}': {e}")
 

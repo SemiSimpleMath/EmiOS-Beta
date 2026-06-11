@@ -4,8 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import yaml
-
+from app.assistant.utils.frontmatter import split_frontmatter
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_repo_root, resolve_repo_path
 from app.assistant.utils.task_spec_loader import load_task_spec, TaskSpec
@@ -35,27 +34,6 @@ class JobSpec:
     job_bundle_text: str
 
 
-def _split_frontmatter(text: str) -> tuple[dict[str, Any], str]:
-    raw = text.lstrip("\ufeff")
-    if not raw.startswith("---"):
-        return {}, text
-    parts = raw.split("\n", 1)
-    if len(parts) < 2:
-        return {}, text
-    rest = parts[1]
-    if "\n---" not in rest:
-        return {}, text
-    fm_text, body = rest.split("\n---", 1)
-    try:
-        frontmatter = yaml.safe_load(fm_text) or {}
-    except Exception as e:
-        logger.warning("Failed to parse job frontmatter: %s", e)
-        frontmatter = {}
-    if body.startswith("\n"):
-        body = body[1:]
-    return frontmatter, body
-
-
 def _normalize_list(items: list[str] | None) -> list[str]:
     out: list[str] = []
     for item in items or []:
@@ -72,7 +50,7 @@ def load_job_spec(path_str: str) -> JobSpec:
     if not path.exists():
         raise FileNotFoundError(f"Job spec not found: {path}")
     text = path.read_text(encoding="utf-8")
-    frontmatter, body = _split_frontmatter(text)
+    frontmatter, body = split_frontmatter(text)
 
     tasks_raw = frontmatter.get("tasks") or []
     tasks: list[JobTaskSpec] = []

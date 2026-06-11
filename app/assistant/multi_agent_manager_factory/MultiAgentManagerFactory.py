@@ -1,10 +1,10 @@
 import time
 
-import importlib
 import copy
 
 from app.assistant.ServiceLocator.service_locator import DI
 
+from app.assistant.utils.dynamic_import import load_class_from_prefix
 from app.assistant.utils.logging_config import get_logger
 logger = get_logger(__name__)
 
@@ -23,7 +23,7 @@ class ManagerFactory:
         if not class_name:
             raise ValueError(f"Missing 'class_name' in config for '{manager_type}'")
 
-        manager_class = self._import_class(class_name)
+        manager_class = load_class_from_prefix("app.assistant.manager_classes", class_name)
 
         allowed_raw = config.get("tools", {}).get("allowed_tools")
         if isinstance(allowed_raw, str):
@@ -50,14 +50,6 @@ class ManagerFactory:
         name = name or manager_type
         instance = manager_class(name, config, filtered_tools, agent_registry_copy)
         return instance
-
-    def _import_class(self, class_name: str):
-        try:
-            module_path = f"app.assistant.manager_classes.{class_name}"
-            module = importlib.import_module(module_path)
-            return getattr(module, class_name)
-        except Exception as e:
-            raise ImportError(f"❌ Could not import manager class '{class_name}': {e}")
 
 
 class MultiAgentManagerFactory:

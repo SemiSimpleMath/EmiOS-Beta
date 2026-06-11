@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict
 
+from app.assistant.utils.coercion import coerce_authority_level
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -35,20 +36,6 @@ def normalize_message_persistence_mode(value: Any) -> str:
             "Expected 'global_blackboard_only' or 'global_blackboard_and_unified_log'."
         )
     return mode
-
-
-def coerce_authority_level(value: Any, *, field_name: str) -> int:
-    if value is None:
-        return 0
-    if isinstance(value, bool):
-        raise ValueError(f"{field_name} must be an integer between 0 and 100.")
-    try:
-        level = int(value)
-    except Exception:
-        raise ValueError(f"{field_name} must be an integer between 0 and 100.")
-    if level < 0 or level > 100:
-        raise ValueError(f"{field_name} must be between 0 and 100.")
-    return level
 
 
 def default_authority_for_surface(*, surface: str) -> int:

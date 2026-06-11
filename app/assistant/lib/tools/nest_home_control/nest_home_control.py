@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Tuple
 from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
 from app.assistant.lib.core_tools.tool_error_protocol import make_tool_error
 from app.assistant.lib.tools.smart_home_gateway import send_smart_home_command
+from app.assistant.utils.coercion import coerce_numeric
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import ToolMessage, ToolResult
 
@@ -16,28 +17,6 @@ _MIN_INFERRED_C = 15.0
 _MAX_INFERRED_C = 30.0
 _MIN_INFERRED_F = 50.0
 _MAX_INFERRED_F = 80.0
-
-
-def _coerce_numeric(value: Any, field_name: str) -> float:
-    if isinstance(value, bool) or value is None:
-        raise ValueError(f"{field_name} must be numeric.")
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        raw = value.strip()
-        if not raw:
-            raise ValueError(f"{field_name} must be numeric.")
-        normalized = raw.replace(",", "")
-        if normalized.count(".") > 1:
-            raise ValueError(f"{field_name} must be numeric.")
-        if normalized.startswith("-"):
-            normalized_digits = normalized[1:]
-        else:
-            normalized_digits = normalized
-        if not normalized_digits or not normalized_digits.replace(".", "", 1).isdigit():
-            raise ValueError(f"{field_name} must be numeric.")
-        return float(normalized)
-    raise ValueError(f"{field_name} must be numeric.")
 
 
 def _fahrenheit_to_celsius(value_f: float) -> float:
@@ -107,7 +86,7 @@ def _format_nest_status_content(response: Any) -> str:
 
 
 def _resolve_target_temperature_c(value: Any) -> float:
-    raw = _coerce_numeric(value, "target_temperature")
+    raw = coerce_numeric(value, "target_temperature")
     if _MIN_INFERRED_F <= raw <= _MAX_INFERRED_F:
         target_c = _fahrenheit_to_celsius(raw)
     elif _MIN_INFERRED_C <= raw <= _MAX_INFERRED_C:

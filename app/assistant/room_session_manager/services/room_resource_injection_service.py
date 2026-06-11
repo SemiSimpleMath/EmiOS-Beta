@@ -13,6 +13,7 @@ from typing import Any, Dict
 
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_repo_root
+from app.assistant.utils.resource_formatting import format_resource_value
 
 logger = get_logger(__name__)
 
@@ -236,18 +237,6 @@ class RoomResourceInjectionService:
             raise
 
     @staticmethod
-    def format_resource_value(value: Any) -> str:
-        if value is None:
-            return ""
-        if isinstance(value, str):
-            return value.strip()
-        try:
-            return json.dumps(value, ensure_ascii=False, indent=2).strip()
-        except Exception:
-            logger.debug("Failed JSON-encoding room resource value for prompt rendering.", exc_info=True)
-            return str(value).strip()
-
-    @staticmethod
     def format_daily_context_summary(value: Any) -> str:
         if not isinstance(value, dict):
             return ""
@@ -355,7 +344,7 @@ class RoomResourceInjectionService:
                 continue
 
             value = self.resolve_scoped_resource(resource_id=resource_id, scope_context=scope_context)
-            formatted = self.format_resource_value(value)
+            formatted = format_resource_value(value)
             if not formatted:
                 continue
             chunks.append(f"## {resource_id}\n{formatted}")

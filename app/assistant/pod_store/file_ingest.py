@@ -22,7 +22,6 @@ Idempotent: re-ingesting the same bytes returns the existing pod.
 """
 from __future__ import annotations
 
-import hashlib
 import mimetypes
 import shutil
 from datetime import datetime, timezone
@@ -31,6 +30,7 @@ from typing import Any, Dict, Optional
 
 from app.assistant.pod_store.contracts import Pod, PodSourceRef
 from app.assistant.pod_store.pod_store import PodStore
+from app.assistant.utils.hashing import sha256_file
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_repo_root
 
@@ -45,14 +45,6 @@ def _pods_root() -> Path:
     root = get_repo_root() / "data" / _PODS_DIR_NAME
     root.mkdir(parents=True, exist_ok=True)
     return root
-
-
-def _sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(65536), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def _store_path_for(sha256: str, ext: str) -> Path:
@@ -115,7 +107,7 @@ def ingest_file(
         )
 
     ext = src_path.suffix.lower()
-    sha256 = _sha256_file(src_path)
+    sha256 = sha256_file(src_path)
     kind = _kind_from_mime(mime)
     dest = _store_path_for(sha256, ext)
     if not dest.exists():

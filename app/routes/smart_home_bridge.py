@@ -10,6 +10,7 @@ from flask import Blueprint, jsonify, request
 
 from app.assistant.lib.google_auth.account_ids import NEST_GOOGLE_ACCOUNT_ID
 from app.assistant.lib.google_auth.google_credentials import load_google_credentials
+from app.assistant.utils.coercion import coerce_numeric
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_configs_dir
 
@@ -25,28 +26,6 @@ _NEST_MIN_INFERRED_C = 15.0
 _NEST_MAX_INFERRED_C = 30.0
 _NEST_MIN_INFERRED_F = 50.0
 _NEST_MAX_INFERRED_F = 80.0
-
-
-def _coerce_numeric(value: Any, field_name: str) -> float:
-    if isinstance(value, bool) or value is None:
-        raise ValueError(f"{field_name} must be numeric.")
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        raw = value.strip()
-        if not raw:
-            raise ValueError(f"{field_name} must be numeric.")
-        normalized = raw.replace(",", "")
-        if normalized.count(".") > 1:
-            raise ValueError(f"{field_name} must be numeric.")
-        if normalized.startswith("-"):
-            normalized_digits = normalized[1:]
-        else:
-            normalized_digits = normalized
-        if not normalized_digits or not normalized_digits.replace(".", "", 1).isdigit():
-            raise ValueError(f"{field_name} must be numeric.")
-        return float(normalized)
-    raise ValueError(f"{field_name} must be numeric.")
 
 
 def _fahrenheit_to_celsius(value_f: float) -> float:
@@ -83,13 +62,13 @@ def _resolve_nest_target_temperature_c(arguments: Dict[str, Any]) -> tuple[float
 
     key = provided_keys[0]
     if key == explicit_c:
-        target_c = _coerce_numeric(arguments.get(explicit_c), explicit_c)
+        target_c = coerce_numeric(arguments.get(explicit_c), explicit_c)
         return target_c, "C"
     if key == explicit_f:
-        target_f = _coerce_numeric(arguments.get(explicit_f), explicit_f)
+        target_f = coerce_numeric(arguments.get(explicit_f), explicit_f)
         return _fahrenheit_to_celsius(target_f), "F"
 
-    raw_temp = _coerce_numeric(arguments.get(key), key)
+    raw_temp = coerce_numeric(arguments.get(key), key)
     if _NEST_MIN_INFERRED_F <= raw_temp <= _NEST_MAX_INFERRED_F:
         return _fahrenheit_to_celsius(raw_temp), "F"
     if _NEST_MIN_INFERRED_C <= raw_temp <= _NEST_MAX_INFERRED_C:

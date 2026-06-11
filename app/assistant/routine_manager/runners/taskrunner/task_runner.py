@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -8,8 +7,8 @@ from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.scope.loader import load_scope_for_source
 from app.assistant.routine_manager.run_types import RoutineRunContext, RoutineRunResult
 from app.assistant.routine_manager.runners.types import RoutineLike
-from app.assistant.utils.path_utils import get_repo_root, resolve_repo_path
-from app.assistant.utils.task_spec_loader import TaskSpec, load_task_spec
+from app.assistant.utils.path_utils import get_repo_root
+from app.assistant.utils.task_spec_loader import TaskSpec, load_task_spec, read_compiled_task
 
 
 class TaskRoutineRunner:
@@ -39,7 +38,7 @@ class TaskRoutineRunner:
 
     def _run_compiled_task_mode(self, *, spec: dict[str, Any], task_file: str, task_spec: TaskSpec) -> RoutineRunResult:
         compiled_file = self._resolve_compiled_file(spec=spec, task_spec=task_spec)
-        compiled_task = self._read_compiled_task(compiled_file)
+        compiled_task = read_compiled_task(compiled_file)
 
         runner = getattr(DI, "task_ir_runner", None)
         if runner is None:
@@ -123,12 +122,3 @@ class TaskRoutineRunner:
                 return deterministic.relative_to(repo_root).as_posix()
             raise ValueError("compiled_task mode could not resolve JSON compiled output path")
         return chosen
-
-    def _read_compiled_task(self, compiled_file: str) -> dict[str, Any]:
-        path = resolve_repo_path(compiled_file)
-        if not path.exists():
-            raise FileNotFoundError(f"Compiled task file not found: {path}")
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            raise ValueError("Compiled task file must contain a JSON object")
-        return data

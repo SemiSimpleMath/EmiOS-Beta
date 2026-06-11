@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import json
 import re
 from typing import Any, Dict, Tuple
 
 from app.assistant.utils.pydantic_classes import Message, ToolResult
+from app.assistant.utils.resource_formatting import format_resource_value
 from app.assistant.utils.task_spec_loader import load_task_spec
 from app.assistant.utils.logging_config import get_logger
 
@@ -18,18 +18,6 @@ class RequestPreprocessor:
 
     def __init__(self, *, resource_manager: Any = None) -> None:
         self._resource_manager = resource_manager
-
-    @staticmethod
-    def _format_task_resource_value(value: Any) -> str:
-        if value is None:
-            return ""
-        if isinstance(value, str):
-            return value.strip()
-        try:
-            return json.dumps(value, ensure_ascii=False, indent=2).strip()
-        except Exception:
-            logger.debug("Failed JSON-encoding task resource value for prompt rendering.", exc_info=True)
-            return str(value).strip()
 
     def _resolve_task_resources(
         self,
@@ -65,7 +53,7 @@ class RequestPreprocessor:
         for rid in allowed_resources:
             if rid not in values:
                 continue
-            rendered = self._format_task_resource_value(values.get(rid))
+            rendered = format_resource_value(values.get(rid))
             if not rendered:
                 continue
             lines.append(f"## {rid}\n{rendered}")

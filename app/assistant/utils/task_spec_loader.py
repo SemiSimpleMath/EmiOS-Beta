@@ -1,13 +1,13 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from app.assistant.ServiceLocator.service_locator import DI
+from app.assistant.utils.frontmatter import split_frontmatter
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_repo_root, resolve_repo_path
 from app.assistant.utils.time_utils import get_local_time, get_local_timezone
@@ -27,28 +27,6 @@ class TaskSpec:
     allowed_write_files: list[str]
     frontmatter: dict[str, Any]
     task_includes: str
-
-
-def _split_frontmatter(text: str) -> tuple[dict[str, Any], str]:
-    raw = text.lstrip("\ufeff")
-    if not raw.startswith("---"):
-        return {}, text
-    parts = raw.split("\n", 1)
-    if len(parts) < 2:
-        return {}, text
-    rest = parts[1]
-    if "\n---" not in rest:
-        return {}, text
-    fm_text, body = rest.split("\n---", 1)
-    try:
-        frontmatter = yaml.safe_load(fm_text) or {}
-    except Exception as e:
-        logger.warning("Failed to parse task frontmatter: %s", e)
-        frontmatter = {}
-    # Strip leading newline if present.
-    if body.startswith("\n"):
-        body = body[1:]
-    return frontmatter, body
 
 
 def _normalize_resource_id(name: str) -> str:
@@ -244,7 +222,7 @@ def load_task_spec(path_str: str) -> TaskSpec:
     if not path.exists():
         raise FileNotFoundError(f"Task spec not found: {path}")
     text = path.read_text(encoding="utf-8")
-    frontmatter, body = _split_frontmatter(text)
+    frontmatter, body = split_frontmatter(text)
 
     includes = _normalize_paths(frontmatter.get("includes"))
     allowed_resources = _normalize_paths(frontmatter.get("allowed_resources"))
@@ -337,3 +315,13 @@ def load_task_spec(path_str: str) -> TaskSpec:
         frontmatter=frontmatter if isinstance(frontmatter, dict) else {},
         task_includes=task_includes,
     )
+
+
+def read_compiled_task(path_value: str) -> dict[str, Any]:
+    path = resolve_repo_path(path_value)
+    if not path.exists():
+        raise FileNotFoundError(f"Compiled task file not found: {path}")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("Compiled task file must contain a JSON object")
+    return data

@@ -38,10 +38,10 @@ from app.assistant.pod_store.image_ingest import (
     _VALID_IMAGE_EXTS,
     _normalize_ext,
     _probe_image_dims,
-    _sha256_file,
     ingest_image_file,
 )
 from app.assistant.pod_store.pod_store import PodStore
+from app.assistant.utils.hashing import sha256_file
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_repo_root
 
@@ -203,7 +203,7 @@ def reconcile_directory(
             continue
 
         # Unstamped — content-addressed lookup.
-        sha256 = _sha256_file(path)
+        sha256 = sha256_file(path)
         existing = _find_pod_by_sha256(store, sha256)
         if existing is not None:
             # Pod exists for this content; stamp the file + refresh path.

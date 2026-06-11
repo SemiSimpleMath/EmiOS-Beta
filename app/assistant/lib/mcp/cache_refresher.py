@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -10,6 +9,7 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
+from app.assistant.lib.mcp.env_placeholders import resolve_env_placeholders
 from app.assistant.lib.mcp.stdio_client import StdioJsonRpcClient, normalize_tools_list_response
 from app.assistant.lib.tool_registry.mcp_tool_cache import write_mcp_tool_cache
 from app.assistant.lib.tool_registry.mcp_trust_policy import require_trusted_mcp_server
@@ -53,28 +53,6 @@ def _resolve_command(command: str) -> str:
     return found
 
 
-def _resolve_env_placeholders(raw_env: dict[str, Any]) -> dict[str, str]:
-    out: dict[str, str] = {}
-    pattern = re.compile(r"\$\{([A-Z0-9_]+)\}")
-    for k, v in raw_env.items():
-        key = str(k)
-        val = str(v)
-        matches = pattern.findall(val)
-        if not matches:
-            out[key] = val
-            continue
-        resolved = val
-        for env_key in matches:
-            env_val = os.environ.get(env_key)
-            if env_val is None:
-                raise ValueError(
-                    f"Missing required environment variable '{env_key}' for MCP launch env key '{key}'."
-                )
-            resolved = resolved.replace(f"${{{env_key}}}", env_val)
-        out[key] = resolved
-    return out
-
-
 def refresh_server_tool_cache(
     *,
     server_id: str,
@@ -99,7 +77,7 @@ def refresh_server_tool_cache(
     env.pop("PYTHONPATH", None)
     launch_env = launch.get("env")
     if isinstance(launch_env, dict):
-        env.update(_resolve_env_placeholders(launch_env))
+        env.update(resolve_env_placeholders(launch_env))
 
     proc = subprocess.Popen(
         [command, *args],

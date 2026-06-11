@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from typing import Any, Optional
 
 from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
@@ -11,6 +10,7 @@ from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import resolve_repo_path
 from app.assistant.utils.pydantic_classes import ToolMessage, ToolResult
 from app.assistant.utils.task_registry import TaskRegistryEntry, resolve_task_entry
+from app.assistant.utils.task_spec_loader import read_compiled_task
 
 logger = get_logger(__name__)
 
@@ -79,7 +79,7 @@ class RunTaskTool(BaseTool):
             compiled_file = self._resolve_compiled_file_from_registry_entry(entry)
 
         try:
-            compiled_task = self._read_compiled_task_file(compiled_file)
+            compiled_task = read_compiled_task(compiled_file)
             runner = get_task_ir_runner()
             runner.ensure_event_subscription()
             run_state = runner.start_run(
@@ -235,15 +235,6 @@ class RunTaskTool(BaseTool):
         task_file_path = resolve_repo_path(entry.task_file)
         deterministic_path = (task_file_path.parent / f"{str(entry.task_id).strip()}.json").resolve()
         return deterministic_path.as_posix()
-
-    def _read_compiled_task_file(self, compiled_file: str) -> dict[str, Any]:
-        path = resolve_repo_path(compiled_file)
-        if not path.exists():
-            raise FileNotFoundError(f"Compiled task file not found: {path}")
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            raise ValueError("compiled task file must contain a JSON object")
-        return data
 
 
 def get_tool_class():

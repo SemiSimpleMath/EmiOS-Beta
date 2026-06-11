@@ -32,7 +32,6 @@ add. Splitting the storage layer from the LLM-extraction layer means:
 """
 from __future__ import annotations
 
-import hashlib
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,6 +39,7 @@ from typing import Any, Dict, Optional
 
 from app.assistant.pod_store.contracts import Pod, PodSourceRef
 from app.assistant.pod_store.pod_store import PodStore
+from app.assistant.utils.hashing import sha256_file
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_repo_root
 
@@ -59,18 +59,6 @@ def _images_root() -> Path:
     root = get_repo_root() / "data" / _IMAGE_DIR_NAME
     root.mkdir(parents=True, exist_ok=True)
     return root
-
-
-def _sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(65536), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
-def _sha256_bytes(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
 
 
 def _normalize_ext(ext: str) -> str:
@@ -158,7 +146,7 @@ def ingest_image_file(
         logger.debug("[image_ingest] unknown image extension %r for %s — proceeding",
                      ext, src_path.name)
 
-    sha256 = _sha256_file(src_path)
+    sha256 = sha256_file(src_path)
     dest = _store_path_for(sha256, ext)
     if not dest.exists():
         dest.parent.mkdir(parents=True, exist_ok=True)

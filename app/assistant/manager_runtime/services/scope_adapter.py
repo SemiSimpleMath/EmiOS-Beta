@@ -5,6 +5,7 @@ import uuid
 from typing import Any, Dict
 
 from app.assistant.rooms.room_resource_loader import load_room_context_for_manager
+from app.assistant.utils.coercion import coerce_authority_level
 from app.assistant.utils.identity_names import PRINCIPAL_USER
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import (
@@ -74,20 +75,6 @@ def _resolve_allowed_tools_from_data(data: dict[str, Any], key: str = "task_allo
         raise ValueError(f"{key} must be a list when provided, got {type(raw).__name__}.")
     # Explicit [] means no rights.
     return _validate_allowed_tools_list(values=_as_str_list(raw), field_name=key)
-
-
-def _coerce_authority_level(value: Any, *, field_name: str) -> int:
-    if value is None:
-        return 0
-    if isinstance(value, bool):
-        raise ValueError(f"{field_name} must be an integer between 0 and 100.")
-    try:
-        level = int(value)
-    except Exception:
-        raise ValueError(f"{field_name} must be an integer between 0 and 100.")
-    if level < 0 or level > 100:
-        raise ValueError(f"{field_name} must be between 0 and 100.")
-    return level
 
 
 def _default_authority_for_surface(*, surface: str) -> int:
@@ -163,7 +150,7 @@ def build_system_scope_context(
             "allowed_reply_types": [_as_non_empty_str(surface)] if _as_non_empty_str(surface) else [],
         },
         "approval": {
-            "authority_level": _coerce_authority_level(
+            "authority_level": coerce_authority_level(
                 authority_level,
                 field_name="scope.approval.authority_level",
             ),
@@ -470,7 +457,7 @@ class ScopeAdapter:
             visibility=_as_non_empty_str(getattr(message, "room_visibility", None)) or "owner_only",
             policy_id=_as_non_empty_str(getattr(message, "room_policy_id", None)) or None,
             scope_id=f"scope::{surface}::{manager_name}::{request_id or uuid.uuid4()}",
-            authority_level=_coerce_authority_level(
+            authority_level=coerce_authority_level(
                 data.get("authority_level", 0),
                 field_name="data.authority_level",
             ),
@@ -620,11 +607,11 @@ class ScopeAdapter:
 
             approval_cfg = narrowing.get("approval") if isinstance(narrowing.get("approval"), dict) else {}
             if approval_cfg and "authority_level" in approval_cfg:
-                parent_level = _coerce_authority_level(
+                parent_level = coerce_authority_level(
                     payload.get("approval", {}).get("authority_level", 0),
                     field_name="scope.approval.authority_level",
                 )
-                requested_level = _coerce_authority_level(
+                requested_level = coerce_authority_level(
                     approval_cfg.get("authority_level"),
                     field_name=f"{manager_name}.scope_contract.approval.authority_level",
                 )
