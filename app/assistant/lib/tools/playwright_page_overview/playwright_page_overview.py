@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import time
-import json
 from pathlib import Path
 from typing import Any, Optional
 
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
 from app.assistant.lib.mcp.tool_runner import mcp_stdio_call_tool, format_mcp_tool_result_content
+from app.assistant.utils.json_parsing import parse_jsonish
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import ToolMessage, ToolResult
 from app.assistant.utils.time_utils import get_local_time_str
@@ -214,15 +214,6 @@ class PlaywrightPageOverview(BaseTool):
         except Exception as e:
             return None, f"browser_evaluate error: {e}"
 
-    def _parse_jsonish(self, raw: str | None) -> Optional[dict]:
-        if not isinstance(raw, str) or not raw.strip():
-            return None
-        s = raw.strip()
-        try:
-            return json.loads(s)
-        except Exception:
-            return None
-
     def _get_viewport(self, server_entry: dict) -> Optional[dict]:
         text, err = self._run_code_raw(
             server_entry,
@@ -230,7 +221,7 @@ class PlaywrightPageOverview(BaseTool):
         )
         if err:
             return None
-        payload = self._parse_jsonish(text)
+        payload = parse_jsonish(text)
         if isinstance(payload, dict) and isinstance(payload.get("width"), (int, float)):
             return payload
         return None

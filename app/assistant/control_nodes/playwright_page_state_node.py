@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import json
-import re
 from typing import Any
 
 from app.assistant.control_nodes.control_node import ControlNode
 from app.assistant.lib.mcp.tool_runner import format_mcp_tool_result_content, mcp_stdio_call_tool
+from app.assistant.utils.json_parsing import parse_jsonish
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pipeline_state import get_last_tool_result_meta
 
@@ -206,7 +205,7 @@ class PlaywrightPageStateNode(ControlNode):
             tool_name=self.MCP_EVALUATE,
             arguments={"function": js},
         )
-        parsed = self._parse_jsonish(text)
+        parsed = parse_jsonish(text)
         if not isinstance(parsed, dict):
             raise RuntimeError(f"[{self.name}] Readiness probe parse failed. payload={str(text)[:500]!r}")
         return parsed
@@ -561,7 +560,7 @@ class PlaywrightPageStateNode(ControlNode):
             if isinstance(structured, dict):
                 return structured
 
-        payload = self._parse_jsonish(text)
+        payload = parse_jsonish(text)
         if not isinstance(payload, dict):
             preview = (text or "").strip().replace("\n", "\\n")[:600]
             raise RuntimeError(f"[{self.name}] Could not parse modal detector payload. preview={preview!r}")
@@ -593,43 +592,6 @@ class PlaywrightPageStateNode(ControlNode):
             raise RuntimeError(f"[{self.name}] MCP tool {tool_name} failed: {text}")
         return text if isinstance(text, str) else ""
 
-    @staticmethod
-    def _parse_jsonish(text: str) -> Any:
-        if not isinstance(text, str):
-            return None
-        s = text.strip()
-        if not s:
-            return None
-        try:
-            return json.loads(s)
-        except Exception:
-            logger.debug("playwright_page_state_node direct JSON parse failed")
-        try:
-            obj, _idx = json.JSONDecoder().raw_decode(s.lstrip())
-            return obj
-        except Exception:
-            logger.debug("playwright_page_state_node raw decode failed")
-        m = re.search(r"```json\s*([\s\S]*?)```", s, flags=re.IGNORECASE)
-        if not m:
-            m = re.search(r"```\s*([\s\S]*?)```", s)
-        if m:
-            payload = (m.group(1) or "").strip()
-            try:
-                return json.loads(payload)
-            except Exception:
-                logger.debug("playwright_page_state_node fenced JSON parse failed")
-
-        # Last resort: try decoding from each likely JSON start token.
-        starts = [m.start() for m in re.finditer(r"[\{\[]", s)]
-        for i1 in starts:
-            tail = s[i1:].lstrip()
-            try:
-                obj, _idx = json.JSONDecoder().raw_decode(tail.lstrip())
-                return obj
-            except Exception:
-                logger.debug("playwright_page_state_node tail JSON parse failed at index %s", i1)
-        logger.debug("playwright_page_state_node failed to parse JSONish payload")
-        return None
 
     def _run_js(self, *, server_entry: dict[str, Any], js: str) -> str:
         """Call browser_evaluate with the given JS snippet. Returns raw response text.
@@ -970,24 +932,4 @@ class PlaywrightPageStateNode(ControlNode):
         return "\n".join(lines)
 
     def _cfg(self) -> dict[str, Any]:
-        flow_cfg = self.blackboard.get_state_value("manager_flow_config", None)
-        if not isinstance(flow_cfg, dict):
-            raise ValueError("manager_flow_config must be a dict.")
-        page_state_cfg = flow_cfg.get("playwright_page_state")
-        if not isinstance(page_state_cfg, dict):
-            raise ValueError("manager_flow_config.playwright_page_state must be a dict.")
-        return page_state_cfg
-
-    @staticmethod
-    def _required_str(cfg: dict[str, Any], key: str) -> str:
-        raw = cfg.get(key)
-        if not isinstance(raw, str) or not raw.strip():
-            raise ValueError(f"playwright page state requires non-empty '{key}'.")
-        return raw.strip()
-
-    @staticmethod
-    def _optional_str(cfg: dict[str, Any], key: str, default: str) -> str:
-        raw = cfg.get(key, default)
-        if not isinstance(raw, str) or not raw.strip():
-            raise ValueError(f"playwright page state key '{key}' must be non-empty when provided.")
-        return raw.strip()
+        return self._flow_section_cfg("playwright_page_state")

@@ -9,6 +9,7 @@ from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
 from app.assistant.lib.core_tools.tool_error_protocol import make_tool_error
 from app.assistant.lib.mcp.tool_runner import mcp_stdio_call_tool, format_mcp_tool_result_content
 from app.assistant.lib.tools.playwright_snapshot_utils import make_snapshot_id, _LINE_WITH_REF_RE
+from app.assistant.utils.json_parsing import parse_jsonish
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import ToolMessage, ToolResult
 
@@ -167,33 +168,6 @@ _JS_SEARCH_NEIGHBORHOOD = """
 """.strip()
 
 
-def _parse_jsonish(text: str) -> Any:
-    if not isinstance(text, str):
-        return None
-    s = text.strip()
-    if not s:
-        return None
-    s = re.sub(r"^#+\s*\w+\s*\n", "", s).strip()
-    try:
-        return json.loads(s)
-    except Exception:
-        pass
-    try:
-        obj, _ = json.JSONDecoder().raw_decode(s.lstrip())
-        return obj
-    except Exception:
-        pass
-    m = re.search(r"```json\s*([\s\S]*?)```", s, flags=re.IGNORECASE)
-    if not m:
-        m = re.search(r"```\s*([\s\S]*?)```", s)
-    if m:
-        try:
-            return json.loads((m.group(1) or "").strip())
-        except Exception:
-            pass
-    return None
-
-
 _ACTIONABLE_ROLES = {
     "button", "link", "input", "textbox", "textarea", "search", "searchbox",
     "checkbox", "radio", "combobox", "menuitem", "tab", "option", "switch",
@@ -313,7 +287,7 @@ class WebModalSearch(BaseTool):
             )
 
         raw_text = text if isinstance(text, str) else ""
-        parsed = _parse_jsonish(raw_text)
+        parsed = parse_jsonish(raw_text)
 
         # Fallback: check structuredContent
         if not isinstance(parsed, dict) and isinstance(call_resp, dict):
@@ -324,7 +298,7 @@ class WebModalSearch(BaseTool):
             elif isinstance(sc, list):
                 for block in sc:
                     if isinstance(block, dict) and block.get("type") == "text":
-                        parsed = _parse_jsonish(str(block.get("text", "")))
+                        parsed = parse_jsonish(str(block.get("text", "")))
                         if isinstance(parsed, dict):
                             break
 

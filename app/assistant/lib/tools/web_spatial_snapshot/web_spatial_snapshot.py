@@ -9,6 +9,7 @@ from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
 from app.assistant.lib.mcp.tool_runner import mcp_stdio_call_tool, format_mcp_tool_result_content
 from app.assistant.lib.tools.playwright_snapshot_utils import make_snapshot_id
+from app.assistant.utils.json_parsing import parse_jsonish
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.lib.core_tools.tool_error_protocol import make_tool_error
 from app.assistant.utils.pydantic_classes import ToolMessage, ToolResult
@@ -36,51 +37,6 @@ class WebSpatialSnapshot(BaseTool):
 
     def __init__(self):
         super().__init__("web_spatial_snapshot")
-
-    @staticmethod
-    def _extract_jsonish(text: str) -> Any:
-        """
-        Playwright MCP `browser_evaluate` often returns markdown with fenced JSON.
-        Extract + parse best-effort.
-        """
-        if not isinstance(text, str) or not text.strip():
-            return None
-        s = text.strip()
-
-        # Fast path: raw JSON
-        try:
-            return json.loads(s)
-        except Exception:
-            try:
-                obj, _idx = json.JSONDecoder().raw_decode(s.lstrip())
-                return obj
-            except Exception:
-                pass
-
-        m = re.search(r"```json\s*([\s\S]*?)```", s, flags=re.IGNORECASE)
-        if not m:
-            m = re.search(r"```\s*([\s\S]*?)```", s)
-        if m:
-            payload = (m.group(1) or "").strip()
-            try:
-                return json.loads(payload)
-            except Exception:
-                try:
-                    obj, _idx = json.JSONDecoder().raw_decode(payload.lstrip())
-                    return obj
-                except Exception:
-                    pass
-
-        # Last resort: try to locate the first '[' or '{' and parse from there.
-        i1 = min([i for i in [s.find("["), s.find("{")] if i >= 0] or [-1])
-        if i1 >= 0:
-            tail = s[i1:]
-            try:
-                obj, _idx = json.JSONDecoder().raw_decode(tail.lstrip())
-                return obj
-            except Exception:
-                return None
-        return None
 
     def _mcp_call(self, *, server_entry: dict, tool_name: str, arguments: dict) -> tuple[str, bool, list[dict[str, Any]]]:
         call_resp = mcp_stdio_call_tool(
@@ -326,7 +282,7 @@ class WebSpatialSnapshot(BaseTool):
                 details={"backend": "mcp", "server_id": self.SERVER_ID, "mcp_tool_name": self.MCP_EVALUATE},
             )
 
-        payload = self._extract_jsonish(text)
+        payload = parse_jsonish(text)
         if not isinstance(payload, dict) or not payload.get("ok"):
             # Keep raw text around for debugging, but do not explode prompt history.
             preview = (text or "").strip()

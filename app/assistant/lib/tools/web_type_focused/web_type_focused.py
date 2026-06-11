@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-import re
 from typing import Any
 
 from app.assistant.ServiceLocator.service_locator import DI
@@ -46,48 +44,6 @@ class WebTypeFocused(BaseTool):
 
     def __init__(self):
         super().__init__("web_type_focused")
-
-    @staticmethod
-    def _extract_jsonish(text: str) -> Any:
-        if not isinstance(text, str) or not text.strip():
-            return None
-        s = text.strip()
-
-        # Fast path: raw JSON
-        try:
-            return json.loads(s)
-        except Exception:
-            try:
-                obj, _idx = json.JSONDecoder().raw_decode(s.lstrip())
-                return obj
-            except Exception:
-                pass
-
-        # Fenced JSON
-        m = re.search(r"```json\s*([\s\S]*?)```", s, flags=re.IGNORECASE)
-        if not m:
-            m = re.search(r"```\s*([\s\S]*?)```", s)
-        if m:
-            payload = (m.group(1) or "").strip()
-            try:
-                return json.loads(payload)
-            except Exception:
-                try:
-                    obj, _idx = json.JSONDecoder().raw_decode(payload.lstrip())
-                    return obj
-                except Exception:
-                    pass
-
-        # Last resort: parse from first { or [
-        i1 = min([i for i in [s.find("{"), s.find("[")] if i >= 0] or [-1])
-        if i1 >= 0:
-            tail = s[i1:]
-            try:
-                obj, _idx = json.JSONDecoder().raw_decode(tail.lstrip())
-                return obj
-            except Exception:
-                return None
-        return None
 
     def execute(self, tool_message: ToolMessage) -> ToolResult:
         args = (tool_message.tool_data or {}).get("arguments", {}) or {}

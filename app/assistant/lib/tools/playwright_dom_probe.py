@@ -1,49 +1,12 @@
 from __future__ import annotations
 
-import json
-import re
 from typing import Any
 
 from app.assistant.lib.mcp.tool_runner import format_mcp_tool_result_content, mcp_stdio_call_tool
+from app.assistant.utils.json_parsing import parse_jsonish
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
-
-
-def _parse_jsonish(text: str) -> Any:
-    if not isinstance(text, str):
-        return None
-    s = text.strip()
-    if not s:
-        return None
-    try:
-        return json.loads(s)
-    except Exception:
-        pass
-    try:
-        obj, _idx = json.JSONDecoder().raw_decode(s.lstrip())
-        return obj
-    except Exception:
-        pass
-    m = re.search(r"```json\s*([\s\S]*?)```", s, flags=re.IGNORECASE)
-    if not m:
-        m = re.search(r"```\s*([\s\S]*?)```", s)
-    if m:
-        payload = (m.group(1) or "").strip()
-        try:
-            return json.loads(payload)
-        except Exception:
-            pass
-    starts = [x.start() for x in re.finditer(r"[\{\[]", s)]
-    for idx in starts:
-        tail = s[idx:].lstrip()
-        try:
-            obj, _ = json.JSONDecoder().raw_decode(tail)
-            return obj
-        except Exception:
-            continue
-    logger.debug("playwright_dom_probe: all parse attempts failed for response preview=%r", s[:120])
-    return None
 
 
 def probe_visible_dom_inputs(*, server_entry: dict[str, Any], max_items: int = 12) -> list[dict[str, Any]]:
@@ -135,7 +98,7 @@ def probe_visible_dom_inputs(*, server_entry: dict[str, Any], max_items: int = 1
     text, is_error, _attachments = format_mcp_tool_result_content(call_resp)
     if is_error:
         return []
-    parsed = _parse_jsonish(text)
+    parsed = parse_jsonish(text)
     if not isinstance(parsed, list):
         result = call_resp.get("result") if isinstance(call_resp, dict) else None
         structured = result.get("structuredContent") if isinstance(result, dict) else None

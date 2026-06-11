@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 from typing import Any
 
@@ -13,6 +12,7 @@ from app.assistant.lib.tools.playwright_snapshot_utils import (
     summarize_actionable_snapshot,
     _LINE_WITH_REF_RE,
 )
+from app.assistant.utils.json_parsing import parse_jsonish
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import ToolMessage, ToolResult
 
@@ -180,34 +180,6 @@ _JS_MODAL_ELEMENTS = """
 """.strip()
 
 
-def _parse_jsonish(text: str) -> Any:
-    if not isinstance(text, str):
-        return None
-    s = text.strip()
-    if not s:
-        return None
-    # Strip markdown headers like "### Result\n"
-    s = re.sub(r"^#+\s*\w+\s*\n", "", s).strip()
-    try:
-        return json.loads(s)
-    except Exception:
-        pass
-    try:
-        obj, _ = json.JSONDecoder().raw_decode(s.lstrip())
-        return obj
-    except Exception:
-        pass
-    m = re.search(r"```json\s*([\s\S]*?)```", s, flags=re.IGNORECASE)
-    if not m:
-        m = re.search(r"```\s*([\s\S]*?)```", s)
-    if m:
-        try:
-            return json.loads((m.group(1) or "").strip())
-        except Exception:
-            pass
-    return None
-
-
 def _match_refs_by_proximity(elements: list[dict], snapshot_text: str) -> None:
     """Enrich each element dict with a 'ref' key by finding it in the snapshot.
 
@@ -319,7 +291,7 @@ class WebModalScan(BaseTool):
             )
 
         raw_text = text if isinstance(text, str) else ""
-        parsed = _parse_jsonish(raw_text)
+        parsed = parse_jsonish(raw_text)
 
         # Fallback: check structuredContent in the raw MCP response
         if not isinstance(parsed, dict) and isinstance(call_resp, dict):
@@ -331,7 +303,7 @@ class WebModalScan(BaseTool):
                 # Sometimes the result is wrapped in a list of content blocks
                 for block in sc:
                     if isinstance(block, dict) and block.get("type") == "text":
-                        parsed = _parse_jsonish(str(block.get("text", "")))
+                        parsed = parse_jsonish(str(block.get("text", "")))
                         if isinstance(parsed, dict):
                             break
 

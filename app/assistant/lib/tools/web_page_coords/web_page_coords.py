@@ -7,6 +7,7 @@ from typing import Any, Optional
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
 from app.assistant.lib.mcp.tool_runner import mcp_stdio_call_tool, format_mcp_tool_result_content
+from app.assistant.utils.json_parsing import parse_jsonish
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import Message, ToolMessage, ToolResult
 from app.assistant.utils.time_utils import get_local_time_str
@@ -58,55 +59,6 @@ class WebPageCoords(BaseTool):
     def __init__(self):
         super().__init__("web_page_coords")
 
-    @staticmethod
-    def _extract_jsonish(text: str) -> Any:
-        """
-        Playwright MCP `browser_evaluate` often returns markdown with fenced JSON.
-        Extract and parse it best-effort.
-        """
-        if not isinstance(text, str) or not text.strip():
-            return None
-
-        s = text.strip()
-        try:
-            return _json.loads(s)
-        except Exception:
-            try:
-                obj, _idx = _json.JSONDecoder().raw_decode(s.lstrip())
-                return obj
-            except Exception:
-                pass
-
-        import re
-
-        m = re.search(r"```json\s*([\s\S]*?)```", s, flags=re.IGNORECASE)
-        if not m:
-            m = re.search(r"```\s*([\s\S]*?)```", s)
-        if m:
-            payload = (m.group(1) or "").strip()
-            try:
-                return _json.loads(payload)
-            except Exception:
-                try:
-                    obj, _idx = _json.JSONDecoder().raw_decode(payload.lstrip())
-                    return obj
-                except Exception:
-                    pass
-
-        i1 = min([i for i in [s.find("["), s.find("{")] if i >= 0] or [-1])
-        if i1 >= 0:
-            tail = s[i1:]
-            try:
-                return _json.loads(tail)
-            except Exception:
-                try:
-                    obj, _idx = _json.JSONDecoder().raw_decode(tail.lstrip())
-                    return obj
-                except Exception:
-                    return tail
-
-        return s
-
     def _mcp_call(self, *, server_entry: dict, tool_name: str, arguments: dict) -> tuple[str, bool, list[dict[str, Any]]]:
         call_resp = mcp_stdio_call_tool(
             server_entry=server_entry,
@@ -145,7 +97,7 @@ class WebPageCoords(BaseTool):
         )
         if is_error:
             raise RuntimeError(text or "browser_evaluate returned isError")
-        parsed = self._extract_jsonish(text)
+        parsed = parse_jsonish(text)
         if isinstance(parsed, list):
             return [m for m in parsed if isinstance(m, dict)]
         preview = (text or "")[:1200]
