@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from app.assistant.pipelines.audit_retention import prune_pipeline_runs_dir
 from app.assistant.routine_manager.utils import utc_now
 from app.assistant.utils.atomic_write import write_json_atomic
 from app.assistant.utils.logging_config import get_logger
@@ -13,35 +12,6 @@ from app.assistant.utils.logging_config import get_logger
 from .step_types import PipelineStep, StepResult, outputs_exist
 
 logger = get_logger(__name__)
-
-
-def _prune_pipeline_runs_dir(*, pipeline_runs_dir: Path, max_files: int = 1500) -> None:
-    """
-    Best-effort retention policy for `day_context/.../pipeline_runs/`.
-
-    Keeps only the most recent N JSON audit files per day-dir.
-    """
-    try:
-        if not pipeline_runs_dir.exists():
-            return
-        max_files = int(max_files) if int(max_files) > 0 else 1500
-
-        files = [p for p in pipeline_runs_dir.glob("*.json") if p.is_file()]
-        if len(files) <= max_files:
-            return
-
-        # Keep newest by mtime; drop the rest.
-        files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-        for p in files[max_files:]:
-            try:
-                # Avoid deleting any conventional "latest" pointer if introduced later.
-                if "latest" in p.name.lower():
-                    continue
-                p.unlink(missing_ok=True)
-            except Exception:
-                continue
-    except Exception:
-        return
 
 
 @dataclass
@@ -161,7 +131,7 @@ class PipelineRunner:
 
         # Retain only the most recent audits for this day.
         try:
-            _prune_pipeline_runs_dir(pipeline_runs_dir=ctx.pipeline_runs_dir, max_files=1500)
+            prune_pipeline_runs_dir(pipeline_runs_dir=ctx.pipeline_runs_dir, max_files=1500)
         except Exception:
             pass
         return result
