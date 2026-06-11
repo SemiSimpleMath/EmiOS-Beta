@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta, timezone
 
 from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
+from app.assistant.lib.core_tools.event_node_cleanup import cascade_delete_children, cleanup_event_node
 from app.assistant.lib.core_tools.tool_error_protocol import make_tool_error
 from app.assistant.utils.pydantic_classes import ToolMessage, ToolResult, Message
 from app.assistant.utils.time_utils import parse_time_string, normalize_google_event_times, get_local_timezone
@@ -826,7 +827,7 @@ class CalendarTool(BaseTool):
 
             # Handle cascade deletion
             if cascade:
-                deleted_children = self._cascade_delete_children('google_calendar', event_id)
+                deleted_children = cascade_delete_children('google_calendar', event_id, delete_source_item=self._delete_source_item, include_direct_children=True)
 
             success = delete_event(self.service, event_id)
             if not success:
@@ -849,7 +850,7 @@ class CalendarTool(BaseTool):
             self.repo_manager.delete_event(event_id, data_type="calendar")
             
             # Clean up EventNode if it exists
-            self._cleanup_event_node('google_calendar', event_id)
+            cleanup_event_node('google_calendar', event_id)
 
             if cascade and deleted_children:
                 return ToolResult(
@@ -887,7 +888,7 @@ class CalendarTool(BaseTool):
 
             deleted_children = []
             if cascade:
-                deleted_children = self._cascade_delete_children('google_calendar', event_id)
+                deleted_children = cascade_delete_children('google_calendar', event_id, delete_source_item=self._delete_source_item, include_direct_children=True)
 
             success = delete_recurring_event(self.service, event_id)
             if not success:
@@ -911,7 +912,7 @@ class CalendarTool(BaseTool):
             event_hub.publish(repo_msg)
 
             self.repo_manager.delete_event(event_id, data_type="calendar")
-            self._cleanup_event_node('google_calendar', event_id)
+            cleanup_event_node('google_calendar', event_id)
 
             if cascade and deleted_children:
                 return ToolResult(
@@ -929,54 +930,6 @@ class CalendarTool(BaseTool):
                 retryable=False,
             )
 
-    def _cascade_delete_children(self, source_system: str, source_id: str) -> list:
-        """Delete all children linked to this event in the EventNode graph."""
-        deleted = []
-        try:
-            from app.assistant.event_graph import get_event_node_manager
-            mgr = get_event_node_manager()
-            
-            hierarchy = mgr.get_event_hierarchy(f"{source_system}:{source_id}")
-            if not hierarchy:
-                return deleted
-            
-            # Get all children and delete them from their source systems
-            for child in hierarchy.get('children', []):
-                child_deleted = self._delete_from_source(child, mgr)
-                if child_deleted:
-                    deleted.append(child_deleted)
-                    
-            # Also recursively delete grandchildren via subtree
-            subtree = hierarchy.get('subtree', [])
-            parent_node_id = hierarchy['node']['node_id']
-            for node in subtree:
-                if node['node_id'] != parent_node_id:  # Skip the parent
-                    node_with_sources = mgr.get_node_with_sources(node['node_id'])
-                    if node_with_sources:
-                        for source in node_with_sources.get('sources', []):
-                            child_deleted = self._delete_source_item(source)
-                            if child_deleted:
-                                deleted.append(child_deleted)
-                                
-        except Exception as e:
-            logger.error("Error in cascade delete: %s", e)
-            logger.debug("cascade delete exception", exc_info=True)
-        return deleted
-    
-    def _delete_from_source(self, child_node: dict, mgr) -> str:
-        """Delete a child node from its source system."""
-        try:
-            node_with_sources = mgr.get_node_with_sources(child_node['node_id'])
-            if not node_with_sources:
-                return None
-                
-            for source in node_with_sources.get('sources', []):
-                return self._delete_source_item(source)
-        except Exception as e:
-            logger.error("Error deleting child: %s", e)
-            logger.debug("child delete exception", exc_info=True)
-        return None
-    
     def _delete_source_item(self, source: dict) -> str:
         """Delete an item from its source system."""
         try:
@@ -1001,18 +954,6 @@ class CalendarTool(BaseTool):
             logger.debug("source item delete exception", exc_info=True)
         return None
     
-    def _cleanup_event_node(self, source_system: str, source_id: str):
-        """Remove the EventNode after deleting from source."""
-        try:
-            from app.assistant.event_graph import get_event_node_manager
-            mgr = get_event_node_manager()
-            node = mgr.get_node_by_source(source_system, source_id)
-            if node:
-                mgr.delete_node(node['node_id'], cascade=False)
-        except Exception as e:
-            logger.debug(f"No EventNode to clean up for {source_system}:{source_id}: {e}")
-
-
 def normalize_start_end(event: dict, calendar_timezone: str = None) -> (str, str):
     """
     Normalize event start and end into UTC ISO strings.

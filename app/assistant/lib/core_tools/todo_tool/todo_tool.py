@@ -5,6 +5,7 @@ from typing import Any, Dict
 from pydantic import ValidationError
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
+from app.assistant.lib.core_tools.event_node_cleanup import cascade_delete_children, cleanup_event_node
 from app.assistant.lib.core_tools.tool_error_protocol import make_tool_error
 
 from app.assistant.utils.pydantic_classes import ToolMessage, ToolResult, Message
@@ -407,7 +408,7 @@ class ToDoTool(BaseTool):
             
             # Handle cascade deletion
             if cascade:
-                deleted_children = self._cascade_delete_children('google_tasks', task_id)
+                deleted_children = cascade_delete_children('google_tasks', task_id, delete_source_item=self._delete_source_item)
 
             delete_task(task_id=task_id)
 
@@ -415,7 +416,7 @@ class ToDoTool(BaseTool):
             self.repo_manager.delete_event(task_id, data_type="todo_task")
             
             # Clean up EventNode if it exists
-            self._cleanup_event_node('google_tasks', task_id)
+            cleanup_event_node('google_tasks', task_id)
 
             repo_msg = Message(
                 data_type="repo_update",
@@ -460,33 +461,6 @@ class ToDoTool(BaseTool):
                 retryable=False,
             )
     
-    def _cascade_delete_children(self, source_system: str, source_id: str) -> list:
-        """Delete all children linked to this task in the EventNode graph."""
-        deleted = []
-        try:
-            from app.assistant.event_graph import get_event_node_manager
-            mgr = get_event_node_manager()
-            
-            hierarchy = mgr.get_event_hierarchy(f"{source_system}:{source_id}")
-            if not hierarchy:
-                return deleted
-            
-            subtree = hierarchy.get('subtree', [])
-            parent_node_id = hierarchy['node']['node_id']
-            
-            for node in subtree:
-                if node['node_id'] != parent_node_id:
-                    node_with_sources = mgr.get_node_with_sources(node['node_id'])
-                    if node_with_sources:
-                        for source in node_with_sources.get('sources', []):
-                            child_deleted = self._delete_source_item(source)
-                            if child_deleted:
-                                deleted.append(child_deleted)
-                                
-        except Exception as e:
-            logger.warning(f"Error in cascade delete: {e}")
-        return deleted
-    
     def _delete_source_item(self, source: dict) -> str:
         """Delete an item from its source system."""
         try:
@@ -508,17 +482,6 @@ class ToDoTool(BaseTool):
             logger.warning(f"Error deleting {source}: {e}")
         return None
     
-    def _cleanup_event_node(self, source_system: str, source_id: str):
-        """Remove the EventNode after deleting from source."""
-        try:
-            from app.assistant.event_graph import get_event_node_manager
-            mgr = get_event_node_manager()
-            node = mgr.get_node_by_source(source_system, source_id)
-            if node:
-                mgr.delete_node(node['node_id'], cascade=False)
-        except Exception as e:
-            logger.debug(f"No EventNode to clean up for {source_system}:{source_id}: {e}")
-
     def handle_create_tasklist(self, arguments: Dict[str, Any]) -> ToolResult:
         try:
             list_name = arguments.get('list_name')

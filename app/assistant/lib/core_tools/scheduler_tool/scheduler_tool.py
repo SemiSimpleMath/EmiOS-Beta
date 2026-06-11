@@ -3,6 +3,7 @@ from typing import Dict, Any
 from datetime import datetime, timezone, timedelta
 from app.assistant.utils.time_utils import parse_time_string
 from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
+from app.assistant.lib.core_tools.event_node_cleanup import cascade_delete_children, cleanup_event_node
 from app.assistant.lib.core_tools.tool_error_protocol import make_tool_error
 from app.assistant.utils.pydantic_classes import ToolMessage, ToolResult, Message
 from app.assistant.utils.time_utils import local_to_utc
@@ -216,7 +217,7 @@ class SchedulerTool(BaseTool):
             
             # Handle cascade deletion
             if cascade:
-                deleted_children = self._cascade_delete_children('scheduler', event_id)
+                deleted_children = cascade_delete_children('scheduler', event_id, delete_source_item=self._delete_source_item)
 
             logger.info(f"Attempting to delete scheduler event with ID: {event_id}")
             # Delete the event from the repository.
@@ -229,7 +230,7 @@ class SchedulerTool(BaseTool):
             result = DI.scheduler.event_scheduler.delete_event(event_id)
             
             # Clean up EventNode if it exists
-            self._cleanup_event_node('scheduler', event_id)
+            cleanup_event_node('scheduler', event_id)
 
             self._update_repo_cache()
 
@@ -251,34 +252,6 @@ class SchedulerTool(BaseTool):
             )
             return self.publish_error(error_result)
     
-    def _cascade_delete_children(self, source_system: str, source_id: str) -> list:
-        """Delete all children linked to this event in the EventNode graph."""
-        deleted = []
-        try:
-            from app.assistant.event_graph import get_event_node_manager
-            mgr = get_event_node_manager()
-            
-            hierarchy = mgr.get_event_hierarchy(f"{source_system}:{source_id}")
-            if not hierarchy:
-                return deleted
-            
-            # Get all descendants and delete them
-            subtree = hierarchy.get('subtree', [])
-            parent_node_id = hierarchy['node']['node_id']
-            
-            for node in subtree:
-                if node['node_id'] != parent_node_id:
-                    node_with_sources = mgr.get_node_with_sources(node['node_id'])
-                    if node_with_sources:
-                        for source in node_with_sources.get('sources', []):
-                            child_deleted = self._delete_source_item(source)
-                            if child_deleted:
-                                deleted.append(child_deleted)
-                                
-        except Exception as e:
-            logger.warning(f"Error in cascade delete: {e}")
-        return deleted
-    
     def _delete_source_item(self, source: dict) -> str:
         """Delete an item from its source system."""
         try:
@@ -299,17 +272,6 @@ class SchedulerTool(BaseTool):
             logger.warning(f"Error deleting {source}: {e}")
         return None
     
-    def _cleanup_event_node(self, source_system: str, source_id: str):
-        """Remove the EventNode after deleting from source."""
-        try:
-            from app.assistant.event_graph import get_event_node_manager
-            mgr = get_event_node_manager()
-            node = mgr.get_node_by_source(source_system, source_id)
-            if node:
-                mgr.delete_node(node['node_id'], cascade=False)
-        except Exception as e:
-            logger.debug(f"No EventNode to clean up for {source_system}:{source_id}: {e}")
-
     ############################################################################
     # Handler for fetching scheduler events.
     ############################################################################
