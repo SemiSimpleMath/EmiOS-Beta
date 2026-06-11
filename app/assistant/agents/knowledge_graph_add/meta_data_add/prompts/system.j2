@@ -80,6 +80,13 @@ If the source text would still make sense with the date removed, the date is **n
 
 - **Events**: Precise date -> actual. Present-tense -> message date (inferred). Single-day -> end_date = start_date. No context -> `""`. valid_currently usually `false` for past Events (the event happened and is no longer "currently happening"), `null` for events in progress or future.
 - **States**: "since 2003" -> start_date 2003-01-01 (estimated). Ongoing -> end_date `""`, valid_currently `null`. Bounded -> valid_currently `false` + cite the bounding event/prose.
+- **Year/month flooring is a SORT KEY, not a claim.** When only a year (or
+  month) is known, the floored date (YYYY-01-01 / YYYY-MM-01) exists purely to
+  give chronology a sortable anchor — the exact day is NOT known. ALWAYS pair a
+  floored date with confidence `estimated` and put the real precision in the
+  prose field ("in 2003", "August 1994"). Never emit a floored date with
+  `actual` confidence; renderers display estimated floors at year/month
+  precision and investigators treat them as non-propagatable.
 
 ### General
 

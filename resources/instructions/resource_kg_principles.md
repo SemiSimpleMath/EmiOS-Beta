@@ -35,6 +35,11 @@ projection — write via `persist_description`, never directly.
 - `start_date > end_date` (inverted interval)
 - Future `start_date` on a past-tense `original_sentence`
 - `start_date` exactly equal to `created_at` (defaulted, not observed)
+- `start_date = end_date = YYYY-01-01` + confidence `estimated` + prose
+  "in YYYY" — year-floor placeholder; only the YEAR was claimed and
+  January 1 is fabricated. Year-precision only: never propagate it as an
+  exact day, never let it outvote an `actual`/`user_set` date for the
+  same life event.
 
 If you find any of these, that's the real KG bug — promote to bucket 1.
 

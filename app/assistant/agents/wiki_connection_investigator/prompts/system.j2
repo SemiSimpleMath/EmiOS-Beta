@@ -46,6 +46,9 @@ The user wants the agent to surface dates UPFRONT so they don't have to do all t
 
 - **Don't guess.** If the page only says "she taught at Berkeley", don't pick `2018-01-01` because Berkeley is a research university and you assume tenure-track. Leave dates null. The user will fill them in.
 - **Use ISO 'YYYY-MM-DD'.** Year-only → `'YYYY-01-01'`. Year+month → `'YYYY-MM-01'`.
+  A floored date is a SORT KEY, not a day claim — the exact day is unknown.
+  Always pair it with the matching prose ("in 2003", "August 1994") so the
+  floor is never mistaken for a known day downstream.
 - **Use the prose fields for fuzzy bounds.** "In her early thirties" → `suggested_start_date_prose='early thirties'`, leave `suggested_start_date` null.
 - **Cite the date in `evidence_quote`.** If you suggest `2018-01-01`, the evidence quote must contain `2018` (or a phrase implying it). The reviewer should be able to see WHERE the date came from.
 

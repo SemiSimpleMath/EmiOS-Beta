@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Iterable, List, Optional
 
+from app.assistant.kg_core.kg_utils.date_display import format_node_date, sort_key_ts
 from app.assistant.kg_projection import (
     BeliefAbout,
     EntityNeighborhood,
@@ -52,31 +53,6 @@ def render_page(neighborhood: EntityNeighborhood) -> str:
 def _slugify_for_link(label: str) -> str:
     """Produce an Obsidian wiki-link target from an entity label. Keep it human-readable."""
     return label.strip()
-
-
-def _fmt_date(dt: Optional[datetime]) -> Optional[str]:
-    if dt is None:
-        return None
-    try:
-        if dt.tzinfo is not None:
-            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-        return dt.strftime("%Y-%m-%d")
-    except Exception:
-        return str(dt)
-
-
-def _sort_key_ts(dt: Optional[datetime]) -> float:
-    """Mixed tz-aware/tz-naive datetimes can't be compared directly.
-    Normalize to a POSIX timestamp for sort purposes only.
-    ``None`` becomes 0 (so callers can order empty dates last/first as they wish)."""
-    if dt is None:
-        return 0.0
-    try:
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.timestamp()
-    except Exception:
-        return 0.0
 
 
 def _det_open(slug: str) -> str:
@@ -120,7 +96,7 @@ def _read_metadata_bits(node, edge) -> str:
         bits.append(f"start_date_prose: {start_prose}")
     end_dt = getattr(node, "end_date", None)
     if end_dt is not None:
-        end_fmt = _fmt_date(end_dt)
+        end_fmt = format_node_date(end_dt, getattr(node, "end_date_confidence", None))
         if end_fmt:
             bits.append(f"end_date: {end_fmt}")
     end_prose = getattr(node, "end_date_prose", None)
@@ -236,7 +212,7 @@ def _render_relationships_section(n: EntityNeighborhood) -> str:
     undated = [r for r in all_rels if r.state.start_date is None]
 
     # Sort dated by start_date descending (normalize timestamps for mixed tz-aware/naive dates)
-    dated.sort(key=lambda r: _sort_key_ts(r.state.start_date), reverse=True)
+    dated.sort(key=lambda r: sort_key_ts(r.state.start_date), reverse=True)
 
     if not dated and not undated:
         lines.append(_comment("No relationships in KG."))
@@ -261,7 +237,7 @@ def _render_relationships_section(n: EntityNeighborhood) -> str:
 
 def _render_state_connection(r: StateConnection) -> List[str]:
     edge = r.edge
-    date = _fmt_date(r.state.start_date)
+    date = format_node_date(r.state.start_date, getattr(r.state, "start_date_confidence", None))
     date_str = f" since {date}" if date else ""
 
     counterpart_names = [c.label for c, _ in r.counterparts]
@@ -343,12 +319,12 @@ def _render_events_section(n: EntityNeighborhood) -> str:
     # Sort by start_date desc, None last
     sorted_events = sorted(
         all_events,
-        key=lambda e: (e.event.start_date is None, -_sort_key_ts(e.event.start_date)),
+        key=lambda e: (e.event.start_date is None, -sort_key_ts(e.event.start_date)),
     )
 
     for e in sorted_events:
         edge = e.edge
-        date = _fmt_date(e.event.start_date)
+        date = format_node_date(e.event.start_date, getattr(e.event, "start_date_confidence", None))
         date_str = f" ({date})" if date else ""
         coparts = [c.label for c, _ in e.co_participants]
         coparts_str = ""

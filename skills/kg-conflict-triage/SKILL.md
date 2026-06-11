@@ -79,6 +79,12 @@ patterns (all bucket 3):
 - `start_date > end_date` (inverted interval — usually a legacy import)
 - future `start_date` on a past-tense `original_sentence`
 - `start_date` exactly equal to `created_at` (defaulted, not observed)
+- `start_date = end_date = YYYY-01-01` with confidence `estimated` and
+  prose like "in YYYY" — a year-floor placeholder: only the YEAR was
+  ever claimed; January 1 is fabricated by the date estimator. Treat it
+  as year-precision. NEVER propagate it to another node as an exact
+  day, and never let it outvote an `actual`/`user_set` date about the
+  same life event.
 
 Any of these on a cited node IS the real bug — bucket 1, regardless of
 what the finding claimed.

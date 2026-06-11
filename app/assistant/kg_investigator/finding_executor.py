@@ -217,6 +217,9 @@ def _build_brief(finding_id: str) -> Optional[Dict[str, Any]]:
             f"superseded — do not fall back to it. Date convention: if the operator "
             f"gives only month + year, use the first of the month "
             f"(e.g. 'August 1994' → '1994-08-01'); year only → January 1st. "
+            f"Floored dates are sort keys, not day claims — set the matching "
+            f"prose field ('August 1994' / 'in 2003') and confidence "
+            f"'estimated' so the floor is never mistaken for a known day. "
             f"If a directive cannot be operationalized (ids don't exist, data has "
             f"shifted), escalate rather than improvise."
         )

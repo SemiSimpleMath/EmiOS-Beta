@@ -354,6 +354,8 @@ def _fetch_dated_neighbors(session, node_id: str, *, limit: int = 20) -> List[Di
               n.end_date AS other_end,
               n.start_date_prose AS other_start_prose,
               n.end_date_prose AS other_end_prose,
+              n.start_date_confidence AS other_start_conf,
+              n.end_date_confidence AS other_end_conf,
               e.relationship_type AS rel,
               e.sentence AS sentence,
               CASE WHEN e.source_id = :nid THEN 'out' ELSE 'in' END AS direction
@@ -372,7 +374,8 @@ def _fetch_dated_neighbors(session, node_id: str, *, limit: int = 20) -> List[Di
     for r in rows:
         m = r._mapping if hasattr(r, "_mapping") else dict(zip(
             ["other_id", "other_label", "other_type", "other_start", "other_end",
-             "other_start_prose", "other_end_prose", "rel", "sentence", "direction"], r,
+             "other_start_prose", "other_end_prose", "other_start_conf",
+             "other_end_conf", "rel", "sentence", "direction"], r,
         ))
         out.append(dict(m))
     return out
@@ -695,7 +698,16 @@ def _brief_state_missing_dates(
 
     if dated_neighbors:
         parts.append("## Dated neighbors (temporal anchors)")
-        parts.append("These connected nodes already have dates; use them to bracket the subject's validity window.")
+        parts.append(
+            "These connected nodes already have dates; use them to bracket the "
+            "subject's validity window. WEIGH BY CONFIDENCE: anchors marked "
+            "user_set/explicit/actual are authoritative; estimated/inferred dates "
+            "are guesses — in particular start=end=YYYY-01-01 with prose like "
+            "'in YYYY' is a year-floor placeholder (only the YEAR is known; "
+            "January 1 is fabricated). Never copy a fabricated day onto another "
+            "node — propagate the prose/precision instead, or anchor on an "
+            "actual-confidence sibling."
+        )
         for n in dated_neighbors[:15]:
             anchor = []
             if n.get("other_start"):
@@ -706,6 +718,10 @@ def _brief_state_missing_dates(
                 anchor.append(f"start_prose={n['other_start_prose']!r}")
             if n.get("other_end_prose"):
                 anchor.append(f"end_prose={n['other_end_prose']!r}")
+            if n.get("other_start_conf") or n.get("other_end_conf"):
+                anchor.append(
+                    f"confidence={n.get('other_start_conf') or '?'}/{n.get('other_end_conf') or '?'}"
+                )
             parts.append(
                 f"- ({n['direction']}) [{n['rel']}] {n['other_label']!r} ({n['other_type']}): {' / '.join(anchor)}"
             )
@@ -743,8 +759,16 @@ def _brief_state_missing_dates(
         "auto-applied by the executor; below that the executor escalates to "
         "the user as a clarifying question. Follow date references in the "
         "prose with kg_query (e.g. 'when Katy was 13' → look up Katy's birth); "
-        "deriving a range from KG facts is reasoning, not invention. If the "
-        "data genuinely doesn't "
+        "deriving a range from KG facts is reasoning, not invention. "
+        "PROPAGATION DISCIPLINE: before copying a date from another node, "
+        "check that node's date confidence — estimated/inferred dates (and "
+        "especially the start=end=YYYY-01-01 year-floor signature) must NOT "
+        "be propagated as exact days; carry the prose instead, or find an "
+        "actual/user_set-dated node for the same life event. Cross-check ALL "
+        "dated candidates your queries returned: if siblings about the same "
+        "event disagree (e.g. an estimated Jan-1 next to an actual September "
+        "date), the disagreement IS the finding — escalate it rather than "
+        "anchoring on either. If the data genuinely doesn't "
         "answer, propose op='escalate_user' with a specific question for the "
         "user (e.g. 'When did Annika start middle school?'). Never invent dates."
     )

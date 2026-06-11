@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Iterable, List, Optional
 
+from app.assistant.kg_core.kg_utils.date_display import format_node_date, sort_key_ts
 from app.assistant.kg_projection.neighborhood import (
     BeliefAbout,
     EntityNeighborhood,
@@ -79,7 +80,7 @@ def render_bullets(neighborhood: EntityNeighborhood) -> List[Bullet]:
     # ---- relationships (State connections, outbound) ----
     dated_rel = sorted(
         [r for r in neighborhood.relationships if r.state.start_date is not None],
-        key=lambda r: _sort_key_ts(r.state.start_date),
+        key=lambda r: sort_key_ts(r.state.start_date),
         reverse=True,
     )
     undated_rel = [r for r in neighborhood.relationships if r.state.start_date is None]
@@ -91,7 +92,7 @@ def render_bullets(neighborhood: EntityNeighborhood) -> List[Bullet]:
     # ---- inbound relationships (this entity is the target of a State hub) ----
     in_dated_rel = sorted(
         [r for r in neighborhood.inbound_relationships if r.state.start_date is not None],
-        key=lambda r: _sort_key_ts(r.state.start_date),
+        key=lambda r: sort_key_ts(r.state.start_date),
         reverse=True,
     )
     in_undated_rel = [r for r in neighborhood.inbound_relationships if r.state.start_date is None]
@@ -103,7 +104,7 @@ def render_bullets(neighborhood: EntityNeighborhood) -> List[Bullet]:
     # ---- events (outbound) ----
     dated_evt = sorted(
         [e for e in neighborhood.events if e.event.start_date is not None],
-        key=lambda e: _sort_key_ts(e.event.start_date),
+        key=lambda e: sort_key_ts(e.event.start_date),
         reverse=True,
     )
     undated_evt = [e for e in neighborhood.events if e.event.start_date is None]
@@ -115,7 +116,7 @@ def render_bullets(neighborhood: EntityNeighborhood) -> List[Bullet]:
     # ---- inbound events (this entity is the location/recipient of an Event hub) ----
     in_dated_evt = sorted(
         [e for e in neighborhood.inbound_events if e.event.start_date is not None],
-        key=lambda e: _sort_key_ts(e.event.start_date),
+        key=lambda e: sort_key_ts(e.event.start_date),
         reverse=True,
     )
     in_undated_evt = [e for e in neighborhood.inbound_events if e.event.start_date is None]
@@ -184,7 +185,7 @@ def _role_line(node_label: str, edge) -> str:
 def _state_connection_bullet(r: StateConnection, *, subkind: str, entity_label: str) -> Bullet:
     state = r.state
     edge = r.edge
-    date = _fmt_date(state.start_date)
+    date = format_node_date(state.start_date, getattr(state, "start_date_confidence", None))
     date_str = f" since {date}" if date else ""
     node_tag = f" {{node:{state.id}}}" if getattr(state, "id", None) else ""
 
@@ -231,7 +232,7 @@ def _state_connection_bullet(r: StateConnection, *, subkind: str, entity_label: 
 def _event_connection_bullet(e: EventConnection, *, subkind: str, entity_label: str) -> Bullet:
     event = e.event
     edge = e.edge
-    date = _fmt_date(event.start_date)
+    date = format_node_date(event.start_date, getattr(event, "start_date_confidence", None))
     date_str = f" ({date})" if date else ""
     node_tag = f" {{node:{event.id}}}" if getattr(event, "id", None) else ""
 
@@ -352,28 +353,6 @@ def _slugify(label: str) -> str:
     return (label or "").strip()
 
 
-def _fmt_date(dt: Optional[datetime]) -> Optional[str]:
-    if dt is None:
-        return None
-    try:
-        if dt.tzinfo is not None:
-            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-        return dt.strftime("%Y-%m-%d")
-    except Exception:
-        return str(dt)
-
-
-def _sort_key_ts(dt: Optional[datetime]) -> float:
-    if dt is None:
-        return 0.0
-    try:
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.timestamp()
-    except Exception:
-        return 0.0
-
-
 def _normalize_dt(dt: Optional[datetime]) -> Optional[datetime]:
     if dt is None:
         return None
@@ -399,7 +378,7 @@ def _read_metadata_bits(node, edge) -> str:
         bits.append(f"start_date_prose: {start_prose}")
     end_dt = getattr(node, "end_date", None)
     if end_dt is not None:
-        end_fmt = _fmt_date(end_dt)
+        end_fmt = format_node_date(end_dt, getattr(node, "end_date_confidence", None))
         if end_fmt:
             bits.append(f"end_date: {end_fmt}")
     end_prose = getattr(node, "end_date_prose", None)
