@@ -206,6 +206,8 @@ data/kg_projection/
 # Local backups (beliefs, KG snapshots, etc.) — point-in-time data dumps,
 # stay local to the install.
 data/backups/
+# Belief engine v2 runtime databases + local backups
+belief_engine_v2/data/
 # EmiCode runtime state — Claude Code session_ids per room context.
 data/emi_code/
 # Ring camera credentials + snapshots — never commit these
