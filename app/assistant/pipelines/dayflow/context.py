@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import timedelta, timezone
+from datetime import timezone
 from pathlib import Path
 from typing import Any, Dict
 
@@ -34,30 +34,7 @@ class DayFlowContext:
         state_path: Path,
     ) -> "DayFlowContext":
         from app.assistant.utils.time_utils import utc_to_local
-        from app.assistant.utils.path_utils import get_configs_dir
-
-        def _repo_root_dir() -> Path:
-            return resources_dir().parent
-
-        def _boundary_hour_local() -> int:
-            try:
-                cfg = read_json_file(get_configs_dir() / "dayflow_pipeline.json") or {}
-                daily_reset = cfg.get("daily_reset") or {}
-                return int(daily_reset.get("boundary_hour_local", 5))
-            except Exception:
-                return 5
-
-        def boundary_date_local_str(now_local_dt) -> str:
-            boundary_hour = _boundary_hour_local()
-            effective_day = now_local_dt
-            if now_local_dt.hour < boundary_hour:
-                effective_day = now_local_dt - timedelta(days=1)
-            return effective_day.strftime("%Y-%m-%d")
-
-        def _day_context_dir(boundary_date_local: str) -> Path:
-            year = boundary_date_local[:4]
-            month = boundary_date_local[5:7]
-            return _repo_root_dir() / "day_context" / year / month / boundary_date_local
+        from app.assistant.pipelines.context import _day_context_dir, boundary_date_local_str
 
         now_utc = utc_now()
         now_local = utc_to_local(now_utc)

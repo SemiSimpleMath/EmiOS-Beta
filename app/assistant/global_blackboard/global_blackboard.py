@@ -6,8 +6,8 @@ from app.assistant.utils.message_visibility_policy import (
     DEFAULT_EXCLUDED_CHAT_TAGS,
     normalize_room_scope_filters,
     should_include_chat_message,
-    to_utc,
 )
+from app.assistant.utils.time_utils import to_utc
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)

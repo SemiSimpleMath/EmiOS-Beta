@@ -4,11 +4,8 @@ import hashlib
 from datetime import datetime, timezone
 
 from app.assistant.control_nodes.chat_task_router_node import ChatTaskRouterNode
-from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.message_manager.save_to_unified_db import save_to_unified_db
-from app.assistant.utils.identity_names import get_required_assistant_name
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.pydantic_classes import Message as PersistMessage
 
 logger = get_logger(__name__)
 
@@ -99,64 +96,6 @@ class MasterRoomChatTaskRouterNode(ChatTaskRouterNode):
     # ------------------------------------------------------------------
     # Master-room specific helpers
     # ------------------------------------------------------------------
-
-    def _persist_guard(self, *, guard_label: str) -> None:
-        """Persist an in-flight guard message to blackboard + unified DB."""
-        assistant_name = get_required_assistant_name()
-        now_utc = datetime.now(timezone.utc)
-        request_id = self.blackboard.get_request_id() or ""
-
-        room_id = str(self.blackboard.get_state_value("room_id", "") or "").strip()
-        room_surface = str(self.blackboard.get_state_value("room_surface", "") or "").strip().lower()
-        room_context_id = str(self.blackboard.get_state_value("room_context_id", "") or "main").strip() or "main"
-        room_policy_id = str(
-            self.blackboard.get_state_value("room_policy_id", "") or f"room_policy::{room_id}::v1"
-        ).strip()
-        visibility = "owner_only" if room_surface == "ui" else "room_shared"
-
-        guard_text = f"[THIS TASK IS ALREADY IN FLIGHT - DO NOT RE-ATTEMPT]\n{guard_label}"
-
-        guard_msg = PersistMessage(
-            data_type="agent_msg",
-            sub_data_type=["agent_guard"],
-            sender=assistant_name,
-            role="assistant",
-            content=guard_text,
-            is_chat=True,
-            request_id=request_id.strip() or None,
-            timestamp=now_utc,
-            room_id=room_id or None,
-            room_surface=room_surface or None,
-            room_context_id=room_context_id,
-            room_visibility=visibility,
-            room_policy_id=room_policy_id or None,
-            room_message_direction="outbound",
-            room_initiated_by="agent",
-            room_delivery_mode="no_send",
-            room_speaker_id=f"assistant:{assistant_name.lower()}",
-            room_speaker_name=assistant_name,
-            room_speaker_role="assistant",
-            room_actor_id=f"assistant:{assistant_name.lower()}",
-            data={"room_id": room_id, "room_surface": room_surface, "agent_guard": True},
-        )
-        DI.global_blackboard.add_msg(guard_msg)
-
-        if room_id:
-            source = f"room_{room_surface}" if room_surface else "room_system"
-            guard_payload = {
-                "id": guard_msg.id,
-                "timestamp": now_utc,
-                "role": "assistant",
-                "message": guard_text,
-                "room_id": room_id,
-                "room_surface": room_surface or None,
-                "room_context_id": room_context_id,
-                "room_message_direction": "outbound",
-                "room_speaker_name": assistant_name,
-                "metadata_json": {"sub_data_type": ["agent_guard"], "agent_guard": True},
-                "data_json": {"room_id": room_id, "room_surface": room_surface, "agent_guard": True},
-            }
-            save_to_unified_db([guard_payload], source=source)
 
     def _persist_dayflow_delegation(self, task_description: str) -> None:
         """Write a tagged request message for the dayflow intake pipeline."""

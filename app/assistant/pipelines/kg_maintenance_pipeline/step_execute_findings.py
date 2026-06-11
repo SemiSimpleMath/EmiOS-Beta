@@ -85,7 +85,8 @@ def _execute_orphan(finding: dict) -> dict:
     finally:
         session.close()
 
-    _delete_node_embedding(node_id)
+    from app.assistant.kg_core.kg_utils.node_merge import delete_node_chroma_vectors
+    delete_node_chroma_vectors(node_id)
 
     return {
         "executed": True,
@@ -117,6 +118,7 @@ def _execute_duplicate(finding: dict) -> dict:
         apply_node_data_merger_result,
         merge_node_fields_into_existing,
     )
+    from app.assistant.pipelines.kg_shared.merge_utils import node_to_merge_dict
 
     node_a_id = finding["primary_node_id"]
     node_b_id = finding["secondary_node_id"]
@@ -142,8 +144,8 @@ def _execute_duplicate(finding: dict) -> dict:
         loser_id = str(loser.id)
         winner_label = winner.label
         loser_label = loser.label
-        winner_data = _node_to_dict(winner)
-        loser_data = _node_to_dict(loser)
+        winner_data = node_to_merge_dict(winner)
+        loser_data = node_to_merge_dict(loser)
     finally:
         session.close()
 
@@ -288,39 +290,9 @@ def _pick_canonical(node_a, node_b, session) -> tuple:
     return (node_a, node_b)
 
 
-def _node_to_dict(node) -> dict[str, Any]:
-    """Extract a plain dict from a Node ORM object for merge_node_fields_into_existing."""
-    return {
-        "label": node.label,
-        "node_type": node.node_type,
-        "aliases": node.aliases or [],
-        "hash_tags": node.hash_tags or [],
-        "semantic_label": node.semantic_label,
-        "goal_status": node.goal_status,
-        "valid_during": node.valid_during,
-        "category": node.category,
-        "start_date": node.start_date,
-        "end_date": node.end_date,
-        "start_date_confidence": node.start_date_confidence,
-        "end_date_confidence": node.end_date_confidence,
-        "confidence": node.confidence,
-        "importance": node.importance,
-    }
-
-
 # ---------------------------------------------------------------------------
 # ChromaDB cleanup (best-effort)
 # ---------------------------------------------------------------------------
-
-def _delete_node_embedding(node_id: str) -> None:
-    try:
-        from app.assistant.kg.chroma.chroma_embedding_manager import get_chroma_manager
-        cm = get_chroma_manager()
-        cm.delete_node_embedding(node_id)
-        cm.delete_node_context_embedding(node_id)
-    except Exception as exc:
-        logger.debug("ChromaDB embedding cleanup failed for node %s: %s", node_id, exc)
-
 
 # ---------------------------------------------------------------------------
 # Series-link execution (link per-occurrence Events to parent Entity)
@@ -705,7 +677,8 @@ def _execute_split_state(finding: dict) -> dict:
     finally:
         session.close()
 
-    _delete_node_embedding(old_node_id)
+    from app.assistant.kg_core.kg_utils.node_merge import delete_node_chroma_vectors
+    delete_node_chroma_vectors(old_node_id)
 
     return {
         "executed": True,

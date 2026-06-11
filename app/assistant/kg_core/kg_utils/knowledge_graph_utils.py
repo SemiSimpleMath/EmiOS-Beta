@@ -9,6 +9,7 @@ from datetime import datetime
 from app.assistant.kg.db.knowledge_graph_db_sqlite import Node, Edge
 from app.assistant.embeddings.embedder import embed_text
 from app.assistant.utils.logging_config import get_logger
+from app.assistant.utils.vector_utils import cosine_similarity
 
 logger = get_logger(__name__)
 from app.models.base import get_session
@@ -75,24 +76,6 @@ class KnowledgeGraphUtils:
         """Create semantic embedding for text."""
         return embed_text(text)
 
-    def cosine_similarity(self, vec1, vec2) -> float:
-        """Calculate cosine similarity between two vectors."""
-        # Handle None or empty cases
-        if vec1 is None or vec2 is None:
-            return 0.0
-        
-        # Convert to numpy arrays if they aren't already
-        vec1 = np.array(vec1)
-        vec2 = np.array(vec2)
-        
-        # Check if arrays are empty
-        if vec1.size == 0 or vec2.size == 0:
-            return 0.0
-            
-        norm_product = np.linalg.norm(vec1) * np.linalg.norm(vec2)
-        if norm_product == 0:
-            return 0.0
-        return np.dot(vec1, vec2) / norm_product
 
     # ──────────────────  NODE HELPERS  ───────────────────────────────────────────
 
@@ -278,7 +261,7 @@ class KnowledgeGraphUtils:
                 for existing_edge in candidate_edges:
                     try:
                         # Compute cosine similarity
-                        similarity = self.cosine_similarity(
+                        similarity = cosine_similarity(
                             new_sentence_embedding,
                             existing_edge.sentence_embedding
                         )

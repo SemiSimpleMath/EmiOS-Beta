@@ -32,11 +32,10 @@ from sqlalchemy import text as sql_text
 
 from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
 from app.assistant.database.kg_revision_log import KGRevisionLog
+from app.assistant.kg_investigator.finding_processor import finding_write_scope
 from app.assistant.ServiceLocator.service_locator import DI
-from app.assistant.scope.loader import load_scope_for_source
-from app.assistant.utils.identity_names import PRINCIPAL_USER
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.pydantic_classes import Message, ScopeContext
+from app.assistant.utils.pydantic_classes import Message
 from app.assistant.utils.time_utils import utc_now
 from app.models.db_manager import get_db_manager
 
@@ -48,24 +47,6 @@ GRACE_WINDOW_HOURS = 24
 # A claim ('executing') older than this is assumed orphaned by a process
 # crash mid-run and is released back to 'investigated' on the next sweep.
 STALE_CLAIM_HOURS = 2
-
-
-def _executor_scope() -> ScopeContext:
-    """Permissive scope so the resolution manager's scope_contract can
-    keep ``write_kg=True``. The manager's own scope_contract narrows
-    tools to its curated mutator allowlist (full read + mutate suite
-    including merge/delete; safety lives in the dev-page 24h grace +
-    Accept review, not in tool exclusion)."""
-    return load_scope_for_source(
-        kind="subsystem",
-        source_id="kg_investigator",
-        actor_id="kg_finding_executor",
-        identity_overrides={
-            "owner_id": PRINCIPAL_USER,
-            "actor_id": "kg_finding_executor",
-            "scope_id": "scope::kg_investigator::finding_executor",
-        },
-    )
 
 
 def _claim_executable_finding_ids(*, limit: int) -> List[str]:
@@ -437,7 +418,7 @@ def execute_one(finding_id: str) -> Dict[str, Any]:
     msg = Message(
         task=brief["task"],
         information=brief["information"],
-        scope_context=_executor_scope(),
+        scope_context=finding_write_scope(),
     )
     watermark = utc_now()
     try:

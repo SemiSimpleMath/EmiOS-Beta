@@ -38,7 +38,7 @@ from app.assistant.room_session_manager.services.room_history_builder import Roo
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.message_visibility_policy import _NON_NORMAL_ROOM_MODES
 from app.assistant.utils.pydantic_classes import Message
-from app.assistant.utils.time_utils import utc_to_local
+from app.assistant.utils.time_utils import day_reset_cutoff_utc, utc_to_local
 
 logger = get_logger(__name__)
 
@@ -252,7 +252,7 @@ class RoomChatSummaryRunner:
             max_age_hours=24,
         )
 
-        day_reset_cutoff_utc = self._history_builder._get_day_reset_utc()
+        day_cutoff_utc = day_reset_cutoff_utc()
         is_dayflow_room = self.room_id == _DAYFLOW_ORCHESTRATOR_ROOM_ID
 
         room_msgs: list[tuple[datetime, Message]] = []
@@ -273,7 +273,7 @@ class RoomChatSummaryRunner:
                 if ts is None:
                     continue
 
-                if ts < day_reset_cutoff_utc and not _is_pinned(m, self.room_id):
+                if ts < day_cutoff_utc and not _is_pinned(m, self.room_id):
                     continue
 
                 room_msgs.append((ts, m))
@@ -294,12 +294,12 @@ class RoomChatSummaryRunner:
 
     def _build_payload_rows(self, messages: list[Message]) -> list[dict]:
         rows: list[dict] = []
-        day_reset_cutoff_utc = self._history_builder._get_day_reset_utc()
+        day_cutoff_utc = day_reset_cutoff_utc()
         for i, m in enumerate(messages):
             msg_id = str(getattr(m, "id", "") or "").strip()
             ts = _ts_utc(m)
             time_str = utc_to_local(ts).strftime("%H:%M") if ts else ""
-            is_previous_day = bool(ts is not None and ts < day_reset_cutoff_utc)
+            is_previous_day = bool(ts is not None and ts < day_cutoff_utc)
 
             rows.append(
                 {

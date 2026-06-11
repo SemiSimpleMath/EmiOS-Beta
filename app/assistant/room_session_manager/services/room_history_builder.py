@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -11,10 +10,9 @@ from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.message_visibility_policy import (
     normalize_room_scope_filters,
     should_include_chat_message,
-    to_utc,
 )
 from app.assistant.utils.pydantic_classes import Message
-from app.assistant.utils.time_utils import get_local_time, local_to_utc, utc_to_local
+from app.assistant.utils.time_utils import day_reset_cutoff_utc, to_utc, utc_to_local
 from app.models.base import get_session
 
 logger = get_logger(__name__)
@@ -39,34 +37,6 @@ class RoomHistoryBuilder:
         return str(value or "").strip().lower()
 
     @staticmethod
-    def _to_utc(ts: Any) -> datetime | None:
-        if ts is None:
-            return None
-        if isinstance(ts, datetime):
-            try:
-                if ts.tzinfo is None:
-                    return ts.replace(tzinfo=timezone.utc)
-                return ts.astimezone(timezone.utc)
-            except Exception as e:
-                logger.error("Failed converting room history timestamp to UTC: %s", e)
-                logger.debug("room history UTC conversion exception details", exc_info=True)
-                return None
-        if isinstance(ts, str):
-            raw = ts.strip()
-            if not raw:
-                return None
-            try:
-                parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-                if parsed.tzinfo is None:
-                    return parsed.replace(tzinfo=timezone.utc)
-                return parsed.astimezone(timezone.utc)
-            except Exception as e:
-                logger.error("Failed parsing room history ISO timestamp '%s': %s", raw, e)
-                logger.debug("room history ISO parse exception details", exc_info=True)
-                return None
-        return None
-
-    @staticmethod
     def _message_fingerprint(msg: Any) -> tuple:
         ts = to_utc(getattr(msg, "timestamp", None))
         ts_key = ts.isoformat() if ts is not None else ""
@@ -79,25 +49,6 @@ class RoomHistoryBuilder:
             str(getattr(msg, "sender", "") or "").strip(),
             str(getattr(msg, "content", "") or "").strip(),
         )
-
-    @staticmethod
-    def _get_day_reset_utc() -> datetime:
-        raw = str(os.environ.get("DAY_RESET_HOUR") or "").strip()
-        local_now = get_local_time()
-
-        try:
-            hour = int(raw)
-        except Exception:
-            hour = 5
-
-        if hour < 0 or hour > 23:
-            hour = 5
-
-        reset_local = local_now.replace(hour=hour, minute=0, second=0, microsecond=0)
-        if local_now < reset_local:
-            reset_local = reset_local - timedelta(days=1)
-
-        return local_to_utc(reset_local)
 
     @staticmethod
     def _get_meta(msg: Any) -> dict:
@@ -130,7 +81,7 @@ class RoomHistoryBuilder:
         return isinstance(value, str) and bool(value.strip())
 
     def _timestamp_sort_key(self, msg: Any) -> tuple[int, datetime]:
-        ts_utc = self._to_utc(getattr(msg, "timestamp", None))
+        ts_utc = to_utc(getattr(msg, "timestamp", None))
         if ts_utc is None:
             return (1, datetime.min.replace(tzinfo=timezone.utc))
         return (0, ts_utc)
@@ -300,7 +251,7 @@ class RoomHistoryBuilder:
             return ""
 
         lines: list[str] = []
-        day_reset_cutoff_utc = self._get_day_reset_utc()
+        day_cutoff_utc = day_reset_cutoff_utc()
         old_chat_header_added = False
         today_chat_header_added = False
 
@@ -320,10 +271,10 @@ class RoomHistoryBuilder:
                 ts = getattr(m, "timestamp", None)
                 if ts:
                     try:
-                        ts_utc = self._to_utc(ts)
+                        ts_utc = to_utc(ts)
                         if (
                             ts_utc is not None
-                            and ts_utc < day_reset_cutoff_utc
+                            and ts_utc < day_cutoff_utc
                             and bool(getattr(m, "is_chat", False))
                             and not old_chat_header_added
                         ):
@@ -398,17 +349,17 @@ class RoomHistoryBuilder:
 
         kept_messages: list[Any] = []
         kept_ids: set[str] = set()
-        day_reset_cutoff_utc = self._get_day_reset_utc()
+        day_cutoff_utc = day_reset_cutoff_utc()
 
         for msg in candidates:
             try:
-                ts_utc = self._to_utc(getattr(msg, "timestamp", None))
+                ts_utc = to_utc(getattr(msg, "timestamp", None))
                 msg_id = str(getattr(msg, "id", "") or "").strip()
 
                 if ts_utc is None:
                     continue
 
-                if ts_utc < day_reset_cutoff_utc:
+                if ts_utc < day_cutoff_utc:
                     # For previous days, keep only pinned messages or room summaries.
                     # Everything else is hidden from display context.
                     if not self._is_pinned_for_room(msg, rid_target) and not self._is_room_summary_message(msg):
@@ -563,7 +514,7 @@ class RoomHistoryBuilder:
             cap_cutoff_utc = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
             capped_messages = []
             for m in all_messages:
-                ts_utc = self._to_utc(getattr(m, "timestamp", None))
+                ts_utc = to_utc(getattr(m, "timestamp", None))
                 if ts_utc is None:
                     continue
 

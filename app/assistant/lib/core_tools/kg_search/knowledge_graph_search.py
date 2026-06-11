@@ -16,6 +16,8 @@ from app.assistant.kg_core.kg_utils.kg_tools import semantic_find_node_by_text, 
 from app.assistant.kg_core.kg_utils.knowledge_graph_utils import KnowledgeGraphUtils
 
 from app.assistant.utils.logging_config import get_logger
+from app.assistant.kg_core.kg_utils.kg_tools import recency_score
+from app.assistant.utils.vector_utils import cosine_similarity
 from app.assistant.utils.time_utils import get_local_time_str
 from app.models.base import get_session
 
@@ -198,14 +200,6 @@ def _expand_neighborhood_fast(
     return distance_by_node_id, collected_edges
 
 
-
-def _recency_score(ts: Optional[datetime]) -> float:
-    if not ts:
-        return 0.0
-    now = datetime.now(timezone.utc)
-    age_days = max(0.0, (now - ts).total_seconds() / 86400.0)
-    half_life = 90.0
-    return 0.5 ** (age_days / half_life)
 
 class KnowledgeGraphSearch(BaseTool):
     """
@@ -591,7 +585,7 @@ class KnowledgeGraphSearch(BaseTool):
                     missing_embedding_count += 1
                     continue
                 try:
-                    sim = float(kg_utils.cosine_similarity(q_emb, emb))
+                    sim = float(cosine_similarity(q_emb, emb))
                 except Exception:
                     logger.debug("cosine_similarity failed for edge", exc_info=True)
                     continue
@@ -905,7 +899,7 @@ class KnowledgeGraphSearch(BaseTool):
 
                 # Recency
                 ts = e.updated_at or e.created_at
-                rec = _recency_score(ts)
+                rec = recency_score(ts)
 
                 # Text relevance, cheap heuristic (no embed here)
                 txt_score = 0.0

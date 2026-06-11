@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from typing import Iterable, List, Optional
 
 from app.assistant.kg_core.kg_utils.date_display import format_node_date, sort_key_ts
+from app.assistant.kg_projection.bullets import detect_likely_duplicates
 from app.assistant.kg_projection import (
     BeliefAbout,
     EntityNeighborhood,
@@ -273,7 +274,7 @@ def _render_state_connection(r: StateConnection) -> List[str]:
 
     # Flag suspected duplicate entities (counterpart label is a substring/superset of another).
     if len(r.counterparts) > 1:
-        dup_pairs = _detect_likely_duplicates(counterpart_names)
+        dup_pairs = detect_likely_duplicates(counterpart_names)
         if dup_pairs:
             for a, b in dup_pairs:
                 out.append(f"  {_comment(f'KG GAP: state {r.state.label!r} likely duplicate counterparts: {a!r} and {b!r}')}")
@@ -281,23 +282,6 @@ def _render_state_connection(r: StateConnection) -> List[str]:
         out.append(f"  {_comment(f'KG GAP: state {r.state.label!r} has no start_date or end_date')}")
 
     return out
-
-
-def _detect_likely_duplicates(names: Iterable[str]) -> List[tuple[str, str]]:
-    """Return pairs of labels that look like aliases of the same entity
-    (e.g. ``Jukka`` and ``Jukka's wife`` both appearing as counterparts).
-    Heuristic: one name is a substring of the other AND both contain the shorter one's words."""
-    names = list(names)
-    pairs: List[tuple[str, str]] = []
-    for i, a in enumerate(names):
-        a_low = a.lower().strip()
-        for b in names[i + 1 :]:
-            b_low = b.lower().strip()
-            if a_low == b_low:
-                continue
-            if a_low in b_low or b_low in a_low:
-                pairs.append((a, b))
-    return pairs
 
 
 # ---------- events ----------

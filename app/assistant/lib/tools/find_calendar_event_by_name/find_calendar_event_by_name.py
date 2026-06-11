@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.time_utils import local_to_utc
 from app.assistant.embeddings.embedder import embed_text
-import numpy as np
+from app.assistant.utils.vector_utils import cosine_similarity
 
 logger = get_logger(__name__)
 
@@ -12,16 +12,6 @@ logger = get_logger(__name__)
 def get_embedding(text: str):
     """Create embedding for text."""
     return embed_text(text)
-
-def cosine_similarity(vec1, vec2):
-    """Calculate cosine similarity between two vectors"""
-    vec1 = np.array(vec1)
-    vec2 = np.array(vec2)
-    norm_product = np.linalg.norm(vec1) * np.linalg.norm(vec2)
-    if norm_product == 0:
-        return 0.0
-    return np.dot(vec1, vec2) / norm_product
-
 
 class FindCalendarEventByName(CalendarTool):
     """

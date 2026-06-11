@@ -9,6 +9,7 @@ from uuid import UUID
 
 from app.models.base import get_session
 from app.assistant.utils.logging_config import get_logger
+from app.assistant.utils.vector_utils import cosine_similarity
 
 from collections import defaultdict, deque
 
@@ -143,7 +144,7 @@ def describe_node(node_id, session: Session, filters: Dict[str, Any] = None, max
         
         for edge in inbound:
             if edge.sentence and edge.sentence_embedding is not None:
-                similarity = kg_utils.cosine_similarity(text_embedding, edge.sentence_embedding)
+                similarity = cosine_similarity(text_embedding, edge.sentence_embedding)
                 logger.debug(f"Edge sentence: '{edge.sentence[:50]}...' similarity: {similarity:.3f}")
                 
                 # Store edge with similarity score
@@ -161,7 +162,7 @@ def describe_node(node_id, session: Session, filters: Dict[str, Any] = None, max
         logger.debug(f"Checking {len(outbound)} outbound edges for text matches")
         for edge in outbound:
             if edge.sentence and edge.sentence_embedding is not None:
-                similarity = kg_utils.cosine_similarity(text_embedding, edge.sentence_embedding)
+                similarity = cosine_similarity(text_embedding, edge.sentence_embedding)
                 logger.debug(f"Edge sentence: '{edge.sentence[:50]}...' similarity: {similarity:.3f}")
                 
                 # Store edge with similarity score
@@ -353,17 +354,7 @@ def safe_add_relationship_by_id(
     """
     attributes = attributes or {}
 
-    # 1. Helper to safely parse ISO date strings from attributes.
-    def _parse_iso(date_str: Optional[str]) -> Optional[datetime]:
-        if not date_str:
-            return None
-        try:
-            # Handle 'Z' for UTC timezone correctly
-            return datetime.fromisoformat(str(date_str).replace("Z", "+00:00"))
-        except (ValueError, TypeError):
-            # Return None if parsing fails
-            return None
-
+    # Dates parse via the module-level _parse_iso helper (defined below).
     start_date = _parse_iso(attributes.get("start_date") or attributes.get("start_date"))
     end_date = _parse_iso(attributes.get("end_date") or attributes.get("end_date"))
 
@@ -459,14 +450,6 @@ def short_describe_node(
     def _edge_ts(e: Edge) -> Optional[datetime]:
         return e.updated_at or e.created_at
 
-    def _recency_score(ts: Optional[datetime]) -> float:
-        if not ts:
-            return 0.0
-        now = datetime.now(timezone.utc)
-        age_days = max(0.0, (now - ts).total_seconds() / 86400.0)
-        half_life = 90.0
-        return 0.5 ** (age_days / half_life)
-
     scored: List[Dict[str, Any]] = []
     for direction, e in edges:
         other = e.source_node if direction == "in" else e.target_node
@@ -486,7 +469,7 @@ def short_describe_node(
             edge_imp = e.importance
         imp = float(edge_imp) if edge_imp is not None else importance_default
 
-        rec = _recency_score(_edge_ts(e))
+        rec = recency_score(_edge_ts(e))
         score = 0.6 * imp + 0.4 * rec
 
         edge_info = {
@@ -551,6 +534,14 @@ def _parse_iso(ts: Optional[str]) -> Optional[datetime]:
     except Exception:
         logger.debug("Could not parse ISO timestamp: %s", ts, exc_info=True)
         return None
+
+def recency_score(ts: Optional[datetime], *, half_life_days: float = 90.0) -> float:
+    """Exponential-decay recency weight in [0, 1] (1.0 = now, 0.5 at one half-life)."""
+    if not ts:
+        return 0.0
+    now = datetime.now(timezone.utc)
+    age_days = max(0.0, (now - ts).total_seconds() / 86400.0)
+    return 0.5 ** (age_days / half_life_days)
 
 def _is_active(start: Optional[datetime], end: Optional[datetime]) -> bool:
     now = datetime.now(timezone.utc)
@@ -993,7 +984,7 @@ def semantic_find_node_by_text(text: str, session: Session, threshold: float = 0
             similarities = []
             for node in filtered_nodes:
                 if node.label_embedding is not None:
-                    sim = kg_utils.cosine_similarity(new_embedding, node.label_embedding)
+                    sim = cosine_similarity(new_embedding, node.label_embedding)
                     if sim >= threshold:
                         similarities.append((node, sim))
             

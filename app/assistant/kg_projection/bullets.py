@@ -210,7 +210,7 @@ def _state_connection_bullet(r: StateConnection, *, subkind: str, entity_label: 
 
     counterpart_names = [c.label for c, _ in r.counterparts]
     if len(r.counterparts) > 1:
-        for a, b in _detect_likely_duplicates(counterpart_names):
+        for a, b in detect_likely_duplicates(counterpart_names):
             lines.append(f"  <!-- KG GAP: state {state.label!r} likely duplicate counterparts: {a!r} and {b!r} -->")
     if state.start_date is None and state.end_date is None:
         lines.append(f"  <!-- KG GAP: state {state.label!r} has no start_date or end_date -->")
@@ -390,7 +390,10 @@ def _read_metadata_bits(node, edge) -> str:
     return "; ".join(bits)
 
 
-def _detect_likely_duplicates(names: Iterable[str]) -> List[tuple]:
+def detect_likely_duplicates(names: Iterable[str]) -> List[tuple]:
+    """Return pairs of labels that look like aliases of the same entity
+    (e.g. a name and "<name>'s wife" both appearing as counterparts).
+    Heuristic: one name is a substring of the other (case-insensitive)."""
     names = list(names)
     pairs: List[tuple] = []
     for i, a in enumerate(names):

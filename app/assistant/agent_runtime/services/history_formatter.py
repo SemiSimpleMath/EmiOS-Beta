@@ -1,9 +1,7 @@
 import os
-from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from app.assistant.utils.time_utils import get_local_time, local_to_utc
-from app.assistant.utils.time_utils import utc_to_local
+from app.assistant.utils.time_utils import day_reset_cutoff_utc, to_utc, utc_to_local
 
 
 class HistoryFormatter:
@@ -53,20 +51,6 @@ class HistoryFormatter:
                 return f"[tool_result_id: {tool_result_id.strip()}]"
             return ""
 
-        def _to_utc(ts: Any) -> datetime | None:
-            if ts is None:
-                return None
-            if isinstance(ts, datetime):
-                if ts.tzinfo is None:
-                    return ts.replace(tzinfo=timezone.utc)
-                return ts.astimezone(timezone.utc)
-            if isinstance(ts, str):
-                parsed = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                if parsed.tzinfo is None:
-                    return parsed.replace(tzinfo=timezone.utc)
-                return parsed.astimezone(timezone.utc)
-            raise ValueError(f"Unsupported timestamp type in history message: {type(ts).__name__}")
-
         def _prefix(m: Any) -> str:
             if bool(getattr(m, "is_chat", False)):
                 sender = (
@@ -105,24 +89,10 @@ class HistoryFormatter:
 
         sorted_msgs = sorted(
             filtered,
-            key=lambda it: (_to_utc(getattr(it[1], "timestamp", None)) is None, _to_utc(getattr(it[1], "timestamp", None)), it[0]),
+            key=lambda it: (to_utc(getattr(it[1], "timestamp", None)) is None, to_utc(getattr(it[1], "timestamp", None)), it[0]),
         )
 
-        def _day_reset_cutoff_utc() -> datetime:
-            raw = str(os.environ.get("DAY_RESET_HOUR") or "").strip()
-            local_now = get_local_time()
-            try:
-                hour = int(raw)
-            except Exception:
-                hour = 5
-            if hour < 0 or hour > 23:
-                hour = 5
-            reset_local = local_now.replace(hour=hour, minute=0, second=0, microsecond=0)
-            if local_now < reset_local:
-                reset_local = reset_local - timedelta(days=1)
-            return local_to_utc(reset_local)
-
-        cutoff_utc = _day_reset_cutoff_utc()
+        cutoff_utc = day_reset_cutoff_utc()
         old_chat_header_added = False
         today_chat_header_added = False
         pieces: list[str] = []
@@ -134,7 +104,7 @@ class HistoryFormatter:
             if not body:
                 continue
 
-            ts_utc = _to_utc(getattr(m, "timestamp", None))
+            ts_utc = to_utc(getattr(m, "timestamp", None))
             if ts_utc is not None:
                 if bool(getattr(m, "is_chat", False)):
                     if ts_utc < cutoff_utc and not old_chat_header_added:

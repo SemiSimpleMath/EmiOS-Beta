@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from app.assistant.utils.pydantic_classes import Message
-from app.assistant.utils.time_utils import utc_to_local
+from app.assistant.utils.time_utils import to_utc, utc_to_local
 
 
 def messages_to_chat_excerpts(
@@ -26,16 +26,6 @@ def messages_to_chat_excerpts(
     - actionability: "local_actionable" or "external_context_only"
     """
 
-    def _to_utc(ts: Optional[datetime]) -> Optional[datetime]:
-        if not ts:
-            return None
-        try:
-            if getattr(ts, "tzinfo", None) is None:
-                ts = ts.replace(tzinfo=timezone.utc)
-            return ts.astimezone(timezone.utc)
-        except Exception:
-            return None
-
     consumer_room = str(consumer_room_id or "").strip()
     out: List[Dict[str, Any]] = []
     for m in messages or []:
@@ -43,7 +33,7 @@ def messages_to_chat_excerpts(
             meta = getattr(m, "metadata", None)
             if isinstance(meta, dict) and meta.get("context_suppressed") and not meta.get("context_pinned"):
                 continue
-            ts_utc = _to_utc(getattr(m, "timestamp", None))
+            ts_utc = to_utc(getattr(m, "timestamp", None))
             if ts_utc is None:
                 continue
             origin_room_id = str(getattr(m, "room_id", "") or "").strip()

@@ -36,30 +36,12 @@ from app.assistant.dayflow_orchestrator.state_store import (
 )
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import Message
-from app.assistant.utils.time_utils import parse_iso_utc_strict
+from app.assistant.utils.time_utils import day_reset_cutoff_utc, parse_iso_utc_strict
 
 logger = get_logger(__name__)
 
 _SHORT_ID_RESET_THRESHOLD = 10_000
 
-
-def _get_day_start_utc(now_utc: datetime) -> datetime:
-    """Return the most recent day-reset boundary in UTC."""
-    import os
-    from app.assistant.utils.time_utils import get_local_timezone
-    from datetime import timedelta
-
-    raw = str(os.environ.get("DAY_RESET_HOUR") or "").strip()
-    hour = int(raw) if raw and raw.lstrip("-").isdigit() else 5
-    if hour < 0 or hour > 23:
-        hour = 5
-
-    local_tz = get_local_timezone()
-    local_now = now_utc.astimezone(local_tz)
-    reset_local = local_now.replace(hour=hour, minute=0, second=0, microsecond=0)
-    if local_now < reset_local:
-        reset_local = reset_local - timedelta(days=1)
-    return reset_local.astimezone(timezone.utc)
 
 
 def _load_chat_entitled_rooms() -> list[str]:
@@ -89,7 +71,7 @@ def _ingest_chat(
     """Ingest new cross-room chat as dayflow items."""
     entitled = _load_chat_entitled_rooms()
 
-    day_start_utc = _get_day_start_utc(now_utc)
+    day_start_utc = day_reset_cutoff_utc(now_utc)
     status = load_orchestrator_status()
     raw_watermark = status.get(CHAT_WATERMARK_KEY)
     since_utc = day_start_utc
@@ -192,7 +174,7 @@ def _ingest_pods(
             since_utc = None
     if since_utc is None:
         # First run: cap at start-of-day so we don't replay history.
-        since_utc = _get_day_start_utc(now_utc)
+        since_utc = day_reset_cutoff_utc(now_utc)
 
     store = PodStore()
     # Query without kind filter — we may have multiple kinds in the

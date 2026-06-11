@@ -59,13 +59,14 @@ def _investigation_scope() -> ScopeContext:
     )
 
 
-def _mutation_scope() -> ScopeContext:
-    """Scope context for the kg_mutation_manager.
+def finding_write_scope() -> ScopeContext:
+    """Scope context for the KG-writing side of finding resolution.
 
-    The mutator's purpose is to apply a previously-recorded proposed_action to
-    the KG via narrow audit-wired tools (kg_merge_nodes, kg_rename_label,
-    kg_update_node_field, kg_finding_resolve, kg_finding_escalate). Therefore
-    write_kg is True here.
+    Shared by the kg_mutation_manager (applies a previously-recorded
+    proposed_action via narrow audit-wired tools) and the resolution
+    manager invoked from finding_executor (full read + mutate suite;
+    safety lives in the dev-page 24h grace + Accept review, not in tool
+    exclusion). write_kg is True in both cases.
     """
     return load_scope_for_source(
         kind="subsystem",
@@ -175,7 +176,7 @@ def apply_one(finding_id: str) -> Dict[str, Any]:
 
     task, information = brief
     mgr = DI.multi_agent_manager_factory.create_manager(MUTATION_MANAGER_NAME)
-    msg = Message(task=task, information=information, scope_context=_mutation_scope())
+    msg = Message(task=task, information=information, scope_context=finding_write_scope())
     try:
         DI.manager_invoker.invoke(mgr, msg)
     except Exception as e:

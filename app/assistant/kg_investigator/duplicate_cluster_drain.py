@@ -65,26 +65,6 @@ def _resolver_scope():
     )
 
 
-def _node_to_dict(node) -> Dict[str, Any]:
-    """Plain dict of the merge-relevant fields for merge_node_fields_into_existing."""
-    return {
-        "label": node.label,
-        "node_type": node.node_type,
-        "aliases": node.aliases or [],
-        "hash_tags": node.hash_tags or [],
-        "semantic_label": node.semantic_label,
-        "goal_status": node.goal_status,
-        "valid_during": node.valid_during,
-        "category": node.category,
-        "start_date": node.start_date,
-        "end_date": node.end_date,
-        "start_date_confidence": node.start_date_confidence,
-        "end_date_confidence": node.end_date_confidence,
-        "confidence": node.confidence,
-        "importance": node.importance,
-    }
-
-
 # ── Clustering ────────────────────────────────────────────────────────────────
 
 def build_duplicate_clusters() -> List[Dict[str, Any]]:
@@ -297,6 +277,7 @@ def _apply_resolution(
     from app.assistant.kg_maintenance.verdict_store import record_distinct_pairs_bulk
     from app.assistant.pipelines.kg_shared.merge_utils import (
         merge_node_fields_into_existing,
+        node_to_merge_dict,
     )
 
     remap: Dict[str, str] = {}  # loser_id -> surviving winner_id
@@ -315,7 +296,7 @@ def _apply_resolution(
                     remap[loser_id] = winner_id  # already gone; treat as merged
                     continue
                 winner_pre = snapshot_node(winner)
-                merge_node_fields_into_existing(winner, _node_to_dict(loser))
+                merge_node_fields_into_existing(winner, node_to_merge_dict(loser))
                 session.flush()
                 merge_nodes_in_session(
                     session,

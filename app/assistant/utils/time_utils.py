@@ -313,6 +313,65 @@ def ensure_aware_utc(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
+def to_utc(value: Any) -> datetime | None:
+    """Permissive coercion of a datetime OR ISO-8601 string to aware UTC.
+
+    Naive datetimes are assumed UTC (the codebase's storage convention —
+    see ``ensure_aware_utc``). None / empty / unparseable input returns
+    None (debug-logged). The ONE shared coercion behind history builders,
+    context injection, chat formatting and message-visibility filtering
+    (dedup audit 2026-06-10 — was copy-pasted five times).
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        try:
+            if value.tzinfo is None:
+                return value.replace(tzinfo=timezone.utc)
+            return value.astimezone(timezone.utc)
+        except Exception as e:
+            logger.debug("to_utc: failed converting datetime: %s", e, exc_info=True)
+            return None
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+        try:
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                return parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc)
+        except Exception as e:
+            logger.debug("to_utc: failed parsing ISO string %r: %s", raw, e, exc_info=True)
+            return None
+    return None
+
+
+def day_reset_cutoff_utc(now_utc: datetime | None = None) -> datetime:
+    """The most recent day-reset boundary in UTC.
+
+    The boundary hour comes from the DAY_RESET_HOUR env var (local-time
+    hour, default 5; out-of-range values fall back to 5). Pass ``now_utc``
+    to evaluate against a fixed instant instead of the current time.
+    """
+    raw = str(os.environ.get("DAY_RESET_HOUR") or "").strip()
+    try:
+        hour = int(raw)
+    except Exception:
+        hour = 5
+    if hour < 0 or hour > 23:
+        hour = 5
+
+    if now_utc is not None:
+        local_now = now_utc.astimezone(get_local_timezone())
+    else:
+        local_now = get_local_time()
+    reset_local = local_now.replace(hour=hour, minute=0, second=0, microsecond=0)
+    if local_now < reset_local:
+        reset_local = reset_local - timedelta(days=1)
+    return reset_local.astimezone(timezone.utc)
+
+
 # ---------------------------------------------------------------------------
 # AwareUtcDateTime — SQLAlchemy column type that always round-trips aware UTC
 # ---------------------------------------------------------------------------

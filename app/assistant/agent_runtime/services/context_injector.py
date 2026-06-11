@@ -12,7 +12,7 @@ from app.assistant.agent_runtime.services.resource_resolver import ResourceResol
 from app.assistant.agent_runtime.services.user_bio_context_service import UserBioContextService
 from app.models.base import get_session
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.time_utils import get_local_time, get_local_time_str
+from app.assistant.utils.time_utils import get_local_time, get_local_time_str, to_utc
 from app.assistant.utils.identity_names import get_assistant_name
 
 logger = get_logger(__name__)
@@ -121,34 +121,6 @@ class ContextInjector:
             logger.debug("[%s] resource cache refresh exception details", agent.name, exc_info=True)
             raise
 
-
-    @staticmethod
-    def _to_utc(ts: Any) -> datetime | None:
-        if ts is None:
-            return None
-        if isinstance(ts, datetime):
-            try:
-                if ts.tzinfo is None:
-                    return ts.replace(tzinfo=timezone.utc)
-                return ts.astimezone(timezone.utc)
-            except Exception as e:
-                logger.error("Failed converting datetime to UTC: %s", e)
-                logger.debug("UTC conversion exception details", exc_info=True)
-                return None
-        if isinstance(ts, str):
-            raw = ts.strip()
-            if not raw:
-                return None
-            try:
-                parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-                if parsed.tzinfo is None:
-                    return parsed.replace(tzinfo=timezone.utc)
-                return parsed.astimezone(timezone.utc)
-            except Exception as e:
-                logger.error("Failed parsing ISO datetime '%s': %s", raw, e)
-                logger.debug("ISO datetime parse exception details", exc_info=True)
-                return None
-        return None
 
     def _load_unified_chat_rows(self, *, cutoff_utc: datetime | None, limit: int | None = None) -> list[dict]:
         """Load master-room chat history from unified_log.
@@ -284,7 +256,7 @@ class ContextInjector:
                 latest_summary_text = content
                 meta = getattr(msg, "metadata", None)
                 if isinstance(meta, dict):
-                    summary_cutoff_utc = self._to_utc(meta.get("summarized_through_utc"))
+                    summary_cutoff_utc = to_utc(meta.get("summarized_through_utc"))
                 break
             except Exception as e:
                 logger.error("[%s] Failed resolving latest summary marker for history: %s", agent.name, e)
@@ -308,7 +280,7 @@ class ContextInjector:
                 content = (getattr(msg, "content", None) or "").strip()
                 if not content:
                     continue
-                ts_utc = self._to_utc(getattr(msg, "timestamp", None))
+                ts_utc = to_utc(getattr(msg, "timestamp", None))
                 if summary_cutoff_utc is not None and ts_utc is not None and ts_utc <= summary_cutoff_utc:
                     # When summary exists, older/equal raw items are compressed into summary.
                     continue
@@ -341,7 +313,7 @@ class ContextInjector:
                 msg_id = getattr(msg, "id", None)
                 if isinstance(msg_id, str) and msg_id.strip():
                     selected_ids.add(msg_id.strip())
-                ts_utc = self._to_utc(getattr(msg, "timestamp", None))
+                ts_utc = to_utc(getattr(msg, "timestamp", None))
                 sender = getattr(msg, "sender", None) or getattr(msg, "role", None) or "Unknown"
                 content = (getattr(msg, "content", None) or "").strip()
                 if content:
@@ -362,7 +334,7 @@ class ContextInjector:
                 if not content:
                     continue
                 sender = self._resolve_history_sender_from_row(row)
-                ts_utc = self._to_utc(row.get("timestamp"))
+                ts_utc = to_utc(row.get("timestamp"))
                 combined.append((ts_utc, sender, content))
             except Exception as e:
                 logger.error("[%s] Failed converting unified row for combined history: %s", agent.name, e)

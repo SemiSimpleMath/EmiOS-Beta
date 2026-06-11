@@ -3,12 +3,12 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-import numpy as np
 from sqlalchemy import func
 
 from app.assistant.embeddings.embedder import embed_text as _embed_text
 from app.assistant.kg.db.knowledge_graph_db_sqlite import Edge, Node
 from app.assistant.utils.logging_config import get_logger
+from app.assistant.utils.vector_utils import cosine_similarity
 
 logger = get_logger(__name__)
 
@@ -53,19 +53,6 @@ def create_embedding(text: str) -> List[float]:
     emb = _embed_text(text)
     _embedding_cache[key] = emb
     return emb
-
-
-def cosine_similarity(vec1, vec2) -> float:
-    if vec1 is None or vec2 is None:
-        return 0.0
-    v1 = np.array(vec1)
-    v2 = np.array(vec2)
-    if v1.size == 0 or v2.size == 0:
-        return 0.0
-    denom = np.linalg.norm(v1) * np.linalg.norm(v2)
-    if denom == 0:
-        return 0.0
-    return float(np.dot(v1, v2) / denom)
 
 
 def _find_exact_match_nodes(session, label: str, node_type: Optional[str] = None) -> List[Node]:
@@ -280,6 +267,26 @@ def build_node_candidate_payload(candidates: List[Node]) -> List[Dict[str, Any]]
             }
         )
     return rows
+
+
+def node_to_merge_dict(node) -> Dict[str, Any]:
+    """Plain dict of the merge-relevant fields for merge_node_fields_into_existing."""
+    return {
+        "label": node.label,
+        "node_type": node.node_type,
+        "aliases": node.aliases or [],
+        "hash_tags": node.hash_tags or [],
+        "semantic_label": node.semantic_label,
+        "goal_status": node.goal_status,
+        "valid_during": node.valid_during,
+        "category": node.category,
+        "start_date": node.start_date,
+        "end_date": node.end_date,
+        "start_date_confidence": node.start_date_confidence,
+        "end_date_confidence": node.end_date_confidence,
+        "confidence": node.confidence,
+        "importance": node.importance,
+    }
 
 
 def merge_node_fields_into_existing(existing: Node, new_data: Dict[str, Any]) -> None:

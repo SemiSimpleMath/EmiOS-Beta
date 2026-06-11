@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Iterable, Optional, Set, Tuple
 
 from app.assistant.utils.pydantic_classes import Message
+from app.assistant.utils.time_utils import to_utc
 
 
 DEFAULT_EXCLUDED_CHAT_TAGS: Set[str] = {
@@ -23,17 +24,6 @@ _NON_NORMAL_ROOM_MODES: frozenset[str] = frozenset({
     "planning_mode",
     "game_mode",
 })
-
-
-def to_utc(ts: Optional[datetime]) -> Optional[datetime]:
-    if ts is None:
-        return None
-    try:
-        if getattr(ts, "tzinfo", None) is None:
-            ts = ts.replace(tzinfo=timezone.utc)
-        return ts.astimezone(timezone.utc)
-    except Exception:
-        return None
 
 
 def normalize_room_scope_filters(
