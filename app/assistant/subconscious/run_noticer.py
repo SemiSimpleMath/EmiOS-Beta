@@ -14,11 +14,9 @@ import argparse
 import json
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Dict
 
 # Bootstrap DI before any project imports that touch services.
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 import app.assistant.tests.test_setup  # noqa: F401  bootstrap
 
 from app.assistant.subconscious.context_builder import build_noticer_context

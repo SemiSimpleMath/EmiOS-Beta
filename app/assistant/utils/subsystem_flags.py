@@ -13,20 +13,26 @@ from pathlib import Path
 import yaml
 
 from app.assistant.utils.logging_config import get_logger
+from app.assistant.utils.path_utils import get_configs_dir
 
 logger = get_logger(__name__)
 
-_CONFIG_PATH = Path(__file__).resolve().parents[3] / "configs" / "subsystems.yaml"
+
+def _config_path() -> Path:
+    """subsystems.yaml under the configs dir. Computed lazily — not at
+    import — so a launcher that sets EMI_DATA_DIR/EMI_CONFIGS_DIR before
+    create_app is respected."""
+    return get_configs_dir() / "subsystems.yaml"
 
 
 @lru_cache(maxsize=1)
 def _load_config() -> dict:
-    if not _CONFIG_PATH.exists():
+    if not _config_path().exists():
         return {}
     try:
-        with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
+        with open(_config_path(), "r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
-        logger.info("Loaded subsystem flags from %s: %s", _CONFIG_PATH, data)
+        logger.info("Loaded subsystem flags from %s: %s", _config_path(), data)
         return data
     except Exception as e:
         logger.error("Failed to load subsystem flags: %s", e)
@@ -58,7 +64,7 @@ def set_subsystem_flag(name: str, enabled: bool) -> dict:
     config = _reload_config()
     config[name] = enabled
     try:
-        with open(_CONFIG_PATH, "w", encoding="utf-8") as f:
+        with open(_config_path(), "w", encoding="utf-8") as f:
             yaml.safe_dump(config, f, default_flow_style=False)
         logger.info("Subsystem flag updated: %s = %s", name, enabled)
     except Exception as e:

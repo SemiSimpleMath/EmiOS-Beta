@@ -61,8 +61,9 @@ class SituationBrief(BaseModel):
 # ---------------------------------------------------------------------------
 
 def _repo_root() -> Path:
-    """Resolve repository root (two levels above app/)."""
-    return Path(__file__).resolve().parents[3]
+    """Resolve repository root via the canonical resolver."""
+    from app.assistant.utils.path_utils import get_repo_root
+    return get_repo_root()
 
 
 def _briefs_dir(owner_id: str) -> Path:

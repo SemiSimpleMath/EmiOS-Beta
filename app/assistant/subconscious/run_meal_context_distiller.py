@@ -17,10 +17,8 @@ import argparse
 import json
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Dict
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 import app.assistant.tests.test_setup  # noqa: F401
 
 from app.assistant.ServiceLocator.service_locator import DI

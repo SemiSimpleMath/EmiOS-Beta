@@ -12,11 +12,8 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import sys
 from datetime import datetime, timezone
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 import app.assistant.tests.test_setup  # noqa: F401  (bootstraps DI for standalone use)
 
 from app.assistant.subconscious.meal_feedback_runner import run_meal_feedback_pass  # noqa: E402

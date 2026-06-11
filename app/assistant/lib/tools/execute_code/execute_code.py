@@ -72,8 +72,8 @@ _IMAGE = "emi-sandbox:v1"
 
 # Where per-call workspaces live on the host. Mounted into the container at
 # /workspace. Pruned daily by a routine (workspaces older than 24h).
-from app.assistant.utils.path_utils import get_data_dir
-_REPO_ROOT = Path(__file__).resolve().parents[5]
+from app.assistant.utils.path_utils import get_data_dir, get_repo_root
+_REPO_ROOT = get_repo_root()
 # Writable sandbox roots live under the data dir (EMI_DATA_DIR); == repo-root/data in dev.
 _WORKSPACES_ROOT = get_data_dir() / "data" / "sandbox_workspaces"
 

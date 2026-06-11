@@ -6,13 +6,14 @@ from jinja2 import Environment, FileSystemLoader
 
 from app.assistant.agent_runtime.exceptions import PromptRenderError
 from app.assistant.utils.logging_config import get_logger
+from app.assistant.utils.path_utils import get_app_root
 from app.assistant.utils.utils import normalize_to_ascii
 
 logger = get_logger(__name__)
 
 # Shared Jinja2 environment with loader rooted at the agents directory so
 # templates can {% import "shared/macros/dayflow_items.j2" %} etc.
-_AGENTS_DIR = Path(__file__).resolve().parents[2] / "agents"
+_AGENTS_DIR = get_app_root() / "assistant" / "agents"
 _jinja_env = Environment(
     loader=FileSystemLoader(str(_AGENTS_DIR)),
     keep_trailing_newline=True,

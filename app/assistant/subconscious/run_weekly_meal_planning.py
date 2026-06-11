@@ -13,12 +13,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import sys
 from collections import Counter
 from datetime import datetime, timezone
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 import app.assistant.tests.test_setup  # noqa: F401  (bootstraps DI for standalone use)
 
 from app.assistant.subconscious.weekly_meal_planning_runner import (  # noqa: E402

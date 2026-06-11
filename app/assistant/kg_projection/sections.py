@@ -68,12 +68,8 @@ def load_taxonomy(
                 logger.debug("Could not load %s via resource_manager: %s", resource_id, e)
 
     if not raw_sections:
-        try:
-            from app.assistant.utils.paths import get_repo_root
-            root = get_repo_root()
-        except Exception:
-            root = Path(__file__).resolve().parents[3]
-        candidate = root / "resources" / "user" / f"{resource_id}.json"
+        from app.assistant.utils.path_utils import get_repo_root
+        candidate = get_repo_root() / "resources" / "user" / f"{resource_id}.json"
         if candidate.exists():
             try:
                 data = json.loads(candidate.read_text(encoding="utf-8"))

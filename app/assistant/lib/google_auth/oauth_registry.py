@@ -15,7 +15,11 @@ from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-_LIB_DIR = Path(__file__).resolve().parents[1]
+def _lib_dir() -> Path:
+    """app/assistant/lib — client_credentials paths in oauth_accounts.json
+    are stored relative to this directory."""
+    from app.assistant.utils.path_utils import get_app_root
+    return get_app_root() / "assistant" / "lib"
 
 
 def _config_path() -> Path:
@@ -91,7 +95,7 @@ def get_client_credentials_path(account_id: str) -> Path:
     rel_path = str(account["client_credentials"]).strip()
     if not rel_path:
         raise ValueError(f"Account '{account_id}' has empty client_credentials path.")
-    resolved = _LIB_DIR / rel_path
+    resolved = _lib_dir() / rel_path
     if not resolved.exists():
         raise FileNotFoundError(
             f"OAuth client credentials file not found for account '{account_id}': {resolved}. "
