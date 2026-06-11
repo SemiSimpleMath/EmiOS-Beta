@@ -542,6 +542,8 @@ def parse_query():
         payload_text = str(data.get("final_answer_answer") or "").strip()
         intent = "noop"
         seed_ids: List[str] = []
+        node_ids: List[str] = []
+        importance_min_v = None
         time_mode_v = None
         time_from_v = None
         time_to_v = None
@@ -555,6 +557,13 @@ def parse_query():
                         str(s) for s in (payload.get("seed_node_ids") or [])
                         if isinstance(s, str)
                     ]
+                    node_ids = [
+                        str(s) for s in (payload.get("node_ids") or [])
+                        if isinstance(s, str)
+                    ]
+                    raw_imp = payload.get("importance_min")
+                    if isinstance(raw_imp, (int, float)):
+                        importance_min_v = max(0.0, min(10.0, float(raw_imp)))
                     time_mode_v = payload.get("time_mode")
                     time_from_v = payload.get("time_from")
                     time_to_v = payload.get("time_to")
@@ -565,6 +574,8 @@ def parse_query():
         return jsonify({
             "intent": intent,
             "seed_node_ids": seed_ids,
+            "node_ids": node_ids,
+            "importance_min": importance_min_v,
             "time_mode": time_mode_v,
             "time_from": time_from_v,
             "time_to": time_to_v,

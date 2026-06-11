@@ -29,6 +29,15 @@ Tools:
 
 1. Read the user input. Decide what they want:
    - Switch focus to a person/entity → set_seeds (replace) or add_seeds (append).
+   - "Connected to both X and Y" / "X and Y together" → set_seeds with BOTH ids.
+     Just resolve the two names (one query each, or one query with IN) — the
+     lens computes the intersection itself. Do NOT compute it in SQL.
+   - "Importance over N" / "only the important stuff" → the lens has an
+     importance dial; resolve any names, note importance_min=N in `progress`,
+     and DON'T filter by importance in SQL.
+   - A filtered SET seeds can't express ("only the Events from 2019",
+     "everything about food") → compute the exact ids with SQL, note intent
+     show_nodes in `progress` with the id list.
    - Filter time → set_time_range or set_time_mode.
    - Reset → reset.
    - Unparseable → noop with an explanation.
