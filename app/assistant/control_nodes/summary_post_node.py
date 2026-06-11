@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from app.assistant.control_nodes.control_node import ControlNode
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.pipeline_state import get_resume_target, set_resume_target
+from app.assistant.utils.pipeline_state import set_resume_target
 
 logger = get_logger(__name__)
 
@@ -164,12 +164,6 @@ class SummaryPostNode(ControlNode):
             out[hid] = summary_text.strip()
         return out
 
-    def _resolve_resume_agent(self, default_resume_agent: str) -> str:
-        resume_target = get_resume_target(self.blackboard)
-        if isinstance(resume_target, str) and resume_target.strip():
-            return resume_target.strip()
-        return default_resume_agent
-
     def _suppress_summary_agent_result(self, summary_agent: str) -> None:
         """
         Hide summary non-user-facing payloads from planner context/history.
@@ -203,44 +197,4 @@ class SummaryPostNode(ControlNode):
             return
 
     def _cfg(self) -> dict:
-        flow_cfg = self.blackboard.get_state_value("manager_flow_config", None)
-        if not isinstance(flow_cfg, dict):
-            raise ValueError("manager_flow_config must be a dict.")
-        legacy_cfg = flow_cfg.get("summary")
-        if legacy_cfg is None:
-            legacy_cfg = {}
-        if not isinstance(legacy_cfg, dict):
-            raise ValueError("manager_flow_config.summary must be a dict when provided.")
-
-        node_cfg_map = self.blackboard.get_state_value("manager_control_node_configs", {})
-        if node_cfg_map is None:
-            node_cfg_map = {}
-        if not isinstance(node_cfg_map, dict):
-            raise ValueError("manager_control_node_configs must be a dict when provided.")
-        node_cfg = node_cfg_map.get(self.name, {})
-        if node_cfg is None:
-            node_cfg = {}
-        if not isinstance(node_cfg, dict):
-            raise ValueError(f"manager_control_node_configs['{self.name}'] must be a dict when provided.")
-
-        cfg = dict(legacy_cfg)
-        cfg.update(node_cfg)
-        if not cfg:
-            raise ValueError(
-                f"[{self.name}] missing summary config. Provide flow_config.summary or control_nodes[{self.name}].config."
-            )
-        return cfg
-
-    @staticmethod
-    def _required_str(cfg: dict, key: str) -> str:
-        raw = cfg.get(key)
-        if not isinstance(raw, str) or not raw.strip():
-            raise ValueError(f"summary post requires non-empty '{key}'.")
-        return raw.strip()
-
-    @staticmethod
-    def _optional_str(cfg: dict, key: str, default: str) -> str:
-        raw = cfg.get(key, default)
-        if not isinstance(raw, str) or not raw.strip():
-            raise ValueError(f"summary post key '{key}' must be non-empty when provided.")
-        return raw.strip()
+        return self._merged_section_node_cfg("summary")

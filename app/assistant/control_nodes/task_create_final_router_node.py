@@ -228,24 +228,4 @@ class TaskCreateFinalRouterNode(ControlNode):
         )
 
     def _cfg(self) -> dict:
-        flow_cfg = self.blackboard.get_state_value("manager_flow_config", None)
-        if not isinstance(flow_cfg, dict):
-            raise ValueError("manager_flow_config must be a dict.")
-        task_mode = flow_cfg.get("task_creation_mode")
-        if not isinstance(task_mode, dict):
-            raise ValueError("manager_flow_config.task_creation_mode must be a dict.")
-        return task_mode
-
-    @staticmethod
-    def _required_str(cfg: dict, key: str) -> str:
-        raw = cfg.get(key)
-        if not isinstance(raw, str) or not raw.strip():
-            raise ValueError(f"task create final router requires non-empty '{key}'.")
-        return raw.strip()
-
-    @staticmethod
-    def _optional_str(cfg: dict, key: str, default: str) -> str:
-        raw = cfg.get(key, default)
-        if not isinstance(raw, str) or not raw.strip():
-            raise ValueError(f"task create final router key '{key}' must be non-empty when provided.")
-        return raw.strip()
+        return self._flow_section_cfg("task_creation_mode")

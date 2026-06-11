@@ -263,8 +263,4 @@ class GeoguessrRouterNode(ControlNode):
             raise
 
     def _cfg(self) -> dict:
-        flow_cfg = self.blackboard.get_state_value("manager_flow_config", None)
-        if not isinstance(flow_cfg, dict):
-            return {}
-        game_mode = flow_cfg.get("game_mode")
-        return game_mode if isinstance(game_mode, dict) else {}
+        return self._flow_section_cfg("game_mode", required=False)

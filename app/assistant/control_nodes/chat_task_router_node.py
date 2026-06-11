@@ -222,24 +222,4 @@ class ChatTaskRouterNode(ControlNode):
     # ------------------------------------------------------------------
 
     def _cfg(self) -> dict:
-        flow_cfg = self.blackboard.get_state_value("manager_flow_config", None)
-        if not isinstance(flow_cfg, dict):
-            raise ValueError("manager_flow_config must be a dict.")
-        chat_gate = flow_cfg.get("chat_gate")
-        if not isinstance(chat_gate, dict):
-            raise ValueError("manager_flow_config.chat_gate must be a dict.")
-        return chat_gate
-
-    @staticmethod
-    def _required_str(cfg: dict, key: str) -> str:
-        raw = cfg.get(key)
-        if not isinstance(raw, str) or not raw.strip():
-            raise ValueError(f"chat task router requires non-empty '{key}'.")
-        return raw.strip()
-
-    @staticmethod
-    def _optional_str(cfg: dict, key: str, default: str) -> str:
-        raw = cfg.get(key, default)
-        if not isinstance(raw, str) or not raw.strip():
-            raise ValueError(f"chat task router key '{key}' must be non-empty when provided.")
-        return raw.strip()
+        return self._flow_section_cfg("chat_gate")

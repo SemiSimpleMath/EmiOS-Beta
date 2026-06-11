@@ -69,19 +69,4 @@ class TaskCompileFinalOutputNode(ControlNode):
         self.blackboard.update_state_value("next_agent", next_agent)
 
     def _cfg(self) -> dict:
-        node_cfg_map = self.blackboard.get_state_value("manager_control_node_configs", {})
-        if not isinstance(node_cfg_map, dict):
-            raise ValueError("manager_control_node_configs must be a dict.")
-        node_cfg = node_cfg_map.get(self.name, {})
-        if not isinstance(node_cfg, dict):
-            raise ValueError(f"manager_control_node_configs['{self.name}'] must be a dict.")
-        if not node_cfg:
-            raise ValueError(f"[{self.name}] missing config.")
-        return node_cfg
-
-    @staticmethod
-    def _required_str(cfg: dict, key: str) -> str:
-        raw = cfg.get(key)
-        if not isinstance(raw, str) or not raw.strip():
-            raise ValueError(f"task compile final output node requires non-empty '{key}'.")
-        return raw.strip()
+        return self._node_cfg()

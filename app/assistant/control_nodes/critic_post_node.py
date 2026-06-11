@@ -131,54 +131,5 @@ class CriticPostNode(ControlNode):
         )
 
     def _cfg(self) -> dict:
-        flow_cfg = self.blackboard.get_state_value("manager_flow_config", None)
-        if not isinstance(flow_cfg, dict):
-            raise ValueError("manager_flow_config must be a dict.")
-        legacy_cfg = flow_cfg.get("critic")
-        if legacy_cfg is None:
-            legacy_cfg = {}
-        if not isinstance(legacy_cfg, dict):
-            raise ValueError("manager_flow_config.critic must be a dict when provided.")
-
-        node_cfg_map = self.blackboard.get_state_value("manager_control_node_configs", {})
-        if node_cfg_map is None:
-            node_cfg_map = {}
-        if not isinstance(node_cfg_map, dict):
-            raise ValueError("manager_control_node_configs must be a dict when provided.")
-        node_cfg = node_cfg_map.get(self.name, {})
-        if node_cfg is None:
-            node_cfg = {}
-        if not isinstance(node_cfg, dict):
-            raise ValueError(f"manager_control_node_configs['{self.name}'] must be a dict when provided.")
-
-        cfg = dict(legacy_cfg)
-        cfg.update(node_cfg)
-        if not cfg:
-            raise ValueError(
-                f"[{self.name}] missing critic config. Provide flow_config.critic or control_nodes[{self.name}].config."
-            )
-        return cfg
-
-    @staticmethod
-    def _required_str(cfg: dict, key: str) -> str:
-        raw = cfg.get(key)
-        if not isinstance(raw, str) or not raw.strip():
-            raise ValueError(f"critic post requires non-empty '{key}'.")
-        return raw.strip()
-
-    @staticmethod
-    def _optional_str(cfg: dict, key: str, default: str) -> str:
-        raw = cfg.get(key, default)
-        if not isinstance(raw, str) or not raw.strip():
-            raise ValueError(f"critic post key '{key}' must be non-empty when provided.")
-        return raw.strip()
-
-    @staticmethod
-    def _optional_node(cfg: dict, key: str) -> str | None:
-        raw = cfg.get(key, None)
-        if raw is None:
-            return None
-        if not isinstance(raw, str) or not raw.strip():
-            raise ValueError(f"critic post key '{key}' must be a non-empty string when provided.")
-        return raw.strip()
+        return self._merged_section_node_cfg("critic")
 

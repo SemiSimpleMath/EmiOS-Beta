@@ -43,18 +43,5 @@ class ToolReturnRouter(ControlNode):
         self.blackboard.update_state_value("last_agent", self.name)
 
     def _cfg(self) -> dict:
-        flow_cfg = self.blackboard.get_state_value("manager_flow_config", None)
-        if not isinstance(flow_cfg, dict):
-            raise ValueError("manager_flow_config must be a dict.")
-        tool_return = flow_cfg.get("tool_return")
-        if not isinstance(tool_return, dict):
-            raise ValueError("manager_flow_config.tool_return must be a dict.")
-        return tool_return
-
-    @staticmethod
-    def _required_str(cfg: dict, key: str) -> str:
-        raw = cfg.get(key)
-        if not isinstance(raw, str) or not raw.strip():
-            raise ValueError(f"tool return router requires non-empty '{key}'.")
-        return raw.strip()
+        return self._flow_section_cfg("tool_return")
 

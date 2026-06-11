@@ -401,24 +401,4 @@ class DocCreateFinalRouterNode(ControlNode):
                     logger.debug("doc_save_failed emit exception", exc_info=True)
 
     def _cfg(self) -> dict:
-        flow_cfg = self.blackboard.get_state_value("manager_flow_config", None)
-        if not isinstance(flow_cfg, dict):
-            raise ValueError("manager_flow_config must be a dict.")
-        doc_mode = flow_cfg.get("doc_creation_mode")
-        if not isinstance(doc_mode, dict):
-            raise ValueError("manager_flow_config.doc_creation_mode must be a dict.")
-        return doc_mode
-
-    @staticmethod
-    def _required_str(cfg: dict, key: str) -> str:
-        raw = cfg.get(key)
-        if not isinstance(raw, str) or not raw.strip():
-            raise ValueError(f"doc create final router requires non-empty '{key}'.")
-        return raw.strip()
-
-    @staticmethod
-    def _optional_str(cfg: dict, key: str, default: str) -> str:
-        raw = cfg.get(key, default)
-        if not isinstance(raw, str) or not raw.strip():
-            raise ValueError(f"doc create final router key '{key}' must be non-empty when provided.")
-        return raw.strip()
+        return self._flow_section_cfg("doc_creation_mode")
