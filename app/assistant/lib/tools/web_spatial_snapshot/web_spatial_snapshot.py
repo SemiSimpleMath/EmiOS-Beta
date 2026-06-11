@@ -7,8 +7,8 @@ from typing import Any, Optional
 
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
-from app.assistant.lib.mcp.tool_runner import mcp_stdio_call_tool, format_mcp_tool_result_content
 from app.assistant.lib.tools.playwright_snapshot_utils import make_snapshot_id
+from app.assistant.lib.tools.web_mcp_utils import mcp_call
 from app.assistant.utils.json_parsing import parse_jsonish
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.lib.core_tools.tool_error_protocol import make_tool_error
@@ -37,15 +37,6 @@ class WebSpatialSnapshot(BaseTool):
 
     def __init__(self):
         super().__init__("web_spatial_snapshot")
-
-    def _mcp_call(self, *, server_entry: dict, tool_name: str, arguments: dict) -> tuple[str, bool, list[dict[str, Any]]]:
-        call_resp = mcp_stdio_call_tool(
-            server_entry=server_entry,
-            tool_name=tool_name,
-            arguments=arguments or {},
-            timeout_s=float(server_entry.get("policy", {}).get("call_timeout_seconds", 20)),
-        )
-        return format_mcp_tool_result_content(call_resp)
 
     @staticmethod
     def _pick_first_text(content_items: list[dict[str, Any]] | None) -> str:
@@ -267,7 +258,7 @@ class WebSpatialSnapshot(BaseTool):
 }}
 """.strip()
 
-        text, is_error, _attachments = self._mcp_call(
+        text, is_error, _attachments = mcp_call(
             server_entry=server_entry,
             tool_name=self.MCP_EVALUATE,
             arguments={"function": js},

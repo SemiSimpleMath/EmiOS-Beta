@@ -8,15 +8,17 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
-from app.assistant.routine_manager.utils import read_json_file, status_dir
+from app.assistant.lib.tools.screen_capture_control import (
+    CONTROL_RESOURCE_FILENAME,
+    control_path,
+    load_control,
+)
 from app.assistant.utils.atomic_write import write_json_atomic
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_repo_root
 from app.assistant.utils.pydantic_classes import ToolMessage, ToolResult
 
 logger = get_logger(__name__)
-
-CONTROL_RESOURCE_FILENAME = "resource_screen_capture_control.json"
 
 
 def _repo_root() -> Path:
@@ -81,37 +83,6 @@ def _get_afk_flags_best_effort() -> tuple[Optional[bool], Optional[bool]]:
         return None, None
 
 
-def _control_path() -> Path:
-    return status_dir() / CONTROL_RESOURCE_FILENAME
-
-
-def _default_control() -> Dict[str, Any]:
-    return {
-        "schema_version": 1,
-        "enabled": False,
-        "enabled_at_utc": None,
-        "enabled_by": None,
-        "disabled_at_utc": None,
-        "disabled_by": None,
-        "disabled_reason": None,
-        # Last local date (YYYY-MM-DD) when we auto-disabled at 08:30.
-        "auto_disabled_date_local": None,
-    }
-
-
-def _load_control() -> Dict[str, Any]:
-    data = read_json_file(_control_path()) or {}
-    if not isinstance(data, dict):
-        data = {}
-    merged = _default_control()
-    merged.update({k: v for k, v in data.items() if k in merged or k in ("schema_version",)})
-    # Keep unknown keys too (forward-compatible) but ensure required defaults exist.
-    for k, v in data.items():
-        if k not in merged:
-            merged[k] = v
-    return merged
-
-
 def _auto_disable_at_0830_local_if_needed(control: Dict[str, Any], now_local: datetime) -> Dict[str, Any]:
     """
     If enabled and local time is >= 08:30, auto-disable once per local day.
@@ -131,7 +102,7 @@ def _auto_disable_at_0830_local_if_needed(control: Dict[str, Any], now_local: da
             control["disabled_reason"] = "auto_off_08_30_local"
             control["auto_disabled_date_local"] = today
             try:
-                write_json_atomic(_control_path(), control)
+                write_json_atomic(control_path(), control)
             except Exception as e:
                 logger.warning("Failed to persist auto-disable control file: %s", e)
     except Exception:
@@ -276,7 +247,7 @@ class CaptureMonitorScreenshotTool(BaseTool):
 
         # Manual toggle: screen capture must be explicitly enabled.
         # Auto turns off at 08:30 local (no auto-rearm).
-        control = _load_control()
+        control = load_control()
         control = _auto_disable_at_0830_local_if_needed(control, now_local)
         if not bool(control.get("enabled", False)) and not _env_truthy("EMI_SCREENSHOTS_ALLOW_WHEN_TOGGLE_OFF"):
             return ToolResult(

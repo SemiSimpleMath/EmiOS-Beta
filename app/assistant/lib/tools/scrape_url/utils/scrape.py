@@ -44,7 +44,7 @@ JUNK_SECTION_TITLES = {
 }
 
 
-def _is_reddit_url(url: Optional[str]) -> bool:
+def is_reddit_url(url: Optional[str]) -> bool:
     if not isinstance(url, str) or not url.strip():
         return False
     try:
@@ -52,7 +52,7 @@ def _is_reddit_url(url: Optional[str]) -> bool:
         host = (parts.hostname or "").lower()
         return host == "redd.it" or host == "reddit.com" or host.endswith(".reddit.com")
     except Exception as e:
-        logger.debug(f"_is_reddit_url parse error: {e}")
+        logger.debug(f"is_reddit_url parse error: {e}")
         return False
 
 
@@ -94,7 +94,7 @@ def _is_meaningful_text(text: str, min_chars: int = 30) -> bool:
 
 def fetch_html(url: str, timeout: int = 15) -> Optional[str]:
     try:
-        if _is_reddit_url(url):
+        if is_reddit_url(url):
             logger.warning(f"Refusing direct fetch for Reddit URL: {url}")
             return None
 
@@ -113,7 +113,7 @@ def fetch_html(url: str, timeout: int = 15) -> Optional[str]:
 
 
 def fetch_rendered_html(url: str, timeout_ms: int = 20000) -> Optional[str]:
-    if _is_reddit_url(url):
+    if is_reddit_url(url):
         logger.warning(f"Refusing rendered fetch for Reddit URL: {url}")
         return None
 
@@ -516,7 +516,7 @@ def scrape_page(url: str) -> Optional[dict]:
     Falls back through readability-lxml then plain BeautifulSoup.
     Returns None only if all fetch+extraction paths fail entirely.
     """
-    if _is_reddit_url(url):
+    if is_reddit_url(url):
         logger.warning(f"Refusing scrape_page for Reddit URL: {url}")
         return None
 

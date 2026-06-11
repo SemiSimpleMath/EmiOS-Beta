@@ -3,8 +3,9 @@ from __future__ import annotations
 import os
 from flask import Blueprint, current_app, jsonify, redirect, render_template, request, url_for
 from pathlib import Path
-from app.assistant.utils.path_utils import get_resources_dir, setup_complete
+from app.assistant.utils.path_utils import setup_complete
 from app.assistant.utils.identity_names import get_assistant_name
+from app.assistant.lib.tools.screen_capture_control import control_path, load_control
 import json
 from datetime import datetime, time, timedelta, timezone
 
@@ -14,8 +15,6 @@ from app.assistant.utils.time_utils import get_local_time, to_rfc3339_z, utc_now
 logger = get_logger(__name__)
 
 chat_bot_bp = Blueprint('chat_bot', __name__)
-
-CONTROL_RESOURCE_FILENAME = "resource_screen_capture_control.json"
 
 
 def is_first_time_user():
@@ -68,41 +67,8 @@ def _wants_mobile_ui() -> bool:
         return False
 
 
-def _control_path():
-    # Keep consistent with other status resources.
-    return get_resources_dir() / "status" / CONTROL_RESOURCE_FILENAME
-
-
-def _default_control():
-    return {
-        "schema_version": 1,
-        "enabled": False,
-        "enabled_at_utc": None,
-        "enabled_by": None,
-        "disabled_at_utc": None,
-        "disabled_by": None,
-        "disabled_reason": None,
-        "auto_disabled_date_local": None,
-    }
-
-
-def _load_control() -> dict:
-    path = _control_path()
-    if not path.exists():
-        return _default_control()
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            return _default_control()
-        merged = _default_control()
-        merged.update(data)
-        return merged
-    except Exception:
-        return _default_control()
-
-
 def _save_control(data: dict) -> None:
-    path = _control_path()
+    path = control_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -188,7 +154,7 @@ def api_get_screen_capture_control():
     if not _dev_tools_enabled():
         return jsonify({"success": False, "message": "Not found"}), 404
 
-    control = _load_control()
+    control = load_control()
     control, changed = _auto_disable_at_0830_local_if_needed(control)
     if changed:
         try:
@@ -218,7 +184,7 @@ def api_set_screen_capture_control():
     desired = bool(payload.get("enabled", False))
     reason = str(payload.get("reason") or "").strip() or None
 
-    control = _load_control()
+    control = load_control()
     now_utc_iso = to_rfc3339_z(utc_now())
 
     if desired:

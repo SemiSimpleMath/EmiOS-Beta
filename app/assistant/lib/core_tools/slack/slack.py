@@ -1,4 +1,3 @@
-import os
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -11,6 +10,7 @@ from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
 from app.assistant.lib.core_tools.tool_error_protocol import make_tool_error
 from app.assistant.slack_interface.slack_room_config import get_slack_room_config
 from app.assistant.utils.path_utils import get_repo_root
+from app.services.slack import resolve_slack_token
 
 from app.assistant.utils.logging_config import get_logger
 logger = get_logger(__name__)
@@ -23,17 +23,10 @@ def _real_slack_send_enabled() -> bool:
     return bool(cfg.get("allow_real_slack_send", False))
 
 
-def _get_slack_token() -> str:
-    for key in ("SLACK_TOKEN", "EMI_SLACK_TOKEN", "SLACK_BOT_TOKEN"):
-        token = str(os.environ.get(key) or "").strip()
-        if token:
-            return token
-    return ""
-
 class SlackTool(BaseTool):
     def __init__(self):
         super().__init__('slack_tool')
-        self.client = WebClient(token=_get_slack_token())
+        self.client = WebClient(token=resolve_slack_token())
         self.last_user_timestamps = {}
         self.bot_user_id = None
 
@@ -220,7 +213,7 @@ class SlackTool(BaseTool):
         return images
 
     def _download_slack_file(self, file_obj: Dict[str, Any], ts: str) -> Optional[str]:
-        slack_token = _get_slack_token()
+        slack_token = resolve_slack_token()
         if not slack_token:
             logger.warning("SLACK_TOKEN missing; cannot download Slack images.")
             return None

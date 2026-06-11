@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import uuid
 from datetime import datetime
 from typing import Any, Dict
@@ -8,6 +7,7 @@ from typing import Any, Dict
 from flask import Blueprint, current_app, jsonify, request
 
 from app.assistant.lib.core_tools.slack.slack import SlackTool
+from app.routes._security import dev_tools_enabled
 from app.assistant.rooms.room_bootstrap import ensure_slack_room, make_slack_room_id
 from app.assistant.slack_interface.slack_room_config import (
     get_slack_channel_id,
@@ -22,16 +22,6 @@ from app.assistant.utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 slack_room_bp = Blueprint("slack_room", __name__)
-
-
-def _dev_tools_enabled() -> bool:
-    try:
-        if str(os.environ.get("EMI_DEV_TOOLS", "")).strip().lower() in {"1", "true", "yes", "y", "on"}:
-            return True
-        host = (request.host or "").split(":", 1)[0].strip().lower()
-        return host in {"127.0.0.1", "localhost"}
-    except Exception:
-        return False
 
 
 def _to_bool(value: Any) -> bool:
@@ -117,7 +107,7 @@ def slack_room_simulate():
     - history_count (optional; when >0, pull that many recent real Slack messages as context)
     - speaker_name (optional alias for sender_name)
     """
-    if not _dev_tools_enabled():
+    if not dev_tools_enabled():
         return jsonify({"error": "Not found"}), 404
 
     payload = request.get_json(silent=True) if request.is_json else None

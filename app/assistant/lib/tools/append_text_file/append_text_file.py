@@ -1,16 +1,11 @@
 from pathlib import Path
-import fnmatch
 
 from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
-from app.assistant.utils.path_utils import get_repo_root
+from app.assistant.lib.tools.text_file_access import is_allowed
 from app.assistant.utils.pydantic_classes import ToolMessage, ToolResult
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
-
-
-def _repo_root() -> Path:
-    return get_repo_root()
 
 
 def _resolve_path(path_str: str) -> Path | None:
@@ -25,22 +20,6 @@ def _resolve_path(path_str: str) -> Path | None:
     except Exception:
         return None
 
-
-def _is_allowed(resolved: Path, allowed: list[str] | None) -> bool:
-    if not allowed:
-        return True
-    try:
-        root = _repo_root()
-        rel = resolved.relative_to(root).as_posix()
-    except Exception:
-        return False
-    for entry in allowed:
-        if not isinstance(entry, str) or not entry.strip():
-            continue
-        ent = entry.strip().replace("\\", "/")
-        if ent == rel or fnmatch.fnmatch(rel, ent):
-            return True
-    return False
 
 class AppendTextFileTool(BaseTool):
     def __init__(self):
@@ -66,7 +45,7 @@ class AppendTextFileTool(BaseTool):
         if resolved is None:
             return ToolResult(result_type="error", content="Invalid or disallowed file_path.")
         allowed_write_files = tool_data.get("allowed_write_files")
-        if isinstance(allowed_write_files, list) and not _is_allowed(resolved, allowed_write_files):
+        if isinstance(allowed_write_files, list) and not is_allowed(resolved, allowed_write_files):
             return ToolResult(result_type="error", content="Write blocked by allowed_write_files policy.")
 
         try:

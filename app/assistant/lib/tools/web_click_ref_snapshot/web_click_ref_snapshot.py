@@ -14,6 +14,7 @@ from app.assistant.lib.tools.playwright_snapshot_utils import (
     merge_actionable_with_dom_inputs,
     summarize_actionable_snapshot,
 )
+from app.assistant.lib.tools.web_mcp_utils import make_mcp_caller
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import ToolMessage, ToolResult
 
@@ -76,15 +77,7 @@ class WebClickRefSnapshot(BaseTool):
                 details={"server_id": self.SERVER_ID},
             )
 
-        def _mcp(tool_name: str, arguments: dict):
-            resp = mcp_stdio_call_tool(
-                server_entry=server_entry,
-                tool_name=tool_name,
-                arguments=arguments,
-                timeout_s=float(server_entry.get("policy", {}).get("call_timeout_seconds", 20)),
-            )
-            text, is_error, _ = format_mcp_tool_result_content(resp)
-            return text, is_error
+        _mcp = make_mcp_caller(server_entry)
 
         # Record tab count before click so we can detect new-tab navigation.
         tabs_text_before, tabs_err_before = _mcp("browser_tabs", {"action": "list"})

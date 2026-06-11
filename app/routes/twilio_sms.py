@@ -8,20 +8,11 @@ from typing import Any, Dict
 from flask import Blueprint, Response, current_app, jsonify, request
 
 from app.assistant.utils.logging_config import get_logger
+from app.routes._security import dev_tools_enabled
 
 logger = get_logger(__name__)
 
 twilio_sms_bp = Blueprint("twilio_sms", __name__)
-
-
-def _dev_tools_enabled() -> bool:
-    try:
-        if str(os.environ.get("EMI_DEV_TOOLS", "")).strip().lower() in {"1", "true", "yes", "y", "on"}:
-            return True
-        host = (request.host or "").split(":", 1)[0].strip().lower()
-        return host in {"127.0.0.1", "localhost"}
-    except Exception:
-        return False
 
 
 def _authorized_sms_numbers() -> set[str]:
@@ -75,7 +66,7 @@ def _verify_twilio_signature(flask_request) -> bool:
     don't want to silently skip verification).
 
     Bypass for localhost dev is allowed only when EMI_DEV_TOOLS is enabled
-    AND the request is from 127.0.0.1 / localhost (see _dev_tools_enabled).
+    AND the request is from 127.0.0.1 / localhost (see dev_tools_enabled).
     """
     try:
         from twilio.request_validator import RequestValidator
@@ -188,7 +179,7 @@ def twilio_inbound_sms():
     request is from localhost with dev tools enabled.
     """
     try:
-        if not (_dev_tools_enabled() and str(os.environ.get("EMI_TWILIO_SKIP_SIG_LOCALHOST", "")).strip().lower() in {"1", "true", "yes"}):
+        if not (dev_tools_enabled() and str(os.environ.get("EMI_TWILIO_SKIP_SIG_LOCALHOST", "")).strip().lower() in {"1", "true", "yes"}):
             if not _verify_twilio_signature(request):
                 logger.warning(
                     "Twilio inbound rejected: invalid or missing X-Twilio-Signature. remote=%s",
@@ -270,7 +261,7 @@ def twilio_inbound_sms_simulate():
     - room_id (optional; defaults to "phil")
     - mode (optional): "room_manager" (default) or "event_hub"
     """
-    if not _dev_tools_enabled():
+    if not dev_tools_enabled():
         return jsonify({"error": "Not found"}), 404
 
     payload = request.get_json(silent=True) if request.is_json else None

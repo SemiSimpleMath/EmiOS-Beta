@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from urllib.parse import urlsplit
-
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
 from app.assistant.lib.tools.scrape_url.utils import scrape
@@ -9,21 +7,6 @@ from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import Message, ToolMessage, ToolResult
 
 logger = get_logger(__name__)
-
-
-def _is_reddit_url(url: str) -> bool:
-    try:
-        parts = urlsplit(str(url))
-        host = (parts.hostname or "").lower()
-        if host == "redd.it":
-            return True
-        if host == "reddit.com" or host.endswith(".reddit.com"):
-            return True
-        return False
-    except Exception as e:
-        logger.error("Failed to parse URL in summarize_link reddit policy check: %s", e)
-        logger.debug("summarize_link reddit policy check exception details", exc_info=True)
-        return False
 
 
 class SummarizeLinkTool(BaseTool):
@@ -42,7 +25,7 @@ class SummarizeLinkTool(BaseTool):
         if not url:
             return ToolResult(result_type="error", content="Missing required argument: url")
 
-        if _is_reddit_url(url):
+        if scrape.is_reddit_url(url):
             return ToolResult(
                 result_type="error",
                 content="Refused to summarize Reddit by policy.",

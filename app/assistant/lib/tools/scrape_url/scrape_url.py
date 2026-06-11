@@ -5,6 +5,7 @@ from app.assistant.lib.tools.scrape_url.utils.scrape import (
     QUALITY_GOOD,
     QUALITY_NAV_ONLY,
     QUALITY_THIN,
+    is_reddit_url,
 )
 from app.assistant.utils.pydantic_classes import (
     ToolMessage,
@@ -13,7 +14,6 @@ from app.assistant.utils.pydantic_classes import (
 )
 
 from app.assistant.utils.logging_config import get_logger
-from urllib.parse import urlsplit
 
 logger = get_logger(__name__)
 
@@ -42,16 +42,6 @@ def _build_quality_warning(quality: str, nav_links: list[dict]) -> str:
     return ""
 
 
-def _is_reddit_url(url: str) -> bool:
-    try:
-        parts = urlsplit(str(url))
-        host = (parts.hostname or "").lower()
-        return host in {"redd.it"} or host == "reddit.com" or host.endswith(".reddit.com")
-    except Exception as e:
-        logger.debug(f"_is_reddit_url parse error: {e}")
-        return False
-
-
 class ScrapeURL(BaseTool):
     """
     Tool to scrape web content based on a query and URL.
@@ -75,7 +65,7 @@ class ScrapeURL(BaseTool):
                 content="Error: 'url' argument is required for scrape tool.",
             )
 
-        if _is_reddit_url(url):
+        if is_reddit_url(url):
             return ToolResult(
                 result_type="error",
                 content=(

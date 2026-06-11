@@ -13,6 +13,7 @@ from app.assistant.lib.tools.playwright_snapshot_utils import (
     merge_actionable_with_dom_inputs,
     summarize_actionable_snapshot,
 )
+from app.assistant.lib.tools.web_mcp_utils import capture_snapshot_text
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import ToolMessage, ToolResult
 
@@ -206,7 +207,9 @@ class WebFillXY(BaseTool):
         snapshot_text = None
         snapshot_id = None
         if capture_snapshot:
-            snapshot_text = self._capture_snapshot(server_entry)
+            snapshot_text = capture_snapshot_text(
+                server_entry=server_entry, snapshot_tool_name=self.MCP_SNAPSHOT, tool_label=self.name
+            )
             if not isinstance(snapshot_text, str) or not snapshot_text.strip():
                 return make_tool_error(
                     error_code="snapshot_capture_failed",
@@ -250,23 +253,6 @@ class WebFillXY(BaseTool):
             content="\n".join(parts).strip(),
             data=result_data,
         )
-
-    def _capture_snapshot(self, server_entry: dict[str, Any]) -> str | None:
-        try:
-            call_resp = mcp_stdio_call_tool(
-                server_entry=server_entry,
-                tool_name=self.MCP_SNAPSHOT,
-                arguments={},
-                timeout_s=float(server_entry.get("policy", {}).get("call_timeout_seconds", 20)),
-            )
-            text_out, is_error, _attachments = format_mcp_tool_result_content(call_resp)
-            if is_error:
-                logger.debug("web_fill_xy snapshot returned error: %s", text_out)
-                return None
-            return text_out if isinstance(text_out, str) and text_out.strip() else ""
-        except Exception:
-            logger.debug("web_fill_xy snapshot exception details", exc_info=True)
-            return None
 
 
 def get_tool_class():

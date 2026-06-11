@@ -32,7 +32,7 @@ class SlackService:
 
     def __init__(self, config: SlackConfig | None = None) -> None:
         if config is None:
-            config = SlackConfig(token=_resolve_token())
+            config = SlackConfig(token=resolve_slack_token())
         self._config = config
 
         if not self._config.token:
@@ -81,7 +81,9 @@ class SlackService:
         return getattr(resp, "data", {}) if hasattr(resp, "data") else dict(resp)
 
 
-def _resolve_token() -> str:
+def resolve_slack_token() -> str:
+    """Resolve the Slack bot token from env (first non-empty wins):
+    SLACK_TOKEN, EMI_SLACK_TOKEN, SLACK_BOT_TOKEN. Returns "" when unset."""
     for key in ("SLACK_TOKEN", "EMI_SLACK_TOKEN", "SLACK_BOT_TOKEN"):
         value = str(os.environ.get(key) or "").strip()
         if value:

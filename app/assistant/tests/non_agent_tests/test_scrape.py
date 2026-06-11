@@ -6,7 +6,7 @@ Structure
 Unit tests (no network, no browser):
   - _normalize_text
   - _is_meaningful_text
-  - _is_reddit_url
+  - is_reddit_url
   - _is_wikipedia_article_url
   - split_html_into_sections
   - score_sections_against_query
@@ -65,10 +65,10 @@ from app.assistant.lib.tools.scrape_url.utils.scrape import (
     _extract_with_trafilatura,
     _extract_wikipedia,
     _is_meaningful_text,
-    _is_reddit_url,
     _is_wikipedia_article_url,
     _normalize_text,
     fetch_html,
+    is_reddit_url,
     score_sections_against_query,
     scrape_page,
     split_html_into_sections,
@@ -222,7 +222,7 @@ def test_is_meaningful_text_custom_min_chars():
 
 
 # ===========================================================================
-# Unit tests — _is_reddit_url
+# Unit tests — is_reddit_url
 # ===========================================================================
 
 @pytest.mark.parametrize("url", [
@@ -233,7 +233,7 @@ def test_is_meaningful_text_custom_min_chars():
     "https://np.reddit.com/r/news",
 ])
 def test_is_reddit_url_detects_reddit(url: str):
-    assert _is_reddit_url(url)
+    assert is_reddit_url(url)
 
 
 @pytest.mark.parametrize("url", [
@@ -245,7 +245,7 @@ def test_is_reddit_url_detects_reddit(url: str):
     123,  # type: ignore[arg-type]
 ])
 def test_is_reddit_url_ignores_non_reddit(url):
-    assert not _is_reddit_url(url)
+    assert not is_reddit_url(url)
 
 
 # ===========================================================================

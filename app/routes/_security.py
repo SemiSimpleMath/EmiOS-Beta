@@ -11,6 +11,7 @@ fronted by a tunnel.
 This is the first, zero-config fence. The stronger follow-up is a shared admin token the local UI
 carries and external callers cannot forge — wire that here too when ready.
 """
+import os
 from functools import wraps
 
 from flask import abort, request
@@ -68,3 +69,18 @@ def local_only(fn):
             abort(403)
         return fn(*args, **kwargs)
     return _wrapped
+
+
+def dev_tools_enabled() -> bool:
+    """True when dev tools may be exposed: EMI_DEV_TOOLS env truthy, or the request targets localhost.
+
+    Softer than ``is_local_request`` (trusts the Host header, no proxy-header check) — use it for
+    dev-only UI affordances and simulators, not as a security boundary.
+    """
+    try:
+        if str(os.environ.get("EMI_DEV_TOOLS", "")).strip().lower() in {"1", "true", "yes", "y", "on"}:
+            return True
+        host = (request.host or "").split(":", 1)[0].strip().lower()
+        return host in {"127.0.0.1", "localhost"}
+    except Exception:
+        return False
