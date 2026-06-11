@@ -26,8 +26,16 @@ class GracefulExitControlNode(ControlNode):
         # handle_graceful_exit seeded (e.g. "graceful_exit", "max_limit",
         # "error_exit"). We use it as the reason label.
         exit_state = str(self.blackboard.get_state_value("last_agent", "") or "").strip() or "unknown"
+        # The TRUE abort reason + the aborted run's cycle count are stashed by
+        # handle_graceful_exit before the exit loop re-enters _run_loop (which
+        # overwrites manager_loop_count and re-labels last_agent).
+        true_reason = str(self.blackboard.get_state_value("manager_abort_reason", "") or "").strip()
+        if true_reason:
+            exit_state = true_reason
         manager_name = str(self.blackboard.get_state_value("manager_name", "") or "").strip() or "manager"
-        loop_count = self.blackboard.get_state_value("manager_loop_count", None)
+        loop_count = self.blackboard.get_state_value("manager_aborted_cycles", None)
+        if loop_count is None:
+            loop_count = self.blackboard.get_state_value("manager_loop_count", None)
         max_cycles = self.blackboard.get_state_value("manager_max_cycles", None)
         error_message = str(self.blackboard.get_state_value("error_message", "") or "").strip()
         task_text = str(self.blackboard.get_state_value("task", "") or "").strip()

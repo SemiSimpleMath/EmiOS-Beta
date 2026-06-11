@@ -1,7 +1,9 @@
 name: me_query_filter_manager
 class_name: MultiAgentManager
 description: "Translates lens chat-input into a structured filter intent. Single Planner with read-only kg_query access, then a dedicated final-answer agent that emits the typed AgentForm (intent + seed_node_ids + time params)."
-max_cycles: 12
+# Budgets LLM-agent activations (planner rounds + final), NOT loop
+# iterations — tool dispatch/handling hops are free as of 2026-06-11.
+max_cycles: 10
 
 role_bindings:
   delegator: shared::delegator

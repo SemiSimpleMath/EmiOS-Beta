@@ -425,11 +425,21 @@ class MultiAgentManager:
         return result
 
     def _run_loop(self, max_cycles, delegator, delegator_data):
-        cycles = 0
+        # max_cycles budgets LLM-AGENT ACTIVATIONS — the unit that costs
+        # time and money. Deterministic plumbing (control nodes, tool
+        # dispatch/handling hops) does NOT consume budget; before
+        # 2026-06-11 it did, which made "12 cycles" mean ~3 real agent
+        # decisions and aborted legitimate work mid-answer.
+        cycles = 0        # loop iterations (plumbing included) — backstop only
+        agent_cycles = 0  # LLM-agent activations — the budgeted unit
+        # A state_map cycle between control nodes never activates an agent,
+        # so an iteration backstop is still required to stop infinite spins.
+        iteration_cap = max(max_cycles * 8, 40)
+        from app.assistant.control_nodes.control_node import ControlNode
         while True:
             logger.info(
-                "[%s] MANAGER LOOP - Cycle %d/%d",
-                self.name, cycles + 1, max_cycles,
+                "[%s] MANAGER LOOP - Cycle %d (agents %d/%d)",
+                self.name, cycles + 1, agent_cycles, max_cycles,
             )
 
             # Expose current loop counters on the blackboard BEFORE delegator runs.
@@ -453,8 +463,18 @@ class MultiAgentManager:
                 logger.warning(f"⚠️ {self.name} cancelled. Exiting loop.")
                 return "cancelled"
             
-            if cycles >= max_cycles:
-                logger.warning(f"⚠️ {self.name} reached max cycles ({max_cycles}).")
+            if agent_cycles >= max_cycles:
+                logger.warning(
+                    f"⚠️ {self.name} reached max agent cycles ({max_cycles}; "
+                    f"{cycles} loop iterations)."
+                )
+                return "max_cycles"
+            if cycles >= iteration_cap:
+                logger.warning(
+                    f"⚠️ {self.name} hit the iteration backstop ({iteration_cap}) "
+                    f"with only {agent_cycles} agent cycles — likely a control-node "
+                    f"routing loop."
+                )
                 return "max_cycles"
             if self.blackboard.get_state_value("exit", False):
                 logger.info(f"✅ Task completed by {self.name}. Exiting loop.")
@@ -538,6 +558,12 @@ class MultiAgentManager:
             except Exception:
                 logger.debug("[%s] Failed to record execution trace step", self.name, exc_info=True)
 
+            if not isinstance(next_agent, ControlNode):
+                agent_cycles += 1
+                try:
+                    self.blackboard.update_global_state_value("manager_agent_cycles", agent_cycles)
+                except Exception:
+                    logger.debug("[%s] Failed to update manager_agent_cycles", self.name, exc_info=True)
             cycles += 1
 
     def run_agent_loop(self):
@@ -617,7 +643,7 @@ class MultiAgentManager:
             exit_state = "error_exit"
         else:
             exit_state = "default_error_exit"
-        return self.handle_graceful_exit(exit_state)
+        return self.handle_graceful_exit(exit_state, true_reason="max_limit")
 
     def handle_exit_error(self):
         if self.flow_config.get("state_map", {}).get("error_exit"):
@@ -626,7 +652,7 @@ class MultiAgentManager:
             exit_state = "graceful_exit"
         else:
             exit_state = "default_error_exit"
-        return self.handle_graceful_exit(exit_state)
+        return self.handle_graceful_exit(exit_state, true_reason="error_exit")
 
     def handle_unknown_exit(self):
         if self.flow_config.get("state_map", {}).get("graceful_exit"):
@@ -635,13 +661,30 @@ class MultiAgentManager:
             exit_state = "error_exit"
         else:
             exit_state = "default_error_exit"
-        return self.handle_graceful_exit(exit_state)
+        return self.handle_graceful_exit(exit_state, true_reason="unknown_exit")
 
-    def handle_graceful_exit(self, exit_state):
+    def handle_graceful_exit(self, exit_state, *, true_reason=None):
         """
         Runs the agent execution loop in graceful exit mode.
+
+        The exit loop re-enters _run_loop, which overwrites the
+        manager_loop_count counters — so the aborted run's cycle count and
+        TRUE abort reason are stashed first under dedicated keys for the
+        graceful_exit_control_node's abort report. (Without this the report
+        always claimed "Cycles run: 0" and labeled max-cycle aborts as
+        generic graceful-exit routing.)
         """
         logger.info(f"🔄 Starting graceful exit loop for {self.name}, for state {exit_state}")
+        try:
+            aborted_cycles = self.blackboard.get_state_value("manager_agent_cycles", None)
+            if aborted_cycles is None:
+                aborted_cycles = self.blackboard.get_state_value("manager_loop_count", None)
+            self.blackboard.update_global_state_value("manager_aborted_cycles", aborted_cycles)
+            self.blackboard.update_global_state_value(
+                "manager_abort_reason", true_reason or exit_state,
+            )
+        except Exception:
+            logger.debug("[%s] Failed to stash abort counters", self.name, exc_info=True)
         max_cycles = self.manager_config.get("max_exit_cycles", 10)
         self.delegator_name = self.resolve_role_binding('delegator')
         self.blackboard.update_state_value('last_agent', exit_state)
