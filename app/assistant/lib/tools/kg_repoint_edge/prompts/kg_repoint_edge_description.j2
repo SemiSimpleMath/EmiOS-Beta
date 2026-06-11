@@ -1,0 +1,11 @@
+Move one endpoint of an existing edge to a different node, keeping the
+edge row (id, sentence, evidence linkage, provenance) intact. The drain
+op for Disambiguation attachment points: once the true referent of an
+attached edge is determined, re-point it from the Disambiguation node
+to the referent.
+
+Audited: requires a non-empty `reason`; refuses user-locked edges and
+edges whose old or new endpoint nodes are user-locked; refuses
+self-loops and re-points that would duplicate an existing edge;
+snapshots before/after into kg_revision_log so the change can be
+reverted. Pass `dry_run: true` to preview without committing.

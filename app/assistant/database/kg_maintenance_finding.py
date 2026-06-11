@@ -41,6 +41,14 @@ finding_type values:
                            approved→extracted→promoted pipeline is TBD).
                            Excluded from the general backlog drain.
 
+  "disambiguation_backlog" — a Disambiguation node (attachment point for
+                           mentions whose referent was unknown at write
+                           time) has accumulated edges. The investigator
+                           determines each edge's true referent and
+                           proposes kg_repoint_edge; unresolvable edges
+                           stay attached (legitimate waiting state).
+                           Raised by step_disambiguation_scan.
+
   Historical (not produced today):
     "suspect_node" — per-node LLM quality scan, sunsetted 2026-04-27. Existing
                      rows of this type may still exist in DB and remain valid;

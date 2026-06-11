@@ -786,6 +786,62 @@ def _brief_single_node(
     return task_phrase, "\n".join(parts)
 
 
+def _brief_disambiguation_backlog(
+    session, finding: KGMaintenanceFinding,
+) -> Tuple[str, str]:
+    """Disambiguation node carrying edges from mentions whose referent was
+    unknown at write time. Beyond the single-node brief (node + its
+    attached edges), pre-fetch the candidate referents: nodes whose label
+    or aliases collide with the disambiguation label. For role labels
+    ("Alex's Sister") no same-label candidate may exist — the anchor's
+    relationship edges are the path then, which the task phrase covers."""
+    task, info = _brief_single_node(
+        session, finding,
+        finding_label="disambiguation_backlog",
+        task_phrase=(
+            "This Disambiguation node is an ATTACHMENT POINT: mentions whose true "
+            "referent was unknown bound to it, so each attached edge belongs to "
+            "some other node. For EACH edge, determine the true referent — use "
+            "the edge sentence, the candidate referents below, and (for role "
+            "labels like \"X's Sister\") the anchor person's relationship edges "
+            "via kg_query — and propose kg_repoint_edge moving that edge's "
+            "disambiguation endpoint to the referent. Edges whose referent "
+            "cannot be determined with confidence stay attached (that is a "
+            "legitimate waiting state, NOT a failure — propose re-points only "
+            "for the edges you resolved). Do NOT propose merging or deleting "
+            "the Disambiguation node while edges remain."
+        ),
+    )
+    label = ((finding.evidence_json or {}).get("label") or "").strip()
+    if label:
+        like_pat = f'%"{label.lower()}"%'
+        rows = session.execute(
+            sql_text(
+                "SELECT id, label, node_type, category, description "
+                "FROM kg_node_metadata "
+                "WHERE node_type != 'Disambiguation' "
+                "  AND (LOWER(label) = :lbl OR LOWER(COALESCE(aliases, '')) LIKE :pat) "
+                "ORDER BY pagerank_score DESC NULLS LAST LIMIT 10"
+            ),
+            {"lbl": label.lower(), "pat": like_pat},
+        ).fetchall()
+        parts = [info, "", f"## Candidate referents (label/alias collision on {label!r})"]
+        if rows:
+            for r in rows:
+                m = r._mapping
+                desc = (m["description"] or m["category"] or "")[:160]
+                parts.append(
+                    f"- `{m['id']}` {m['label']!r} ({m['node_type']}) — {desc}"
+                )
+        else:
+            parts.append(
+                "- none found by label/alias — resolve via the anchor's "
+                "relationship edges (kg_query)."
+            )
+        info = "\n".join(parts)
+    return task, info
+
+
 # ----- public entry point ---------------------------------------------------
 
 
@@ -869,6 +925,11 @@ def build_finding_brief(finding_id: str) -> Optional[Tuple[str, str]]:
                     "If the node is itself dubious, recommend escalate_user instead."
                 ),
             )
+            if prior_verdicts_block:
+                info = f"{prior_verdicts_block}\n\n{info}"
+            return task, info
+        if ftype == "disambiguation_backlog":
+            task, info = _brief_disambiguation_backlog(session, finding)
             if prior_verdicts_block:
                 info = f"{prior_verdicts_block}\n\n{info}"
             return task, info

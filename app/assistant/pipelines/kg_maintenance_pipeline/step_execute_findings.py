@@ -424,40 +424,26 @@ def _execute_series_link(finding: dict) -> dict:
         )
         session.add(new_edge)
 
-        # Mint a Disambiguation node at the canonical_label if none exists,
-        # pointing to the parent Entity. This is the "leave behind a learned
-        # correction" piece — future extractor proposals at the same label
-        # will resolve THROUGH the Disambiguation to the canonical, instead
-        # of fragmenting into yet another sibling. Also covers labels
-        # different from the parent's exact label (the investigator may
-        # refine "Pickup" -> "Child pickups", so we mint both).
-        from app.assistant.kg.disambiguation import (
-            find_disambiguation, create_disambiguation,
-        )
+        # Leave the learned correction behind as ALIASES on the parent
+        # Entity — future extractor proposals at these labels then bind to
+        # the parent via the resolver's alias lookup instead of fragmenting
+        # into yet another sibling. Covers labels different from the
+        # parent's exact label (the investigator may refine "Pickup" ->
+        # "Child pickups", so we mark both).
         labels_to_mark = {canonical_label.strip()}
         if (event_node.label or "").strip():
             labels_to_mark.add(event_node.label.strip())
-        if (entity_node.label or "").strip():
-            labels_to_mark.add(entity_node.label.strip())
-        for lbl in labels_to_mark:
-            if not lbl:
-                continue
-            if find_disambiguation(session, lbl) is not None:
-                continue
-            create_disambiguation(
-                session,
-                label=lbl,
-                canonical_node_id=str(entity_node.id),
-                previously_misclassified_as=(
-                    "Event"
-                    if action == "create_parent_entity_and_link"
-                    else None
-                ),
-                reason=(
-                    f"Minted by series_link executor on {action}. "
-                    f"Cluster sourced from {len(evidence.get('all_event_ids') or [])} "
-                    f"Event instances."
-                ),
+        entity_known = {(entity_node.label or "").strip().lower()}
+        entity_known.update(
+            (a or "").strip().lower() for a in (entity_node.aliases or [])
+        )
+        new_aliases = [
+            lbl for lbl in labels_to_mark
+            if lbl and lbl.lower() not in entity_known
+        ]
+        if new_aliases:
+            entity_node.aliases = sorted(
+                {*(entity_node.aliases or []), *new_aliases}
             )
         session.commit()
 
@@ -465,7 +451,8 @@ def _execute_series_link(finding: dict) -> dict:
             "executed": True,
             "detail": (
                 f"Linked Event {event_id[:8]} -> Entity {entity_node.id[:8]} "
-                f"via instance_of (Disambiguation seeded if absent)"
+                f"via instance_of"
+                + (f" (aliases added: {new_aliases})" if new_aliases else "")
             ),
         }
     except Exception:

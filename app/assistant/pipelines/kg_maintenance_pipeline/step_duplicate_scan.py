@@ -86,11 +86,14 @@ def _load_node_descriptors() -> dict[str, dict[str, Any]]:
 
     session = get_session()
     try:
+        # Disambiguation nodes share their label with the entities they
+        # disambiguate BY CONSTRUCTION — pairing them as duplicates (and
+        # worse, merging them) would destroy the attachment point.
         nodes = session.query(
             Node.id, Node.label, Node.description, Node.node_type,
             Node.aliases, Node.category, Node.semantic_label,
             Node.original_sentence, Node.start_date, Node.end_date,
-        ).all()
+        ).filter(Node.node_type != "Disambiguation").all()
 
         edges = (
             session.query(

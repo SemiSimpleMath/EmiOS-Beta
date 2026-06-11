@@ -110,11 +110,13 @@ def _resolve_entity_like(session, label: str, node_type: str) -> Optional[Node]:
     through `_resolve_property` (subject-scoped match).
 
     Disambiguation precedence: if a Disambiguation node exists at this
-    label, follow its `disambiguates_to` edge to the canonical FIRST
-    (provided the canonical passes the same type gate). This lets a
-    learned correction persist — once any pass has decided "label X
-    really means canonical Y," subsequent proposals at label X bind to
-    Y without re-deriving the call.
+    label, the referent is known-ambiguous — bind to the Disambiguation
+    node itself (bypassing the type gate; it is the designated
+    attachment point for ANY mention at that label), even over an exact
+    label/alias hit. Edges land on it until the maintenance
+    investigator re-points them to the true referent; once the
+    ambiguity is resolved (alias on the real node + Disambiguation
+    deleted), mentions bind normally again.
     """
     if not label:
         return None
@@ -123,11 +125,11 @@ def _resolve_entity_like(session, label: str, node_type: str) -> Optional[Node]:
         return None
     allowed_types = [node_type, *_CROSS_TYPE_BIND_ALLOWLIST.get(node_type, ())]
 
-    # Disambiguation FIRST — learned correction beats default resolution.
-    from app.assistant.kg.disambiguation import resolve_through_disambiguation
-    redirected = resolve_through_disambiguation(session, label)
-    if redirected is not None and (redirected.node_type or "") in allowed_types:
-        return redirected
+    # Disambiguation FIRST — known-ambiguous label beats default resolution.
+    from app.assistant.kg.disambiguation import find_disambiguation
+    dis = find_disambiguation(session, label)
+    if dis is not None:
+        return dis
 
     hit = (
         session.query(Node)
@@ -234,43 +236,39 @@ def _semantic_entity_candidates(
         return []
 
 
-def _park_on_disambiguation_if_present(
-    session, new_node, proposal_id: str,
-) -> None:
-    """If a Disambiguation node exists at the new node's label, park
-    the new node on it via `pending_resolution`.
+def _mint_disambiguation_on_label_collision(session, new_node) -> None:
+    """After an entity-like create: if the new node's exact label now
+    collides with another same-type node, mint a Disambiguation at that
+    label.
 
-    Called right after the promoter creates a fresh node (the resolver
-    didn't find a clean match). The created node is correct as data —
-    we don't lose it — but the parking edge flags it for the next
-    maintenance sweep, which can route via investigator (merge into
-    canonical, mint as legitimate sibling, or split into a new concept).
-
-    The node's own resolver already consulted the Disambiguation; if
-    that path matched, the node would have been merged into the
-    canonical and this function would not run. So reaching here means
-    the resolver couldn't bind cleanly DESPITE a Disambiguation
-    existing — which is exactly the "park for review" case.
+    Reaching here means the resolver/node_merger saw the existing node
+    and DECLINED the match (two-Alexes guard or merger verdict) — so
+    the label genuinely has multiple referents. Without the marker,
+    future mentions at this label would silently bind to whichever
+    twin wins on pagerank. With it, they attach to the Disambiguation
+    node until the investigator re-points them.
     """
     label = (new_node.label or "").strip()
     if not label:
         return
-    from app.assistant.kg.disambiguation import (
-        find_disambiguation, park_node_on_disambiguation,
+    collision = (
+        session.query(Node.id)
+        .filter(func.lower(Node.label) == label.lower())
+        .filter(Node.node_type == new_node.node_type)
+        .filter(Node.id != new_node.id)
+        .first()
     )
-    dis = find_disambiguation(session, label)
-    if dis is None or str(dis.id) == str(new_node.id):
+    if collision is None:
         return
-    park_node_on_disambiguation(
+    from app.assistant.kg.disambiguation import create_disambiguation
+    create_disambiguation(
         session,
-        new_node_id=str(new_node.id),
-        disambiguation_node_id=str(dis.id),
+        label=label,
         reason=(
-            f"Promoter created a fresh {new_node.node_type} at label "
-            f"{label!r} despite an existing Disambiguation; the "
-            f"resolver could not bind cleanly to the canonical "
-            f"(type mismatch or ambiguous identity). Proposal "
-            f"{proposal_id[:8]}."
+            f"Minted by the promoter: a new {new_node.node_type} "
+            f"({str(new_node.id)[:8]}) was created at a label already "
+            f"held by {str(collision.id)[:8]} after the resolver "
+            f"declined the match — the label has multiple referents."
         ),
     )
 
@@ -2538,7 +2536,7 @@ def _evaluate_and_apply(
                     proposal_node=pn,
                     merge_action="created",
                 )
-                _park_on_disambiguation_if_present(session, new, proposal.id)
+                _mint_disambiguation_on_label_collision(session, new)
                 dec.node_outcomes.append(_NodeOutcome(
                     pn.id, "created_new", new.id,
                     f"created {pn.node_type} {pn.label!r} as {new.id[:8]}",
@@ -2596,7 +2594,6 @@ def _evaluate_and_apply(
                     proposal_node=pn,
                     merge_action="created",
                 )
-                _park_on_disambiguation_if_present(session, new, proposal.id)
                 ttl_blurb = ""
                 if isinstance(new.attributes, dict) and "ttl" in new.attributes:
                     t = new.attributes["ttl"]

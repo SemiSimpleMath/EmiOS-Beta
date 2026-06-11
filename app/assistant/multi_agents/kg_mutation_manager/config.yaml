@@ -1,5 +1,5 @@
 name: kg_mutation_manager
-description: "KG mutation manager — consumes a kg_investigation report's proposed_action and applies it to the KG via narrow audit-wired tools (merge / rename / update field / resolve / escalate). Refuses anything outside the proposed_action's op."
+description: "KG mutation manager — consumes a kg_investigation report's proposed_action and applies it to the KG via narrow audit-wired tools (merge / rename / update field / re-point edge / resolve / escalate). Refuses anything outside the proposed_action's op."
 class_name: MultiAgentManager
 max_cycles: 16
 
@@ -53,6 +53,7 @@ tool_visibility:
     - kg_merge_nodes
     - kg_rename_label
     - kg_update_node_field
+    - kg_repoint_edge
     - kg_finding_resolve
     - kg_finding_escalate
     - ask_user
@@ -64,6 +65,7 @@ tools:
     - kg_merge_nodes
     - kg_rename_label
     - kg_update_node_field
+    - kg_repoint_edge
     - kg_create_state_node
     - kg_close_state
     - kg_finding_resolve
@@ -78,6 +80,7 @@ scope_contract:
       - kg_merge_nodes
       - kg_rename_label
       - kg_update_node_field
+      - kg_repoint_edge
       - kg_create_state_node
       - kg_close_state
       - kg_finding_resolve

@@ -1,12 +1,13 @@
 """KGMutatorTool — narrow typed mutators against the live KG, audit-wired.
 
-Backs ten tool names (one BaseTool, dispatched on tool_name):
+Backs eleven tool names (one BaseTool, dispatched on tool_name):
 
   kg_merge_nodes(keep_id, fold_id, reason, dry_run=False)
   kg_rename_label(node_id, new_label, reason, dry_run=False)
   kg_update_node_field(node_id, field, value, reason, dry_run=False)
   kg_delete_node(node_id, reason, dry_run=False)
   kg_delete_edge(edge_id, reason, dry_run=False)
+  kg_repoint_edge(edge_id, new_source_id/new_target_id, reason, dry_run=False)
   kg_create_state_node(owner_node_id, predicate, label, ..., reason, dry_run=False)
   kg_create_edge(source_id, target_id, relationship_type, ..., reason, dry_run=False)
   kg_close_state(node_id, end_date, ..., reason, dry_run=False)
@@ -752,6 +753,120 @@ class KGMutatorTool(BaseTool):
                 result_type="kg_delete_edge",
                 content=f"Deleted edge {edge_id[:8]} ({before['relationship_type']}). revision_log_id={rid}",
                 data={"ok": True, "revision_log_id": rid, "deleted": before},
+            ))
+
+    def handle_kg_repoint_edge(self, arguments: Dict[str, Any], tool_message: ToolMessage) -> ToolResult:
+        """Move one endpoint of an existing edge to a different node,
+        keeping the edge row (id, sentence, confidence_tier, evidence
+        linkage, provenance) intact.
+
+        The drain op for Disambiguation attachment points: once the
+        investigator determines an edge's true referent, the edge is
+        re-pointed from the Disambiguation node to the referent.
+
+        Required: edge_id, reason, and at least one of new_source_id /
+        new_target_id.
+        Optional: finding_id, dry_run.
+        Refuses: missing edge/node, user-locked edge, user-locked
+        endpoint (old or new), self-loops, and re-points that would
+        duplicate an existing (source, target, relationship_type) edge.
+        """
+        edge_id = str(arguments.get("edge_id") or "").strip()
+        if not edge_id:
+            raise ValueError("`edge_id` is required.")
+        new_source_id = str(arguments.get("new_source_id") or "").strip() or None
+        new_target_id = str(arguments.get("new_target_id") or "").strip() or None
+        if not new_source_id and not new_target_id:
+            raise ValueError("At least one of `new_source_id` / `new_target_id` is required.")
+        reason = self._require_reason(arguments)
+        dry_run = bool(arguments.get("dry_run", False))
+        finding_id = arguments.get("finding_id") or None
+
+        with get_db_manager().transaction(op="kg_mutator.repoint_edge") as session:
+            edge = session.query(Edge).filter(Edge.id == edge_id).first()
+            if edge is None:
+                raise ValueError(f"edge {edge_id!r} not found")
+            _refuse_if_locked(edge, "kg_repoint_edge")
+
+            final_source = new_source_id or edge.source_id
+            final_target = new_target_id or edge.target_id
+            if final_source == final_target:
+                raise ValueError("re-point would create a self-loop.")
+            if final_source == edge.source_id and final_target == edge.target_id:
+                raise ValueError("re-point is a no-op: edge already has these endpoints.")
+
+            # Old AND new endpoints: moving an edge changes those nodes'
+            # facts, so a user lock on any of them refuses the op.
+            involved = {edge.source_id, edge.target_id, final_source, final_target}
+            for node_id in involved:
+                endpoint = session.query(Node).filter(Node.id == node_id).first()
+                if endpoint is None and node_id in (final_source, final_target):
+                    raise ValueError(f"new endpoint {node_id!r} not found")
+                if endpoint is not None:
+                    _refuse_if_locked(endpoint, "kg_repoint_edge")
+
+            duplicate = (
+                session.query(Edge)
+                .filter(
+                    Edge.source_id == final_source,
+                    Edge.target_id == final_target,
+                    Edge.relationship_type == edge.relationship_type,
+                    Edge.id != edge.id,
+                )
+                .first()
+            )
+            if duplicate is not None:
+                raise ValueError(
+                    f"Refusing to re-point: a {edge.relationship_type!r} edge between "
+                    f"these nodes already exists (id={duplicate.id}). Use kg_delete_edge "
+                    "on this edge instead."
+                )
+
+            before = _edge_snapshot(edge)
+
+            if dry_run:
+                return self.publish_result(ToolResult(
+                    result_type="kg_repoint_edge",
+                    content=(
+                        f"DRY RUN: would re-point edge {edge_id[:8]} "
+                        f"({before['source_id'][:8]} -[{before['relationship_type']}]-> "
+                        f"{before['target_id'][:8]}) to "
+                        f"{final_source[:8]} -> {final_target[:8]}."
+                    ),
+                    data={"ok": True, "dry_run": True, "before": before,
+                          "after": {**before, "source_id": final_source,
+                                    "target_id": final_target}},
+                ))
+
+            edge.source_id = final_source
+            edge.target_id = final_target
+            session.flush()
+            after = _edge_snapshot(edge)
+
+            rid = _write_revision_log(
+                session=session,
+                op="repoint_edge",
+                args={
+                    "edge_id": edge_id,
+                    "new_source_id": new_source_id,
+                    "new_target_id": new_target_id,
+                    "finding_id": finding_id,
+                },
+                before=before,
+                after=after,
+                reason=reason,
+                finding_id=finding_id,
+                agent_id=self._agent_id(tool_message),
+            )
+            return self.publish_result(ToolResult(
+                result_type="kg_repoint_edge",
+                content=(
+                    f"Re-pointed edge {edge_id[:8]} ({before['relationship_type']}): "
+                    f"{before['source_id'][:8]} -> {before['target_id'][:8]} is now "
+                    f"{after['source_id'][:8]} -> {after['target_id'][:8]}. "
+                    f"revision_log_id={rid}"
+                ),
+                data={"ok": True, "revision_log_id": rid, "before": before, "after": after},
             ))
 
     def handle_kg_delete_node(self, arguments: Dict[str, Any], tool_message: ToolMessage) -> ToolResult:

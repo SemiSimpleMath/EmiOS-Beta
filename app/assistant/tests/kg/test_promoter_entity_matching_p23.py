@@ -232,7 +232,20 @@ def test_race_guard_does_not_silently_bind_confirm_tier_person():
     try:
         outcome = dec.node_outcomes[0]
         assert outcome.action == "created_new"
-        n = session.query(Node).filter(Node.label == "Alexis").count()
+        n = (
+            session.query(Node)
+            .filter(Node.label == "Alexis", Node.node_type == "Entity")
+            .count()
+        )
         assert n == 2
+        # The label now has two referents — the attach-here rework mints a
+        # Disambiguation marker so FUTURE "Alexis" mentions park there
+        # instead of pagerank-guessing between the twins.
+        dis = (
+            session.query(Node)
+            .filter(Node.label == "Alexis", Node.node_type == "Disambiguation")
+            .count()
+        )
+        assert dis == 1
     finally:
         session.close()

@@ -27,9 +27,12 @@ def run(ctx: PipelineContext) -> dict:
             .union(session.query(Edge.target_id))
             .subquery()
         )
+        # Edge-less is a Disambiguation node's RESTING state (attachment
+        # point waiting for ambiguous mentions) — not an orphan.
         orphan_nodes = (
             session.query(Node.id, Node.label, Node.node_type)
             .filter(Node.id.notin_(connected_ids))
+            .filter(Node.node_type != "Disambiguation")
             .all()
         )
         # Copy to plain tuples so nothing leaks across session boundary

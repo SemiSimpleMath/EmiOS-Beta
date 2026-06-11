@@ -108,6 +108,9 @@ class KGMaintenancePipeline:
         _run_step("missing_dates_scan", lambda: (
             __import__("app.assistant.pipelines.kg_maintenance_pipeline.step_missing_dates_scan", fromlist=["run"]).run(ctx)
         ))
+        _run_step("disambiguation_scan", lambda: (
+            __import__("app.assistant.pipelines.kg_maintenance_pipeline.step_disambiguation_scan", fromlist=["run"]).run(ctx)
+        ))
 
         # Final pass: hand any findings produced by this run (orphan_scan,
         # duplicate_scan, etc.) to kg_investigation_manager so a structured
