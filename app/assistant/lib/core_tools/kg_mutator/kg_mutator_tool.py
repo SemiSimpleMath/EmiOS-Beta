@@ -869,6 +869,84 @@ class KGMutatorTool(BaseTool):
                 data={"ok": True, "revision_log_id": rid, "before": before, "after": after},
             ))
 
+    def handle_kg_set_user_lock(self, arguments: Dict[str, Any], tool_message: ToolMessage) -> ToolResult:
+        """Set or clear the user lock (axiom layer) on a node.
+
+        Locking marks the node's facts as guaranteed-true by the user:
+        ``locked_by_user_at`` is stamped and ``confidence_tier`` becomes
+        ``axiom``; every destructive mutator op then refuses the row.
+        Unlocking clears the stamp and returns the tier to ``provisional``.
+
+        This op is the ONLY mutator path that may touch a locked row —
+        unlock is how the user revokes the guarantee. The user-facing KG
+        Lens lock toggle and agent-driven lock requests both land here.
+
+        Required: node_id, locked (bool), reason.
+        Optional: finding_id, dry_run.
+        Refuses: missing node, and no-op transitions (already in the
+        requested state).
+        """
+        node_id = str(arguments.get("node_id") or "").strip()
+        if not node_id:
+            raise ValueError("`node_id` is required.")
+        if "locked" not in arguments:
+            raise ValueError("`locked` (bool) is required.")
+        locked = bool(arguments.get("locked"))
+        reason = self._require_reason(arguments)
+        dry_run = bool(arguments.get("dry_run", False))
+        finding_id = arguments.get("finding_id") or None
+
+        with get_db_manager().transaction(op="kg_mutator.set_user_lock") as session:
+            node = session.query(Node).filter(Node.id == node_id).first()
+            if node is None:
+                raise ValueError(f"node {node_id!r} not found")
+
+            currently_locked = node.locked_by_user_at is not None
+            if currently_locked == locked:
+                state = "locked" if locked else "unlocked"
+                raise ValueError(
+                    f"no-op: node {node_id[:8]} ({node.label!r}) is already {state}."
+                )
+
+            before = _node_snapshot(node)
+
+            if dry_run:
+                verb = "lock" if locked else "unlock"
+                return self.publish_result(ToolResult(
+                    result_type="kg_set_user_lock",
+                    content=f"DRY RUN: would {verb} node {node_id[:8]} ({node.label!r}).",
+                    data={"ok": True, "dry_run": True, "before": before},
+                ))
+
+            if locked:
+                node.locked_by_user_at = datetime.now(timezone.utc)
+                node.confidence_tier = "axiom"
+            else:
+                node.locked_by_user_at = None
+                node.confidence_tier = "provisional"
+            session.flush()
+            after = _node_snapshot(node)
+
+            rid = _write_revision_log(
+                session=session,
+                op="set_user_lock",
+                args={"node_id": node_id, "locked": locked, "finding_id": finding_id},
+                before=before,
+                after=after,
+                reason=reason,
+                finding_id=finding_id,
+                agent_id=self._agent_id(tool_message),
+            )
+            verb = "Locked" if locked else "Unlocked"
+            return self.publish_result(ToolResult(
+                result_type="kg_set_user_lock",
+                content=(
+                    f"{verb} node {node_id[:8]} ({node.label!r}); confidence_tier="
+                    f"{after['confidence_tier']}. revision_log_id={rid}"
+                ),
+                data={"ok": True, "revision_log_id": rid, "before": before, "after": after},
+            ))
+
     def handle_kg_delete_node(self, arguments: Dict[str, Any], tool_message: ToolMessage) -> ToolResult:
         """Delete a node AND all its edges, snapshotting everything first.
 

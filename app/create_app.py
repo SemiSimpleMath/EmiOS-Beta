@@ -243,6 +243,12 @@ def create_app(config_class="config.DevelopmentConfig"):
     app.register_blueprint(me_bp)
     from app.me.api import me_api
     app.register_blueprint(me_api)
+
+    # /kg-lens — graph + editable node sidebar (reuses /api/me subgraph services).
+    from app.routes.kg_lens import kg_lens_bp
+    app.register_blueprint(kg_lens_bp)
+    from app.kg_lens.api import kg_lens_api
+    app.register_blueprint(kg_lens_api)
     if graph_api is not None:
         app.register_blueprint(graph_api)
     

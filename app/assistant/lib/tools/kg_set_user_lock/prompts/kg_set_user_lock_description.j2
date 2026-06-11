@@ -1,0 +1,13 @@
+Set or clear the user lock (axiom layer) on a KG node. Locking stamps
+locked_by_user_at and sets confidence_tier='axiom', marking the node's
+facts as guaranteed-true by the user; every destructive mutator op
+refuses locked rows. Unlocking clears the stamp and returns the tier to
+'provisional'.
+
+Only apply on the user's explicit say-so - the lock is the user's
+guarantee, not the agent's judgment.
+
+Audited: requires a non-empty `reason`; refuses no-op transitions
+(already in the requested state); snapshots before/after into
+kg_revision_log so the change can be reverted. Pass `dry_run: true` to
+preview without committing.
