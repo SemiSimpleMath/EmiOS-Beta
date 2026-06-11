@@ -12,12 +12,11 @@ for the orchestrator's planner to pick up.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.assistant.pipelines.dayflow.step_types import BaseStep, StepContext, StepResult
-from app.assistant.scope.loader import load_scope_for_source
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_resources_dir as _get_resources_dir
 from app.assistant.utils.time_utils import utc_to_local
@@ -33,37 +32,6 @@ _ENTERTAINMENT_TAGS = frozenset({"entertainment", "hobbies", "music", "food", "s
 class EntertainmentAdvisorStep(BaseStep):
     step_id: str = "entertainment_advisor"
 
-    def _build_pipeline_scope_context(self, agent_input: Dict[str, Any]):
-        return load_scope_for_source(kind="pipeline", source_id="dayflow", actor_id=f"{self.step_id}_runner", identity_overrides={"room_id": None, "surface": (None) or "pipeline"})
-
-    def _get_afk_snapshot(self) -> Dict[str, Any]:
-        from app.assistant.ServiceLocator.service_locator import DI
-
-        monitor = getattr(DI, "afk_monitor", None)
-        if monitor is None:
-            logger.error("EntertainmentAdvisorStep: DI.afk_monitor is missing")
-            raise RuntimeError("AFKMonitor missing: DI.afk_monitor is None")
-        snapshot = monitor.get_computer_activity()
-        if not isinstance(snapshot, dict):
-            logger.error("EntertainmentAdvisorStep: AFKMonitor returned invalid type=%s", type(snapshot))
-            raise RuntimeError(f"AFKMonitor returned invalid type: {type(snapshot)}")
-        return snapshot
-
-    def _get_last_run_utc(self, ctx: StepContext) -> Optional[datetime]:
-        step_runs = ctx.state.get("step_runs", {})
-        info = step_runs.get(self.step_id, {}) if isinstance(step_runs, dict) else {}
-        raw = info.get("last_run_utc") if isinstance(info, dict) else None
-        if not raw:
-            return None
-        try:
-            dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            return dt
-        except Exception as e:
-            logger.debug("EntertainmentAdvisorStep: could not parse last_run_utc %r: %s", raw, e, exc_info=True)
-            return None
-
     def should_run(self, ctx: StepContext) -> Tuple[bool, str]:
         stage_cfg = ctx.step_config or {}
         run_policy = stage_cfg.get("run_policy", {}) if isinstance(stage_cfg, dict) else {}
@@ -77,7 +45,7 @@ class EntertainmentAdvisorStep(BaseStep):
 
         afk_guard = stage_cfg.get("afk_guard", {}) if isinstance(stage_cfg, dict) else {}
         if isinstance(afk_guard, dict) and afk_guard.get("skip_when_afk", True):
-            snapshot = self._get_afk_snapshot()
+            snapshot = self._get_afk_snapshot(strict=True)
             if bool(snapshot.get("is_afk", False)):
                 return False, "afk_guard=afk"
 
@@ -152,7 +120,8 @@ class EntertainmentAdvisorStep(BaseStep):
             from app.assistant.utils.pydantic_classes import Message
 
             agent = DI.agent_factory.create_agent("entertainment_advisor")
-            scope_context = self._build_pipeline_scope_context(agent_input)
+            # Deliberately scope-bare: this step never carries a room identity.
+            scope_context = self._build_pipeline_scope_context()
             result = agent.action_handler(Message(agent_input=agent_input, scope_context=scope_context))
 
             if hasattr(result, "data") and isinstance(result.data, dict):

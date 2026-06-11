@@ -39,18 +39,11 @@ from app.assistant.pipelines.dayflow.utils.subconscious_projection import (
     project_subconscious_for_daily_context,
 )
 from app.assistant.utils.chat_formatting import messages_to_chat_excerpts
-from app.assistant.scope.loader import load_scope_for_source
 
 logger = get_logger(__name__)
 
 
 class DailyContextGeneratorStep(BaseStep):
-    def _build_pipeline_scope_context(self, agent_input: Dict[str, Any]):
-        history_scope = agent_input.get("history_scope") if isinstance(agent_input, dict) else {}
-        room_id = str(history_scope.get("room_id") or "").strip() if isinstance(history_scope, dict) else ""
-        room_surface = str(history_scope.get("room_surface") or "").strip() if isinstance(history_scope, dict) else ""
-        return load_scope_for_source(kind="pipeline", source_id="dayflow", actor_id=f"{self.step_id}_runner", identity_overrides={"room_id": room_id or None, "surface": (room_surface or None) or "pipeline"})
-
     """
     Pipeline stage that runs the daily_context_tracker agent to generate
     daily context summary (what's happening today, user's state, etc.)
@@ -140,13 +133,6 @@ class DailyContextGeneratorStep(BaseStep):
         except Exception:
             return None
 
-    def _get_last_run_utc(self, ctx: StepContext) -> Optional[datetime]:
-        """Get this step's last run timestamp from state."""
-        step_runs = ctx.state.get("step_runs", {})
-        step_info = step_runs.get(self.step_id, {}) or {}
-        stage_info = step_info
-        return self._parse_iso_utc(stage_info.get("last_run_utc"))
-
     def _get_stage_run_info(self, ctx: StepContext) -> Dict[str, Any]:
         step_runs = ctx.state.get("step_runs", {})
         info = step_runs.get(self.step_id, {}) if isinstance(step_runs, dict) else {}
@@ -216,19 +202,6 @@ class DailyContextGeneratorStep(BaseStep):
                 dbg["desktop_activity_entry_ts_utc"] = ts_utc.isoformat()
 
         return text, {"desktop_activity_gate": "new"}
-
-    def _get_afk_snapshot(self) -> Dict[str, Any]:
-        """Best-effort realtime snapshot from AFKMonitor."""
-        try:
-            from app.assistant.ServiceLocator.service_locator import DI
-
-            monitor = getattr(DI, "afk_monitor", None)
-            if monitor is None:
-                return {}
-            snapshot = monitor.get_computer_activity()
-            return snapshot if isinstance(snapshot, dict) else {}
-        except Exception:
-            return {}
 
     # -------------------------------------------------------------------------
     # Gate Logic

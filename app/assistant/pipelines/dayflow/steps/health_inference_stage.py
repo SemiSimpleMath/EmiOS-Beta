@@ -31,18 +31,11 @@ from app.assistant.pipelines.dayflow.utils.context_sources import (
 )
 from app.assistant.pipelines.dayflow.utils.room_scope import resolve_room_scope
 from app.assistant.utils.chat_formatting import messages_to_chat_history_text
-from app.assistant.scope.loader import load_scope_for_source
 
 logger = get_logger(__name__)
 
 
 class HealthInferenceStep(BaseStep):
-    def _build_pipeline_scope_context(self, agent_input: Dict[str, Any]):
-        history_scope = agent_input.get("history_scope") if isinstance(agent_input, dict) else {}
-        room_id = str(history_scope.get("room_id") or "").strip() if isinstance(history_scope, dict) else ""
-        room_surface = str(history_scope.get("room_surface") or "").strip() if isinstance(history_scope, dict) else ""
-        return load_scope_for_source(kind="pipeline", source_id="dayflow", actor_id=f"{self.step_id}_runner", identity_overrides={"room_id": room_id or None, "surface": (room_surface or None) or "pipeline"})
-
     """
     Pipeline stage that runs the health_status_inference agent to infer
     user's health/energy/cognitive state from available data.
@@ -56,13 +49,6 @@ class HealthInferenceStep(BaseStep):
 
     def _output_filename(self) -> str:
         return "resource_health_inference_output.json"
-
-    def _boundary_date_local(self, ctx: StepContext) -> str:
-        """
-        Use the pipeline manager's boundary-day (default 5AM local).
-        Falls back to local calendar date if boundary_date_local is missing.
-        """
-        return str(ctx.state.get("boundary_date_local") or ctx.now_local.strftime("%Y-%m-%d"))
 
     def _snapshots_path(self, ctx: StepContext, boundary_date_local: str) -> Path:
         year = boundary_date_local[:4]
@@ -130,25 +116,6 @@ class HealthInferenceStep(BaseStep):
         write_json_atomic(path, out)
         return True, len(snapshots)
 
-    def _get_last_run_utc(self, ctx: StepContext) -> Optional[datetime]:
-        """Get this step's last run timestamp from state."""
-        step_runs = ctx.state.get("step_runs", {})
-        step_info = step_runs.get(self.step_id, {}) or {}
-        stage_info = step_info
-        return parse_iso_utc(stage_info.get("last_run_utc"))
-
-    def _get_afk_snapshot(self) -> Dict[str, Any]:
-        """Best-effort realtime snapshot from AFKMonitor."""
-        try:
-            from app.assistant.ServiceLocator.service_locator import DI
-
-            monitor = getattr(DI, "afk_monitor", None)
-            if monitor is None:
-                return {}
-            snapshot = monitor.get_computer_activity()
-            return snapshot if isinstance(snapshot, dict) else {}
-        except Exception:
-            return {}
 
     # -------------------------------------------------------------------------
     # Gate Logic

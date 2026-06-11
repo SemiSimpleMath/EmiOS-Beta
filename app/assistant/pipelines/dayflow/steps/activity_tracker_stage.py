@@ -18,55 +18,24 @@ from app.assistant.utils.time_utils import parse_iso_utc, utc_to_local
 from app.assistant.pipelines.dayflow.step_types import BaseStep, StepContext, StepResult
 from app.assistant.pipelines.dayflow.utils.room_scope import resolve_room_scope
 from app.assistant.utils.chat_formatting import messages_to_chat_excerpts
-from app.assistant.scope.loader import load_scope_for_source
 
 logger = get_logger(__name__)
 
 
 class ActivityTrackerStep(BaseStep):
-    def _build_pipeline_scope_context(self, *, history_scope: Dict[str, Any] | None = None):
-        scope_data = history_scope if isinstance(history_scope, dict) else {}
-        room_id = str(scope_data.get("room_id") or "").strip()
-        room_surface = str(scope_data.get("room_surface") or "").strip()
-        return load_scope_for_source(kind="pipeline", source_id="dayflow", actor_id=f"{self.step_id}_runner", identity_overrides={"room_id": room_id or None, "surface": (room_surface or None) or "pipeline"})
-
     step_id: str = "activity_tracker"
 
     def _output_filename(self) -> str:
         return "resource_tracked_activities_output.json"
 
-    def _get_afk_snapshot(self, ctx: StepContext) -> Dict[str, Any]:
-        """
-        Get current AFK status from AFKMonitor.
-
-        Strict contract: no fallbacks. If AFKMonitor is unavailable or returns
-        an invalid payload, raise loudly so the pipeline fails fast.
-        """
-        from app.assistant.ServiceLocator.service_locator import DI
-
-        monitor = getattr(DI, "afk_monitor", None)
-        if monitor is None:
-            logger.error("ActivityTrackerStage: DI.afk_monitor is missing (strict mode)")
-            raise RuntimeError("AFKMonitor missing: DI.afk_monitor is None")
-
-        snapshot = monitor.get_computer_activity()
-        if not isinstance(snapshot, dict):
-            logger.error("ActivityTrackerStage: AFKMonitor returned non-dict snapshot (strict mode)")
-            raise RuntimeError(f"AFKMonitor returned invalid snapshot type: {type(snapshot)}")
-
-        # Enforce presence of stable API keys. Values may be None, but keys must exist.
+    def _get_afk_snapshot_checked(self) -> Dict[str, Any]:
+        """Strict snapshot + this step additionally requires the stable
+        'last_afk_return_utc' key (values may be None, the key must exist)."""
+        snapshot = self._get_afk_snapshot(strict=True)
         if "last_afk_return_utc" not in snapshot:
             logger.error("ActivityTrackerStage: snapshot missing 'last_afk_return_utc' (strict mode)")
             raise RuntimeError("AFKMonitor snapshot missing required key: last_afk_return_utc")
-
         return snapshot
-
-    def _get_last_run_utc(self, ctx: StepContext) -> Optional[datetime]:
-        """Get this step's last run timestamp from state."""
-        step_runs = ctx.state.get("step_runs", {})
-        step_info = step_runs.get(self.step_id, {}) or {}
-        stage_info = step_info  # legacy variable name in downstream code
-        return parse_iso_utc(stage_info.get("last_run_utc"))
 
     def _get_last_afk_reset_utc(self, ctx: StepContext) -> Optional[datetime]:
         """Get timestamp of last AFK reset we performed."""
@@ -163,7 +132,7 @@ class ActivityTrackerStep(BaseStep):
 
         afk_guard = step_cfg.get("afk_guard", {}) if isinstance(step_cfg, dict) else {}
         if isinstance(afk_guard, dict):
-            snapshot = self._get_afk_snapshot(ctx)
+            snapshot = self._get_afk_snapshot_checked()
             is_afk = bool(snapshot.get("is_afk", False))
             is_potentially_afk = bool(snapshot.get("is_potentially_afk", False))
             if afk_guard.get("skip_when_afk") and is_afk:
@@ -290,7 +259,7 @@ class ActivityTrackerStep(BaseStep):
 
         # Fallback: in-memory last_afk_return_utc from the monitor snapshot.
         if reset_dt is None:
-            snapshot = self._get_afk_snapshot(ctx)
+            snapshot = self._get_afk_snapshot_checked()
             last_return_iso = snapshot.get("last_afk_return_utc")
             dt_return = parse_iso_utc(last_return_iso) if isinstance(last_return_iso, str) else None
             if dt_return:

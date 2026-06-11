@@ -13,7 +13,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.assistant.pipelines.dayflow.step_types import BaseStep, StepContext, StepResult
-from app.assistant.scope.loader import load_scope_for_source
 from app.assistant.pipelines.dayflow.utils.context_sources import (
     _format_ticket_for_context,
     build_time_since,
@@ -30,12 +29,6 @@ logger = get_logger(__name__)
 
 
 class DayFlowCronTicketsStep(BaseStep):
-    def _build_pipeline_scope_context(self, agent_input: Dict[str, Any]):
-        history_scope = agent_input.get("history_scope") if isinstance(agent_input, dict) else {}
-        room_id = str(history_scope.get("room_id") or "").strip() if isinstance(history_scope, dict) else ""
-        room_surface = str(history_scope.get("room_surface") or "").strip() if isinstance(history_scope, dict) else ""
-        return load_scope_for_source(kind="pipeline", source_id="dayflow", actor_id=f"{self.step_id}_runner", identity_overrides={"room_id": room_id or None, "surface": (room_surface or None) or "pipeline"})
-
     step_id: str = "dayflow_cron_tickets"
 
     def _source_filename(self) -> str:
@@ -103,35 +96,6 @@ class DayFlowCronTicketsStep(BaseStep):
         info_dict["last_processed_source_utc"] = dt.isoformat()
         step_runs[self.step_id] = info_dict
 
-    def _get_afk_snapshot(self) -> Dict[str, Any]:
-        from app.assistant.ServiceLocator.service_locator import DI
-
-        monitor = getattr(DI, "afk_monitor", None)
-        if monitor is None:
-            logger.error("DayFlowCronTicketsStep: DI.afk_monitor is missing")
-            raise RuntimeError("AFKMonitor missing: DI.afk_monitor is None")
-        snapshot = monitor.get_computer_activity()
-        if not isinstance(snapshot, dict):
-            logger.error("DayFlowCronTicketsStep: AFKMonitor returned invalid snapshot type=%s", type(snapshot))
-            raise RuntimeError(f"AFKMonitor returned invalid snapshot type: {type(snapshot)}")
-        return snapshot
-
-    def _get_last_run_utc(self, ctx: StepContext) -> Optional[datetime]:
-        """Get last run time for this stage."""
-        step_runs = ctx.state.get("step_runs", {})
-        last_run_str = step_runs.get(self.step_id, {}).get("last_run_utc")
-        if last_run_str:
-            try:
-                dt = datetime.fromisoformat(last_run_str.replace("Z", "+00:00"))
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
-                return dt
-            except Exception as e:
-                logger.warning(
-                    f"DayFlowOrchestratorStep: could not parse last_run_utc '{last_run_str}': {e}",
-                    exc_info=True,
-                )
-        return None
 
     def should_run(self, ctx: StepContext) -> Tuple[bool, str]:
         """Check if stage should run based on interval and AFK guard."""
@@ -148,7 +112,7 @@ class DayFlowCronTicketsStep(BaseStep):
 
         afk_guard = stage_cfg.get("afk_guard", {}) if isinstance(stage_cfg, dict) else {}
         if isinstance(afk_guard, dict):
-            snapshot = self._get_afk_snapshot()
+            snapshot = self._get_afk_snapshot(strict=True)
             is_afk = bool(snapshot.get("is_afk", False))
             is_potentially_afk = bool(snapshot.get("is_potentially_afk", False))
             if afk_guard.get("skip_when_afk", True) and is_afk:

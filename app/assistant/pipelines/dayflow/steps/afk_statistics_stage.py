@@ -45,32 +45,6 @@ class AFKStatisticsStep(BaseStep):
     def _output_filename(self) -> str:
         return "resource_afk_statistics_output.json"
 
-    def _get_last_run_utc(self, ctx: StepContext) -> Optional[datetime]:
-        step_runs = ctx.state.get("step_runs", {})
-        step_info = step_runs.get(self.step_id, {}) or {}
-        stage_info = step_info  # legacy variable name in downstream code
-        return parse_iso_utc(stage_info.get("last_run_utc"))
-
-    def _get_afk_snapshot(self) -> Dict[str, Any]:
-        """
-        Best-effort realtime snapshot from AFKMonitor.
-
-        Important:
-        - No fallback to resource_afk_statistics_output.json, because that is an output
-          artifact and does not share the AFKMonitor snapshot schema.
-        """
-        try:
-            from app.assistant.ServiceLocator.service_locator import DI
-
-            monitor = getattr(DI, "afk_monitor", None)
-            if monitor is None:
-                return {}
-
-            snapshot = monitor.get_computer_activity()
-            return snapshot if isinstance(snapshot, dict) else {}
-        except Exception:
-            return {}
-
     # -------------------------------------------------------------------------
     # Time Helpers
     # -------------------------------------------------------------------------

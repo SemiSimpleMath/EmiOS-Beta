@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from app.assistant.utils.atomic_write import write_text_atomic
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.pipelines.dayflow.step_types import BaseStep, StepContext, StepResult
+from app.assistant.pipelines.dayflow.step_types import BaseStep, StepContext, StepResult, format_belief_line
 from app.assistant.scope.loader import load_scope_for_source
 from app.assistant.utils.path_utils import get_resources_dir as _get_resources_dir
 
@@ -82,15 +82,7 @@ def _format_health_beliefs() -> str:
 
     active.sort(key=lambda e: _CONFIDENCE_RANK.get(e.get("confidence", "low"), 2))
 
-    def _fmt(e: dict) -> str:
-        stmt = e.get("statement", "")
-        domain = e.get("domain", "")
-        confidence = e.get("confidence", "")
-        conditions = e.get("conditions", "")
-        cond_suffix = f" [{conditions}]" if conditions else ""
-        return f"[{domain}/{confidence}] {stmt}{cond_suffix}"
-
-    return "\n".join(_fmt(e) for e in active) if active else "(no active health beliefs)"
+    return "\n".join(format_belief_line(e) for e in active) if active else "(no active health beliefs)"
 
 
 def _format_sleep_output(ctx: StepContext) -> str:
@@ -139,21 +131,12 @@ class HealthStatusStep(BaseStep):
 
     step_id: str = "health_status"
 
-    def _boundary_date_local(self, ctx: StepContext) -> str:
-        return str(ctx.state.get("boundary_date_local") or ctx.now_local.strftime("%Y-%m-%d"))
-
-    def _day_context_dir(self, ctx: StepContext, boundary_date_local: str) -> Path:
-        year = boundary_date_local[:4]
-        month = boundary_date_local[5:7]
-        repo_root = Path(ctx.resources_dir).parent
-        return repo_root / "day_context" / year / month / boundary_date_local
-
     def _already_generated_today(self, ctx: StepContext, boundary_date_local: str) -> bool:
         runs = ctx.state.get("step_runs", {})
         info = runs.get(self.step_id, {}) if isinstance(runs, dict) else {}
         if isinstance(info, dict) and info.get("last_generated_boundary") == boundary_date_local:
             latest_path = Path(ctx.resources_dir) / _LATEST_FILENAME
-            archive_path = self._day_context_dir(ctx, boundary_date_local) / _LATEST_FILENAME
+            archive_path = ctx.day_archive_dir(boundary_date_local) / _LATEST_FILENAME
             return latest_path.exists() and archive_path.exists()
         return False
 
@@ -194,7 +177,7 @@ class HealthStatusStep(BaseStep):
 
         md = md.strip() + "\n"
         latest_path = Path(ctx.resources_dir) / _LATEST_FILENAME
-        archive_path = self._day_context_dir(ctx, boundary_date_local) / _LATEST_FILENAME
+        archive_path = ctx.day_archive_dir(boundary_date_local) / _LATEST_FILENAME
 
         write_text_atomic(latest_path, md)
         write_text_atomic(archive_path, md)

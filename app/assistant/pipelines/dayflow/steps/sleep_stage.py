@@ -46,9 +46,6 @@ class SleepStep(BaseStep):
     def should_run(self, ctx: StepContext) -> Tuple[bool, str]:
         return True, "ready"
 
-    def _boundary_date_local(self, ctx: StepContext) -> str:
-        return str(ctx.state.get("boundary_date_local") or ctx.now_local.strftime("%Y-%m-%d"))
-
     def _pre_sleep_snapshot_path(self, ctx: StepContext, boundary_date_local: str) -> Path:
         year = boundary_date_local[:4]
         month = boundary_date_local[5:7]

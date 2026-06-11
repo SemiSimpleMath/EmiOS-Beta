@@ -31,7 +31,7 @@ from typing import Any, Dict, Optional, Tuple
 from app.assistant.utils.atomic_write import write_text_atomic
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.time_utils import parse_iso_utc
-from app.assistant.pipelines.dayflow.step_types import BaseStep, StepContext, StepResult
+from app.assistant.pipelines.dayflow.step_types import BaseStep, StepContext, StepResult, format_belief_line
 from app.assistant.scope.loader import load_scope_for_source
 
 from app.assistant.utils.path_utils import get_resources_dir as _get_resources_dir
@@ -299,19 +299,11 @@ def _render_belief_block(entries: list) -> str:
     pinned.sort(key=_sort_key)
     rest.sort(key=_sort_key)
 
-    def _fmt(e: dict) -> str:
-        stmt = e.get("statement", "")
-        domain = e.get("domain", "")
-        confidence = e.get("confidence", "")
-        conditions = e.get("conditions", "")
-        cond_suffix = f" [{conditions}]" if conditions else ""
-        return f"[{domain}/{confidence}] {stmt}{cond_suffix}"
-
     parts: list[str] = []
 
     if pinned:
         parts.append("### Always-apply (chronic, high-impact — never omit these)")
-        parts.extend(_fmt(e) for e in pinned)
+        parts.extend(format_belief_line(e) for e in pinned)
 
     from collections import defaultdict
     by_domain: dict[str, list] = defaultdict(list)
@@ -324,7 +316,7 @@ def _render_belief_block(entries: list) -> str:
         if not items:
             continue
         parts.append(f"\n### {domain.capitalize()} beliefs")
-        parts.extend(_fmt(e) for e in items)
+        parts.extend(format_belief_line(e) for e in items)
 
     return "\n".join(parts) if parts else "(no active beliefs)"
 
@@ -364,15 +356,6 @@ class DayFlowRoutineStep(BaseStep):
     """
 
     step_id: str = "dayflow_routine"
-
-    def _boundary_date_local(self, ctx: StepContext) -> str:
-        return str(ctx.state.get("boundary_date_local") or ctx.now_local.strftime("%Y-%m-%d"))
-
-    def _day_context_dir(self, ctx: StepContext, boundary_date_local: str) -> Path:
-        year = boundary_date_local[:4]
-        month = boundary_date_local[5:7]
-        repo_root = Path(ctx.resources_dir).parent
-        return repo_root / "day_context" / year / month / boundary_date_local
 
     def _last_generated_at(self, ctx: StepContext) -> Optional[datetime]:
         runs = ctx.state.get("step_runs", {})
@@ -445,7 +428,7 @@ class DayFlowRoutineStep(BaseStep):
 
         md = md.strip() + "\n"
         latest_path = Path(ctx.resources_dir) / _LATEST_FILENAME
-        archive_path = self._day_context_dir(ctx, boundary_date_local) / _LATEST_FILENAME
+        archive_path = ctx.day_archive_dir(boundary_date_local) / _LATEST_FILENAME
 
         write_text_atomic(latest_path, md)
         write_text_atomic(archive_path, md)

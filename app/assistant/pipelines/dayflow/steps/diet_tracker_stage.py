@@ -12,7 +12,7 @@ Purpose:
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.time_utils import (
@@ -46,11 +46,6 @@ class DietTrackerStep(BaseStep):
         if self._store is None:
             self._store = PodStore()
         return self._store
-
-    def _get_last_run_utc(self, ctx: StepContext) -> Optional[datetime]:
-        step_runs = ctx.state.get("step_runs", {})
-        info = step_runs.get(self.step_id, {}) if isinstance(step_runs, dict) else {}
-        return parse_iso_utc(info.get("last_run_utc")) if isinstance(info, dict) else None
 
     def _since_for_query(self, ctx: StepContext) -> datetime:
         """On first run, look back a day so we don't miss breakfast;

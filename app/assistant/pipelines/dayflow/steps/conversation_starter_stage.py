@@ -20,7 +20,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from app.assistant.pipelines.dayflow.step_types import BaseStep, StepContext, StepResult
 from app.assistant.pipelines.dayflow.utils.room_scope import resolve_room_scope
-from app.assistant.scope.loader import load_scope_for_source
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -156,21 +155,6 @@ class _GateDecision:
 
 class ConversationStarterStep(BaseStep):
     step_id: str = "conversation_starter"
-
-    def _build_pipeline_scope_context(self, agent_input: dict):
-        history_scope = agent_input.get("history_scope") if isinstance(agent_input, dict) else {}
-        room_id = str(history_scope.get("room_id") or "").strip() if isinstance(history_scope, dict) else ""
-        room_surface = str(history_scope.get("room_surface") or "").strip() if isinstance(history_scope, dict) else ""
-        return load_scope_for_source(kind="pipeline", source_id="dayflow", actor_id=f"{self.step_id}_runner", identity_overrides={"room_id": room_id or None, "surface": (room_surface or None) or "pipeline"})
-
-    def _boundary_date_local(self, ctx: StepContext) -> str:
-        return str(ctx.state.get("boundary_date_local") or ctx.now_local.strftime("%Y-%m-%d"))
-
-    def _day_dir(self, ctx: StepContext, boundary_date_local: str) -> Path:
-        year = boundary_date_local[:4]
-        month = boundary_date_local[5:7]
-        repo_root = Path(ctx.resources_dir).parent
-        return repo_root / "day_context" / year / month / boundary_date_local
 
     def _latest_pointer_path(self, ctx: StepContext) -> Path:
         return Path(ctx.resources_dir) / "resource_conversation_starters_latest.json"
@@ -815,7 +799,7 @@ class ConversationStarterStep(BaseStep):
             logger.warning("ConversationStarterStage: failed to record to global blackboard: %s", e)
 
         # Append JSONL log
-        day_dir = self._day_dir(ctx, boundary_date_local)
+        day_dir = ctx.day_archive_dir(boundary_date_local)
         log_path = day_dir / "conversation_starters.jsonl"
         entry = {
             "schema_version": 1,

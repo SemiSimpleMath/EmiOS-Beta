@@ -57,6 +57,19 @@ class StepContext:
     day_dir: Path
     new_chat_messages: List[Dict[str, Any]] = field(default_factory=list)
 
+    def day_archive_dir(self, boundary_date_local: str) -> Path:
+        """Per-day archive dir used by step-local snapshots / markdown archives.
+
+        NOTE (dedup audit 2026-06-10): this resolves under
+        ``resources/day_context/...`` — a SEPARATE tree from ``day_dir``
+        (``<repo_root>/day_context/...``). Every step helper this replaced
+        used the resources-rooted tree, so behavior is preserved as-is;
+        unifying the two trees is a data-migration decision.
+        """
+        year = boundary_date_local[:4]
+        month = boundary_date_local[5:7]
+        return Path(self.resources_dir).parent / "day_context" / year / month / boundary_date_local
+
     def read_resource(self, filename: str) -> Optional[Dict[str, Any]]:
         return _read_json_file(self.resources_dir / filename)
 
@@ -91,6 +104,17 @@ class StepContext:
             pass
 
 
+def format_belief_line(e: dict) -> str:
+    """One belief as ``[domain/confidence] statement [conditions]`` — the
+    shared rendering used by the health-status and dayflow-routine stages."""
+    stmt = e.get("statement", "")
+    domain = e.get("domain", "")
+    confidence = e.get("confidence", "")
+    conditions = e.get("conditions", "")
+    cond_suffix = f" [{conditions}]" if conditions else ""
+    return f"[{domain}/{confidence}] {stmt}{cond_suffix}"
+
+
 class BaseStep:
     """
     Base class for DayFlow steps.
@@ -100,6 +124,80 @@ class BaseStep:
 
     def should_run(self, ctx: StepContext) -> Tuple[bool, str]:
         return True, "ready"
+
+    # ------------------------------------------------------------------
+    # Shared step helpers (dedup audit 2026-06-10 — were copy-pasted
+    # across six-plus stages).
+    # ------------------------------------------------------------------
+
+    def _build_pipeline_scope_context(
+        self,
+        agent_input: Optional[Dict[str, Any]] = None,
+        *,
+        history_scope: Optional[Dict[str, Any]] = None,
+    ):
+        """Dayflow pipeline scope for this step's agent invocations.
+
+        Pass the agent_input dict (its ``history_scope`` is extracted) or
+        ``history_scope`` directly; with neither, identity falls back to
+        the bare pipeline surface.
+        """
+        from app.assistant.scope.loader import load_scope_for_source
+
+        if history_scope is None and isinstance(agent_input, dict):
+            history_scope = agent_input.get("history_scope")
+        scope_data = history_scope if isinstance(history_scope, dict) else {}
+        room_id = str(scope_data.get("room_id") or "").strip()
+        room_surface = str(scope_data.get("room_surface") or "").strip()
+        return load_scope_for_source(
+            kind="pipeline",
+            source_id="dayflow",
+            actor_id=f"{self.step_id}_runner",
+            identity_overrides={
+                "room_id": room_id or None,
+                "surface": (room_surface or None) or "pipeline",
+            },
+        )
+
+    def _get_last_run_utc(self, ctx: StepContext):
+        """This step's last_run_utc from pipeline state (aware UTC or None)."""
+        from app.assistant.utils.time_utils import parse_iso_utc
+
+        step_runs = ctx.state.get("step_runs", {})
+        info = step_runs.get(self.step_id, {}) if isinstance(step_runs, dict) else {}
+        return parse_iso_utc(info.get("last_run_utc")) if isinstance(info, dict) else None
+
+    def _get_afk_snapshot(self, *, strict: bool = False) -> Dict[str, Any]:
+        """Realtime AFKMonitor snapshot.
+
+        ``strict=True`` raises loudly when the monitor is missing or returns
+        a non-dict (steps whose output is meaningless without it); the
+        default is best-effort and returns {}.
+        """
+        try:
+            monitor = getattr(DI, "afk_monitor", None)
+            if monitor is None:
+                if strict:
+                    logger.error("%s: DI.afk_monitor is missing (strict mode)", type(self).__name__)
+                    raise RuntimeError("AFKMonitor missing: DI.afk_monitor is None")
+                return {}
+            snapshot = monitor.get_computer_activity()
+            if not isinstance(snapshot, dict):
+                if strict:
+                    logger.error(
+                        "%s: AFKMonitor returned invalid snapshot type=%s",
+                        type(self).__name__, type(snapshot),
+                    )
+                    raise RuntimeError(f"AFKMonitor returned invalid snapshot type: {type(snapshot)}")
+                return {}
+            return snapshot
+        except Exception:
+            if strict:
+                raise
+            return {}
+
+    def _boundary_date_local(self, ctx: StepContext) -> str:
+        return str(ctx.state.get("boundary_date_local") or ctx.now_local.strftime("%Y-%m-%d"))
 
     def run(self, ctx: StepContext) -> StepResult:
         raise NotImplementedError
