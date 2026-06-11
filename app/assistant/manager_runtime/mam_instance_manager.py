@@ -22,7 +22,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from app.assistant.routine_manager.utils import status_dir, write_json_file
+from app.assistant.routine_manager.utils import status_dir
+from app.assistant.utils.atomic_write import write_json_atomic
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -359,7 +360,7 @@ class MAMInstanceManager:
         try:
             payload = self.get_status_payload()
             path = status_dir() / "resource_manager_invocation_status.json"
-            write_json_file(path, payload)
+            write_json_atomic(path, payload)
             resource_manager = self._resource_manager
             if resource_manager is None:
                 from app.assistant.ServiceLocator.service_locator import DI

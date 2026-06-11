@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
-from app.assistant.routine_manager.utils import read_json_file, status_dir, write_json_file
+from app.assistant.routine_manager.utils import read_json_file, status_dir
+from app.assistant.utils.atomic_write import write_json_atomic
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_repo_root
 from app.assistant.utils.pydantic_classes import ToolMessage, ToolResult
@@ -130,7 +131,7 @@ def _auto_disable_at_0830_local_if_needed(control: Dict[str, Any], now_local: da
             control["disabled_reason"] = "auto_off_08_30_local"
             control["auto_disabled_date_local"] = today
             try:
-                write_json_file(_control_path(), control)
+                write_json_atomic(_control_path(), control)
             except Exception as e:
                 logger.warning("Failed to persist auto-disable control file: %s", e)
     except Exception:

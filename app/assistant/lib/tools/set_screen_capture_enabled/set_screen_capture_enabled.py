@@ -5,7 +5,8 @@ from pathlib import Path
 from typing import Any, Dict
 
 from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
-from app.assistant.routine_manager.utils import read_json_file, status_dir, write_json_file
+from app.assistant.routine_manager.utils import read_json_file, status_dir
+from app.assistant.utils.atomic_write import write_json_atomic
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import ToolMessage, ToolResult
 
@@ -67,7 +68,7 @@ class SetScreenCaptureEnabledTool(BaseTool):
             control["disabled_by"] = actor
             control["disabled_reason"] = reason or "manual_off"
 
-        write_json_file(_control_path(), control)
+        write_json_atomic(_control_path(), control)
         logger.info("Screen capture toggle updated: enabled=%s by=%s", enabled, actor)
 
         return ToolResult(

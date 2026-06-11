@@ -16,13 +16,11 @@ Notes:
 
 from __future__ import annotations
 
-import json
-import os
-import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
+from app.assistant.utils.atomic_write import write_json_atomic
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.time_utils import get_local_timezone, local_to_utc, parse_iso_utc, utc_to_local
 from app.assistant.pipelines.dayflow.step_types import BaseStep, StepContext, StepResult
@@ -64,23 +62,6 @@ class SleepStep(BaseStep):
             / boundary_date_local
             / "sleep_pre_sleep_snapshot.json"
         )
-
-    @staticmethod
-    def _write_json_atomic(path: Path, data: Dict[str, Any]) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
-        try:
-            with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp_path, str(path))
-        except BaseException:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
 
     def _maybe_write_pre_sleep_snapshot(self, ctx: StepContext, sleep_output: Dict[str, Any]) -> bool:
         """
@@ -138,12 +119,12 @@ class SleepStep(BaseStep):
             "sleep_output": sleep_output,
             "notes": "Pre-sleep hardened snapshot captured near sleep_window.start to preserve naps/daily sleep stats before bedtime roll-in.",
         }
-        self._write_json_atomic(out_path, payload)
+        write_json_atomic(out_path, payload)
 
         # Write a small "latest pointer" into resources/ for injection/debugging.
         try:
             pointer_path = Path(ctx.resources_dir) / "resource_sleep_pre_sleep_snapshot_latest.json"
-            self._write_json_atomic(
+            write_json_atomic(
                 pointer_path,
                 {
                     "schema_version": 1,

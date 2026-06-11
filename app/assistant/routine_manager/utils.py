@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from app.assistant.utils.atomic_write import write_json_atomic
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_resources_dir
 from app.assistant.utils.time_utils import get_local_timezone
@@ -49,38 +48,6 @@ def read_json_file(path: Path) -> Optional[Dict[str, Any]]:
         return None
 
 
-def write_json_file(path: Path, data: Dict[str, Any]) -> None:
-    """Atomic JSON write: write to temp file, fsync, then rename.
-
-    On Windows, os.replace can fail with PermissionError if another thread
-    has the target file open momentarily. Retry a few times with a short
-    backoff before propagating.
-    """
-    import time
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
-    try:
-        with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-            f.flush()
-            os.fsync(f.fileno())
-        for attempt in range(5):
-            try:
-                os.replace(tmp_path, str(path))
-                return
-            except PermissionError:
-                if attempt == 4:
-                    raise
-                time.sleep(0.05 * (attempt + 1))
-    except BaseException:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
-
-
 def read_json_optional(path: Path) -> Any:
     if not path.exists():
         return None
@@ -119,5 +86,5 @@ def write_latest_pointer_json(
     }
     if extra:
         payload.update(extra)
-    write_json_file(pointers_dir() / resource_filename, payload)
+    write_json_atomic(pointers_dir() / resource_filename, payload)
 

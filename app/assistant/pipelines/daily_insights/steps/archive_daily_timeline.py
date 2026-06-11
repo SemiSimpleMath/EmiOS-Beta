@@ -6,7 +6,8 @@ from pathlib import Path
 from typing import Any, List, Optional
 
 from app.assistant.ServiceLocator.service_locator import DI
-from app.assistant.routine_manager.utils import read_json_file, write_json_file, write_latest_pointer_json
+from app.assistant.routine_manager.utils import read_json_file, write_latest_pointer_json
+from app.assistant.utils.atomic_write import write_json_atomic
 from app.assistant.utils.pydantic_classes import Message
 from app.assistant.utils.time_utils import utc_to_local, local_to_utc, get_local_time_str, get_local_timezone
 
@@ -198,7 +199,7 @@ class ArchiveDailyTimelineStep:
             "timeline": merged_sorted,
             "notes": normalized.get("notes") if isinstance(normalized, dict) else "",
         }
-        write_json_file(out_path, payload)
+        write_json_atomic(out_path, payload)
         write_latest_pointer_json(
             resource_filename="resource_daily_timeline_latest.json",
             date_str=ctx.date_str,

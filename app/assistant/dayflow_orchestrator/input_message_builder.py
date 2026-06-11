@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from app.assistant.ServiceLocator.service_locator import DI
-from app.assistant.routine_manager.utils import write_json_file
+from app.assistant.utils.atomic_write import write_json_atomic
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_configs_dir, get_resources_dir
 from app.assistant.utils.pydantic_classes import Message
@@ -416,7 +416,7 @@ def _seed_expected_calendar_from_api(*, now_utc: datetime) -> Dict[str, Any]:
     }
     # Persist canonical file directly, then hydrate resource cache.
     expected_calendar_path = get_resources_dir() / "dayflow_pipeline_outputs" / "resource_expected_calendar.json"
-    write_json_file(expected_calendar_path, payload)
+    write_json_atomic(expected_calendar_path, payload)
     resource_manager.update_resource("resource_expected_calendar", payload, persist=False)
     logger.info(
         "Auto-seeded resource_expected_calendar from API (%d item(s), boundary=%s).",

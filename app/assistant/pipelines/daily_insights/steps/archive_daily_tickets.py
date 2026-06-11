@@ -3,7 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List
 
-from app.assistant.routine_manager.utils import write_json_file, write_latest_pointer_json
+from app.assistant.routine_manager.utils import write_latest_pointer_json
+from app.assistant.utils.atomic_write import write_json_atomic
 from app.assistant.utils.time_utils import get_local_timezone
 
 from app.assistant.pipelines.context import PipelineContext
@@ -50,7 +51,7 @@ class ArchiveDailyTicketsStep:
             "count": len(ticket_dicts),
             "tickets": ticket_dicts,
         }
-        write_json_file(out_path, payload)
+        write_json_atomic(out_path, payload)
         write_latest_pointer_json(
             resource_filename="resource_daily_tickets_latest.json",
             date_str=ctx.date_str,

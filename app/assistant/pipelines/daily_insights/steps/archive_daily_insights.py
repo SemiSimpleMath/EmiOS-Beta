@@ -5,7 +5,8 @@ from pathlib import Path
 from typing import Any, List
 
 from app.assistant.ServiceLocator.service_locator import DI
-from app.assistant.routine_manager.utils import daily_insights_outputs_dir, write_json_file, read_json_file
+from app.assistant.routine_manager.utils import daily_insights_outputs_dir, read_json_file
+from app.assistant.utils.atomic_write import write_json_atomic
 from app.assistant.utils.pydantic_classes import Message
 from app.assistant.utils.time_utils import get_local_timezone, get_local_time_str
 
@@ -83,9 +84,9 @@ class ArchiveDailyInsightsStep:
             "actionable_information": filtered,
             "dropped_tags": dropped_tags,
         }
-        write_json_file(out_path, out_payload)
+        write_json_atomic(out_path, out_payload)
 
         latest_payload = dict(out_payload)
         latest_payload["archive_path"] = str(out_path)
-        write_json_file(daily_insights_outputs_dir() / "resource_daily_insights.json", latest_payload)
+        write_json_atomic(daily_insights_outputs_dir() / "resource_daily_insights.json", latest_payload)
 

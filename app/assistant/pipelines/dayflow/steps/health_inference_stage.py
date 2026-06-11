@@ -16,12 +16,11 @@ Notes:
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from app.assistant.utils.atomic_write import write_json_atomic
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.time_utils import parse_iso_utc
 from app.assistant.pipelines.dayflow.step_types import BaseStep, StepContext, StepResult
@@ -79,23 +78,6 @@ class HealthInferenceStep(BaseStep):
             / "health_snapshots.json"
         )
 
-    @staticmethod
-    def _write_json_atomic(path: Path, data: Dict[str, Any]) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
-        try:
-            with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp_path, str(path))
-        except BaseException:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
-
     def _load_snapshots_file(self, path: Path) -> Dict[str, Any]:
         if not path.exists():
             return {}
@@ -145,7 +127,7 @@ class HealthInferenceStep(BaseStep):
             "count": len(snapshots),
             "snapshots": snapshots,
         }
-        self._write_json_atomic(path, out)
+        write_json_atomic(path, out)
         return True, len(snapshots)
 
     def _get_last_run_utc(self, ctx: StepContext) -> Optional[datetime]:
@@ -356,7 +338,7 @@ class HealthInferenceStep(BaseStep):
             if snapshot_written:
                 try:
                     pointer_path = Path(ctx.resources_dir) / "resource_health_snapshots_latest.json"
-                    self._write_json_atomic(
+                    write_json_atomic(
                         pointer_path,
                         {
                             "schema_version": 1,

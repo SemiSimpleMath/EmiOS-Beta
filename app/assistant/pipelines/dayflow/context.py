@@ -5,7 +5,8 @@ from datetime import timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict
 
-from app.assistant.routine_manager.utils import read_json_file, resources_dir, utc_now, write_json_file
+from app.assistant.routine_manager.utils import read_json_file, resources_dir, utc_now
+from app.assistant.utils.atomic_write import write_json_atomic
 from app.assistant.utils.time_utils import get_local_time
 
 
@@ -120,7 +121,7 @@ class DayFlowContext:
 
     def save_state(self) -> None:
         self.state["last_updated_utc"] = utc_now().isoformat()
-        write_json_file(self.state_path, self.state)
+        write_json_atomic(self.state_path, self.state)
 
     def ensure_boundary_state(self) -> bool:
         prev = self.state.get("boundary_date_local")

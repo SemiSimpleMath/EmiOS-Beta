@@ -11,10 +11,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import random
 import re
-import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -139,23 +137,6 @@ def _in_time_range(now_local: datetime, spec: str) -> bool:
         return start <= now_local <= end
     # Wraps midnight
     return now_local >= start or now_local <= end
-
-
-def _write_text_atomic(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
-    try:
-        with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
-            f.write(text)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, str(path))
-    except BaseException:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
 
 
 def _read_json_optional(path: Path) -> Any:

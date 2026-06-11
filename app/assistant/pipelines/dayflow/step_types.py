@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.assistant.ServiceLocator.service_locator import DI
+from app.assistant.utils.atomic_write import write_json_atomic
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -23,26 +22,6 @@ def _read_json_file(path: Path) -> Optional[Dict[str, Any]]:
     except Exception as e:
         logger.warning("Failed to read JSON file: %s (%s)", path, e)
         return None
-
-
-def _write_json_file_atomic(path: Path, data: Dict[str, Any]) -> None:
-    """
-    Atomic JSON write (best-effort) to reduce corruption risk on crash.
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
-    try:
-        with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, str(path))
-    except BaseException:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
 
 
 @dataclass
@@ -91,13 +70,13 @@ class StepContext:
           `day_context/.../<boundary_date>/resource_snapshots/<filename>`.
         """
         # 1) Latest output (injection source)
-        _write_json_file_atomic(self.resources_dir / filename, data)
+        write_json_atomic(self.resources_dir / filename, data)
 
         # 2) Archive mirror (best-effort)
         try:
             if filename.startswith("resource_") and filename.lower().endswith(".json"):
                 snap_dir = self.day_dir / "resource_snapshots"
-                _write_json_file_atomic(snap_dir / filename, data)
+                write_json_atomic(snap_dir / filename, data)
         except Exception:
             # Mirroring is best-effort; pipeline must keep running.
             pass

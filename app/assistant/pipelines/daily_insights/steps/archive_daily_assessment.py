@@ -3,7 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, List, Optional
 
-from app.assistant.routine_manager.utils import read_json_optional, write_json_file, write_latest_pointer_json
+from app.assistant.routine_manager.utils import read_json_optional, write_latest_pointer_json
+from app.assistant.utils.atomic_write import write_json_atomic
 from app.assistant.utils.time_utils import get_local_timezone
 
 from app.assistant.pipelines.context import PipelineContext
@@ -136,7 +137,7 @@ class ArchiveDailyAssessmentStep:
             counts["insights_applied_count"] = apply_results.get("count")
 
         out_path = ctx.day_dir / "resource_daily_assessment.json"
-        write_json_file(
+        write_json_atomic(
             out_path,
             {
                 "schema_version": 1,

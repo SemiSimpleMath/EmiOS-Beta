@@ -24,12 +24,11 @@ visibility before the planner has to act.
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
+from app.assistant.utils.atomic_write import write_text_atomic
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.time_utils import parse_iso_utc
 from app.assistant.pipelines.dayflow.step_types import BaseStep, StepContext, StepResult
@@ -46,23 +45,6 @@ _WEEKLY_INSIGHTS_PATH = _get_resources_dir() / "weekly_insights_pipeline_outputs
 
 # Re-generate at most once per hour
 _MIN_REGEN_INTERVAL_SECONDS = 3600
-
-
-def _write_text_atomic(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
-    try:
-        with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
-            f.write(text)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, str(path))
-    except BaseException:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
 
 
 # Window covers at minimum 5 hours forward (the floor) and extends up to
@@ -465,8 +447,8 @@ class DayFlowRoutineStep(BaseStep):
         latest_path = Path(ctx.resources_dir) / _LATEST_FILENAME
         archive_path = self._day_context_dir(ctx, boundary_date_local) / _LATEST_FILENAME
 
-        _write_text_atomic(latest_path, md)
-        _write_text_atomic(archive_path, md)
+        write_text_atomic(latest_path, md)
+        write_text_atomic(archive_path, md)
 
         try:
             from app.assistant.ServiceLocator.service_locator import DI

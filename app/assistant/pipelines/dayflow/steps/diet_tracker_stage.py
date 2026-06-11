@@ -311,7 +311,6 @@ def _write_markdown_view(ctx: StepContext, log: Dict[str, Any]) -> None:
     md_text = "\n".join(lines)
 
     # Write via resources_dir directly — ctx.write_resource is JSON-only.
-    from app.assistant.pipelines.dayflow.step_types import _write_json_file_atomic  # noqa: F401
     md_path = ctx.resources_dir / _OUTPUT_MD_FILENAME
     md_path.parent.mkdir(parents=True, exist_ok=True)
     md_path.write_text(md_text, encoding="utf-8")

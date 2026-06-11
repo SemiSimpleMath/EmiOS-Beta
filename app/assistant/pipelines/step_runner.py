@@ -6,7 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from app.assistant.routine_manager.utils import write_json_file, utc_now
+from app.assistant.routine_manager.utils import utc_now
+from app.assistant.utils.atomic_write import write_json_atomic
 from app.assistant.utils.logging_config import get_logger
 
 from .step_types import PipelineStep, StepResult, outputs_exist
@@ -144,7 +145,7 @@ class PipelineRunner:
         )
 
         # Always write audit file.
-        write_json_file(
+        write_json_atomic(
             ctx.audit_path(),
             {
                 "schema_version": 1,

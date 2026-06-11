@@ -14,11 +14,11 @@ from app.assistant.utils.path_utils import get_resources_dir, get_configs_dir, s
 from app.assistant.utils.time_utils import utc_to_local
 from app.assistant.routine_manager.utils import (
     read_json_file,
-    write_json_file,
     utc_now,
     parse_iso_utc,
     status_dir,
 )
+from app.assistant.utils.atomic_write import write_json_atomic
 from app.assistant.routine_manager.windows import (
     is_in_window,
     resolve_window,
@@ -351,7 +351,7 @@ class RoutineManager:
     def _save_state_unlocked(self, config: Dict[str, Any]) -> None:
         state_file = str(config.get("state_resource_file") or "resource_routine_status.json")
         path = _resources_dir() / state_file
-        write_json_file(path, self._state)
+        write_json_atomic(path, self._state)
         resource_manager = self._resource_manager
         if resource_manager is None:
             from app.assistant.ServiceLocator.service_locator import DI  # local import — shim only
@@ -588,7 +588,7 @@ class RoutineManager:
                     data["disabled_by"] = "system"
                     data["disabled_reason"] = f"auto_off_{auto_off.replace(':', '')}_local"
                     data["auto_disabled_date_local"] = today
-                    write_json_file(path, data)
+                    write_json_atomic(path, data)
                     logger.info(
                         "%s ROUTINE AUTO-OFF %s id=%s reason=%s",
                         self._BANNER_LINE,
@@ -1638,7 +1638,7 @@ class RoutineManager:
         payload = self._build_runtime_status_payload(config=config)
         self._last_runtime_status = payload
         status_path = status_dir() / "resource_runtime_concurrency_status.json"
-        write_json_file(status_path, payload)
+        write_json_atomic(status_path, payload)
         resource_manager = self._resource_manager
         if resource_manager is None:
             from app.assistant.ServiceLocator.service_locator import DI  # local import — shim only

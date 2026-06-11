@@ -19,8 +19,6 @@ Storage:
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,6 +26,7 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
+from app.assistant.utils.atomic_write import write_text_atomic
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -74,23 +73,6 @@ def _latest_pointer_path(owner_id: str) -> Path:
     return _repo_root() / "resources" / "context_engine" / owner_id / "situation_brief_latest.json"
 
 
-def _write_atomic(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(text)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, str(path))
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
-
-
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -108,7 +90,7 @@ def save_brief(brief: SituationBrief) -> Path:
     """
     brief_path = _briefs_dir(brief.owner_id) / f"{brief.brief_id}.json"
     payload = brief.model_dump_json(indent=2)
-    _write_atomic(brief_path, payload)
+    write_text_atomic(brief_path, payload)
 
     pointer = {
         "brief_id": brief.brief_id,
@@ -117,7 +99,7 @@ def save_brief(brief: SituationBrief) -> Path:
         "seeds": brief.seeds,
         "brief_path": str(brief_path),
     }
-    _write_atomic(_latest_pointer_path(brief.owner_id), json.dumps(pointer, indent=2))
+    write_text_atomic(_latest_pointer_path(brief.owner_id), json.dumps(pointer, indent=2))
 
     logger.debug("situation_brief: saved brief_id=%s path=%s", brief.brief_id, brief_path)
     return brief_path

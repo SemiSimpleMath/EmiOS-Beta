@@ -4,7 +4,8 @@ from pathlib import Path
 from typing import Any, List
 
 from app.assistant.ServiceLocator.service_locator import DI
-from app.assistant.routine_manager.utils import daily_insights_outputs_dir, read_json_optional, write_json_file, write_text_file
+from app.assistant.routine_manager.utils import daily_insights_outputs_dir, read_json_optional, write_text_file
+from app.assistant.utils.atomic_write import write_json_atomic
 from app.assistant.utils.pydantic_classes import Message
 from app.assistant.utils.time_utils import get_local_timezone, get_local_time_str
 
@@ -48,7 +49,7 @@ class ArchiveDailyAssessmentSummaryStep:
             payload = result
 
         summary_path = ctx.day_dir / "resource_daily_assessment_summary.json"
-        write_json_file(
+        write_json_atomic(
             summary_path,
             {
                 "schema_version": 1,
@@ -70,7 +71,7 @@ class ArchiveDailyAssessmentSummaryStep:
         }
         if isinstance(latest_summary_payload, dict):
             latest_summary_payload["archive_path"] = str(summary_path)
-            write_json_file(daily_insights_outputs_dir() / "resource_daily_assessment_summary.json", latest_summary_payload)
+            write_json_atomic(daily_insights_outputs_dir() / "resource_daily_assessment_summary.json", latest_summary_payload)
 
         # Markdown view (best-effort)
         title = str(payload.get("title") or f"Daily Assessment Summary -- {ctx.date_str}")

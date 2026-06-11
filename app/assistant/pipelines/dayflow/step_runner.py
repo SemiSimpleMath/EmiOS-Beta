@@ -218,9 +218,9 @@ class DayFlowRunner:
             "notes": "Step-based DayFlow.",
         }
 
-        from app.assistant.routine_manager.utils import write_json_file
+        from app.assistant.utils.atomic_write import write_json_atomic
 
-        write_json_file(ctx.audit_path(), audit)
+        write_json_atomic(ctx.audit_path(), audit)
 
         # Retain only the most recent audits for this day.
         try:

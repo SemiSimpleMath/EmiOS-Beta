@@ -13,11 +13,10 @@ Writes:
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from app.assistant.utils.atomic_write import write_text_atomic
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.pipelines.dayflow.step_types import BaseStep, StepContext, StepResult
 from app.assistant.scope.loader import load_scope_for_source
@@ -57,23 +56,6 @@ _EXCLUDED_BELIEF_KEYS = {
 }
 
 _CONFIDENCE_RANK = {"high": 0, "medium": 1, "low": 2}
-
-
-def _write_text_atomic(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
-    try:
-        with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
-            f.write(text)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, str(path))
-    except BaseException:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
 
 
 def _format_health_beliefs() -> str:
@@ -214,8 +196,8 @@ class HealthStatusStep(BaseStep):
         latest_path = Path(ctx.resources_dir) / _LATEST_FILENAME
         archive_path = self._day_context_dir(ctx, boundary_date_local) / _LATEST_FILENAME
 
-        _write_text_atomic(latest_path, md)
-        _write_text_atomic(archive_path, md)
+        write_text_atomic(latest_path, md)
+        write_text_atomic(archive_path, md)
 
         try:
             from app.assistant.ServiceLocator.service_locator import DI
