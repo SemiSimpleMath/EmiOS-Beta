@@ -55,11 +55,17 @@ Steps:
     assert "fact_1" not in data_ids
 
 
-def test_preprovided_artifact_include_compiles_to_resource_ref():
-    source_task = """# Task
+def test_preprovided_artifact_include_compiles_to_resource_ref(tmp_path):
+    # The coercer validates the include file exists, so use a real temp file
+    # (the old fixture pointed at a gitignored personal file under tasks/ —
+    # the test only passed on machines that had it).
+    include_file = tmp_path / "contact.bio.md"
+    include_file.write_text("bio context", encoding="utf-8")
+    include_path = include_file.as_posix()
+    source_task = f"""# Task
 
 Already provided facts and artifacts (readily consumable, do not re-materialize):
-- artifact_1: Mark bio context from include `tasks/email_mark/Katy.bio.md`.
+- artifact_1: Contact bio context from include `{include_path}`.
 
 Steps:
 1) Do thing.
@@ -72,7 +78,7 @@ Steps:
         tool_registry=None,
     )
 
-    preloaded = node._extract_preloaded_task_state(compile_seed=compile_seed)
+    preloaded = node._extract_preloaded_task_state(compile_seed=compile_seed, draft={})
     artifacts = preloaded.get("artifacts")
     assert isinstance(artifacts, dict)
     artifact_1 = artifacts.get("artifact_1")
@@ -80,7 +86,7 @@ Steps:
     ref = artifact_1.get("__resource_ref__")
     assert isinstance(ref, dict)
     assert ref.get("kind") == "repo_file"
-    assert ref.get("path") == "tasks/email_mark/Katy.bio.md"
+    assert ref.get("path") == include_path
 
 
 def test_materialize_data_bindings_allows_multi_step_deterministic_fact_updates():
@@ -229,7 +235,11 @@ Steps:
     assert "fact_3" not in data_ids
 
 
-def test_normalize_steps_by_kind_rejects_action_with_multiple_artifact_outputs():
+def test_normalize_steps_by_kind_truncates_multiple_artifact_outputs_to_first():
+    """An action declaring several artifact_* outputs keeps only the FIRST —
+    extras are LLM over-declarations, dropped with a warning (the old
+    contract raised; truncation keeps compilation moving and dead-produces
+    pruning cleans up anything unconsumed)."""
     compile_seed = {"source_task": "# Task\n\nSteps:\n1) Do thing."}
     node = TaskCompilePostNode(
         name="task_compile_post_node",
@@ -251,5 +261,8 @@ def test_normalize_steps_by_kind_rejects_action_with_multiple_artifact_outputs()
         {"id": "s2", "kind": "end", "title": "Done"},
     ]
 
-    with pytest.raises(ValueError, match="at most one artifact"):
-        node._normalize_steps_by_kind(steps)
+    normalized = node._normalize_steps_by_kind(steps)
+    s1 = next(s for s in normalized if s.get("id") == "s1")
+    produces = s1.get("produces_data_ids")
+    assert "artifact_1" in produces
+    assert "artifact_2" not in produces
