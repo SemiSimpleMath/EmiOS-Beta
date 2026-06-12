@@ -110,6 +110,23 @@ def system_health():
     except Exception as e:
         out["database"] = {"error": str(e)}
 
+    # KG embedding index freshness — last reconciler run (hourly diff /
+    # nightly full). Stale or missing status means the routines aren't
+    # running and chroma drift is unbounded again.
+    try:
+        from app.assistant.kg.chroma.embedding_sync import read_sync_status
+        sync_status = read_sync_status()
+        out["kg_embedding_sync"] = sync_status or {"error": "no sync has run yet"}
+        if sync_status:
+            ran_at = datetime.fromisoformat(str(sync_status.get("ran_at_utc")))
+            age_h = (datetime.now(timezone.utc) - ran_at).total_seconds() / 3600
+            out["kg_embedding_sync"]["age_hours"] = round(age_h, 2)
+            if age_h > 3:
+                degraded_reasons.append(
+                    f"kg embedding sync stale ({age_h:.1f}h since last run)")
+    except Exception as e:
+        out["kg_embedding_sync"] = {"error": str(e)}
+
     try:
         import psutil
         process = psutil.Process(os.getpid())

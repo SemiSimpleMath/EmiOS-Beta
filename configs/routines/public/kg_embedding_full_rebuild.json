@@ -1,0 +1,22 @@
+{
+  "id": "kg_embedding_full_rebuild",
+  "enabled": true,
+  "name": "KG embedding full rebuild (nightly floor)",
+  "runner": "function",
+  "spec": {
+    "function_name": "kg_embedding_full_rebuild"
+  },
+  "run_policy": {
+    "type": "daily",
+    "time_local": "04:10"
+  },
+  "max_run_seconds": 1800,
+  "on_error": {
+    "max_failures": 3,
+    "backoff_base_seconds": 600,
+    "backoff_max_seconds": 7200,
+    "then": "disable_with_ticket",
+    "auto_retry_after_seconds": 7200
+  },
+  "notes": "[Created 2026-06-12, fragility review #4.] Nightly 04:10 (after the identity refresh at 03:45 so fresh sentences embed): re-embeds EVERY node's label + identity sentence regardless of apparent freshness — the floor that catches anything the watermark-free diff logic cannot see. Drift cannot survive 24h by construction. Local MiniLM = minutes of free CPU."
+}

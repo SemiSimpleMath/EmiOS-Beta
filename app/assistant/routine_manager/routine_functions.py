@@ -142,6 +142,28 @@ def _lazy_kg_identity_sentence_refresh(*, target_date=None, routine=None):
 kg_identity_sentence_refresh = _lazy_kg_identity_sentence_refresh
 
 
+def _lazy_kg_embedding_diff_sync(*, target_date=None, routine=None):
+    """Hourly: reconcile chroma label+identity collections against sqlite
+    (ghosts removed, missing embedded, text drift re-embedded). Free local
+    MiniLM; no-op when in sync. Fragility review #4 — drift on the
+    resolution path cannot survive an hour."""
+    from app.assistant.kg.chroma.embedding_sync import sync_kg_embeddings
+    return sync_kg_embeddings(mode="diff")
+
+
+kg_embedding_diff_sync = _lazy_kg_embedding_diff_sync
+
+
+def _lazy_kg_embedding_full_rebuild(*, target_date=None, routine=None):
+    """Nightly: re-embed every node's label + identity sentence — the
+    floor; drift cannot survive 24h by construction."""
+    from app.assistant.kg.chroma.embedding_sync import sync_kg_embeddings
+    return sync_kg_embeddings(mode="full")
+
+
+kg_embedding_full_rebuild = _lazy_kg_embedding_full_rebuild
+
+
 def _lazy_kg_state_decay(*, target_date=None, routine=None):
     """Nightly: auto-close State/Event nodes whose TTL has elapsed.
 
@@ -498,6 +520,8 @@ ROUTINE_FUNCTION_REGISTRY = {
     "kg_importance_rater": kg_importance_rater,
     "entity_card_refresh": entity_card_refresh,
     "kg_identity_sentence_refresh": kg_identity_sentence_refresh,
+    "kg_embedding_diff_sync": kg_embedding_diff_sync,
+    "kg_embedding_full_rebuild": kg_embedding_full_rebuild,
     "sleep_camera_tick_local": sleep_camera_tick_local,
 }
 

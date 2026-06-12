@@ -1,0 +1,22 @@
+{
+  "id": "kg_embedding_diff_sync",
+  "enabled": true,
+  "name": "KG embedding diff sync (hourly reconciler)",
+  "runner": "function",
+  "spec": {
+    "function_name": "kg_embedding_diff_sync"
+  },
+  "run_policy": {
+    "type": "interval",
+    "min_interval_seconds": 3600
+  },
+  "max_run_seconds": 600,
+  "on_error": {
+    "max_failures": 3,
+    "backoff_base_seconds": 600,
+    "backoff_max_seconds": 7200,
+    "then": "disable_with_ticket",
+    "auto_retry_after_seconds": 7200
+  },
+  "notes": "[Created 2026-06-12, fragility review #4; hourly cadence is a user directive: 'at least the diff every hour'.] Reconciles the chroma label + identity collections against sqlite: removes ghost vectors (deleted/merged nodes), embeds missing ones (failed inline embeds, new nodes), re-embeds text drift (rename without re-embed). Local MiniLM = free; no-op when in sync. Drift on the resolution path cannot survive an hour. Ghost-cleans the context collection too (its missing/stale handling stays with the context backfill step)."
+}

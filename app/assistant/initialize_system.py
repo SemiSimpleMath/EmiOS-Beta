@@ -51,6 +51,18 @@ def initialize_system():
     agent_registry = DI.agent_registry
     validate_all(agent_registry)
 
+    # KG embedding chokepoint (fragility review #4): ORM mutations of Node
+    # identity text embed inline post-commit so no mutation path can forget
+    # chroma. Production process only — test DBs skip (tests fake chroma;
+    # inline embedding there would pollute the real index).
+    try:
+        import os as _os
+        if _os.environ.get("USE_TEST_DB", "").lower() != "true":
+            from app.assistant.kg.chroma.embedding_sync import register_kg_embedding_sync
+            register_kg_embedding_sync()
+    except Exception:
+        logger.error("Failed to register KG embedding sync chokepoint", exc_info=True)
+
 
     # Create and register the SocketManager
     socket_manager = SocketManager()
