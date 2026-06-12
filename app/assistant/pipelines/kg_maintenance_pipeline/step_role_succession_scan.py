@@ -89,7 +89,6 @@ def run(ctx: PipelineContext) -> dict:
             ev_rows = (
                 session.query(KGNodeEvidence)
                 .filter(KGNodeEvidence.node_id == n.id)
-                .order_by(KGNodeEvidence.message_timestamp.asc().nulls_last())
                 .all()
             )
             if len(ev_rows) < MIN_EVIDENCE:
@@ -101,8 +100,17 @@ def run(ctx: PipelineContext) -> dict:
         candidates = candidates[:MAX_JUDGES_PER_RUN]
 
         # Snapshot everything the judge needs while the session is open.
+        # Date-stratified sampling (evidence_sampler): a referent-change
+        # judge fed only the oldest rows cannot see the change; the sample
+        # covers the whole timespan with endpoints always included.
+        from app.assistant.kg_core.kg_utils.evidence_sampler import sample_evidence
+
         judge_inputs: List[Dict[str, Any]] = []
         for n, ev_rows in candidates:
+            sampled = sample_evidence(
+                ev_rows, cap=30,
+                date_key=lambda ev: ev.message_timestamp or ev.created_at,
+            )
             evidence = [
                 {
                     "date": (
@@ -111,7 +119,7 @@ def run(ctx: PipelineContext) -> dict:
                     ),
                     "sentence": (ev.derived_sentence or ev.source_text or "")[:300],
                 }
-                for ev in ev_rows[:30]
+                for ev in sampled
             ]
             edge_lines = []
             for e, other in (
