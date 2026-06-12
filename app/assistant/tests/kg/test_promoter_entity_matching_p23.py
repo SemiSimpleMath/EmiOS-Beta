@@ -78,8 +78,24 @@ def test_entity_resolution_gated_to_own_type():
         # A Goal proposal no longer binds to the same-label Concept…
         assert _resolve_entity_like(session, "Fitness", "Goal") is None
         # …while the same-type lookup still works.
-        hit = _resolve_entity_like(session, "Fitness", "Concept")
-        assert hit is not None and hit.node_type == "Concept"
+        hit, tier = _resolve_entity_like(session, "Fitness", "Concept")
+        assert hit.node_type == "Concept" and tier == "label"
+    finally:
+        session.close()
+
+
+# ── alias tier is not closed-form (the Jouko's-house misbind, 2026-06-12) ─
+
+
+def test_alias_hit_returns_alias_tier():
+    # "House" became an alias of a specific home via P2.2(c) accretion; an
+    # alias hit must be distinguishable from an exact-label hit so the
+    # caller can route it through node_merger instead of silently binding.
+    _mk_node("Tom's House", aliases=["House"])
+    session = get_session()
+    try:
+        hit, tier = _resolve_entity_like(session, "House", "Entity")
+        assert hit.label == "Tom's House" and tier == "alias"
     finally:
         session.close()
 
@@ -216,6 +232,22 @@ def test_race_guard_converts_concurrent_mint_to_match():
         assert outcome.resolved_node_id == existing
         n = session.query(Node).filter(Node.label == "Race Winner").count()
         assert n == 1                          # no double-mint
+    finally:
+        session.close()
+
+
+def test_race_guard_does_not_silently_bind_alias_tier_hit():
+    # The concurrent "hit" is only an alias match ("House" ∈ aliases of a
+    # specific home). A silent alias bind is the exact failure the confirm
+    # tier exists to prevent — the race guard must create, not convert.
+    home = _mk_node("Tom's House", aliases=["House"])
+    pid, pn_id = _proposal_with_entity("House")
+
+    session, dec = _apply_create_plan(pid, pn_id, "House")
+    try:
+        outcome = dec.node_outcomes[0]
+        assert outcome.action == "created_new"
+        assert outcome.resolved_node_id != home
     finally:
         session.close()
 

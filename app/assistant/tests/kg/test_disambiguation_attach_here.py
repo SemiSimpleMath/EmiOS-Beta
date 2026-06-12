@@ -136,11 +136,11 @@ def test_resolver_binds_to_disambiguation_over_exact_label_hit():
 
     session = get_session()
     try:
-        hit = _resolve_entity_like(session, "Alex", "Entity")
-        assert hit is not None and str(hit.id) == dis_id
+        hit, tier = _resolve_entity_like(session, "Alex", "Entity")
+        assert str(hit.id) == dis_id and tier == "disambiguation"
         # Any entity-like type binds to the attachment point (type-gate bypass).
-        hit2 = _resolve_entity_like(session, "Alex", "Concept")
-        assert hit2 is not None and str(hit2.id) == dis_id
+        hit2, tier2 = _resolve_entity_like(session, "Alex", "Concept")
+        assert str(hit2.id) == dis_id and tier2 == "disambiguation"
     finally:
         session.close()
 
@@ -149,8 +149,8 @@ def test_resolver_unaffected_when_no_disambiguation():
     nid = _mk_node("Springfield")
     session = get_session()
     try:
-        hit = _resolve_entity_like(session, "Springfield", "Entity")
-        assert hit is not None and str(hit.id) == nid
+        hit, tier = _resolve_entity_like(session, "Springfield", "Entity")
+        assert str(hit.id) == nid and tier == "label"
     finally:
         session.close()
 

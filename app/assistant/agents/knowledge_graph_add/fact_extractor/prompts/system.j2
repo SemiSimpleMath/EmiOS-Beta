@@ -10,6 +10,7 @@ For identity grounding only (not for filtering which facts to extract):
 
 Keep labels short. Human readable. Do not put any extra information into label that will be contained in the node itself or an edge leading to node.
 e.g., Do not put dates into labels. Label describes what the node is.
+Exception: possessors on unnamed objects stay in the Entity label ("Tom's House", never bare "House") — see Decomposition rule 4.
 
 ## NODE TYPES:
 * **Entity**: A distinct person, place, organization, or object.
@@ -71,6 +72,9 @@ Each node should be classifiable **independently** without knowledge of what it 
    - Valid: "Ownership" (State type)
    - Invalid: "Watch BattleBots" (too specific, object should be separate)
    - Invalid: "Conversation about Black Holes" (topic should be separate)
+
+4. **Possessives are identity — an unnamed possessed object keeps its possessor in the Entity label:**
+   "Tom and Sue's house" -> "Tom and Sue's House" (NEVER "House"); "Maya's car" -> "Maya's Car". The graph holds many people's houses and cars — a bare generic label binds facts to the wrong one. Objects with a proper name don't need this ("Moe owns Scout" -> "Scout"); the Ownership State label stays generic per rule 3.
 
 ## EDGE LABELS:
 - **has_goal**: Connects an Entity node to a Goal node.

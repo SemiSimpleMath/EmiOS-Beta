@@ -7,7 +7,9 @@ Walks pending proposals one at a time, evaluates each, and — when
     For each proposal (in its own transaction):
         1. Resolve/create each node:
              - Entities / Concepts / Goals / Properties:
-                 label + alias match. No match → auto-create.
+                 exact label match binds; alias match goes through
+                 node_merger confirmation (aliases accrete from mention
+                 labels and can be generic). No match → auto-create.
              - States / Events:
                  participant-subset match on their outgoing-from-entity
                  edges (resolve those participants first, then match on
@@ -97,8 +99,16 @@ _ENTITY_SEMANTIC_SIM_THRESHOLD = 0.88
 _ENTITY_SEMANTIC_TOP_K = 8
 
 
-def _resolve_entity_like(session, label: str, node_type: str) -> Optional[Node]:
+def _resolve_entity_like(session, label: str, node_type: str) -> Optional[Tuple[Node, str]]:
     """Match an Entity/Concept/Goal node by canonical label or alias.
+
+    Returns (node, tier) where tier is one of "disambiguation", "label",
+    "alias" — or None on no match. Callers must treat the tiers
+    differently: only "disambiguation" and "label" are closed-form
+    identity. "alias" is NOT — aliases accrete from bound mention labels
+    (P2.2(c) refinement), so a generic label like "House" can become an
+    alias of one specific node and silently capture every future mention
+    of anyone's house. Alias hits go through node_merger confirmation.
 
     Prefers locked + higher pagerank when multiple match.
 
@@ -129,7 +139,7 @@ def _resolve_entity_like(session, label: str, node_type: str) -> Optional[Node]:
     from app.assistant.kg.disambiguation import find_disambiguation
     dis = find_disambiguation(session, label)
     if dis is not None:
-        return dis
+        return dis, "disambiguation"
 
     hit = (
         session.query(Node)
@@ -140,10 +150,10 @@ def _resolve_entity_like(session, label: str, node_type: str) -> Optional[Node]:
         .first()
     )
     if hit:
-        return hit
+        return hit, "label"
 
     like_pat = f'%"{label_lower}"%'
-    return (
+    hit = (
         session.query(Node)
         .filter(Node.node_type.in_(allowed_types))
         .filter(func.lower(func.coalesce(func.cast(Node.aliases, type_=__import__("sqlalchemy").String), "")).like(like_pat))
@@ -151,6 +161,9 @@ def _resolve_entity_like(session, label: str, node_type: str) -> Optional[Node]:
                   Node.pagerank_score.desc().nulls_last())
         .first()
     )
+    if hit:
+        return hit, "alias"
+    return None
 
 
 def _needs_person_confirm(session, node: Node) -> bool:
@@ -2127,8 +2140,25 @@ def _prepare_proposal_plan(proposal_id: str) -> Optional[_PromoterPlan]:
         # already-resolved entity ids.
         for pn in pnodes:
             if pn.node_type in ENTITY_LIKE_TYPES and pn.node_type != "Property":
-                m = _resolve_entity_like(session, pn.label, pn.node_type)
-                if m is not None and _needs_person_confirm(session, m):
+                resolved = _resolve_entity_like(session, pn.label, pn.node_type)
+                m, tier = resolved if resolved is not None else (None, None)
+                if m is not None and tier == "alias":
+                    # Alias hits are NOT closed-form identity: aliases
+                    # accrete from bound mention labels (P2.2(c)), so a
+                    # generic label ("House") can become an alias of one
+                    # specific node and capture every future mention of
+                    # anyone's house (the wrong-house misbind, 2026-06-12).
+                    # The sentence decides: route through node_merger with
+                    # the alias hit + semantic near-matches as candidates.
+                    entity_resolutions[pn.id] = None
+                    confirm = [_snapshot_state_candidate(session, m)]
+                    seen_ids = {m.id}
+                    for c in _semantic_entity_candidates(session, pn.label, pn.node_type):
+                        if c.get("node_id") not in seen_ids:
+                            confirm.append(c)
+                            seen_ids.add(c.get("node_id"))
+                    entity_confirm_lists[pn.id] = confirm
+                elif m is not None and _needs_person_confirm(session, m):
                     # Two-Alexes guard (audit P2.3): a same-label bind to a
                     # well-connected person needs node_merger confirmation
                     # (post-session). Unconfirmed → create; a duplicate is
@@ -2504,11 +2534,15 @@ def _evaluate_and_apply(
                 # txn; on hit, convert to match instead of double-minting.
                 # Property stays out: it is subject-scoped (never bound by
                 # global label) and resolves via _resolve_property only.
-                raced = (
+                raced_hit = (
                     _resolve_entity_like(session, pn.label, pn.node_type)
                     if pn.node_type != "Property" else None
                 )
-                if raced is not None and not _needs_person_confirm(session, raced):
+                raced, raced_tier = raced_hit if raced_hit is not None else (None, None)
+                # Alias-tier raced hits don't convert: a silent alias bind is
+                # the exact failure the confirm tier exists to prevent. A
+                # twin node is the safe outcome (dup scan heals it later).
+                if raced is not None and raced_tier != "alias" and not _needs_person_confirm(session, raced):
                     pn.resolved_node_id = raced.id
                     pn.resolution_action = "matched_existing"
                     _refresh_on_reobservation(raced, proposal, proposal_node=pn)
