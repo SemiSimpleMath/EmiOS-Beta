@@ -92,10 +92,8 @@ def split_succession(
         )
     old_start = old.start_date
     if old_start is not None:
-        anchor = split_date if split_date.tzinfo else split_date
-        cmp_start = old_start.replace(tzinfo=None) if old_start.tzinfo else old_start
-        cmp_split = anchor.replace(tzinfo=None) if anchor.tzinfo else anchor
-        if cmp_split <= cmp_start:
+        from app.assistant.kg_core.kg_utils.date_compare import as_aware_utc
+        if as_aware_utc(split_date) <= as_aware_utc(old_start):
             raise ValueError(
                 f"split_date {split_date.date()} must postdate the node's "
                 f"start_date {old_start.date()}."

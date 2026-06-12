@@ -24,11 +24,12 @@ Edge-less Disambiguation nodes are the resting state and raise nothing.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import datetime
+from typing import Any, Dict, List
 
 from sqlalchemy import func, or_
 
+from app.assistant.kg_core.kg_utils.date_compare import as_aware_utc, in_window
 from app.assistant.kg_maintenance.store import upsert_finding
 from app.assistant.pipelines.context import PipelineContext
 from app.assistant.utils.logging_config import get_logger
@@ -37,15 +38,8 @@ from app.models.base import get_session
 logger = get_logger(__name__)
 
 
-def _aware(dt: Optional[datetime]) -> Optional[datetime]:
-    if dt is not None and dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt
-
-
 def _era_contains(node, d: datetime) -> bool:
-    start, end = _aware(node.start_date), _aware(node.end_date)
-    return (start is None or start <= d) and (end is None or d < end)
+    return in_window(d, node.start_date, node.end_date)
 
 
 def temporal_drain(session, dis_node_id: str, label: str) -> Dict[str, Any]:
@@ -86,8 +80,8 @@ def temporal_drain(session, dis_node_id: str, label: str) -> Dict[str, Any]:
             .order_by(KGEdgeEvidence.message_timestamp.asc().nulls_last())
             .first()
         )
-        d = _aware(ev.message_timestamp) if ev is not None and ev.message_timestamp else None
-        d = d or _aware(e.created_at)
+        d = as_aware_utc(ev.message_timestamp) if ev is not None and ev.message_timestamp else None
+        d = d or as_aware_utc(e.created_at)
         if d is None:
             continue
         containing = [era for era in eras if _era_contains(era, d)]

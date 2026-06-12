@@ -26,9 +26,8 @@ _SEMANTIC_TOP_K = 8
 
 
 def _as_aware_utc(dt: Optional[datetime]) -> Optional[datetime]:
-    if dt is not None and dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt
+    from app.assistant.kg_core.kg_utils.date_compare import as_aware_utc
+    return as_aware_utc(dt)
 
 
 def _node_dates_suffix(node) -> str:

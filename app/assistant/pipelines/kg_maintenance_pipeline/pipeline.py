@@ -114,6 +114,9 @@ class KGMaintenancePipeline:
         _run_step("role_succession_scan", lambda: (
             __import__("app.assistant.pipelines.kg_maintenance_pipeline.step_role_succession_scan", fromlist=["run"]).run(ctx)
         ))
+        _run_step("date_lint_scan", lambda: (
+            __import__("app.assistant.pipelines.kg_maintenance_pipeline.step_date_lint_scan", fromlist=["run"]).run(ctx)
+        ))
         _run_step("disambiguation_scan", lambda: (
             __import__("app.assistant.pipelines.kg_maintenance_pipeline.step_disambiguation_scan", fromlist=["run"]).run(ctx)
         ))
