@@ -101,6 +101,26 @@ class ConcernEscalation(BaseModel):
     reason: str = Field(max_length=300)
 
 
+class ConcernDisposition(BaseModel):
+    """The forced decision on a long-running concern.
+
+    The context lists concerns UNDER PRESSURE (reinforced many times since
+    the last decision, or stale in `addressing`). Each one MUST get exactly
+    one disposition this tick:
+    - accept_chronic: a real but long-term pattern; archive to dormant with
+      a summary so it stops consuming ticks (it can be re-raised as a NEW
+      concern if it sharpens).
+    - re_escalate: the handoff stalled or the situation worsened; push it
+      back to active with a fresh high-urgency escalation.
+    - keep_active: justified continuation — say WHY tracking longer is the
+      right call; the pressure rule resets and won't re-fire for a while.
+    """
+    model_config = ConfigDict(extra="forbid")
+    concern_id: str
+    action: Literal["accept_chronic", "re_escalate", "keep_active"]
+    reason: str = Field(max_length=300, description="Why this disposition is right.")
+
+
 class BeliefUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     belief_kind: str = Field(
@@ -119,6 +139,24 @@ class BeliefUpdate(BaseModel):
     half_life_days: Optional[int] = Field(
         default=None,
         description="Noticer's guess for how fast this should decay. Belief store uses kind-driven default if None.",
+    )
+
+
+class QuestionOutcome(BaseModel):
+    """Processing verdict for a question in the mailbox.
+
+    Required for every question the context lists under 'Question mailbox'.
+    `processed` means the captured answer was read AND its consequences
+    were emitted in this same tick (concern reinforce/resolve/disposition,
+    or a belief update). `expired_default_applied` retires a stale
+    unanswered question — apply the default the question itself stated.
+    """
+    model_config = ConfigDict(extra="forbid")
+    question_id: str
+    outcome: Literal["processed", "expired_default_applied"]
+    notes: str = Field(
+        max_length=300,
+        description="What the answer (or default) changed in the register.",
     )
 
 
@@ -150,8 +188,23 @@ class AgentForm(BaseModel):
     )
     resolved_concerns: List[ConcernResolution] = Field(default_factory=list)
     escalated_concerns: List[ConcernEscalation] = Field(default_factory=list)
+    concern_dispositions: List[ConcernDisposition] = Field(
+        default_factory=list,
+        description=(
+            "REQUIRED for every concern the context lists under 'CONCERNS UNDER "
+            "PRESSURE' — accept_chronic / re_escalate / keep_active with a reason. "
+            "Empty when no concern is under pressure."
+        ),
+    )
     belief_updates: List[BeliefUpdate] = Field(default_factory=list)
     pending_questions: List[PendingQuestion] = Field(default_factory=list)
+    question_outcomes: List[QuestionOutcome] = Field(
+        default_factory=list,
+        description=(
+            "REQUIRED for every item in the context's 'Question mailbox' section. "
+            "Empty when the mailbox is empty."
+        ),
+    )
     summary: str = Field(
         max_length=800,
         description="2-4 sentences on what was noticed this tick and what changed in concerns_register.",

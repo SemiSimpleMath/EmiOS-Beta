@@ -6,12 +6,15 @@ which appends the highest-priority topically-matching question to
 Emi's outbound chat replies (one question per reply, budgeted across
 a rolling window so the user doesn't get hammered).
 
-Lifecycle:
-    pending -> asked -> (no further updates; the question lives as
-                         history; a fresh question is enqueued if the
-                         topic recurs)
+Lifecycle (answer loop closed 2026-06-11):
+    pending -> asked -> answered -> closed
+                  |         (answer captured       (noticer processed the
+                  |          by the per-turn check   answer: concern updated,
+                  |          or hourly sweeper)      question retired)
+                  +-> expired (no answer in the freshness window; the
+                      noticer applies the question's stated default)
     pending -> dismissed (creator or maintenance cancelled before ask)
-    pending -> expired (freshness window passed)
+    pending -> expired (freshness window passed before it was asked)
 
 The queue is intentionally simple — no LLM-driven matching, no
 embedding similarity. The injector picks by topical_tag exact match
@@ -50,8 +53,21 @@ class PendingQuestion(Base):
     # budget-constrained (one slot per day reserved for high).
     priority = Column(String(16), nullable=False, default="medium", index=True)
 
-    # 'pending' | 'asked' | 'dismissed' | 'expired'.
+    # 'pending' | 'asked' | 'answered' | 'closed' | 'dismissed' | 'expired'.
     status = Column(String(16), nullable=False, default="pending", index=True)
+
+    # Concern in the subconscious register this question serves, when the
+    # noticer asked it. The captured answer routes back to this concern.
+    related_concern_id = Column(String, nullable=True, index=True)
+
+    # 'chat' (woven naturally into a reply — default) | 'ticket' (blocking
+    # modal; reserved for high-stakes questions with closing windows).
+    ask_mode = Column(String(16), nullable=True)
+
+    # Answer capture (per-turn check or hourly sweeper).
+    answered_at = Column(AwareUtcDateTime, nullable=True)
+    answer_text = Column(Text, nullable=True)
+    answer_message_id = Column(String, nullable=True)
 
     # Free string naming the agent or pipeline that enqueued the
     # question, for audit / dedup. e.g. 'subconscious::noticer',

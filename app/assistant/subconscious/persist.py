@@ -26,6 +26,96 @@ logger = get_logger(__name__)
 _REGISTER_REL = "resources/subconscious/resource_concerns_register.json"
 _TICK_LOG_REL = "resources/subconscious/resource_subconscious_tick_log.jsonl"
 
+# ── Lifecycle pressure knobs (2026-06-11) ────────────────────────────────
+# A concern reinforced this many times since its last disposition MUST get
+# a disposition from the noticer (accept_chronic / re_escalate /
+# keep_active). Stops eternal reinforcement sinks like the sleep concern
+# that accumulated 64 evidence items over 3 weeks with no decision.
+DISPOSITION_REINFORCEMENT_THRESHOLD = 8
+# A concern sitting in `addressing` this many days without resolution is
+# stale — the handoff likely dropped; the noticer must re-escalate or
+# resolve it.
+ADDRESSING_STALE_DAYS = 4
+# Evidence list cap per concern: keep the founding items + the freshest.
+_EVIDENCE_KEEP_HEAD = 3
+_EVIDENCE_KEEP_TAIL = 9
+# Reinforcement journal cap (entries, newest kept).
+_JOURNAL_KEEP = 10
+
+
+def _trim_evidence(existing: Dict[str, Any]) -> None:
+    """Cap the evidence list, counting what was dropped."""
+    evidence = existing.get("evidence") or []
+    cap = _EVIDENCE_KEEP_HEAD + _EVIDENCE_KEEP_TAIL
+    if len(evidence) <= cap:
+        return
+    dropped = len(evidence) - cap
+    existing["evidence"] = evidence[:_EVIDENCE_KEEP_HEAD] + evidence[-_EVIDENCE_KEEP_TAIL:]
+    existing["evidence_archived_count"] = int(existing.get("evidence_archived_count") or 0) + dropped
+
+
+def _journal_entries(notes: str) -> List[str]:
+    return [ln.strip() for ln in (notes or "").splitlines() if ln.strip()]
+
+
+def _trim_journal(existing: Dict[str, Any]) -> None:
+    """Cap the reinforcement_notes journal to the newest entries."""
+    entries = _journal_entries(existing.get("reinforcement_notes") or "")
+    if len(entries) <= _JOURNAL_KEEP:
+        return
+    dropped = len(entries) - _JOURNAL_KEEP
+    kept = entries[-_JOURNAL_KEEP:]
+    existing["reinforcement_notes"] = "\n" + "\n".join(
+        [f"({dropped} earlier notes archived)"] + kept
+    )
+
+
+def _bump_reinforcement_count(existing: Dict[str, Any]) -> int:
+    """Increment the explicit counter, backfilling from the journal for
+    concerns that predate the counter."""
+    count = existing.get("reinforcement_count")
+    if count is None:
+        count = len(_journal_entries(existing.get("reinforcement_notes") or ""))
+    count = int(count) + 1
+    existing["reinforcement_count"] = count
+    return count
+
+
+def compute_pressure(register: Dict[str, Any], *, now_utc: Optional[datetime] = None) -> Dict[str, List[Dict[str, Any]]]:
+    """Deterministically rank which concerns demand a disposition.
+
+    Returns {"needs_disposition": [...], "addressing_stale": [...]} with the
+    raw concern dicts. Pure read — the LLM decides what to DO (the
+    deterministic side only proposes). Used by the noticer context builder.
+    """
+    now_utc = now_utc or datetime.now(timezone.utc)
+    needs: List[Dict[str, Any]] = []
+    stale: List[Dict[str, Any]] = []
+
+    for bucket in ("active", "addressing"):
+        for c in register.get(bucket) or []:
+            count = c.get("reinforcement_count")
+            if count is None:
+                count = len(_journal_entries(c.get("reinforcement_notes") or ""))
+            since_disposition = int(count) - int(c.get("last_disposition_at_count") or 0)
+            if since_disposition >= DISPOSITION_REINFORCEMENT_THRESHOLD:
+                needs.append(c)
+
+    for c in register.get("addressing") or []:
+        since_raw = str(c.get("addressing_since_utc") or "").strip()
+        if not since_raw:
+            continue
+        try:
+            since = datetime.fromisoformat(since_raw.replace("Z", "+00:00"))
+            if since.tzinfo is None:
+                since = since.replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        if (now_utc - since).days >= ADDRESSING_STALE_DAYS:
+            stale.append(c)
+
+    return {"needs_disposition": needs, "addressing_stale": stale}
+
 
 def apply_noticer_output(
     output: Dict[str, Any],
@@ -50,6 +140,8 @@ def apply_noticer_output(
     addressing_concerns = output.get("addressing_concerns") or []
     resolved_concerns = output.get("resolved_concerns") or []
     escalated_concerns = output.get("escalated_concerns") or []
+    concern_dispositions = output.get("concern_dispositions") or []
+    question_outcomes = output.get("question_outcomes") or []
     belief_updates = output.get("belief_updates") or []
     pending_questions = output.get("pending_questions") or []
 
@@ -70,7 +162,9 @@ def apply_noticer_output(
             continue
         register.setdefault("active", []).append(c)
 
-    # 2. Reinforcements → update in-place
+    # 2. Reinforcements → update in-place (with growth caps: evidence and
+    # the notes journal are bounded, and an explicit reinforcement_count
+    # feeds the disposition-pressure rule).
     for r in reinforced_concerns:
         cid = r.get("concern_id")
         if not cid or cid not in by_id:
@@ -84,9 +178,14 @@ def apply_noticer_output(
             existing["severity"] = _bump_severity(existing.get("severity"), up=True)
         elif sev_change == "lowered":
             existing["severity"] = _bump_severity(existing.get("severity"), up=False)
+        # Counter bump BEFORE the journal append — the backfill path counts
+        # journal entries, which must not include this tick's own note.
+        _bump_reinforcement_count(existing)
         notes = r.get("notes")
         if notes:
             existing["reinforcement_notes"] = (existing.get("reinforcement_notes") or "") + f"\n[{now_utc_iso}] {notes}"
+        _trim_evidence(existing)
+        _trim_journal(existing)
 
     # 2b. Addressing → move active → addressing. Work is in flight (e.g. the dayflow orchestrator
     # already researched it) but the concern is NOT resolved yet (no booking/appointment). Moving
@@ -139,6 +238,79 @@ def apply_noticer_output(
             "escalated_at_utc": now_utc_iso,
         }
 
+    # 4b. Dispositions — the forced decision on long-running concerns
+    # (the pressure rule in compute_pressure demands these).
+    for d in concern_dispositions:
+        cid = d.get("concern_id")
+        action = str(d.get("action") or "").strip()
+        if not cid or cid not in by_id:
+            logger.warning("[noticer.persist] disposition targets unknown concern %s", cid)
+            continue
+        existing = by_id[cid]
+        reason = str(d.get("reason") or "").strip()
+        existing["reinforcement_notes"] = (
+            (existing.get("reinforcement_notes") or "")
+            + f"\n[{now_utc_iso}] disposition={action}: {reason}"
+        )
+
+        if action == "accept_chronic":
+            # Known long-term pattern; stop tracking it tick-by-tick. Keeps a
+            # compact record in `dormant` (founding + freshest evidence only).
+            existing["chronic"] = True
+            existing["dormant_at_utc"] = now_utc_iso
+            existing["dormant_reason"] = reason
+            evidence = existing.get("evidence") or []
+            if len(evidence) > 4:
+                existing["evidence_archived_count"] = (
+                    int(existing.get("evidence_archived_count") or 0) + len(evidence) - 4
+                )
+                existing["evidence"] = evidence[:2] + evidence[-2:]
+            for status_key in ("active", "addressing"):
+                register[status_key] = [
+                    c for c in register.get(status_key, []) if c.get("concern_id") != cid
+                ]
+            register.setdefault("dormant", []).append(existing)
+            by_id.pop(cid, None)
+        elif action == "re_escalate":
+            # The handoff stalled (stale `addressing`) or the pattern needs
+            # another push: back to active + a fresh escalation marker.
+            register["addressing"] = [
+                c for c in register.get("addressing", []) if c.get("concern_id") != cid
+            ]
+            if not any(c.get("concern_id") == cid for c in register.get("active", [])):
+                register.setdefault("active", []).append(existing)
+            existing.pop("addressing_since_utc", None)
+            existing["escalation"] = {
+                "target": "dayflow_orchestrator",
+                "urgency": "high",
+                "reason": reason or "re-escalated after stalled handling",
+                "escalated_at_utc": now_utc_iso,
+            }
+            existing["last_disposition_at_count"] = int(existing.get("reinforcement_count") or 0)
+        elif action == "keep_active":
+            # Justified continuation — resets the pressure window so the
+            # rule doesn't re-fire next tick.
+            existing["last_disposition_at_count"] = int(existing.get("reinforcement_count") or 0)
+        else:
+            logger.warning("[noticer.persist] unknown disposition action %r for %s", action, cid)
+
+    # 4c. Question outcomes — retire processed/expired mailbox items so
+    # they don't re-demand attention next tick. The concern-side effects
+    # were emitted as regular ops in this same output.
+    outcomes_applied = 0
+    for qo in question_outcomes:
+        qid = str(qo.get("question_id") or "").strip()
+        outcome = str(qo.get("outcome") or "").strip()
+        if not qid:
+            continue
+        status = "closed" if outcome == "processed" else "expired"
+        try:
+            from app.assistant.pending_questions import close_question
+            if close_question(qid, outcome=status, notes=str(qo.get("notes") or "")):
+                outcomes_applied += 1
+        except Exception:
+            logger.exception("[noticer.persist] question outcome failed for %s", qid)
+
     register["last_updated_utc"] = now_utc_iso
     register["last_noticer_tick_utc"] = now_utc_iso
     _save_register(register_path, register)
@@ -170,6 +342,8 @@ def apply_noticer_output(
         "addressing_count": len(addressing_concerns),
         "resolved_count": len(resolved_concerns),
         "escalated_count": len(escalated_concerns),
+        "dispositions_count": len(concern_dispositions),
+        "question_outcomes_count": outcomes_applied,
         "belief_updates_count": len(belief_updates),
         "pending_questions_count": len(pending_questions),
         "questions_enqueued_count": questions_enqueued,
@@ -245,12 +419,23 @@ def _enqueue_pending_questions(
         if if_unanswered:
             question_text = f"{text} (if no reply, I'll go with: {if_unanswered})"
 
+        # High-stakes questions earn a blocking ticket; everything else is
+        # woven naturally into chat (the magical default).
+        ask_mode = "chat"
+        if concern is not None:
+            sev = (concern.get("severity") or "").lower()
+            horizon = (concern.get("horizon") or "").lower()
+            if sev == "high" and horizon in ("today", "this_week"):
+                ask_mode = "ticket"
+
         qid = enqueue_question(
             question_text=question_text,
             topical_tag=topical_tag,
             priority=priority,
             created_by="subconscious::noticer",
             expires_after_hours=expires_after_hours,
+            related_concern_id=related_id,
+            ask_mode=ask_mode,
         )
         if qid:
             enqueued += 1

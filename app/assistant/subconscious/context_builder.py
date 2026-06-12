@@ -61,6 +61,7 @@ def build_noticer_context(
         "kg_household_digests": _build_kg_household_digests(household_members),
         "ambient_state_digest": _build_ambient_state_digest(household_members),
         "concerns_register_active": _build_concerns_register_active(),
+        "question_mailbox": _build_question_mailbox(),
         "exploration_outcomes_30d": _build_exploration_outcomes(now_utc=now_utc),
         "dayflow_recent": _build_dayflow_recent(now_utc=now_utc),
         "watchlist_summary": _build_watchlist_summary(),
@@ -496,7 +497,76 @@ def _build_concerns_register_active() -> str:
         lines.append(_render_concern_summary(c, status="active"))
     for c in addressing:
         lines.append(_render_concern_summary(c, status="addressing"))
+
+    # Lifecycle pressure: long-running concerns MUST get a disposition this
+    # tick (deterministic detection; the noticer decides what to do).
+    from app.assistant.subconscious.persist import compute_pressure
+    pressure = compute_pressure(data)
+    pressured = {c.get("concern_id"): "reinforced many times since last decision"
+                 for c in pressure["needs_disposition"]}
+    for c in pressure["addressing_stale"]:
+        cid = c.get("concern_id")
+        why = f"stale in 'addressing' since {str(c.get('addressing_since_utc') or '')[:10]}"
+        pressured[cid] = f"{pressured[cid]} AND {why}" if cid in pressured else why
+    if pressured:
+        by_id = {c.get("concern_id"): c for c in [*active, *addressing]}
+        lines.append("## CONCERNS UNDER PRESSURE — disposition REQUIRED this tick")
+        lines.append(
+            "Each concern below has run long enough that continuing to reinforce "
+            "it is no longer a decision-free default. Emit exactly one "
+            "concern_dispositions entry per id: accept_chronic (real but "
+            "long-term — archive with a summary), re_escalate (handling stalled "
+            "or it got worse — push back to active with high urgency), or "
+            "keep_active (justify WHY longer tracking is right)."
+        )
+        for cid, why in pressured.items():
+            c = by_id.get(cid) or {}
+            count = c.get("reinforcement_count")
+            lines.append(
+                f"- {cid} — {c.get('title', '(no title)')} "
+                f"[{why}; reinforcements={count if count is not None else '?'}]"
+            )
     return "\n\n".join(lines)
+
+
+def _build_question_mailbox() -> str:
+    """Captured answers to noticer questions + stale unanswered asks.
+
+    Every listed item demands a question_outcomes entry from the noticer:
+    answered questions get processed into concern updates; stale ones get
+    their stated default applied (outcome expired)."""
+    try:
+        from app.assistant.pending_questions import get_for_noticer_processing
+        mailbox = get_for_noticer_processing()
+    except Exception as e:
+        logger.warning("[noticer.context] question mailbox fetch failed: %s", e)
+        return "(question mailbox unavailable this tick)"
+
+    answered = mailbox.get("answered") or []
+    stale = mailbox.get("stale_asked") or []
+    if not answered and not stale:
+        return "(no answers waiting, no stale questions)"
+
+    lines: List[str] = []
+    if answered:
+        lines.append("### ANSWERS RECEIVED — process each into its concern")
+        for q in answered:
+            lines.append(
+                f"- question_id={q.id}\n"
+                f"  asked: {q.question_text}\n"
+                f"  USER'S ANSWER: {q.answer_text}\n"
+                f"  related_concern_id: {q.related_concern_id or '(none)'}"
+            )
+    if stale:
+        lines.append("### UNANSWERED >48h — apply the stated default (outcome: expired)")
+        for q in stale:
+            lines.append(
+                f"- question_id={q.id}\n"
+                f"  asked: {q.question_text}\n"
+                f"  asked_at: {q.asked_at}\n"
+                f"  related_concern_id: {q.related_concern_id or '(none)'}"
+            )
+    return "\n".join(lines)
 
 
 def _render_concern_summary(c: Dict[str, Any], *, status: str) -> str:

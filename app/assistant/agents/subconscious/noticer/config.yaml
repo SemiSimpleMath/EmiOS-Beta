@@ -36,6 +36,7 @@ user_context_items:
   - kg_household_digests
   - ambient_state_digest
   - concerns_register_active
+  - question_mailbox
   - exploration_outcomes_30d
   - dayflow_recent
   - watchlist_summary

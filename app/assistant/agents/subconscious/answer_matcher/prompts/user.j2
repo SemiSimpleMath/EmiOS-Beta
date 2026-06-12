@@ -1,0 +1,15 @@
+## The question the assistant asked
+
+{{ agent_input.question_text }}
+
+Asked at: {{ agent_input.asked_at }}
+{% if agent_input.why_asking %}Why it was asked: {{ agent_input.why_asking }}{% endif %}
+{% if agent_input.related_concern_title %}Related concern: {{ agent_input.related_concern_title }}{% endif %}
+
+## User messages since the question (same room, oldest first)
+
+{% for m in agent_input.candidate_messages %}
+- [{{ m.id }}] ({{ m.timestamp }}) {{ m.text }}
+{% endfor %}
+
+Did the user answer the question? Emit the verdict form.

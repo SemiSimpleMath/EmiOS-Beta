@@ -15,12 +15,16 @@ Lifecycle of a question is on the PendingQuestion model
 (app/assistant/database/pending_question.py).
 """
 from app.assistant.pending_questions.store import (
+    close_question,
+    count_asked_in_window,
     enqueue_question,
+    expire_stale,
+    get_asked_unanswered,
+    get_for_noticer_processing,
     get_pending,
+    mark_answered,
     mark_asked,
     mark_dismissed,
-    expire_stale,
-    count_asked_in_window,
 )
 from app.assistant.pending_questions.injector import (
     QuestionInjector,
@@ -28,12 +32,16 @@ from app.assistant.pending_questions.injector import (
 )
 
 __all__ = [
+    "close_question",
+    "count_asked_in_window",
     "enqueue_question",
+    "expire_stale",
+    "get_asked_unanswered",
+    "get_for_noticer_processing",
     "get_pending",
+    "mark_answered",
     "mark_asked",
     "mark_dismissed",
-    "expire_stale",
-    "count_asked_in_window",
     "QuestionInjector",
     "pick_question_for_nudge",
 ]

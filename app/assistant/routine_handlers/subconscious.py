@@ -118,6 +118,48 @@ def noticer_run(
 
 
 # ---------------------------------------------------------------------------
+# Answer sweep (hourly catch-up for the per-turn answer capture)
+# ---------------------------------------------------------------------------
+
+
+@routine_handler(name="answer_sweep_run")
+def answer_sweep_run(
+    *,
+    target_date: Optional[str] = None,
+    routine: Any = None,
+    event_message: Any = None,
+) -> Dict[str, Any]:
+    """Judge asked-but-unanswered noticer questions against the chat that
+    followed them. FREE when there are none (pure SQL, no LLM)."""
+    from app.assistant.subconscious.answer_capture import check_open_questions
+
+    summary = check_open_questions()
+    return {"status": "ok", **summary}
+
+
+# ---------------------------------------------------------------------------
+# Daily digest (no LLM — renders the concerns_register into chat)
+# ---------------------------------------------------------------------------
+
+
+@routine_handler(name="digest_run")
+def digest_run(
+    *,
+    target_date: Optional[str] = None,
+    routine: Any = None,
+    event_message: Any = None,
+) -> Dict[str, Any]:
+    """Render + post the daily subconscious digest to master_room.
+
+    Pure templating over the concerns_register (no agent call) — the
+    noticer's 04:00 tick has already done the thinking; this is the voice."""
+    from app.assistant.subconscious.digest_runner import run_digest_pass
+
+    summary = run_digest_pass()
+    return {"status": "ok", **summary}
+
+
+# ---------------------------------------------------------------------------
 # Daily meal proposer
 # ---------------------------------------------------------------------------
 

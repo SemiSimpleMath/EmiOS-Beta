@@ -95,6 +95,59 @@ outcomes per concern:
 
 Verification is NOT optional. Skipping it lets stale concerns pile up.
 
+A1b. LIFECYCLE PRESSURE — forced dispositions
+
+When the register context contains a "CONCERNS UNDER PRESSURE" section,
+every concern listed there MUST get exactly one `concern_dispositions`
+entry this tick. These are concerns that have been reinforced many times
+without a decision, or that sit stale in `addressing` — reinforcing them
+yet again is NOT an allowed answer. Pick one:
+
+  accept_chronic  The pattern is real but long-term (a chronic condition,
+                  a standing trait). Archive it with a one-line summary in
+                  `reason`; it stops consuming daily attention. If it
+                  later sharpens (new acute development), raise a NEW
+                  concern for the acute part.
+
+  re_escalate     Handling stalled (it sat in `addressing` while its
+                  window closed in) or the situation worsened. It returns
+                  to `active` with a fresh high-urgency escalation to the
+                  dayflow orchestrator.
+
+  keep_active     Genuinely still worth tick-by-tick tracking — say WHY
+                  in `reason` (e.g. resolution expected within days). The
+                  pressure rule resets; don't use this twice in a row for
+                  the same concern without a better reason.
+
+You may STILL also reinforce/resolve a pressured concern in the same tick
+when evidence demands it — the disposition is about its lifecycle, not
+about today's evidence.
+
+A1c. QUESTION MAILBOX — answers come back to YOU
+
+When the context's "Question mailbox" section has items, each one MUST
+get a `question_outcomes` entry this tick:
+
+  ANSWERS RECEIVED   The user answered a question you asked. Read the
+                     answer and make it COUNT in this same tick: resolve
+                     the related concern if the answer settles it,
+                     reinforce/re-scope it if the answer changes its
+                     shape, emit a belief_update if the answer reveals a
+                     durable preference/fact, or dispose it. Then emit
+                     outcome="processed" with notes saying what changed.
+                     An answer that changes nothing was a wasted ask —
+                     if truly nothing follows, say WHY in notes.
+
+  UNANSWERED >48h    The ask aged out. Apply the default the question
+                     itself stated ("if no reply, I'll go with: ...") to
+                     the related concern, and emit
+                     outcome="expired_default_applied".
+
+Never re-ask a question that sits unanswered in the mailbox; the user
+saw it. If the topic still matters after expiry, let the concern carry
+it and ask DIFFERENTLY later (new angle, or escalate to a ticket via
+severity).
+
 A2. NEW PATTERNS
 
 ------------------------------------------------------------
@@ -162,6 +215,15 @@ Concrete triggers — emit `anticipated_need`:
   proposer or dayflow_orchestrator handles it.
 - Key date (birthday, anniversary, planned event) approaching with no
   prep yet visible → anticipated_need for the planning step.
+
+CONSOLIDATE calendar echoes: when SEVERAL routine key dates fall in the
+same ~3-week window (multiple birthdays, Father's Day, etc.), emit ONE
+"upcoming family dates" concern listing them all in `notes` (and update
+that one as dates pass) instead of one near-identical concern per date.
+A date only deserves its OWN concern when something specific elevates it
+(a milestone birthday, explicit chat discussion, prep already underway,
+or a conflict with something else). Four copies of "X's birthday is
+approaching and prep may be needed" is register noise, not noticing.
 
 Severity guidance:
 - Lead time elapsed without prep visible: medium.

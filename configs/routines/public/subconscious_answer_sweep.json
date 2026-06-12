@@ -1,0 +1,30 @@
+{
+  "id": "subconscious_answer_sweep",
+  "enabled": true,
+  "name": "Subconscious answer sweep — capture replies to noticer questions",
+  "runner": "function",
+  "spec": {
+    "function_name": "answer_sweep_run"
+  },
+  "run_policy": {
+    "type": "interval",
+    "min_interval_seconds": 3600
+  },
+  "trigger": {
+    "type": "time",
+    "active_window": {
+      "from": "07:00",
+      "to": "22:00",
+      "local": true
+    }
+  },
+  "max_run_seconds": 180,
+  "on_error": {
+    "max_failures": 3,
+    "backoff_base_seconds": 300,
+    "backoff_max_seconds": 3600,
+    "then": "disable_with_ticket",
+    "auto_retry_after_seconds": 3600
+  },
+  "notes": "Hourly sweeper behind the per-turn answer check: judges asked-but-unanswered noticer questions against the user chat that followed (answer_matcher, cheap model), marks captured answers, annotates the related concern, and triggers an immediate noticer tick. No open questions = pure SQL no-op, so the hourly cadence costs nothing in the common case."
+}

@@ -689,6 +689,36 @@ class RoomSessionManager:
             outbound_result=outbound_result,
         )
 
+    def _maybe_check_question_answers(self, *, room_id: str) -> None:
+        """Post-turn answer capture for noticer questions (off the reply
+        path). Cheap gate first: only spawns the background check when an
+        asked-but-unanswered question exists at all."""
+        if not isinstance(room_id, str) or not room_id.strip():
+            return
+        try:
+            from app.assistant.pending_questions import get_asked_unanswered
+            if not get_asked_unanswered(limit=1):
+                return
+
+            import threading
+
+            def _run() -> None:
+                try:
+                    from app.assistant.subconscious.answer_capture import check_open_questions
+                    summary = check_open_questions(room_id=room_id)
+                    if summary.get("answered"):
+                        logger.info(
+                            "Post-turn answer capture in %s: %s", room_id, summary,
+                        )
+                except Exception:
+                    logger.error("Post-turn answer capture failed for %s", room_id)
+                    logger.debug("post-turn answer capture exception details", exc_info=True)
+
+            threading.Thread(target=_run, name=f"answer-capture-{room_id}", daemon=True).start()
+        except Exception as e:
+            logger.error("Failed scheduling answer capture for %s: %s", room_id, e)
+            logger.debug("answer capture scheduling exception details", exc_info=True)
+
     def _maybe_trigger_room_summary(self, *, room_id: str, room_ctx: Dict[str, Any] | None) -> None:
         if not isinstance(room_id, str) or not room_id.strip():
             return
@@ -816,6 +846,7 @@ class RoomSessionManager:
                 envelope_mode = str(envelope.metadata.get("room_mode") or "").strip().lower()
             if envelope_mode in ("", "normal"):
                 self._maybe_trigger_room_summary(room_id=envelope.room_id, room_ctx=room_ctx)
+                self._maybe_check_question_answers(room_id=envelope.room_id)
             ensure_request_room_metadata(
                 blackboard=self._blackboard,
                 request_id=envelope.request_id,

@@ -28,6 +28,8 @@ def enqueue_question(
     priority: str = "medium",
     created_by: Optional[str] = None,
     expires_after_hours: Optional[float] = 72.0,
+    related_concern_id: Optional[str] = None,
+    ask_mode: str = "chat",
 ) -> Optional[str]:
     """Add a new pending question. Returns the question id, or None on
     bad input (caller's logged).
@@ -60,6 +62,8 @@ def enqueue_question(
             status="pending",
             created_by=(created_by or "unknown")[:128],
             expires_at=expires_at,
+            related_concern_id=(related_concern_id or None),
+            ask_mode=(ask_mode or "chat").strip().lower() or "chat",
         )
         session.add(row)
         session.commit()
@@ -136,6 +140,117 @@ def mark_asked(question_id: str, *, asked_in_message_id: Optional[str] = None) -
     except Exception:
         session.rollback()
         logger.exception("[pending_questions] mark_asked failed id=%s", question_id)
+        return False
+    finally:
+        session.close()
+
+
+def get_asked_unanswered(*, max_age_hours: float = 72.0, limit: int = 20) -> List[PendingQuestion]:
+    """Questions asked but not yet answered, newest first — the answer
+    capture's working set. Questions older than `max_age_hours` are left
+    for the noticer's expiry processing instead."""
+    session = get_session()
+    try:
+        cutoff = utc_now() - timedelta(hours=float(max_age_hours))
+        rows = (
+            session.query(PendingQuestion)
+            .filter(PendingQuestion.status == "asked")
+            .filter(PendingQuestion.asked_at.isnot(None))
+            .filter(PendingQuestion.asked_at >= cutoff)
+            .order_by(PendingQuestion.asked_at.desc())
+            .limit(limit)
+            .all()
+        )
+        session.expunge_all()
+        return rows
+    finally:
+        session.close()
+
+
+def get_for_noticer_processing(*, stale_after_hours: float = 48.0) -> dict:
+    """The noticer's question mailbox: captured answers awaiting processing
+    plus stale asked-questions awaiting an expiry decision."""
+    session = get_session()
+    try:
+        answered = (
+            session.query(PendingQuestion)
+            .filter(PendingQuestion.status == "answered")
+            .order_by(PendingQuestion.answered_at.asc())
+            .limit(20)
+            .all()
+        )
+        stale_cutoff = utc_now() - timedelta(hours=float(stale_after_hours))
+        stale = (
+            session.query(PendingQuestion)
+            .filter(PendingQuestion.status == "asked")
+            .filter(PendingQuestion.asked_at.isnot(None))
+            .filter(PendingQuestion.asked_at <= stale_cutoff)
+            .order_by(PendingQuestion.asked_at.asc())
+            .limit(20)
+            .all()
+        )
+        session.expunge_all()
+        return {"answered": answered, "stale_asked": stale}
+    finally:
+        session.close()
+
+
+def mark_answered(
+    question_id: str,
+    *,
+    answer_text: str,
+    answer_message_id: Optional[str] = None,
+) -> bool:
+    """Answer captured (per-turn check or sweeper) — awaiting noticer
+    processing. Refuses rows that aren't in 'asked'."""
+    text = (answer_text or "").strip()
+    if not text:
+        logger.warning("[pending_questions] mark_answered with empty text id=%s", question_id)
+        return False
+    session = get_session()
+    try:
+        row = session.query(PendingQuestion).filter_by(id=question_id).first()
+        if row is None or row.status != "asked":
+            logger.warning(
+                "[pending_questions] mark_answered skipped id=%s status=%s",
+                question_id, getattr(row, "status", "missing"),
+            )
+            return False
+        row.status = "answered"
+        row.answered_at = utc_now()
+        row.answer_text = text[:2000]
+        if answer_message_id:
+            row.answer_message_id = answer_message_id
+        session.commit()
+        logger.info("[pending_questions] answered id=%s", question_id[:8])
+        return True
+    except Exception:
+        session.rollback()
+        logger.exception("[pending_questions] mark_answered failed id=%s", question_id)
+        return False
+    finally:
+        session.close()
+
+
+def close_question(question_id: str, *, outcome: str, notes: str = "") -> bool:
+    """Noticer processed the question. outcome: 'closed' (answer handled)
+    or 'expired' (no answer; stated default applied)."""
+    if outcome not in ("closed", "expired"):
+        logger.warning("[pending_questions] close_question bad outcome %r", outcome)
+        return False
+    session = get_session()
+    try:
+        row = session.query(PendingQuestion).filter_by(id=question_id).first()
+        if row is None:
+            return False
+        row.status = outcome
+        if notes:
+            row.dismissed_reason = (notes or "")[:500]
+        session.commit()
+        return True
+    except Exception:
+        session.rollback()
+        logger.exception("[pending_questions] close_question failed id=%s", question_id)
         return False
     finally:
         session.close()
