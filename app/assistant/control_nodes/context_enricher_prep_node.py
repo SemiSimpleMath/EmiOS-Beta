@@ -12,7 +12,8 @@ The prep node provides raw KG search results. The agent does ALL the reasoning.
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
 from app.assistant.control_nodes.control_node import ControlNode
 from app.assistant.utils.logging_config import get_logger
@@ -22,6 +23,50 @@ logger = get_logger(__name__)
 _MAX_ITEMS_PER_CYCLE = 8
 _SEMANTIC_THRESHOLD = 0.40
 _SEMANTIC_TOP_K = 8
+
+
+def _as_aware_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    if dt is not None and dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _node_dates_suffix(node) -> str:
+    """Render a node's dates plus a computed past/ongoing/UPCOMING marker.
+
+    The enricher LLM sees only what we render here. A date-less Event line
+    is how a road trip planned weeks out got asserted as currently
+    happening — deterministic code states the temporal facts, the LLM
+    decides relevance.
+    """
+    from app.assistant.kg_core.kg_utils.date_display import format_node_date
+    from app.assistant.utils.time_utils import utc_now
+
+    start, end = node.start_date, node.end_date
+    if start is None and end is None:
+        return ""
+
+    start_s = format_node_date(start, node.start_date_confidence)
+    end_s = format_node_date(end, node.end_date_confidence)
+    now = utc_now()
+    start_a = _as_aware_utc(start)
+    end_a = _as_aware_utc(end)
+
+    if start_a is not None and start_a > now:
+        when = f"starts {start_s}" + (f", ends {end_s}" if end_s else "")
+        return f" (UPCOMING — {when}; has not happened yet)"
+    if end_a is not None and end_a < now:
+        when = f"{start_s} → {end_s}" if start_s else f"ended {end_s}"
+        return f" (past: {when})"
+    if start_a is not None and end_a is not None:
+        return f" (ongoing: started {start_s}, ends {end_s})"
+    if start_a is not None:
+        # A State/Entity with an open end is current/extant since its start
+        # (for a person that's the birth date); a dated Event just happened then.
+        if node.node_type in ("State", "Entity"):
+            return f" (since {start_s})"
+        return f" (dated {start_s})"
+    return f" (until {end_s})"
 
 
 def _get_meta(item: Dict[str, Any]) -> Dict[str, Any]:
@@ -124,19 +169,20 @@ def _build_kg_context(search_terms: List[str], session) -> str:
     _pod_cache: Dict[str, tuple] = {}
 
     def _resolve_endpoint(node_obj, endpoint_id: str):
-        """Return (label, node_type) for an edge endpoint; hydrate pod URIs from pod_store."""
+        """Return (label, node_type, dates_suffix) for an edge endpoint;
+        hydrate pod URIs from pod_store (pods carry no KG dates)."""
         if node_obj is not None:
-            return node_obj.label, node_obj.node_type
+            return node_obj.label, node_obj.node_type, _node_dates_suffix(node_obj)
         if not endpoint_id or not POD_URI_RE.fullmatch(endpoint_id):
-            return None, None
+            return None, None, ""
         if endpoint_id in _pod_cache:
             return _pod_cache[endpoint_id]
         from app.assistant.pod_store.pod_store import PodStore
         pod = PodStore().get(endpoint_id)
         if pod is None:
-            _pod_cache[endpoint_id] = (None, None)
+            _pod_cache[endpoint_id] = (None, None, "")
         else:
-            _pod_cache[endpoint_id] = ((pod.one_liner or endpoint_id)[:200], "Pod")
+            _pod_cache[endpoint_id] = ((pod.one_liner or endpoint_id)[:200], "Pod", "")
         return _pod_cache[endpoint_id]
 
     lines = []
@@ -151,24 +197,25 @@ def _build_kg_context(search_terms: List[str], session) -> str:
                     continue
                 seen.add(node.id)
                 desc = f" — {node.description[:150]}" if node.description else ""
-                lines.append(f"- [{node.node_type}] **{node.label}** (match={score:.2f}){desc}")
+                dates = _node_dates_suffix(node)
+                lines.append(f"- [{node.node_type}] **{node.label}** (match={score:.2f}){dates}{desc}")
 
                 for edge, target in (
                     session.query(Edge, Node).outerjoin(Node, Edge.target_id == Node.id)
                     .filter(Edge.source_id == node.id).limit(5).all()
                 ):
-                    t_label, t_type = _resolve_endpoint(target, edge.target_id)
+                    t_label, t_type, t_dates = _resolve_endpoint(target, edge.target_id)
                     if t_label is None:
                         continue
-                    lines.append(f"    → {edge.relationship_type} → {t_label} [{t_type}]")
+                    lines.append(f"    → {edge.relationship_type} → {t_label} [{t_type}]{t_dates}")
                 for edge, source in (
                     session.query(Edge, Node).outerjoin(Node, Edge.source_id == Node.id)
                     .filter(Edge.target_id == node.id).limit(5).all()
                 ):
-                    s_label, s_type = _resolve_endpoint(source, edge.source_id)
+                    s_label, s_type, s_dates = _resolve_endpoint(source, edge.source_id)
                     if s_label is None:
                         continue
-                    lines.append(f"    ← {s_label} [{s_type}] → {edge.relationship_type}")
+                    lines.append(f"    ← {s_label} [{s_type}]{s_dates} → {edge.relationship_type}")
         except Exception as e:
             logger.warning("context_enricher_prep: search failed for %r: %s", term, e)
 
