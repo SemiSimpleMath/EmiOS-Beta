@@ -654,6 +654,19 @@ class ContextInjector:
             if isinstance(incoming_value, str) and incoming_value.strip():
                 context["incoming_message"] = incoming_value.strip()
 
+            # `agent_input` as a declared context item resolves to the
+            # inbound message's agent_input VERBATIM. Without this, the
+            # generic blackboard lookup at the end of the key loop
+            # resolves it to None for dict inputs — AgentInputApplier
+            # SPREADS dict agent_input onto the blackboard as individual
+            # keys, so there is no "agent_input" blackboard entry — and
+            # every template using {{ agent_input.field }} silently
+            # rendered blank (the succession_judge / date_gap_gate /
+            # wiki-fact / answer_matcher judging-empty-input bug,
+            # found 2026-06-12).
+            if getattr(message, "agent_input", None) is not None:
+                context["agent_input"] = message.agent_input
+
         if "incoming_message" not in context:
             bb_task = str(agent.blackboard.get_state_value("task", "") or "").strip()
             if bb_task:
