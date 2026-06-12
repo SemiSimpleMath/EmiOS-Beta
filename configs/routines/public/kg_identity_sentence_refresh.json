@@ -15,5 +15,13 @@
     "type": "daily",
     "time_local": "03:45"
   },
+  "max_run_seconds": 1800,
+  "on_error": {
+    "max_failures": 3,
+    "backoff_base_seconds": 600,
+    "backoff_max_seconds": 7200,
+    "then": "disable_with_ticket",
+    "auto_retry_after_seconds": 7200
+  },
   "notes": "[Created 2026-06-12, KG fragility review #1: label is a bad identifier.] Nightly 03:45 (after the KG drains, before card refresh at 04:30 so cards can read fresh sentences later): (re)generate identity sentences - graph-derived definite descriptions that uniquely identify each Entity's referent. NULL-sentence backfill first by pagerank, then hash-stale nodes (label/era/anchor-edge drift). Embeds into node_identity_embeddings; resolution + merge judges read them. Spec: scratch/IDENTITY_SENTENCE_SPEC.md."
 }
