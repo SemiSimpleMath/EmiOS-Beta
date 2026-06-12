@@ -198,37 +198,48 @@ function timeToMillisecondsFromMidnight(timeString) {
     const moonTop = boxHeight * 0.2;    // Moon's peak (20% height)
     const moonBottom = boxHeight;       // Moon's starting/ending position
 
-    // Narrow widget: pin both bodies to the right edge so they arc
-    // up/down on the right side of the strip instead of crossing the
-    // sky horizontally. Detected via presence of #weather_narrow_time.
+    // Narrow widget: both bodies travel a half-ellipse across the strip —
+    // rising out of the bottom-RIGHT corner, peaking top-center at the
+    // real solar midpoint, setting into the bottom-LEFT corner.
+    // Detected via presence of #weather_narrow_time.
     const narrow = !!narrowTime;
-    const rightEdgeMargin = 14;
+    const edgeMargin = 10;
 
-    const sunX = narrow
-      ? (boxWidth - sun.clientWidth - rightEdgeMargin)
-      : ((boxWidth / 2) - (sun.clientWidth / 2));
-    const moonXCenter = narrow
-      ? (boxWidth - moon.clientWidth - rightEdgeMargin)
-      : (boxWidth / 2);
+    const sunX = (boxWidth / 2) - (sun.clientWidth / 2);
+    const moonXCenter = boxWidth / 2;
 
     if (isSun) {
-      let y;
+      // Progress p: 0 at sunrise, 0.5 at the real solar midpoint (halfDay),
+      // 1 at sunset. Split at halfDay so the peak stays pinned to the real
+      // solar max even if the dawn/dusk windows ever become asymmetric.
+      let p;
+      if (currentTime >= dawnStart_a && currentTime < halfDay) {
+        p = 0.5 * (currentTime - dawnStart_a) / (halfDay - dawnStart_a);
+      } else if (currentTime >= halfDay && currentTime < duskEnd_a) {
+        p = 0.5 + 0.5 * (currentTime - halfDay) / (duskEnd_a - halfDay);
+      } else {
+        return null; // Sun not visible (night)
+      }
 
-      // Sun movement logic — symmetric triangle wave between sunBottom
+      if (narrow) {
+        const angle = Math.PI * p;
+        const centerX = (boxWidth - sun.clientWidth) / 2;
+        const radiusX = centerX - edgeMargin;
+        return {
+          x: centerX + Math.cos(angle) * radiusX,
+          y: sunBottom - Math.sin(angle) * (sunBottom - sunTop),
+        };
+      }
+
+      // Full widget — symmetric triangle wave between sunBottom
       // (near-horizon) and sunTop (overhead). Earlier version had a stray
       // `* 0.85` factor on the first-half start that made the peak
       // overshoot above the box (y = -0.05H at noon) and left the sun
       // visually pinned near the bottom for most of the day. The moon
       // already uses a proper sin arc — the sun should match.
-      if (currentTime >= dawnStart_a && currentTime < halfDay) {
-        const factor = (currentTime - dawnStart_a) / (halfDay - dawnStart_a); // 0 to 1
-        y = sunBottom - factor * (sunBottom - sunTop); // bottom → top
-      } else if (currentTime >= halfDay && currentTime < duskEnd_a) {
-        const factor = (currentTime - halfDay) / (duskEnd_a - halfDay); // 0 to 1
-        y = sunTop + factor * (sunBottom - sunTop); // top → bottom
-      } else {
-        return null; // Sun not visible (night)
-      }
+      const y = p < 0.5
+        ? sunBottom - (p * 2) * (sunBottom - sunTop)   // bottom → top
+        : sunTop + ((p - 0.5) * 2) * (sunBottom - sunTop); // top → bottom
 
       return { x: sunX, y };
     } else {
@@ -243,8 +254,11 @@ function timeToMillisecondsFromMidnight(timeString) {
         const angle = Math.PI * factor; // Angle from 0 to π radians (half-circle)
 
         if (narrow) {
-          // Pin to right edge; arc bottom -> top -> bottom across the night.
-          x = moonXCenter;
+          // Same half-ellipse as the sun: bottom-right corner → top-center
+          // → bottom-left corner across the night.
+          const centerX = (boxWidth - moon.clientWidth) / 2;
+          const radiusX = centerX - edgeMargin;
+          x = centerX + Math.cos(angle) * radiusX;
           y = moonBottom - Math.sin(angle) * (moonBottom - moonTop);
         } else {
           // Original: half-circle across the bottom of the full widget.

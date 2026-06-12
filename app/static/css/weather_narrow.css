@@ -1,8 +1,9 @@
 /* ============================================================
    Narrow weather widget — horizontal/desktop layout.
-   Loaded AFTER weather.css. Pins sun/moon to the top-right
-   corner (overriding weather.js's arc transform), strips stars
-   and grounds, lays time/temp in a single horizontal row.
+   Loaded AFTER weather.css. The sky gradient and the sun/moon
+   half-ellipse arc (bottom-right → top-center at solar noon →
+   bottom-left) are driven by weather.js's narrow-mode branch;
+   this file strips stars/grounds and lays time/temp in a row.
    ============================================================ */
 
 .weather-narrow {
@@ -17,27 +18,18 @@
   padding: 0 16px;
   font-family: Arial, Helvetica, sans-serif;
   color: #E8EAED;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  /* Sky bg follows the real outside colors (no scrim), so the daytime
+     sky is light — the stronger shadow keeps the text readable on it. */
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
   overflow: hidden;
-}
-
-/* Dark scrim — keeps the JS-driven bg cycle as a subtle tint
-   without overwhelming the dark theme around it. */
-.weather-narrow::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: rgba(10, 14, 22, 0.62);
-  pointer-events: none;
-  z-index: 0;
 }
 
 /* Sun and moon get arc-positioned by weather.js (narrow-mode branch).
    They live at top-left of the box (position: absolute) and JS sets a
-   translate(x, y) every frame. z-index puts them above the dark scrim. */
+   translate(x, y) every frame. z-index keeps them under the text. */
 .weather-narrow .sun,
 .weather-narrow .moon {
-  z-index: 1;
+  z-index: 0;
 }
 
 .weather-narrow .sun {

@@ -2,8 +2,9 @@
 
    Reuses .weather-box and .sun/.moon class hooks so weather.js drives
    the same bg-color cycle and sun→moon transition as the full widget.
-   weather_narrow.css overrides sun/moon positioning to the top-right
-   corner instead of an arc trajectory across the sky.
+   In narrow mode weather.js moves both bodies on a half-ellipse:
+   rising out of the bottom-right corner, peaking top-center at the
+   real solar midpoint, setting into the bottom-left corner.
 
    Time is populated by the helper in weather.js (same updateScene
    tick). Temp uses the canonical IDs that news_weather_widgets.js
