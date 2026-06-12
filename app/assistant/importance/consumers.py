@@ -208,6 +208,34 @@ WIKI_GROWTH_MIN_DEGREE: int = 4
 # value (moved here, value unchanged).
 WIKI_REFRESH_CHANGE_FLOOR: float = 4.0
 
+# DATE_GAP_WORTH_FLOOR / DATE_GAP_PRIORITY_*
+# ------------------------------------------
+# What they gate: step_missing_dates_scan computes a worth per undated
+# State/Event = MAX effective importance among its connected NON-primary
+# entities (the primary user sits near 10 on everything he touches, so
+# he can't be the discriminator; a state whose only entity IS the
+# primary user falls back to its own importance). Below the floor the
+# scanner creates no finding and sweeps existing pending ones to
+# 'rejected' — nobody wants to date-stamp the swivel chair
+# (2026-06-12 curation).
+#
+# Why 4.0: ordinary objects (furniture, gadgets) land at 1.5-3; people,
+# schools, homes, employers land 5+. Same calibration class as
+# WIKI_REFRESH_CHANGE_FLOOR.
+DATE_GAP_WORTH_FLOOR: float = 4.0
+DATE_GAP_PRIORITY_HIGH: float = 7.0
+DATE_GAP_PRIORITY_MEDIUM: float = 5.5
+
+
+def date_gap_priority(worth: float) -> str:
+    """Absolute priority bins for date-gap findings (replaces the old
+    percentile binning that let the least-trivial trivia rank 'high')."""
+    if worth >= DATE_GAP_PRIORITY_HIGH:
+        return "high"
+    if worth >= DATE_GAP_PRIORITY_MEDIUM:
+        return "medium"
+    return "low"
+
 # STATE_DECAY_NOTEWORTHY_FLOOR
 # ----------------------------
 # What it gates: step_state_decay.py decides whether a State closure

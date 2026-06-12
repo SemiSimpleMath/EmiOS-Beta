@@ -76,41 +76,30 @@ def _normalize_category(c: Optional[str]) -> str:
     return (c or "").strip().lower()
 
 
-def _bin_priority(score: float, distribution: List[float]) -> str:
-    """Map a score to high/medium/low using the distribution's percentiles.
-
-    distribution is the sorted list of all candidate scores. We use the
-    *median* as the high cutoff and the *25th percentile* as the medium
-    cutoff. Scores at-or-above median are high, between p25 and median are
-    medium, below p25 are low. Edge cases: empty / 1-element distributions
-    fall back to "medium".
-    """
-    n = len(distribution)
-    if n == 0 or score is None:
-        return "medium"
-    if n < 4:
-        # Too few candidates for percentile binning to be meaningful — give
-        # everyone medium so the daily routine sees them in created_at order.
-        return "medium"
-    sorted_scores = sorted(distribution)
-    p50 = sorted_scores[n // 2]
-    p25 = sorted_scores[n // 4]
-    if score >= p50:
-        return "high"
-    if score >= p25:
-        return "medium"
-    return "low"
+# ── Curation (2026-06-12) ────────────────────────────────────────────────
+# The original scanner auto-promoted anything touching the primary user to
+# 'high' (nearly everything does — he OWNS the swivel chair) and binned the
+# rest by percentile, so in a pool of trivia the least-trivial trivia still
+# ranked high. Worth is now ABSOLUTE and based on the one signal that
+# separates a swivel chair from a Berkeley degree: the semantic importance
+# of what the state connects to, read through the importance module
+# (effective_importance — never raw; thresholds live in
+# importance.consumers like every other gate).
+from app.assistant.importance import effective_importance
+from app.assistant.importance.consumers import (
+    DATE_GAP_WORTH_FLOOR as WORTH_FLOOR,
+    date_gap_priority,
+)
 
 
-def _top2_sum(pageranks: List[float]) -> float:
-    """Sum of the two highest pageranks in the list. Captures 'two important
-    people both involved' without rewarding hubs of mediocrities."""
-    if not pageranks:
-        return 0.0
-    cleaned = sorted((p for p in pageranks if p is not None), reverse=True)
-    if not cleaned:
-        return 0.0
-    return float(cleaned[0]) + (float(cleaned[1]) if len(cleaned) > 1 else 0.0)
+def _worth(own_effective: float, non_primary_entity_importances: List[float]) -> float:
+    """worth(state) = max effective importance among connected NON-primary
+    entities; a state whose only entity is the primary user falls back to
+    its own effective importance."""
+    cleaned = [float(v) for v in non_primary_entity_importances if v is not None]
+    if cleaned:
+        return max(cleaned)
+    return float(own_effective or 0.0)
 
 
 def run(ctx: PipelineContext) -> dict:
@@ -139,9 +128,7 @@ def run(ctx: PipelineContext) -> dict:
                 primary_user_id = str(row.id)
 
         candidates_q = (
-            session.query(
-                Node.id, Node.label, Node.node_type, Node.category, Node.description
-            )
+            session.query(Node)
             .filter(
                 Node.node_type.in_(["State", "Event"]),
                 Node.start_date.is_(None),
@@ -150,20 +137,17 @@ def run(ctx: PipelineContext) -> dict:
         all_candidates = candidates_q.all()
         scanned = len(all_candidates)
 
-        # Filter to bounded categories only — saves a lot of pagerank lookups.
+        # Filter to bounded categories only — saves a lot of entity lookups.
         bounded = [
-            (str(r.id), r.label or "", r.node_type or "", r.category or "", r.description or "")
-            for r in all_candidates
-            if _normalize_category(r.category) in BOUNDED_CATEGORIES
+            (str(n.id), n.label or "", n.node_type or "", n.category or "",
+             n.description or "", effective_importance(n))
+            for n in all_candidates
+            if _normalize_category(n.category) in BOUNDED_CATEGORIES
         ]
 
-        # For each bounded candidate, collect the pagerank of every
-        # connected Entity node (in/out edges, deduped) and remember whether
-        # the primary user is among them.
-        scored: List[Tuple[str, str, str, str, str, float, bool, List[str]]] = []
-        for node_id, label, node_type, category, description in bounded:
-            entity_rows = (
-                session.query(Node.id, Node.label, Node.pagerank_score)
+        def _entity_context(node_id: str):
+            entity_nodes = (
+                session.query(Node)
                 .join(
                     Edge,
                     or_(
@@ -175,31 +159,77 @@ def run(ctx: PipelineContext) -> dict:
                 .distinct()
                 .all()
             )
-            pageranks = [float(r.pagerank_score or 0.0) for r in entity_rows]
-            score = _top2_sum(pageranks)
+            non_primary = [
+                effective_importance(n) for n in entity_nodes
+                if n.importance is not None and str(n.id) != primary_user_id
+            ]
             connects_primary = primary_user_id is not None and any(
-                str(r.id) == primary_user_id for r in entity_rows
+                str(n.id) == primary_user_id for n in entity_nodes
             )
-            entity_labels = [r.label or "" for r in entity_rows]
+            labels = [n.label or "" for n in entity_nodes]
+            return non_primary, connects_primary, labels
+
+        scored: List[Tuple[str, str, str, str, str, float, bool, List[str]]] = []
+        below_floor_ids: List[str] = []
+        for node_id, label, node_type, category, description, own_effective in bounded:
+            non_primary, connects_primary, entity_labels = _entity_context(node_id)
+            worth = _worth(own_effective, non_primary)
+            if worth < WORTH_FLOOR:
+                below_floor_ids.append(node_id)
+                continue
             scored.append((
                 node_id, label, node_type, category, description,
-                score, connects_primary, entity_labels,
+                worth, connects_primary, entity_labels,
             ))
+
+        # Sweep: pending findings whose node now computes below the floor
+        # (including pre-curation backlog) move to 'rejected' — the
+        # designed don't-re-raise state.
+        from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
+        swept = 0
+        pending_rows = (
+            session.query(KGMaintenanceFinding)
+            .filter(KGMaintenanceFinding.finding_type == "state_missing_dates")
+            .filter(KGMaintenanceFinding.status == "pending")
+            .all()
+        )
+        below_floor_set = set(below_floor_ids)
+        scored_ids = {s[0] for s in scored}
+        for f in pending_rows:
+            pid = str(f.primary_node_id)
+            if pid in scored_ids:
+                continue
+            if pid in below_floor_set:
+                in_floor = True
+            else:
+                # Node not in this scan's candidate set (dated meanwhile,
+                # category drift, ...) — leave those alone; only sweep
+                # confirmed below-floor nodes.
+                in_floor = False
+            if in_floor:
+                f.status = "rejected"
+                f.execution_notes = (
+                    f"curation floor: worth < {WORTH_FLOOR} — nobody wants to "
+                    f"date-stamp low-importance objects (2026-06-12 curation)"
+                )
+                swept += 1
+        if swept:
+            session.commit()
     finally:
         session.close()
 
     if not scored:
-        logger.info("[missing_dates_scan] no bounded-category candidates with NULL start_date")
-        return {"scanned": scanned, "candidates": 0, "new_findings": 0}
-
-    # Distribution for percentile binning. Auto-promoted (primary-user-connected)
-    # rows still go through binning for tiebreaking among themselves.
-    score_distribution = [s[5] for s in scored]
+        logger.info(
+            "[missing_dates_scan] no candidates above the worth floor "
+            "(below_floor=%d swept=%d)", len(below_floor_ids), swept,
+        )
+        return {"scanned": scanned, "candidates": 0, "new_findings": 0,
+                "below_floor": len(below_floor_ids), "swept": swept}
 
     new_findings = 0
     for (node_id, label, node_type, category, description,
-         score, connects_primary, entity_labels) in scored:
-        priority = "high" if connects_primary else _bin_priority(score, score_distribution)
+         worth, connects_primary, entity_labels) in scored:
+        priority = date_gap_priority(worth)
 
         evidence: Dict[str, object] = {
             "label": label,
@@ -207,13 +237,13 @@ def run(ctx: PipelineContext) -> dict:
             "category": category,
             "description": (description or "")[:300],
             "connected_entity_labels": entity_labels[:10],
-            "top_2_pagerank_sum": round(score, 4),
+            "worth": round(worth, 2),
             "connects_primary_user": connects_primary,
         }
         reason = (
             f"{node_type} '{label}' (category={category!r}) has no start_date — "
             f"connects {len(entity_labels)} entit{'y' if len(entity_labels) == 1 else 'ies'} "
-            f"(top-2 PR sum {score:.3f}{', includes primary user' if connects_primary else ''})."
+            f"(worth {worth:.1f}{', includes primary user' if connects_primary else ''})."
         )
 
         _, created = upsert_finding(
@@ -231,7 +261,8 @@ def run(ctx: PipelineContext) -> dict:
             new_findings += 1
 
     logger.info(
-        "[missing_dates_scan] scanned=%d bounded_candidates=%d new_findings=%d",
-        scanned, len(scored), new_findings,
+        "[missing_dates_scan] scanned=%d above_floor=%d below_floor=%d swept=%d new_findings=%d",
+        scanned, len(scored), len(below_floor_ids), swept, new_findings,
     )
-    return {"scanned": scanned, "candidates": len(scored), "new_findings": new_findings}
+    return {"scanned": scanned, "candidates": len(scored), "new_findings": new_findings,
+            "below_floor": len(below_floor_ids), "swept": swept}

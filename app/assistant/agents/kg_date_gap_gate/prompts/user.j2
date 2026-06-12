@@ -1,0 +1,9 @@
+## Undated state
+
+Label: {{ agent_input.label }}
+Type/category: {{ agent_input.node_type }} / {{ agent_input.category }}
+{% if agent_input.description %}Description: {{ agent_input.description }}{% endif %}
+Connected entities: {{ agent_input.entities | join(', ') }}
+Worth score (0-10): {{ agent_input.worth }}
+
+Worth asking the user when this began? Emit the form.

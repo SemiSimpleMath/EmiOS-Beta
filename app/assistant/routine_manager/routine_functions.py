@@ -79,111 +79,23 @@ kg_finding_backlog_drain = _lazy_kg_finding_backlog_drain
 
 
 def _lazy_kg_date_gap_drain(*, target_date=None, routine=None):
-    """Daily: pick 1-3 highest-priority state_missing_dates findings, mark
-    them queued, and ENQUEUE each as a pending question (audit P3.5) — the
-    conversation-starter bridge surfaces those under its own daily nudge
-    budget, speaking in persona. /kg-maintenance/date-gaps remains the
-    pull-based surface (queued items sort first by priority).
+    """Daily: route captured date-gap ANSWERS into the finding executor,
+    then gate + ask up to N new curated questions (kg_maintenance::
+    date_gap_gate decides worth and crafts the question; swivel-chair-grade
+    ownership gets the finding rejected). Core lives in
+    kg_maintenance/date_gap_drain.py.
 
     Routine spec:
-      limit          — max findings to queue this run (default 3)
-      cooldown_days  — re-ask interval; findings asked within this many days
-                       are skipped (default 7)
+      limit          — max questions to ask this run (default 3)
+      cooldown_days  — re-ask interval (default 7)
     """
-    from datetime import datetime, timezone, timedelta
-    from sqlalchemy import case
-    from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
-    from app.models.db_manager import get_db_manager
+    from app.assistant.kg_maintenance.date_gap_drain import run_date_gap_drain
 
     spec = (routine.spec if routine and hasattr(routine, "spec") else {}) or {}
-    limit = max(1, int(spec.get("limit", 3)))
-    cooldown_days = max(0, int(spec.get("cooldown_days", 7)))
-    cutoff = datetime.now(timezone.utc) - timedelta(days=cooldown_days)
-
-    queued_ids: list[str] = []
-    question_payloads: list[tuple[str, str]] = []  # (question_text, priority)
-    skipped_in_cooldown = 0
-    with get_db_manager().transaction(op="kg_date_gap_drain") as session:
-        rows = (
-            session.query(KGMaintenanceFinding)
-            .filter(KGMaintenanceFinding.finding_type == "state_missing_dates")
-            .filter(KGMaintenanceFinding.status == "pending")
-            .order_by(
-                # high → medium → low
-                case(
-                    {"high": 1, "medium": 2, "low": 3},
-                    value=KGMaintenanceFinding.priority,
-                    else_=4,
-                ),
-                KGMaintenanceFinding.created_at.asc(),
-            )
-            .limit(limit * 5)  # pull a buffer so cooldown filter has room
-            .all()
-        )
-        for f in rows:
-            if len(queued_ids) >= limit:
-                break
-            ev = dict(f.evidence_json or {})
-            last_asked_raw = ev.get("last_asked_at")
-            if last_asked_raw:
-                try:
-                    last_asked = datetime.fromisoformat(last_asked_raw.replace("Z", "+00:00"))
-                    if last_asked.tzinfo is None:
-                        last_asked = last_asked.replace(tzinfo=timezone.utc)
-                    if last_asked > cutoff:
-                        skipped_in_cooldown += 1
-                        continue
-                except ValueError:
-                    pass
-            ev["last_asked_at"] = datetime.now(timezone.utc).isoformat()
-            ev["asked_count"] = int(ev.get("asked_count", 0)) + 1
-            f.evidence_json = ev
-            queued_ids.append(f.id)
-
-            label = ev.get("label") or "this"
-            entities = ev.get("connected_entity_labels") or []
-            if len(entities) >= 2:
-                scope_txt = f" between {entities[0]} and {entities[1]}"
-            elif entities:
-                scope_txt = f" for {entities[0]}"
-            else:
-                scope_txt = ""
-            question_payloads.append((
-                f"Memory date gap: roughly when did the '{label}' "
-                f"state{scope_txt} begin? A loose answer like 'around 2003' "
-                f"or 'since birth' is plenty.",
-                f.priority or "medium",
-            ))
-
-    # Deliver AFTER the write transaction (enqueue_question opens its own
-    # session; SQLite is single-writer). The conversation-starter bridge
-    # picks these up under its daily nudge budget; the 72h question expiry
-    # sits well inside the 7-day re-ask cooldown, so at most one live
-    # question exists per finding.
-    questions_enqueued = 0
-    if question_payloads:
-        from app.assistant.pending_questions.store import enqueue_question
-        for qtext, pri in question_payloads:
-            if enqueue_question(
-                question_text=qtext,
-                topical_tag="kg_date_gap",
-                priority=pri,
-                created_by="kg_date_gap_drain",
-            ):
-                questions_enqueued += 1
-
-    logger.info(
-        "[kg_date_gap_drain] queued=%d questions_enqueued=%d "
-        "skipped_in_cooldown=%d (limit=%d, cooldown_days=%d)",
-        len(queued_ids), questions_enqueued, skipped_in_cooldown,
-        limit, cooldown_days,
+    return run_date_gap_drain(
+        limit=max(1, int(spec.get("limit", 3))),
+        cooldown_days=max(0, int(spec.get("cooldown_days", 7))),
     )
-    return {
-        "queued": len(queued_ids),
-        "questions_enqueued": questions_enqueued,
-        "skipped_in_cooldown": skipped_in_cooldown,
-        "queued_finding_ids": queued_ids,
-    }
 
 
 kg_date_gap_drain = _lazy_kg_date_gap_drain
