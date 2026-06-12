@@ -844,7 +844,7 @@
         }
         dot.addEventListener("click", () => showDetail(e));
         const title = document.createElementNS(SVG_NS, "title");
-        title.textContent = `${e.date_iso || e.date_prose || "?"} · ${e.label}${e.importance != null ? " · imp " + e.importance.toFixed(1) : ""}\n${e.sentence || ""}`;
+        title.textContent = `${e.date_display || e.date_iso || e.date_prose || "?"} · ${e.label}${e.importance != null ? " · imp " + e.importance.toFixed(1) : ""}\n${e.sentence || ""}`;
         dot.appendChild(title);
         svg.appendChild(dot);
 
@@ -861,7 +861,7 @@
             // Tooltip with full text — duplicates the dot's title so hovering
             // the label also works.
             const lblTitle = document.createElementNS(SVG_NS, "title");
-            lblTitle.textContent = `${e.date_iso || e.date_prose || "?"} · ${e.label}${e.importance != null ? " · imp " + e.importance.toFixed(1) : ""}`;
+            lblTitle.textContent = `${e.date_display || e.date_iso || e.date_prose || "?"} · ${e.label}${e.importance != null ? " · imp " + e.importance.toFixed(1) : ""}`;
             lbl.appendChild(lblTitle);
             lbl.addEventListener("click", () => showDetail(e));
             lbl.style.cursor = "pointer";
@@ -921,7 +921,7 @@
         const panel = document.getElementById("detailPanel");
         const c = document.getElementById("detailContent");
         const conf = e.date_confidence ? ` (${e.date_confidence})` : "";
-        const dateStr = e.date_iso || e.date_prose || "—";
+        const dateStr = e.date_display || e.date_iso || e.date_prose || "—";
         const endStr = e.end_iso || e.end_prose || "";
         c.innerHTML = `
             <h3>${escapeHtml(e.label)}</h3>

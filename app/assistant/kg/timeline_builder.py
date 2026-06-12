@@ -23,7 +23,9 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
+from app.assistant.importance import effective_importance
 from app.assistant.kg.db.knowledge_graph_db_sqlite import Edge, Node
+from app.assistant.kg_core.kg_utils.date_display import format_node_date
 from app.assistant.utils.path_utils import get_repo_root
 from app.assistant.utils.time_utils import utc_now
 
@@ -54,9 +56,15 @@ class TimelineEntry:
     # with relative anchors / fuzzy. The renderer marks non-actual visually so
     # agents reading the timeline can see at a glance what's confirmed vs guessed.
     date_confidence: Optional[str]
+    # Honest-precision display form (date_display.format_node_date): an
+    # estimated/inferred year-floor renders as 'YYYY' (month-floor as
+    # 'YYYY-MM') — never as a fabricated full day. date_iso stays the full
+    # floored ISO for SORTING; the display form is what humans/agents read.
+    date_display: Optional[str]
     end_iso: Optional[str]             # for ranges; None for point-in-time
     end_prose: Optional[str]
     end_confidence: Optional[str]
+    end_display: Optional[str]
     label: str
     sentence: str
     node_type: str
@@ -82,40 +90,44 @@ def _slugify(text: str) -> str:
     return s or "untitled"
 
 
-def _format_one_date(iso: Optional[str], prose: Optional[str], confidence: Optional[str]) -> str:
+def _format_one_date(display: Optional[str], prose: Optional[str], confidence: Optional[str]) -> str:
     """Render a single date with a confidence marker.
 
+    ``display`` is the honest-precision form from format_node_date — an
+    estimated year-floor arrives as 'YYYY', never a fabricated full day.
+
     Suffix conventions (visible at a glance to any agent reading the file):
-      ``YYYY-MM-DD``         actual — user-confirmed or evidence-explicit
-      ``YYYY-MM-DD?``        inferred — derived from clear context
-      ``YYYY-MM-DD?est``     estimated — derived with fuzzy / relative anchors
-      ``prose``              prose only — no ISO available, only narrative anchor
+      ``YYYY-MM-DD``    actual — user-confirmed or evidence-explicit
+      ``YYYY?``         inferred year-floor — derived from clear context
+      ``YYYY?est``      estimated year-floor — fuzzy / relative anchors
+      ``prose``         prose only — no ISO available, only narrative anchor
 
     The point: a date-fill agent that writes back to Node.start_date with
     confidence='estimated' MUST be visible in the rendered output. Without a
     visible marker, an agent reading the timeline can't tell what's confirmed
     from what's guessed and would compound the guesswork.
     """
-    if iso:
+    if display:
         c = (confidence or "").lower()
-        if c in ("", "actual"):
-            return iso
+        if c in ("", "actual", "user_set", "explicit"):
+            return display
         if c == "inferred":
-            return f"{iso}?"
+            return f"{display}?"
         if c == "estimated":
-            return f"{iso}?est"
+            return f"{display}?est"
         # Unknown confidence string — be defensive; mark unclear.
-        return f"{iso}?{c}"
+        return f"{display}?{c}"
     if prose:
         return prose
     return "—"
 
 
 def _date_column(entry: TimelineEntry) -> str:
-    """Render the date column. ISO when known (with confidence marker),
-    prose when not, range with arrow when both ends present."""
-    start = _format_one_date(entry.date_iso, entry.date_prose, entry.date_confidence)
-    end = _format_one_date(entry.end_iso, entry.end_prose, entry.end_confidence)
+    """Render the date column. Honest-precision date when known (with
+    confidence marker), prose when not, range with arrow when both ends
+    present."""
+    start = _format_one_date(entry.date_display, entry.date_prose, entry.date_confidence)
+    end = _format_one_date(entry.end_display, entry.end_prose, entry.end_confidence)
     if (entry.end_iso or entry.end_prose) and end != start:
         return f"{start} → {end}"
     return start
@@ -157,14 +169,16 @@ def collect_entries(session: Session, entity_id: str) -> List[TimelineEntry]:
             date_iso=other.start_date.date().isoformat() if has_iso else None,
             date_prose=(other.start_date_prose or "").strip() or None,
             date_confidence=(other.start_date_confidence or "").strip().lower() or None,
+            date_display=format_node_date(other.start_date, other.start_date_confidence),
             end_iso=other.end_date.date().isoformat() if other.end_date else None,
             end_prose=(other.end_date_prose or "").strip() or None,
             end_confidence=(other.end_date_confidence or "").strip().lower() or None,
+            end_display=format_node_date(other.end_date, other.end_date_confidence),
             label=other.label or "?",
             sentence=(other.original_sentence or "").strip(),
             node_type=other.node_type or "?",
             category=other.category,
-            importance=float(other.importance) if other.importance is not None else None,
+            importance=effective_importance(other) if other.importance is not None else None,
             relationship_type=edge.relationship_type or "?",
             direction="outgoing" if is_outgoing else "incoming",
         ))
@@ -189,8 +203,9 @@ def render_markdown(entity: Node, entries: List[TimelineEntry]) -> str:
         f"Importance: ★ = major (≥ {IMPORTANCE_BAND_MAJOR}); "
         f"· = moderate ({IMPORTANCE_BAND_MID}–{IMPORTANCE_BAND_MAJOR}); "
         f"unmarked = minor/unrated.",
-        "Date confidence: `YYYY-MM-DD` = actual; `YYYY-MM-DD?` = inferred; "
-        "`YYYY-MM-DD?est` = estimated; prose-only when no ISO known.",
+        "Date confidence: `YYYY-MM-DD` = actual; `?` = inferred; `?est` = estimated. "
+        "Dates render at their HONEST precision — `2003?est` means only the year "
+        "is known (never a fabricated Jan 1). Prose-only when no ISO known.",
         "",
     ]
     body_lines: List[str] = []

@@ -135,9 +135,14 @@ def timeline_data(entity_key: str):
                 "date_iso": e.date_iso,
                 "date_prose": e.date_prose,
                 "date_confidence": e.date_confidence,
+                # Honest-precision form: estimated year-floors arrive as
+                # 'YYYY', month-floors as 'YYYY-MM'. The detail panel should
+                # show this, not the floored full ISO.
+                "date_display": e.date_display,
                 "end_iso": e.end_iso,
                 "end_prose": e.end_prose,
                 "end_confidence": e.end_confidence,
+                "end_display": e.end_display,
                 "year": year,
                 "label": e.label,
                 "sentence": e.sentence,
