@@ -16,7 +16,8 @@ Rules:
 - Third person always — never "I"/"my", even when evidence sentences use them.
 - Use the provided edges and dates — they are the discriminating structure. Do not invent facts not present in the input.
 - Include the era ("since 2010", "from 2020 to 2024") when the node carries dates — eras distinguish successive referents of the same role.
-- If the inputs genuinely cannot distinguish this referent (no anchors, generic label, nothing to lean on), write the most specific honest sentence the inputs support — never pad with guesses.
+- If the inputs genuinely cannot single out a coherent referent (no usable anchors, abstract extraction fragments, pure state plumbing), set definable=false and say in `basis` what is missing — NEVER pad with guesses or restate graph jargon as identity.
+- Sometimes the original conversation snippet that created the node is provided. Use it to find the real-world referent the extractor saw. If even the conversation does not reveal a coherent referent, definable=false is the honest verdict — such a node likely has no value.
 - Present tense for current things; past tense for ended eras.
 - Max ~200 characters.
 

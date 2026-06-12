@@ -110,24 +110,27 @@ class _FakeChroma:
         self.stored[node_id] = sentence
 
 
-def _run_refresh(monkeypatch, sentences_by_label, max_per_run=50):
+def _run_refresh(monkeypatch, sentences_by_label, max_per_run=50,
+                 window_text=None):
     import app.assistant.kg_core.kg_utils.identity_sentence as mod
 
     calls = []
 
-    def fake_generate(inputs):
-        calls.append(inputs["label"])
-        return sentences_by_label.get(inputs["label"])
+    def fake_generate(inputs, *, source_window=None):
+        calls.append((inputs["label"], source_window))
+        s = sentences_by_label.get(inputs["label"])
+        return {"sentence": s, "definable": s is not None, "basis": "test"}
 
     fake_chroma = _FakeChroma()
     monkeypatch.setattr(mod, "generate_identity_sentence", fake_generate)
+    monkeypatch.setattr(mod, "_source_window_text", lambda nid: window_text)
     import app.assistant.kg.chroma.chroma_embedding_manager as cem
     monkeypatch.setattr(cem, "get_chroma_manager", lambda: fake_chroma)
     import app.assistant.embeddings.embedder as embedder_mod
     monkeypatch.setattr(embedder_mod, "embed_text", lambda text: [0.1, 0.2])
 
     result = mod.run_identity_sentence_refresh(max_per_run=max_per_run)
-    return result, calls, fake_chroma
+    return result, [c[0] for c in calls], fake_chroma
 
 
 def test_refresh_backfills_null_sentences_and_stamps_hash(monkeypatch):
@@ -223,8 +226,13 @@ def test_refresh_node_types_filter(monkeypatch):
     import app.assistant.kg_core.kg_utils.identity_sentence as mod
 
     calls = []
-    monkeypatch.setattr(mod, "generate_identity_sentence",
-                        lambda inputs: (calls.append(inputs["label"]) or "S."))
+
+    def fake_generate(inputs, *, source_window=None):
+        calls.append(inputs["label"])
+        return {"sentence": "S.", "definable": True, "basis": "test"}
+
+    monkeypatch.setattr(mod, "generate_identity_sentence", fake_generate)
+    monkeypatch.setattr(mod, "_source_window_text", lambda nid: None)
     import app.assistant.kg.chroma.chroma_embedding_manager as cem
     monkeypatch.setattr(cem, "get_chroma_manager", lambda: _FakeChroma())
     import app.assistant.embeddings.embedder as embedder_mod
@@ -237,6 +245,86 @@ def test_refresh_node_types_filter(monkeypatch):
     mod.run_identity_sentence_refresh(max_per_run=50)  # default: all covered
     assert "Some Entity" in calls and "Some Trip" not in calls  # Event now fresh
     assert "Some Birthday" not in calls  # Property excluded always
+
+
+# ── escalation + undefinable verdict (user directive, 2026-06-12) ───────
+
+
+def test_indefinable_escalates_to_source_window(monkeypatch):
+    import app.assistant.kg_core.kg_utils.identity_sentence as mod
+
+    nid = _mk_node("Vague Fragment")
+    calls = []
+
+    def fake_generate(inputs, *, source_window=None):
+        calls.append(source_window)
+        if source_window is None:
+            return {"sentence": None, "definable": False, "basis": "no anchors"}
+        return {"sentence": "The fragment from the window.", "definable": True,
+                "basis": "window"}
+
+    monkeypatch.setattr(mod, "generate_identity_sentence", fake_generate)
+    monkeypatch.setattr(mod, "_source_window_text", lambda n: "user: blah blah")
+    import app.assistant.kg.chroma.chroma_embedding_manager as cem
+    monkeypatch.setattr(cem, "get_chroma_manager", lambda: _FakeChroma())
+    import app.assistant.embeddings.embedder as embedder_mod
+    monkeypatch.setattr(embedder_mod, "embed_text", lambda text: [0.1])
+
+    result = mod.run_identity_sentence_refresh(max_per_run=5)
+
+    assert calls == [None, "user: blah blah"]  # stage 1 then stage 2
+    assert result["generated"] == 1
+    session = get_session()
+    try:
+        assert session.get(Node, nid).identity_sentence == "The fragment from the window."
+    finally:
+        session.close()
+
+
+def test_undefinable_stamps_hash_raises_finding_and_does_not_retry(monkeypatch):
+    import app.assistant.kg_core.kg_utils.identity_sentence as mod
+    from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
+
+    nid = _mk_node("Pure Junk Fragment")
+
+    def fake_generate(inputs, *, source_window=None):
+        return {"sentence": None, "definable": False, "basis": "no referent"}
+
+    monkeypatch.setattr(mod, "generate_identity_sentence", fake_generate)
+    monkeypatch.setattr(mod, "_source_window_text", lambda n: "user: noise")
+    import app.assistant.kg.chroma.chroma_embedding_manager as cem
+    monkeypatch.setattr(cem, "get_chroma_manager", lambda: _FakeChroma())
+    import app.assistant.embeddings.embedder as embedder_mod
+    monkeypatch.setattr(embedder_mod, "embed_text", lambda text: [0.1])
+
+    result = mod.run_identity_sentence_refresh(max_per_run=5)
+    assert result["undefinable"] == 1
+
+    session = get_session()
+    try:
+        n = session.get(Node, nid)
+        assert n.identity_sentence is None
+        assert n.identity_inputs_hash  # verdict stamped
+        f = (session.query(KGMaintenanceFinding)
+             .filter_by(finding_type="undefinable_node", primary_node_id=nid)
+             .one())
+        report = dict(f.investigation_report_json or {})
+        assert f.status == "investigated"
+        assert report.get("disposition") == "needs_user_review"
+    finally:
+        session.close()
+
+    # Second run: hash matches -> skipped, no second writer call, no dup finding.
+    result2 = mod.run_identity_sentence_refresh(max_per_run=5)
+    assert result2["undefinable"] == 0
+    session = get_session()
+    try:
+        count = (session.query(KGMaintenanceFinding)
+                 .filter_by(finding_type="undefinable_node", primary_node_id=nid)
+                 .count())
+        assert count == 1
+    finally:
+        session.close()
 
 
 # ── semantic tier reads the identity collection ──────────────────────────

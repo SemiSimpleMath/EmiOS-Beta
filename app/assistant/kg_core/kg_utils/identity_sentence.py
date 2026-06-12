@@ -107,11 +107,14 @@ def identity_inputs_hash(inputs: Dict[str, Any]) -> str:
     return hashlib.sha1(basis.encode("utf-8")).hexdigest()
 
 
-def generate_identity_sentence(inputs: Dict[str, Any]) -> Optional[str]:
+def generate_identity_sentence(
+    inputs: Dict[str, Any], *, source_window: Optional[str] = None,
+) -> Dict[str, Any]:
     """LLM phrases the gathered facts into one definite description.
 
-    Deterministic proposes (the facts), LLM decides (selection + phrasing).
-    Returns None when the writer produces nothing usable.
+    Deterministic proposes (the facts), LLM decides (selection + phrasing
+    — or the honest verdict that no coherent referent exists).
+    Returns {"sentence": Optional[str], "definable": bool, "basis": str}.
     """
     from app.assistant.routine_handlers.subconscious import _run_subconscious_agent
 
@@ -119,6 +122,8 @@ def generate_identity_sentence(inputs: Dict[str, Any]) -> Optional[str]:
         raise ValueError("identity inputs missing label — refusing to invoke writer")
 
     agent_input = {k: v for k, v in inputs.items() if not k.startswith("_")}
+    if source_window:
+        agent_input["source_window"] = source_window[:800]
     result = _run_subconscious_agent(
         handler_label="identity_sentence_writer",
         agent_name=AGENT_NAME,
@@ -127,11 +132,14 @@ def generate_identity_sentence(inputs: Dict[str, Any]) -> Optional[str]:
         actor_id="identity_sentence_refresh",
     )
     if not isinstance(result, dict):
-        return None
-    sentence = str(result.get("identity_sentence") or "").strip()
-    if not sentence:
-        return None
-    return sentence[:MAX_SENTENCE_CHARS]
+        return {"sentence": None, "definable": False, "basis": "writer returned no data"}
+    sentence = str(result.get("identity_sentence") or "").strip()[:MAX_SENTENCE_CHARS]
+    definable = bool(result.get("definable")) and bool(sentence)
+    return {
+        "sentence": sentence if definable else None,
+        "definable": definable,
+        "basis": str(result.get("basis") or "")[:200],
+    }
 
 
 COVERED_NODE_TYPES = ("Entity", "Event", "State", "Goal", "Concept")
@@ -180,6 +188,9 @@ def run_identity_sentence_refresh(
             .all()
         )
         # Snapshot work items inside the session; LLM calls happen after.
+        # Freshness = hash match alone: hash-stamped-with-NULL-sentence is
+        # the durable "judged undefinable" verdict — re-attempted only when
+        # the node's structure actually changes (hash drift).
         work: List[Dict[str, Any]] = []
         for n in nodes:
             if len(work) >= max_per_run:
@@ -187,7 +198,7 @@ def run_identity_sentence_refresh(
             examined += 1
             inputs = gather_identity_inputs(session, n)
             h = identity_inputs_hash(inputs)
-            if n.identity_sentence and n.identity_inputs_hash == h:
+            if n.identity_inputs_hash == h:
                 skipped_fresh += 1
                 continue
             work.append({"node_id": n.id, "inputs": inputs, "hash": h})
@@ -202,19 +213,54 @@ def run_identity_sentence_refresh(
         primary_user = None
 
     cm = None
+    undefinable = 0
     for item in work:
         sentence = None
+        verdict_basis = ""
         label = str(item["inputs"].get("label") or "")
         if primary_user and label.strip().lower() == primary_user:
             sentence = f"{label}, the primary user of this system."
         else:
             try:
-                sentence = generate_identity_sentence(item["inputs"])
+                result = generate_identity_sentence(item["inputs"])
+                # Escalation (user directive, 2026-06-12): not definable
+                # from graph structure alone -> retry with the original
+                # conversation snippet the node was extracted from.
+                if not result["definable"]:
+                    window_text = _source_window_text(item["node_id"])
+                    if window_text:
+                        result = generate_identity_sentence(
+                            item["inputs"], source_window=window_text,
+                        )
+                sentence = result["sentence"]
+                verdict_basis = result["basis"]
             except Exception as e:
                 logger.error("[identity_refresh] writer failed for %r: %s",
                              label, e)
+                failed += 1
+                continue
+
         if not sentence:
-            failed += 1
+            # Indefinable even with the source conversation: stamp the hash
+            # WITHOUT a sentence (durable verdict — retried only on
+            # structural drift) and surface the node for review. A node
+            # that cannot be defined from its own minting conversation
+            # likely has no value.
+            with get_db_manager().transaction(op="identity_sentence_refresh") as s:
+                from app.assistant.kg.db.knowledge_graph_db_sqlite import Node as N
+                s.execute(
+                    sql_update(N)
+                    .where(N.id == item["node_id"])
+                    .values(
+                        identity_sentence=None,
+                        identity_inputs_hash=item["hash"],
+                        updated_at=N.updated_at,
+                    )
+                )
+            _raise_undefinable_finding(item["node_id"], label, verdict_basis)
+            undefinable += 1
+            logger.info("[identity_refresh] %r judged undefinable: %s",
+                        label, verdict_basis[:120])
             continue
 
         with get_db_manager().transaction(op="identity_sentence_refresh") as s:
@@ -245,6 +291,67 @@ def run_identity_sentence_refresh(
         "examined": examined,
         "generated": generated,
         "failed": failed,
+        "undefinable": undefinable,
         "skipped_fresh": skipped_fresh,
         "queued": len(work),
     }
+
+
+def _source_window_text(node_id: str) -> Optional[str]:
+    """The chat snippet the node was minted from (earliest evidence window)."""
+    from app.assistant.kg.proposal_promoter import _node_window_text
+    from app.models.db_manager import get_db_manager
+
+    try:
+        with get_db_manager().read_session() as s:
+            return _node_window_text(s, node_id, max_chars=800)
+    except Exception as e:
+        logger.error("[identity_refresh] window fetch failed for %s: %s",
+                     node_id[:8], e)
+        return None
+
+
+def _raise_undefinable_finding(node_id: str, label: str, basis: str) -> None:
+    """Born-investigated review finding: no coherent referent exists."""
+    from app.assistant.kg_maintenance.store import upsert_finding
+    from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
+    from app.models.db_manager import get_db_manager
+    from app.assistant.utils.time_utils import utc_now
+
+    fid, created = upsert_finding(
+        finding_type="undefinable_node",
+        primary_node_id=node_id,
+        suggested_action="review",
+        reason=(
+            f"{label!r} could not be given an identity sentence even with its "
+            f"source conversation in hand — no coherent real-world referent. "
+            f"Writer: {basis[:200]}"
+        ),
+        confidence=0.7,
+        priority="low",
+        agent_name="identity_sentence_refresh",
+        evidence={"label": label, "writer_basis": basis[:300]},
+    )
+    if not created:
+        return
+    with get_db_manager().transaction(op="identity_refresh.undefinable") as s:
+        f = s.query(KGMaintenanceFinding).filter_by(id=fid).first()
+        if f is None:
+            return
+        f.status = "investigated"
+        f.investigated_at = utc_now()
+        f.investigation_report_json = {
+            "recommendation": (
+                f"Node `{node_id}` ({label!r}) has no describable referent — the "
+                f"identity writer failed to define it from graph structure AND "
+                f"from its minting conversation. Likely an extraction fragment. "
+                f"Review its edges with kg_query: fold anything real into the "
+                f"proper node (kg_repoint_edge / kg_merge_nodes), then delete it "
+                f"(kg_delete_node). If it is genuinely meaningful, the user's "
+                f"notes are ground truth."
+            ),
+            "diagnosis": f"Indefinable after window escalation: {basis[:300]}",
+            "evidence": [{"kind": "writer_basis", "text": basis[:300]}],
+            "confidence": "medium",
+            "disposition": "needs_user_review",
+        }

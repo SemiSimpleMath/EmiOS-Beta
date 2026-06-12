@@ -11,6 +11,10 @@ Era: starts {{ agent_input.start_date or "?" }}, ends {{ agent_input.end_date or
 ## First observation (incidental — identity may differ)
 {{ agent_input.original_sentence or "(none)" }}
 
+{% if agent_input.source_window %}## Original conversation snippet (where this node was extracted)
+{{ agent_input.source_window }}
+{% endif %}
+
 {% if agent_input.description %}## Current description (may be stale)
 {{ agent_input.description }}
 {% endif %}
