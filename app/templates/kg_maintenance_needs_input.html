@@ -150,8 +150,8 @@
 
           <div class="inv-actions">
             <button type="button" class="inv-btn inv-btn-accept" onclick="acceptFinding('${esc(f.id)}')"
-                    title="Run the (refined) recommendation now via kg_resolution_manager.">
-              ✓ Accept (run now)
+                    title="Queue for the executor. Anything in the notes box rides along and supersedes the investigator's recommendation (operator words are ground truth).">
+              ✓ Accept with notes
             </button>
             <button type="button" class="inv-btn inv-btn-dismiss" onclick="dismissFinding('${esc(f.id)}')"
                     title="Mark as dismissed — no execution.">
@@ -217,7 +217,11 @@
 
     window.acceptFinding = async function acceptFinding(id) {
       const card = document.getElementById('card-' + id);
-      if (!confirm('Queue this finding for the executor?\n\nIt will run via kg_resolution_manager on the next cron tick. To drain immediately, use the "Run executor now" button on /kg-maintenance/investigated.')) return;
+      const notes = notesValue(id);
+      const confirmMsg = notes
+        ? 'Queue this finding for the executor WITH your notes?\n\nYour notes supersede the investigator\'s recommendation — the executor treats them as ground truth. Runs via kg_resolution_manager on the next cron tick (≤15 min).'
+        : 'Queue this finding for the executor?\n\nNo notes written — the executor will follow the investigator\'s original recommendation. (Type guidance in the notes box first if you want to direct it.)';
+      if (!confirm(confirmMsg)) return;
       const actions = card?.querySelector('.inv-actions');
       const prevHtml = actions?.innerHTML;
       if (actions) actions.innerHTML = '<span class="inv-applying">queueing…</span>';
@@ -225,7 +229,7 @@
         const res = await fetch(`/kg-maintenance/api/finding/${id}/accept`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({}),
+          body: JSON.stringify({ notes }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || res.statusText);
@@ -234,7 +238,7 @@
           actions.innerHTML = `
             <div class="inv-applied-block">
               <span class="inv-closed-badge inv-closed-queued">queued</span>
-              <p class="inv-applied-summary">Will run on next executor tick. Refresh after running to see terminal status.</p>
+              <p class="inv-applied-summary">${notes ? 'Queued with your notes as ground truth. ' : ''}Will run on next executor tick (≤15 min). Refresh after running to see terminal status.</p>
             </div>`;
         }
       } catch (e) {
@@ -249,7 +253,7 @@
         const res = await fetch(`/kg-maintenance/api/finding/${id}/dismiss`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({}),
+          body: JSON.stringify({ notes: notesValue(id) }),
         });
         if (!res.ok) throw new Error((await res.json()).error || res.statusText);
         const card = document.getElementById('card-' + id);

@@ -685,6 +685,9 @@ def api_finding_accept(finding_id):
     from app.models.base import get_session as _get_session
     from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
 
+    data = request.get_json(silent=True) or {}
+    notes = str(data.get("notes") or "").strip()
+
     try:
         finding = get_finding(finding_id)
         if finding is None:
@@ -709,6 +712,13 @@ def api_finding_accept(finding_id):
                 report = {}
             report = dict(report)
             report["disposition"] = "auto_apply"
+            # "Accept with these notes": guidance riding the Accept click
+            # supersedes the investigator's recommendation in the executor
+            # brief (operator words are ground truth). Written in the SAME
+            # report mutation so a separate save can't be forgotten.
+            if notes:
+                report["operator_notes"] = notes
+                report["operator_notes_updated_at"] = to_rfc3339_z(utc_now())
             f.investigation_report_json = report
             flag_modified(f, "investigation_report_json")
             # Backdate investigated_at past the 24h grace gate.
