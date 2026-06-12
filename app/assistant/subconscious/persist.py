@@ -439,6 +439,18 @@ def _enqueue_pending_questions(
         )
         if qid:
             enqueued += 1
+            if ask_mode == "ticket":
+                # High-stakes: deliver as the modal immediately (perfect
+                # answer attribution). On failure it stays pending and the
+                # chat injector delivers it on the normal path.
+                from app.assistant.pending_questions.ticket_delivery import (
+                    deliver_question_as_ticket,
+                )
+                deliver_question_as_ticket(
+                    question_id=qid,
+                    question_text=question_text,
+                    priority=priority,
+                )
     if enqueued:
         logger.info(
             "[noticer.persist] enqueued %d of %d pending questions",

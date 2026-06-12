@@ -172,6 +172,88 @@ def test_enqueue_derives_ticket_mode_for_high_stakes(tmp_path):
         session.close()
 
 
+def test_ticket_delivery_flips_question_to_asked(monkeypatch):
+    from app.assistant.pending_questions import ticket_delivery
+
+    qid = enqueue_question(
+        question_text="Book the AC service this week?",
+        priority="high",
+        created_by="subconscious::noticer",
+        related_concern_id="c-high",
+        ask_mode="ticket",
+    )
+    ticket_id = ticket_delivery.deliver_question_as_ticket(
+        question_id=qid,
+        question_text="Book the AC service this week?",
+    )
+    assert ticket_id
+    row = _get(qid)
+    assert row.status == "asked"
+    assert row.asked_in_message_id == f"ticket:{ticket_id}"
+
+    # The ticket carries the question linkage for the response router.
+    from app.assistant.ticket_manager.ticket_manager import get_ticket_manager
+    ticket = get_ticket_manager().get_ticket_by_id(ticket_id)
+    assert (ticket.trigger_context or {}).get("question_id") == qid
+
+
+def test_ticket_response_routes_into_answer_loop(monkeypatch):
+    from app.assistant.pending_questions import ticket_delivery
+    from app.assistant.subconscious import answer_capture
+
+    triggered = []
+    monkeypatch.setattr(answer_capture, "trigger_noticer", lambda reason: triggered.append(reason))
+    annotated = []
+    monkeypatch.setattr(
+        answer_capture, "annotate_concern_answer",
+        lambda cid, **kw: annotated.append((cid, kw)) or True,
+    )
+
+    qid = enqueue_question(
+        question_text="Book it?",
+        priority="high",
+        created_by="subconscious::noticer",
+        related_concern_id="c-high",
+        ask_mode="ticket",
+    )
+    ticket_id = ticket_delivery.deliver_question_as_ticket(
+        question_id=qid, question_text="Book it?",
+    )
+
+    class _Msg:
+        data = {"ticket_id": ticket_id, "action": "answer",
+                "target_state": "accepted", "user_text": "Yes, Tuesday morning"}
+
+    ticket_delivery._on_ticket_responded(_Msg())
+
+    row = _get(qid)
+    assert row.status == "answered"
+    assert row.answer_text == "Yes, Tuesday morning"
+    assert row.answer_message_id == f"ticket:{ticket_id}"
+    assert annotated and annotated[0][0] == "c-high"
+    assert triggered
+
+
+def test_ticket_dismissal_expires_question(monkeypatch):
+    from app.assistant.pending_questions import ticket_delivery
+
+    qid = enqueue_question(
+        question_text="Optional thing?",
+        created_by="subconscious::noticer",
+        ask_mode="ticket",
+    )
+    ticket_id = ticket_delivery.deliver_question_as_ticket(
+        question_id=qid, question_text="Optional thing?",
+    )
+
+    class _Msg:
+        data = {"ticket_id": ticket_id, "action": "dismiss",
+                "target_state": "dismissed", "user_text": ""}
+
+    ticket_delivery._on_ticket_responded(_Msg())
+    assert _get(qid).status == "expired"
+
+
 def test_annotate_concern_answer_journals_register(tmp_path, monkeypatch):
     from app.assistant.subconscious import answer_capture
 

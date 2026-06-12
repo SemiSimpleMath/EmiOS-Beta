@@ -180,6 +180,12 @@ def initialize_system():
     task_ir_runner.ensure_event_subscription()
     logger.info("✅ Initialized task_ir_runner")
 
+    # Route ticket responses for ticket-mode pending questions back into
+    # the subconscious answer loop (mark answered → annotate concern →
+    # trigger a noticer tick).
+    from app.assistant.pending_questions.ticket_delivery import register_ticket_answer_listener
+    register_ticket_answer_listener()
+
     if is_subsystem_enabled("dayflow_scheduler"):
         from app.assistant.dayflow_orchestrator.dayflow_scheduler import DayflowScheduler
         dayflow_scheduler = DayflowScheduler(
