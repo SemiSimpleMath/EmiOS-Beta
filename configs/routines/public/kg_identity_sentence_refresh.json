@@ -9,7 +9,7 @@
   "runner": "function",
   "spec": {
     "function_name": "kg_identity_sentence_refresh",
-    "max_per_run": 50
+    "max_per_run": 1500
   },
   "run_policy": {
     "type": "daily",
@@ -23,5 +23,5 @@
     "then": "disable_with_ticket",
     "auto_retry_after_seconds": 7200
   },
-  "notes": "[Created 2026-06-12, KG fragility review #1: label is a bad identifier.] Nightly 03:45 (after the KG drains, before card refresh at 04:30 so cards can read fresh sentences later): (re)generate identity sentences - graph-derived definite descriptions that uniquely identify each Entity's referent. NULL-sentence backfill first by pagerank, then hash-stale nodes (label/era/anchor-edge drift). Embeds into node_identity_embeddings; resolution + merge judges read them. Spec: scratch/IDENTITY_SENTENCE_SPEC.md."
+  "notes": "[Created 2026-06-12, KG fragility review #1: label is a bad identifier.] Nightly 03:45 (after the KG drains, before card refresh at 04:30 so cards can read fresh sentences later): (re)generate identity sentences - graph-derived definite descriptions that uniquely identify each node's referent (Entity/Event/State/Goal/Concept). NULL-sentence backfill first by pagerank, then hash-stale nodes (label/era/anchor-edge drift). Embeds into node_identity_embeddings; resolution + merge judges read them. max_per_run 1500: high cap is harmless steady-state (only drifted nodes process; free local models) and lets the remaining type backfills finish IN-SERVER - external backfill processes writing chroma alongside the server corrupted the identity collection's hnsw index on 2026-06-12; the server is the ONLY chroma writer. Spec: scratch/IDENTITY_SENTENCE_SPEC.md."
 }
