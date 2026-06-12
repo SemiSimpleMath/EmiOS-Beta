@@ -122,8 +122,9 @@ def generate_identity_sentence(
         raise ValueError("identity inputs missing label — refusing to invoke writer")
 
     agent_input = {k: v for k, v in inputs.items() if not k.startswith("_")}
-    if source_window:
-        agent_input["source_window"] = source_window[:800]
+    # Always present: the template tests this key and strict_template
+    # raises on undefined variables (prompt guards layer 3).
+    agent_input["source_window"] = source_window[:800] if source_window else None
     result = _run_subconscious_agent(
         handler_label="identity_sentence_writer",
         agent_name=AGENT_NAME,

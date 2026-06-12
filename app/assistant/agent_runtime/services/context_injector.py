@@ -772,6 +772,11 @@ class ContextInjector:
                     else:
                         context[key] = self._build_history_for_prompt(agent)
                 except Exception as e:
+                    # Audited 2026-06-12 (prompt guards): deliberate
+                    # optional-decoration degrade — history enriches but no
+                    # judgment depends on it solely. An agent whose judgment
+                    # DOES depend on it declares required_context_items:
+                    # [history] and the guard refuses the empty result.
                     logger.error("[%s] Failed building history for prompt injection: %s", agent.name, e)
                     logger.debug("[%s] history builder exception details", agent.name, exc_info=True)
                     context[key] = ""
@@ -796,6 +801,10 @@ class ContextInjector:
                     logger.debug("[%s] user_bio_context: result length=%d", agent.name, len(result))
                     context[key] = result
                 except Exception as e:
+                    # Audited 2026-06-12 (prompt guards): deliberate
+                    # optional-decoration degrade — bio context enriches chat
+                    # tone; declare it in required_context_items where a
+                    # judgment genuinely depends on it.
                     logger.error("[%s] Failed building user_bio_context: %s", agent.name, e)
                     logger.debug("[%s] user_bio_context builder exception details", agent.name, exc_info=True)
                     context[key] = ""

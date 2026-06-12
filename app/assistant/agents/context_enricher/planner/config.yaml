@@ -15,5 +15,12 @@ user_context_items:
   - task
   - information
 
+# Prompt guard: an enricher with no item or no KG results writes
+# fabrication-bait — refuse loudly instead (the prep node already skips
+# items with empty KG context, so empties here mean caller bugs).
+required_context_items:
+  - task
+  - information
+
 system_context_items:
   - date_time

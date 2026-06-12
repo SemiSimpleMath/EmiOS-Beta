@@ -15,4 +15,9 @@ accept_auto_skills: false
 user_context_items:
   - agent_input
 
+# Prompt guard: judged blank input undetected until 2026-06-12 —
+# refuse loudly instead.
+required_context_items:
+  - agent_input
+
 system_context_items: []

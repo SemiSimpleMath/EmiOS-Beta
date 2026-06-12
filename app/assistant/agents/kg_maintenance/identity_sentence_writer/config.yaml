@@ -16,4 +16,10 @@ accept_auto_skills: false
 user_context_items:
   - agent_input
 
+# Prompt guards: judging on empty input is the failure mode (2026-06-12);
+# refuse loudly instead. Strict templates raise on undefined variables.
+required_context_items:
+  - agent_input
+strict_template: true
+
 system_context_items: []

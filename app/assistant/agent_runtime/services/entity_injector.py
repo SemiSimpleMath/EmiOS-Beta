@@ -93,8 +93,8 @@ class EntityInjector:
         prompt_injections: list,
         entity_injection_keys: set[str],
     ) -> str:
-        from app.assistant.agent_runtime.services.prompt_builder import _jinja_env
-        template = _jinja_env.from_string(user_prompt_template)
+        from app.assistant.agent_runtime.services.prompt_builder import get_jinja_env_for_agent
+        template = get_jinja_env_for_agent(agent).from_string(user_prompt_template)
         render_keys = self._resolve_render_keys(prompt_injections, entity_injection_keys)
         render_fields = self._resolve_render_fields(agent=agent, render_keys=render_keys)
 

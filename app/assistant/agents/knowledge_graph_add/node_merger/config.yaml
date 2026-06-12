@@ -10,6 +10,11 @@ user_context_items:
 - new_node_context
 - existing_node_candidates
 - entity_level_0
+# Prompt guard (2026-06-12): a merge judgment without the new node or the
+# candidate set is a coin flip — refuse loudly instead.
+required_context_items:
+- new_node_context
+- existing_node_candidates
 system_context_items:
 - resource_assistant_data
 - resource_user_data

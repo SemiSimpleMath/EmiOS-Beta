@@ -1,8 +1,9 @@
+import hashlib
 import re
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 
-from jinja2 import Environment, FileSystemLoader
+from jinja2 import ChainableUndefined, Environment, FileSystemLoader, StrictUndefined
 
 from app.assistant.agent_runtime.exceptions import PromptRenderError
 from app.assistant.utils.logging_config import get_logger
@@ -18,6 +19,115 @@ _jinja_env = Environment(
     loader=FileSystemLoader(str(_AGENTS_DIR)),
     keep_trailing_newline=True,
 )
+
+# Strict variant: undefined template variables RAISE instead of rendering
+# as empty string. Opt-in per agent via config `strict_template: true` —
+# default for newly authored agents; old agents ratchet over as audited
+# (many legacy templates lean on silent-empty optionals).
+_strict_jinja_env = Environment(
+    loader=FileSystemLoader(str(_AGENTS_DIR)),
+    keep_trailing_newline=True,
+    undefined=StrictUndefined,
+)
+
+
+def get_jinja_env_for_agent(agent) -> Environment:
+    try:
+        strict = bool((agent.config or {}).get("strict_template"))
+    except Exception:
+        strict = False
+    return _strict_jinja_env if strict else _jinja_env
+
+
+# ── Prompt guards (fragility review #3, 2026-06-12) ──────────────────────
+# Blank input does not look like an error to an LLM — it looks like
+# CONSERVATIVE JUDGMENT (gates reject everything, matchers match nothing).
+# Four judgment agents shipped judging empty input with zero errors before
+# these guards existed. Fail loud at the template boundary instead.
+
+def _is_empty_context_value(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    if isinstance(value, (list, dict, tuple, set)):
+        return len(value) == 0
+    return False
+
+
+_skeleton_cache: Dict[str, str] = {}
+
+# Skeleton renders simulate "every variable blank". Jinja's DEFAULT
+# Undefined raises on attribute access ({{ agent_input.label }} with no
+# agent_input at all); ChainableUndefined tolerates attribute chains but
+# still raises on method CALLS ({{ agent_input.get('x') }}). The skeleton
+# simulation must tolerate both — blank in, blank out.
+class _BlankUndefined(ChainableUndefined):
+    def __call__(self, *args, **kwargs):
+        return self
+
+
+_skeleton_env = Environment(
+    loader=FileSystemLoader(str(_AGENTS_DIR)),
+    keep_trailing_newline=True,
+    undefined=_BlankUndefined,
+)
+
+_SKELETON_UNRENDERABLE = object()
+
+
+def _skeleton_render(template_str: str):
+    """The template rendered with NO context (every variable, attribute
+    chain, and method call blank), normalized the same way as the real
+    render path. Cached by template hash. Templates using constructs even
+    the blank simulation can't survive (e.g. filters that type-check)
+    return a sentinel — the skeleton check fails OPEN for those; layer 1
+    (required_context_items) remains the hard guard."""
+    key = hashlib.sha1(template_str.encode("utf-8")).hexdigest()
+    if key not in _skeleton_cache:
+        try:
+            skeleton = _skeleton_env.from_string(template_str).render()
+            _skeleton_cache[key] = skeleton.replace("\n\n", "\n").strip()
+        except Exception as e:
+            logger.debug("skeleton render unrenderable (%s) — check fails open", e)
+            _skeleton_cache[key] = _SKELETON_UNRENDERABLE
+    return _skeleton_cache[key]
+
+
+def enforce_required_context_items(
+    agent_name: str, user_context: Optional[dict], required_items,
+) -> None:
+    """Layer 1: an agent declares which context items its judgment depends
+    on (config `required_context_items`); invocation with any of them
+    empty refuses loudly instead of judging nothing."""
+    for item in required_items or []:
+        value = (user_context or {}).get(item)
+        if _is_empty_context_value(value):
+            raise PromptRenderError(
+                f"[{agent_name}] required context item {item!r} resolved "
+                f"empty ({type(value).__name__}) — refusing to invoke on "
+                f"missing input. Declared in config required_context_items."
+            )
+
+
+def enforce_skeleton_guard(
+    agent_name: str, template_str: str, rendered: Optional[str],
+) -> None:
+    """Layer 2 (generic backstop, zero per-agent config): a rendered user
+    prompt identical to the empty-context skeleton means NO data reached
+    the template at all — every variable resolved blank. Static templates
+    (no Jinja constructs) are exempt by construction."""
+    if "{{" not in template_str and "{%" not in template_str:
+        return
+    skeleton = _skeleton_render(template_str)
+    if skeleton is _SKELETON_UNRENDERABLE:
+        return
+    if (rendered or "").strip() == skeleton:
+        raise PromptRenderError(
+            f"[{agent_name}] rendered user prompt equals the empty-context "
+            f"skeleton — no data reached the template. Check the agent's "
+            f"context items and the caller's input."
+        )
 
 
 class PromptBuilder:
@@ -141,7 +251,7 @@ class PromptBuilder:
         )
 
         try:
-            template = _jinja_env.from_string(system_prompt_template)
+            template = get_jinja_env_for_agent(agent).from_string(system_prompt_template)
             return template.render(**(system_context or {}))
         except Exception as e:
             logger.error("[%s] ERROR while rendering system prompt: %s", agent.name, e)
@@ -234,8 +344,12 @@ class PromptBuilder:
         else:
             user_context = {}
 
+        enforce_required_context_items(
+            agent.name, user_context, agent.config.get("required_context_items"),
+        )
+
         try:
-            return agent.components.entity_injector.render_user_prompt_with_entities(
+            rendered = agent.components.entity_injector.render_user_prompt_with_entities(
                 agent=agent,
                 message=message,
                 agent_name=agent.name,
@@ -248,4 +362,7 @@ class PromptBuilder:
             logger.error("[%s] ERROR while rendering user prompt: %s", agent.name, e)
             logger.debug("[%s] user prompt render exception details", agent.name, exc_info=True)
             raise
+
+        enforce_skeleton_guard(agent.name, user_prompt_template, rendered)
+        return rendered
 
