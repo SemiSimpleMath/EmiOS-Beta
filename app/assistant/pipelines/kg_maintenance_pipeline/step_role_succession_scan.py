@@ -136,6 +136,7 @@ def run(ctx: PipelineContext) -> dict:
                 "node_id": n.id,
                 "label": n.label,
                 "category": n.category,
+                "identity_sentence": getattr(n, "identity_sentence", None),
                 "start_date": format_node_date(n.start_date, n.start_date_confidence),
                 "end_date": None,
                 "evidence": evidence,

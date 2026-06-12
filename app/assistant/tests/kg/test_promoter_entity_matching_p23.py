@@ -148,6 +148,7 @@ def test_semantic_tier_returns_same_type_candidates_above_threshold(monkeypatch)
     fake_cm = SimpleNamespace(
         node_collection=_FakeCollection([(near, near_vec), (far, far_vec)]),
         node_context_collection=_FakeCollection([(wrong_type, near_vec)]),
+        node_identity_collection=_FakeCollection([]),
     )
     monkeypatch.setattr(cem, "get_chroma_manager", lambda: fake_cm)
 

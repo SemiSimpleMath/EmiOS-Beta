@@ -442,16 +442,18 @@ def supersede_verdicts_for_node(session: Session, node_id: str, *, reason: str) 
 
 def delete_node_chroma_vectors(node_id: str) -> bool:
     """
-    Remove a node's label + context embeddings from Chroma. Best-effort by
-    necessity — Chroma is not transactional with SQLite — so failures are
-    logged at ERROR (ghost vectors feed the duplicate scan false candidates
-    until swept) and reported via the return value, never raised.
+    Remove a node's label + context + identity embeddings from Chroma.
+    Best-effort by necessity — Chroma is not transactional with SQLite — so
+    failures are logged at ERROR (ghost vectors feed the duplicate scan
+    false candidates until swept) and reported via the return value, never
+    raised.
     """
     try:
         from app.assistant.kg.chroma.chroma_embedding_manager import get_chroma_manager
         cm = get_chroma_manager()
         cm.delete_node_embedding(node_id)
         cm.delete_node_context_embedding(node_id)
+        cm.delete_node_identity_embedding(node_id)
         return True
     except Exception as exc:
         logger.error(

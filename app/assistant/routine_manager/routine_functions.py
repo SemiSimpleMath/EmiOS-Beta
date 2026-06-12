@@ -122,6 +122,26 @@ def _lazy_entity_card_refresh(*, target_date=None, routine=None):
 entity_card_refresh = _lazy_entity_card_refresh
 
 
+def _lazy_kg_identity_sentence_refresh(*, target_date=None, routine=None):
+    """Nightly: (re)generate identity sentences — the graph-derived definite
+    descriptions that uniquely identify each Entity's referent (the identity
+    layer; see scratch/IDENTITY_SENTENCE_SPEC.md). NULL-sentence nodes
+    backfill first (pagerank order), then nodes whose discriminating inputs
+    (label / era dates / anchor edges) drifted per identity_inputs_hash.
+    Writes preserve updated_at (a projection is not a content change).
+
+    Routine spec: max_per_run (default 50).
+    """
+    from app.assistant.kg_core.kg_utils.identity_sentence import run_identity_sentence_refresh
+    spec = (routine.spec if routine and hasattr(routine, "spec") else {}) or {}
+    return run_identity_sentence_refresh(
+        max_per_run=max(1, int(spec.get("max_per_run", 50))),
+    )
+
+
+kg_identity_sentence_refresh = _lazy_kg_identity_sentence_refresh
+
+
 def _lazy_kg_state_decay(*, target_date=None, routine=None):
     """Nightly: auto-close State/Event nodes whose TTL has elapsed.
 
@@ -477,6 +497,7 @@ ROUTINE_FUNCTION_REGISTRY = {
     "kg_wiki_inference": kg_wiki_inference,
     "kg_importance_rater": kg_importance_rater,
     "entity_card_refresh": entity_card_refresh,
+    "kg_identity_sentence_refresh": kg_identity_sentence_refresh,
     "sleep_camera_tick_local": sleep_camera_tick_local,
 }
 

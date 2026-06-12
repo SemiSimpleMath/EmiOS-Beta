@@ -2,7 +2,8 @@ Today: {{ agent_input.today }}
 
 ## Entity
 Label: {{ agent_input.label }}
-Type/category: Entity / {{ agent_input.category or "?" }}
+{% if agent_input.identity_sentence %}Identity: {{ agent_input.identity_sentence }}
+{% endif %}Type/category: Entity / {{ agent_input.category or "?" }}
 Era: starts {{ agent_input.start_date or "?" }}, ends {{ agent_input.end_date or "open" }}
 
 ## Evidence sentences (with observation dates)

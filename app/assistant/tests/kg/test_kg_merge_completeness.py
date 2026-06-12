@@ -54,12 +54,16 @@ class _ChromaRecorder:
     def __init__(self):
         self.deleted = []
         self.deleted_context = []
+        self.deleted_identity = []
 
     def delete_node_embedding(self, node_id):
         self.deleted.append(node_id)
 
     def delete_node_context_embedding(self, node_id):
         self.deleted_context.append(node_id)
+
+    def delete_node_identity_embedding(self, node_id):
+        self.deleted_identity.append(node_id)
 
 
 @pytest.fixture

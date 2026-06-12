@@ -182,12 +182,15 @@ def _needs_person_confirm(session, node: Node) -> bool:
 
 
 def _semantic_entity_candidates(
-    session, label: str, node_type: str,
+    session, label: str, node_type: str, sentence: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Chroma-similarity candidates for an entity-like proposal that found
     no exact label/alias match (audit P2.3 fix 2): cosine >=
     _ENTITY_SEMANTIC_SIM_THRESHOLD against the label + context collections
-    (the duplicate scan's tier-3 bar), filtered to the proposal's own
+    (the duplicate scan's tier-3 bar) PLUS the identity-sentence collection
+    (definite descriptions — queried with the mention's own sentence when
+    available; sentence-vs-sentence similarity is MiniLM's strength, and
+    short generic labels are its weakness). Filtered to the proposal's own
     node_type, snapshotted for the post-session node_merger confirm.
     Catches "the user's mom" vs "the user's mother" before it mints a twin.
 
@@ -203,21 +206,37 @@ def _semantic_entity_candidates(
         logger.warning("[promoter] entity semantic tier unavailable: %s", exc)
         return []
 
+    def _unit(text: str):
+        v = np.array(embed_text(text), dtype=float)
+        n = float(np.linalg.norm(v))
+        return (v, n) if n > 0.0 else (None, 0.0)
+
     try:
-        query_emb = np.array(embed_text(label.strip()), dtype=float)
-        query_n = float(np.linalg.norm(query_emb))
-        if query_n == 0.0:
+        query_emb, query_n = _unit(label.strip())
+        if query_emb is None:
             return []
         cm = get_chroma_manager()
 
-        # Top-K from both collections, then exact cosine per candidate
+        # Identity collection gets the mention sentence as its query when
+        # the extractor provided one — that is the like-vs-like comparison.
+        identity_emb, identity_n = (query_emb, query_n)
+        if sentence and sentence.strip():
+            emb, n = _unit(sentence.strip())
+            if emb is not None:
+                identity_emb, identity_n = emb, n
+
+        # Top-K per collection, then exact cosine per candidate
         # (collection.query distances are L2 — same recompute pattern as
         # the scan's tier 3 and the label-relax filter).
         cand_ids: set[str] = set()
-        for collection in (cm.node_collection, cm.node_context_collection):
+        for collection, q_emb, q_n in (
+            (cm.node_collection, query_emb, query_n),
+            (cm.node_context_collection, query_emb, query_n),
+            (cm.node_identity_collection, identity_emb, identity_n),
+        ):
             try:
                 res = collection.query(
-                    query_embeddings=[query_emb.tolist()],
+                    query_embeddings=[q_emb.tolist()],
                     n_results=_ENTITY_SEMANTIC_TOP_K,
                     include=["embeddings"],
                 )
@@ -232,7 +251,7 @@ def _semantic_entity_candidates(
                 n = float(np.linalg.norm(v))
                 if n == 0.0:
                     continue
-                if float(np.dot(query_emb, v) / (query_n * n)) >= _ENTITY_SEMANTIC_SIM_THRESHOLD:
+                if float(np.dot(q_emb, v) / (q_n * n)) >= _ENTITY_SEMANTIC_SIM_THRESHOLD:
                     cand_ids.add(str(cid))
         if not cand_ids:
             return []
@@ -2006,6 +2025,10 @@ def _snapshot_state_candidate(session, cand: Node) -> Dict[str, Any]:
         "label": cand.label,
         "node_type": cand.node_type,
         "category": cand.category,
+        # The definite description — the strongest same-referent signal the
+        # merger gets (graph-derived; see identity_sentence.py). NULL until
+        # the nightly refresh has covered this node.
+        "identity_sentence": getattr(cand, "identity_sentence", None),
         "description": (cand.description or "")[:500],
         "original_sentence": cand.original_sentence,
         "start_date": cand.start_date.isoformat() if cand.start_date else None,
@@ -2153,7 +2176,10 @@ def _prepare_proposal_plan(proposal_id: str) -> Optional[_PromoterPlan]:
                     entity_resolutions[pn.id] = None
                     confirm = [_snapshot_state_candidate(session, m)]
                     seen_ids = {m.id}
-                    for c in _semantic_entity_candidates(session, pn.label, pn.node_type):
+                    for c in _semantic_entity_candidates(
+                        session, pn.label, pn.node_type,
+                        sentence=getattr(pn, "sentence", None),
+                    ):
                         if c.get("node_id") not in seen_ids:
                             confirm.append(c)
                             seen_ids.add(c.get("node_id"))
@@ -2180,7 +2206,10 @@ def _prepare_proposal_plan(proposal_id: str) -> Optional[_PromoterPlan]:
                     # near-matches ("the user's mom" vs "...mother") go to
                     # the post-session node_merger instead of silently
                     # minting a twin.
-                    sem = _semantic_entity_candidates(session, pn.label, pn.node_type)
+                    sem = _semantic_entity_candidates(
+                        session, pn.label, pn.node_type,
+                        sentence=getattr(pn, "sentence", None),
+                    )
                     if sem:
                         entity_confirm_lists[pn.id] = sem
 

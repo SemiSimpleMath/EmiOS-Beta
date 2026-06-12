@@ -1,0 +1,18 @@
+## Node
+Label: {{ agent_input.label }}
+Type/category: {{ agent_input.node_type }} / {{ agent_input.category or "?" }}
+Era: starts {{ agent_input.start_date or "?" }}, ends {{ agent_input.end_date or "open" }}
+
+## Edges (most important first)
+{% for e in agent_input.edges %}
+- {{ e }}
+{% endfor %}
+
+## First observation (incidental — identity may differ)
+{{ agent_input.original_sentence or "(none)" }}
+
+{% if agent_input.description %}## Current description (may be stale)
+{{ agent_input.description }}
+{% endif %}
+
+Write the identity sentence for this node.

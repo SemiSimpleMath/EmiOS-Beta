@@ -153,16 +153,31 @@ class ChromaEmbeddingManager:
                 },
             )
 
+            # Identity sentence embeddings — the definite-description
+            # projection (kg_core/kg_utils/identity_sentence.py). Sentence-vs-
+            # sentence similarity is what MiniLM is trained for; this is the
+            # primary resolution signal once populated.
+            self.node_identity_collection = self._client.get_or_create_collection(
+                name="node_identity_embeddings",
+                metadata={
+                    "description": "Node identity sentence embeddings (definite descriptions)",
+                    "embedding_model": EMBEDDING_MODEL_NAME,
+                    "embedding_schema": EMBEDDING_SCHEMA_ID,
+                },
+            )
+
             self._validate_embedding_contract(self.node_collection, "node_embeddings")
             self._validate_embedding_contract(self.edge_collection, "edge_embeddings")
             self._validate_embedding_contract(self.taxonomy_collection, "taxonomy_embeddings")
             self._validate_embedding_contract(self.node_context_collection, "node_context_embeddings")
-            
+            self._validate_embedding_contract(self.node_identity_collection, "node_identity_embeddings")
+
             logger.info(f"ChromaDB collections initialized:")
             logger.info(f"  - node_embeddings: {self.node_collection.count()} items")
             logger.info(f"  - edge_embeddings: {self.edge_collection.count()} items")
             logger.info(f"  - taxonomy_embeddings: {self.taxonomy_collection.count()} items")
             logger.info(f"  - node_context_embeddings: {self.node_context_collection.count()} items")
+            logger.info(f"  - node_identity_embeddings: {self.node_identity_collection.count()} items")
             
         except Exception as e:
             logger.error(f"Error initializing ChromaDB collections: {e}")
@@ -310,6 +325,30 @@ class ChromaEmbeddingManager:
             logger.debug("Deleted context embedding for node %s", node_id)
         except Exception as e:
             logger.error("Error deleting node context embedding: %s", e, exc_info=True)
+
+    # ==================== NODE IDENTITY EMBEDDINGS ====================
+
+    def store_node_identity_embedding(self, node_id: str, sentence: str, embedding: List[float]):
+        """Store a node's identity-sentence embedding (definite description)."""
+        try:
+            node_id = self._norm_id(node_id)
+            self.node_identity_collection.upsert(
+                ids=[node_id],
+                embeddings=[embedding],
+                metadatas=[{"identity_sentence": sentence[:300]}],
+            )
+            logger.debug("Stored identity embedding for node %s", node_id)
+        except Exception as e:
+            logger.error("Error storing node identity embedding: %s", e)
+            raise
+
+    def delete_node_identity_embedding(self, node_id: str):
+        """Delete a node's identity-sentence embedding."""
+        try:
+            self.node_identity_collection.delete(ids=[str(node_id)])
+            logger.debug("Deleted identity embedding for node %s", node_id)
+        except Exception as e:
+            logger.error("Error deleting node identity embedding: %s", e, exc_info=True)
 
     # ==================== EDGE EMBEDDINGS ====================
     
@@ -473,6 +512,7 @@ class ChromaEmbeddingManager:
         return {
             "nodes": self.node_collection.count(),
             "node_contexts": self.node_context_collection.count(),
+            "node_identities": self.node_identity_collection.count(),
             "edges": self.edge_collection.count(),
             "taxonomy": self.taxonomy_collection.count(),
         }

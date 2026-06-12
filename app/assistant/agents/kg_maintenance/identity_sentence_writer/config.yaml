@@ -1,0 +1,19 @@
+name: kg_maintenance::identity_sentence_writer
+class_name: Agent
+action_required: false
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.4-mini"
+  model_tier: "fast"
+
+# Pure writing: graph-derived facts in, one definite description out.
+# No tools.
+allowed_tools: []
+except_tools: []
+allowed_nodes: []
+accept_auto_skills: false
+
+user_context_items:
+  - agent_input
+
+system_context_items: []
