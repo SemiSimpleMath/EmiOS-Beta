@@ -667,6 +667,22 @@ class ContextInjector:
             if getattr(message, "agent_input", None) is not None:
                 context["agent_input"] = message.agent_input
 
+            # Same class, older convention: direct Agent invocations carry
+            # their payload in Message(task=..., information=...). Nothing
+            # copies those fields to the blackboard, so the generic lookup
+            # below resolved them to None and the template rendered blank —
+            # context_engine::chat_scan judged "User message: " since it
+            # shipped (caught by the skeleton guard, 2026-06-12). The
+            # message fields FILL only when the blackboard has nothing:
+            # manager flows (whose control nodes own the blackboard task)
+            # keep their precedence.
+            for _fld in ("task", "information"):
+                _v = getattr(message, _fld, None)
+                if isinstance(_v, str) and _v.strip():
+                    _bb = agent.blackboard.get_state_value(_fld, None)
+                    if _bb is None or (isinstance(_bb, str) and not _bb.strip()):
+                        context[_fld] = _v
+
         if "incoming_message" not in context:
             bb_task = str(agent.blackboard.get_state_value("task", "") or "").strip()
             if bb_task:
