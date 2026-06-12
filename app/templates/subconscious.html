@@ -10,10 +10,107 @@
 <body>
     <div class="sub-container">
         <header class="sub-header">
-            <h1><i class="fas fa-brain"></i> Subconscious suggestions</h1>
+            <h1><i class="fas fa-brain"></i> Subconscious</h1>
             <a href="/chat_bot" class="back-link"><i class="fas fa-arrow-left"></i> Back to Chat</a>
         </header>
 
+        <div class="mind-stats">
+            <span class="mind-stat"><strong>{{ mind.counts.active }}</strong> active</span>
+            <span class="mind-stat"><strong>{{ mind.counts.addressing }}</strong> addressing</span>
+            <span class="mind-stat"><strong>{{ mind.counts.resolved }}</strong> resolved</span>
+            {% if mind.last_tick_utc %}<span class="mind-stat mind-stat-dim">last tick {{ mind.last_tick_utc }} UTC</span>{% endif %}
+            {% if mind.digest.last_digest_at %}<span class="mind-stat mind-stat-dim">last digest {{ mind.digest.last_digest_at }} UTC</span>{% endif %}
+        </div>
+
+        <!-- ── The mind: concerns register ─────────────────────────── -->
+        <section class="mind-section">
+            <h2 class="mind-h2"><i class="fas fa-eye"></i> Concerns</h2>
+            {% if not mind.concerns.active and not mind.concerns.addressing %}
+            <p class="mind-empty">No active concerns — the register is quiet.</p>
+            {% endif %}
+
+            {% for bucket, label in [('addressing', 'Being addressed'), ('active', 'Active')] %}
+            {% if mind.concerns[bucket] %}
+            <h3 class="mind-bucket-label">{{ label }} ({{ mind.concerns[bucket]|length }})</h3>
+            {% for c in mind.concerns[bucket] %}
+            <details class="concern concern-{{ c.severity }}">
+                <summary class="concern-summary">
+                    <span class="concern-sev concern-sev-{{ c.severity }}">{{ c.severity }}</span>
+                    <span class="concern-title">{{ c.title }}</span>
+                    <span class="concern-meta-inline">
+                        {{ c.kind }}{% if c.subject %} · {{ c.subject }}{% endif %}{% if c.horizon %} · {{ c.horizon }}{% endif %}
+                        · {{ c.evidence_count }} evidence
+                        {% if c.first_observed %} · since {{ c.first_observed }}{% endif %}
+                    </span>
+                </summary>
+                <div class="concern-body">
+                    {% if c.notes %}<p class="concern-notes">{{ c.notes }}</p>{% endif %}
+                    {% if c.evidence %}
+                    <div class="concern-evidence">
+                        {% for e in c.evidence %}
+                        <div class="evidence-row"><span class="evidence-kind">{{ e.kind }}</span> {{ e.snippet }}</div>
+                        {% endfor %}
+                        {% if c.evidence_count > c.evidence|length %}
+                        <div class="evidence-row evidence-more">… {{ c.evidence_count - c.evidence|length }} more</div>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                    {% if c.reinforcement_tail %}
+                    <div class="concern-reinforcements">
+                        {% for note in c.reinforcement_tail %}
+                        <div class="reinforce-row">{{ note }}</div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                    <div class="concern-foot">
+                        {% if c.domain_tags %}<span>{{ c.domain_tags|join(', ') }}</span>{% endif %}
+                        {% if c.addressable_by %}<span>→ {{ c.addressable_by|join(', ') }}</span>{% endif %}
+                        {% if c.last_reinforced %}<span>last reinforced {{ c.last_reinforced }}</span>{% endif %}
+                    </div>
+                </div>
+            </details>
+            {% endfor %}
+            {% endif %}
+            {% endfor %}
+
+            {% if mind.concerns.resolved %}
+            <details class="mind-resolved">
+                <summary class="mind-bucket-label">Recently resolved ({{ mind.concerns.resolved|length }})</summary>
+                {% for c in mind.concerns.resolved %}
+                <div class="resolved-row"><span class="concern-sev concern-sev-{{ c.severity }}">{{ c.severity }}</span> {{ c.title }}</div>
+                {% endfor %}
+            </details>
+            {% endif %}
+        </section>
+
+        <!-- ── Tick activity ───────────────────────────────────────── -->
+        {% if mind.ticks %}
+        <section class="mind-section">
+            <h2 class="mind-h2"><i class="fas fa-heartbeat"></i> Recent noticer activity</h2>
+            <div class="tick-list">
+                {% for t in mind.ticks %}
+                <div class="tick-row">
+                    <span class="tick-time">{{ t.tick_utc }}</span>
+                    <span class="tick-counts">{{ t.new }} new · {{ t.reinforced }} reinforced · {{ t.resolved }} resolved{% if t.escalated %} · {{ t.escalated }} escalated{% endif %}{% if t.questions %} · {{ t.questions }} questions{% endif %}</span>
+                    {% if t.new_titles %}<span class="tick-new-titles">{{ t.new_titles|join(' | ') }}</span>{% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </section>
+        {% endif %}
+
+        <!-- ── Latest digest ───────────────────────────────────────── -->
+        {% if mind.digest.latest_text %}
+        <section class="mind-section">
+            <details class="digest-details">
+                <summary class="mind-h2-summary"><i class="fas fa-newspaper"></i> Latest digest{% if mind.digest.latest_name %} — {{ mind.digest.latest_name }}{% endif %}</summary>
+                <pre class="digest-pre">{{ mind.digest.latest_text }}</pre>
+            </details>
+        </section>
+        {% endif %}
+
+        <!-- ── The output: proposed intentions ─────────────────────── -->
+        <h2 class="mind-h2"><i class="fas fa-lightbulb"></i> Proposals</h2>
         <p class="sub-intro">
             Every proposal the subconscious has minted for the next 14 days,
             grouped by date. Write a comment on anything — vetoes, calibration,

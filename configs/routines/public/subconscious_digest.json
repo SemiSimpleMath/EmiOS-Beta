@@ -1,0 +1,30 @@
+{
+  "id": "subconscious_digest",
+  "enabled": true,
+  "name": "Subconscious digest — post the daily concerns digest to chat",
+  "runner": "function",
+  "spec": {
+    "function_name": "digest_run"
+  },
+  "run_policy": {
+    "type": "interval",
+    "min_interval_seconds": 86400
+  },
+  "trigger": {
+    "type": "time",
+    "active_window": {
+      "from": "07:30",
+      "to": "22:00",
+      "local": true
+    }
+  },
+  "max_run_seconds": 120,
+  "on_error": {
+    "max_failures": 3,
+    "backoff_base_seconds": 300,
+    "backoff_max_seconds": 3600,
+    "then": "disable_with_ticket",
+    "auto_retry_after_seconds": 3600
+  },
+  "notes": "Daily digest of the concerns_register posted to master_room (new vs ongoing vs recently-resolved concerns + pending questions). Pure templating, no LLM. Window starts 07:30 so the 04:00 noticer tick and 05:00-06:00 proposers have already run; the wide fall-back window (to 22:00) means a late boot still gets its digest instead of silently skipping the day. Digest also lands in app/subconscious_digests/ and on the /subconscious page."
+}

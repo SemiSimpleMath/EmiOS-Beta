@@ -25,6 +25,8 @@ subconscious_bp = Blueprint("subconscious", __name__)
 
 @subconscious_bp.route("/subconscious")
 def subconscious_page():
+    from app.assistant.subconscious.dashboard_service import load_mind_overview
+
     rows = list_intentions_for_dashboard(days_ahead=14)
     # Group by date for clean rendering — the template iterates date buckets.
     by_date: dict = {}
@@ -38,6 +40,7 @@ def subconscious_page():
         "subconscious.html",
         grouped=grouped,
         item_count=len(rows),
+        mind=load_mind_overview(),
     )
 
 
