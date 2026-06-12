@@ -169,12 +169,17 @@ def get_asked_unanswered(*, max_age_hours: float = 72.0, limit: int = 20) -> Lis
 
 def get_for_noticer_processing(*, stale_after_hours: float = 48.0) -> dict:
     """The noticer's question mailbox: captured answers awaiting processing
-    plus stale asked-questions awaiting an expiry decision."""
+    plus stale asked-questions awaiting an expiry decision.
+
+    Ownership: each creator drains its OWN answers — the noticer only sees
+    questions it asked (other creators, e.g. the wiki fact drain, run
+    their own processing)."""
     session = get_session()
     try:
         answered = (
             session.query(PendingQuestion)
             .filter(PendingQuestion.status == "answered")
+            .filter(PendingQuestion.created_by == "subconscious::noticer")
             .order_by(PendingQuestion.answered_at.asc())
             .limit(20)
             .all()
@@ -183,6 +188,7 @@ def get_for_noticer_processing(*, stale_after_hours: float = 48.0) -> dict:
         stale = (
             session.query(PendingQuestion)
             .filter(PendingQuestion.status == "asked")
+            .filter(PendingQuestion.created_by == "subconscious::noticer")
             .filter(PendingQuestion.asked_at.isnot(None))
             .filter(PendingQuestion.asked_at <= stale_cutoff)
             .order_by(PendingQuestion.asked_at.asc())
@@ -191,6 +197,25 @@ def get_for_noticer_processing(*, stale_after_hours: float = 48.0) -> dict:
         )
         session.expunge_all()
         return {"answered": answered, "stale_asked": stale}
+    finally:
+        session.close()
+
+
+def get_by_creator(*, created_by: str, status: str, limit: int = 20) -> List[PendingQuestion]:
+    """A creator's own questions in a given status (drain-your-own-answers
+    ownership pattern)."""
+    session = get_session()
+    try:
+        rows = (
+            session.query(PendingQuestion)
+            .filter(PendingQuestion.created_by == created_by)
+            .filter(PendingQuestion.status == status)
+            .order_by(PendingQuestion.created_at.asc())
+            .limit(limit)
+            .all()
+        )
+        session.expunge_all()
+        return rows
     finally:
         session.close()
 

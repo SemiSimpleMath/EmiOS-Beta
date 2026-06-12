@@ -131,7 +131,7 @@ Defined in `page_writer.py:502`. This is the path the nightly routine and the `/
 10. Stitch frontmatter + title + lead + body, then run `apply_references` to convert `{node:<uuid>}` markers into numbered `[N]` footnotes plus an appended `## References` section.
 11. Write `<vault>/prose/<Entity>.md`.
 
-There is also an older `generate_prose_page` (full single-call writer, `page_writer.py:202`) and `generate_prose_page_sectioned` (per-`WIKI:DET`-section calls, `page_writer.py:368`) still in the file. Neither is called by the nightly path or the `/wiki/<entity>/regenerate` route — `generate_prose_page_tagged` is the live entry point.
+(The older `generate_prose_page` and `generate_prose_page_sectioned` writers have been removed — `generate_prose_page_tagged` is the only prose entry point.)
 
 ### 3. `regenerate_affected_sections` — incremental
 

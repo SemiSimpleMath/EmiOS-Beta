@@ -57,6 +57,11 @@ The user wants the agent to surface dates UPFRONT so they don't have to do all t
 - Facts already present in `subject_neighborhood`.
 - Speculation from world knowledge alone (LLMs hallucinate kinship and affiliations all the time).
 - Trivial restatements of facts the page paraphrases from the KG.
+- Taxonomy/definitional trivia about generic concepts ("water is a drink
+  and a resource", "dogs are animals"). Personal-graph facts only:
+  relationships, history, places, work, preferences, events tied to the
+  household's actual life. Each proposal may end up as a confirmation
+  question to the user — generic trivia wastes that budget.
 - Facts about entities you can't pin down (don't write a sentence about "her brother" if no name appears).
 - Sentence forms that try to encode predicates / triples ("Jorma — is_father — Jukka"). Just write the natural sentence.
 

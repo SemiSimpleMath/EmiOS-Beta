@@ -1,0 +1,8 @@
+## Proposed fact (inferred from the wiki)
+
+Claim: {{ agent_input.claim }}
+Source page: {{ agent_input.source_page }}
+Inference confidence: {{ agent_input.confidence }}
+{% if agent_input.subject_label %}Subject: {{ agent_input.subject_label }} ({{ agent_input.subject_type }}){% endif %}
+
+Is this worth confirming with the user? Emit the form.

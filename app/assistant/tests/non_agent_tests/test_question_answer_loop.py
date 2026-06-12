@@ -95,18 +95,22 @@ def test_stale_asked_lands_in_noticer_mailbox():
     from datetime import timedelta
     from app.assistant.utils.time_utils import utc_now
 
-    qid = enqueue_question(question_text="Old ask?", created_by="t")
+    # The mailbox is ownership-filtered: only the noticer's own questions.
+    qid = enqueue_question(question_text="Old ask?", created_by="subconscious::noticer")
     mark_asked(qid)
+    other = enqueue_question(question_text="Someone else's ask", created_by="wiki::synthetic_fact_drain")
+    mark_asked(other)
     session = get_session()
     try:
-        row = session.query(PendingQuestion).filter_by(id=qid).one()
-        row.asked_at = utc_now() - timedelta(hours=60)
+        for stale_id in (qid, other):
+            row = session.query(PendingQuestion).filter_by(id=stale_id).one()
+            row.asked_at = utc_now() - timedelta(hours=60)
         session.commit()
     finally:
         session.close()
 
     mailbox = get_for_noticer_processing(stale_after_hours=48.0)
-    assert [q.id for q in mailbox["stale_asked"]] == [qid]
+    assert [q.id for q in mailbox["stale_asked"]] == [qid]  # the drain's question is NOT the noticer's business
     # And the capture working-set ignores it (too old to keep judging).
     assert get_asked_unanswered(max_age_hours=48.0) == []
 

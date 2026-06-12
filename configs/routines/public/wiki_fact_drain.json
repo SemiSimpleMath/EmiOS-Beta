@@ -1,0 +1,30 @@
+{
+  "id": "wiki_fact_drain",
+  "enabled": true,
+  "name": "Wiki synthetic-fact drain — confirm inferred facts with the user",
+  "runner": "function",
+  "spec": {
+    "function_name": "wiki_fact_drain_run"
+  },
+  "run_policy": {
+    "type": "interval",
+    "min_interval_seconds": 86400
+  },
+  "trigger": {
+    "type": "time",
+    "active_window": {
+      "from": "08:00",
+      "to": "22:00",
+      "local": true
+    }
+  },
+  "max_run_seconds": 300,
+  "on_error": {
+    "max_failures": 3,
+    "backoff_base_seconds": 300,
+    "backoff_max_seconds": 3600,
+    "then": "disable_with_ticket",
+    "auto_retry_after_seconds": 3600
+  },
+  "notes": "Drains synthetic_fact_proposal findings (wiki_connection_investigator's 04:15 output): trivia gets dismissed by the worthiness gate; worthy facts become natural confirmation questions (max 2/run, riding the standard question loop + answer capture). Confirmed facts become investigated/auto_apply findings the kg_finding_executor materializes after its 24h grace - full mutator safeguards, no new ingestion machinery. Window starts 08:00 so the morning noticer/digest questions get priority."
+}
