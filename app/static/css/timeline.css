@@ -337,6 +337,14 @@ body {
     pointer-events: none;
 }
 
+/* "show less" badge — collapses a month bin expanded past its budget */
+.tl-more-badge.tl-collapse rect {
+    stroke: #7c5af7;
+}
+.tl-more-badge.tl-collapse .tl-more-text {
+    fill: #b9a8f7;
+}
+
 /* Undated lane label */
 .tl-lane-label {
     fill: #8888a0;

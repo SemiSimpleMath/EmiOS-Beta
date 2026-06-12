@@ -2,10 +2,11 @@
 //
 // Three zoom tiers:
 //   'overview'      — full range. If span > 15 yr, group into 5-year bins;
-//                     else step year-by-year. Cap top N per bin/year.
-//   'bin-detail'    — one 5-year bin. Top N per year inside it. Only used
+//                     else step year-by-year. Per-bin display budget.
+//   'bin-detail'    — one 5-year bin. Per-year budget inside it. Only used
 //                     when overview is binned.
-//   'year-detail'   — one year, X spread by month. Shows all entries.
+//   'year-detail'   — one year, X spread by month. Per-month budget;
+//                     "+N more" toggles a month to show everything.
 //
 // A breadcrumb back button steps one level up. Importance drives dot size +
 // opacity; category drives color; date confidence drives stroke style.
@@ -67,9 +68,13 @@
         return "1,3";
     }
 
-    // Per-cluster density caps + binning thresholds.
-    const PER_CLUSTER_CAP = 3;        // shown per bin (overview-binned) or per year
-    const PER_MONTH_CAP = 5;          // shown per month in year-detail; "+N more" zooms into month
+    // Density-adaptive curation: per-bin display budgets by zoom tier.
+    // The global filters (importance slider + confidence toggles) apply
+    // first as a floor; if a bin still exceeds its budget only the top-K
+    // survive (see curationOrder) and a "+N more" badge owns up to the rest.
+    const BUDGET_OVERVIEW_PER_YEAR = 4;  // overview + bin-detail: per year (or per 5-yr bin) cluster
+    const BUDGET_YEAR_PER_MONTH = 8;     // year-detail: per month; "+N more" expands the month in place
+    // month-detail: unlimited — everything that passes the global filters.
     const BIN_SIZE = 5;               // years per bin
     const BIN_THRESHOLD = 15;          // span > this triggers binning in overview
     const UNDATED_LABEL_CAP = 5;       // max labeled prose-only entries in lane
@@ -85,6 +90,7 @@
     let detailYear = null;        // year-detail anchor (also set in month-detail)
     let detailMonth = null;       // month-detail anchor (1..12)
     let pageIndex = 0;            // page within overview (binned or year-by-year)
+    const expandedMonths = new Set(); // year-detail: month bins toggled past their budget; reset on zoom change
 
     function getContainerWidth() {
         const wrap = document.querySelector(".timeline-wrap");
@@ -143,10 +149,25 @@
         return true;
     }
 
-    function importanceDesc(a, b) {
+    // Curation order within a bin: importance desc (null = -1), then date
+    // confidence (hard dates beat inferred beat estimated beat the rest),
+    // then date_iso asc. Array.sort is stable, so ties keep input order —
+    // deterministic across renders.
+    const CONFIDENCE_RANK = { actual: 0, user_set: 0, explicit: 0, inferred: 1, estimated: 2 };
+    function confidenceRank(c) {
+        const r = CONFIDENCE_RANK[c];
+        return r === undefined ? 3 : r;
+    }
+    function curationOrder(a, b) {
         const ai = a.importance == null ? -1 : a.importance;
         const bi = b.importance == null ? -1 : b.importance;
-        return bi - ai;
+        if (bi !== ai) return bi - ai;
+        const ac = confidenceRank(a.date_confidence);
+        const bc = confidenceRank(b.date_confidence);
+        if (ac !== bc) return ac - bc;
+        const ad = a.date_iso || "";
+        const bd = b.date_iso || "";
+        return ad < bd ? -1 : ad > bd ? 1 : 0;
     }
 
     function binFor(year) {
@@ -159,6 +180,7 @@
         detailYear = null;
         detailMonth = null;
         pageIndex = 0;
+        expandedMonths.clear();
         render();
     }
     function setModeBinDetail(binStart) {
@@ -167,6 +189,7 @@
         detailYear = null;
         detailMonth = null;
         pageIndex = 0;
+        expandedMonths.clear();
         render();
     }
     function setModeYearDetail(year) {
@@ -174,6 +197,7 @@
         detailYear = year;
         detailMonth = null;
         pageIndex = 0;
+        expandedMonths.clear();
         render();
     }
     function setModeMonthDetail(year, month) {
@@ -181,6 +205,7 @@
         detailYear = year;
         detailMonth = month;
         pageIndex = 0;
+        expandedMonths.clear();
         render();
     }
 
@@ -335,9 +360,9 @@
 
             let maxRowsAny = 0;
             pageBins.forEach((b) => {
-                const list = (byBin[b] || []).slice().sort(importanceDesc);
+                const list = (byBin[b] || []).slice().sort(curationOrder);
                 if (list.length === 0) return;
-                const shown = list.slice(0, PER_CLUSTER_CAP);
+                const shown = list.slice(0, BUDGET_OVERVIEW_PER_YEAR);
                 const hidden = list.length - shown.length;
                 const x = binToX(b);
                 shown.forEach((e, i) => {
@@ -350,7 +375,7 @@
                     maxRowsAny = Math.max(maxRowsAny, row + 1);
                     const yPx = ROW_TOP + row * ROW_HEIGHT;
                     drawMoreBadge(svg, x, yPx, hidden, () => setModeBinDetail(b),
-                        `Click to zoom into ${b}–${b + BIN_SIZE - 1} (${hidden} more)`);
+                        `Showing ${shown.length} of ${list.length} for ${b}–${b + BIN_SIZE - 1} — click to zoom in`);
                 }
             });
 
@@ -387,9 +412,9 @@
 
             let maxRowsAny = 0;
             pageYears.forEach((y) => {
-                const list = (byYear[y] || []).slice().sort(importanceDesc);
+                const list = (byYear[y] || []).slice().sort(curationOrder);
                 if (list.length === 0) return;
-                const shown = list.slice(0, PER_CLUSTER_CAP);
+                const shown = list.slice(0, BUDGET_OVERVIEW_PER_YEAR);
                 const hidden = list.length - shown.length;
                 const x = yearToX(y);
                 shown.forEach((e, i) => {
@@ -402,7 +427,7 @@
                     maxRowsAny = Math.max(maxRowsAny, row + 1);
                     const yPx = ROW_TOP + row * ROW_HEIGHT;
                     drawMoreBadge(svg, x, yPx, hidden, () => setModeYearDetail(y),
-                        `Click to zoom into ${y} (${hidden} more)`);
+                        `Showing ${shown.length} of ${list.length} for ${y} — click to zoom in`);
                 }
             });
 
@@ -485,8 +510,8 @@
         let maxRowsAny = 0;
         const sortedYears = Object.keys(byYear).map(Number).sort((a, b) => a - b);
         sortedYears.forEach((y) => {
-            const list = byYear[y].slice().sort(importanceDesc);
-            const shown = list.slice(0, PER_CLUSTER_CAP);
+            const list = byYear[y].slice().sort(curationOrder);
+            const shown = list.slice(0, BUDGET_OVERVIEW_PER_YEAR);
             const hidden = list.length - shown.length;
             const x = yearToX(y);
             shown.forEach((e, i) => {
@@ -499,7 +524,7 @@
                 maxRowsAny = Math.max(maxRowsAny, row + 1);
                 const yPx = ROW_TOP + row * ROW_HEIGHT;
                 drawMoreBadge(svg, x, yPx, hidden, () => setModeYearDetail(y),
-                    `Click to zoom into ${y} (${hidden} more)`);
+                    `Showing ${shown.length} of ${list.length} for ${y} — click to zoom in`);
             }
         });
 
@@ -532,6 +557,12 @@
         const usable = W - PAD_LEFT - PAD_RIGHT;
         const monthToX = (m) => PAD_LEFT + (m - 0.5) / 12 * usable;
 
+        const byMonth = {};
+        yearEntries.forEach((e) => {
+            const m = parseMonth(e.date_iso);
+            (byMonth[m] = byMonth[m] || []).push(e);
+        });
+
         const axisGroup = document.createElementNS(SVG_NS, "g");
         axisGroup.setAttribute("class", "tl-axis");
         const axisLine = document.createElementNS(SVG_NS, "line");
@@ -553,11 +584,19 @@
             tick.setAttribute("stroke", "#5a5a6e");
             axisGroup.appendChild(tick);
             const label = document.createElementNS(SVG_NS, "text");
-            label.setAttribute("class", "tl-year-label");
             label.setAttribute("x", x);
             label.setAttribute("y", AXIS_Y - 10);
             label.setAttribute("text-anchor", "middle");
             label.textContent = monthNames[m - 1];
+            // Months with entries zoom into day-level detail, mirroring the
+            // clickable year labels in overview.
+            if (byMonth[m]) {
+                label.setAttribute("class", "tl-year-label tl-year-clickable");
+                label.addEventListener("click", () => setModeMonthDetail(year, m));
+                label.style.cursor = "pointer";
+            } else {
+                label.setAttribute("class", "tl-year-label");
+            }
             axisGroup.appendChild(label);
         }
         const yearText = document.createElementNS(SVG_NS, "text");
@@ -568,21 +607,15 @@
         axisGroup.appendChild(yearText);
         svg.appendChild(axisGroup);
 
-        const byMonth = {};
-        yearEntries.forEach((e) => {
-            const m = parseMonth(e.date_iso);
-            (byMonth[m] = byMonth[m] || []).push(e);
-        });
-
         let maxRowsAny = 0;
         Object.keys(byMonth).forEach((mKey) => {
             const m = Number(mKey);
-            // Sort by importance first (so the top-N is the most-important
-            // items, not just the earliest in the month). Within the visible
-            // list we keep importance-desc; date order is reserved for the
-            // month-detail view where everything fits.
-            const list = byMonth[m].slice().sort(importanceDesc);
-            const shown = list.slice(0, PER_MONTH_CAP);
+            // Curation order so the budget keeps the most-important items,
+            // not just the earliest in the month; date order is reserved for
+            // the month-detail view where everything fits.
+            const list = byMonth[m].slice().sort(curationOrder);
+            const expanded = expandedMonths.has(m);
+            const shown = expanded ? list : list.slice(0, BUDGET_YEAR_PER_MONTH);
             const hidden = list.length - shown.length;
             const x = m >= 1 && m <= 12 ? monthToX(m) : PAD_LEFT - 20;
             shown.forEach((e, i) => {
@@ -590,13 +623,21 @@
                 const yPx = ROW_TOP + i * ROW_HEIGHT;
                 drawEntry(svg, e, x, yPx, /*showLabel*/ true);
             });
-            if (hidden > 0 && m >= 1 && m <= 12) {
+            if (hidden > 0) {
                 const row = shown.length;
                 maxRowsAny = Math.max(maxRowsAny, row + 1);
                 const yPx = ROW_TOP + row * ROW_HEIGHT;
                 drawMoreBadge(svg, x, yPx, hidden,
-                    () => setModeMonthDetail(year, m),
-                    `Click to zoom into ${year}-${String(m).padStart(2, "0")} (${hidden} more)`);
+                    () => { expandedMonths.add(m); render(); },
+                    `Showing ${shown.length} of ${list.length} — click to show all`);
+            } else if (expanded && list.length > BUDGET_YEAR_PER_MONTH) {
+                const row = shown.length;
+                maxRowsAny = Math.max(maxRowsAny, row + 1);
+                const yPx = ROW_TOP + row * ROW_HEIGHT;
+                drawMoreBadge(svg, x, yPx, 0,
+                    () => { expandedMonths.delete(m); render(); },
+                    `Showing all ${list.length} — click to show top ${BUDGET_YEAR_PER_MONTH}`,
+                    /*labelOverride*/ "show less", /*extraClass*/ "tl-collapse");
             }
         });
 
@@ -680,7 +721,7 @@
         let maxRowsAny = 0;
         Object.keys(byDay).forEach((dKey) => {
             const d = Number(dKey);
-            const list = byDay[d].slice().sort(importanceDesc);
+            const list = byDay[d].slice().sort(curationOrder);
             const x = d >= 1 && d <= daysInMonth ? dayToX(d) : PAD_LEFT - 20;
             list.forEach((e, i) => {
                 maxRowsAny = Math.max(maxRowsAny, i + 1);
@@ -784,7 +825,7 @@
         laneText.textContent = "Undated:";
         svg.appendChild(laneText);
 
-        const sorted = proseOnly.slice().sort(importanceDesc);
+        const sorted = proseOnly.slice().sort(curationOrder);
         const labelable = sorted.slice(0, UNDATED_LABEL_CAP);
         const rest = sorted.slice(UNDATED_LABEL_CAP);
         const usable = W - PAD_LEFT - PAD_RIGHT - 80; // reserve room for "+N undated" at right
@@ -869,12 +910,12 @@
         }
     }
 
-    function drawMoreBadge(svg, x, y, count, onClick, tooltip, labelOverride) {
+    function drawMoreBadge(svg, x, y, count, onClick, tooltip, labelOverride, extraClass) {
         const text = labelOverride || `+${count} more`;
         // Width grows with label
         const w = Math.max(48, text.length * 7 + 14);
         const g = document.createElementNS(SVG_NS, "g");
-        g.setAttribute("class", "tl-more-badge");
+        g.setAttribute("class", extraClass ? `tl-more-badge ${extraClass}` : "tl-more-badge");
         g.setAttribute("transform", `translate(${x - w / 2}, ${y - 9})`);
         if (onClick) g.style.cursor = "pointer";
 
