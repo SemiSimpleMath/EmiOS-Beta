@@ -110,6 +110,21 @@ def system_health():
     except Exception as e:
         out["database"] = {"error": str(e)}
 
+    # Maintenance backlog — caps convert LLM cost into silent queue debt
+    # (the 1400-finding incident); raise-vs-drain over 7d makes it visible.
+    try:
+        from app.assistant.kg_maintenance.backlog_metrics import (
+            BACKLOG_ALARM_TOTAL,
+            compute_backlog_metrics,
+        )
+        backlog = compute_backlog_metrics()
+        out["kg_maintenance_backlog"] = backlog
+        if backlog["total_open"] > BACKLOG_ALARM_TOTAL:
+            degraded_reasons.append(
+                f"kg maintenance backlog at {backlog['total_open']} open findings")
+    except Exception as e:
+        out["kg_maintenance_backlog"] = {"error": str(e)}
+
     # KG embedding index freshness — last reconciler run (hourly diff /
     # nightly full). Stale or missing status means the routines aren't
     # running and chroma drift is unbounded again.
