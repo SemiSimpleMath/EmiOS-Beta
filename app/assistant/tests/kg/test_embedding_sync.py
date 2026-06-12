@@ -54,6 +54,10 @@ class _FakeChroma:
     def store_node_identity_embedding(self, nid, sentence, emb):
         self.stored_identities[nid] = sentence
 
+    def store_node_context_embedding(self, nid, text, emb):
+        self.stored_contexts = getattr(self, "stored_contexts", {})
+        self.stored_contexts[nid] = text
+
     def delete_node_embedding(self, nid):
         self.deleted.append(("label", nid))
 
@@ -120,7 +124,8 @@ def test_diff_sync_heals_ghosts_missing_and_stale(monkeypatch, fake_embed, statu
 
 
 def test_full_sync_reembeds_everything(monkeypatch, fake_embed, status_to_tmp):
-    a = _mk_node("A", identity_sentence="The A node.")
+    a = _mk_node("A", identity_sentence="The A node.",
+                 original_sentence="A was observed doing things.")
     b = _mk_node("B")
     fake = _FakeChroma(
         labels={a: {"label": "A"}, b: {"label": "B"}},
@@ -133,6 +138,16 @@ def test_full_sync_reembeds_everything(monkeypatch, fake_embed, status_to_tmp):
     assert set(fake.stored_labels) == {a, b}
     assert set(fake.stored_identities) == {a}
     assert counts["labels_embedded"] == 2
+    # Context re-anchors with the identity head + original observation.
+    assert fake.stored_contexts[a] == "The A node. A was observed doing things."
+
+
+def test_compose_context_text():
+    f = sync_mod.compose_context_text
+    assert f("Who it is.", "What happened.") == "Who it is. What happened."
+    assert f(None, "What happened.") == "What happened."
+    assert f("Who it is.", "") == "Who it is."
+    assert f(None, None) == ""
 
 
 # ── ORM chokepoint ───────────────────────────────────────────────────────

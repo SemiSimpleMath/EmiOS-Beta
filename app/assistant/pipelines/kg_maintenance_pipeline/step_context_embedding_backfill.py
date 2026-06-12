@@ -58,7 +58,8 @@ def run(ctx: PipelineContext, *, max_nodes: int = 5000) -> dict:
     session = get_session()
     try:
         rows = (
-            session.query(Node.id, Node.label, Node.original_sentence)
+            session.query(Node.id, Node.label, Node.original_sentence,
+                          Node.identity_sentence)
             .all()
         )
     finally:
@@ -72,11 +73,13 @@ def run(ctx: PipelineContext, *, max_nodes: int = 5000) -> dict:
     cm = get_chroma_manager()
     errors = 0
 
-    # ── Context embeddings (original_sentence) ──────────────────────────
+    # ── Context embeddings (identity head + original observation) ───────
+    from app.assistant.kg.chroma.embedding_sync import compose_context_text
     ctx_rows = [
-        (str(r.id), r.label or "", r.original_sentence)
+        (str(r.id), r.label or "",
+         compose_context_text(r.identity_sentence, r.original_sentence))
         for r in rows
-        if r.original_sentence and str(r.original_sentence).strip()
+        if compose_context_text(r.identity_sentence, r.original_sentence)
     ]
     ctx_ids = [nid for nid, _, _ in ctx_rows]
     ctx_missing = _missing_ids(cm.node_context_collection, ctx_ids)

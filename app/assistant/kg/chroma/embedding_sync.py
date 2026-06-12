@@ -36,6 +36,19 @@ _registered = False
 _listeners: list = []  # (target, event_name, fn) — for unregister in tests
 
 
+def compose_context_text(identity_sentence, original_sentence) -> str:
+    """The context (aboutness) embedding text: definite description as the
+    anchored head + the original observation as content. Before identity
+    sentences existed, context vectors were ONLY the accidental first
+    observation; leading with WHO the node is pulls same-referent nodes
+    together and pushes different referents apart without losing content."""
+    parts = [
+        str(p).strip() for p in (identity_sentence, original_sentence)
+        if p and str(p).strip()
+    ]
+    return " ".join(parts)
+
+
 # ── reconciler ────────────────────────────────────────────────────────────
 
 def sync_kg_embeddings(*, mode: str = "diff") -> Dict[str, Any]:
@@ -55,9 +68,10 @@ def sync_kg_embeddings(*, mode: str = "diff") -> Dict[str, Any]:
 
     with get_db_manager().read_session() as s:
         rows = s.execute(sql_text(
-            "SELECT id, label, identity_sentence FROM kg_node_metadata"
+            "SELECT id, label, identity_sentence, original_sentence "
+            "FROM kg_node_metadata"
         )).fetchall()
-    sql_nodes = {str(r[0]): (r[1] or "", r[2]) for r in rows}
+    sql_nodes = {str(r[0]): (r[1] or "", r[2], r[3]) for r in rows}
 
     cm = get_chroma_manager()
 
@@ -75,6 +89,7 @@ def sync_kg_embeddings(*, mode: str = "diff") -> Dict[str, Any]:
         "mode": mode, "nodes": len(sql_nodes),
         "ghosts_removed": 0, "labels_embedded": 0,
         "identities_embedded": 0, "identities_removed": 0,
+        "contexts_embedded": 0,
     }
 
     # Ghosts: chroma ids with no sqlite row — remove from ALL collections.
@@ -85,7 +100,7 @@ def sync_kg_embeddings(*, mode: str = "diff") -> Dict[str, Any]:
             cm.delete_node_identity_embedding(cid)
             counts["ghosts_removed"] += 1
 
-    for nid, (label, identity_sentence) in sql_nodes.items():
+    for nid, (label, identity_sentence, original_sentence) in sql_nodes.items():
         # Label collection: missing, text-drifted, or full mode.
         meta = label_state.get(nid)
         stale = meta is None or (meta or {}).get("label") != label
@@ -93,7 +108,9 @@ def sync_kg_embeddings(*, mode: str = "diff") -> Dict[str, Any]:
             cm.store_node_embedding(nid, label, embed_text(label))
             counts["labels_embedded"] += 1
 
-        # Identity collection: mirrors identity_sentence exactly.
+        # Identity collection: mirrors identity_sentence exactly. When the
+        # identity drifts, the context (aboutness) vector re-anchors too —
+        # its head IS the identity sentence (compose_context_text).
         imeta = identity_state.get(nid)
         if identity_sentence and identity_sentence.strip():
             preview = identity_sentence[:300]
@@ -102,6 +119,10 @@ def sync_kg_embeddings(*, mode: str = "diff") -> Dict[str, Any]:
                 cm.store_node_identity_embedding(
                     nid, identity_sentence, embed_text(identity_sentence))
                 counts["identities_embedded"] += 1
+                ctx_text = compose_context_text(identity_sentence, original_sentence)
+                if ctx_text:
+                    cm.store_node_context_embedding(nid, ctx_text, embed_text(ctx_text))
+                    counts["contexts_embedded"] += 1
         elif imeta is not None:
             cm.delete_node_identity_embedding(nid)
             counts["identities_removed"] += 1

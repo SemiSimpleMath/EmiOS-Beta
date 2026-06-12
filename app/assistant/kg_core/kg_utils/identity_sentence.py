@@ -281,6 +281,14 @@ def run_identity_sentence_refresh(
             cm.store_node_identity_embedding(
                 item["node_id"], sentence, embed_text(sentence),
             )
+            # The context (aboutness) vector re-anchors on the fresh
+            # identity: definite description head + original observation.
+            from app.assistant.kg.chroma.embedding_sync import compose_context_text
+            ctx_text = compose_context_text(
+                sentence, item["inputs"].get("original_sentence"))
+            if ctx_text:
+                cm.store_node_context_embedding(
+                    item["node_id"], ctx_text, embed_text(ctx_text))
         except Exception as e:
             logger.error("[identity_refresh] chroma embed failed for %s: %s "
                          "(nightly rebuild heals)", item["node_id"][:8], e)
