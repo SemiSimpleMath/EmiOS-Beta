@@ -249,6 +249,10 @@ def create_app(config_class="config.DevelopmentConfig"):
     app.register_blueprint(kg_lens_bp)
     from app.kg_lens.api import kg_lens_api
     app.register_blueprint(kg_lens_api)
+
+    # /beliefs-shadow — belief v1-vs-v2 shadow-run comparison.
+    from app.routes.beliefs_shadow import beliefs_shadow_bp
+    app.register_blueprint(beliefs_shadow_bp)
     if graph_api is not None:
         app.register_blueprint(graph_api)
     

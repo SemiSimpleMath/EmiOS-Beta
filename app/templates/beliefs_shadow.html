@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Belief shadow runs — {{ assistant_name }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/beliefs_shadow.css') }}?v={{ static_v }}">
+</head>
+<body>
+    <div class="bs-container">
+        <header class="bs-header">
+            <h1>Belief shadow runs</h1>
+            <a href="/meals" class="bs-back">← Meals</a>
+        </header>
+        <p class="bs-intro">
+            Both belief engines run in parallel: <strong>v2</strong> feeds the meal agents,
+            <strong>v1</strong> keeps operating underneath. Each meal-agent run records what
+            both lanes produced. Diffs are <em>approximate</em> (the lanes phrase the same
+            belief differently) — the side-by-side is the ground truth.
+            Window: last {{ days|int }} day(s)
+            (<a href="?days=14">14d</a> · <a href="?days=30">30d</a>).
+        </p>
+
+        {% if not diffs %}
+        <section class="bs-empty">
+            <h2>No shadow runs recorded yet</h2>
+            <p>Comparisons are recorded each time a meal agent builds its belief lane
+            (weekly planner Sunday 17:00; daily proposer ~05:00). Check back after the
+            next run, or trigger one from /meals.</p>
+        </section>
+        {% endif %}
+
+        {% for d in diffs %}
+        <section class="bs-run">
+            <h2 class="bs-run-head">{{ d.recorded_at }} · {{ d.agent }}
+                <span class="bs-counts">v2: {{ d.v2_count }} · v1: {{ d.v1_count }}</span>
+            </h2>
+            {% if d.only_v2 or d.only_v1 %}
+            <div class="bs-diff">
+                {% if d.only_v2 %}
+                <div class="bs-diff-col">
+                    <h3>Only in v2 ({{ d.only_v2|length }})</h3>
+                    {% for s in d.only_v2 %}<p class="bs-only bs-only-v2">+ {{ s }}</p>{% endfor %}
+                </div>
+                {% endif %}
+                {% if d.only_v1 %}
+                <div class="bs-diff-col">
+                    <h3>Only in v1 ({{ d.only_v1|length }})</h3>
+                    {% for s in d.only_v1 %}<p class="bs-only bs-only-v1">− {{ s }}</p>{% endfor %}
+                </div>
+                {% endif %}
+            </div>
+            {% else %}
+            <p class="bs-agree">Lanes agree (approximately).</p>
+            {% endif %}
+            <details class="bs-full">
+                <summary>Full side-by-side</summary>
+                <div class="bs-diff">
+                    <div class="bs-diff-col">
+                        <h3>v2 (what the planner saw)</h3>
+                        {% for e in d.v2_items %}
+                        <p class="bs-item">{{ e.statement }}
+                            <span class="bs-meta">[{{ e.kind }}{% if e.status and e.status != 'active' %} · {{ e.status }}{% endif %} · score {{ e.score }}{% if e.obs_count and e.obs_count > 1 %} · {{ e.obs_count }}x{% endif %}{% if e.last_observed %} · {{ e.last_observed[:10] }}{% endif %}]</span>
+                        </p>
+                        {% endfor %}
+                    </div>
+                    <div class="bs-diff-col">
+                        <h3>v1 (legacy lane)</h3>
+                        {% for s in d.v1_items %}<p class="bs-item">{{ s }}</p>{% endfor %}
+                    </div>
+                </div>
+            </details>
+        </section>
+        {% endfor %}
+
+        <section class="bs-activity">
+            <h2>v2 engine activity (last {{ days|int }}d)</h2>
+            {% if activity_error %}
+            <p class="bs-error">activity unavailable: {{ activity_error }}</p>
+            {% elif activity %}
+            <p class="bs-stats">
+                {{ activity.observations_folded }} observations folded ·
+                resolver mix: {% for k, v in activity.resolver_method_mix.items() %}{{ k }}={{ v }} {% endfor %} ·
+                totals: {% for k, v in activity.belief_totals_by_status.items() %}{{ k }}={{ v }} {% endfor %}
+            </p>
+            {% if activity.beliefs_minted %}
+            <h3>Minted ({{ activity.beliefs_minted|length }})</h3>
+            {% for b in activity.beliefs_minted %}<p class="bs-item bs-minted">+ [{{ b.kind }}] {{ b.statement_nl }}</p>{% endfor %}
+            {% endif %}
+            {% if activity.beliefs_reinforced %}
+            <h3>Reinforced ({{ activity.beliefs_reinforced|length }})</h3>
+            {% for b in activity.beliefs_reinforced %}<p class="bs-item">~ [{{ b.obs_count }}x] {{ b.statement_nl }}</p>{% endfor %}
+            {% endif %}
+            {% if activity.contested %}
+            <h3>Contested ({{ activity.contested|length }})</h3>
+            {% for b in activity.contested %}<p class="bs-item bs-contested">! (+{{ b.support|round(1) }}/−{{ b.contradiction|round(1) }}) {{ b.statement_nl }}</p>{% endfor %}
+            {% endif %}
+            {% if activity.merges %}
+            <h3>Merges ({{ activity.merges|length }})</h3>
+            {% for m in activity.merges %}<p class="bs-item">{{ m.belief_id[:8] }} → {{ m.merged_into[:8] }} ({{ m.method }})</p>{% endfor %}
+            {% endif %}
+            {% endif %}
+        </section>
+    </div>
+</body>
+</html>

@@ -322,7 +322,8 @@ def _build_food_beliefs(agent: str = "meal_planner") -> str:
     if not is_subsystem_enabled("meal_beliefs_v2"):
         return _build_food_beliefs_v1()
     try:
-        return _build_food_beliefs_v2(agent=agent)
+        capture: dict = {}
+        text = _build_food_beliefs_v2(agent=agent, capture=capture)
     except Exception as e:
         logger.error(
             "[meal_context] belief v2 lane failed (flag meal_beliefs_v2 is ON): %s", e,
@@ -332,6 +333,22 @@ def _build_food_beliefs(agent: str = "meal_planner") -> str:
             "(BELIEF LANE ERROR: belief-engine v2 store unavailable — see server "
             "log. Flip subsystem flag 'meal_beliefs_v2' off to use the legacy lane.)"
         )
+
+    # Shadow-run comparison: record what BOTH lanes produced this run so the
+    # tuning session / v1 retirement rests on visible diffs (/beliefs-shadow).
+    # Shadowing must never cost the planner its context — failures log ERROR
+    # and the v2 text still returns.
+    try:
+        from belief_engine_v2.shadow import record_shadow_run
+        record_shadow_run(
+            agent=agent,
+            v2_rows=capture.get("rows") or [],
+            v1_text=_build_food_beliefs_v1(),
+        )
+    except Exception as e:
+        logger.error("[meal_context] shadow-run recording failed: %s", e)
+        logger.debug("[meal_context] shadow recording exception", exc_info=True)
+    return text
 
 
 _MEAL_BELIEFS_QUERY = (
@@ -343,9 +360,12 @@ _V2_K = 40                # candidate-set size (the planner LLM judges relevance
 
 
 def _build_food_beliefs_v2(*, agent: str, db_path: Optional[str] = None,
-                           embedder=None, now=None) -> str:
+                           embedder=None, now=None,
+                           capture: Optional[dict] = None) -> str:
     """Context-scoped v2 lane. `db_path`/`embedder`/`now` are injectable for
-    tests; production resolves the live shadow store + app embedder."""
+    tests; production resolves the live shadow store + app embedder.
+    `capture`, when given, receives {'rows': <the surfaced rows>} for the
+    shadow-run comparison."""
     from belief_engine_v2.ingest import open_live_store
     from belief_engine_v2.retrieval import beliefs_for_context
     from belief_engine_v2.surfacing import log_surfaced
@@ -370,6 +390,8 @@ def _build_food_beliefs_v2(*, agent: str, db_path: Optional[str] = None,
         log_surfaced(store.conn, agent=agent, rows=rows)
     finally:
         store.close()
+    if capture is not None:
+        capture["rows"] = rows
 
     if not rows:
         return "(belief v2 store has no active beliefs yet)"
