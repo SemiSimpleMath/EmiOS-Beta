@@ -215,6 +215,30 @@ def test_refresh_respects_cap(monkeypatch):
     assert result["generated"] == 2
 
 
+def test_refresh_node_types_filter(monkeypatch):
+    _mk_node("Some Entity")
+    _mk_node("Some Trip", node_type="Event")
+    _mk_node("Some Birthday", node_type="Property")  # never covered
+
+    import app.assistant.kg_core.kg_utils.identity_sentence as mod
+
+    calls = []
+    monkeypatch.setattr(mod, "generate_identity_sentence",
+                        lambda inputs: (calls.append(inputs["label"]) or "S."))
+    import app.assistant.kg.chroma.chroma_embedding_manager as cem
+    monkeypatch.setattr(cem, "get_chroma_manager", lambda: _FakeChroma())
+    import app.assistant.embeddings.embedder as embedder_mod
+    monkeypatch.setattr(embedder_mod, "embed_text", lambda text: [0.1])
+
+    mod.run_identity_sentence_refresh(max_per_run=50, node_types=("Event",))
+    assert calls == ["Some Trip"]
+
+    calls.clear()
+    mod.run_identity_sentence_refresh(max_per_run=50)  # default: all covered
+    assert "Some Entity" in calls and "Some Trip" not in calls  # Event now fresh
+    assert "Some Birthday" not in calls  # Property excluded always
+
+
 # ── semantic tier reads the identity collection ──────────────────────────
 
 

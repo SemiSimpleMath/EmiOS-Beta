@@ -11,7 +11,8 @@ derives from changes. It is NOT original_sentence — that is the first
 observation, an accident of arrival order ("the house only has one Nest
 thermostat" was a real one).
 
-Spec: scratch/IDENTITY_SENTENCE_SPEC.md. v1 scope: Entity nodes.
+Spec: scratch/IDENTITY_SENTENCE_SPEC.md. Covers Entity/Event/State/Goal/
+Concept (Property resolves subject-scoped and is excluded).
 """
 from __future__ import annotations
 
@@ -133,15 +134,26 @@ def generate_identity_sentence(inputs: Dict[str, Any]) -> Optional[str]:
     return sentence[:MAX_SENTENCE_CHARS]
 
 
-def run_identity_sentence_refresh(*, max_per_run: int = 50) -> Dict[str, Any]:
-    """Nightly projection pass: (re)generate identity sentences for Entity
-    nodes that have none or whose discriminating inputs drifted.
+COVERED_NODE_TYPES = ("Entity", "Event", "State", "Goal", "Concept")
+# Property excluded: resolves subject-scoped, never by label/similarity.
+# Disambiguation excluded: meta-graph markers, no referent of their own.
+
+
+def run_identity_sentence_refresh(
+    *, max_per_run: int = 50, node_types: tuple = COVERED_NODE_TYPES,
+) -> Dict[str, Any]:
+    """Nightly projection pass: (re)generate identity sentences for nodes
+    that have none or whose discriminating inputs drifted.
 
     NULL-sentence nodes first (backfill), then hash-stale, both ordered by
     pagerank so important nodes get sentences earliest. Writes preserve
     updated_at verbatim (a projection is not a content change — bumping
     would cascade card/wiki refreshes). Embeds into the
     node_identity_embeddings chroma collection after the DB write.
+
+    node_types narrows a run to specific types (one-time per-type
+    backfills); the nightly default covers everything but Property and
+    Disambiguation.
     """
     from sqlalchemy import update as sql_update
 
@@ -159,7 +171,7 @@ def run_identity_sentence_refresh(*, max_per_run: int = 50) -> Dict[str, Any]:
     with get_db_manager().read_session() as session:
         nodes = (
             session.query(Node)
-            .filter(Node.node_type == "Entity")
+            .filter(Node.node_type.in_(list(node_types)))
             .filter(Node.node_type != DISAMBIGUATION_NODE_TYPE)
             .order_by(
                 Node.identity_sentence.isnot(None),  # NULLs (False) first
