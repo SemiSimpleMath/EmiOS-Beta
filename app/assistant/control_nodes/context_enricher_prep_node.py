@@ -24,6 +24,11 @@ _MAX_ITEMS_PER_CYCLE = 8
 _SEMANTIC_THRESHOLD = 0.40
 _SEMANTIC_TOP_K = 8
 
+# Hub doctrine (fragility review #6 move 3): above this edge count, a
+# 5-edge sample is near-random — render the entity CARD (the curated
+# projection that exists precisely for dense nodes) instead of raw edges.
+_HUB_EDGE_THRESHOLD = 30
+
 
 def _as_aware_utc(dt: Optional[datetime]) -> Optional[datetime]:
     from app.assistant.kg_core.kg_utils.date_compare import as_aware_utc
@@ -184,6 +189,20 @@ def _build_kg_context(search_terms: List[str], session) -> str:
             _pod_cache[endpoint_id] = ((pod.one_liner or endpoint_id)[:200], "Pod", "")
         return _pod_cache[endpoint_id]
 
+    def _hub_card_block(node) -> str:
+        """Curated projection for hub-grade nodes. Empty string when no
+        card exists — the caller keeps the raw-edge path (sink, not drop)."""
+        try:
+            from app.assistant.entity_management.entity_card_v2 import (
+                render_v2_card_for_prompt_injection_level,
+            )
+            return (render_v2_card_for_prompt_injection_level(
+                session, node.label, level=1) or "").strip()
+        except Exception as e:
+            logger.error("context_enricher_prep: hub card render failed for %r: %s",
+                         node.label, e)
+            return ""
+
     lines = []
     seen = set()
     for term in search_terms:
@@ -198,6 +217,25 @@ def _build_kg_context(search_terms: List[str], session) -> str:
                 desc = f" — {node.description[:150]}" if node.description else ""
                 dates = _node_dates_suffix(node)
                 lines.append(f"- [{node.node_type}] **{node.label}** (match={score:.2f}){dates}{desc}")
+
+                edge_count = (
+                    session.query(Edge.id)
+                    .filter((Edge.source_id == node.id) | (Edge.target_id == node.id))
+                    .count()
+                )
+                if edge_count > _HUB_EDGE_THRESHOLD:
+                    card = _hub_card_block(node)
+                    if card:
+                        lines.append(
+                            f"    (hub node, {edge_count} edges — curated card "
+                            f"instead of a random edge sample)"
+                        )
+                        lines.extend(f"    {ln}" for ln in card.splitlines() if ln.strip())
+                        continue
+                    lines.append(
+                        f"    (hub node, {edge_count} edges, no card — "
+                        f"showing a small sample)"
+                    )
 
                 for edge, target in (
                     session.query(Edge, Node).outerjoin(Node, Edge.target_id == Node.id)
