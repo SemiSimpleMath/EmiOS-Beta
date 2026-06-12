@@ -108,6 +108,12 @@ class KGMaintenancePipeline:
         _run_step("missing_dates_scan", lambda: (
             __import__("app.assistant.pipelines.kg_maintenance_pipeline.step_missing_dates_scan", fromlist=["run"]).run(ctx)
         ))
+        # Diachronic disambiguation: judge role-reference entities for
+        # referent changes BEFORE the disambiguation scan, whose temporal
+        # drain re-points mentions parked at already-split labels.
+        _run_step("role_succession_scan", lambda: (
+            __import__("app.assistant.pipelines.kg_maintenance_pipeline.step_role_succession_scan", fromlist=["run"]).run(ctx)
+        ))
         _run_step("disambiguation_scan", lambda: (
             __import__("app.assistant.pipelines.kg_maintenance_pipeline.step_disambiguation_scan", fromlist=["run"]).run(ctx)
         ))

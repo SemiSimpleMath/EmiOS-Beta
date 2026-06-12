@@ -1,6 +1,6 @@
 """KGMutatorTool — narrow typed mutators against the live KG, audit-wired.
 
-Backs eleven tool names (one BaseTool, dispatched on tool_name):
+Backs twelve tool names (one BaseTool, dispatched on tool_name):
 
   kg_merge_nodes(keep_id, fold_id, reason, dry_run=False)
   kg_rename_label(node_id, new_label, reason, dry_run=False)
@@ -8,6 +8,7 @@ Backs eleven tool names (one BaseTool, dispatched on tool_name):
   kg_delete_node(node_id, reason, dry_run=False)
   kg_delete_edge(edge_id, reason, dry_run=False)
   kg_repoint_edge(edge_id, new_source_id/new_target_id, reason, dry_run=False)
+  kg_split_succession(node_id, split_date, reason, ..., dry_run=False)
   kg_create_state_node(owner_node_id, predicate, label, ..., reason, dry_run=False)
   kg_create_edge(source_id, target_id, relationship_type, ..., reason, dry_run=False)
   kg_close_state(node_id, end_date, ..., reason, dry_run=False)
@@ -868,6 +869,96 @@ class KGMutatorTool(BaseTool):
                 ),
                 data={"ok": True, "revision_log_id": rid, "before": before, "after": after},
             ))
+
+    def handle_kg_split_succession(self, arguments: Dict[str, Any], tool_message: ToolMessage) -> ToolResult:
+        """Era-split a role-reference Entity whose real-world referent
+        changed (diachronic disambiguation): close the old node's era at
+        split_date, mint a same-label successor, mint the Disambiguation
+        park point at the label, chain old --succeeded_by--> successor,
+        and optionally repoint era-mismatched edges onto the successor.
+
+        Required: node_id, split_date (ISO date), reason.
+        Optional: date_confidence (user_set|actual|estimated|inferred,
+        default estimated — year-floor doctrine applies to loose dates),
+        repoint_edge_ids, finding_id, dry_run.
+        Refuses: non-Entity nodes, Disambiguation nodes, user-locked
+        nodes, already-closed eras, split_date <= start_date.
+        """
+        from app.assistant.kg_core.kg_utils.succession import split_succession
+
+        node_id = str(arguments.get("node_id") or "").strip()
+        if not node_id:
+            raise ValueError("`node_id` is required.")
+        raw_date = str(arguments.get("split_date") or "").strip()
+        if not raw_date:
+            raise ValueError("`split_date` is required (ISO date).")
+        try:
+            split_date = datetime.fromisoformat(raw_date.replace("Z", "+00:00"))
+        except ValueError:
+            raise ValueError(f"`split_date` {raw_date!r} is not a valid ISO date.")
+        if split_date.tzinfo is None:
+            split_date = split_date.replace(tzinfo=timezone.utc)
+        reason = self._require_reason(arguments)
+        date_confidence = str(arguments.get("date_confidence") or "estimated").strip()
+        repoint_edge_ids = [
+            str(x).strip() for x in (arguments.get("repoint_edge_ids") or []) if str(x).strip()
+        ]
+        finding_id = arguments.get("finding_id") or None
+        dry_run = bool(arguments.get("dry_run", False))
+
+        if dry_run:
+            # Validation-only pass: run the split in a transaction and roll
+            # it back, reporting what WOULD happen.
+            with get_db_manager().transaction(op="kg_mutator.split_succession_dry") as session:
+                result = split_succession(
+                    session, node_id=node_id, split_date=split_date, reason=reason,
+                    date_confidence=date_confidence, repoint_edge_ids=repoint_edge_ids,
+                    finding_id=finding_id, agent_id=self._agent_id(tool_message),
+                )
+                session.rollback()
+            return self.publish_result(ToolResult(
+                result_type="kg_split_succession",
+                content=(
+                    f"DRY RUN: would close era at {split_date.date().isoformat()}, "
+                    f"mint successor + Disambiguation, repoint "
+                    f"{len(result['repointed'])} edge(s) "
+                    f"({len(result['skipped_repoints'])} would skip)."
+                ),
+                data={"ok": True, "dry_run": True, **result},
+            ))
+
+        with get_db_manager().transaction(op="kg_mutator.split_succession") as session:
+            result = split_succession(
+                session, node_id=node_id, split_date=split_date, reason=reason,
+                date_confidence=date_confidence, repoint_edge_ids=repoint_edge_ids,
+                finding_id=finding_id, agent_id=self._agent_id(tool_message),
+            )
+
+        # Chroma AFTER the sqlite commit (not transactional with it); a
+        # failure here is reported, and the nightly embedding backfill heals.
+        embed_ok = True
+        try:
+            from app.assistant.kg.proposal_promoter import _embed_and_store_node
+            _embed_and_store_node(
+                result["successor_node_id"], result["successor_label"],
+                result["successor_sentence"],
+            )
+        except Exception as e:
+            embed_ok = False
+            logger.error("[kg_split_succession] successor chroma embed failed: %s", e)
+
+        return self.publish_result(ToolResult(
+            result_type="kg_split_succession",
+            content=(
+                f"Split {result['successor_label']!r} at {split_date.date().isoformat()}: "
+                f"old era closed, successor {result['successor_node_id'][:8]} minted, "
+                f"Disambiguation in place, {len(result['repointed'])} edge(s) repointed"
+                + (f", {len(result['skipped_repoints'])} skipped" if result["skipped_repoints"] else "")
+                + ("" if embed_ok else " (chroma embed failed - backfill will heal)")
+                + f". revision_log_id={result['revision_log_id']}"
+            ),
+            data={"ok": True, "embed_ok": embed_ok, **result},
+        ))
 
     def handle_kg_set_user_lock(self, arguments: Dict[str, Any], tool_message: ToolMessage) -> ToolResult:
         """Set or clear the user lock (axiom layer) on a node.

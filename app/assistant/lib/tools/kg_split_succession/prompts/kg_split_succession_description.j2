@@ -1,0 +1,13 @@
+Era-split a role-reference Entity whose real-world referent changed
+over time ("X's School" four years ago is not "X's School" today).
+Closes the old node's era at split_date, mints a same-label successor
+whose era opens there, mints the Disambiguation park point at the label
+(future mentions attach there; the disambiguation scan re-points them by
+evidence date), and chains old --succeeded_by--> successor. Edges named
+in repoint_edge_ids move onto the successor (locked/duplicate edges are
+skipped and reported).
+
+Audited: requires a non-empty `reason`; refuses non-Entity nodes,
+Disambiguation nodes, user-locked nodes, already-closed eras, and split
+dates not after the node's start; snapshots into kg_revision_log. Pass
+`dry_run: true` to preview without committing.

@@ -1,0 +1,18 @@
+Today: {{ agent_input.today }}
+
+## Entity
+Label: {{ agent_input.label }}
+Type/category: Entity / {{ agent_input.category or "?" }}
+Era: starts {{ agent_input.start_date or "?" }}, ends {{ agent_input.end_date or "open" }}
+
+## Evidence sentences (with observation dates)
+{% for ev in agent_input.evidence %}
+- [{{ ev.date or "undated" }}] {{ ev.sentence }}
+{% endfor %}
+
+## Edges
+{% for e in agent_input.edges %}
+- {{ e }}
+{% endfor %}
+
+Did this entity's real-world referent change at some point, or does all of this describe one stable referent?

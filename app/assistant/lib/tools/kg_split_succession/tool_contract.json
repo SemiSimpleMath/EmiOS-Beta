@@ -1,0 +1,85 @@
+{
+  "name": "kg_split_succession",
+  "description": "Era-split a role-reference Entity whose real-world referent changed over time (diachronic disambiguation). 'X's School' four years ago is not 'X's School' today: this op closes the old node's era at split_date, mints a same-label successor whose era opens there, mints the Disambiguation park point at the label (future mentions attach there and the disambiguation scan re-points them by evidence date), chains old --succeeded_by--> successor, and optionally repoints named era-mismatched edges onto the successor. Audited: requires a non-empty `reason`, refuses non-Entity nodes, user-locked nodes, already-closed eras and split dates before the node's start; snapshots into kg_revision_log. Pass `dry_run: true` to preview.",
+  "inputs": [
+    {
+      "name": "node_id",
+      "type": "string",
+      "required": true,
+      "description": "UUID of the role-reference Entity to split."
+    },
+    {
+      "name": "split_date",
+      "type": "string",
+      "required": true,
+      "description": "ISO date where the referent changed: the old era's end and the successor's start. Year-floor doctrine applies to loose dates ('fall 2024' -> 2024-09-01 with date_confidence=estimated)."
+    },
+    {
+      "name": "reason",
+      "type": "string",
+      "required": true,
+      "description": "Why this split is correct (the succession evidence). Goes into kg_revision_log."
+    },
+    {
+      "name": "date_confidence",
+      "type": "string",
+      "required": false,
+      "description": "Confidence for the era boundary: user_set | actual | estimated | inferred. Default estimated."
+    },
+    {
+      "name": "repoint_edge_ids",
+      "type": "array",
+      "required": false,
+      "description": "Edge UUIDs currently on the old node that belong to the NEW era; they are repointed onto the successor (locked/duplicate edges are skipped and reported, not fatal)."
+    },
+    {
+      "name": "dry_run",
+      "type": "boolean",
+      "required": false,
+      "description": "Preview the split; do not commit. Default false."
+    },
+    {
+      "name": "finding_id",
+      "type": "string",
+      "required": false,
+      "description": "Source kg_maintenance_finding.id, if any."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "One-line summary of what happened."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "{ok, old_node_id, successor_node_id, disambiguation_node_id, succeeded_by_edge_id, repointed, skipped_repoints, revision_log_id}."
+    }
+  ],
+  "arguments_prompt": "Arguments for kg_split_succession:\n- node_id (required): UUID of the role-reference Entity to split\n- split_date (required): ISO date where the referent changed\n- reason (required): the succession evidence justifying the split\n- date_confidence (optional): user_set | actual | estimated | inferred (default estimated)\n- repoint_edge_ids (optional): edges on the old node that belong to the new era\n- dry_run (optional): preview only\n- finding_id (optional): source finding row id\n\nExample:\n{\n    \"node_id\": \"node-abc-123\",\n    \"split_date\": \"2026-09-01\",\n    \"reason\": \"Evidence shows a new school starting fall 2026; the earlier era's facts describe a different school\",\n    \"date_confidence\": \"estimated\"\n}",
+  "metadata": {
+    "min_authority": 95,
+    "approval_min_authority": 95,
+    "domain": "knowledge_graph",
+    "actions": [
+      "mutate",
+      "create",
+      "update"
+    ],
+    "selectors": [
+      "node",
+      "edge",
+      "graph"
+    ],
+    "risk_level": "high",
+    "side_effects": "write",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

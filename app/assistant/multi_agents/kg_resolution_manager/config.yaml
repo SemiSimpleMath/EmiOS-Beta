@@ -57,6 +57,7 @@ tool_visibility:
     - kg_create_edge
     - kg_delete_edge
     - kg_repoint_edge
+    - kg_split_succession
     - kg_delete_node
     - kg_merge_nodes
   use_narrower: false
@@ -78,6 +79,7 @@ tools:
     - kg_create_edge
     - kg_delete_edge
     - kg_repoint_edge
+    - kg_split_succession
     - kg_delete_node
     - kg_merge_nodes
     # Finding lifecycle (audit P3.4): the prose-resolve task instructs the
@@ -99,6 +101,7 @@ scope_contract:
       - kg_create_edge
       - kg_delete_edge
       - kg_repoint_edge
+      - kg_split_succession
       - kg_delete_node
       - kg_merge_nodes
       - kg_finding_resolve
