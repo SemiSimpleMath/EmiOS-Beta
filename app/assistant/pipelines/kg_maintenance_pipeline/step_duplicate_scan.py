@@ -68,6 +68,18 @@ MAX_EDGE_SENTENCES = 5
 
 MAX_NEIGHBORS = 10
 
+# Tier 5 (identity-sentence) tunables — identity phase 4.
+# Threshold from the 2026-06-12 calibration probe
+# (scratch/IDENTITY_PHASE4_UNIQUENESS_SPEC.md): true dups appear from
+# ~0.88 up, BUT same-shaped recurring events with different dates
+# saturate 0.96+ ("greeting on April 4" vs "March 16" = 0.978 — MiniLM
+# barely weighs date tokens). The cosine gate therefore ALWAYS pairs
+# with the date-separation test: both dated and >N days apart =
+# distinct recurrence by doctrine, never a Tier 5 candidate.
+IDENTITY_SIM_THRESHOLD = 0.88
+IDENTITY_DATE_SEPARATION_DAYS = 3
+IDENTITY_TOP_K = 5
+
 # Tier 4 (anchor-propagation) tunables.
 ANCHOR_MIN_EDGE_COUNT = 5  # only Entity anchors with >=N edges can drive a candidate
 TIER4_MAX_PAIRS = 80       # safety cap on pairs Tier 4 emits per run
@@ -93,6 +105,7 @@ def _load_node_descriptors() -> dict[str, dict[str, Any]]:
             Node.id, Node.label, Node.description, Node.node_type,
             Node.aliases, Node.category, Node.semantic_label,
             Node.original_sentence, Node.start_date, Node.end_date,
+            Node.identity_sentence,
         ).filter(Node.node_type != "Disambiguation").all()
 
         edges = (
@@ -165,6 +178,9 @@ def _load_node_descriptors() -> dict[str, dict[str, Any]]:
             "category": r.category or "",
             "semantic_label": r.semantic_label or "",
             "original_sentence": (r.original_sentence or ""),
+            # The definite description — the strongest same-referent signal
+            # (identity phase 4); NULL until the nightly refresh covers it.
+            "identity_sentence": (r.identity_sentence or ""),
             # The detector's doctrine says "read the dates BEFORE deciding";
             # without these it couldn't follow it (audit P1.3).
             "start_date": str(r.start_date)[:10] if r.start_date else None,
@@ -551,6 +567,21 @@ def _build_candidate_pairs(
         "[duplicate_scan] Tier 4 (anchor propagation): %d new pairs",
         len(candidates) - tier3_count,
     )
+    tier4_count = len(candidates)
+
+    # --- Tier 5: identity sentences (identity phase 4) ---
+    # 5a exact: two nodes sharing one definite description are duplicates
+    # or defective-sentence carriers. 5b cosine: identity-embedding
+    # similarity gated by the recurring-event date-separation test.
+    for a, b in _identity_exact_pairs(descriptors):
+        _add_pair(a, b, "identity_exact")
+    for a, b in _identity_similarity_pairs(descriptors):
+        _add_pair(a, b, "identity_similarity")
+
+    logger.info(
+        "[duplicate_scan] Tier 5 (identity sentences): %d new pairs",
+        len(candidates) - tier4_count,
+    )
 
     logger.info(
         "[duplicate_scan] Total unique candidate pairs: %d "
@@ -579,6 +610,87 @@ def _build_candidate_pairs(
             "stay unstamped for the next run", len(cut), len(capped_node_ids),
         )
     return kept, pair_anchor_context, capped_node_ids
+
+
+def _normalize_identity_sentence(s: str) -> str:
+    return " ".join((s or "").lower().strip().rstrip(".").split())
+
+
+def _identity_exact_pairs(descriptors: dict[str, dict]) -> list[tuple[str, str]]:
+    """Tier 5a: normalized-equal identity sentences across same-type nodes.
+    The strongest duplicate signal in the graph — a definite description is
+    unique BY CONSTRUCTION, so two nodes sharing one are either duplicates
+    or carriers of defective sentences (the triage decides which)."""
+    by_sentence: dict[tuple[str, str], list[str]] = {}
+    for nid, d in descriptors.items():
+        norm = _normalize_identity_sentence(d.get("identity_sentence") or "")
+        if not norm:
+            continue
+        by_sentence.setdefault((d.get("node_type") or "", norm), []).append(nid)
+
+    pairs: list[tuple[str, str]] = []
+    for (_ntype, _norm), nids in by_sentence.items():
+        if len(nids) < 2:
+            continue
+        nids.sort()
+        for i in range(len(nids)):
+            for j in range(i + 1, len(nids)):
+                pairs.append((nids[i], nids[j]))
+    return pairs
+
+
+def _identity_similarity_pairs(descriptors: dict[str, dict]) -> list[tuple[str, str]]:
+    """Tier 5b: identity-embedding cosine >= IDENTITY_SIM_THRESHOLD,
+    same-type, NOT date-separated (the recurring-event guard — see the
+    tunables comment). Failure-isolated: chroma down → empty list."""
+    from app.assistant.kg_core.kg_utils.date_compare import dates_separated
+
+    try:
+        import numpy as np
+        from app.assistant.kg.chroma.chroma_embedding_manager import get_chroma_manager
+
+        res = get_chroma_manager().node_identity_collection.get(include=["embeddings"])
+    except Exception as exc:
+        logger.warning("[duplicate_scan] Tier 5b unavailable: %s", exc)
+        return []
+
+    ids = [str(i) for i in (res.get("ids") or []) if str(i) in descriptors]
+    if len(ids) < 2:
+        return []
+    id_pos = {i: k for k, i in enumerate(str(x) for x in res.get("ids") or [])}
+    embs = np.array(res.get("embeddings") or [], dtype=np.float32)
+    norms = np.linalg.norm(embs, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    unit = embs / norms
+
+    pairs: list[tuple[str, str]] = []
+    rows = [id_pos[i] for i in ids]
+    sub = unit[rows]
+    CHUNK = 500
+    k = min(IDENTITY_TOP_K, len(ids) - 1)
+    for start in range(0, len(ids), CHUNK):
+        block = sub[start:start + CHUNK] @ sub.T
+        for r in range(block.shape[0]):
+            block[r, start + r] = -1.0
+        top = np.argpartition(-block, k, axis=1)[:, :k]
+        for r in range(block.shape[0]):
+            a = ids[start + r]
+            da = descriptors[a]
+            for c in top[r]:
+                sim = float(block[r, c])
+                if sim < IDENTITY_SIM_THRESHOLD:
+                    continue
+                b = ids[int(c)]
+                if b <= a:
+                    continue
+                db = descriptors[b]
+                if (da.get("node_type") or "") != (db.get("node_type") or ""):
+                    continue
+                if dates_separated(da.get("start_date"), db.get("start_date"),
+                                   min_days=IDENTITY_DATE_SEPARATION_DAYS):
+                    continue  # distinct recurrence by doctrine
+                pairs.append((a, b))
+    return pairs
 
 
 def _embedding_similarity_pairs(all_node_ids: list[str]) -> list[tuple[str, str]]:
@@ -686,8 +798,11 @@ def _build_triage_brief(
             "node_type": da.get("node_type"),
             "category": da.get("category"),
             "aliases": da.get("aliases") or [],
+            "identity_sentence": da.get("identity_sentence") or "",
             "description": (da.get("description") or "")[:200],
             "original_sentence": da.get("original_sentence") or "",
+            "start_date": da.get("start_date"),
+            "end_date": da.get("end_date"),
             "edge_sentences": (da.get("edge_sentences") or [])[:3],
         },
         "b": {
@@ -695,8 +810,11 @@ def _build_triage_brief(
             "node_type": db.get("node_type"),
             "category": db.get("category"),
             "aliases": db.get("aliases") or [],
+            "identity_sentence": db.get("identity_sentence") or "",
             "description": (db.get("description") or "")[:200],
             "original_sentence": db.get("original_sentence") or "",
+            "start_date": db.get("start_date"),
+            "end_date": db.get("end_date"),
             "edge_sentences": (db.get("edge_sentences") or [])[:3],
         },
     }
@@ -738,20 +856,21 @@ def _triage_filter_pairs(
     detector unfiltered — only that batch, not the entire set.
     """
     if not pairs:
-        return pairs
+        return pairs, set()
 
     # Sanity-check that the agent is registered before we start batching.
     try:
         probe_agent = DI.agent_factory.create_agent("kg_maintenance::duplicate_triage")
         if probe_agent is None:
             logger.warning("[duplicate_scan] triage agent unavailable — skipping pre-filter")
-            return pairs
+            return pairs, set()
     except Exception as exc:
         logger.warning("[duplicate_scan] triage agent create failed: %s — skipping pre-filter", exc)
-        return pairs
+        return pairs, set()
 
     distinct_indices: set[int] = set()  # global 0-based indices into `pairs`
     distinct_reasons: dict[int, str] = {}  # global idx → triage's reason prose
+    defective_indices: set[int] = set()  # identity sentences need regeneration
     n_batches = (len(pairs) + TRIAGE_BATCH_SIZE - 1) // TRIAGE_BATCH_SIZE
     n_batches_failed = 0
 
@@ -811,8 +930,29 @@ def _triage_filter_pairs(
                 reason = str(v.get("reason") or "").strip()
                 if reason:
                     distinct_reasons[global_idx] = reason
+            elif verdict == "defective_sentences" and 1 <= local_idx_1based <= len(batch):
+                defective_indices.add(batch_start + (local_idx_1based - 1))
 
-    survivors = [p for i, p in enumerate(pairs) if i not in distinct_indices]
+    # Defective identity sentences: regenerate rather than judge. The pair
+    # is removed from this run (no distinct verdict, no detector call), the
+    # sentences + hashes are nulled so the nightly refresh rewrites them,
+    # and the nodes stay UNSTAMPED so the pair rescans after regeneration
+    # (the dup scan doubles as the identity layer's quality checker).
+    defective_node_ids: set[str] = set()
+    if defective_indices:
+        for i in sorted(defective_indices):
+            a, b, tier = pairs[i]
+            defective_node_ids.update((a, b))
+            logger.info(
+                "[duplicate_scan] triage: defective identity sentences on "
+                "pair %s/%s (tier %s) — nulling for regeneration", a[:8], b[:8], tier,
+            )
+        _null_identity_sentences(defective_node_ids)
+
+    survivors = [
+        p for i, p in enumerate(pairs)
+        if i not in distinct_indices and i not in defective_indices
+    ]
     if n_batches_failed:
         logger.warning(
             "[duplicate_scan] %d/%d triage batches failed — their pairs flow through unfiltered",
@@ -850,10 +990,35 @@ def _triage_filter_pairs(
             )
 
     logger.info(
-        "[duplicate_scan] Triage: %d pairs → %d survived (%d dropped as 'distinct')",
-        len(pairs), len(survivors), len(distinct_indices),
+        "[duplicate_scan] Triage: %d pairs → %d survived (%d dropped as "
+        "'distinct', %d defective-sentence pairs sent to regeneration)",
+        len(pairs), len(survivors), len(distinct_indices), len(defective_indices),
     )
-    return survivors
+    return survivors, defective_node_ids
+
+
+def _null_identity_sentences(node_ids: set[str]) -> None:
+    """Null identity_sentence + identity_inputs_hash so the nightly refresh
+    regenerates them (triage verdict: the sentences fail to discriminate).
+    Preserves updated_at verbatim — a projection reset, not a content change."""
+    from sqlalchemy import update as sql_update
+
+    from app.models.db_manager import get_db_manager
+
+    try:
+        from app.assistant.kg.db.knowledge_graph_db_sqlite import Node
+        with get_db_manager().transaction(op="duplicate_scan.defective_sentences") as s:
+            s.execute(
+                sql_update(Node)
+                .where(Node.id.in_(list(node_ids)))
+                .values(identity_sentence=None, identity_inputs_hash=None,
+                        updated_at=Node.updated_at)
+            )
+    except Exception as exc:
+        logger.error(
+            "[duplicate_scan] failed to null %d defective identity "
+            "sentence(s): %s", len(node_ids), exc,
+        )
 
 
 def _confirm_pairs_with_llm(
@@ -882,10 +1047,13 @@ def _confirm_pairs_with_llm(
     # Pre-filter cheap: nano-class triage drops obviously-distinct pairs so the
     # heavy detector only spends time on plausible ones. Asymmetric trust:
     # we accept its NO, never its YES (the detector still owns the merge call).
-    pairs = _triage_filter_pairs(pairs, descriptors, scope_context, pair_anchor_context)
+    pairs, defective_node_ids = _triage_filter_pairs(
+        pairs, descriptors, scope_context, pair_anchor_context)
 
     merge_actions: list[dict] = []
-    failed_node_ids: set[str] = set()
+    # Defective-sentence nodes stay unstamped: their pairs rescan after the
+    # nightly refresh regenerates the sentences.
+    failed_node_ids: set[str] = set(defective_node_ids)
 
     for idx, (nid_a, nid_b, tier) in enumerate(pairs):
         desc_a = descriptors.get(nid_a)
@@ -927,6 +1095,7 @@ def _confirm_pairs_with_llm(
                 "node_id": d["node_id"],
                 "label": d["label"],
                 "node_type": d["node_type"],
+                "identity_sentence": d.get("identity_sentence") or "",
                 "original_sentence": d.get("original_sentence") or "",
                 "start_date": d.get("start_date"),
                 "end_date": d.get("end_date"),

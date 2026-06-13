@@ -8,6 +8,11 @@ class PairVerdict(BaseModel):
     `verdict`:
       - "distinct" → confident these are NOT the same; drop the pair
       - "uncertain" → can't tell from this brief; forward to the full detector
+      - "defective_sentences" → the pair's identity sentences fail to
+        discriminate (identical or near-identical while the nodes are
+        clearly different referents, or referent-free phrasing). The nodes
+        are NOT judged duplicates or distinct — their identity sentences
+        get nulled for regeneration and the pair rescans afterward.
 
     There is no "merge" verdict at this stage — the cost of a false-merge is
     high enough that the heavy detector + investigator chain owns that call.
@@ -15,7 +20,7 @@ class PairVerdict(BaseModel):
     so the downstream cost is spent only on plausible candidates.
     """
     pair_index: int = Field(..., description="1-based index of the pair in the input batch.")
-    verdict: str = Field(..., description="'distinct' or 'uncertain'.")
+    verdict: str = Field(..., description="'distinct', 'uncertain', or 'defective_sentences'.")
     reason: str = Field("", description="≤1 sentence justification.")
 
 

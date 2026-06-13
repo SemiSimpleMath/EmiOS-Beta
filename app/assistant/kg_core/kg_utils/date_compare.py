@@ -88,3 +88,24 @@ def end_before_start(
     """The impossible-era check: both set and end strictly before start."""
     s, e = as_aware_utc(start), as_aware_utc(end)
     return s is not None and e is not None and e < s
+
+
+def _coerce(d) -> Optional[datetime]:
+    if d is None or isinstance(d, datetime):
+        return as_aware_utc(d)
+    try:
+        return as_aware_utc(datetime.fromisoformat(str(d)[:19]))
+    except ValueError:
+        return None
+
+
+def dates_separated(a, b, *, min_days: int = 3) -> bool:
+    """The recurring-event test: both dates known and more than min_days
+    apart — by doctrine, same-shaped dated occurrences that far apart are
+    DISTINCT recurrences, not duplicates. Either side unknown → False
+    (cannot rule out a duplicate on missing data; sink to the judge).
+    Accepts datetimes or ISO strings (node descriptor convention)."""
+    da, db = _coerce(a), _coerce(b)
+    if da is None or db is None:
+        return False
+    return abs((da - db).total_seconds()) > min_days * 86400
