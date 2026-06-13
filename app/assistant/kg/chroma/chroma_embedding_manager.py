@@ -55,6 +55,18 @@ class ChromaEmbeddingManager:
         if self._client is None:
             with self._init_lock:
                 if self._client is None:
+                    # Chroma has ONE writer: the server process. A test process
+                    # opening the real PersistentClient both pollutes the prod
+                    # index (test-node ghosts) and can access-violate the rust
+                    # client while the server writes concurrently — an
+                    # uncatchable native crash that kills the whole pytest run.
+                    # Tests must monkeypatch get_chroma_manager with a fake.
+                    if os.environ.get("USE_TEST_DB", "").strip().lower() in ("1", "true", "yes"):
+                        raise RuntimeError(
+                            "ChromaEmbeddingManager refuses to open the real chroma "
+                            "index under USE_TEST_DB — monkeypatch "
+                            "chroma_embedding_manager.get_chroma_manager with a fake."
+                        )
                     chroma_path = get_chroma_kg_db_dir()
                     chroma_path.mkdir(exist_ok=True)
                     self._client = _make_chroma_client(str(chroma_path))

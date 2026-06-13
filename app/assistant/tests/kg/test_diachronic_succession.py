@@ -46,6 +46,16 @@ D = lambda y, m=1, d=1: datetime(y, m, d, tzinfo=timezone.utc)  # noqa: E731
 
 
 @pytest.fixture(autouse=True)
+def _no_real_chroma(monkeypatch):
+    # kg_split_succession embeds the successor node post-commit. Reaching the
+    # real chroma index from a test process violates the single-writer
+    # doctrine (and can access-violate the rust client while the server runs);
+    # the manager now refuses under USE_TEST_DB, so stub the embed entirely.
+    import app.assistant.kg.proposal_promoter as pp
+    monkeypatch.setattr(pp, "_embed_and_store_node", lambda *a, **k: None)
+
+
+@pytest.fixture(autouse=True)
 def _clean_tables():
     session = get_session()
     try:
