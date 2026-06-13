@@ -32,6 +32,9 @@ user_context_items:
   - inventory_snapshot
   - ralphs_standing_list
   - agent_weekly_list_state
+  # Go-to rotation with DUE/RESTING cadence markers (built alongside
+  # inventory_snapshot in meal_context_builder; the template references it).
+  - easy_meals_rotation
 
 system_context_items:
   - resource_user_data

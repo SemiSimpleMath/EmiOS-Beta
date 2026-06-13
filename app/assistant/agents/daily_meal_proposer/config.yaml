@@ -19,6 +19,7 @@ user_context_items:
   - diet_log_7d
   - inventory_snapshot
   - recipes_house
+  - easy_meals_rotation
   - dietary_context
   - food_beliefs
   - food_calendar
