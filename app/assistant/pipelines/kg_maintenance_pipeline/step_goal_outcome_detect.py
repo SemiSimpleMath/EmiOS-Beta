@@ -38,6 +38,7 @@ from sqlalchemy import text as sql_text
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.assistant.ServiceLocator.service_locator import DI
+from app.assistant.scope.loader import load_scope_for_source
 from app.assistant.pipelines.context import PipelineContext
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import Message
@@ -135,6 +136,15 @@ def run(ctx: PipelineContext, *, limit: Optional[int] = None) -> dict:
     agent = DI.agent_factory.create_agent("goal_outcome_detector")
     if agent is None:
         raise RuntimeError("goal_outcome_detector agent not registered")
+
+    # This step invokes the agent directly (no manager ingress sets scope), but
+    # goal_outcome_detector declares system_context_items: resource_assistant_data,
+    # and resource resolution requires a scope_context — without one the prompt
+    # build fails loud. Set a pipeline scope on the agent's blackboard, the same
+    # pattern the other maintenance steps use (description_creator, duplicate_scan).
+    _scope = load_scope_for_source(
+        kind="pipeline", source_id=ctx.pipeline_id, actor_id="goal_outcome_detector")
+    agent.blackboard.update_state_value("scope_context", _scope)
 
     payload = _serialize_for_agent(has_evidence)
     try:
