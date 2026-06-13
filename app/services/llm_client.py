@@ -791,23 +791,29 @@ class OpenAILLM(BaseLLMProvider):
 # ---------------------------------------------------------------------------
 
 def _gemini_inline_refs(schema: dict) -> dict:
-    """Inline all $defs/$ref references to produce a flat JSON Schema dict."""
+    """Inline all $defs/$ref references to produce a flat JSON Schema dict.
+
+    Carries a `seen` set of in-progress ref keys so a self-referential model
+    (a recursive $ref) breaks the cycle into an open object instead of
+    recursing forever — the inliner must never loop on a pathological schema.
+    """
     defs = schema.get("$defs", {})
     if not defs:
         return schema
 
-    def _resolve(obj):
+    def _resolve(obj, seen):
         if isinstance(obj, dict):
             if "$ref" in obj:
                 ref_key = obj["$ref"].split("/")[-1]
-                resolved = defs.get(ref_key, obj)
-                return _resolve(resolved)
-            return {k: _resolve(v) for k, v in obj.items() if k != "$defs"}
+                if ref_key in seen:
+                    return {"type": "object"}  # cycle — leave the node open
+                return _resolve(defs.get(ref_key, obj), seen | {ref_key})
+            return {k: _resolve(v, seen) for k, v in obj.items() if k != "$defs"}
         if isinstance(obj, list):
-            return [_resolve(i) for i in obj]
+            return [_resolve(i, seen) for i in obj]
         return obj
 
-    return _resolve(schema)
+    return _resolve(schema, frozenset())
 
 
 def _gemini_clean_schema(obj, _inside_properties: bool = False) -> object:
@@ -976,6 +982,34 @@ class GeminiLLM(BaseLLMProvider):
             logger.warning("Gemini thinking_config build failed (%s); using default thinking", e)
             return None
 
+    def _check_structured_response(self, response, model_name, json_lib):
+        """Classify a structured-output response. Returns (reason, parsed):
+        reason is None on a clean parse (parsed = the dict); otherwise a short
+        string naming the degeneracy. Degenerate cases — empty/blocked,
+        MAX_TOKENS truncation, or unparseable JSON — are the symptoms of the
+        constrained-decoder runaway (the "infinite-loop JSON"); the caller
+        retries them with a cache-bust nonce. API/transport errors are NOT
+        handled here (they raise from generate_content and propagate)."""
+        raw_text = getattr(response, "text", None)
+        finish_reason = None
+        if getattr(response, "candidates", None):
+            finish_reason = getattr(response.candidates[0], "finish_reason", None)
+        if not raw_text:
+            block_reason = getattr(getattr(response, "prompt_feedback", None), "block_reason", None)
+            logger.error(
+                "Gemini returned empty response text (model=%s, block_reason=%s, finish_reason=%s)",
+                model_name, block_reason, finish_reason,
+            )
+            return (f"empty_response(block={block_reason},finish={finish_reason})", None)
+        if finish_reason is not None and "MAX_TOKENS" in str(finish_reason):
+            # The runaway signature: generation hit the ceiling mid-structure,
+            # so the JSON is truncated/looping.
+            return ("max_tokens_truncation", None)
+        try:
+            return (None, json_lib.loads(raw_text))
+        except Exception as e:
+            return (f"json_parse_error({str(e)[:80]})", None)
+
     def structured_output(self, messages, **send_params):
         import time as _time
 
@@ -1006,23 +1040,17 @@ class GeminiLLM(BaseLLMProvider):
             import json as json_lib
             import uuid as _uuid
 
-            # Unique prefix defeats the SDK's implicit prompt caching which
-            # can crash or produce infinite-loop JSON on the second call with
-            # a matching prefix.
-            cache_bust = f"[req-{_uuid.uuid4().hex[:8]}]\n"
+            # Sanitize the schema for Gemini: inline $ref/$defs (so the
+            # constrained decoder gets a flat target) and strip
+            # additionalProperties/$schema/title-metadata. The raw Pydantic
+            # schema with refs + additionalProperties gave the decoder an
+            # ambiguous target — a contributing cause of the "infinite-loop
+            # JSON" the old blanket cache-bust was masking.
+            json_schema = _gemini_clean_schema(_gemini_inline_refs(json_schema))
 
-            if system_instruction:
-                full_prompt = f"{cache_bust}{system_instruction}\n\n{content}"
-            else:
-                full_prompt = f"{cache_bust}{content}"
-
-            _thread = threading.current_thread()
-            logger.info(
-                "Gemini generate_content: model=%s, prompt_len=%d, schema_keys=%s, thread=%s(%s)",
-                model_name, len(full_prompt), list(json_schema.get("properties", {}).keys()),
-                _thread.name, _thread.ident,
+            base_prompt = (
+                f"{system_instruction}\n\n{content}" if system_instruction else content
             )
-            print(f"    [Gemini] >> {model_name} prompt={len(full_prompt)} chars [thread:{_thread.name}]", flush=True)
 
             gen_config_kwargs = dict(
                 response_mime_type='application/json',
@@ -1038,36 +1066,64 @@ class GeminiLLM(BaseLLMProvider):
             thinking_config = self._build_thinking_config(send_params)
             if thinking_config is not None:
                 gen_config_kwargs['thinking_config'] = thinking_config
-            response = self.client.models.generate_content(
-                model=model_name,
-                contents=full_prompt,
-                config=self.types.GenerateContentConfig(**gen_config_kwargs),
-            )
-            _telemetry_usage = getattr(response, "usage_metadata", None)
+            # Optional per-agent output bound. NOT defaulted: on Gemini thinking
+            # models max_output_tokens COUNTS thinking tokens, so a low cap
+            # starves the answer / returns empty (googleapis/python-genai#782).
+            # Leave it None unless an agent explicitly opts in.
+            if send_params.get('max_output_tokens') is not None:
+                gen_config_kwargs['max_output_tokens'] = int(send_params['max_output_tokens'])
 
-            print(f"    [Gemini] << OK [thread:{_thread.name}]", flush=True)
-            logger.info("Gemini generate_content returned (model=%s, thread=%s)", model_name, _thread.name)
-            raw_text = response.text
-            if not raw_text:
-                block_reason = getattr(getattr(response, "prompt_feedback", None), "block_reason", None)
-                finish_reason = None
-                safety_ratings = None
-                if response.candidates:
-                    finish_reason = getattr(response.candidates[0], "finish_reason", None)
-                    safety_ratings = getattr(response.candidates[0], "safety_ratings", None)
-                logger.error(
-                    "Gemini returned empty response text "
-                    "(model=%s, block_reason=%s, finish_reason=%s, safety_ratings=%s)",
-                    model_name, block_reason, finish_reason, safety_ratings,
+            # Happy path runs WITHOUT a unique prefix, so Gemini implicit caching
+            # engages (a static system prefix with the variable content at the
+            # end is Google's documented cache-friendly shape; ~75% input
+            # discount on the cached prefix). The old code prepended a uuid that
+            # defeated caching on EVERY call. The rare degenerate response
+            # (empty / MAX_TOKENS truncation / unparseable — the "infinite-loop
+            # JSON" symptom) is retried WITH a cache-bust nonce — the proven
+            # mitigation, applied surgically only when needed instead of always.
+            _MAX_ATTEMPTS = 3
+            _thread = threading.current_thread()
+            last_reason = None
+            result_dict = None
+            for _attempt in range(_MAX_ATTEMPTS):
+                use_nonce = _attempt > 0
+                nonce = f"[req-{_uuid.uuid4().hex[:8]}]\n" if use_nonce else ""
+                full_prompt = f"{nonce}{base_prompt}"
+                logger.info(
+                    "Gemini generate_content: model=%s, prompt_len=%d, attempt=%d/%d, cache_bust=%s, thread=%s",
+                    model_name, len(full_prompt), _attempt + 1, _MAX_ATTEMPTS, use_nonce, _thread.name,
                 )
+                print(f"    [Gemini] >> {model_name} prompt={len(full_prompt)} chars "
+                      f"attempt={_attempt + 1} [thread:{_thread.name}]", flush=True)
+                response = self.client.models.generate_content(
+                    model=model_name,
+                    contents=full_prompt,
+                    config=self.types.GenerateContentConfig(**gen_config_kwargs),
+                )
+                _telemetry_usage = getattr(response, "usage_metadata", None)
+                reason, parsed = self._check_structured_response(response, model_name, json_lib)
+                if reason is None:
+                    print(f"    [Gemini] << OK [thread:{_thread.name}]", flush=True)
+                    result_dict = parsed
+                    break
+                last_reason = reason
+                logger.warning(
+                    "Gemini structured output degenerate (%s) on attempt %d/%d (model=%s) — "
+                    "%s", reason, _attempt + 1, _MAX_ATTEMPTS, model_name,
+                    "retrying with cache-bust nonce" if _attempt + 1 < _MAX_ATTEMPTS else "no attempts left",
+                )
+
+            if result_dict is None:
+                # Fail loud: every attempt degenerated (and the cache-bust nonce
+                # — today's known mitigation — did not recover it).
+                _telemetry_status = "parse_error"
                 raise ValueError(
-                    f"Gemini returned empty response "
-                    f"(block_reason={block_reason}, finish_reason={finish_reason})"
+                    f"Gemini structured output degenerate after {_MAX_ATTEMPTS} attempts "
+                    f"(model={model_name}, last_reason={last_reason})"
                 )
-            result_dict = json_lib.loads(raw_text)
 
             performance_monitor.end_timer(timer_id, {'status': 'success', 'model': model_name})
-            logger.info(f"✅ Gemini response received successfully")
+            logger.info("✅ Gemini response received successfully")
             _telemetry_status = "ok"
             return result_dict
 
