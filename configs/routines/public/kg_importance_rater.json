@@ -7,11 +7,14 @@
   "spec": {
     "function_name": "kg_importance_rater",
     "batch_size_edges": 50,
-    "batch_size_nodes": 60
+    "batch_size_nodes": 60,
+    "max_edges_per_run": 400,
+    "max_tags_per_run": 60
   },
   "run_policy": {
     "type": "interval",
     "min_interval_seconds": 1800
   },
+  "max_run_seconds": 900,
   "notes": "Re-enabled 2026-05-12 with new architecture: ONE LLM rater (me::edge_importance_rater on unrated edges), then all node importance is DERIVED. Entity/Concept = max(adjacent edge importance). State/Event/Goal/Property = max(src_imp \u00d7 edge_imp / 10). Replaces the buggy me::importance_rater Entity-LLM path which misrated Emi at 3.0 because the prompt categorized her as an AI tool. Cheap, idempotent, runs every 30 min."
 }

@@ -177,6 +177,7 @@ def regenerate_edge_importance(
     *,
     batch_size: int = EDGE_RATER_BATCH_SIZE,
     only_unrated: bool = True,
+    max_edges: Optional[int] = None,
     scope_context: ScopeContext,
 ) -> int:
     """Rate every edge and write to kg_edge_metadata.importance.
@@ -232,6 +233,10 @@ def regenerate_edge_importance(
         batch_size: edges per LLM call.
         only_unrated: when True (default), skip edges that already have
             a non-NULL importance value. Set False to fully re-rate.
+        max_edges: cap edges processed in ONE run (None = unbounded). Pairs
+            with only_unrated (a shrinking selector — rated edges drop out),
+            so a large backlog (e.g. a bulk re-extraction) converges over
+            multiple runs instead of becoming one graph-wide LLM grind.
 
     Returns: number of edges scored this run.
     """
@@ -245,10 +250,15 @@ def regenerate_edge_importance(
         node_by_id: Dict[str, Node] = {
             str(n.id): n for n in session.query(Node).all()
         }
+        edge_q = session.query(Edge)
         if only_unrated:
-            all_edges = session.query(Edge).filter(Edge.importance.is_(None)).all()
-        else:
-            all_edges = session.query(Edge).all()
+            edge_q = edge_q.filter(Edge.importance.is_(None))
+        # Per-run cap: bound the backlog so a bulk re-extraction can't turn one
+        # run into a graph-wide LLM grind. With only_unrated (a shrinking
+        # selector) the remainder converges over subsequent runs.
+        if max_edges is not None:
+            edge_q = edge_q.limit(max_edges)
+        all_edges = edge_q.all()
 
     logger.info(
         "edge importance: rating %d edges in batches of %d (only_unrated=%s)",

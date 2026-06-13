@@ -413,6 +413,12 @@ def _lazy_kg_importance_rater(*, target_date=None, routine=None):
     from app.assistant.scope.loader import load_scope_for_source
     spec = (routine.spec if routine and hasattr(routine, "spec") else {}) or {}
     batch_edges = int(spec.get("batch_size_edges", 50))
+    # Per-run caps so a backlog (bulk import / re-extraction) converges over
+    # runs instead of one unbounded LLM grind. Both underlying loops use
+    # shrinking selectors (only_unrated edges / untagged nodes), so capping
+    # converges. Paired with max_run_seconds in the routine config.
+    max_edges = int(spec.get("max_edges_per_run", 400))
+    max_tags = int(spec.get("max_tags_per_run", 60))
 
     # One scope, built at the routine entry, threaded into the two LLM steps
     # (edge rater + section tagger). The pure-DB derivation steps take no scope.
@@ -424,7 +430,8 @@ def _lazy_kg_importance_rater(*, target_date=None, routine=None):
 
     # Step 1: rate edges via me::edge_importance_rater. The single LLM input.
     edge_count = regenerate_edge_importance(
-        batch_size=batch_edges, only_unrated=True, scope_context=scope,
+        batch_size=batch_edges, only_unrated=True, max_edges=max_edges,
+        scope_context=scope,
     )
     edge_status = int(edge_count or 0)
 
@@ -445,7 +452,7 @@ def _lazy_kg_importance_rater(*, target_date=None, routine=None):
     tag_stats = {}
     try:
         from app.assistant.kg.section_tagging import backfill_untagged_nodes
-        tag_stats = backfill_untagged_nodes(scope_context=scope)
+        tag_stats = backfill_untagged_nodes(scope_context=scope, limit=max_tags)
     except Exception:
         logger.exception("[kg_importance_rater] tagging step failed")
         tag_stats = {"error": "exception"}
