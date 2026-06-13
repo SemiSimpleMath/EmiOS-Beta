@@ -208,6 +208,10 @@ data/kg_projection/
 data/backups/
 # Belief engine v2 runtime databases + local backups
 belief_engine_v2/data/
+# Context-engine situation briefs — runtime-generated per-room snapshots of the
+# user's situation (personal data). Static context_engine resources still track.
+resources/context_engine/*/situation_briefs/
+resources/context_engine/*/situation_brief_latest.json
 # EmiCode runtime state — Claude Code session_ids per room context.
 data/emi_code/
 # Ring camera credentials + snapshots — never commit these
