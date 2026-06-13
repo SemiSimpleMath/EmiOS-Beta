@@ -327,8 +327,27 @@ class ScopeAdapter:
 
     @staticmethod
     def _strict_scope_enabled() -> bool:
-        raw = str(os.environ.get("SCOPE_CONTRACT_STRICT", "false") or "false").strip().lower()
-        return raw in {"1", "true", "yes", "on"}
+        """Whether manager ingress REFUSES a scope-less request (no inbound
+        scope, no room, no data scope-contract) instead of silently deriving a
+        wide system scope.
+
+        Default flipped to STRICT (2026-06-13, owner directive "ingress should
+        refuse too"): every live invoker caller already passes a scope/room (the
+        maintenance + dayflow + chat + task paths were built for this), so a
+        scope-less ingress is an unintended ungated invocation and must fail
+        loud. An explicit SCOPE_CONTRACT_STRICT env always wins. Test mode is
+        lenient (derive, not refuse) so harnesses that invoke via the invoker
+        without building a scope still run — mirrors MultiAgentManager's own
+        test-mode scope substitution. Production never sets the test markers.
+        """
+        raw = os.environ.get("SCOPE_CONTRACT_STRICT")
+        if raw is not None:
+            return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+        test_mode = (
+            os.environ.get("EMI_TEST_MODE") == "1"
+            or "PYTEST_CURRENT_TEST" in os.environ
+        )
+        return not test_mode
 
     @staticmethod
     def _allow_strict_mode_system_derivation(*, message: Message) -> bool:
