@@ -1,5 +1,14 @@
 
+import os
 import sys
+
+# Mark this process as a TEST process. MultiAgentManager refuses to run a
+# manager with no scope_context in PRODUCTION (fail-closed), but in test mode
+# it substitutes a permissive test scope so harnesses that don't build their
+# own scope still run. Every test bootstraps via this module (CLAUDE.md), so
+# setting it here covers pytest and the standalone manager tests alike;
+# production never imports tests/, so it's never set there.
+os.environ.setdefault("EMI_TEST_MODE", "1")
 
 # Ensure the project root is in the path for imports
 from pathlib import Path

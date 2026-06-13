@@ -215,6 +215,51 @@ class MultiAgentManager:
                 raise
         return seeded_count
 
+    @staticmethod
+    def _test_mode_active() -> bool:
+        """True when running under a test harness (EMI_TEST_MODE set by
+        tests/test_setup.py, or pytest's PYTEST_CURRENT_TEST). Production never
+        sets either."""
+        import os
+        return (
+            os.environ.get("EMI_TEST_MODE") == "1"
+            or "PYTEST_CURRENT_TEST" in os.environ
+        )
+
+    def _apply_no_inbound_scope(self) -> None:
+        """Handle an inbound Message that carries NO scope_context.
+
+        PRODUCTION: fail loud — a manager must never run with the scope gate
+        off. Every invocation must carry a scope (manager_invoker attaches one;
+        see scratch/REQUEST_HANDLER_CALLERS_AUDIT.md).
+
+        TEST: substitute a permissive scope (allow-all, authority 100,
+        resources-all) so harnesses that don't build their own scope still run.
+        This is equivalent to the prior ungated behavior, so tests are
+        unaffected — only the production default flips from open to refuse.
+        """
+        if not self._test_mode_active():
+            raise ValueError(
+                f"[{self.name}] request_handler invoked with no scope_context — refusing "
+                "to run ungated. Every manager invocation must carry a scope (route "
+                "through manager_invoker, which attaches one)."
+            )
+        from app.assistant.utils.pydantic_classes import (
+            ScopeApprovalPolicy,
+            ScopeContext,
+            ScopeResourcePolicy,
+            ScopeToolPolicy,
+        )
+        test_scope = ScopeContext(
+            scope_id="scope::test::auto",
+            owner_id="test_owner", actor_id="test_actor", surface="test",
+            tools=ScopeToolPolicy(allowed_tools=["all"]),
+            approval=ScopeApprovalPolicy(authority_level=100),
+            resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
+        )
+        self.blackboard.update_state_value("scope_context", test_scope.model_dump())
+        self.blackboard.update_state_value("scope_contract_enforced", True)
+
     def request_handler(self, user_message: Message):
         """
         Handles a new task request by setting up the blackboard and invoking Delegator.
@@ -276,7 +321,7 @@ class MultiAgentManager:
                     logger.debug("[%s] scope_context load exception details", self.name, exc_info=True)
                     raise
             else:
-                self.blackboard.update_state_value("scope_contract_enforced", False)
+                self._apply_no_inbound_scope()
             try:
                 self.tool_scope_service.initialize_scope(
                     blackboard=self.blackboard,
