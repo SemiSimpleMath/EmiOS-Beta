@@ -408,6 +408,25 @@ class ToolScopeService:
         except Exception as e:
             logger.error("[tool_scope] Failed reading scope_context for tool filtering: %s", e)
             logger.debug("[tool_scope] scope_context read exception details", exc_info=True)
+            # Enforcement was requested but the scope is unreadable/corrupt: FAIL
+            # CLOSED. Never silently fall through to exposing the full tool list.
+            # Mirrors the execution layer (tool_caller / agent_input_applier),
+            # which raises on the same "enforced but no usable scope" condition.
+            if scope_contract_enforced:
+                raise ValueError(
+                    "[tool_scope] scope_contract_enforced=true but scope_context could not "
+                    "be read/validated for tool visibility filtering — refusing to expose "
+                    "an unscoped tool list."
+                ) from e
+        # Enforced but no scope present at all is the same breach: the invariant is
+        # 'enforced => scope present' (enforced at execution by tool_caller). Fail loud
+        # instead of returning every tool unfiltered.
+        if scope_contract_enforced and scope_context is None:
+            raise ValueError(
+                "[tool_scope] scope_contract_enforced=true but no scope_context is set for "
+                "tool visibility filtering — refusing to expose an unscoped tool list."
+            )
+
         def _apply_scope_filters(items: list[str], stage: str) -> list[str]:
             """Filter to the scope's permission ceiling (allowed_tools / blocked_tools).
 
@@ -420,7 +439,10 @@ class ToolScopeService:
             Called BEFORE the narrower (so it never evaluates already-blocked tools)
             AND AFTER it (so its expanded list can't re-introduce scope-blocked tools).
             """
-            if not (scope_contract_enforced and scope_context is not None):
+            # scope_contract_enforced=False => no contract requested => visibility
+            # unrestricted (by design). When enforced, scope_context is guaranteed
+            # present here (we fail loud above otherwise), so we always filter.
+            if not scope_contract_enforced:
                 return items
             result = items
             scope_allowed = scope_context.tools.allowed_tools if isinstance(scope_context.tools.allowed_tools, list) else []

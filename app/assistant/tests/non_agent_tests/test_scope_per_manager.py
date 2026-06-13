@@ -110,6 +110,50 @@ def _can_use(scope: ScopeContext, tool: str) -> bool:
 # Schema round-trip
 # ---------------------------------------------------------------------------
 
+def test_visibility_fails_closed_when_enforced_but_scope_missing():
+    """Visibility must FAIL CLOSED — not expose the full tool list — when the
+    scope contract is enforced but no scope_context is present. (The execution
+    layer already raises on this exact invariant; the visibility layer used to
+    silently return every tool.)"""
+    import pytest
+    bb = Blackboard()
+    bb.update_state_value("scope_contract_enforced", True)  # no scope_context set
+    bb.update_state_value("recently_used_tools", [])
+    bb.update_state_value("recently_installed_tools", [])
+    with pytest.raises(ValueError, match="unscoped tool list"):
+        ToolScopeService().initialize_scope(
+            blackboard=bb, tool_registry=_FakeToolRegistry(),
+            manager_config=_manager_cfg("emi_team_manager"), task="x", information="")
+
+
+def test_visibility_fails_closed_when_scope_corrupt():
+    """A stored scope that fails validation must fail closed, not fall through
+    to the full tool list."""
+    import pytest
+    bb = Blackboard()
+    bb.update_state_value("scope_contract_enforced", True)
+    bb.update_state_value("scope_context", {"not": "a valid scope"})  # model_validate raises
+    bb.update_state_value("recently_used_tools", [])
+    bb.update_state_value("recently_installed_tools", [])
+    with pytest.raises(ValueError, match="unscoped tool list"):
+        ToolScopeService().initialize_scope(
+            blackboard=bb, tool_registry=_FakeToolRegistry(),
+            manager_config=_manager_cfg("emi_team_manager"), task="x", information="")
+
+
+def test_visibility_unrestricted_when_not_enforced():
+    """No scope contract requested => visibility unrestricted (by design); must
+    NOT raise (the fail-closed guard only fires when enforcement is on)."""
+    bb = Blackboard()
+    bb.update_state_value("scope_contract_enforced", False)
+    bb.update_state_value("recently_used_tools", [])
+    bb.update_state_value("recently_installed_tools", [])
+    ToolScopeService().initialize_scope(
+        blackboard=bb, tool_registry=_FakeToolRegistry(),
+        manager_config=_manager_cfg("emi_team_manager"), task="x", information="")
+    assert _read_visible(bb)  # tools shown, no scope contract to restrict
+
+
 def test_scope_tool_rule_roundtrip():
     rule = ScopeToolRule(allow=["a", "b"], block=["c"])
     dumped = rule.model_dump()

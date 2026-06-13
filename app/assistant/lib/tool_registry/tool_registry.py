@@ -283,6 +283,7 @@ class ToolRegistry:
         return self.mcp_server_entries.get(server_id)
 
     def load_tools(self):
+        failures: list[str] = []
         for tool_dir in self.tools_dir.iterdir():
             if tool_dir.is_dir():
                 tool_name = tool_dir.name
@@ -317,6 +318,18 @@ class ToolRegistry:
                     logger.info(f"Registered tool: {tool_name}")
                 except Exception as e:
                     logger.error(f"Failed to load tool '{tool_name}': {e}")
+                    failures.append(f"{tool_name}: {e}")
+        if failures:
+            # Fail loud: a core tool that won't load (bad import, or a malformed
+            # tool_contract — including the min_authority / approval_min_authority
+            # range checks) must NOT silently vanish from the registry while boot
+            # reports success. A missing security-gated tool is a defect to fix,
+            # not to skip past. (MCP tool-cache errors are collected separately;
+            # this guards the first-party tools in tools_dir.)
+            raise RuntimeError(
+                f"Tool registry failed to load {len(failures)} tool(s); refusing to "
+                f"start with a partial registry:\n  - " + "\n  - ".join(failures)
+            )
 
     def load_tool_class(self, tool_dir: Path, tool_name: str):
         tool_file = tool_dir / f"{tool_name}.py"
