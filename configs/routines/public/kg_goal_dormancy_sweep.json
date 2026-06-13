@@ -15,5 +15,6 @@
     "time_local": "02:50",
     "quiet_hours_ok": true
   },
+  "max_run_seconds": 600,
   "notes": "[Re-enabled 2026-06-10 — full healing-loop enablement (audit follow-up): the 2026-05-10 POST-NUKE pause is over; pipeline rebuilt, scanner live since 2026-05-12, finding drains live since 2026-06-09.] Flips long-silent Goal nodes from active â†’ dormant. Reversible — any re-observation in the promoter flips back to active. NEVER sets end_date (that's terminal achievement/abandonment, handled separately). Threshold = max(ttl.estimated_duration_days * 1.5, 30) days, capped at 730d. Default 90d when no TTL. Lifelong-value Goals (label/category contains 'lifelong', 'value', 'be a good', 'stay healthy', etc.) are skipped — only explicit closure can end those. Runs alongside state_decay (02:45) so card/wiki refreshes downstream see consistent goal_status."
 }

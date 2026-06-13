@@ -59,11 +59,17 @@ logger = get_logger(__name__)
 MAX_CLUSTER_SIZE_PER_LLM_CALL = 12
 
 
-def run(ctx: PipelineContext) -> dict:
+def run(ctx: PipelineContext, *, max_clusters: int | None = None) -> dict:
     """Cluster pending findings by primary_node_id, verify with LLM, apply.
 
+    max_clusters bounds the number of candidate clusters processed in ONE run
+    (None = unbounded). Each cluster is >= 1 LLM call, so an unbounded run over
+    a large pending-findings backlog is a graph-wide LLM grind. The candidate
+    builder excludes superseded findings, so resolved clusters drop out — the
+    remainder converges over subsequent runs.
+
     Returns {"candidates_examined": int, "clusters_confirmed": int,
-             "findings_superseded": int}.
+             "findings_superseded": int, "clusters_deferred": int}.
     """
     from app.assistant.database.kg_maintenance_finding import KGMaintenanceFinding
 
@@ -74,6 +80,7 @@ def run(ctx: PipelineContext) -> dict:
             "candidates_examined": 0,
             "clusters_confirmed": 0,
             "findings_superseded": 0,
+            "clusters_deferred": 0,
         }
 
     agent = DI.agent_factory.create_agent("kg_finding_cluster_resolver")
@@ -83,8 +90,19 @@ def run(ctx: PipelineContext) -> dict:
     confirmed = 0
     superseded = 0
     examined = 0
+    processed_clusters = 0
+    deferred = 0
 
     for primary_node_id, findings in candidates.items():
+        if max_clusters is not None and processed_clusters >= max_clusters:
+            deferred = len(candidates) - processed_clusters
+            logger.info(
+                "[cluster_resolve] per-run cap %d reached; deferring %d cluster(s) "
+                "to the next run (superseded findings drop out, so they converge)",
+                max_clusters, deferred,
+            )
+            break
+        processed_clusters += 1
         # Process in chunks if the cluster is huge (rare).
         for chunk_start in range(0, len(findings), MAX_CLUSTER_SIZE_PER_LLM_CALL):
             chunk = findings[chunk_start : chunk_start + MAX_CLUSTER_SIZE_PER_LLM_CALL]
@@ -155,6 +173,7 @@ def run(ctx: PipelineContext) -> dict:
         "candidates_examined": examined,
         "clusters_confirmed": confirmed,
         "findings_superseded": superseded,
+        "clusters_deferred": deferred,
     }
 
 

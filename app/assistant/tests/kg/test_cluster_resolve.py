@@ -427,6 +427,7 @@ def test_no_candidates_means_no_agent_call():
         "candidates_examined": 0,
         "clusters_confirmed": 0,
         "findings_superseded": 0,
+        "clusters_deferred": 0,
     }
 
 

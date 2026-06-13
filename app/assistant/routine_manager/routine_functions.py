@@ -260,8 +260,13 @@ def _lazy_kg_finding_cluster_resolve(*, target_date=None, routine=None):
     """
     from app.assistant.pipelines.context import PipelineContext
     from app.assistant.pipelines.kg_maintenance_pipeline.step_cluster_resolve import run as run_cluster_resolve
+    spec = (routine.spec if routine and hasattr(routine, "spec") else {}) or {}
+    # Per-run cap: each cluster is >= 1 LLM call; bound them so a large pending
+    # backlog converges over runs (superseded findings drop out of candidates)
+    # instead of one graph-wide grind. Paired with max_run_seconds in config.
+    max_clusters = int(spec.get("max_clusters_per_run", 30))
     ctx = PipelineContext.for_date(pipeline_id="kg_finding_cluster_resolve")
-    return run_cluster_resolve(ctx)
+    return run_cluster_resolve(ctx, max_clusters=max_clusters)
 
 
 kg_finding_cluster_resolve = _lazy_kg_finding_cluster_resolve
