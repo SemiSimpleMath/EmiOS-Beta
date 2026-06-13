@@ -408,6 +408,7 @@ def _register_all_models() -> None:
     )
     from app.assistant.database import claim_proposals  # noqa: F401
     from app.assistant.database import kg_maintenance_finding  # noqa: F401
+    from app.assistant.database import kg_mention_map  # noqa: F401
     from app.assistant.database import kg_merge_log  # noqa: F401
     from app.assistant.database import kg_pipeline_models  # noqa: F401
     from app.assistant.database import kg_revision_log  # noqa: F401

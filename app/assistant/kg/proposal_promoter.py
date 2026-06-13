@@ -103,12 +103,15 @@ def _resolve_entity_like(session, label: str, node_type: str) -> Optional[Tuple[
     """Match an Entity/Concept/Goal node by canonical label or alias.
 
     Returns (node, tier) where tier is one of "disambiguation", "label",
-    "alias" — or None on no match. Callers must treat the tiers
-    differently: only "disambiguation" and "label" are closed-form
-    identity. "alias" is NOT — aliases accrete from bound mention labels
-    (P2.2(c) refinement), so a generic label like "House" can become an
-    alias of one specific node and silently capture every future mention
-    of anyone's house. Alias hits go through node_merger confirmation.
+    "mention_map", "alias" — or None on no match. Callers must treat the
+    tiers differently: "disambiguation", "label", and "mention_map" are
+    closed-form identity (the mention map records PRIOR node_merger
+    confirmations and self-revokes on ambiguity). "alias" is NOT —
+    aliases accrete from bound mention labels (P2.2(c) refinement), so a
+    generic label like "House" can become an alias of one specific node
+    and silently capture every future mention of anyone's house. Alias
+    hits go through node_merger confirmation, and confirmed binds mint
+    mention-map entries so the confirmation is paid once.
 
     Prefers locked + higher pagerank when multiple match.
 
@@ -151,6 +154,15 @@ def _resolve_entity_like(session, label: str, node_type: str) -> Optional[Tuple[
     )
     if hit:
         return hit, "label"
+
+    # Mention map (identity phase 5): forms the node_merger has already
+    # CONFIRMED, recorded durably, validated + self-revoking on every hit.
+    # Closed-form because the confirmation already happened — this is the
+    # learning step alias accretion tried to be, minus the capture bug.
+    from app.assistant.kg.mention_map import lookup_mention
+    mapped = lookup_mention(session, label, node_type)
+    if mapped is not None:
+        return mapped, "mention_map"
 
     like_pat = f'%"{label_lower}"%'
     hit = (
@@ -1998,6 +2010,11 @@ class _PreparedNode:
     pn_node_type: str
     decision: str  # "match" | "create"
     matched_node_id: Optional[str] = None
+    # True when the match came from a node_merger CONFIRMATION (alias-tier /
+    # semantic-tier / person-confirm). Confirmed binds mint mention-map
+    # entries in the apply phase (identity phase 5) so the next mention of
+    # the same form resolves closed-form.
+    from_confirm: bool = False
     # Populated only for "create" decisions on RELATIONSHIP_LIKE_TYPES.
     ttl: Optional[Dict[str, Any]] = None
     # Populated only for "create" decisions on State/Event/Goal.
@@ -2184,11 +2201,14 @@ def _prepare_proposal_plan(proposal_id: str) -> Optional[_PromoterPlan]:
                             confirm.append(c)
                             seen_ids.add(c.get("node_id"))
                     entity_confirm_lists[pn.id] = confirm
-                elif m is not None and _needs_person_confirm(session, m):
+                elif m is not None and tier != "mention_map" \
+                        and _needs_person_confirm(session, m):
                     # Two-Alexes guard (audit P2.3): a same-label bind to a
                     # well-connected person needs node_merger confirmation
                     # (post-session). Unconfirmed → create; a duplicate is
-                    # fixable, a wrong person-merge is not.
+                    # fixable, a wrong person-merge is not. Mention-map hits
+                    # skip this — the map IS a recorded confirmation and
+                    # self-revokes if the form ever becomes contested.
                     # Known tradeoff: while unconfirmed, this entity is
                     # absent from entity_resolutions, so THIS proposal's
                     # State/Event participant fingerprints (computed below,
@@ -2379,6 +2399,7 @@ def _prepare_proposal_plan(proposal_id: str) -> Optional[_PromoterPlan]:
         if snap["node_type"] not in ENTITY_LIKE_TYPES:
             continue
         match_id = entity_resolutions.get(pn_id)
+        from_confirm = False
         if match_id is None and entity_confirm_lists.get(pn_id):
             new_node_ctx = {
                 "label": snap["label"],
@@ -2392,12 +2413,14 @@ def _prepare_proposal_plan(proposal_id: str) -> Optional[_PromoterPlan]:
             match_id = _call_node_merger_for_state_match(
                 new_node_ctx, entity_confirm_lists[pn_id],
             )
+            from_confirm = match_id is not None
         nodes[pn_id] = _PreparedNode(
             pn_id=pn_id,
             pn_label=snap["label"] or "",
             pn_node_type=snap["node_type"],
             decision="match" if match_id else "create",
             matched_node_id=match_id,
+            from_confirm=from_confirm,
         )
 
     # Relationship-like nodes: optionally call node_merger if there are
@@ -2550,6 +2573,26 @@ def _evaluate_and_apply(
                     proposal_node=pn,
                     merge_action="confirmed",
                 )
+                if prepared.from_confirm:
+                    # Identity phase 5: the node_merger confirmed this
+                    # mention form → record it durably so the next mention
+                    # binds closed-form. mint refuses contested forms
+                    # (sink, not error).
+                    try:
+                        from app.assistant.kg.mention_map import mint_mention
+                        mint_mention(
+                            session,
+                            label=pn.label,
+                            node_type=pn.node_type,
+                            node_id=prepared.matched_node_id,
+                            minted_by="node_merger:confirm",
+                            source_proposal_id=proposal.id,
+                        )
+                    except Exception as exc:
+                        logger.error(
+                            "[promoter] mention-map mint failed for %r: %s",
+                            pn.label, exc,
+                        )
             dec.node_outcomes.append(_NodeOutcome(
                 pn.id, "matched_existing", prepared.matched_node_id,
                 f"{pn.node_type} {pn.label!r} matched {prepared.matched_node_id[:8]}",
