@@ -186,30 +186,16 @@ class Node(Base):
     
     @property
     def label_embedding(self):
-        """
-        Get label embedding from ChromaDB.
-        If not found, compute and store it.
+        """Read this node's label embedding from ChromaDB, or None if absent.
+
+        Read-only: population is owned by the single ORM chokepoint
+        (embedding_sync.register_kg_embedding_sync, on every label
+        insert/change) with the hourly reconciler as the backstop. A read
+        thread must not write chroma — a miss returns None and the caller
+        handles it (this was one of four redundant label-writers).
         """
         from app.assistant.kg.chroma.chroma_embedding_manager import get_chroma_manager
-        from app.assistant.kg_core.kg_utils.knowledge_graph_utils import KnowledgeGraphUtils
-        from app.models.base import get_session
-        
-        chroma = get_chroma_manager()
-        
-        # Try to get from ChromaDB first
-        embedding = chroma.get_node_embedding(str(self.id))
-        
-        # If not found, compute and store
-        if embedding is None:
-            session = get_session()
-            try:
-                kg_utils = KnowledgeGraphUtils(session)
-                embedding = kg_utils.create_embedding(self.label)
-                chroma.store_node_embedding(str(self.id), self.label, embedding)
-            finally:
-                session.close()  # Always close the session!
-        
-        return embedding
+        return get_chroma_manager().get_node_embedding(str(self.id))
     
     __table_args__ = (
         Index('ix_kg_nodes_label', 'label'),

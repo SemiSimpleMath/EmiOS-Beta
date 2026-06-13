@@ -172,14 +172,11 @@ class KnowledgeGraphUtils:
             original_sentence=original_sentence,
         )
         
-        # Store label embedding in ChromaDB
-        from app.assistant.kg.chroma.chroma_embedding_manager import get_chroma_manager
-        chroma = get_chroma_manager()
-        label_embedding = self.create_embedding(label)
-        chroma.store_node_embedding(str(node_id), label, label_embedding)
-
-        # Add the new node to the session and commit immediately
-        # SQLite single-writer: commit after each write to avoid lock contention
+        # Label embedding is written by the single ORM chokepoint
+        # (embedding_sync.register_kg_embedding_sync) on the commit below —
+        # it fires on every node insert. No explicit write here (it was one
+        # of four redundant label-writers; the chokepoint is now the sole
+        # owner, with the hourly reconciler as the backstop).
         self.session.add(new_node)
         self.session.commit()
 

@@ -1292,19 +1292,18 @@ def _create_kg_node_from_proposal(
 
 
 def _embed_and_store_node(node_id: str, label: str, sentence: str) -> None:
-    """Compute the label + context embeddings for a freshly-written node
-    and store them in ChromaDB. No-op + warn on any failure.
+    """Store the freshly-written node's CONTEXT embedding so it's
+    discoverable by the duplicate scan's tier 3 on the very next run
+    instead of waiting for the periodic context backfill. No-op + warn on
+    any failure.
 
-    The label embedding was historically only written by
-    KnowledgeGraphUtils.add_node — a path the promoter doesn't use — which
-    is how the node_embeddings collection ended up EMPTY after the
-    embedding-schema reset (found 2026-06-10): the promoter creates nearly
-    every node now and only wrote context vectors. Both collections feed
-    the duplicate scan's tier 3 and the entity semantic tier (P2.3).
-
-    Single responsibility: don't query, don't decide; just persist the
-    embeddings. The dedup pipelines that consume them remain the policy
-    layer.
+    Label + identity embeddings are NOT written here: they are owned by the
+    single ORM chokepoint (embedding_sync.register_kg_embedding_sync),
+    which fires on every node insert / label change and is the sole
+    event-driven label writer (the hourly reconciler is the backstop). The
+    chokepoint does not do context vectors, so this remains the one
+    context-at-mint writer. (`label` is retained in the signature for the
+    callers; it is no longer written from here.)
     """
     try:
         from app.assistant.embeddings.embedder import embed_text
@@ -1314,8 +1313,6 @@ def _embed_and_store_node(node_id: str, label: str, sentence: str) -> None:
         return
     try:
         cm = get_chroma_manager()
-        if label and str(label).strip():
-            cm.store_node_embedding(node_id, label, embed_text(label))
         if sentence and str(sentence).strip():
             cm.store_node_context_embedding(node_id, sentence, embed_text(sentence))
     except Exception as exc:
