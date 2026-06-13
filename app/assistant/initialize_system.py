@@ -118,6 +118,39 @@ def initialize_system():
     emi_reminder_handler = DI.agent_factory.create_agent('emi_reminder_handler', DI.global_blackboard)
     ServiceLocator.register('emi_reminder_handler', emi_reminder_handler)
 
+    # Pre-warm the heavyweight native singletons (ChromaDB rust client +
+    # collections, and the ONNX/sentence-transformers embedder) on THIS
+    # boot thread, BEFORE the routine refresh below fans routines out across
+    # threads. First-time initialization of these native libraries is NOT
+    # thread-safe: concurrent first-init of the chroma rust client and the
+    # embedder DLLs corrupts process memory and access-violates (0xC0000005),
+    # which on Windows kills the whole process during startup. Once warmed,
+    # every concurrent routine finds the singletons already built and just
+    # reuses them, so the init race cannot happen. (Three native-concurrency
+    # crashes on 2026-06-12 traced to this; the singletons are derived
+    # indexes — warming is cheap and safe.)
+    try:
+        # Self-heal a corrupt derived collection BEFORE opening chroma: a
+        # corrupt hnsw segment access-violates on .count() and bricks boot
+        # otherwise. The probe is subprocess-isolated, so a native crash
+        # there can't kill us; corrupt collections are dropped and recreated
+        # empty below, then repopulated by the diff sync.
+        from app.assistant.kg.chroma.chroma_health import heal_corrupt_collections
+        dropped = heal_corrupt_collections()
+        if dropped:
+            logger.warning("Chroma self-heal dropped corrupt collections "
+                           "(will rebuild from sqlite): %s", dropped)
+
+        from app.assistant.kg.chroma.chroma_embedding_manager import get_chroma_manager
+        from app.assistant.embeddings.embedder import embed_text
+        get_chroma_manager()                 # rust client + all KG collections
+        embed_text("warmup")                 # ONNX default embedding function
+        from belief_engine.chroma.belief_chroma import get_belief_chroma
+        get_belief_chroma()                  # belief collection (shares the client)
+        logger.info("Native singletons pre-warmed (chroma + embedder) before routine fan-out.")
+    except Exception as e:
+        logger.error("Native singleton pre-warm failed (chroma/embedder degraded): %s", e)
+
     # Camera dispatch is wired declaratively as the camera_dispatch routine
     # in configs/routines.json (trigger.type=event, topic=ring_snapshot_captured).
     # Subscriptions happen inside RoutineManager.refresh(), but the
