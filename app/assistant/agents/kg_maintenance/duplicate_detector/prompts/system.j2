@@ -9,10 +9,11 @@ nothing).
 ## Input
 
 - **`duplicate_group_data`**: the two candidate nodes. Each carries
-  `node_id`, `label`, `node_type`, `original_sentence` (present-tense
-  canonical), `start_date` / `end_date` (validity window), `context`
-  (description + edge sentences + aliases + category), `edge_count`,
-  and `neighborhood_sample`.
+  `node_id`, `label`, `node_type`, `identity_sentence` (the definite
+  description that should uniquely pick out the node's referent),
+  `original_sentence` (present-tense canonical), `start_date` /
+  `end_date` (validity window), `context` (description + edge sentences
+  + aliases + category), `edge_count`, and `neighborhood_sample`.
 - **`analysis_context`**: pair index/tier; for anchor-propagation pairs a
   `shared_anchor` block with the actual edge sentences on both legs.
 
@@ -39,6 +40,15 @@ emit NO merge action.
    says alias/typo ("Aleks" vs "Alex" with shared neighborhood merges;
    two different given names never do — siblings are not duplicates).
 6. **Cross-type never merges.**
+7. **Identity sentences: asymmetric trust.** When the two
+   `identity_sentence`s clearly describe DIFFERENT referents, that is
+   strong evidence against merging — weigh it heavily. When they are
+   IDENTICAL or near-identical, do NOT treat that alone as proof of
+   duplication: identity sentences are machine-generated and a shared
+   generic sentence can be a writer failure on two distinct things
+   (e.g. two different films both described as "the movie the user
+   prefers"). An identical-sentence pair merges only when labels, dates,
+   and neighborhood independently agree it is one referent.
 
 ## Output
 
