@@ -161,12 +161,19 @@ kg_evidence_digestion = _lazy_kg_evidence_digestion
 
 
 def _lazy_kg_embedding_diff_sync(*, target_date=None, routine=None):
-    """Hourly: reconcile chroma label+identity collections against sqlite
-    (ghosts removed, missing embedded, text drift re-embedded). Free local
-    MiniLM; no-op when in sync. Fragility review #4 — drift on the
-    resolution path cannot survive an hour."""
+    """Hourly: reconcile chroma label+identity+context collections against
+    sqlite (ghosts removed, missing embedded, text drift re-embedded). Free
+    local MiniLM; no-op when in sync. Fragility review #4 — drift on the
+    resolution path cannot survive an hour.
+
+    Bounded by max_embeds/run (spec, default 1200) so a large backlog (e.g.
+    the boot self-heal dropping a collection) converges over several runs
+    instead of breaching the watchdog."""
     from app.assistant.kg.chroma.embedding_sync import sync_kg_embeddings
-    return sync_kg_embeddings(mode="diff")
+    spec = (routine.spec if routine and hasattr(routine, "spec") else {}) or {}
+    return sync_kg_embeddings(
+        mode="diff", max_embeds=max(1, int(spec.get("max_embeds", 1200))),
+    )
 
 
 kg_embedding_diff_sync = _lazy_kg_embedding_diff_sync

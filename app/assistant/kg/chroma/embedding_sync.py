@@ -51,12 +51,20 @@ def compose_context_text(identity_sentence, original_sentence) -> str:
 
 # ── reconciler ────────────────────────────────────────────────────────────
 
-def sync_kg_embeddings(*, mode: str = "diff") -> Dict[str, Any]:
+def sync_kg_embeddings(*, mode: str = "diff", max_embeds: Optional[int] = None) -> Dict[str, Any]:
     """Reconcile the chroma label + identity collections against sqlite.
 
     mode="diff": embed only missing/stale, remove ghosts.
     mode="full": re-embed every row regardless (the nightly floor).
     Idempotent either way; safe to run any time.
+
+    max_embeds bounds the embeds done in ONE run (None = unbounded). A big
+    backlog — e.g. the self-heal dropping a collection, leaving ~6.6k
+    vectors to rebuild — would otherwise run ~40min and breach the hourly
+    reconciler's watchdog. With a budget the run stays short and the
+    remaining work converges over subsequent runs (the diff is idempotent;
+    the next run picks up whatever is still missing). Ghost removal is
+    always completed (cheap deletes, no embeds).
     """
     from app.assistant.embeddings.embedder import embed_text
     from app.assistant.kg.chroma.chroma_embedding_manager import get_chroma_manager
@@ -89,7 +97,7 @@ def sync_kg_embeddings(*, mode: str = "diff") -> Dict[str, Any]:
         "mode": mode, "nodes": len(sql_nodes),
         "ghosts_removed": 0, "labels_embedded": 0,
         "identities_embedded": 0, "identities_removed": 0,
-        "contexts_embedded": 0,
+        "contexts_embedded": 0, "budget_hit": False,
     }
 
     # Ghosts: chroma ids with no sqlite row — remove from ALL collections.
@@ -101,6 +109,17 @@ def sync_kg_embeddings(*, mode: str = "diff") -> Dict[str, Any]:
             counts["ghosts_removed"] += 1
 
     for nid, (label, identity_sentence, original_sentence) in sql_nodes.items():
+        # Per-run embed budget: stop starting new nodes once hit, so a large
+        # backlog converges over multiple runs instead of breaching the
+        # watchdog. Checked at node granularity so a node is fully done or
+        # not started.
+        if max_embeds is not None and (
+            counts["labels_embedded"] + counts["identities_embedded"]
+            + counts["contexts_embedded"]
+        ) >= max_embeds:
+            counts["budget_hit"] = True
+            break
+
         # Label collection: missing, text-drifted, or full mode.
         meta = label_state.get(nid)
         stale = meta is None or (meta or {}).get("label") != label

@@ -142,6 +142,43 @@ def test_full_sync_reembeds_everything(monkeypatch, fake_embed, status_to_tmp):
     assert fake.stored_contexts[a] == "The A node. A was observed doing things."
 
 
+def test_diff_budget_bounds_run_and_converges(monkeypatch, fake_embed, status_to_tmp):
+    # Five nodes, all missing label vectors -> five embeds of backlog.
+    nids = [_mk_node(f"Backlog {i}") for i in range(5)]
+    fake = _FakeChroma(labels={})  # nothing embedded yet
+    import app.assistant.kg.chroma.chroma_embedding_manager as cem
+    monkeypatch.setattr(cem, "get_chroma_manager", lambda: fake)
+
+    # First run with a budget of 2: only ~2 nodes processed, budget flagged.
+    c1 = sync_mod.sync_kg_embeddings(mode="diff", max_embeds=2)
+    assert c1["budget_hit"] is True
+    assert len(fake.stored_labels) == 2
+    assert c1["labels_embedded"] == 2
+
+    # Re-point the fake's label state at what's been embedded so the next
+    # run sees the first two as in-sync and continues with the rest.
+    fake.node_collection.rows = {n: {"label": f"Backlog {i}"}
+                                 for i, n in enumerate(nids) if n in fake.stored_labels}
+
+    c2 = sync_mod.sync_kg_embeddings(mode="diff", max_embeds=2)
+    assert len(fake.stored_labels) == 4  # two more
+
+    fake.node_collection.rows = {n: {"label": f"Backlog {i}"}
+                                 for i, n in enumerate(nids) if n in fake.stored_labels}
+    c3 = sync_mod.sync_kg_embeddings(mode="diff", max_embeds=2)
+    assert len(fake.stored_labels) == 5 and c3["budget_hit"] is False  # converged
+
+
+def test_diff_unbounded_by_default(monkeypatch, fake_embed, status_to_tmp):
+    nids = [_mk_node(f"Node {i}") for i in range(4)]
+    fake = _FakeChroma(labels={})
+    import app.assistant.kg.chroma.chroma_embedding_manager as cem
+    monkeypatch.setattr(cem, "get_chroma_manager", lambda: fake)
+
+    counts = sync_mod.sync_kg_embeddings(mode="diff")  # no max_embeds
+    assert len(fake.stored_labels) == 4 and counts["budget_hit"] is False
+
+
 def test_compose_context_text():
     f = sync_mod.compose_context_text
     assert f("Who it is.", "What happened.") == "Who it is. What happened."
