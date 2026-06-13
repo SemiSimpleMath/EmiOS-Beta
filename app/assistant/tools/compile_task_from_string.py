@@ -151,6 +151,18 @@ def main() -> None:
 
     DI.manager_registry.preload_all()
     manager = DI.multi_agent_manager_factory.create_manager("task_compile_manager")
+    # Attach a system scope so the manager runs with the authority/allow/block
+    # gate ENFORCED. Without a scope_context, MultiAgentManager sets
+    # scope_contract_enforced=False and runs the manager fully ungated (scope
+    # audit, 2026-06-13). authority 99 = the autonomous-subsystem default (task
+    # compilation is internal, acting on its own behalf); it preserves the tool
+    # access this manager had when ungated while turning the owner/allow gate on,
+    # so it enforces the contract without regressing compilation.
+    from app.assistant.manager_runtime.services.scope_adapter import build_system_scope_context
+    scope = build_system_scope_context(
+        owner_id="system", actor_id="task_compiler", surface="system",
+        authority_level=99,
+    )
     request = Message(
         data_type="agent_activation",
         sender="User",
@@ -165,6 +177,7 @@ def main() -> None:
             },
             ensure_ascii=False,
         ),
+        scope_context=scope,
     )
     result = manager.request_handler(request)
     result_data = result.data if isinstance(result.data, dict) else {}

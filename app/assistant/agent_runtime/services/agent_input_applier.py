@@ -58,23 +58,19 @@ class AgentInputApplier:
             agent._active_reply_to = None
 
     def enforce_scope_contract(self) -> None:
-        """Raise if scope_contract_enforced=true but no scope is set."""
-        try:
-            enforced = bool(self._blackboard.get_state_value("scope_contract_enforced", False))
-        except Exception:
-            logger.debug("[%s] Could not read scope_contract_enforced; defaulting to False", self._name, exc_info=True)
-            enforced = False
-        if enforced:
-            try:
-                active_scope = self._blackboard.get_state_value("scope_context")
-            except Exception:
-                logger.debug("[%s] Could not read scope_context from blackboard", self._name, exc_info=True)
-                active_scope = None
-            if active_scope is None:
-                raise ValueError(
-                    f"[{self._name}] Missing scope_context while scope_contract_enforced=true. "
-                    "Agent execution without scope contract is not allowed."
-                )
+        """Raise if scope_contract_enforced=true but no scope is set.
+
+        No try/except-to-default: a blackboard read failure must propagate, not
+        silently default enforced=False (that would skip the gate on a broken
+        blackboard — fail-open). The `default=False` on the flag read is the
+        legitimate 'key absent => no contract requested' case, not a swallow.
+        """
+        enforced = bool(self._blackboard.get_state_value("scope_contract_enforced", False))
+        if enforced and self._blackboard.get_state_value("scope_context") is None:
+            raise ValueError(
+                f"[{self._name}] Missing scope_context while scope_contract_enforced=true. "
+                "Agent execution without scope contract is not allowed."
+            )
 
     def apply_agent_input(self, message: Message) -> None:
         """Unpack message.agent_input onto the blackboard."""
