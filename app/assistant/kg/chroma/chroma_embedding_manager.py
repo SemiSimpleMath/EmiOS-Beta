@@ -69,6 +69,11 @@ class ChromaEmbeddingManager:
                         )
                     chroma_path = get_chroma_kg_db_dir()
                     chroma_path.mkdir(exist_ok=True)
+                    # Cross-process guard: only ONE process may open this index
+                    # (concurrent multi-process access corrupts the hnsw segments).
+                    # Raises ChromaWriterLockError if another process holds it.
+                    from app.assistant.kg.chroma.chroma_lock import acquire_chroma_writer_lock
+                    acquire_chroma_writer_lock(chroma_path)
                     self._client = _make_chroma_client(str(chroma_path))
                     logger.info("ChromaDB initialized at %s", chroma_path)
 

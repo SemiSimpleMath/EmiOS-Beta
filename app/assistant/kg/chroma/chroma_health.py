@@ -89,6 +89,15 @@ def heal_corrupt_collections(*, max_iterations: int = 8) -> List[str]:
     healthy index drops nothing. MUST run before the main process opens
     chroma, and while no other process touches the index (single writer).
     """
+    # Take the cross-process lock before probing/dropping: the heal opens
+    # chroma (in probe subprocesses and to drop), so it must be the sole
+    # process touching the index. In-server this is the same idempotent
+    # lock the manager holds; run standalone while the server is up, this
+    # raises ChromaWriterLockError instead of racing it.
+    from app.assistant.kg.chroma.chroma_lock import acquire_chroma_writer_lock
+    from app.assistant.utils.path_utils import get_chroma_kg_db_dir
+    acquire_chroma_writer_lock(get_chroma_kg_db_dir())
+
     healed: List[str] = []
     for _ in range(max_iterations):
         proc = subprocess.run(

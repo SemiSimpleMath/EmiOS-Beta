@@ -129,12 +129,15 @@ def initialize_system():
     # reuses them, so the init race cannot happen. (Three native-concurrency
     # crashes on 2026-06-12 traced to this; the singletons are derived
     # indexes — warming is cheap and safe.)
+    from app.assistant.kg.chroma.chroma_lock import ChromaWriterLockError
     try:
         # Self-heal a corrupt derived collection BEFORE opening chroma: a
         # corrupt hnsw segment access-violates on .count() and bricks boot
         # otherwise. The probe is subprocess-isolated, so a native crash
         # there can't kill us; corrupt collections are dropped and recreated
-        # empty below, then repopulated by the diff sync.
+        # empty below, then repopulated by the diff sync. heal_corrupt_collections
+        # also takes the cross-process writer lock, so a second server boot
+        # surfaces here as ChromaWriterLockError before anything opens chroma.
         from app.assistant.kg.chroma.chroma_health import heal_corrupt_collections
         dropped = heal_corrupt_collections()
         if dropped:
@@ -148,6 +151,10 @@ def initialize_system():
         from belief_engine.chroma.belief_chroma import get_belief_chroma
         get_belief_chroma()                  # belief collection (shares the client)
         logger.info("Native singletons pre-warmed (chroma + embedder) before routine fan-out.")
+    except ChromaWriterLockError as e:
+        logger.error("CHROMA LOCK: another process already owns the chroma index — "
+                     "this server is running WITHOUT chroma (KG/beliefs degraded). "
+                     "Stop the other process and restart. %s", e)
     except Exception as e:
         logger.error("Native singleton pre-warm failed (chroma/embedder degraded): %s", e)
 
