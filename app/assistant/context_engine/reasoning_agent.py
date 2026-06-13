@@ -70,7 +70,9 @@ def run_reasoning_agent(
     t0 = time.perf_counter()
 
     from app.assistant.ServiceLocator.service_locator import DI
-    from app.assistant.utils.pydantic_classes import Message, ScopeContext
+    from app.assistant.utils.pydantic_classes import (
+        Message, ScopeApprovalPolicy, ScopeContext, ScopeToolPolicy,
+    )
 
     visitor_seeds = [s for s in brief.seeds if s.lower() != primary_user.lower()]
     subject = visitor_seeds[0] if visitor_seeds else brief.seeds[0]
@@ -87,6 +89,12 @@ def run_reasoning_agent(
         owner_id=owner_id,
         actor_id="context_engine_reasoning",
         surface="internal",
+        # Ceiling = only the tool this agent needs (ask_kg). Authority 99 is the
+        # autonomous-subsystem default (routines run at 99); ask_kg reads the KG
+        # at the standard personal-data floor (90), so 99 clears it. The scope
+        # can do nothing but ask_kg — minimal authority surface despite the 99.
+        tools=ScopeToolPolicy(allowed_tools=["ask_kg"]),
+        approval=ScopeApprovalPolicy(authority_level=99),
     )
 
     manager = DI.multi_agent_manager_factory.create_manager("emi_team_manager")

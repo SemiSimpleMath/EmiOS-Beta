@@ -296,6 +296,80 @@ class ToolScopeService:
             )
         return KeywordMetadataToolRanker()
 
+    @staticmethod
+    def _read_scope(blackboard) -> tuple[bool, "ScopeContext | None"]:
+        """Read (scope_contract_enforced, scope_context) from the blackboard.
+
+        Fails CLOSED: if enforcement is on but the scope is missing or corrupt,
+        raise rather than silently expose an unscoped tool list (mirrors the
+        execution gate, tool_caller). Single reader so every visibility path —
+        pinned and ranked — gets the same fail-closed behavior.
+        """
+        scope_contract_enforced = False
+        scope_context: ScopeContext | None = None
+        try:
+            scope_contract_enforced = bool(blackboard.get_state_value("scope_contract_enforced", False))
+            raw_scope = blackboard.get_state_value("scope_context")
+            if scope_contract_enforced and raw_scope is not None:
+                if isinstance(raw_scope, ScopeContext):
+                    scope_context = raw_scope
+                elif isinstance(raw_scope, dict):
+                    scope_context = ScopeContext.model_validate(raw_scope)
+        except Exception as e:
+            logger.error("[tool_scope] Failed reading scope_context for tool filtering: %s", e)
+            logger.debug("[tool_scope] scope_context read exception details", exc_info=True)
+            if scope_contract_enforced:
+                raise ValueError(
+                    "[tool_scope] scope_contract_enforced=true but scope_context could not "
+                    "be read/validated for tool visibility filtering — refusing to expose "
+                    "an unscoped tool list."
+                ) from e
+        if scope_contract_enforced and scope_context is None:
+            raise ValueError(
+                "[tool_scope] scope_contract_enforced=true but no scope_context is set for "
+                "tool visibility filtering — refusing to expose an unscoped tool list."
+            )
+        return scope_contract_enforced, scope_context
+
+    @staticmethod
+    def _filter_to_ceiling(
+        items: list[str], *, scope_contract_enforced: bool,
+        scope_context: "ScopeContext | None", all_tools_cfg,
+    ) -> list[str]:
+        """Filter a tool list to the scope's permission CEILING — the single
+        definition of 'allowed'. Two gates, both mirroring execution
+        (check_tool_access):
+          - allow/block: allowed_tools / blocked_tools (already folded with
+            per_manager + the subtree-grant at narrowing time).
+          - L1 authority floor: a tool whose min_authority exceeds the scope's
+            authority_level is dropped.
+        EVERY visibility path runs through this — pinned and ranked alike — so
+        visibility is always a strict subset of what execution permits. A
+        forced/pinned tool can NARROW visibility, never bypass the ceiling.
+
+        scope_contract_enforced=False => no contract requested => unrestricted.
+        """
+        if not scope_contract_enforced:
+            return items
+        result = items
+        scope_allowed = scope_context.tools.allowed_tools if isinstance(scope_context.tools.allowed_tools, list) else []
+        scope_blocked = scope_context.tools.blocked_tools if isinstance(scope_context.tools.blocked_tools, list) else []
+        allow_set = {str(x).strip() for x in scope_allowed if isinstance(x, str) and str(x).strip()}
+        block_set = {str(x).strip() for x in scope_blocked if isinstance(x, str) and str(x).strip()}
+        # Empty allow_set means "allow nothing" -> show nothing. Only "all"
+        # bypasses the allow filter (absence of a contract is handled above).
+        if "all" not in allow_set:
+            result = [t for t in result if t in allow_set]
+        if block_set:
+            result = [t for t in result if t not in block_set]
+        authority_level = int(getattr(scope_context.approval, "authority_level", 0) or 0)
+        kept: list[str] = []
+        for t in result:
+            floor = resolve_tool_min_authority(t, all_tools_cfg.get(t) if isinstance(all_tools_cfg, dict) else None)
+            if floor is None or authority_level >= floor:
+                kept.append(t)
+        return kept
+
     def initialize_scope(
         self,
         *,
@@ -320,13 +394,28 @@ class ToolScopeService:
         if isinstance(pinned_raw, list) and pinned_raw:
             pinned: list[str] = [s.strip() for s in pinned_raw if isinstance(s, str) and s.strip()]
             if pinned:
+                # Pinned tools skip RANKING/NARROWING (relevance) but NOT the
+                # permission CEILING. A pinned tool that's blocked or above the
+                # scope's authority is dropped here, so visibility stays a strict
+                # subset of allowed — the same invariant the ranked path holds.
+                # (Previously the pinned path returned the list verbatim, a
+                # bypass that let a forced tool be shown despite the authority
+                # floor; execution then denied it and aborted the manager.)
+                scope_contract_enforced, scope_context = self._read_scope(blackboard)
+                # No try/except-to-default: a registry read failure must fail
+                # loud, not silently leave the ceiling unenforceable.
+                pinned = self._filter_to_ceiling(
+                    pinned, scope_contract_enforced=scope_contract_enforced,
+                    scope_context=scope_context,
+                    all_tools_cfg=tool_registry.get_all_tools(),
+                )
                 logger.info(
-                    "[tool_scope] %s pinned_tools override: skipping ranking/narrowing, using %s tools: %s",
+                    "[tool_scope] %s pinned_tools override: skipping ranking/narrowing, "
+                    "ceiling-filtered to %s tool(s): %s",
                     manager_name or "manager",
                     len(pinned),
                     pinned,
                 )
-                # Pinned-tools override — no narrowing/ranking happens here.
                 ToolScopeStateManager(blackboard).initialize_runtime_scope(
                     visible_tools=pinned,
                     max_visible=-1,
@@ -347,12 +436,10 @@ class ToolScopeService:
         recently_used = self._read_string_list(blackboard, "recently_used_tools")
         recently_installed = self._read_string_list(blackboard, "recently_installed_tools")
 
-        try:
-            all_tools_cfg = tool_registry.get_all_tools() or {}
-        except Exception as e:
-            logger.error("Tool scope init failed to read tool registry: %s", e)
-            logger.debug("Tool scope registry read exception details", exc_info=True)
-            all_tools_cfg = {}
+        # No try/except-to-default: if the registry can't be read while we're
+        # shaping a scoped tool list, fail loud rather than silently rank/filter
+        # against an empty config (which would mis-resolve every authority floor).
+        all_tools_cfg = tool_registry.get_all_tools()
         ranked = ranker.rank_tools(
             all_tools_cfg=all_tools_cfg if isinstance(all_tools_cfg, dict) else {},
             task=task,
@@ -393,88 +480,20 @@ class ToolScopeService:
                     len(ranked),
                 )
 
-        # Apply scope contract tool allowlist/blocklist so the LLM is never shown tools
-        # it cannot execute. scope_contract_enforced must be True for filtering to apply.
-        scope_contract_enforced = False
-        scope_context: ScopeContext | None = None
-        try:
-            scope_contract_enforced = bool(blackboard.get_state_value("scope_contract_enforced", False))
-            raw_scope = blackboard.get_state_value("scope_context")
-            if scope_contract_enforced and raw_scope is not None:
-                if isinstance(raw_scope, ScopeContext):
-                    scope_context = raw_scope
-                elif isinstance(raw_scope, dict):
-                    scope_context = ScopeContext.model_validate(raw_scope)
-        except Exception as e:
-            logger.error("[tool_scope] Failed reading scope_context for tool filtering: %s", e)
-            logger.debug("[tool_scope] scope_context read exception details", exc_info=True)
-            # Enforcement was requested but the scope is unreadable/corrupt: FAIL
-            # CLOSED. Never silently fall through to exposing the full tool list.
-            # Mirrors the execution layer (tool_caller / agent_input_applier),
-            # which raises on the same "enforced but no usable scope" condition.
-            if scope_contract_enforced:
-                raise ValueError(
-                    "[tool_scope] scope_contract_enforced=true but scope_context could not "
-                    "be read/validated for tool visibility filtering — refusing to expose "
-                    "an unscoped tool list."
-                ) from e
-        # Enforced but no scope present at all is the same breach: the invariant is
-        # 'enforced => scope present' (enforced at execution by tool_caller). Fail loud
-        # instead of returning every tool unfiltered.
-        if scope_contract_enforced and scope_context is None:
-            raise ValueError(
-                "[tool_scope] scope_contract_enforced=true but no scope_context is set for "
-                "tool visibility filtering — refusing to expose an unscoped tool list."
-            )
+        # Read the scope (fail-closed) and filter to its ceiling — same logic as
+        # the pinned path, via the shared helpers, so visibility is a strict
+        # subset of allowed on every path.
+        scope_contract_enforced, scope_context = self._read_scope(blackboard)
 
         def _apply_scope_filters(items: list[str], stage: str) -> list[str]:
-            """Filter to the scope's permission ceiling (allowed_tools / blocked_tools).
-
-            These already reflect per_manager and the subtree-grant: they are computed
-            once at scope-narrowing time (ScopeAdapter._apply_manager_narrowing) and
-            this layer only derives a visible subset from them. Visibility is therefore
-            always a strict subset of what execution (check_tool_access) permits — the
-            scope is the single source of truth, not this prompt-shaping pass.
-
-            Called BEFORE the narrower (so it never evaluates already-blocked tools)
-            AND AFTER it (so its expanded list can't re-introduce scope-blocked tools).
-            """
-            # scope_contract_enforced=False => no contract requested => visibility
-            # unrestricted (by design). When enforced, scope_context is guaranteed
-            # present here (we fail loud above otherwise), so we always filter.
-            if not scope_contract_enforced:
-                return items
-            result = items
-            scope_allowed = scope_context.tools.allowed_tools if isinstance(scope_context.tools.allowed_tools, list) else []
-            scope_blocked = scope_context.tools.blocked_tools if isinstance(scope_context.tools.blocked_tools, list) else []
-            allow_set = {str(x).strip() for x in scope_allowed if isinstance(x, str) and str(x).strip()}
-            block_set = {str(x).strip() for x in scope_blocked if isinstance(x, str) and str(x).strip()}
-            # Empty allow_set means "allow nothing" -> show nothing. Only "all"
-            # (or absence of a scope contract, handled above) bypasses the filter.
-            # Guarding on `if allow_set` was a fail-open seam: an empty allowed_tools
-            # skipped the filter and surfaced the full tool list (visibility then
-            # disagreed with the execution gate, which correctly denies empty).
-            if "all" not in allow_set:
-                result = [t for t in result if t in allow_set]
-            if block_set:
-                result = [t for t in result if t not in block_set]
-            # per_manager is NOT re-derived here — it is folded into allowed_tools /
-            # blocked_tools at narrowing time, so the allow_set/block_set checks above
-            # already reflect it (and the subtree-grant). This is the fix for the
-            # divergence where per_manager bound visibility but NOT execution.
-            #
-            # L1 authority floor: hide any tool whose min_authority exceeds the
-            # scope's authority. This mirrors the execution gate (check_tool_access),
-            # so visibility stays a strict subset of what the scope can actually
-            # call — a below-floor tool is never shown to the planner.
-            authority_level = int(getattr(scope_context.approval, "authority_level", 0) or 0)
-            kept: list[str] = []
-            for t in result:
-                floor = resolve_tool_min_authority(t, all_tools_cfg.get(t) if isinstance(all_tools_cfg, dict) else None)
-                if floor is None or authority_level >= floor:
-                    kept.append(t)
-            result = kept
-            return result
+            """Visibility is a strict subset of the scope's permission ceiling
+            (allow/block + L1 authority floor). Called BEFORE the narrower (so it
+            never evaluates already-blocked tools) AND AFTER it (so its expanded
+            list can't re-introduce out-of-ceiling tools)."""
+            return self._filter_to_ceiling(
+                items, scope_contract_enforced=scope_contract_enforced,
+                scope_context=scope_context, all_tools_cfg=all_tools_cfg,
+            )
 
         # Pre-narrower filter: keeps narrower from wasting tokens on blocked tools.
         ranked = _apply_scope_filters(ranked, stage="pre_narrower")

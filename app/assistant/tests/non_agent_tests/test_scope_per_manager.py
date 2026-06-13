@@ -26,6 +26,7 @@ from app.assistant.lib.tool_execution.tool_access_control import check_tool_acce
 from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
 from app.assistant.manager_runtime.services.tool_scope_service import ToolScopeService
 from app.assistant.utils.pydantic_classes import (
+    ScopeApprovalPolicy,
     ScopeContext,
     ScopeToolPolicy,
     ScopeToolRule,
@@ -109,6 +110,75 @@ def _can_use(scope: ScopeContext, tool: str) -> bool:
 # ---------------------------------------------------------------------------
 # Schema round-trip
 # ---------------------------------------------------------------------------
+
+class _CfgRegistry:
+    """Minimal registry whose get_all_tools returns tool configs with contracts,
+    so resolve_tool_min_authority can read a real min_authority floor."""
+    def __init__(self, cfg):
+        self._cfg = cfg
+
+    def get_all_tools(self):
+        return dict(self._cfg)
+
+
+# ask_kg-like tool: read-only but min_authority 90 (the personal-data floor).
+_ASK_KG_CFG = {
+    "ask_kg": {"tool_contract": {"metadata": {"min_authority": 90}}},
+    "ask_user": {"tool_contract": {"metadata": {"min_authority": 0}}},
+}
+
+
+def _bb_pin(scope: ScopeContext, pinned: list) -> Blackboard:
+    bb = _bb_with_scope(scope)
+    bb.update_state_value("visible_tools", pinned)
+    return bb
+
+
+def test_pinned_tool_above_authority_is_not_visible():
+    """A forced/pinned tool whose min_authority exceeds the scope's authority
+    must be dropped — the pinned path enforces the ceiling, not just relevance.
+    (Regression for the bypass that aborted emi_team_manager via ask_kg.)"""
+    scope = ScopeContext(
+        scope_id="s", owner_id="u", actor_id="a", surface="internal",
+        tools=ScopeToolPolicy(allowed_tools=["all"]),
+        approval=ScopeApprovalPolicy(authority_level=0),
+    )
+    bb = _bb_pin(scope, ["ask_kg"])
+    ToolScopeService().initialize_scope(
+        blackboard=bb, tool_registry=_CfgRegistry(_ASK_KG_CFG),
+        manager_config=_manager_cfg("x"), task="t", information="")
+    assert "ask_kg" not in _read_visible(bb)   # authority 0 < floor 90 -> hidden
+
+
+def test_pinned_tool_visible_when_authority_sufficient():
+    """authority_level >= the tool's floor AND in allowed_tools -> pinned tool
+    is visible (the reasoning_agent fix: authority 99 + allowed ask_kg)."""
+    scope = ScopeContext(
+        scope_id="s", owner_id="u", actor_id="a", surface="internal",
+        tools=ScopeToolPolicy(allowed_tools=["ask_kg"]),
+        approval=ScopeApprovalPolicy(authority_level=99),
+    )
+    bb = _bb_pin(scope, ["ask_kg"])
+    ToolScopeService().initialize_scope(
+        blackboard=bb, tool_registry=_CfgRegistry(_ASK_KG_CFG),
+        manager_config=_manager_cfg("x"), task="t", information="")
+    assert _read_visible(bb) == ["ask_kg"]
+
+
+def test_pinned_tool_not_in_allowed_is_dropped():
+    """A pinned tool outside allowed_tools is dropped even with full authority —
+    pinned visibility is a subset of the allow ceiling."""
+    scope = ScopeContext(
+        scope_id="s", owner_id="u", actor_id="a", surface="internal",
+        tools=ScopeToolPolicy(allowed_tools=["ask_user"]),
+        approval=ScopeApprovalPolicy(authority_level=100),
+    )
+    bb = _bb_pin(scope, ["ask_kg"])
+    ToolScopeService().initialize_scope(
+        blackboard=bb, tool_registry=_CfgRegistry(_ASK_KG_CFG),
+        manager_config=_manager_cfg("x"), task="t", information="")
+    assert "ask_kg" not in _read_visible(bb)
+
 
 def test_visibility_fails_closed_when_enforced_but_scope_missing():
     """Visibility must FAIL CLOSED — not expose the full tool list — when the
