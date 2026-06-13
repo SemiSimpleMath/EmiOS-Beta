@@ -108,9 +108,7 @@ def sync_kg_embeddings(*, mode: str = "diff") -> Dict[str, Any]:
             cm.store_node_embedding(nid, label, embed_text(label))
             counts["labels_embedded"] += 1
 
-        # Identity collection: mirrors identity_sentence exactly. When the
-        # identity drifts, the context (aboutness) vector re-anchors too —
-        # its head IS the identity sentence (compose_context_text).
+        # Identity collection: mirrors identity_sentence exactly.
         imeta = identity_state.get(nid)
         if identity_sentence and identity_sentence.strip():
             preview = identity_sentence[:300]
@@ -119,13 +117,22 @@ def sync_kg_embeddings(*, mode: str = "diff") -> Dict[str, Any]:
                 cm.store_node_identity_embedding(
                     nid, identity_sentence, embed_text(identity_sentence))
                 counts["identities_embedded"] += 1
-                ctx_text = compose_context_text(identity_sentence, original_sentence)
-                if ctx_text:
-                    cm.store_node_context_embedding(nid, ctx_text, embed_text(ctx_text))
-                    counts["contexts_embedded"] += 1
         elif imeta is not None:
             cm.delete_node_identity_embedding(nid)
             counts["identities_removed"] += 1
+
+        # Context (aboutness) collection: identity-sentence head + original
+        # observation. Compared via its stored preview so ANY text drift
+        # (identity regen, sentence canonicalization) re-anchors it — the
+        # diff covers everything the full mode does, which keeps full mode
+        # a weekly floor (20k embeds ≈ 2h+ on this hardware, measured).
+        ctx_text = compose_context_text(identity_sentence, original_sentence)
+        if ctx_text:
+            cmeta = context_state.get(nid)
+            cstale = cmeta is None or (cmeta or {}).get("context_preview") != ctx_text[:200]
+            if cstale or mode == "full":
+                cm.store_node_context_embedding(nid, ctx_text, embed_text(ctx_text))
+                counts["contexts_embedded"] += 1
 
     _write_status(counts)
     logger.info("[embedding_sync] %s", counts)

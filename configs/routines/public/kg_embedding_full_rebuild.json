@@ -7,10 +7,11 @@
     "function_name": "kg_embedding_full_rebuild"
   },
   "run_policy": {
-    "type": "daily",
+    "type": "weekly",
+    "day_of_week": "Sunday",
     "time_local": "04:10"
   },
-  "max_run_seconds": 1800,
+  "max_run_seconds": 10800,
   "on_error": {
     "max_failures": 3,
     "backoff_base_seconds": 600,
@@ -18,5 +19,5 @@
     "then": "disable_with_ticket",
     "auto_retry_after_seconds": 7200
   },
-  "notes": "[Created 2026-06-12, fragility review #4.] Nightly 04:10 (after the identity refresh at 03:45 so fresh sentences embed): re-embeds EVERY node's label + identity sentence regardless of apparent freshness — the floor that catches anything the watermark-free diff logic cannot see. Drift cannot survive 24h by construction. Local MiniLM = minutes of free CPU."
+  "notes": "[Created 2026-06-12, fragility review #4; demoted nightly->weekly same day after a watchdog breach.] Re-embeds EVERY node's label + identity + context vector regardless of apparent freshness. REALITY CHECK: ~20k embeds at this machine's ~0.4s/embed = 2h+, not 'minutes' — hence weekly Sunday 04:10 with a 3h budget. The hourly diff now compares label, identity, AND context previews, so it catches all text drift on its own; this run is the belt-and-suspenders floor plus the tool for embedding-model migrations."
 }
