@@ -54,7 +54,14 @@ class KGNodeEvidence(Base):
 
     # Pipeline context
     window_id = Column(String, nullable=True, index=True)
-    merge_action = Column(String(32), nullable=False, default="created")  # created | confirmed | updated
+    merge_action = Column(String(32), nullable=False, default="created")  # created | confirmed | updated | digest
+
+    # Digestion (evidence compaction, fragility review #6 move 2): when a
+    # row's content has been folded into a consolidated digest row, this is
+    # stamped and prompt consumers skip the row. NOTHING is deleted —
+    # evidence is provenance; digested rows stay for audits. Digest rows
+    # themselves carry merge_action='digest' and digested_at=NULL (live).
+    digested_at = Column(AwareUtcDateTime, nullable=True)
 
     created_at = Column(AwareUtcDateTime, nullable=False, default=utc_now)
 

@@ -86,9 +86,12 @@ def run(ctx: PipelineContext) -> dict:
                 continue
             if find_disambiguation(session, n.label) is not None:
                 continue  # already split — the park point handles new mentions
+            # Live rows only: digested originals are folded into a digest
+            # row (merge_action='digest') that rides along here.
             ev_rows = (
                 session.query(KGNodeEvidence)
                 .filter(KGNodeEvidence.node_id == n.id)
+                .filter(KGNodeEvidence.digested_at.is_(None))
                 .all()
             )
             if len(ev_rows) < MIN_EVIDENCE:
@@ -117,7 +120,11 @@ def run(ctx: PipelineContext) -> dict:
                         (ev.message_timestamp or ev.created_at).date().isoformat()
                         if (ev.message_timestamp or ev.created_at) else None
                     ),
-                    "sentence": (ev.derived_sentence or ev.source_text or "")[:300],
+                    # Digest rows carry a whole folded era — don't truncate
+                    # them down to one observation's budget.
+                    "sentence": (ev.derived_sentence or ev.source_text or "")[
+                        : (2000 if ev.merge_action == "digest" else 300)
+                    ],
                 }
                 for ev in sampled
             ]

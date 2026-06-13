@@ -142,6 +142,24 @@ def _lazy_kg_identity_sentence_refresh(*, target_date=None, routine=None):
 kg_identity_sentence_refresh = _lazy_kg_identity_sentence_refresh
 
 
+def _lazy_kg_evidence_digestion(*, target_date=None, routine=None):
+    """Nightly: fold the oldest evidence rows of the heaviest-evidenced
+    nodes into one consolidated digest row each (chat-compaction move for
+    kg_node_evidence; see scratch/EVIDENCE_HUB_BUDGETS_SPEC.md). Originals
+    are stamped digested_at and kept — nothing is deleted.
+
+    Routine spec: max_nodes_per_run (default 5).
+    """
+    from app.assistant.kg_core.kg_utils.evidence_digestion import run_evidence_digestion
+    spec = (routine.spec if routine and hasattr(routine, "spec") else {}) or {}
+    return run_evidence_digestion(
+        max_nodes_per_run=max(1, int(spec.get("max_nodes_per_run", 5))),
+    )
+
+
+kg_evidence_digestion = _lazy_kg_evidence_digestion
+
+
 def _lazy_kg_embedding_diff_sync(*, target_date=None, routine=None):
     """Hourly: reconcile chroma label+identity collections against sqlite
     (ghosts removed, missing embedded, text drift re-embedded). Free local
@@ -520,6 +538,7 @@ ROUTINE_FUNCTION_REGISTRY = {
     "kg_importance_rater": kg_importance_rater,
     "entity_card_refresh": entity_card_refresh,
     "kg_identity_sentence_refresh": kg_identity_sentence_refresh,
+    "kg_evidence_digestion": kg_evidence_digestion,
     "kg_embedding_diff_sync": kg_embedding_diff_sync,
     "kg_embedding_full_rebuild": kg_embedding_full_rebuild,
     "sleep_camera_tick_local": sleep_camera_tick_local,

@@ -1,0 +1,11 @@
+## Node
+Label: {{ agent_input.label }}
+Type: {{ agent_input.node_type }}
+{% if agent_input.identity_sentence %}Identity: {{ agent_input.identity_sentence }}
+{% endif %}
+## Evidence rows to fold (oldest first)
+{% for r in agent_input.rows %}
+- [{{ r.date or "undated" }}{% if r.kind == "digest" %}, kind=digest{% endif %}] {{ r.text }}
+{% endfor %}
+
+Write the consolidated digest of these rows.
