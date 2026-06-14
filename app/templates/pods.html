@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pods — {{ assistant_name }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/pods.css') }}?v={{ static_v }}">
+</head>
+<body>
+  <div class="pods-shell">
+    <header class="pods-header">
+      <h1>Pods</h1>
+      <span class="pods-sub">data pod store · owner-only</span>
+      <span id="pods-status" class="pods-status">loading…</span>
+      <button id="pods-refresh" type="button" class="pods-btn-ghost" title="Reload">↻</button>
+    </header>
+
+    <div class="pods-toolbar">
+      <input id="pods-search" type="search" placeholder="search one-liner, body preview, tags, id…" spellcheck="false" autocomplete="off">
+      <select id="pods-kind"><option value="">all kinds</option></select>
+      <select id="pods-sort">
+        <option value="importance">sort: importance ↓</option>
+        <option value="recent">sort: newest</option>
+        <option value="authority">sort: authority ↓</option>
+        <option value="kind">sort: kind</option>
+      </select>
+      <span id="pods-shown" class="pods-shown"></span>
+    </div>
+
+    <main class="pods-body">
+      <ul class="pods-list" id="pods-list"></ul>
+
+      <section class="pods-detail" id="pods-detail">
+        <div class="pods-detail-empty" id="pods-detail-empty">Select a pod to view its contents.</div>
+        <div class="pods-detail-inner" id="pods-detail-inner" hidden></div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    window.AUTHORITY_BANDS = {{ authority_bands|tojson }};
+  </script>
+  <script src="{{ url_for('static', filename='js/pods.js') }}?v={{ static_v }}"></script>
+</body>
+</html>

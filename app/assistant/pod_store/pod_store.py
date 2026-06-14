@@ -29,6 +29,10 @@ logger = get_logger(__name__)
 
 _SINCE_SHORTHAND_RE = re.compile(r"^\s*(\d+)\s*([hdwm])\s*$", re.IGNORECASE)
 
+# Sentinel for update_curation: distinguishes "caller omitted this field"
+# from "caller explicitly set it to None" (importance None = unrated).
+_UNSET = object()
+
 
 def _parse_since(value: Union[datetime, str]) -> datetime:
     """Accept a datetime, an ISO string, or a shorthand like '24h', '3d',
@@ -123,6 +127,34 @@ class PodStore:
                 if row is None:
                     return None
                 return self._row_to_pod(row)
+            finally:
+                session.close()
+
+    def update_curation(self, pod_id: str, *, importance=_UNSET, min_authority=_UNSET) -> None:
+        """Update the owner-editable curation fields on an existing pod.
+
+        Only ``importance`` (0-10 priority, or None = unrated) and
+        ``min_authority`` (read-permission band) are mutable here — the pod's
+        content/identity is immutable once minted. Fields left at the _UNSET
+        sentinel are not touched; passing ``importance=None`` explicitly clears
+        the rating (distinct from omitting it). Raises KeyError if no pod with
+        ``pod_id`` exists (fail loud — the caller passed a bad id).
+        """
+        with self._lock:
+            session = get_session()
+            try:
+                row = session.query(PodRow).filter_by(pod_id=pod_id).one_or_none()
+                if row is None:
+                    raise KeyError(f"pod {pod_id!r} not found")
+                if importance is not _UNSET:
+                    row.importance = None if importance is None else float(importance)
+                if min_authority is not _UNSET:
+                    row.min_authority = int(min_authority)
+                session.add(row)
+                session.commit()
+            except Exception:
+                session.rollback()
+                raise
             finally:
                 session.close()
 
