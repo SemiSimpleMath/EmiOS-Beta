@@ -1,0 +1,46 @@
+# Permission scope for the kg_goal_outcome_detect routine — the daily
+# "did the user explicitly achieve / abandon an active Goal?" detector.
+#
+# PERMISSION ONLY. Identity (owner_id, actor_id, surface) is stamped per run by
+# the caller via load_scope_for_source — never authored here.
+#
+# Built once at routine entry (_lazy_kg_goal_outcome_detect ->
+# PipelineContext.for_date(pipeline_id="kg_goal_outcome_detect")) and threaded
+# into the goal_outcome_detector agent. The step code is shared from
+# kg_maintenance_pipeline/step_goal_outcome_detect.py, but this routine carries
+# its OWN scope identity (its own pipeline_id), so it gets its own scope.yaml.
+#
+# LLM-AS-PRIMITIVE: goal_outcome_detector is a TOOLLESS structured-output agent
+# (allowed_tools: []) — it reads recent chat evidence + the candidate Goal and
+# judges achieved / abandoned. The Python step then closes the Goal (sets
+# goal_status + end_date, writes a kg_revision_log row) via deterministic
+# SQLAlchemy that takes no scope param. The LLM advises; the code writes. So
+# scope is needed only to build the LLM Message (resources / acting_as), never
+# as a privilege gate.
+#
+# authority_level 99 — autonomous routine (no human approver), capped below the
+# 100 courier band. Toolless, so it's an advisor with no hands. Matches the
+# sibling kg_importance_rater.
+#
+# write_kg is FALSE on purpose AND inert here: the goal close is deterministic
+# code, not a scope-gated capability (same posture as kg_pipeline / kg_importance_rater).
+
+approval:
+  authority_level: 99
+
+tools:
+  allowed_tools: []
+
+resources:
+  allowed_global_resources: [all]
+  resource_groups:
+    - chat
+    - memory
+
+pods:
+  allowed_scopes: [self]
+
+writes:
+  write_unified_log: true
+  write_kg: false
+  allow_fact_extraction: false
