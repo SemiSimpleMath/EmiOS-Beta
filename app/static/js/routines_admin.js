@@ -253,7 +253,7 @@
       const banner       = autoDisableBanner(r);
 
       tr.innerHTML =
-        `<td><span class="pill ${r.enabled ? "on" : "off"}">${r.enabled ? "ON" : "OFF"}</span></td>` +
+        `<td><button class="pill pill-toggle ${r.enabled ? "on" : "off"}" data-act="toggle" data-id="${r.id}" title="Click to ${r.enabled ? "disable" : "enable"}">${r.enabled ? "ON" : "OFF"}</button></td>` +
         `<td>${escape(r.name)}<div class="field-note">${escape(r.id)}</div>${banner}</td>` +
         `<td>${escape(r.runner)}<div class="rt-badges">${triggerBadge}</div></td>` +
         `<td>${escape(r.schedule_label)}</td>` +
@@ -264,10 +264,8 @@
         `<td>${r.run_count || 0}</td>` +
         `<td><div class="btn-row">` +
           `<button class="btn" data-act="edit" data-id="${r.id}">Edit</button>` +
-          `<button class="btn" data-act="run" data-id="${r.id}">Run now</button>` +
-          `<button class="btn" data-act="decisions" data-id="${r.id}">Decisions</button>` +
-          `<button class="btn ${r.enabled ? "danger" : "primary"}" data-act="toggle" data-id="${r.id}">` +
-          `${r.enabled ? "Disable" : "Enable"}</button>` +
+          `<button class="btn" data-act="run" data-id="${r.id}">Run</button>` +
+          `<button class="btn" data-act="decisions" data-id="${r.id}">Log</button>` +
         `</div></td>`;
       tb.appendChild(tr);
     });

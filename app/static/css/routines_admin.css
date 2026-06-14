@@ -211,6 +211,7 @@ body {
 /* All-routines table */
 .all-table {
   width: 100%;
+  table-layout: fixed;          /* share 100% width across columns; wrap, don't overflow */
   border-collapse: collapse;
   background: var(--panel);
   border: 1px solid var(--line);
@@ -218,10 +219,13 @@ body {
   overflow: hidden;
 }
 .all-table th, .all-table td {
-  padding: 8px 12px;
+  padding: 6px 8px;
   text-align: left;
   font-size: 12px;
   border-bottom: 1px solid var(--line);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  vertical-align: top;
 }
 .all-table th {
   background: var(--panel-soft);
@@ -233,6 +237,29 @@ body {
 .all-table tbody tr:hover { background: var(--panel-hi); }
 .all-table tbody tr.disabled { opacity: 0.5; }
 
+/* Fit-to-viewport: give each column a share of the width so long values wrap
+   within the cell instead of pushing the table past the screen edge. */
+#all-table th:nth-child(1)  { width: 5.5%; }   /* Enabled (toggle pill) */
+#all-table th:nth-child(2)  { width: 17%;  }   /* Name */
+#all-table th:nth-child(3)  { width: 9%;   }   /* Runner */
+#all-table th:nth-child(4)  { width: 12%;  }   /* Schedule */
+#all-table th:nth-child(5)  { width: 9%;   }   /* Window */
+#all-table th:nth-child(6)  { width: 12%;  }   /* Guards */
+#all-table th:nth-child(7)  { width: 10%;  }   /* Last run */
+#all-table th:nth-child(8)  { width: 8%;   }   /* Status */
+#all-table th:nth-child(9)  { width: 5.5%; }   /* Runs */
+#all-table th:nth-child(10) { width: 12%;  }   /* Actions */
+.all-table .btn { padding: 4px 8px; font-size: 11px; }
+.all-table .btn-row { gap: 4px; }
+
+/* Recent-decisions table (also fixed-layout) — give the reason/error column room. */
+#decisions-table th:nth-child(1) { width: 13%; }   /* Time */
+#decisions-table th:nth-child(2) { width: 16%; }   /* Routine */
+#decisions-table th:nth-child(3) { width: 11%; }   /* Event */
+#decisions-table th:nth-child(4) { width: 34%; }   /* Reason / error */
+#decisions-table th:nth-child(5) { width: 9%;  }   /* Duration */
+#decisions-table th:nth-child(6) { width: 17%; }   /* Run id */
+
 .pill {
   display: inline-block;
   padding: 2px 9px;
@@ -243,6 +270,12 @@ body {
 .pill.off { background: var(--pill-off-bg); color: var(--pill-off-fg); }
 .pill.bad { background: rgba(239, 68, 68, 0.18); color: #fca5a5; }
 .pill.warn { background: rgba(245, 158, 11, 0.18); color: #fcd34d; }
+
+/* The "Enabled" pill in the All-routines table doubles as the on/off toggle —
+   it's where users instinctively click, so make it a real, interactive control. */
+.pill-toggle { cursor: pointer; border: none; font: inherit; line-height: inherit; }
+.pill-toggle:hover { filter: brightness(1.18); outline: 1px solid var(--line); }
+.pill-toggle:focus-visible { outline: 2px solid var(--accent); }
 
 .btn {
   border: 1px solid var(--line);
