@@ -35,6 +35,7 @@ user_context_items:
 
 system_context_items:
   - has_spec_steps
+  - tool_descriptions
 
 skills:
   - critic-handling
