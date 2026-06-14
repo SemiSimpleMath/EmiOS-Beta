@@ -310,6 +310,15 @@ def test_web_page_coords_marks_returns_clickable_coords_for_modal_close():
         x = float(t0["x"])
         y = float(t0["y"])
 
+        # The agent ONLY ever sees `content` (the recent-history renderer renders
+        # `content` and drops `data`), so the resolved coords MUST appear in
+        # `content` — otherwise the planner is blind and falls back to guessing
+        # pixel positions (the 2026-06-14 bug that drove a 240-cycle click loop).
+        assert f"x={int(round(x))}" in res.content and f"y={int(round(y))}" in res.content, (
+            f"web_page_coords.content must carry the target coords for the agent to "
+            f"click them; got: {res.content!r}"
+        )
+
         # Verify the returned coords point at the actual close button.
         js_check = f"""
 async (page) => {{

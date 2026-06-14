@@ -372,12 +372,23 @@ class WebPageCoords(BaseTool):
                     data={"image_path": image_path, "marked": marked},
                 )
 
+            # Surface the resolved coordinates IN `content` — the planner only sees
+            # `content` in its recent-history rendering, NOT `data.targets`. Without
+            # the coords here the agent knows a target was *found* but not WHERE, so
+            # it falls back to guessing round numbers (e.g. 1200,40) and the click
+            # misses, which drives the find -> guess-click -> re-find loop.
+            _coord_lines = "".join(
+                f"\n  target: x={int(round(float(t.get('x', 0))))} y={int(round(float(t.get('y', 0))))}"
+                f" (mark {t.get('mark_id')}: {t.get('label')}) — click with web_click_xy_snapshot"
+                for t in out_targets
+            )
             return ToolResult(
                 result_type="web_page_coords",
                 content=(
                     "web_page_coords: screenshot captured and analyzed."
                     f" marked={bool(marked)} marks={int(marks_count)} targets={n_targets}"
                     f" requested_target_found={bool(requested_target_found)}"
+                    + _coord_lines
                 ),
                 data={
                     "question": question or None,
