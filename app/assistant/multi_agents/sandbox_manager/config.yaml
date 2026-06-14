@@ -72,6 +72,7 @@ tools:
     - pod_search
     - pod_fetch
     - mint_pod_from_path
+    - mint_pod
     - read_tool_result
     - ask_user
     - discover_skills
@@ -111,7 +112,6 @@ scope_contract:
       - kg_dev_manager
       - kg_mutation_manager
       - kg_investigation_manager
-      - kg_team_manager
 
 tool_visibility:
   always_show:
@@ -119,6 +119,7 @@ tool_visibility:
     - pod_search
     - pod_fetch
     - mint_pod_from_path
+    - mint_pod
     - read_tool_result
     - ask_user
     - discover_skills

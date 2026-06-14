@@ -23,7 +23,7 @@ python app/assistant/tests/manager_tests/kg_explorer/run_tests.py
 ## Test Structure
 
 ### kg_explorer_tests.py
-- **Pattern**: Follows `kg_team_manager.py` structure
+- **Pattern**: Follows the standard manager-test structure (see `emi_team/emi_team_test.py`)
 - **Purpose**: Test the full KG Explorer manager as a standalone entity
 - **Features**:
   - Full system initialization via `test_setup`
@@ -76,7 +76,7 @@ python app/assistant/tests/manager_tests/kg_explorer/run_tests.py
 
 ## Notes
 
-- Manager test follows the exact same pattern as `kg_team_manager.py`
+- Manager test follows the standard manager-test pattern (see `emi_team/emi_team_test.py`)
 - Tool test is useful for debugging individual queries
 - Both tests require database access to the knowledge graph
 - Results are printed to console for review

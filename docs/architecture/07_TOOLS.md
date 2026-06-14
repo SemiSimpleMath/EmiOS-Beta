@@ -53,9 +53,7 @@ Examples currently shipped under `lib/tools/`:
 | Wrapper tool | Manager invoked | Use |
 |---|---|---|
 | `emi_team_manager` | `emi_team_manager` | General-purpose worker — see [15_EMI_TEAM_AND_SCOPE](15_EMI_TEAM_AND_SCOPE.md) |
-| `kg_query_manager` | `kg_query_manager` | Read-only KG question answering |
 | `kg_explorer_manager` | `kg_explorer_manager` | Multi-step KG exploration |
-| `kg_team_manager` | `kg_team_manager` | KG team coordination |
 | `devices_manager` | `devices_manager` | Smart-home device coordination |
 | `entertainment_manager` | `entertainment_manager` | Music / video / chess |
 | `event_manager` | `event_manager` | Calendar + reminder coordination |

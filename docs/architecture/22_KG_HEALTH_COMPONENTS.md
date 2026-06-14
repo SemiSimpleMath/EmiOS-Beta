@@ -297,9 +297,7 @@ Helper module `app/assistant/kg_maintenance/verdict_store.py` exposes:
 | `kg_mutation_manager` *(legacy — `/apply` route only)* | applies a structured `proposed_action` from older investigator reports | typed mutator allowlist | `/api/finding/<id>/apply` (legacy dev-page Apply button) |
 | `kg_dev_manager` | free-form admin console | full mutator suite | `kg_dev_room` chat |
 | `kg_dev_room_manager` | dispatch front for `kg_dev_manager` | `kg_dev_manager` (as a tool) | `kg_dev_room` chat |
-| `kg_query_manager` | read-only sub-tool | `kg_query` | other managers via delegation |
 | `kg_explorer_manager` | multi-step exploration with provenance | exploration tools | `emi_team_manager` delegation |
-| `kg_team_manager` | bundle for `emi_team_manager` to delegate to | child managers | `emi_team_manager` |
 
 `kg_mutation_manager` is **not retired** — it still backs the legacy `/api/finding/<id>/apply` route. `kg_resolution_manager` is the canonical executor for autonomous runs (cron drain) and the dev-page Accept button. Plan: collapse `apply_one` into the same `execute_one` path so there's one executor, one audit trail, one toolkit; deferred until the legacy /apply path traffic is empirically zero.
 

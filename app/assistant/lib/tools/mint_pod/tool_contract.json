@@ -1,0 +1,33 @@
+{
+  "name": "mint_pod",
+  "description": "Persist provided content as a durable pod and return its pod_id. Use this when asked to 'make/save a datapod' from information you already have (a list, a note, a set of contacts) — it writes a real pod_store row so the content survives the turn and can be reopened later by pod_id. This is NOT for files on disk (use mint_pod_from_path) and NOT pod search (use pod_search).\n\nReturns the canonical pod_id (datapod:note:...). ALWAYS surface that id back to the user / downstream so the pod can be reopened with pod_fetch. If you only have a spec and don't call this tool, nothing is persisted.",
+  "inputs": [
+    {"name": "title", "type": "string", "required": true, "description": "One-line title/summary (becomes the pod's one_liner)."},
+    {"name": "body", "type": "string", "required": true, "description": "Full content, stored verbatim as the pod body."},
+    {"name": "kind", "type": "string", "required": false, "description": "Pod kind; only 'note' is allowed (the default)."},
+    {"name": "tags", "type": "array", "required": false, "description": "Optional tag names for later pod_search filtering."},
+    {"name": "importance", "type": "number", "required": false, "description": "Optional curation importance 0-10 (higher surfaces first). Omit if unsure."},
+    {"name": "min_authority", "type": "integer", "required": false, "description": "Read-permission band (10 public / 50 chat / 70 gated / 99 user-only). Default 50."}
+  ],
+  "outputs": [
+    {"path": "content", "type": "text", "description": "Human-readable confirmation including the pod_id."},
+    {"path": "data", "type": "object", "description": "{ok, pod_id, kind, importance, min_authority, tags}."}
+  ],
+  "arguments_prompt": "Persist content as a pod and get back its pod_id.\n\nFields:\n  - `title` — one-line summary (becomes one_liner).\n  - `body` — the full content, stored verbatim.\n  - `tags` (optional) — for pod_search.\n  - `min_authority` (optional) — 10 public / 50 chat (default) / 70 gated / 99 user-only.\n\nReturns `pod_id` (datapod:note:...). Surface it back so the pod can be reopened with pod_fetch.\n\nExample:\n  `{ \"title\": \"Friends & Family Emails\", \"body\": \"Alice: alice@example.com\\nBob: bob@example.com\", \"tags\": [\"contacts\"] }`",
+  "metadata": {
+    "min_authority": 50,
+    "domain": "pods",
+    "actions": ["create", "mint"],
+    "selectors": ["title"],
+    "risk_level": "low",
+    "side_effects": "write",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false,
+    "approval_min_authority": 50
+  }
+}

@@ -26,6 +26,13 @@
       "_doc_excluded_from_kg": "Chat clusters are conversation context, not facts. KG ingests facts extracted FROM clusters; clusters themselves are not KG citizens."
     },
 
+    "note": {
+      "description": "Freeform authored content pod — a user- or agent-curated note, list, or collection (e.g. a contacts/email list). one_liner=title, body=verbatim content. Minted on demand via the mint_pod tool.",
+      "kg_admissible": false,
+      "body_extraction": "verbatim",
+      "default_for_agents": []
+    },
+
     "service_loop": {
       "description": "Internal pod_classifier service-loop placeholder. Not user-facing content; emitted to keep the pipeline running when there's nothing to classify.",
       "kg_admissible": false,

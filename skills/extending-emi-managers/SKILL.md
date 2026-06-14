@@ -101,7 +101,7 @@ assistant uses `emi_team_manager`; KG mutations route through
 
 - Generalist with many sub-managers: `app/assistant/multi_agents/emi_team_manager/`
 - Domain-specific (admin tasks): `app/assistant/multi_agents/personal_admin_manager/`
-- Read-only KG access: `app/assistant/multi_agents/kg_team_manager/`
+- Read-only KG access: the `ask_kg` leaf tool (LLM-RAG over the knowledge graph)
 - Approval-gated browser automation: `app/assistant/multi_agents/playwright_manager/`
 
 ## Notes

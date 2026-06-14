@@ -53,6 +53,10 @@ class Pod(BaseModel):
     # carry sensitive payloads — e.g., HTTP response pods sealed via
     # http_request's response_pod_kind path.
     min_authority: Optional[int] = None
+    # Curation signal (0-10). None = unrated. Stored sortable in the DB so it
+    # can rank pod_search and inform retention. A separate axis from
+    # min_authority (which is read-permission, not priority).
+    importance: Optional[float] = None
 
 
 class PodHeader(BaseModel):

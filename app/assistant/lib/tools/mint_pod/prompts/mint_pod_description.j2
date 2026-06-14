@@ -1,0 +1,10 @@
+Persist provided content as a durable pod and return its pod_id.
+
+Use when asked to "make a datapod" / "save this as a pod" from content you
+already have (a list, a note, a set of contacts). It writes a real pod_store
+row so the content survives the turn and can be reopened later with
+pod_fetch(pod_id).
+
+NOT for files on disk (use mint_pod_from_path). NOT for finding pods (use
+pod_search). Always echo the returned pod_id back to the user — if you only
+describe a pod without calling this tool, nothing is actually saved.

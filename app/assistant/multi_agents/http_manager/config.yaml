@@ -114,7 +114,6 @@ scope_contract:
       - kg_dev_manager
       - kg_mutation_manager
       - kg_investigation_manager
-      - kg_team_manager
 
 tool_visibility:
   always_show:

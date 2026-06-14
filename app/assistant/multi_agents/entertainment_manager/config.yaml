@@ -63,7 +63,7 @@ scope_contract:
     requires_approval_tools:
       - playwright_manager
 tool_visibility:
-  always_show: [kg_team_manager, web_manager, ask_user]
+  always_show: [ask_kg, web_manager, ask_user]
   use_narrower: true
   hidden_tools:
     # --- personal_admin_manager leaf tools (not needed for entertainment) ---
@@ -121,13 +121,12 @@ tool_visibility:
     - mcp::npm/playwright-mcp::browser_hover
     - mcp::npm/playwright-mcp::browser_run_code
 
-    # --- kg_team_manager leaf tools (call the manager instead) ---
+    # --- KG leaf primitives (entertainment uses ask_kg in always_show) ---
     - kg_find_node
     - kg_find_edge
     - kg_find_edge
     - kg_describe_node
     - kg_describe_edge
-    - ask_kg
     - kg_update_node
     - kg_create_node
     - kg_create_edge
@@ -136,7 +135,6 @@ tool_visibility:
 
     # --- Specialist sub-managers not needed for entertainment ---
     - personal_admin_manager
-    - kg_query_manager
     - kg_explorer_manager
     - event_manager
     - fast_tool_manager

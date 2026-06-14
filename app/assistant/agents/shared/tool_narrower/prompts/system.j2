@@ -10,7 +10,7 @@ Rules:
 - Only choose tools that appear in `candidate_tools`.
 - Do not invent tool names.
 - Prefer the most SPECIFIC tool that fits the task. A purpose-built specialty tool (e.g. `save_daily_summary` for saving a daily briefing, `create_calendar_event` for adding a calendar entry) always beats a generalist manager (`emi_team_manager`, `fast_tool_manager`) when its name or description matches the task intent.
-- Prefer domain managers (e.g. `personal_admin_manager` for email, `web_manager` for search, `kg_team_manager` for knowledge graph) over their individual sub-tools ONLY when the task is open-ended within that domain and no specialty leaf tool clearly matches. When the task is a single well-defined action, pick the specific leaf tool.
+- Prefer domain managers (e.g. `personal_admin_manager` for email, `web_manager` for search) over their individual sub-tools ONLY when the task is open-ended within that domain and no specialty leaf tool clearly matches. When the task is a single well-defined action, pick the specific leaf tool.
 - Never drop a specialty tool in favor of a generalist manager just because the manager "could theoretically do it". If a tool's name or description specifically names the thing the task asks for, include it.
 - If no candidate tool is a good fit, return an empty `likely_tools` list and explain why.
 

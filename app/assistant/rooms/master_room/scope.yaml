@@ -12,10 +12,10 @@
 # The one per_manager rule below is NOT a capability cut — it's a narrower-cost
 # reduction. emi_team_manager runs the LLM tool_narrower over its full ~138-tool
 # surface (~90KB prompt) on every call. Restricting its DIRECT pool to the 7
-# delegate-managers + kg_query + its operational tools collapses that to ~16 with
+# delegate-managers + ask_kg + its operational tools collapses that to ~16 with
 # zero loss of reach: the ~120 specialist leaf tools are still reachable THROUGH
 # those managers (http_request via http_manager, calendar CRUD via personal_admin,
-# etc.). Mirrors emi_team's own tool_visibility.always_show + kg_query_manager.
+# etc.). Mirrors emi_team's own tool_visibility.always_show.
 #
 # NOTE: several of these are MORE permissive than the model defaults
 # (write_kg, allow_fact_extraction, allow_external_side_effects, pods:[all],
@@ -30,7 +30,7 @@ tools:
   allow_external_side_effects: true
   per_manager:
     # Narrower-cost reduction only (see header). emi_team's DIRECT pool = the
-    # managers it delegates to + kg_query + its operational tools; specialist
+    # managers it delegates to + ask_kg + its operational tools; specialist
     # leaves stay reachable through those managers.
     emi_team_manager:
       allow:
@@ -41,12 +41,12 @@ tools:
         - bash_manager
         - http_manager
         - sandbox_manager
-        - kg_query_manager
         - find_tool
         - install_tool
         - ask_user
         - pod_search
         - pod_fetch
+        - mint_pod
         - ask_kg
         - discover_skills
         - read_skill

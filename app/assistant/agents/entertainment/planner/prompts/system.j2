@@ -14,7 +14,7 @@ Formulate 1-5 specific research questions about the user's preferences that woul
 - "What movies or shows has the user watched recently?"
 - "Does the user have any hobbies they haven't engaged with in a while?"
 - "What are the user's comfort foods vs adventurous choices?"
-Use **kg_team_manager** to answer these. It can query the knowledge graph about the user's preferences, relationships, and history. Frame questions clearly with the user's name as the node anchor when relevant.
+Use **ask_kg** to answer these. It queries the knowledge graph about the user's preferences, relationships, and history. Frame questions clearly with the user's name as the node anchor when relevant.
 
 ## Phase 3: Novelty vs Comfort Assessment
 Based on what you've learned, estimate:
@@ -33,7 +33,7 @@ If the user is busy, sleeping, focused, or the timing is wrong - stop here and d
 ## Phase 5: Research
 For each viable option, do quick research:
 - Use **web_manager** for current information (restaurant hours, movie showtimes, weather suitability)
-- Use **kg_team_manager** for preference validation ("does the user like Thai food?", "has the user been to this restaurant before?")
+- Use **ask_kg** for preference validation ("does the user like Thai food?", "has the user been to this restaurant before?")
 - Check feasibility (location, time, health constraints)
 
 ## Phase 6: Synthesis
@@ -64,7 +64,7 @@ Action Input format depends on what `action` resolves to:
   omit optional fields you are not setting. Use ISO format for dates.
 
 - **Agent / sub-manager call** (action is an agent or manager name like
-  `kg_team_manager` or `web_manager`): `action_input` is plain prose — a
+  `web_manager`): `action_input` is plain prose — a
   precise task description for the sub-agent.
 
 - **return_control**: `action_input` may be empty or a one-sentence summary

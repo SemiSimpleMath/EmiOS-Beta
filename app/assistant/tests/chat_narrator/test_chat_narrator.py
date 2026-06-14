@@ -28,7 +28,6 @@ def _seed_display_names():
         "emi_team_manager": "Em",
         "personal_admin_manager": "Phyllis",
         "devices_manager": "Watt",
-        "kg_team_manager": "Mnemo",
     })
     yield
     initialize_display_name_registry({})

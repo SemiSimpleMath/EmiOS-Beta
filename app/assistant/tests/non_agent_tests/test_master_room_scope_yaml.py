@@ -67,16 +67,19 @@ def test_full_tool_surface(built):
     assert built["tools"]["allow_external_side_effects"] is True
     # master_room is full-trust ([all]); the ONE per_manager rule is a
     # narrower-cost reduction (NOT a capability cut): emi_team_manager's DIRECT
-    # pool is pinned to its delegate-managers + kg_query + operational tools so
+    # pool is pinned to its delegate-managers + ask_kg + operational tools so
     # its LLM tool_narrower ranks ~16 instead of ~138. Specialist leaves stay
     # reachable THROUGH those managers. See rooms/master_room/scope.yaml header.
     per_mgr = built["tools"]["per_manager"]
     assert set(per_mgr.keys()) == {"emi_team_manager"}
     allow = per_mgr["emi_team_manager"]["allow"]
-    # the 7 delegate managers + kg_query + emi_team operational tools (16 total)
+    # the 7 delegate managers + ask_kg + emi_team operational tools (incl. the
+    # pod read/write trio pod_search/pod_fetch/mint_pod) = 16 total.
     assert "web_manager" in allow and "http_manager" in allow
-    assert "personal_admin_manager" in allow and "kg_query_manager" in allow
+    assert "personal_admin_manager" in allow and "ask_kg" in allow
     assert "pod_search" in allow and "ask_user" in allow
+    assert "mint_pod" in allow  # emi_team can persist a content pod directly
+    assert "kg_query_manager" not in allow  # retired (superseded by ask_kg)
     assert "create_dayflow_ticket" not in allow  # switchboard-only, not emi_team's
     assert len(allow) == 16
 

@@ -14,7 +14,7 @@ projections live in this side table; reads are authority-gated.
 from __future__ import annotations
 
 from sqlalchemy import (
-    Column, JSON, String, Text, TIMESTAMP, Integer, UniqueConstraint, Index, func,
+    Column, JSON, String, Text, TIMESTAMP, Integer, Float, UniqueConstraint, Index, func,
 )
 
 from app.models.base import Base
@@ -63,6 +63,11 @@ class PodRow(Base):
     # PodProjection side-table refines this further on a per-projection
     # basis. Authority bands defined in app.assistant.pod_store.authority.
     min_authority = Column(Integer, nullable=False, default=50)
+
+    # Curation signal (0-10, NULL = unrated). Set at mint time, editable in the
+    # pods UI. Sortable so it can rank pod_search / inform retention. Distinct
+    # from min_authority (which is read-permission, not priority).
+    importance = Column(Float, nullable=True, index=True)
 
     # Audit trail.
     created_by = Column(String, nullable=True)  # agent id or "pod_classifier"

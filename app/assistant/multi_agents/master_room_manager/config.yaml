@@ -62,7 +62,6 @@ tools:
     - web_manager
     - ask_user
     - playwright_manager
-    - kg_team_manager
     - ask_kg
     - read_text_file
     - append_text_file

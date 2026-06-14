@@ -105,6 +105,8 @@ class PodStore:
                 row.metadata_json = dict(pod.metadata) if pod.metadata else None
                 if pod.min_authority is not None:
                     row.min_authority = int(pod.min_authority)
+                if pod.importance is not None:
+                    row.importance = float(pod.importance)
                 session.add(row)
                 session.commit()
             except Exception:
@@ -611,4 +613,5 @@ class PodStore:
             created_at=row.created_at,
             metadata=dict(row.metadata_json or {}),
             min_authority=row.min_authority,
+            importance=row.importance,
         )
