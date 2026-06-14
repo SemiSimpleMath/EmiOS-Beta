@@ -65,6 +65,31 @@ def current_room_scope_id(blackboard) -> Optional[str]:
     return rid or None
 
 
+# The map of "what is SYSTEM" — the owner's own surfaces. Add a room_id here to
+# fold it into the system scope. The owner drives master_room directly;
+# dayflow_orchestrator is that same owner's autonomous engine — it acts on their
+# behalf at authority 95 (vs master_room's 99) and escalates to master_room for
+# approval on truly important actions. They are peers, not parent/child. A pod
+# minted by any system surface is the owner's data and is readable from every
+# system surface — they share one pod-visibility identity.
+#
+# This lives in the pod-scope SSOT because pod visibility is its only consumer
+# today; if "system" grows to gate resources/authority too, lift it to the scope
+# layer. Prefer is_system_scope() over comparing room ids in callers.
+SYSTEM_SCOPES = frozenset({"master_room", "dayflow_orchestrator"})
+
+
+def is_system_scope(scope_id: Any) -> bool:
+    """True if ``scope_id`` is one of the owner's system-level surfaces."""
+    return isinstance(scope_id, str) and scope_id in SYSTEM_SCOPES
+
+
+def _expand_system_scopes(scope_id: str) -> set:
+    """A system surface resolves to the WHOLE system set (system surfaces are
+    mutually pod-visible); any other scope resolves to just itself."""
+    return set(SYSTEM_SCOPES) if scope_id in SYSTEM_SCOPES else {scope_id}
+
+
 def resolve_allowed_scopes(scope_ctx: Any) -> List[str]:
     """The concrete pod scope_ids a caller can read. Reads ``scope.pods.allowed_scopes`` (default
     ``["self"]``) and expands ``"self"`` -> the caller's room_id. Returns ``["all"]`` (unrestricted),
@@ -96,7 +121,19 @@ def resolve_allowed_scopes(scope_ctx: Any) -> List[str]:
             continue
         if s_str not in out:
             out.append(s_str)
-    return out or ["__none__"]
+    if not out:
+        return ["__none__"]
+    # A caller on a system surface (master_room / dayflow_orchestrator) reads
+    # pods minted by ANY system surface — they share one identity. Expand each
+    # concrete scope through the system map. No-op while system rooms grant
+    # pods:[all] (returned above), but keeps the equivalence true if either is
+    # ever narrowed to "self".
+    expanded: List[str] = []
+    for s in out:
+        for eq in sorted(_expand_system_scopes(s)):
+            if eq not in expanded:
+                expanded.append(eq)
+    return expanded
 
 
 def pod_in_scope(pod_scope_id: Optional[str], allowed_scopes: List[str]) -> bool:

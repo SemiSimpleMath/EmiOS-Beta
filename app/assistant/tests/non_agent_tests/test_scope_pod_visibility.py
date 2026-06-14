@@ -137,6 +137,51 @@ def test_resolve_self_without_room_id_returns_sentinel():
     assert result == ["__none__"]
 
 
+# ---------------------------------------------------------------------------
+# System-scope equivalence — master_room and dayflow_orchestrator are ONE
+# owner-level system surface. A pod minted by either is readable from the other
+# even when the caller is scoped to a concrete room ("self"), not ["all"].
+# ---------------------------------------------------------------------------
+
+def _sys_scope(room_id, scopes):
+    return ScopeContext(
+        scope_id="s", owner_id="u", actor_id="a", surface="ui",
+        room_id=room_id, pods=ScopePodPolicy(allowed_scopes=scopes),
+    )
+
+
+def test_is_system_scope_map():
+    from app.assistant.pod_store.pod_utils import is_system_scope
+    assert is_system_scope("master_room")
+    assert is_system_scope("dayflow_orchestrator")
+    assert not is_system_scope("slack/A")
+    assert not is_system_scope(None)
+
+
+def test_system_self_expands_across_system_surfaces():
+    from app.assistant.lib.core_tools.pod_store.pod_store_tool import _resolve_pod_allowed_scopes
+    # master_room scoped to "self" still reads dayflow_orchestrator pods — and vice versa.
+    assert set(_resolve_pod_allowed_scopes(_tm_with_scope(_sys_scope("master_room", ["self"])))) == {
+        "master_room", "dayflow_orchestrator"}
+    assert set(_resolve_pod_allowed_scopes(_tm_with_scope(_sys_scope("dayflow_orchestrator", ["self"])))) == {
+        "master_room", "dayflow_orchestrator"}
+
+
+def test_non_system_self_not_expanded():
+    from app.assistant.lib.core_tools.pod_store.pod_store_tool import _resolve_pod_allowed_scopes
+    # a non-system room's "self" binds to just itself — no system bleed-through.
+    assert _resolve_pod_allowed_scopes(_tm_with_scope(_sys_scope("slack/A", ["self"]))) == ["slack/A"]
+
+
+def test_dayflow_pod_readable_from_master_room_self():
+    from app.assistant.pod_store.pod_utils import resolve_allowed_scopes, pod_in_scope
+    allowed = resolve_allowed_scopes(_sys_scope("master_room", ["self"]))
+    assert pod_in_scope("dayflow_orchestrator", allowed) is True
+    # but a non-system room still cannot reach a system pod
+    allowed_t = resolve_allowed_scopes(_sys_scope("slack/A", ["self"]))
+    assert pod_in_scope("dayflow_orchestrator", allowed_t) is False
+
+
 if __name__ == "__main__":
     import pytest
     sys.exit(pytest.main([__file__, "-v"]))

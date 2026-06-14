@@ -6,11 +6,12 @@ llm_params:
   model_tier: "mini"
 
 # Curated list — was `all` (149 tools) which bloated prompt + leaked
-# off-domain guidance (pod search workflow, KG mutations, etc.) into
-# every personal_admin call. personal_admin's job is email + calendar
-# + todos + reminders. Pod work here is "act on a pod the task already
-# named" (attach via send_email pod_ids, fetch to read), NOT pod search
-# — that's emi_team's job per resource_pod_skill_admin.
+# off-domain guidance (KG mutations, etc.) into every personal_admin
+# call. personal_admin's job is email + calendar + todos + reminders.
+# Pod work here: find the pod (pod_search), read it (pod_fetch), attach
+# it (send_email pod_ids). pod_search is included because chat_gate can
+# forward a pod task straight here without emi_team resolving the
+# pod_id first — so personal_admin must be able to locate it itself.
 allowed_tools:
   # Email — read/find/send/triage
   - send_email
@@ -39,8 +40,9 @@ allowed_tools:
   - get_scheduler_events
   # User interaction
   - ask_user
-  # Pod actions on a pod_id the task already references — read body.
-  # (Attaching is via send_email's pod_ids field, no extra tool needed.)
+  # Pod actions — find a pod by query (pod_search) and read its body by id
+  # (pod_fetch). Attaching is via send_email's pod_ids field, no extra tool.
+  - pod_search
   - pod_fetch
 except_tools: []
 allowed_nodes: [personal_admin::final_answer]
@@ -76,11 +78,10 @@ system_context_items:
 # inbound message contains a matching keyword. Saves prompt budget on
 # tasks where the skill is not relevant.
 #
-# personal_admin's responsibility is acting on pods (attaching to
-# email, fetching to read) — NOT searching for them. Finding pods is
-# emi_team's job (see emi_team/planner/config.yaml). When a task
-# arrives here with pod_ids already in it, the pod-courier skill
-# teaches the right tool composition.
+# personal_admin acts on pods — searching to locate, fetching to read,
+# attaching to email. When a task arrives with pod_ids already in it (or a
+# pod it must find first), the pod-courier skill teaches the right tool
+# composition.
 #
 # Triggers live on the skills (skills/pod-courier/SKILL.md auto_inject_when).
 accept_auto_skills: true
