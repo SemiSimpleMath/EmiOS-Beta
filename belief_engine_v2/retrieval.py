@@ -186,19 +186,25 @@ def beliefs_for_context(
     dt = _as_dt(now)
     w = {**_DEFAULT_WEIGHTS, **(weights or {})}
 
-    # Attach the belief's domain category for downstream scoping. `belief_category`
-    # is a side table (survives projection rebuilds); it may be absent on stores
-    # not yet backfilled, so degrade to domain=None rather than error.
-    _has_cat = store.conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='belief_category'"
-    ).fetchone() is not None
-    if _has_cat:
-        rows = store.conn.execute(
-            "SELECT b.*, c.domain FROM beliefs b "
-            "LEFT JOIN belief_category c ON b.belief_id = c.belief_id WHERE b.status='active'"
-        ).fetchall()
+    # Attach domain + apply owner overrides from side tables (both survive
+    # projection rebuilds; both optional — degrade gracefully on older stores).
+    # belief_category -> domain; belief_user_override -> suppress (filtered out
+    # here), statement edit (applied in the loop), and lock (carried for consumers).
+    def _has(_n):
+        return store.conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (_n,)).fetchone() is not None
+    _has_cat, _has_ovr = _has("belief_category"), _has("belief_user_override")
+    _cols = ["b.*", "c.domain" if _has_cat else "NULL AS domain"]
+    _joins = " LEFT JOIN belief_category c ON c.belief_id = b.belief_id" if _has_cat else ""
+    if _has_ovr:
+        _cols += ["o.statement_override AS _stmt_ovr", "COALESCE(o.locked,0) AS locked"]
+        _joins += " LEFT JOIN belief_user_override o ON o.belief_id = b.belief_id"
+        _where = "b.status='active' AND COALESCE(o.suppressed,0)=0"
     else:
-        rows = store.conn.execute("SELECT *, NULL AS domain FROM beliefs WHERE status='active'").fetchall()
+        _cols += ["NULL AS _stmt_ovr", "0 AS locked"]
+        _where = "b.status='active'"
+    rows = store.conn.execute(
+        f"SELECT {', '.join(_cols)} FROM beliefs b{_joins} WHERE {_where}").fetchall()
 
     qvec = None
     if embedder is not None and (query or entities):
@@ -208,19 +214,22 @@ def beliefs_for_context(
 
     scored: List[Dict[str, Any]] = []
     for r in rows:
-        aw = json.loads(r["applies_when"]) if r["applies_when"] else None
+        item = dict(r)
+        # owner statement edit (belief_user_override) wins over the projected text
+        stmt = item.pop("_stmt_ovr", None) or item.get("statement_nl")
+        item["statement_nl"] = stmt
+        aw = json.loads(item["applies_when"]) if item.get("applies_when") else None
         t = temporal_applicability(aw, dt, horizon)   # SOFT score — never excludes
 
-        rec = _recency(r["last_observed"], dt)
-        freq = _frequency(r["obs_count"])
+        rec = _recency(item.get("last_observed"), dt)
+        freq = _frequency(item.get("obs_count"))
         rel = 0.0
-        if qvec is not None and r["statement_nl"]:
-            bvec = _unit(embedder(r["statement_nl"]))
+        if qvec is not None and stmt:
+            bvec = _unit(embedder(stmt))
             if bvec is not None:
                 rel = max(0.0, float(qvec @ bvec))
 
         score = w["temporal"] * t + w["recency"] * rec + w["frequency"] * freq + w["relevance"] * rel
-        item = dict(r)
         item["score"] = score
         if include_scores:
             item["_scores"] = {"temporal": t, "recency": rec, "frequency": freq, "relevance": rel}

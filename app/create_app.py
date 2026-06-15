@@ -203,6 +203,8 @@ def create_app(config_class="config.DevelopmentConfig"):
     app.register_blueprint(pod_api_bp)
     from app.routes.pods import pods_bp
     app.register_blueprint(pods_bp)
+    from app.routes.beliefs import beliefs_admin_bp
+    app.register_blueprint(beliefs_admin_bp)
     from app.routes.task_graph_route import task_graph_bp
     app.register_blueprint(task_graph_bp)
     from app.routes.doc_route import doc_bp

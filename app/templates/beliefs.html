@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Beliefs — owner control</title>
+  <link rel="stylesheet" href="/static/css/beliefs.css">
+</head>
+<body>
+  <header class="bx-header">
+    <h1>Beliefs</h1>
+    <div class="bx-sub">
+      belief&#8209;engine v2 &middot; <span id="bx-count">&hellip;</span> shown &middot;
+      edits are <b>durable overrides</b> &mdash; they survive rebuilds and lock against auto&#8209;revert
+    </div>
+  </header>
+
+  <div class="bx-filters">
+    <input id="f-q" type="search" placeholder="search statements&hellip;">
+    <select id="f-domain"><option value="">all domains</option></select>
+    <select id="f-kind"><option value="">all kinds</option></select>
+    <select id="f-status">
+      <option value="active">active</option>
+      <option value="all">all statuses</option>
+      <option value="dormant">dormant</option>
+    </select>
+    <label class="bx-chk"><input type="checkbox" id="f-suppressed"> show suppressed</label>
+    <button id="f-refresh">refresh</button>
+  </div>
+
+  <div id="bx-list" class="bx-list"></div>
+
+  <div id="bx-drawer" class="bx-drawer hidden">
+    <div class="bx-drawer-inner">
+      <button id="bx-close" class="bx-close" title="close (Esc)">&times;</button>
+      <h2 id="d-title">Belief</h2>
+      <div id="d-meta" class="bx-meta"></div>
+
+      <label class="bx-lbl">Statement <span class="bx-hint">(editing overrides the projected text)</span></label>
+      <textarea id="d-statement" rows="4"></textarea>
+
+      <div class="bx-row">
+        <label class="bx-lbl small">Domain
+          <select id="d-domain"></select>
+        </label>
+        <label class="bx-chk"><input type="checkbox" id="d-suppressed"> suppress &mdash; remove from use</label>
+        <label class="bx-chk"><input type="checkbox" id="d-locked"> lock &mdash; no auto&#8209;revision</label>
+      </div>
+
+      <div class="bx-actions">
+        <button id="d-save" class="bx-primary">Save corrections</button>
+        <span id="d-saved" class="bx-saved hidden">saved &check;</span>
+      </div>
+
+      <h3>Evidence <span class="bx-hint">(observations behind this belief)</span></h3>
+      <div id="d-evidence" class="bx-evidence"></div>
+    </div>
+  </div>
+
+  <script>window.BX_DOMAINS = {{ domains|tojson }};</script>
+  <script src="/static/js/beliefs.js"></script>
+</body>
+</html>
