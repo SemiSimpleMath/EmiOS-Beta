@@ -30,7 +30,15 @@ def export_beliefs(*, domain: Optional[str] = None) -> Path:
     Export active beliefs to JSON.
     If domain is given, export only that domain.
     Returns the path written. Skips write if content is unchanged.
+
+    No-op when the `beliefs_v2_primary` subsystem flag is on: belief-engine v2 then owns
+    resource_user_beliefs.json (written by its nightly ingest/export), and a v1 write here
+    would race it.
     """
+    from app.assistant.utils.subsystem_flags import is_subsystem_enabled
+    if is_subsystem_enabled("beliefs_v2_primary"):
+        logger.info("[export_beliefs] beliefs_v2_primary ON — v2 owns %s; v1 export skipped", _OUTPUT_FILE)
+        return _OUTPUT_DIR / _OUTPUT_FILE
     _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     store = BeliefStore()
 

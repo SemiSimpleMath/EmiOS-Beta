@@ -229,21 +229,6 @@ def _format_daily_context(
 
 _DOMAIN_ORDER = ["routine", "health", "food", "general", "work"]
 
-# Belief keys that must always appear prominently regardless of context.
-# These are chronic, day-shaping facts that agents must never overlook.
-_PINNED_BELIEF_KEYS = {
-    "food.intermittent_fasting",
-    "routine.intermittent_fasting",
-    "health.intermittent_fasting",
-    "health.back_pain",
-    "health.finger_pain",
-    "health.morning_post_nasal_drip",
-    "routine.screen_free_cutoff",
-    "routine.sleep_target",
-    "routine.coffee_pacing",
-    "food.coffee_cutoff_time_1600",
-}
-
 _CONFIDENCE_RANK = {"high": 0, "medium": 1, "low": 2}
 
 # The daily routine is a SCHEDULE. Only schedule/routine-shaping beliefs belong in
@@ -251,8 +236,7 @@ _CONFIDENCE_RANK = {"high": 0, "medium": 1, "low": 2}
 # (recurring routines / wall-clock anchors) + durable_fact, and drop
 # stable_preference (background tastes), episodic_context (one-off past events),
 # transient_state, etc. — which were drowning the real routine items (826 active
-# beliefs collapse to ~290). Pinned belief keys bypass this filter (explicit
-# must-haves). Widen this set if a genuinely schedule-shaping kind shows up.
+# beliefs collapse to ~290). Widen this set if a genuinely schedule-shaping kind shows up.
 _ROUTINE_RELEVANT_KINDS = {"routine_pattern", "durable_fact"}
 
 
@@ -278,32 +262,22 @@ def _render_belief_block(entries: list) -> str:
 
     Scopes to schedule/routine-shaping beliefs via `kind` (see
     _ROUTINE_RELEVANT_KINDS) so background preferences + one-off episodic facts
-    don't drown the actual routine items. Pinned belief keys are always kept,
-    regardless of kind. Extracted from _format_beliefs so it's unit-testable
-    without the live export file.
+    don't drown the actual routine items. Importance rises organically from the
+    upstream evidence ranking (recency/frequency) — there is no hardcoded pin
+    list. Extracted from _format_beliefs so it's unit-testable without the live
+    export file.
     """
     active = [e for e in entries if e.get("statement") and e.get("status", "active") == "active"]
-
-    pinned = [e for e in active if e.get("belief_key", "") in _PINNED_BELIEF_KEYS]
-    rest = [
-        e for e in active
-        if e.get("belief_key", "") not in _PINNED_BELIEF_KEYS
-        and e.get("kind") in _ROUTINE_RELEVANT_KINDS
-    ]
+    rest = [e for e in active if e.get("kind") in _ROUTINE_RELEVANT_KINDS]
 
     def _sort_key(e: dict) -> tuple:
         domain_rank = _DOMAIN_ORDER.index(e.get("domain", "")) if e.get("domain", "") in _DOMAIN_ORDER else len(_DOMAIN_ORDER)
         conf_rank = _CONFIDENCE_RANK.get(e.get("confidence", "low"), 2)
         return (domain_rank, conf_rank)
 
-    pinned.sort(key=_sort_key)
     rest.sort(key=_sort_key)
 
     parts: list[str] = []
-
-    if pinned:
-        parts.append("### Always-apply (chronic, high-impact — never omit these)")
-        parts.extend(format_belief_line(e) for e in pinned)
 
     from collections import defaultdict
     by_domain: dict[str, list] = defaultdict(list)

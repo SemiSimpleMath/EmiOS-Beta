@@ -3,7 +3,8 @@
 The dayflow_routine_writer was fed all ~826 active beliefs, so the actual routine
 items (a weekly timesheet, AC anchors) drowned under 416 background preferences +
 101 one-off episodic facts. It now scopes to routine-relevant `kind`s
-(routine_pattern + durable_fact); pinned belief keys bypass the filter.
+(routine_pattern + durable_fact). Importance rises organically from evidence
+ranking — there is no hardcoded pin list.
 
 Hermetic — renders from a fixture entry list, no live export file. Pre-push guard.
 """
@@ -38,15 +39,3 @@ def test_routine_block_scopes_to_routine_kinds():
     assert "Avoid mustard" not in out                   # stable_preference
     assert "Cancel the Coursera" not in out             # episodic_context
     assert "A deprecated routine" not in out            # deprecated never included
-
-
-def test_pinned_belief_bypasses_kind_filter():
-    # A pinned key with a non-routine kind must still appear.
-    key = next(iter(drs._PINNED_BELIEF_KEYS))
-    entries = [{
-        "belief_key": key, "domain": "food", "kind": "stable_preference",
-        "confidence": "high", "status": "active",
-        "statement": "PINNED must-have appears regardless of kind.",
-    }]
-    out = drs._render_belief_block(entries)
-    assert "PINNED must-have appears regardless of kind." in out

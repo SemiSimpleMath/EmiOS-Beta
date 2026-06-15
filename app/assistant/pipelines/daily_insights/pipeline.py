@@ -29,9 +29,12 @@ class DailyInsightsPipeline:
                 ArchiveDailyTicketsStep(),
                 ArchiveDailyTimelineStep(),
                 ArchiveDailyInsightsStep(),
-                BeliefV2ShadowIngestStep(),     # §3a seam step 2: shadow-ingest enriched items into v2
                 ArchiveDailyAssessmentStep(),
                 ArchiveDailyAssessmentSummaryStep(),
+                # Last: ingest enriched items into v2 + export the belief resource. Placed last so a
+                # fail-loud failure (when v2 is primary) surfaces as pipeline error WITHOUT skipping
+                # the archival steps (the runner breaks on a raising step).
+                BeliefV2ShadowIngestStep(),
             ]
         )
 

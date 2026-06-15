@@ -34,27 +34,6 @@ _WEEKLY_INSIGHTS_PATH = (
 # Belief domains to include in the health status document
 _HEALTH_DOMAINS = {"health", "sleep"}
 
-# Belief keys that are NOT physical/medical — they belong in routine or other contexts.
-# These are excluded even if they appear in a health/sleep domain.
-_EXCLUDED_BELIEF_KEYS = {
-    "health.seyfarth_work_cutoff_1700_no_pings",
-    "health.fri_dog_walk_after_friday_night_meats_zoom",
-    "health.evening_family_time_1800_protected",
-    "health.pet_emergency_jobs_require_explicit_consent",
-    "health.monthly_timesheet_day_first_business_day",
-    "health.fri_friday_night_meats_decompression_policy",
-    "health.wellness_preference_proactive_gentle_nudges_all_day",
-    "health.wellness_avoid_skydiving_extreme_heights",
-    "health.wellness_digital_wellbeing_podcasts_over_doomscrolling",
-    "health.lunch_break_prefer_emi_coding_at_keyboard",
-    "health.nutrition_grocery_staples_ralphs_household",
-    "health.nutrition_grocery_snacks_treats_resist_junk",
-    "health.nutrition_takeout_irvine_breakfast_poached_avoid_snooze",
-    "health.nutrition_snack_preference_triple_cream_brie_water_crackers",
-    "health.dog_yard_access_free_suppress_yard_break_reminders",
-    "health.coffee_preference_sweet_creamy_creamer_room_temp",
-}
-
 _CONFIDENCE_RANK = {"high": 0, "medium": 1, "low": 2}
 
 
@@ -77,7 +56,6 @@ def _format_health_beliefs() -> str:
         if e.get("statement")
         and e.get("status", "active") == "active"
         and e.get("domain", "") in _HEALTH_DOMAINS
-        and e.get("belief_key", "") not in _EXCLUDED_BELIEF_KEYS
     ]
 
     active.sort(key=lambda e: _CONFIDENCE_RANK.get(e.get("confidence", "low"), 2))
