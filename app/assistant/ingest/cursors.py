@@ -54,33 +54,23 @@ class IngestCursorStore:
             raise ValueError("source_key is required")
         if not cursor_value:
             raise ValueError("cursor_value is required")
+        # Serialize through the single application writer (db_manager) so the
+        # frequent boot-time cursor writes queue instead of colliding on the lock.
+        from app.models.db_manager import get_db_manager
         with self._lock:
-            session = get_session()
-            try:
+            with get_db_manager().transaction(op="ingest_cursor.set") as session:
                 row = session.query(IngestCursorRow).filter_by(source_key=source_key).one_or_none()
                 if row is None:
                     row = IngestCursorRow(source_key=source_key)
                 row.cursor_value = cursor_value
                 session.add(row)
-                session.commit()
-            except Exception:
-                session.rollback()
-                raise
-            finally:
-                session.close()
 
     def clear(self, source_key: str) -> None:
         """Delete a cursor row. Used by tests that need a clean starting state."""
         source_key = str(source_key or "").strip()
         if not source_key:
             raise ValueError("source_key is required")
+        from app.models.db_manager import get_db_manager
         with self._lock:
-            session = get_session()
-            try:
+            with get_db_manager().transaction(op="ingest_cursor.clear") as session:
                 session.query(IngestCursorRow).filter_by(source_key=source_key).delete()
-                session.commit()
-            except Exception:
-                session.rollback()
-                raise
-            finally:
-                session.close()

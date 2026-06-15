@@ -239,54 +239,56 @@ def save_to_unified_db(messages, source: str, db_session=None, force_test_db=Fal
     - Inserts new rows.
     - Updates existing rows by id.
     - Caller must provide stable ids for records that may be rewritten later.
+
+    Production writes route through the single application writer (``db_manager``)
+    so the boot-time write storm queues instead of colliding on SQLite's
+    single-writer lock (the 30s busy_timeout). The work is a short upsert (no
+    LLM/HTTP) so it's safe to hold the writer slot. A caller-supplied
+    ``db_session`` keeps its own transaction lifecycle; ``force_test_db`` writes
+    the test DB directly, outside the production queue.
     """
-    own_session = False
-    if db_session is None:
-        db_session = get_session(force_test_db=force_test_db)
-        own_session = True
+    if not messages:
+        logger.debug("No %s messages to save.", source)
+        return
 
-    try:
-        if not messages:
-            logger.debug("No %s messages to save.", source)
-            return
+    records_2026 = []
+    for raw in messages:
+        msg = _coerce_payload(raw)
+        allowed, reason = LogIngestionPolicy.should_persist_payload(source, msg)
+        if not allowed:
+            logger.debug("[%s] Skipping log payload id=%s reason=%s", source, msg.get("id"), reason)
+            continue
 
-        records_2026 = []
-        for raw in messages:
-            msg = _coerce_payload(raw)
-            allowed, reason = LogIngestionPolicy.should_persist_payload(source, msg)
-            if not allowed:
-                logger.debug("[%s] Skipping log payload id=%s reason=%s", source, msg.get("id"), reason)
-                continue
+        record = _to_2026_record(msg, source)
+        if not record.get("id"):
+            logger.warning("[%s] Skipping payload with empty id: %r", source, msg)
+            continue
 
-            record = _to_2026_record(msg, source)
-            if not record.get("id"):
-                logger.warning("[%s] Skipping payload with empty id: %r", source, msg)
-                continue
+        records_2026.append(record)
 
-            records_2026.append(record)
+    if not records_2026:
+        logger.debug("[%s] No messages qualified after policy filter.", source)
+        return
 
-        if not records_2026:
-            logger.debug("[%s] No messages qualified after policy filter.", source)
-            return
+    # Guard against pre-serialized JSON strings in JSON columns.
+    # SQLAlchemy's JSON type auto-serializes dicts; passing a string
+    # causes double-encoding (string-of-JSON stored as JSON string).
+    import json as _json
+    for rec in records_2026:
+        for json_key in ("metadata_json", "data_json"):
+            val = rec.get(json_key)
+            if isinstance(val, str):
+                try:
+                    rec[json_key] = _json.loads(val)
+                except (ValueError, TypeError):
+                    rec[json_key] = None
 
-        # Guard against pre-serialized JSON strings in JSON columns.
-        # SQLAlchemy's JSON type auto-serializes dicts; passing a string
-        # causes double-encoding (string-of-JSON stored as JSON string).
-        import json as _json
-        for rec in records_2026:
-            for json_key in ("metadata_json", "data_json"):
-                val = rec.get(json_key)
-                if isinstance(val, str):
-                    try:
-                        rec[json_key] = _json.loads(val)
-                    except (ValueError, TypeError):
-                        rec[json_key] = None
-
+    def _persist(session) -> None:
         # Detect cross-source ID collisions before upsert.
         rec_ids = [r["id"] for r in records_2026 if r.get("id")]
         if rec_ids:
             from sqlalchemy.sql import select as _select
-            existing_rows = db_session.execute(
+            existing_rows = session.execute(
                 _select(UnifiedLog2026.id, UnifiedLog2026.source)
                 .where(UnifiedLog2026.id.in_(rec_ids))
             ).all()
@@ -306,14 +308,10 @@ def save_to_unified_db(messages, source: str, db_session=None, force_test_db=Fal
         stmt = insert(UnifiedLog2026).values(records_2026)
 
         # On conflict, only mutate fields that legitimately change after a
-        # row's original write (per-room metadata flags written by the
-        # compactor, derived data state, processed flag, attached media
-        # snapshots). Identity-defining fields — source, role, message,
-        # timestamp, room_id, direction, speaker_*, transport_* — are
-        # IMMUTABLE once the row is created. Clobbering them silently
-        # rewrites history: e.g. the room_chat_summary compactor used to
-        # rewrite original `room_ui` rows to `room_summary::<room_id>`,
-        # which made them invisible to the KG resolver's source filter.
+        # row's original write (metadata flags, derived data state, processed
+        # flag, media snapshots). Identity-defining fields — source, role,
+        # message, timestamp, room_id, direction, speaker_*, transport_* — are
+        # IMMUTABLE once the row is created; clobbering them rewrites history.
         update_columns = {
             "processed": stmt.excluded.processed,
             "content_type": stmt.excluded.content_type,
@@ -322,27 +320,41 @@ def save_to_unified_db(messages, source: str, db_session=None, force_test_db=Fal
             "metadata_json": stmt.excluded.metadata_json,
             "data_json": stmt.excluded.data_json,
         }
+        stmt = stmt.on_conflict_do_update(index_elements=["id"], set_=update_columns)
 
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["id"],
-            set_=update_columns,
-        )
-
-        result = db_session.execute(stmt)
-        db_session.commit()
-
+        result = session.execute(stmt)
         logger.debug(
-            "[%s] Messages saved. Rows affected unified_log_2026=%s",
-            source,
-            result.rowcount,
+            "[%s] Messages saved. Rows affected unified_log_2026=%s", source, result.rowcount,
         )
 
+    try:
+        if db_session is not None:
+            # Caller owns the session + transaction lifecycle.
+            _persist(db_session)
+            db_session.commit()
+        elif force_test_db:
+            # Explicit test DB — own lifecycle, not the production writer queue.
+            session = get_session(force_test_db=True)
+            try:
+                _persist(session)
+                session.commit()
+            except Exception:
+                session.rollback()
+                raise
+            finally:
+                session.close()
+        else:
+            # Production: serialize through the single application writer so the
+            # boot-time storm queues instead of colliding on the SQLite lock.
+            from app.models.db_manager import get_db_manager
+            with get_db_manager().transaction(op=f"save_to_unified_db:{source}") as session:
+                _persist(session)
     except Exception as e:
-        db_session.rollback()
+        if db_session is not None:
+            try:
+                db_session.rollback()
+            except Exception:
+                pass
         logger.error("[%s] Error saving messages: %s", source, e)
         logger.error(traceback.format_exc())
         raise
-
-    finally:
-        if own_session:
-            db_session.close()
