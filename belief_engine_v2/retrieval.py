@@ -144,7 +144,10 @@ def _recency(last_observed: Optional[str], now: datetime) -> float:
         last = datetime.fromisoformat(last_observed)
     except Exception:
         return 0.5
-    age_days = max(0.0, (now - last).total_seconds() / 86400.0)
+    # Compare tz-naively: real timestamps mix naive (date-only source_date) and
+    # aware (full created_at) forms; recency is day-scale, so drop tz (as the
+    # store's _age_days does) rather than raise on a naive/aware subtraction.
+    age_days = max(0.0, (now.replace(tzinfo=None) - last.replace(tzinfo=None)).total_seconds() / 86400.0)
     return 0.5 ** (age_days / _RECENCY_HALF_LIFE_DAYS)
 
 
