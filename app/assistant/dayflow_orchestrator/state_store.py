@@ -294,6 +294,7 @@ def build_plan_synopsis_dicts(plan_synopses: List[Dict[str, Any]]) -> List[Dict[
             step_outline = [str(v).strip() for v in step_outline_raw if str(v).strip()]
         else:
             step_outline = []
+        based_on = [str(x).strip() for x in (raw.get("based_on") or []) if str(x).strip()]
 
         item_id = f"plan_synopsis:{plan_id}"
         summary = f"{plan_id}: {objective}"
@@ -308,6 +309,7 @@ def build_plan_synopsis_dicts(plan_synopses: List[Dict[str, Any]]) -> List[Dict[
             "synopsis": synopsis,
             "success_criteria": success_criteria,
             "step_outline": step_outline,
+            "based_on": based_on,
             "importance": "medium",
             "actionability": "context_only",
             "state": "active",

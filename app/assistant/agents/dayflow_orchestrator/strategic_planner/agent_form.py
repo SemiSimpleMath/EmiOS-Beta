@@ -13,12 +13,30 @@ class PlanSynopsis(BaseModel):
         default_factory=list,
         description="Ordered high-level outline of the plan.",
     )
+    based_on: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Provenance — ids of the sources this plan is based on (artifact_id, plan_id, a concern, a "
+            "belief, etc.). Leave EMPTY if it is your own original observation; the plan's own id then "
+            "stands as the origin. Re-state these whenever you change the plan so its provenance is not lost."
+        ),
+    )
 
 
 class PlannedTask(BaseModel):
     task_id: str = Field(description="Reference label for this task. Use the short numeric id shown in plan status for existing tasks. For new tasks use any short label — the system will assign a canonical id.")
     plan_id: Optional[str] = Field(default=None, description="REQUIRED for plan tasks. The parent plan id this task belongs to. Null only for standalone tasks with no parent plan.")
     task: str = Field(description="High-level task intent, constraints, and expected outcome.")
+    based_on: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Provenance — ids of the sources this task is based on: the artifact_id of an email/item "
+            "you are acting on, a plan_id, a subconscious concern, a belief, etc. Leave EMPTY if this is "
+            "your OWN original observation that no surfaced source prompted (e.g. 'it's summer and hot — "
+            "make sure the AC works') — the task's own id then stands as a new origin. Cite only sources "
+            "you are genuinely acting on."
+        ),
+    )
     dependencies: List[str] = Field(
         default_factory=list,
         description="List of task ids that this task depends on, if any.",

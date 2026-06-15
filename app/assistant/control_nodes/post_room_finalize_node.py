@@ -714,6 +714,12 @@ class PostRoomFinalizeNode(ControlNode):
                     else []
                 )
 
+            # Provenance: the planner's based_on, or preserve the existing one on update
+            # (provenance is set at creation and must not be wiped by a later re-emission).
+            based_on = [str(x).strip() for x in (raw.get("based_on") or []) if str(x).strip()]
+            if not based_on and isinstance(existing_meta.get("based_on"), list):
+                based_on = existing_meta.get("based_on")
+
             metadata: Dict[str, Any] = dict(existing_meta)
             metadata.update(
                 {
@@ -733,6 +739,7 @@ class PostRoomFinalizeNode(ControlNode):
                     else [],
                     "plan_id": str(raw.get("plan_id") or existing_meta.get("plan_id") or "").strip(),
                     "blocked_by": blocked_by,
+                    "based_on": based_on,
                     "wake_signals": raw["wake_signals"]
                     if "wake_signals" in raw and isinstance(raw["wake_signals"], list)
                     else (
