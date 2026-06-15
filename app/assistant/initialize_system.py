@@ -158,6 +158,34 @@ def initialize_system():
     except Exception as e:
         logger.error("Native singleton pre-warm failed (chroma/embedder degraded): %s", e)
 
+    # Pre-warm the LLM provider SDKs for every provider that has a real API key, so
+    # the FIRST agent call after boot doesn't pay the cold (lazy) SDK-import cost.
+    # Provider-agnostic: a deploy warms only what it's configured for — a missing or
+    # placeholder key is skipped (not every install uses Gemini). OpenAI's SDK is
+    # imported at llm_client module load, so it's already warm. Best-effort: a warm
+    # failure (e.g. SDK not installed) is logged, never fatal.
+    try:
+        import os as _os
+        from app.services.llm_client import _is_placeholder_api_key
+        _llm_warmed = []
+        if not _is_placeholder_api_key(_os.environ.get("GOOGLE_API_KEY")):
+            try:
+                from google import genai as _genai            # noqa: F401 — heavy lazy import
+                from google.genai import types as _gtypes      # noqa: F401
+                _llm_warmed.append("gemini")
+            except Exception as e:
+                logger.warning("LLM pre-warm: gemini SDK import failed (non-fatal): %s", e)
+        if not _is_placeholder_api_key(_os.environ.get("ANTHROPIC_API_KEY")):
+            try:
+                import anthropic as _anthropic                 # noqa: F401
+                _llm_warmed.append("anthropic")
+            except Exception as e:
+                logger.warning("LLM pre-warm: anthropic SDK import failed (non-fatal): %s", e)
+        if _llm_warmed:
+            logger.info("LLM provider SDKs pre-warmed: %s", _llm_warmed)
+    except Exception as e:
+        logger.error("LLM SDK pre-warm step failed (non-fatal): %s", e)
+
     # Camera dispatch is wired declaratively as the camera_dispatch routine
     # in configs/routines.json (trigger.type=event, topic=ring_snapshot_captured).
     # Subscriptions happen inside RoutineManager.refresh(), but the
@@ -202,6 +230,7 @@ def initialize_system():
         ingest_service = IngestService(
             sources=[UnifiedLogSource(), EmailRepoSource()],
             poll_interval_seconds=120,
+            startup_delay_seconds=45,   # quiet window after boot before the first poll
         )
         ServiceLocator.register("ingest_service", ingest_service)
 

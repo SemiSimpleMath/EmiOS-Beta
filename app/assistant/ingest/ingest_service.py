@@ -39,11 +39,16 @@ class IngestService:
         sources: List[IngestSource],
         *,
         poll_interval_seconds: int = 120,
+        startup_delay_seconds: int = 0,
     ) -> None:
         if not sources:
             raise ValueError("IngestService requires at least one source")
         self._sources: List[IngestSource] = list(sources)
         self._poll_interval_seconds = max(5, int(poll_interval_seconds))
+        # Optional quiet window before the FIRST poll. Default 0 (immediate, as
+        # before — keeps tests deterministic); production sets it so the boot poll
+        # doesn't contend with a user's first interaction right after restart.
+        self._startup_delay_seconds = max(0, int(startup_delay_seconds))
         self._subscribers: List[IngestSubscriber] = []
         self._subscribers_lock = threading.RLock()
 
@@ -142,6 +147,10 @@ class IngestService:
         )
 
     def _run_loop(self) -> None:
+        if self._startup_delay_seconds:
+            # The loop polls at the top, so without this the first poll fires
+            # immediately on start; hold it until the post-boot storm settles.
+            self._stop_event.wait(self._startup_delay_seconds)
         while not self._stop_event.is_set():
             tick_started = time.monotonic()
             try:

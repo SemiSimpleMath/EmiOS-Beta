@@ -31,6 +31,11 @@ DEBOUNCE_SECONDS = 60
 MIN_GAP_SECONDS = 120          # mutual-exclusion floor; applies to scheduled-item ticks
 POKE_MIN_INTERVAL_SECONDS = 600  # delta/poke wakes throttle to >= this since last run (10 min)
 MAX_CEILING_SECONDS = 1800
+# Delay the FIRST tick after boot (vs a few seconds) so it doesn't pile onto the
+# post-restart routine/ingest fan-out and a user's first interaction, all competing
+# for the CPU/GIL + DB writer in the first minute. Overnight items waited all night;
+# an extra ~45s on the first tick is immaterial. Aligns with the ~45s routine grace.
+STARTUP_TICK_DELAY_SECONDS = 45
 
 # A waiting/watching item whose reactivate_at_utc is overdue by more than
 # this is treated as broken-and-stuck — it won't drag the scheduler into a
@@ -61,8 +66,8 @@ class DayflowScheduler:
             return
         self._started = True
         self._subscribe_events()
-        self._schedule_tick(delay_seconds=10, reason="startup")
-        logger.info("[DayflowScheduler] Started — initial tick in 10s")
+        self._schedule_tick(delay_seconds=STARTUP_TICK_DELAY_SECONDS, reason="startup")
+        logger.info("[DayflowScheduler] Started — initial tick in %ss", STARTUP_TICK_DELAY_SECONDS)
 
     def stop(self) -> None:
         self._started = False
