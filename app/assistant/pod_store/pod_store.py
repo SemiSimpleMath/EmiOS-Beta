@@ -92,9 +92,13 @@ class PodStore:
         checks `pod_kind_registry.is_kg_admissible()` when writing edges
         with `datapod:*` endpoints.
         """
+        # Serialize through the single application writer (db_manager) so pod
+        # minting — pod_classifier fires it during the post-boot storm — queues
+        # instead of colliding on SQLite's single-writer lock. The Pod (incl. any
+        # embedding) is built upstream; this is a short read-modify-write.
+        from app.models.db_manager import get_db_manager
         with self._lock:
-            session = get_session()
-            try:
+            with get_db_manager().transaction(op="pod_store.put") as session:
                 row = session.query(PodRow).filter_by(pod_id=pod.pod_id).one_or_none()
                 if row is None:
                     row = PodRow(pod_id=pod.pod_id)
@@ -112,12 +116,6 @@ class PodStore:
                 if pod.importance is not None:
                     row.importance = float(pod.importance)
                 session.add(row)
-                session.commit()
-            except Exception:
-                session.rollback()
-                raise
-            finally:
-                session.close()
 
     def get(self, pod_id: str) -> Optional[Pod]:
         with self._lock:
@@ -140,9 +138,9 @@ class PodStore:
         the rating (distinct from omitting it). Raises KeyError if no pod with
         ``pod_id`` exists (fail loud — the caller passed a bad id).
         """
+        from app.models.db_manager import get_db_manager
         with self._lock:
-            session = get_session()
-            try:
+            with get_db_manager().transaction(op="pod_store.update_curation") as session:
                 row = session.query(PodRow).filter_by(pod_id=pod_id).one_or_none()
                 if row is None:
                     raise KeyError(f"pod {pod_id!r} not found")
@@ -151,12 +149,6 @@ class PodStore:
                 if min_authority is not _UNSET:
                     row.min_authority = int(min_authority)
                 session.add(row)
-                session.commit()
-            except Exception:
-                session.rollback()
-                raise
-            finally:
-                session.close()
 
     def query(
         self,
