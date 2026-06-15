@@ -196,7 +196,7 @@ def beliefs_for_context(
     def _has(_n):
         return store.conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (_n,)).fetchone() is not None
-    _has_cat, _has_ovr = _has("belief_category"), _has("belief_user_override")
+    _has_cat, _has_ovr, _has_sid = _has("belief_category"), _has("belief_user_override"), _has("belief_short_id")
     _cols = ["b.*", "c.domain" if _has_cat else "NULL AS domain"]
     _joins = " LEFT JOIN belief_category c ON c.belief_id = b.belief_id" if _has_cat else ""
     if _has_ovr:
@@ -206,6 +206,11 @@ def beliefs_for_context(
     else:
         _cols += ["NULL AS _stmt_ovr", "0 AS locked"]
         _where = "b.status='active'"
+    if _has_sid:
+        _cols += ["s.short_id AS _short_id_n"]
+        _joins += " LEFT JOIN belief_short_id s ON s.belief_id = b.belief_id"
+    else:
+        _cols += ["NULL AS _short_id_n"]
     rows = store.conn.execute(
         f"SELECT {', '.join(_cols)} FROM beliefs b{_joins} WHERE {_where}").fetchall()
 
@@ -221,6 +226,8 @@ def beliefs_for_context(
         # owner statement edit (belief_user_override) wins over the projected text
         stmt = item.pop("_stmt_ovr", None) or item.get("statement_nl")
         item["statement_nl"] = stmt
+        _sid = item.pop("_short_id_n", None)
+        item["short_id"] = f"b{int(_sid)}" if _sid is not None else None
         aw = json.loads(item["applies_when"]) if item.get("applies_when") else None
         t = temporal_applicability(aw, dt, horizon)   # SOFT score — never excludes
 

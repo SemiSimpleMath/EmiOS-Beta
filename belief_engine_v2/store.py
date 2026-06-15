@@ -137,6 +137,15 @@ CREATE TABLE IF NOT EXISTS belief_merges (
     detail      TEXT,                         -- JSON (verifier reason, similarity)
     created_at  TEXT
 );
+
+-- LLM-citable short ids: a stable, compact handle per belief (for prompts + provenance
+-- citation), mapped to the durable belief_id (which is a hash). Survives projection rebuilds;
+-- assigned monotonically by _assign_short_ids() at the end of rebuild_projection.
+CREATE TABLE IF NOT EXISTS belief_short_id (
+    belief_id   TEXT PRIMARY KEY,
+    short_id    INTEGER NOT NULL UNIQUE,
+    assigned_at TEXT
+);
 """
 
 _RESOLVER_VERSION = "v0-stub"
@@ -330,8 +339,45 @@ class Store:
             "INSERT INTO justifications (belief_id,observation_id,sign,raw_weight,weight,occurred_at,source) "
             "VALUES (?,?,?,?,?,?,?)", just_rows,
         )
+        self._assign_short_ids()
         self.conn.commit()
         return len(rows)
+
+    def _assign_short_ids(self) -> None:
+        """Ensure every belief in the projection has a stable, LLM-citable short id
+        (belief_short_id side table, keyed on the durable belief_id). Assigns monotonic
+        ids to any belief lacking one; existing ids are never reused or changed. Idempotent
+        and cheap — usually a no-op after the first rebuild. Does NOT commit (the caller does)."""
+        missing = [r[0] for r in self.conn.execute(
+            "SELECT b.belief_id FROM beliefs b "
+            "LEFT JOIN belief_short_id s ON s.belief_id = b.belief_id "
+            "WHERE s.belief_id IS NULL")]
+        if not missing:
+            return
+        start = int(self.conn.execute(
+            "SELECT COALESCE(MAX(short_id), 0) FROM belief_short_id").fetchone()[0]) + 1
+        now = _now()
+        self.conn.executemany(
+            "INSERT INTO belief_short_id (belief_id, short_id, assigned_at) VALUES (?,?,?)",
+            [(bid, start + i, now) for i, bid in enumerate(missing)],
+        )
+
+    def short_id_for(self, belief_id: str) -> Optional[str]:
+        """The LLM-citable short handle ('b<n>') for a belief_id, or None if unassigned."""
+        r = self.conn.execute(
+            "SELECT short_id FROM belief_short_id WHERE belief_id=?", (belief_id,)).fetchone()
+        return f"b{r[0]}" if r else None
+
+    def belief_id_for_short(self, short: str) -> Optional[str]:
+        """Resolve a short handle ('b7' or '7') back to its durable belief_id, or None."""
+        s = str(short or "").strip().lower()
+        if s.startswith("b"):
+            s = s[1:]
+        if not s.isdigit():
+            return None
+        r = self.conn.execute(
+            "SELECT belief_id FROM belief_short_id WHERE short_id=?", (int(s),)).fetchone()
+        return r[0] if r else None
 
     def beliefs_as_of(self, as_of, now=None) -> List[Dict[str, Any]]:
         """Transaction-time travel (#7): what the engine believed as of system time `as_of`,
