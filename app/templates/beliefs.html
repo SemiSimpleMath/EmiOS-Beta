@@ -15,20 +15,54 @@
     </div>
   </header>
 
-  <div class="bx-filters">
-    <input id="f-q" type="search" placeholder="search statements&hellip;">
-    <select id="f-domain"><option value="">all domains</option></select>
-    <select id="f-kind"><option value="">all kinds</option></select>
-    <select id="f-status">
-      <option value="active">active</option>
-      <option value="all">all statuses</option>
-      <option value="dormant">dormant</option>
-    </select>
-    <label class="bx-chk"><input type="checkbox" id="f-suppressed"> show suppressed</label>
-    <button id="f-refresh">refresh</button>
-  </div>
+  <nav class="bx-tabs">
+    <button class="bx-tab is-active" data-tab="browse">Browse</button>
+    <button class="bx-tab" data-tab="trends">Trends</button>
+  </nav>
 
-  <div id="bx-list" class="bx-list"></div>
+  <section id="bx-browse" class="bx-panel">
+    <div class="bx-filters">
+      <input id="f-q" type="search" placeholder="search statements&hellip;">
+      <select id="f-domain"><option value="">all domains</option></select>
+      <select id="f-kind"><option value="">all kinds</option></select>
+      <select id="f-status">
+        <option value="active">active</option>
+        <option value="all">all statuses</option>
+        <option value="dormant">dormant</option>
+      </select>
+      <label class="bx-chk"><input type="checkbox" id="f-suppressed"> show suppressed</label>
+      <button id="f-refresh">refresh</button>
+    </div>
+    <div id="bx-list" class="bx-list"></div>
+  </section>
+
+  <section id="bx-trends" class="bx-panel hidden">
+    <div class="bx-filters">
+      <label class="bx-chk">window
+        <select id="t-window">
+          <option value="7">7 days</option>
+          <option value="21" selected>21 days</option>
+          <option value="60">60 days</option>
+        </select>
+      </label>
+      <button id="t-refresh">refresh</button>
+      <span class="bx-sub" id="t-window-label"></span>
+    </div>
+    <div class="bx-trends">
+      <div class="bx-trend-col">
+        <h3 class="bx-trend-h up">&#8593; Trending up <span class="bx-hint">gaining ground</span></h3>
+        <div id="t-up" class="bx-list"></div>
+      </div>
+      <div class="bx-trend-col">
+        <h3 class="bx-trend-h warn">&#9888; Challenged <span class="bx-hint">losing ground</span></h3>
+        <div id="t-challenged" class="bx-list"></div>
+      </div>
+      <div class="bx-trend-col">
+        <h3 class="bx-trend-h gone">&#8635; Recently faded <span class="bx-hint">left the active set</span></h3>
+        <div id="t-changed" class="bx-list"></div>
+      </div>
+    </div>
+  </section>
 
   <div id="bx-drawer" class="bx-drawer hidden">
     <div class="bx-drawer-inner">

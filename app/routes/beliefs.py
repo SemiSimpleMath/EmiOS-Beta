@@ -17,7 +17,7 @@ planner (and future consumers) and the pipeline can't silently re-derive over it
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from flask import Blueprint, jsonify, render_template, request
@@ -34,6 +34,21 @@ beliefs_admin_bp.before_request(reject_if_not_local)
 
 # Canonical domain vocabulary (configs/belief_domains.yaml ids).
 _DOMAINS = ["routine", "health", "food", "meal", "communication", "sleep", "work", "general"]
+
+# Trends (the dashboard's second tab) read the v2 observation log directly. Only real
+# user-driven signal counts toward movement — the engine's own bookkeeping (seed replay,
+# canonicalization, deprecation) is excluded so the counts reflect what the user actually did.
+_REAL_SOURCES = ("daily_insight", "daily_insights", "ticket_acceptance", "ticket_rejection", "user_comment")
+_TREND_WINDOW_DAYS = 21
+_TREND_MIN_NET = 2
+_TREND_LIMIT = 15
+
+
+def _int_arg(name: str, default: int) -> int:
+    raw = request.args.get(name)
+    if raw is None or not raw.strip():
+        return default
+    return int(raw.strip())
 
 
 def _db_path() -> Path:
@@ -115,6 +130,79 @@ def beliefs_list():
         "domains": _DOMAINS,
         "kinds": kinds,
         "domain_counts": dcounts,
+    })
+
+
+@beliefs_admin_bp.route("/api/beliefs/trends")
+def beliefs_trends():
+    """v2 belief movement over a recent window (read straight from belief_v2_live.db):
+      - trending_up      : net-positive real-signal beliefs (gaining ground)
+      - challenged       : real-signal challenges >= confirms (losing ground / contested)
+      - recently_changed : beliefs that left the active set (faded to dormant) in the window
+    Rows open the same edit drawer as Browse, so the evidence trail is shared."""
+    days = _int_arg("days", _TREND_WINDOW_DAYS)
+    min_net = _int_arg("min_net", _TREND_MIN_NET)
+    limit = _int_arg("limit", _TREND_LIMIT)
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat()
+    src_ph = ",".join("?" for _ in _REAL_SOURCES)
+
+    windowed = (
+        " SELECT b.belief_id, COALESCE(o.statement_override, b.statement_nl) AS statement,"
+        "        c.domain, b.kind, b.status, b.obs_count, b.last_observed,"
+        "        SUM(CASE WHEN ob.polarity='affirm' THEN 1 ELSE 0 END) AS confirms,"
+        "        SUM(CASE WHEN ob.polarity='contradict' THEN 1 ELSE 0 END) AS challenges"
+        " FROM beliefs b"
+        " JOIN observations ob ON ob.resolves_to = b.belief_id"
+        " LEFT JOIN belief_category c ON c.belief_id = b.belief_id"
+        " LEFT JOIN belief_user_override o ON o.belief_id = b.belief_id"
+        " WHERE b.status='active' AND COALESCE(o.suppressed,0)=0"
+        f"   AND ob.occurred_at >= ? AND ob.source IN ({src_ph})"
+        " GROUP BY b.belief_id"
+    )
+    conn = _connect()
+    try:
+        trending_up = conn.execute(
+            windowed + " HAVING (confirms - challenges) >= ?"
+                       " ORDER BY (confirms - challenges) DESC, confirms DESC LIMIT ?",
+            [cutoff, *_REAL_SOURCES, min_net, limit]).fetchall()
+        # Challenged = engine-flagged contested beliefs (v2's native dispute signal, all-time)
+        # plus active beliefs that lost ground in the window; contested first, deduped.
+        losing = conn.execute(
+            windowed + " HAVING challenges > 0 AND challenges >= confirms"
+                       " ORDER BY (challenges - confirms) DESC, challenges DESC LIMIT ?",
+            [cutoff, *_REAL_SOURCES, limit]).fetchall()
+        contested = conn.execute(
+            " SELECT b.belief_id, COALESCE(o.statement_override, b.statement_nl) AS statement,"
+            "        c.domain, b.kind, b.status, b.obs_count, b.last_observed,"
+            "        SUM(CASE WHEN ob.polarity='affirm' THEN 1 ELSE 0 END) AS confirms,"
+            "        SUM(CASE WHEN ob.polarity='contradict' THEN 1 ELSE 0 END) AS challenges"
+            " FROM beliefs b JOIN observations ob ON ob.resolves_to = b.belief_id"
+            " LEFT JOIN belief_category c ON c.belief_id = b.belief_id"
+            " LEFT JOIN belief_user_override o ON o.belief_id = b.belief_id"
+            " WHERE b.status='contested' AND COALESCE(o.suppressed,0)=0"
+            " GROUP BY b.belief_id ORDER BY challenges DESC LIMIT ?", [limit]).fetchall()
+        seen, challenged = set(), []
+        for r in [*contested, *losing]:
+            if r["belief_id"] in seen:
+                continue
+            seen.add(r["belief_id"])
+            challenged.append(r)
+        challenged = challenged[:limit]
+        recently_changed = conn.execute(
+            " SELECT b.belief_id, COALESCE(o.statement_override, b.statement_nl) AS statement,"
+            "        c.domain, b.kind, b.status, b.obs_count, b.last_observed AS changed_on"
+            " FROM beliefs b"
+            " LEFT JOIN belief_category c ON c.belief_id = b.belief_id"
+            " LEFT JOIN belief_user_override o ON o.belief_id = b.belief_id"
+            " WHERE b.status='dormant' AND b.last_observed >= ?"
+            " ORDER BY b.last_observed DESC LIMIT ?", [cutoff, limit]).fetchall()
+    finally:
+        conn.close()
+    return jsonify({
+        "window_days": days,
+        "trending_up": [dict(r) for r in trending_up],
+        "challenged": [dict(r) for r in challenged],
+        "recently_changed": [dict(r) for r in recently_changed],
     })
 
 

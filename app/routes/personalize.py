@@ -23,7 +23,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any, Dict, List
 
-from flask import Blueprint, jsonify, render_template, request
+from flask import Blueprint, jsonify, redirect, render_template, request
 from sqlalchemy import text as _sql
 
 from app.assistant.utils.logging_config import get_logger
@@ -195,7 +195,10 @@ def personalize_landing():
 
 @personalize_bp.route("/personalize/beliefs")
 def personalize_beliefs():
-    return render_template("personalize_beliefs.html")
+    # Beliefs moved to the v2 dashboard at /beliefs (Browse + Trends, served by
+    # beliefs_admin_bp). Redirect so the old menu link / personalize tile still land on
+    # the live page. The v1 trend endpoints below are retained but no longer page-wired.
+    return redirect("/beliefs")
 
 
 @personalize_bp.route("/api/personalize/beliefs/trends")

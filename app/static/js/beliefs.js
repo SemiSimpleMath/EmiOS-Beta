@@ -131,6 +131,59 @@ async function save() {
   load();
 }
 
+// ── Trends tab ──────────────────────────────────────────────────────────────
+let TRENDS_LOADED = false;
+
+function showTab(name) {
+  document.querySelectorAll(".bx-tab").forEach((t) =>
+    t.classList.toggle("is-active", t.dataset.tab === name));
+  $("#bx-browse").classList.toggle("hidden", name !== "browse");
+  $("#bx-trends").classList.toggle("hidden", name !== "trends");
+  if (name === "trends" && !TRENDS_LOADED) loadTrends();
+}
+
+async function loadTrends() {
+  const days = $("#t-window").value;
+  const r = await fetch("/api/beliefs/trends?days=" + encodeURIComponent(days));
+  const data = await r.json();
+  TRENDS_LOADED = true;
+  $("#t-window-label").textContent = `over the last ${data.window_days} days`;
+  renderTrend("#t-up", data.trending_up, "up");
+  renderTrend("#t-challenged", data.challenged, "warn");
+  renderTrend("#t-changed", data.recently_changed, "gone");
+}
+
+function renderTrend(sel, rows, mode) {
+  const c = $(sel);
+  c.innerHTML = "";
+  if (!rows || !rows.length) {
+    const msg = mode === "up" ? "Nothing gaining ground in this window."
+      : mode === "warn" ? "Nothing losing ground — steady."
+      : "Nothing recently faded.";
+    c.appendChild(el("div", "bx-empty", msg));
+    return;
+  }
+  rows.forEach((b) => {
+    const row = el("div", "bx-item");
+    const main = el("div", "bx-item-main");
+    main.appendChild(el("div", "bx-stmt", b.statement));
+    const tags = el("div", "bx-tags");
+    if (b.domain) tags.appendChild(el("span", "bx-badge dom", b.domain));
+    if (mode === "gone") {
+      tags.appendChild(el("span", "bx-badge", "faded"));
+      if (b.changed_on) tags.appendChild(el("span", "bx-badge date", String(b.changed_on).slice(0, 10)));
+    } else {
+      tags.appendChild(el("span", "bx-badge " + (mode === "warn" ? "netdown" : "netup"),
+        `+${b.confirms || 0} / -${b.challenges || 0}`));
+      tags.appendChild(el("span", "bx-badge obs", `${b.obs_count || 0}× total`));
+    }
+    main.appendChild(tags);
+    row.appendChild(main);
+    row.addEventListener("click", () => openDrawer(b.belief_id));
+    c.appendChild(row);
+  });
+}
+
 $("#f-refresh").addEventListener("click", load);
 $("#f-q").addEventListener("keydown", (e) => { if (e.key === "Enter") load(); });
 ["f-domain", "f-kind", "f-status", "f-suppressed"].forEach((id) =>
@@ -138,5 +191,10 @@ $("#f-q").addEventListener("keydown", (e) => { if (e.key === "Enter") load(); })
 $("#bx-close").addEventListener("click", () => $("#bx-drawer").classList.add("hidden"));
 $("#d-save").addEventListener("click", save);
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("#bx-drawer").classList.add("hidden"); });
+
+document.querySelectorAll(".bx-tab").forEach((t) =>
+  t.addEventListener("click", () => showTab(t.dataset.tab)));
+$("#t-refresh").addEventListener("click", loadTrends);
+$("#t-window").addEventListener("change", loadTrends);
 
 load();
