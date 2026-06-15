@@ -515,9 +515,27 @@ class ScopeAdapter:
     ) -> ScopeContext:
         narrowing = manager_config.get("scope_contract")
         per_manager_rule = (scope.tools.per_manager or {}).get(manager_name)
-        # per_manager applies even when the manager declares no scope_contract of
-        # its own — it is the SCOPE's authoritative narrowing of this manager.
-        if not isinstance(narrowing, dict) and per_manager_rule is None:
+
+        # A manager's OWN tool surface: an explicit scope_contract.tools.allowed_tools
+        # if it declares one, else the manager's config `tools.allowed_tools`. Being
+        # GRANTED a manager (named in the parent's allow-list, or a parent ["all"])
+        # grants its WHOLE surface — NOT an intersection with the parent's narrowed
+        # leaf list. Reading the config surface here is the fix for the starvation
+        # bug: a sub-manager reached through a narrowed parent
+        # (master_room -> emi_team -> sandbox) used to inherit the parent's small
+        # allow-list and lose its own tools, because only scope_contract.allowed_tools
+        # (which most managers don't declare) triggered the grant.
+        _sc_tools = narrowing.get("tools") if isinstance(narrowing, dict) and isinstance(narrowing.get("tools"), dict) else {}
+        _cfg_tools = manager_config.get("tools") if isinstance(manager_config.get("tools"), dict) else {}
+        manager_own = None
+        if "allowed_tools" in _sc_tools:
+            manager_own = _as_str_list(_sc_tools.get("allowed_tools"))
+        elif "allowed_tools" in _cfg_tools:
+            manager_own = _as_str_list(_cfg_tools.get("allowed_tools"))
+
+        # Nothing to narrow: no scope_contract, no per_manager rule, and no
+        # self-declared surface -> inherit the scope unchanged.
+        if not isinstance(narrowing, dict) and per_manager_rule is None and manager_own is None:
             return scope
         if not isinstance(narrowing, dict):
             narrowing = {}
@@ -525,30 +543,26 @@ class ScopeAdapter:
         try:
             payload = scope.model_dump()
             tools_cfg = narrowing.get("tools") if isinstance(narrowing.get("tools"), dict) else {}
+
+            if manager_own is not None:
+                # The inherited allow-list is a CEILING.
+                #   - parent ["all"]         -> the manager's own surface stands.
+                #   - manager_name in parent -> the parent GRANTED this manager, so
+                #     its whole surface is allowed (granting a manager grants its
+                #     subtree, NOT an intersection with the parent's leaf list) —
+                #     this is what stops a granted sub-manager from being starved.
+                #   - otherwise              -> bounded by the ceiling (intersection).
+                #     Empty parent -> [] ("allow []" => nothing) keeps the breach wall.
+                # blocked_tools still UNION below, so denylists keep propagating.
+                parent_allowed = _as_str_list(payload["tools"].get("allowed_tools") or [])
+                if _is_all_marker(parent_allowed) or manager_name in set(parent_allowed):
+                    payload["tools"]["allowed_tools"] = manager_own
+                else:
+                    payload["tools"]["allowed_tools"] = _intersect_allowed_tools(
+                        parent_allowed, manager_own
+                    )
+
             if tools_cfg:
-                if "allowed_tools" in tools_cfg:
-                    manager_own = _as_str_list(tools_cfg.get("allowed_tools"))
-                    # The inherited allow-list is a CEILING — a manager's own
-                    # scope_contract may NARROW it but must never WIDEN it.
-                    # (The old unconditional REPLACE turned a fail-closed
-                    # `allowed_tools: []` room into a fully open one: its
-                    # switchboard reached emi_team -> personal_admin -> send_email
-                    # despite the room granting nothing.)
-                    #   - parent ["all"]          -> the manager's own surface stands.
-                    #   - manager_name in parent  -> the parent explicitly GRANTED
-                    #     this manager, so its whole declared subtree is allowed
-                    #     ("allow [personal_admin_manager]" => everything under it).
-                    #   - otherwise               -> bounded by the ceiling
-                    #     (intersection). Empty parent -> [] ("allow []" => nothing).
-                    # blocked_tools still UNION below, so denylists keep
-                    # propagating regardless of this allow logic.
-                    parent_allowed = _as_str_list(payload["tools"].get("allowed_tools") or [])
-                    if _is_all_marker(parent_allowed) or manager_name in set(parent_allowed):
-                        payload["tools"]["allowed_tools"] = manager_own
-                    else:
-                        payload["tools"]["allowed_tools"] = _intersect_allowed_tools(
-                            parent_allowed, manager_own
-                        )
                 if "blocked_tools" in tools_cfg:
                     blocked = _as_str_list(tools_cfg.get("blocked_tools"))
                     payload["tools"]["blocked_tools"] = list({*payload["tools"].get("blocked_tools", []), *blocked})

@@ -420,6 +420,60 @@ def test_per_manager_allow_empty_list_blocks_everything():
     assert visible == []
 
 
+# ---------------------------------------------------------------------------
+# Granted sub-manager keeps its OWN surface (starvation fix, 2026-06-13)
+# ---------------------------------------------------------------------------
+
+def _narrow_cfg(scope: ScopeContext, manager_name: str, surface: list[str]) -> ScopeContext:
+    """Narrow for a manager that declares its own tool surface via config
+    tools.allowed_tools (what a real manager config carries)."""
+    return ScopeAdapter()._apply_manager_narrowing(
+        scope=scope, manager_name=manager_name,
+        manager_config={"tools": {"allowed_tools": surface}})
+
+
+def test_granted_submanager_keeps_own_surface():
+    """A sub-manager NAMED in the parent's allow-list runs on its OWN config
+    surface — not an intersection with the parent's narrow list. This is the
+    starvation fix: sandbox reached via emi_team used to lose execute_code /
+    mint_pod because the parent's 16-tool list intersected them away."""
+    parent = ScopeContext(
+        scope_id="s", owner_id="u", actor_id="a", surface="internal",
+        tools=ScopeToolPolicy(allowed_tools=["sandbox_manager", "pod_search", "web_manager"]),
+        approval=ScopeApprovalPolicy(authority_level=99),
+    )
+    narrowed = _narrow_cfg(parent, "sandbox_manager", ["execute_code", "pod_search", "pod_fetch"])
+    # execute_code / pod_fetch are in the manager's OWN surface but NOT the
+    # parent's narrow list — they survive because the manager was granted.
+    assert set(narrowed.tools.allowed_tools) == {"execute_code", "pod_search", "pod_fetch"}
+
+
+def test_ungranted_submanager_bounded_by_ceiling():
+    """A manager NOT named in the parent's allow-list is still bounded by the
+    inherited ceiling (intersection) — the breach wall holds."""
+    parent = ScopeContext(
+        scope_id="s", owner_id="u", actor_id="a", surface="internal",
+        tools=ScopeToolPolicy(allowed_tools=["pod_search"]),  # does NOT name sandbox_manager
+        approval=ScopeApprovalPolicy(authority_level=99),
+    )
+    narrowed = _narrow_cfg(parent, "sandbox_manager", ["execute_code", "pod_search"])
+    # not granted -> ceiling wins; execute_code dropped.
+    assert set(narrowed.tools.allowed_tools) == {"pod_search"}
+
+
+def test_empty_ceiling_starves_ungranted_manager():
+    """An empty parent allow-list ([]) leaves an ungranted manager with nothing —
+    the original Telegram-breach guarantee (a room granting nothing can reach
+    nothing)."""
+    parent = ScopeContext(
+        scope_id="s", owner_id="u", actor_id="a", surface="internal",
+        tools=ScopeToolPolicy(allowed_tools=[]),
+        approval=ScopeApprovalPolicy(authority_level=99),
+    )
+    narrowed = _narrow_cfg(parent, "sandbox_manager", ["execute_code", "pod_search"])
+    assert narrowed.tools.allowed_tools == []
+
+
 if __name__ == "__main__":
     import pytest
     sys.exit(pytest.main([__file__, "-v"]))

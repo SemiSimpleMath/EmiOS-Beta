@@ -7,11 +7,17 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import sys
 
 from belief_engine_v2.shadow import diff_run, load_shadow_runs, v2_activity
 
 
 def main() -> None:
+    # Belief statements carry curly quotes / non-breaking hyphens; the default
+    # Windows console encoding (cp1252) can't encode them, so print() raises
+    # UnicodeEncodeError before the report finishes. utf-8 encodes all of Unicode.
+    sys.stdout.reconfigure(encoding="utf-8")
+
     parser = argparse.ArgumentParser(description="Belief v1-vs-v2 shadow-run report.")
     parser.add_argument("--days", type=float, default=7.0)
     args = parser.parse_args()
