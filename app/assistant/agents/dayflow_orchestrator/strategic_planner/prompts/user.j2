@@ -265,13 +265,10 @@ No active plans.
 {{ task_block(non_plan_closed, "Closed Tasks") }}
 {%- endif %}
 
-{%- if recent_dayflow_chat_history %}
-
-########## CHAT HISTORY ##########
-{%- for c in recent_dayflow_chat_history %}
-- [{{ c.get("time_local","") }}] {{ c.get("summary","") }}
-{%- endfor %}
-{%- endif %}
+{#- CHAT HISTORY removed 2026-06-15: feeding cross-room chat to the strategic_planner
+    made it re-do things already being handled in chat, and the "context only, don't
+    respond" safeguards weren't worth the trouble. `recent_dayflow_chat_history` is still
+    injected — it's simply no longer rendered into the prompt. Restore this block to re-enable. #}
 
 {%- if entity_card %}
 
