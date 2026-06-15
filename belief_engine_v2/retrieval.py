@@ -186,7 +186,19 @@ def beliefs_for_context(
     dt = _as_dt(now)
     w = {**_DEFAULT_WEIGHTS, **(weights or {})}
 
-    rows = store.conn.execute("SELECT * FROM beliefs WHERE status='active'").fetchall()
+    # Attach the belief's domain category for downstream scoping. `belief_category`
+    # is a side table (survives projection rebuilds); it may be absent on stores
+    # not yet backfilled, so degrade to domain=None rather than error.
+    _has_cat = store.conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='belief_category'"
+    ).fetchone() is not None
+    if _has_cat:
+        rows = store.conn.execute(
+            "SELECT b.*, c.domain FROM beliefs b "
+            "LEFT JOIN belief_category c ON b.belief_id = c.belief_id WHERE b.status='active'"
+        ).fetchall()
+    else:
+        rows = store.conn.execute("SELECT *, NULL AS domain FROM beliefs WHERE status='active'").fetchall()
 
     qvec = None
     if embedder is not None and (query or entities):
