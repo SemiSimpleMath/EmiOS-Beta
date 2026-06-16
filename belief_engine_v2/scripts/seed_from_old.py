@@ -16,7 +16,7 @@ are seeded — deprecated/merged ones are not resurrected. Dedup is a SEPARATE s
 lexical + LLM bootstrap merge) run on this faithful base.
 
 Reads emi.db READ-ONLY; writes belief_engine_v2/data/belief_v2_faithful.db.
-Run: .venv/Scripts/python.exe -m belief_engine_v2.seed_from_old
+Run: .venv/Scripts/python.exe -m belief_engine_v2.scripts.seed_from_old
 """
 from __future__ import annotations
 

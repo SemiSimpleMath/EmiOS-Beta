@@ -12,7 +12,7 @@ For the seed (old data has no clean subject/predicate/object), we canonicalize t
 STATEMENT as the object; live observations from the LLM extractor carry full s/p/o.
 
 Reads beliefs_seed.db READ-ONLY; uses the app's embedder; writes its own db.
-Run: .venv/Scripts/python.exe -m belief_engine_v2.seed_canonical
+Run: .venv/Scripts/python.exe -m belief_engine_v2.scripts.seed_canonical
 """
 from __future__ import annotations
 

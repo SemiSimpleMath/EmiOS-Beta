@@ -41,7 +41,7 @@ _SCOPE_BY_KIND = {
     "transient_state": "transient",
 }
 
-# v2 kind -> v1 kind vocabulary (inverse of seed_from_old._KIND_MAP). Consumers FILTER on v1 kind
+# v2 kind -> v1 kind vocabulary (inverse of scripts.seed_from_old._KIND_MAP). Consumers FILTER on v1 kind
 # names — e.g. the dayflow routine stage keeps only _ROUTINE_RELEVANT_KINDS = {"routine_pattern",
 # "durable_fact"} — so a drop-in file must speak v1's vocabulary or every v2 belief is filtered out.
 # semantic_fact came from durable_fact|stable_relationship in the seed; durable_fact is the

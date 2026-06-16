@@ -7,7 +7,7 @@ This is the lesson from merging applied to retrieval: deterministic means propos
 decides. Nothing relevant is ever silently excluded (silent exclusion was the original bug).
 No LLM, no model load (scores are deterministic; relevance term is off without an embedder).
 
-Run: .venv/Scripts/python.exe -m belief_engine_v2.demo_retrieval
+Run: .venv/Scripts/python.exe -m belief_engine_v2.scripts.demo_retrieval
 """
 from __future__ import annotations
 

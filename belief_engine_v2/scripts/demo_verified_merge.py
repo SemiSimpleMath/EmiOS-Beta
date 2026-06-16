@@ -9,7 +9,7 @@ once — because the LLM, not a cosine cutoff, makes every merge decision:
 and the verifier draws the line. Tightening τ would only hide candidates from it.
 
 Reads beliefs_seed.db READ-ONLY; uses the app embedder + a real LLM verifier (cheap model).
-Run: .venv/Scripts/python.exe -m belief_engine_v2.demo_verified_merge
+Run: .venv/Scripts/python.exe -m belief_engine_v2.scripts.demo_verified_merge
 """
 from __future__ import annotations
 
