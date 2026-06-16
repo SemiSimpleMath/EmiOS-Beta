@@ -28,6 +28,10 @@ change wording.
 Include ALL specific details from the task — names, dates, amounts, options. The switchboard
 will route to the right tool or manager.
 
+If the task references a saved finding / pod (a `datapod:...` id), copy that pod id VERBATIM into
+switchboard_task — the downstream agent fetches the pod for the full prior work; drop the id and it
+redoes the research.
+
 # PRIORITY
 - Choose by urgency + impact.
 - Favor items with imminent time windows or high importance.

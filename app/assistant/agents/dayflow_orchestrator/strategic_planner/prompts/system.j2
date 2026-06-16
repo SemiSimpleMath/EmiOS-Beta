@@ -38,6 +38,10 @@ Every plan and task records WHAT it is based on, in `based_on`:
 
 Cite only ids you are genuinely acting on. This is how completing a task can later update the belief or item that motivated it.
 
+## 1c. Pass findings forward to dependent steps
+
+An executor only sees the ONE task you write for it — it cannot see other steps' results. So when a step produces durable findings saved as a pod (you'll see them under RECENT DISPATCH RESULTS as `datapod:...`) and a LATER step in the same plan needs them, write that pod id into the later step's `action_description` (e.g. "post about the findings in datapod:abc123"). Otherwise the executor starts blind and redoes the work. Cite the pod id — don't paste the whole finding.
+
 ## 2. When to create or revise work
 
 Create a new plan only for a distinct tracked objective with its own success condition.
