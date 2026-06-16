@@ -9,9 +9,16 @@
     "max_per_run": 60
   },
   "run_policy": {
-    "type": "interval",
-    "min_interval_seconds": 86400
+    "type": "daily",
+    "time_local": "05:30"
   },
   "max_run_seconds": 600,
-  "notes": "Nightly: tag active beliefs that have no belief_tags yet, from the standardized vocab (configs/belief_tags.yaml), so consumers can pull them. only_untagged is a shrinking selector so the pass converges; capped at max_per_run with max_run_seconds as the watchdog. Runs in the belief-engine nightly rhythm so the night's new beliefs get tagged before morning."
+  "on_error": {
+    "max_failures": 3,
+    "backoff_base_seconds": 300,
+    "backoff_max_seconds": 3600,
+    "then": "disable_with_ticket",
+    "auto_retry_after_seconds": 3600
+  },
+  "notes": "Daily at 05:30 local — AFTER the belief_engine rebuild (00:30) and the feedback_extractor drain (04:00-05:00), so the night's new beliefs from both producers get tagged before morning. Tags active beliefs with no belief_tags yet, from the standardized vocab (configs/belief_tags.yaml). only_untagged is a shrinking selector so the pass converges; capped at max_per_run with max_run_seconds as the watchdog. on_error.auto_retry_after_seconds self-heals a transient failure (DB lock / LLM hiccup)."
 }
