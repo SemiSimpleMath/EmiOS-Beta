@@ -1,0 +1,60 @@
+# Standardized belief TAG vocabulary — the CONTROLLED set of cross-cutting tags
+# a belief may carry, for RETRIEVAL ("pull beliefs to where they're needed").
+#
+# Multi-label: a belief carries EVERY tag that applies. Consumers pull by a tag
+# SET (e.g. the meal engine pulls {food, meal, dietary, ...}); a belief surfaces
+# if it carries ANY tag in that set. Bridge tags (dietary, family, social, meal)
+# are what let a consumer reach beliefs filed under a different primary domain.
+#
+# STANDARDIZED: tags MUST come from this list. Every writer — the belief
+# categorizer, the /beliefs editor, any consumer pull-set — is validated against
+# it; off-vocab tags are rejected. This is the anti-proliferation guarantee, the
+# same principle as the v2 belief engine's canonical identity.
+#
+# `domain` (belief_category / belief_domains.yaml) is UNCHANGED and stays the
+# nightly derivation lane; these tags are a separate, ADDITIVE retrieval layer.
+#
+# Adding a tag: add it here with a one-line definition. Keep the set small and
+# intuitive — the categorizer LLM must choose from it.
+
+tags:
+  # --- Food & eating ---
+  food:            "general food likes / dislikes / preferences"
+  meal:            "meals, dishes, recipes, what to cook or serve"
+  cooking:         "cooking methods, prep, kitchen equipment"
+  dining_out:      "restaurants, takeout, delivery"
+  beverage:        "coffee, drinks, alcohol"
+  snack:           "snacks"
+  groceries:       "shopping, ingredients, inventory"
+  dietary:         "dietary restrictions, triggers, eating patterns (the food/health bridge)"
+
+  # --- Health & body ---
+  health:          "health conditions and patterns"
+  sleep:           "sleep, CPAP, bedtime"
+  exercise:        "physical activity, movement"
+  mental_health:   "anxiety, stress, emotional wellbeing"
+
+  # --- Home & pets ---
+  home:            "house, chores, maintenance"
+  home_automation: "smart-home devices (AC, lighting)"
+  pets:            "dogs and pet care"
+
+  # --- People & social ---
+  family:          "household members, spouse, kids"
+  social:          "friends and social events"
+
+  # --- Time, routine, work ---
+  routine:         "recurring habits and patterns"
+  reminders:       "nudge cadence and delivery preferences"
+  schedule:        "calendar, deadlines, timing"
+  work:            "job, timesheets, professional"
+
+  # --- Interaction & meta ---
+  communication:   "how to communicate with the user (tone, channel, style)"
+  projects:        "the user's personal projects and work-products"
+  agent_behavior:  "how the assistant itself should operate"
+
+# Consumer pull-sets — which tags each consumer retrieves. A belief surfaces for
+# a consumer if it carries ANY tag in that consumer's set.
+pull_sets:
+  meal_engine: [food, meal, cooking, dining_out, beverage, snack, groceries, dietary]

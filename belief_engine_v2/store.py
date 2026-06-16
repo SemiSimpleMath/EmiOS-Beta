@@ -146,6 +146,19 @@ CREATE TABLE IF NOT EXISTS belief_short_id (
     short_id    INTEGER NOT NULL UNIQUE,
     assigned_at TEXT
 );
+
+-- Multi-label retrieval tags (configs/belief_tags.yaml vocab). ADDITIVE: `domain`
+-- (belief_category) stays the nightly derivation lane; these are how consumers PULL
+-- beliefs ("anything tagged food/meal/dietary"). Many per belief; survives rebuilds
+-- (keyed on the durable belief_id, same as belief_short_id / belief_category).
+CREATE TABLE IF NOT EXISTS belief_tags (
+    belief_id   TEXT NOT NULL,
+    tag         TEXT NOT NULL,
+    assigned_at TEXT,
+    method      TEXT,                         -- categorizer | manual | seed
+    PRIMARY KEY (belief_id, tag)
+);
+CREATE INDEX IF NOT EXISTS ix_belief_tags_tag ON belief_tags(tag);
 """
 
 _RESOLVER_VERSION = "v0-stub"

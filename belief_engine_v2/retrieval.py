@@ -188,6 +188,7 @@ def beliefs_for_context(
     horizon: str = "day",
     embedder=None,
     weights: Optional[Dict[str, float]] = None,
+    tags: Optional[Sequence[str]] = None,
     include_scores: bool = False,
 ) -> List[Dict[str, Any]]:
     """A ranked, high-recall candidate set of ACTIVE beliefs for `now` — for the LLM to judge,
@@ -198,6 +199,9 @@ def beliefs_for_context(
     horizon="day" (default) ranks for whole-day planning (time-of-day is a slot hint, not scored);
     horizon="instant" additionally favors what's firing now. `query`/`entities` drive relevance
     when an `embedder` is given. `agent` is accepted for the API shape (future per-agent scoping).
+    `tags` (opt-in) scopes the candidate pool to beliefs carrying ANY of those vocab tags
+    (configs/belief_tags.yaml) — how a consumer pulls its slice (e.g. the meal engine). Default
+    None keeps the full high-recall set.
     """
     dt = _as_dt(now)
     w = {**_DEFAULT_WEIGHTS, **(weights or {})}
@@ -224,8 +228,20 @@ def beliefs_for_context(
         _joins += " LEFT JOIN belief_short_id s ON s.belief_id = b.belief_id"
     else:
         _cols += ["NULL AS _short_id_n"]
+    _params: list = []
+    if tags and _has("belief_tags"):
+        from belief_engine_v2 import tags as _tagmod
+        _clean = _tagmod.sanitize(tags)
+        # Scope to the tagged slice ONLY when the store has actually been tagged. On an
+        # untagged store (no belief_tags rows yet — a fresh install, or before the nightly
+        # tagging pass) the tag layer is absent, so stay high-recall (return all) instead of
+        # returning nothing.
+        if _clean and store.conn.execute("SELECT 1 FROM belief_tags LIMIT 1").fetchone():
+            _ph = ",".join("?" for _ in _clean)
+            _where += f" AND b.belief_id IN (SELECT belief_id FROM belief_tags WHERE tag IN ({_ph}))"
+            _params = _clean
     rows = store.conn.execute(
-        f"SELECT {', '.join(_cols)} FROM beliefs b{_joins} WHERE {_where}").fetchall()
+        f"SELECT {', '.join(_cols)} FROM beliefs b{_joins} WHERE {_where}", _params).fetchall()
 
     qvec = None
     if embedder is not None and (query or entities):

@@ -366,6 +366,7 @@ def _build_food_beliefs_v2(*, agent: str, db_path: Optional[str] = None,
     tests; production resolves the live shadow store + app embedder.
     `capture`, when given, receives {'rows': <the surfaced rows>} for the
     shadow-run comparison."""
+    from belief_engine_v2 import tags as belief_tags_mod
     from belief_engine_v2.ingest import open_live_store
     from belief_engine_v2.retrieval import beliefs_for_context
     from belief_engine_v2.surfacing import log_surfaced
@@ -386,6 +387,7 @@ def _build_food_beliefs_v2(*, agent: str, db_path: Optional[str] = None,
         rows = beliefs_for_context(
             store, now, agent=agent, query=_MEAL_BELIEFS_QUERY,
             embedder=embedder, k=_V2_K, horizon="day",
+            tags=belief_tags_mod.pull_set("meal_engine"),
         )
         log_surfaced(store.conn, agent=agent, rows=rows)
     finally:
