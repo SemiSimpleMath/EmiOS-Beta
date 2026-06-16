@@ -1,0 +1,17 @@
+{
+  "id": "belief_tag_new",
+  "enabled": true,
+  "name": "Belief tag new (categorize untagged beliefs)",
+  "aliases": [],
+  "runner": "function",
+  "spec": {
+    "function_name": "belief_tag_new",
+    "max_per_run": 60
+  },
+  "run_policy": {
+    "type": "interval",
+    "min_interval_seconds": 86400
+  },
+  "max_run_seconds": 600,
+  "notes": "Nightly: tag active beliefs that have no belief_tags yet, from the standardized vocab (configs/belief_tags.yaml), so consumers can pull them. only_untagged is a shrinking selector so the pass converges; capped at max_per_run with max_run_seconds as the watchdog. Runs in the belief-engine nightly rhythm so the night's new beliefs get tagged before morning."
+}

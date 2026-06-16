@@ -25,6 +25,7 @@ from flask import Blueprint, jsonify, render_template, request
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_repo_root
 from app.routes._security import reject_if_not_local
+from belief_engine_v2 import tags as belief_tags_mod
 
 logger = get_logger(__name__)
 
@@ -75,12 +76,20 @@ def _connect() -> sqlite3.Connection:
         " short_id INTEGER NOT NULL UNIQUE,"
         " assigned_at TEXT)"
     )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS belief_tags ("
+        " belief_id TEXT NOT NULL,"
+        " tag TEXT NOT NULL,"
+        " assigned_at TEXT,"
+        " method TEXT,"
+        " PRIMARY KEY (belief_id, tag))"
+    )
     return conn
 
 
 @beliefs_admin_bp.route("/beliefs")
 def beliefs_page():
-    return render_template("beliefs.html", domains=_DOMAINS)
+    return render_template("beliefs.html", domains=_DOMAINS, tags_vocab=list(belief_tags_mod.vocab().keys()))
 
 
 @beliefs_admin_bp.route("/api/beliefs/list")
@@ -100,7 +109,8 @@ def beliefs_list():
         " (o.statement_override IS NOT NULL) AS edited,",
         " b.kind, b.status, b.support, b.contradiction, b.net, b.obs_count, b.last_observed,",
         " c.domain, COALESCE(o.suppressed,0) AS suppressed, COALESCE(o.locked,0) AS locked,",
-        " ('b' || s.short_id) AS short_id",
+        " ('b' || s.short_id) AS short_id,",
+        " (SELECT GROUP_CONCAT(tag) FROM belief_tags WHERE belief_id=b.belief_id) AS tags",
         " FROM beliefs b",
         " LEFT JOIN belief_category c ON c.belief_id = b.belief_id",
         " LEFT JOIN belief_user_override o ON o.belief_id = b.belief_id",
@@ -231,12 +241,14 @@ def beliefs_item():
         dom = conn.execute("SELECT domain FROM belief_category WHERE belief_id=?", (bid,)).fetchone()
         ovr = conn.execute("SELECT * FROM belief_user_override WHERE belief_id=?", (bid,)).fetchone()
         sid = conn.execute("SELECT short_id FROM belief_short_id WHERE belief_id=?", (bid,)).fetchone()
+        btags = [r[0] for r in conn.execute("SELECT tag FROM belief_tags WHERE belief_id=? ORDER BY tag", (bid,))]
     finally:
         conn.close()
     return jsonify({
         "belief": dict(b),
         "short_id": f"b{sid['short_id']}" if sid else None,
         "domain": dom["domain"] if dom else None,
+        "tags": btags,
         "override": dict(ovr) if ovr else None,
         "evidence": [dict(e) for e in evidence],
     })
@@ -284,6 +296,14 @@ def beliefs_update():
                 "INSERT OR REPLACE INTO belief_user_override"
                 "(belief_id, suppressed, locked, statement_override, updated_at) VALUES(?,?,?,?,?)",
                 (bid, supp, lock, stmt, datetime.now(timezone.utc).isoformat()))
+
+        if "tags" in data:
+            clean = belief_tags_mod.sanitize(data.get("tags") or [])
+            now_iso = datetime.now(timezone.utc).isoformat()
+            conn.execute("DELETE FROM belief_tags WHERE belief_id=?", (bid,))
+            conn.executemany(
+                "INSERT OR IGNORE INTO belief_tags (belief_id, tag, assigned_at, method) VALUES (?,?,?,?)",
+                [(bid, t, now_iso, "manual") for t in clean])
         conn.commit()
 
         row = conn.execute(

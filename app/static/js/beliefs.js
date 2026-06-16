@@ -60,6 +60,7 @@ function renderList(beliefs) {
     if (b.short_id) tags.appendChild(el("span", "bx-badge sid", b.short_id));
     if (b.domain) tags.appendChild(el("span", "bx-badge dom", b.domain));
     if (b.kind) tags.appendChild(el("span", "bx-badge kind", b.kind));
+    if (b.tags) String(b.tags).split(",").forEach((tg) => tags.appendChild(el("span", "bx-badge tag", tg)));
     tags.appendChild(el("span", "bx-badge obs", `${b.obs_count || 0}× · net ${b.net ?? 0}`));
     if (b.last_observed) tags.appendChild(el("span", "bx-badge date", String(b.last_observed).slice(0, 10)));
     if (b.locked) tags.appendChild(el("span", "bx-badge lock", "🔒 locked"));
@@ -69,6 +70,17 @@ function renderList(beliefs) {
     row.appendChild(main);
     row.addEventListener("click", () => openDrawer(b.belief_id));
     list.appendChild(row);
+  });
+}
+
+function renderTagPicker(selected) {
+  const box = $("#d-tags");
+  box.innerHTML = "";
+  const sel = new Set(selected || []);
+  (window.BX_TAGS || []).forEach((t) => {
+    const chip = el("span", "bx-tagchip" + (sel.has(t) ? " on" : ""), t);
+    chip.addEventListener("click", () => chip.classList.toggle("on"));
+    box.appendChild(chip);
   });
 }
 
@@ -93,6 +105,7 @@ async function openDrawer(id) {
   $("#d-domain").value = data.domain || "general";
   $("#d-suppressed").checked = !!ov.suppressed;
   $("#d-locked").checked = !!ov.locked;
+  renderTagPicker(data.tags || []);
 
   const ev = $("#d-evidence");
   ev.innerHTML = "";
@@ -120,6 +133,7 @@ async function save() {
     suppressed: $("#d-suppressed").checked,
     locked: $("#d-locked").checked,
     statement: $("#d-statement").value,
+    tags: [...document.querySelectorAll("#d-tags .bx-tagchip.on")].map((c) => c.textContent),
   };
   const r = await fetch("/api/beliefs/update", {
     method: "POST",

@@ -73,6 +73,9 @@
       <label class="bx-lbl">Statement <span class="bx-hint">(editing overrides the projected text)</span></label>
       <textarea id="d-statement" rows="4"></textarea>
 
+      <label class="bx-lbl">Tags <span class="bx-hint">(how consumers pull this belief &mdash; click to toggle)</span></label>
+      <div id="d-tags" class="bx-tagpick"></div>
+
       <div class="bx-row">
         <label class="bx-lbl small">Domain
           <select id="d-domain"></select>
@@ -91,7 +94,7 @@
     </div>
   </div>
 
-  <script>window.BX_DOMAINS = {{ domains|tojson }};</script>
+  <script>window.BX_DOMAINS = {{ domains|tojson }}; window.BX_TAGS = {{ tags_vocab|tojson }};</script>
   <script src="/static/js/beliefs.js"></script>
 </body>
 </html>
