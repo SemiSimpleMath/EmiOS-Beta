@@ -26,7 +26,6 @@ logger = get_logger(__name__)
 _OUTPUT_FILENAME = "resource_entertainment_advisor_output.json"
 _BELIEFS_PATH = _get_resources_dir() / "kg_derived" / "resource_user_beliefs.json"
 _BIO_PATH = _get_resources_dir() / "user_bio.json"
-_ENTERTAINMENT_TAGS = frozenset({"entertainment", "hobbies", "music", "food", "social", "dining"})
 
 
 class EntertainmentAdvisorStep(BaseStep):
@@ -52,7 +51,8 @@ class EntertainmentAdvisorStep(BaseStep):
         return True, "ready"
 
     def _load_entertainment_beliefs(self) -> List[str]:
-        """Extract entertainment-related beliefs from the beliefs resource."""
+        """Leisure/enjoyment beliefs (the `entertainment` pull-set tags) for the advisor."""
+        from belief_engine_v2 import tags as belief_tags
         try:
             if not _BELIEFS_PATH.exists():
                 return []
@@ -62,15 +62,16 @@ class EntertainmentAdvisorStep(BaseStep):
             beliefs_list = raw.get("beliefs", [])
             if not isinstance(beliefs_list, list):
                 return []
+            wanted = set(belief_tags.pull_set("entertainment"))
             results: List[str] = []
             for belief in beliefs_list:
                 if not isinstance(belief, dict):
                     continue
-                tags = belief.get("tags", [])
+                tags = belief.get("tags") or []
                 if not isinstance(tags, list):
                     continue
-                if any(str(t).strip().lower() in _ENTERTAINMENT_TAGS for t in tags):
-                    text = str(belief.get("belief", "")).strip()
+                if {str(t).strip().lower() for t in tags} & wanted:
+                    text = str(belief.get("statement", "")).strip()
                     if text:
                         results.append(text)
             return results

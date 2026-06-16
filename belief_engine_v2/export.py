@@ -105,6 +105,9 @@ def export_beliefs_v2(*, db_path: Optional[Path] = None, out_name: str = _OUTPUT
         joins += " LEFT JOIN belief_short_id s ON s.belief_id=b.belief_id"
     else:
         cols += ["NULL AS _short_id_n"]
+    # tags are many-per-belief -> a correlated subquery keeps one row per belief.
+    cols += ["(SELECT GROUP_CONCAT(tag) FROM belief_tags WHERE belief_id=b.belief_id) AS _tags"
+             if _has("belief_tags") else "NULL AS _tags"]
     rows = conn.execute(
         f"SELECT {', '.join(cols)} FROM beliefs b{joins} WHERE {where} ORDER BY _domain, b.net DESC"
     ).fetchall()
@@ -123,6 +126,7 @@ def export_beliefs_v2(*, db_path: Optional[Path] = None, out_name: str = _OUTPUT
             "belief_key": r["belief_id"],
             "short_id": f"b{r['_short_id_n']}" if r["_short_id_n"] is not None else None,
             "domain": r["_domain"] if r["_domain"] else "general",
+            "tags": r["_tags"].split(",") if r["_tags"] else [],
             "statement": statement,
             "confidence": _confidence_band(r["net"], r["status"]),
             "scope": _SCOPE_BY_KIND.get(kind.lower(), "chronic"),

@@ -51,11 +51,17 @@ def _format_health_beliefs() -> str:
         logger.error("[HealthStatusStage] Failed reading beliefs: %s", exc, exc_info=True)
         return ""
 
+    from belief_engine_v2 import tags as _belief_tags
+    health_tags = set(_belief_tags.pull_set("health_status"))
+    # Health-relevant = a curated health/sleep DOMAIN, OR a health-bridging TAG (dietary,
+    # mental_health, exercise) — the tag side catches beliefs filed under another domain
+    # (e.g. a reflux trigger tagged food+dietary). Domain stays the floor so this still
+    # works on an export that predates tags.
     active = [
         e for e in entries
         if e.get("statement")
         and e.get("status", "active") == "active"
-        and e.get("domain", "") in _HEALTH_DOMAINS
+        and (e.get("domain", "") in _HEALTH_DOMAINS or (set(e.get("tags") or []) & health_tags))
     ]
 
     active.sort(key=lambda e: _CONFIDENCE_RANK.get(e.get("confidence", "low"), 2))
