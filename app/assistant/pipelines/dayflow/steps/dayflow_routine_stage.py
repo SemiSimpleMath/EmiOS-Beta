@@ -231,12 +231,15 @@ _DOMAIN_ORDER = ["routine", "health", "food", "general", "work"]
 
 _CONFIDENCE_RANK = {"high": 0, "medium": 1, "low": 2}
 
-# The daily routine is a SCHEDULE. Only schedule/routine-shaping beliefs belong in
-# the writer's context. `kind` already classifies this, so we feed routine_pattern
-# (recurring routines / wall-clock anchors) + durable_fact, and drop
-# stable_preference (background tastes), episodic_context (one-off past events),
-# transient_state, etc. — which were drowning the real routine items (826 active
-# beliefs collapse to ~290). Widen this set if a genuinely schedule-shaping kind shows up.
+# The daily routine is a SCHEDULE. A belief reaches the writer's context if EITHER:
+#   1. its `kind` is routine-shaping — routine_pattern (recurring routines / wall-clock
+#      anchors) + durable_fact; this drops background tastes / one-off episodics that were
+#      drowning the real routine items (826 active beliefs collapsed to ~290); OR
+#   2. it carries a routing TAG from the routine_stage pull-set (configs/belief_tags.yaml:
+#      routine, home_automation). `kind` is the DECAY axis, not routing — a standing setpoint
+#      like "cooling 75F at 06:00" is correctly kind=stable_preference (evergreen; silence
+#      shouldn't erode it) yet is squarely routine-relevant, and its tags say so. kind alone
+#      stranded these (the AC morning step-up never reached the writer).
 _ROUTINE_RELEVANT_KINDS = {"routine_pattern", "durable_fact"}
 
 
@@ -260,15 +263,18 @@ def _format_beliefs(day_of_week: str) -> str:
 def _render_belief_block(entries: list) -> str:
     """Render the routine writer's belief context from raw export entries.
 
-    Scopes to schedule/routine-shaping beliefs via `kind` (see
-    _ROUTINE_RELEVANT_KINDS) so background preferences + one-off episodic facts
-    don't drown the actual routine items. Importance rises organically from the
-    upstream evidence ranking (recency/frequency) — there is no hardcoded pin
-    list. Extracted from _format_beliefs so it's unit-testable without the live
-    export file.
+    Admits a belief if its `kind` is routine-shaping (see _ROUTINE_RELEVANT_KINDS) OR it
+    carries a routine_stage routing tag (routine / home_automation) — so a recurring schedule
+    that `kind` mislabels a preference (e.g. a standing AC setpoint) still gets in. Background
+    preferences + one-off episodics without a routing tag stay out, so they don't drown the
+    routine items. Importance rises organically from the upstream evidence ranking — no
+    hardcoded pin list. Extracted from _format_beliefs so it's unit-testable.
     """
+    from belief_engine_v2 import tags as _belief_tags
+    routine_tags = set(_belief_tags.pull_set("routine_stage"))
     active = [e for e in entries if e.get("statement") and e.get("status", "active") == "active"]
-    rest = [e for e in active if e.get("kind") in _ROUTINE_RELEVANT_KINDS]
+    rest = [e for e in active
+            if e.get("kind") in _ROUTINE_RELEVANT_KINDS or (set(e.get("tags") or []) & routine_tags)]
 
     def _sort_key(e: dict) -> tuple:
         domain_rank = _DOMAIN_ORDER.index(e.get("domain", "")) if e.get("domain", "") in _DOMAIN_ORDER else len(_DOMAIN_ORDER)

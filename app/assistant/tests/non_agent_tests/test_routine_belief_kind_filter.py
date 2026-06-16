@@ -39,3 +39,19 @@ def test_routine_block_scopes_to_routine_kinds():
     assert "Avoid mustard" not in out                   # stable_preference
     assert "Cancel the Coursera" not in out             # episodic_context
     assert "A deprecated routine" not in out            # deprecated never included
+
+
+def test_routine_block_admits_routine_tagged_regardless_of_kind():
+    """A recurring schedule that `kind` mislabels a preference (the 6 AM AC step-up) is still
+    admitted when it carries a routine/home_automation TAG. `kind` is the decay axis; tags are
+    the routing axis. Preferences WITHOUT a routine tag (mustard) still stay out."""
+    entries = [
+        {"belief_key": "routine.ac_morning", "domain": "routine", "kind": "stable_preference",
+         "tags": ["home_automation", "routine", "schedule"], "status": "active",
+         "statement": "Default cooling 70F at 21:00, then 75F at 06:00 so the AC stops in the morning."},
+        {"belief_key": "food.no_mustard", "domain": "food", "kind": "stable_preference",
+         "tags": ["food"], "status": "active", "statement": "Avoid mustard on family sandwiches."},
+    ]
+    out = drs._render_belief_block(entries)
+    assert "75F at 06:00" in out          # stable_preference, but routine/home_automation-tagged -> admitted
+    assert "Avoid mustard" not in out     # stable_preference, only food-tagged -> still dropped

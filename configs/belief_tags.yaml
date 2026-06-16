@@ -60,3 +60,4 @@ pull_sets:
   meal_engine:   [food, meal, cooking, dining_out, beverage, snack, groceries, dietary]
   health_status: [health, sleep, dietary, mental_health, exercise]
   entertainment: [food, dining_out]
+  routine_stage:  [routine, home_automation]
