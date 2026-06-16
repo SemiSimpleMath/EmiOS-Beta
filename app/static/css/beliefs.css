@@ -32,6 +32,7 @@ body{margin:0;background:var(--bg);color:var(--ink);
   color:var(--mut);border:1px solid var(--line);white-space:nowrap}
 .bx-badge.dom{background:#1c2a4a;color:#a9c6ff;border-color:#2c477e}
 .bx-badge.kind{background:#26203f;color:#c4a9ff;border-color:#43356e}
+.bx-badge.sid{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;background:#141a30;color:var(--acc);border-color:#2c477e;font-weight:600}
 .bx-badge.lock{color:var(--warn);border-color:#5a4321}
 .bx-badge.edited{color:var(--ok);border-color:#2a5a34}
 .bx-badge.supp{color:var(--bad);border-color:#5a2a2a}

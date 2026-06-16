@@ -69,6 +69,12 @@ def _connect() -> sqlite3.Connection:
         " statement_override TEXT,"
         " updated_at TEXT)"
     )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS belief_short_id ("
+        " belief_id TEXT PRIMARY KEY,"
+        " short_id INTEGER NOT NULL UNIQUE,"
+        " assigned_at TEXT)"
+    )
     return conn
 
 
@@ -93,10 +99,12 @@ def beliefs_list():
         " COALESCE(o.statement_override, b.statement_nl) AS statement,",
         " (o.statement_override IS NOT NULL) AS edited,",
         " b.kind, b.status, b.support, b.contradiction, b.net, b.obs_count, b.last_observed,",
-        " c.domain, COALESCE(o.suppressed,0) AS suppressed, COALESCE(o.locked,0) AS locked",
+        " c.domain, COALESCE(o.suppressed,0) AS suppressed, COALESCE(o.locked,0) AS locked,",
+        " ('b' || s.short_id) AS short_id",
         " FROM beliefs b",
         " LEFT JOIN belief_category c ON c.belief_id = b.belief_id",
         " LEFT JOIN belief_user_override o ON o.belief_id = b.belief_id",
+        " LEFT JOIN belief_short_id s ON s.belief_id = b.belief_id",
         " WHERE 1=1",
     ]
     params: list = []
@@ -222,10 +230,12 @@ def beliefs_item():
             "FROM observations WHERE resolves_to=? ORDER BY recorded_at DESC LIMIT 60", (bid,)).fetchall()
         dom = conn.execute("SELECT domain FROM belief_category WHERE belief_id=?", (bid,)).fetchone()
         ovr = conn.execute("SELECT * FROM belief_user_override WHERE belief_id=?", (bid,)).fetchone()
+        sid = conn.execute("SELECT short_id FROM belief_short_id WHERE belief_id=?", (bid,)).fetchone()
     finally:
         conn.close()
     return jsonify({
         "belief": dict(b),
+        "short_id": f"b{sid['short_id']}" if sid else None,
         "domain": dom["domain"] if dom else None,
         "override": dict(ovr) if ovr else None,
         "evidence": [dict(e) for e in evidence],

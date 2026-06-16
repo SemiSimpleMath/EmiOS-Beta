@@ -90,7 +90,7 @@ def export_beliefs_v2(*, db_path: Optional[Path] = None, out_name: str = _OUTPUT
         return conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone() is not None
 
-    has_cat, has_ovr = _has("belief_category"), _has("belief_user_override")
+    has_cat, has_ovr, has_sid = _has("belief_category"), _has("belief_user_override"), _has("belief_short_id")
     cols = ["b.*", "c.domain AS _domain" if has_cat else "NULL AS _domain"]
     joins = " LEFT JOIN belief_category c ON c.belief_id=b.belief_id" if has_cat else ""
     if has_ovr:
@@ -100,6 +100,11 @@ def export_beliefs_v2(*, db_path: Optional[Path] = None, out_name: str = _OUTPUT
     else:
         cols += ["NULL AS _stmt_ovr"]
         where = "b.status='active'"
+    if has_sid:
+        cols += ["s.short_id AS _short_id_n"]
+        joins += " LEFT JOIN belief_short_id s ON s.belief_id=b.belief_id"
+    else:
+        cols += ["NULL AS _short_id_n"]
     rows = conn.execute(
         f"SELECT {', '.join(cols)} FROM beliefs b{joins} WHERE {where} ORDER BY _domain, b.net DESC"
     ).fetchall()
@@ -116,6 +121,7 @@ def export_beliefs_v2(*, db_path: Optional[Path] = None, out_name: str = _OUTPUT
         last_obs = r["last_observed"]
         entry = {
             "belief_key": r["belief_id"],
+            "short_id": f"b{r['_short_id_n']}" if r["_short_id_n"] is not None else None,
             "domain": r["_domain"] if r["_domain"] else "general",
             "statement": statement,
             "confidence": _confidence_band(r["net"], r["status"]),

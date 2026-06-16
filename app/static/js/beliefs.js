@@ -57,6 +57,7 @@ function renderList(beliefs) {
     const main = el("div", "bx-item-main");
     main.appendChild(el("div", "bx-stmt", b.statement));
     const tags = el("div", "bx-tags");
+    if (b.short_id) tags.appendChild(el("span", "bx-badge sid", b.short_id));
     if (b.domain) tags.appendChild(el("span", "bx-badge dom", b.domain));
     if (b.kind) tags.appendChild(el("span", "bx-badge kind", b.kind));
     tags.appendChild(el("span", "bx-badge obs", `${b.obs_count || 0}× · net ${b.net ?? 0}`));
@@ -78,8 +79,8 @@ async function openDrawer(id) {
   CURRENT = id;
   const b = data.belief;
   const ov = data.override || {};
-  $("#d-title").textContent =
-    [b.subject, b.predicate, b.object].filter(Boolean).join("  ·  ") || "Belief";
+  const _title = [b.subject, b.predicate, b.object].filter(Boolean).join("  ·  ") || "Belief";
+  $("#d-title").textContent = data.short_id ? `${data.short_id}  ·  ${_title}` : _title;
   $("#d-meta").innerHTML = "";
   [["kind", b.kind], ["status", b.status], ["support", b.support], ["contradiction", b.contradiction],
    ["net", b.net], ["obs", b.obs_count], ["first", String(b.first_observed || "").slice(0, 10)],
