@@ -150,3 +150,30 @@ def test_k_limits_results():
         _add(store, "x", "p", f"obj{i}", f"statement {i}", None, occ)
     store.rebuild_projection()
     assert len(beliefs_for_context(store, mon, k=3)) == 3
+
+
+def test_usage_boosts_a_surfaced_belief():
+    """A belief that's been SURFACED to a consumer outranks an otherwise-identical belief that
+    hasn't — importance earned from USE (surfacing_log). With no surfacing both score 0 on usage,
+    so the term is a pure no-op until real use accrues (zero regression for the other tests)."""
+    from belief_engine_v2.surfacing import log_surfaced
+    store = _store()
+    mon = _monday()
+    occ = (mon - timedelta(days=1)).isoformat()
+    # identical base signals (same cue, recency, obs count) -> only usage can separate them
+    _add(store, "kids", "likes", "apples", "the kids like apples", None, occ)
+    _add(store, "kids", "likes", "pears", "the kids like pears", None, occ)
+    store.rebuild_projection()
+
+    base = beliefs_for_context(store, mon, include_scores=True)
+    assert {b["object"] for b in base} == {"apples", "pears"}
+    assert all(b["_scores"]["usage"] == 0.0 for b in base)      # no surfacing yet -> term is 0
+
+    apples_id = next(b["belief_id"] for b in base if b["object"] == "apples")
+    for _ in range(5):
+        log_surfaced(store.conn, agent="test_consumer", rows=[{"belief_id": apples_id, "score": 1.0}])
+
+    ranked = beliefs_for_context(store, mon, include_scores=True)
+    assert ranked[0]["object"] == "apples"                      # usage boost lifts it to the top
+    assert next(b for b in ranked if b["object"] == "apples")["_scores"]["usage"] > 0.0
+    assert next(b for b in ranked if b["object"] == "pears")["_scores"]["usage"] == 0.0

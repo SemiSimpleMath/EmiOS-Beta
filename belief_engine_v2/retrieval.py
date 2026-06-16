@@ -2,8 +2,9 @@
 
 `beliefs_for_context(store, now, ...)` returns a ranked candidate set of ACTIVE beliefs for a
 moment, scored by
-    w_t·temporal_applicability(applies_when, now) + w_r·recency + w_f·frequency + w_v·relevance
-(scratch/BELIEF-ENGINE-NEW.md §5).
+    w_t·temporal_applicability(applies_when, now) + w_r·recency + w_f·frequency + w_v·relevance + w_u·usage
+(scratch/BELIEF-ENGINE-NEW.md §5). `usage` = how often the belief has actually been SURFACED
+to a consumer (surfacing_log) — importance earned from use, not just observation.
 
 Design principle (the lesson from merge): deterministic means CANNOT decide relevance — there is
 no finite enumeration of why a belief matters today ("the day before a trip", "when it's raining",
@@ -24,7 +25,7 @@ from __future__ import annotations
 
 import json
 import math
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Sequence
 
 try:
@@ -38,9 +39,14 @@ _WEEKDAY = {
     "sat": 5, "saturday": 5, "sun": 6, "sunday": 6,
 }
 
-_DEFAULT_WEIGHTS = {"temporal": 0.35, "recency": 0.20, "frequency": 0.15, "relevance": 0.30}
+# Weights are RANKING coefficients, not a normalized mix — `usage` is ADDITIVE (a belief earns a
+# boost from being used), so the sum exceeds 1 by design; the score is only ever a sort key. With
+# no surfacing data the usage term is 0, so ranking is identical to the pre-usage behavior.
+_DEFAULT_WEIGHTS = {"temporal": 0.35, "recency": 0.20, "frequency": 0.15, "relevance": 0.30, "usage": 0.15}
 _RECENCY_HALF_LIFE_DAYS = 30.0
 _FREQ_SATURATION = 20.0   # obs_count at which the frequency term ≈ 1.0
+_USAGE_WINDOW_DAYS = 30.0 # surfacings within this window count toward usage (current use, not all-time)
+_USAGE_SATURATION = 10.0  # surfaced-count at which the usage term ≈ 1.0
 _AT_WINDOW_MIN = 60       # instant horizon: an `at HH:MM` setpoint peaks within this many minutes
 _DEFAULT_K = 40           # generous: a candidate set for the LLM, not the final answer
 
@@ -156,6 +162,13 @@ def _frequency(obs_count: Optional[int]) -> float:
     return min(1.0, math.log1p(n) / math.log1p(_FREQ_SATURATION))
 
 
+def _usage(surfaced_count: Optional[int]) -> float:
+    """Saturating USE signal: how often the belief was surfaced to a consumer recently. Same
+    log-saturation shape as _frequency, so a few surfacings help and it caps (no runaway)."""
+    n = float(surfaced_count or 0)
+    return min(1.0, math.log1p(n) / math.log1p(_USAGE_SATURATION))
+
+
 def _unit(vec) -> Optional["np.ndarray"]:
     if np is None or vec is None:
         return None
@@ -220,6 +233,20 @@ def beliefs_for_context(
         if text:
             qvec = _unit(embedder(text))
 
+    # USE-frequency: how often each belief was actually SURFACED to a consumer in the recent
+    # window (surfacing_log, written by beliefs_for_context's consumers). A belief that keeps
+    # getting pulled into context earns importance from USE, not just from being observed.
+    # Optional table (older stores lack it) -> {} -> the term is a no-op. Day-resolution window:
+    # an ISO-string compare on surfaced_at, which is fine for a 30-day horizon.
+    usage_counts: Dict[str, int] = {}
+    if _has("surfacing_log"):
+        _cut = (dt - timedelta(days=_USAGE_WINDOW_DAYS)).isoformat()
+        usage_counts = {
+            _r[0]: int(_r[1]) for _r in store.conn.execute(
+                "SELECT belief_id, COUNT(*) FROM surfacing_log WHERE surfaced_at >= ? GROUP BY belief_id",
+                (_cut,))
+        }
+
     scored: List[Dict[str, Any]] = []
     for r in rows:
         item = dict(r)
@@ -233,16 +260,18 @@ def beliefs_for_context(
 
         rec = _recency(item.get("last_observed"), dt)
         freq = _frequency(item.get("obs_count"))
+        use = _usage(usage_counts.get(item.get("belief_id"), 0))
         rel = 0.0
         if qvec is not None and stmt:
             bvec = _unit(embedder(stmt))
             if bvec is not None:
                 rel = max(0.0, float(qvec @ bvec))
 
-        score = w["temporal"] * t + w["recency"] * rec + w["frequency"] * freq + w["relevance"] * rel
+        score = (w["temporal"] * t + w["recency"] * rec + w["frequency"] * freq
+                 + w["relevance"] * rel + w["usage"] * use)
         item["score"] = score
         if include_scores:
-            item["_scores"] = {"temporal": t, "recency": rec, "frequency": freq, "relevance": rel}
+            item["_scores"] = {"temporal": t, "recency": rec, "frequency": freq, "relevance": rel, "usage": use}
         scored.append(item)
 
     scored.sort(key=lambda x: x["score"], reverse=True)
