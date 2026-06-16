@@ -48,7 +48,7 @@ def main() -> None:
     emb = lambda t: vd.get(t, [0.0] * len(vecs[0]))   # noqa: E731
 
     conn = sqlite3.connect(":memory:")
-    verifier = LLMMergeVerifier(engine="gpt-5.4-mini")
+    verifier = LLMMergeVerifier()
     reg = Registry(conn, embedder=emb, verifier=verifier, threshold=_TAU, max_candidates=8)
 
     groups = defaultdict(list)

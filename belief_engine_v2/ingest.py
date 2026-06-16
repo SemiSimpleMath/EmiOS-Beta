@@ -48,7 +48,7 @@ def open_live_store(
     emb = embedder or _default_embedder()
     if verifier is None and with_verifier:
         from belief_engine_v2.merge_verifier import LLMMergeVerifier
-        verifier = LLMMergeVerifier(engine="gpt-5.4-mini")
+        verifier = LLMMergeVerifier()
     reg = Registry(store.conn, embedder=emb, verifier=verifier, threshold=tau, max_candidates=8)
     store.resolver = Resolver(reg)
     return store
@@ -129,7 +129,7 @@ def consolidate_live_store(store, *, embedder=None, verifier=None, tau: float = 
         verifier = getattr(reg, "verifier", None)
         if verifier is None:
             from belief_engine_v2.merge_verifier import LLMMergeVerifier
-            verifier = LLMMergeVerifier(engine="gpt-5.4-mini")
+            verifier = LLMMergeVerifier()
     # Structural recall ON: production beliefs carry canonical subject+predicate, so two phrasings of
     # one preference (embedding only ~0.6 apart) are proposed via their shared subject+predicate —
     # the verifier still decides. Without this the sweep misses framing-divergent duplicates.
