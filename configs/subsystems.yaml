@@ -1,5 +1,5 @@
 background_tasks: true
-beliefs_v2_primary: true
+beliefs_v2_primary: false
 context_engine: true
 dayflow_scheduler: true
 dj_manager: true

@@ -13,7 +13,6 @@ from .steps import (
     ArchiveDailyInsightsStep,
     ArchiveDailyTicketsStep,
     ArchiveDailyTimelineStep,
-    BeliefV2ShadowIngestStep,
 )
 
 logger = get_logger(__name__)
@@ -31,10 +30,6 @@ class DailyInsightsPipeline:
                 ArchiveDailyInsightsStep(),
                 ArchiveDailyAssessmentStep(),
                 ArchiveDailyAssessmentSummaryStep(),
-                # Last: ingest enriched items into v2 + export the belief resource. Placed last so a
-                # fail-loud failure (when v2 is primary) surfaces as pipeline error WITHOUT skipping
-                # the archival steps (the runner breaks on a raising step).
-                BeliefV2ShadowIngestStep(),
             ]
         )
 

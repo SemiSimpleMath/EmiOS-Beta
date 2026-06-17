@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from app.assistant.subconscious.context_builder import (
@@ -305,50 +304,32 @@ _FOOD_BELIEF_KEY_PREFIXES = (
 
 
 def _build_food_beliefs(agent: str = "meal_planner") -> str:
-    """Food-belief lane for the meal agents — belief-engine v2 cutover pilot.
+    """Food-belief lane for the meal agents — over the v1 belief store.
 
-    With subsystem flag `meal_beliefs_v2` ON (the default), beliefs come from
-    the v2 store via the context-scoped retrieval API (`beliefs_for_context`):
-    ranked by temporal-applicability + recency + frequency + relevance instead
-    of belief_key prefix matching, with every surfacing logged (the bandit
-    seed). Flip the flag in /dev/subsystems to return to the legacy v1
-    two-lane table read (`_build_food_beliefs_v1`).
+    With subsystem flag `meal_beliefs_v2` ON (the default), beliefs come from the
+    context-scoped retrieval API (`belief_engine.retrieval.beliefs_for_context`):
+    ranked by relevance + recency + frequency and tag-scoped to the meal pull-set,
+    instead of belief_key prefix matching. Flip the flag in /dev/subsystems to use
+    the legacy prefix-match lane (`_build_food_beliefs_v1`).
 
-    A v2 lane failure is LOUD: ERROR log + an explicit failure marker in the
-    prompt (never a silent swap to v1 — the flag is the human's switch).
+    A lane failure is LOUD: ERROR log + an explicit failure marker in the prompt
+    (never a silent swap — the flag is the human's switch).
     """
     from app.assistant.utils.subsystem_flags import is_subsystem_enabled
 
     if not is_subsystem_enabled("meal_beliefs_v2"):
         return _build_food_beliefs_v1()
     try:
-        capture: dict = {}
-        text = _build_food_beliefs_v2(agent=agent, capture=capture)
+        return _build_food_beliefs_v2(agent=agent)
     except Exception as e:
         logger.error(
-            "[meal_context] belief v2 lane failed (flag meal_beliefs_v2 is ON): %s", e,
+            "[meal_context] belief retrieval lane failed (flag meal_beliefs_v2 is ON): %s", e,
         )
-        logger.debug("[meal_context] belief v2 lane exception", exc_info=True)
+        logger.debug("[meal_context] belief retrieval lane exception", exc_info=True)
         return (
-            "(BELIEF LANE ERROR: belief-engine v2 store unavailable — see server "
-            "log. Flip subsystem flag 'meal_beliefs_v2' off to use the legacy lane.)"
+            "(BELIEF LANE ERROR: belief store unavailable — see server log. "
+            "Flip subsystem flag 'meal_beliefs_v2' off to use the legacy prefix-match lane.)"
         )
-
-    # Shadow-run comparison: record what BOTH lanes produced this run so the
-    # tuning session / v1 retirement rests on visible diffs (/beliefs-shadow).
-    # Shadowing must never cost the planner its context — failures log ERROR
-    # and the v2 text still returns.
-    try:
-        from belief_engine_v2.shadow import record_shadow_run
-        record_shadow_run(
-            agent=agent,
-            v2_rows=capture.get("rows") or [],
-            v1_text=_build_food_beliefs_v1(),
-        )
-    except Exception as e:
-        logger.error("[meal_context] shadow-run recording failed: %s", e)
-        logger.debug("[meal_context] shadow recording exception", exc_info=True)
-    return text
 
 
 _MEAL_BELIEFS_QUERY = (
@@ -359,48 +340,30 @@ _V2_RECENT_DAYS = 21      # mark beliefs observed this recently as current inten
 _V2_K = 40                # candidate-set size (the planner LLM judges relevance)
 
 
-def _build_food_beliefs_v2(*, agent: str, db_path: Optional[str] = None,
-                           embedder=None, now=None,
-                           capture: Optional[dict] = None) -> str:
-    """Context-scoped v2 lane. `db_path`/`embedder`/`now` are injectable for
-    tests; production resolves the live shadow store + app embedder.
-    `capture`, when given, receives {'rows': <the surfaced rows>} for the
-    shadow-run comparison."""
-    from belief_engine_v2 import tags as belief_tags_mod
-    from belief_engine_v2.ingest import open_live_store
-    from belief_engine_v2.retrieval import beliefs_for_context
-    from belief_engine_v2.surfacing import log_surfaced
+def _build_food_beliefs_v2(*, agent: str = "meal_planner", conn=None,
+                           embedder=None, now=None) -> str:
+    """Food-belief lane over the v1 store: `belief_engine.retrieval.beliefs_for_context`,
+    tag-scoped to the meal pull-set, ranked by relevance + recency + frequency. `conn`/
+    `embedder`/`now` are injectable for tests; production resolves emi.db + the app embedder.
 
-    if embedder is None:
-        from app.assistant.embeddings.embedder import embed_texts
-        embedder = lambda t: embed_texts([t])[0]  # noqa: E731
-    if db_path is None:
-        db_path = str(get_repo_root() / "belief_engine_v2" / "data" / "belief_v2_live.db")
-        if not Path(db_path).exists():
-            raise FileNotFoundError(f"belief v2 live store missing: {db_path}")
-    # Naive local time: belief timestamps are stored naive; retrieval's
-    # recency math subtracts directly.
+    Named `_v2` for continuity with the `meal_beliefs_v2` flag, but reads the v1 store —
+    belief-engine v2 was retired as the primary producer (2026-06-16)."""
+    from belief_engine.retrieval import beliefs_for_context
+    from belief_engine.tagging import pull_set
+
+    # Naive local time: belief timestamps are stored naive; recency math subtracts directly.
     now = now or get_local_time().replace(tzinfo=None)
-
-    store = open_live_store(db_path, with_verifier=False)   # read path: no LLM
-    try:
-        rows = beliefs_for_context(
-            store, now, agent=agent, query=_MEAL_BELIEFS_QUERY,
-            embedder=embedder, k=_V2_K, horizon="day",
-            tags=belief_tags_mod.pull_set("meal_engine"),
-        )
-        log_surfaced(store.conn, agent=agent, rows=rows)
-    finally:
-        store.close()
-    if capture is not None:
-        capture["rows"] = rows
+    rows = beliefs_for_context(
+        query=_MEAL_BELIEFS_QUERY, tags=pull_set("meal_engine"),
+        k=_V2_K, now=now, conn=conn, embedder=embedder,
+    )
 
     if not rows:
-        return "(belief v2 store has no active beliefs yet)"
+        return "(belief store has no active meal-relevant beliefs yet)"
 
     cutoff = (now - timedelta(days=_V2_RECENT_DAYS)).isoformat()
     lines = [
-        f"Food & household beliefs (belief-engine v2, context-ranked, top {len(rows)}, "
+        f"Food & household beliefs (belief engine, context-ranked, top {len(rows)}, "
         f"today is {now.strftime('%A %Y-%m-%d')}). Each item shows when it was last "
         f"observed. Items observed in the last {_V2_RECENT_DAYS} days are current "
         f"intent — let them override older preferences. TIME-SCOPE the transient/"
@@ -410,16 +373,16 @@ def _build_food_beliefs_v2(*, agent: str, db_path: Optional[str] = None,
         f"says otherwise; one observed yesterday still governs today's meals).",
     ]
     for r in rows:
-        stmt = (r.get("statement_nl") or "").strip()
+        stmt = (r.get("statement") or "").strip()
         if not stmt:
             continue
-        last = (r.get("last_observed") or "")
+        last = (r.get("last_confirmed") or "")
         recent = last >= cutoff
         meta = [k for k in ((r.get("kind") or ""),) if k]
         if last:
             meta.append(f"observed {last[:10]}")
-        if r.get("obs_count") and int(r["obs_count"]) > 1:
-            meta.append(f"{int(r['obs_count'])}x")
+        if r.get("observation_count") and int(r["observation_count"]) > 1:
+            meta.append(f"{int(r['observation_count'])}x")
         if recent:
             meta.append("recent")
         suffix = f"  [{', '.join(meta)}]" if meta else ""

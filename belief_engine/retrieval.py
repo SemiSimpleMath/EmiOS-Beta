@@ -84,7 +84,7 @@ def beliefs_for_context(
             where += f" AND b.id IN (SELECT belief_id FROM belief_tags WHERE tag IN ({ph}))"
             params = clean
         rows = conn.execute(
-            "SELECT b.id, b.belief_key, b.statement, b.domain, b.confidence, "
+            "SELECT b.id, b.belief_key, b.statement, b.domain, b.confidence, b.kind, "
             "b.observation_count, b.last_confirmed, s.short_id "
             "FROM user_beliefs b LEFT JOIN belief_short_id s ON s.belief_id=b.id "
             f"WHERE {where}", params).fetchall()
@@ -120,6 +120,8 @@ def beliefs_for_context(
                 "id": r["id"], "belief_key": r["belief_key"],
                 "short_id": f"b{r['short_id']}" if r["short_id"] is not None else None,
                 "statement": r["statement"], "domain": r["domain"], "confidence": r["confidence"],
+                "kind": r["kind"], "observation_count": r["observation_count"],
+                "last_confirmed": r["last_confirmed"],
                 "tags": sorted(tags_by_id.get(r["id"], [])),
                 "score": w["relevance"] * rl + w["recency"] * rec + w["frequency"] * freq,
             }
