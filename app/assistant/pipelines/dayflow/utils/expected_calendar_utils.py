@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.time_utils import get_local_timezone, parse_iso_utc_strict
+from app.assistant.utils.time_utils import get_local_timezone, parse_iso_utc, parse_iso_utc_strict
 
 logger = get_logger(__name__)
 
@@ -132,3 +133,106 @@ def _parse_local_clock(boundary_date, value: str, local_tz) -> datetime:
         tzinfo=local_tz,
     )
     return local_dt.astimezone(timezone.utc)
+
+
+# --- Hour-by-hour scaffold for the dayflow routine overlay --------------------
+# The routine writer used to be told to "walk the window hour by hour" and do
+# the clock math itself in prose — which mis-fired (e.g. judging 06:00 "already
+# past" at 05:57). The schedule already carries structured UTC times, so we
+# build the hour grid deterministically here and hand the writer a ready
+# scaffold to FILL. Time-from-prose placement (which belief lands in which hour)
+# stays with the LLM — that is the one thing we do NOT want to regex out of text.
+
+def _fmt_clock(dt: datetime) -> str:
+    """'6:00 AM' — Windows-safe (avoids the non-portable %-I)."""
+    return dt.strftime("%I:%M %p").lstrip("0")
+
+
+def end_of_local_day_utc(now_utc: datetime, *, local_tz=None) -> datetime:
+    """UTC instant of the next local midnight (end of the local day holding now)."""
+    if local_tz is None:
+        local_tz = get_local_timezone()
+    now_local = now_utc.astimezone(local_tz)
+    next_midnight = (now_local + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    return next_midnight.astimezone(timezone.utc)
+
+
+def build_hour_grid(
+    items: List[Dict[str, Any]],
+    now_utc: datetime,
+    end_utc: Optional[datetime] = None,
+    *,
+    lookback_hours: int = 1,
+    local_tz=None,
+) -> List[Dict[str, Any]]:
+    """Deterministic hour-by-hour skeleton spanning ~``lookback_hours`` before
+    now through ``end_utc`` (default: end of the local day). One slot per LOCAL
+    hour, INCLUDING hours with no scheduled item ('open' slots); each item is
+    anchored to the local hour it starts in; the slot holding ``now`` is flagged
+    ``is_now``. The writer FILLS slots — it never builds the grid or does clock
+    math. The ~1h look-back lets a just-missed automation still be caught up.
+    """
+    if local_tz is None:
+        local_tz = get_local_timezone()
+    if end_utc is None:
+        end_utc = end_of_local_day_utc(now_utc, local_tz=local_tz)
+
+    now_local = now_utc.astimezone(local_tz)
+    start_local = (now_utc - timedelta(hours=lookback_hours)).astimezone(local_tz).replace(
+        minute=0, second=0, microsecond=0
+    )
+    end_local = end_utc.astimezone(local_tz)
+    end_hour = end_local.replace(minute=0, second=0, microsecond=0)
+    if end_local > end_hour:
+        end_hour += timedelta(hours=1)
+
+    by_hour: Dict[datetime, List[Dict[str, Any]]] = defaultdict(list)
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        start = parse_iso_utc(it.get("start_utc"))
+        if start is None:
+            continue
+        hour_key = start.astimezone(local_tz).replace(minute=0, second=0, microsecond=0)
+        by_hour[hour_key].append(it)
+
+    slots: List[Dict[str, Any]] = []
+    cur = start_local
+    while cur < end_hour:
+        is_now = cur <= now_local < cur + timedelta(hours=1)
+        items_in = sorted(by_hour.get(cur, []), key=lambda it: str(it.get("start_utc") or ""))
+        slots.append({
+            "label": f"Now ({_fmt_clock(now_local)})" if is_now else _fmt_clock(cur),
+            "hour_local_iso": cur.isoformat(),
+            "is_now": is_now,
+            "items": items_in,
+        })
+        cur += timedelta(hours=1)
+    return slots
+
+
+def render_hour_grid(slots: List[Dict[str, Any]]) -> str:
+    """Render build_hour_grid() output as the scaffold the writer fills."""
+    lines = [
+        "Hour-by-hour scaffold. The 'Now (...)' slot is the CURRENT time; every "
+        "slot from there on is UPCOMING (not yet done). Write an entry for EVERY "
+        "slot below; (open) hours still get their timed beliefs or a brief ramp note:",
+    ]
+    for slot in slots:
+        items = slot.get("items") or []
+        if items:
+            rendered = []
+            for it in items:
+                title = str(it.get("title") or "Untitled").strip()
+                sl = str(it.get("start_local") or "").strip()
+                el = str(it.get("end_local") or "").strip()
+                status = str(it.get("status") or "").strip().lower()
+                span = f" ({sl}–{el})" if sl and el else (f" ({sl})" if sl else "")
+                suffix = f" [{status}]" if status and status != "upcoming" else ""
+                rendered.append(f"{title}{span}{suffix}")
+            body = "; ".join(rendered)
+        else:
+            body = "(open)"
+        arrow = " →" if slot.get("is_now") else ""
+        lines.append(f"  {slot['label']}{arrow}   {body}")
+    return "\n".join(lines)
