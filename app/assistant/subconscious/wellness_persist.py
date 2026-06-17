@@ -108,9 +108,6 @@ def _mint_intention_wellness_pod(
         if novelty_rationale:
             body_parts += ["", "**Why this novel pick:**", novelty_rationale]
 
-        if addresses:
-            body_parts += ["", "**Addresses concerns:** " + ", ".join(addresses)]
-
         body = "\n".join(body_parts)
         tags = ["intention", "wellness", kind]
         if novelty == "novel":
@@ -146,9 +143,11 @@ def _mint_intention_wellness_pod(
         )
         store.put(pod)
         return pod_id
-    except Exception as e:
-        logger.warning("[wellness_persist] mint intention.wellness failed: %s", e)
-        return None
+    except Exception:
+        # Fail loud — a swallowed warning here previously hid a NameError
+        # (undefined `addresses`) that silently dropped EVERY wellness pod.
+        logger.exception("[wellness_persist] mint intention.wellness failed")
+        raise
 
 
 def _mint_intention_wellness_set_pod(
@@ -205,6 +204,6 @@ def _mint_intention_wellness_set_pod(
         )
         store.put(pod)
         return pod_id
-    except Exception as e:
-        logger.warning("[wellness_persist] mint intention.wellness_set failed: %s", e)
-        return None
+    except Exception:
+        logger.exception("[wellness_persist] mint intention.wellness_set failed")
+        raise
