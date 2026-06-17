@@ -62,7 +62,7 @@ This precedence is exactly what `ScopeAdapter._resolve_scope_context` already im
 ### Bucket A — PERMISSION (this is what a `scope.yaml` declares)
 - `tools` (`ScopeToolPolicy`): `allowed_tools`, `blocked_tools`, `requires_approval_tools`, `allow_external_side_effects`, and `per_manager` (a dict of `ScopeToolRule{allow, block}` that fires for a named manager *anywhere* in the call tree).
 - `resources` (`ScopeResourcePolicy`): `allowed_global_resources`, `allowed_room_resources`, `denied_resources` (hard blocklist), `resource_groups` (RAG scopes).
-- `pods`: `allowed_scopes` (e.g. `[self]`).
+- `pods` (`ScopePodPolicy`): `allowed_scopes` — which pod `scope_id`s this scope may read. `["self"]` is the default (own room's pods only); `["all"]` is the owner cross-room surface; explicit room_ids may extend `self`. A field validator rejects mixing `"all"` with explicit ids. This is the **cross-room privacy** axis — orthogonal to body-sensitivity gating (a pod's `min_authority`), which is enforced separately.
 - `entities`, `cards`: KG entity/card visibility.
 - `writes` (`ScopeWritePolicy`): `write_unified_log` (default `True`), `write_kg` (default `False`), `allow_fact_extraction` (default `False`), `writable_state_keys`.
 - `approval` (`ScopeApprovalPolicy`): `authority_level: int` (0..100).
@@ -118,11 +118,14 @@ manager_invoker.invoke(manager, message)
        ├─ _resolve_scope_context(...)        # precedence (§2):
        │     inbound Message scope            #   tier 1: inherit (caller-supersedes)
        │       else _derive_room_scope(...)   #   tier 2: room is the source
-       │       else _derive_system_scope(...) #   tier 3: build_system_scope_context floor
-       ├─ _apply_manager_narrowing(...)       # the four-layer narrowing (§6), narrow-only
+       │       else (strict) REFUSE           #   tier 3: scope-less => fail loud by default
+       │       else _derive_system_scope(...) #            (lenient/test mode only)
+       ├─ _apply_manager_narrowing(...)       # the ceiling narrowing (§6/§7), narrow-only
        └─ _project_scope_to_runtime_data(...) # stamps task_allowed_tools / write_kg / etc.
                                               # onto message.data + scope_contract_enforced
 ```
+
+**Strict ingress (default since 2026-06-13).** `_resolve_scope_context` does **not** silently fall through to a wide system scope when a request arrives with no inbound scope, no room, and no `data.scope_contract`: it raises. `_strict_scope_enabled()` returns `not test_mode` by default — an explicit `SCOPE_CONTRACT_STRICT` env wins; `EMI_TEST_MODE=1` / `PYTEST_CURRENT_TEST` relax it to *derive* (mirroring `MultiAgentManager`'s test-mode substitution, so harnesses that invoke without a scope still run). Every live invoker path attaches a scope or room, so a scope-less production ingress is an unintended ungated invocation and fails loud. (`_allow_strict_mode_system_derivation` still derives when the request carries a `task_file`, a `scope_contract` seed, or a resource contract.)
 
 `_project_scope_to_runtime_data` exists so downstream legacy tool-scoping code can keep reading `task_allowed_tools` etc. off `message.data`. `ToolScopeService` (`tool_scope_service.py`) then consumes those keys for tool **visibility** filtering.
 
@@ -159,19 +162,20 @@ A room's `allowed_tools` **cannot** trim what its manager's agents are shown —
 >     room_manager:            # hosts room::switchboard
 >       allow: [emi_team_manager]
 > ```
-> Verified on the wire: this collapses the Slack switchboard's "Available tools" from 29 → 1 and forces all work through `emi_team_manager`. `per_manager` is visibility-enforced, which is sufficient for a router: the switchboard's only power is picking from the list it is shown.
+> Verified on the wire: this collapses the Slack switchboard's "Available tools" from 29 → 1 and forces all work through `emi_team_manager`. `per_manager` now **folds into `allowed_tools` at narrowing time**, so it binds at **execution** (`check_tool_access` reads `allowed_tools`), and visibility derives from that surface — not the other way round.
 
 ---
 
-## 7. The narrowing-only rule (managers)
+## 7. The narrowing-only rule (managers) — ceiling, not per-level grant
 
-A manager's `scope_contract` block in its `config.yaml` can **only tighten** the inbound scope, never loosen it. `ScopeAdapter._apply_manager_narrowing` does:
-- `allowed_tools` → **intersected** with inbound (with `["all"]` semantics).
-- `blocked_tools` / `requires_approval_tools` → **set-union** with inbound (additive denial).
-- `allow_external_side_effects` → may flip `True`→`False`, never `False`→`True`.
-- `resources.*` → intersected; authority → clamped down.
+A manager's `scope_contract` can **only tighten** the inbound scope, never loosen it. But for the tool surface "tighten" is **not** a blind intersection. `ScopeAdapter._apply_manager_narrowing` treats the inbound `allowed_tools` as a **ceiling** and resolves the manager's *own* surface (`scope_contract.tools.allowed_tools` if declared, else its `config.tools.allowed_tools`) against it:
+- **parent `["all"]`** → the manager's own surface stands verbatim.
+- **`manager_name` ∈ the parent's allow-list** → granting a manager grants its **whole subtree** — its own surface is allowed, *not* intersected with the parent's narrowed leaf list.
+- **otherwise** → bounded by the ceiling (intersection); empty parent → `[]` (allow nothing).
 
-Consequence: anything in a manager's `allowed_tools` is **hidden + blocked at the `emi_team` layer** for sub-managers (the child inherits the parent's restriction and strips its own native tools). Don't forget `master_room_manager.allowed_tools` when reasoning about this.
+The rest is monotone: `blocked_tools` / `requires_approval_tools` → **set-union** with inbound (additive denial); `allow_external_side_effects` → may flip `True`→`False` only; `resources.*` → intersected; `writes.*` → may flip `True`→`False` (`False`→`True` raises); authority → clamped down. Then `per_manager` folds in (§6).
+
+**The starvation fix.** This "granted ⇒ whole subtree" rule replaced an earlier blind intersection that **starved** sub-managers: a manager reached through a narrowed parent (`master_room → emi_team → sandbox`) used to inherit the parent's small leaf allow-list and lose its own native tools. Now a *granted* sub-manager keeps its surface, while a *non-granted* one is still ceiling-bounded (the breach wall holds). Don't forget `master_room_manager.allowed_tools` when reasoning about what is granted.
 
 ---
 
@@ -284,15 +288,16 @@ Build a scope (system surface, named `actor_id` for provenance) and hand it on t
 
 ---
 
-## 14. Convergence status (2026-05-31)
+## 14. Convergence status (2026-06-16)
 
 The objective: **one loader, no ad-hoc `ScopeContext(` sprawl.** Where it stands:
 
 - ✅ **On the loader (~63 sites):** all pipelines, subconscious, KG (investigator/resolution/ingest/maintenance), wiki_generator, task_runner, invoke_agent, belief_engine, EmiReminderHandler, dj_manager; rooms via `load_scope`.
-- ✅ **Routine mechanism wired** (`a05a6e0a`) — inert until a routine ships a `scope.yaml`.
+- ✅ **Source `scope.yaml` migrations shipped** beyond pipelines/rooms: the **subsystem** registry (`_SUBSYSTEM_SCOPE_DIRS`: wiki_generator, subconscious, kg_investigator, kg_resolution, edge_importance_eval, image_pod_enrichment, system_reminder), **belief_engine** (`belief_engine/scope.yaml`), and **compiled-task** execution (`app/assistant/scope/sources/task/scope.yaml`, `kind="task"`). The `kg_finding_executor` case study now routes through the loader (`finding_write_scope()` → `kind="subsystem"`, `kg_investigator`) instead of an inline `ScopeContext(...)`.
+- ✅ **Routine mechanism wired** (`a05a6e0a`) — still **inert: no routine ships a `<id>.scope.yaml` yet** (`configs/routines/public/` has none). Literally true.
 - 🟢 **Deliberate non-loader paths (correct, keep):** courier (`for_courier_call` ×5), `for_sub_manager`, the `_derive_system_scope` floor, and `ScopeContext.model_validate(...)` re-hydration sites (parsing an existing scope dict back to an object — not new policy).
-- 🟡 **Parked legacy** (`build_system_scope_context` callers to retire): the `daily_summary`/MaintenanceManager cluster (×4) and `task_ir_actions` fallback; plus Orchestrator (future, intentionally untouched).
-- 🔴 **Un-migrated tail** (still hand-roll `ScopeContext(`): `context_engine` (chat_scan, reasoning_agent), `location_manager`, `routes/me` & `routes/preferences`, `geoguessr`, `execution_trace/dojo`.
-- 🔴 **First routine-scope consumer not done:** `fetch_email` needs a `scope.yaml` + the `email_parser` must thread `tool_message.scope_context` (kills the `_EMAIL_PARSER_SCOPE` constant in `email_utils.py`). Plus ~10 other hidden-LLM tools (scraper, web_parser, label, vision_*, ask_kg) to audit for the same thread-the-caller fix; and `FunctionRoutineRunner` to wire.
+- 🟡 **Parked legacy** (`build_system_scope_context` callers to retire): the `daily_summary`/MaintenanceManager cluster and `task_ir_actions` fallback; plus Orchestrator (future, intentionally untouched).
+- 🔴 **Un-migrated tail** (still hand-roll `ScopeContext(`): `context_engine` (chat_scan, reasoning_agent), `location_manager`, `routes/preferences`, `geoguessr`, `execution_trace/dojo`. (`routes/me` no longer hand-rolls — migrated off; only `routes/preferences` remains in `app/routes/`.)
+- 🔴 **First routine-scope consumer not done:** `fetch_email` needs a `scope.yaml` + the `email_parser` must thread `tool_message.scope_context` (kills the `_EMAIL_PARSER_SCOPE` constant — still live at `lib/core_tools/email_tool/utils/email_utils.py`). Plus ~10 other hidden-LLM tools (scraper, web_parser, label, vision_*, ask_kg) to audit for the same thread-the-caller fix; and `FunctionRoutineRunner` to wire.
 
 > When modifying scope: re-read the actual file first (this codebase's tooling has at times returned stale/garbled reads — verify anchors), prefer assert-before-write edits, and remember the blast radius is system-wide.

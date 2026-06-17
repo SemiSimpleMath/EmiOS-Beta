@@ -52,14 +52,27 @@ None of this touches the bytes-band (always 100) or the mint. Accounts are a **d
 resource — same scope-gated path as a file resource, but the value is COMPUTED from the
 registry (`render_accounts_for_scope`), not read from disk.
 
-**Dynamic-resource registration (settled).** Resources become **lock-optional**, mirroring
+**Dynamic-resource registration (SHIPPED).** Resources are **lock-optional**, mirroring
 skills: a resource may declare a `requires_scope` lock evaluated by the SAME shared
 scope-gate primitive skills use (`utils/scope_gate.scope_gate_passes`) — **no lock = free**
-(backward-compatible; every existing file resource stays unlocked). `ResourceManager` gains
-a **provider registry** (computed value) and a **lock registry**, both optional; `get_resource`
-runs the lock (if any) → the existing `allowed_global_resources`/`denied` allowlist → then
-resolves the value (provider if registered, else file/cache). Accounts register a provider
-**+** a lock; the `available_accounts` special-case (context_injector) is deleted.
+(backward-compatible; every existing file resource stays unlocked). `ResourceManager` carries
+a **provider registry** (`register_provider`, computed value) and a **lock registry**
+(`register_lock`), both optional. `get_resource(*, scope_context, resource_id)` runs the
+order: `denied_resources` → the `allowed_global_resources` allowlist (`"all"` or explicit) →
+the lock (if any) → then resolves the value (provider if registered, **else** file/cache).
+Account resources register a provider (some also a lock); the `available_accounts`
+special-case auto-inject in `context_injector` is **deleted** (the only remaining mention is
+the bootstrap comment recording its removal). Agents reach accounts only through the normal
+`resolve_resource` → `ResourceResolver.get_global_resource(..., scope_context=...)` path.
+
+**The domain-relevance (`categories`) filter.** `render_accounts_for_scope(scope, *, categories=None)`
+takes an optional set of platform categories (`gmail`→`email`, `bluesky`→`social`, … per the
+`_FEATURE_BY_PLATFORM` map, unknowns → `other`). When set, only accounts whose platform
+category is in the set are rendered. This is **RELEVANCE, not permission** — principal +
+authority still gate *access*; `categories` only trims to what is pertinent to the agent's
+job. `personal_admin::planner` requests `{"email"}` (via the `resource_email_accounts`
+provider) so social accounts never enter its prompt; `categories=None` (the `resource_accounts`
+provider) shows every category the scope already permits.
 
 **Why authority is an `int`, not an `enum`:** it's an ordered line and the gate is a
 single `caller ≥ required` comparison. The named bands are anchors; a pod/account can
@@ -137,16 +150,40 @@ The two paths **never cross**. That is the whole design.
 5. Authority is an `int` (ordered line), not an enum; the **99/100 cap** is the only
    categorical line.
 
-## Status (2026-06-04)
+## Status (2026-06-16)
 
-- **Built & committed:** env page reads the real `.env` masked (`105095e1`); pod
-  lifecycle mint-on-`agent` / hard-delete-on-demote + per-var sensitivity on the env page
-  (`91693b2e`).
-- **Built (uncommitted):** account creation `create_account()` (`owner/login/password/
-  authority`) — uniform mint, structured record to the unified registry, route + form.
-- **Designed, not built:** accounts as a **dynamic, scope-gated resource** — register a
-  computed `resource_accounts` that rides `get_global_resource(scope_context)`, and delete
-  the `available_accounts` special-case auto-inject. Dynamic-resource **registration** is
-  the open plumbing question (today "resources = files in a folder").
-- **Queued:** names (`PRIMARY_USER`/`ASSISTANT_NAME`) out of `.env` → resource files,
-  fold the two name resolvers (separate change).
+The whole three-layer design is **shipped and wired**. The dynamic-resource registration
+that was "the open plumbing question" is resolved.
+
+- **Accounts-as-a-dynamic-scope-gated-resource — SHIPPED.** `app/bootstrap.py` registers, at
+  init, two providers backed by `EnvRegistryService.render_accounts_for_scope`:
+  - `resource_accounts` → `render_accounts_for_scope(scope)` (every permitted category).
+  - `resource_email_accounts` → `render_accounts_for_scope(scope, categories={"email"})`
+    (the domain-relevance filter; `personal_admin` consumes this).
+
+  Both apply the **principal** filter (`accessible_by` ∋ `acting_as`, via `resolve_principal`)
+  **and** the **per-account authority** filter (account `authority` int ≤ caller's
+  `approval.authority_level`) *inside* the computed value. Access itself is the outer
+  scope-gate (`get_resource`'s allow/deny + lock) — accounts surface only when the agent
+  opts in (`config.yaml` context item + `.j2`) **and** the scope grants the resource.
+  `bootstrap.py` also `register_lock("resource_user_email", {"acting_as": "user"})` — locking
+  the user's email-identity (file) resource to user-mode so it does not leak into `/actas self`
+  (where email-as-self governs instead).
+- **`create_account()` — SHIPPED.** `EnvRegistryService.create_account(owner, platform, login,
+  secret, authority, …)` writes name-neutral `ACCT_…_HANDLE`/`ACCT_…_SECRET` `.env` keys
+  (values only), mints the **standard** `auth.bearer` pod (uniform mint — `authority` is *not*
+  applied at mint; it lands on the entry as surfacing policy), and persists the `kind=account`
+  record to `env_registry_user.json`.
+- **`resolve_gmail_account_id(alias, *, scope_acting_as)` — SHIPPED.** Resolves a planner
+  alias / scope principal to a Google OAuth `account_id`: `"user"` → the owner's primary
+  Google account, `"self"` → the assistant's gmail `account_id` (raises if her gmail isn't
+  configured), anything else → passed through as a literal id. Companion:
+  `expected_email_for_account_id` validates a consented identity against the registry's
+  expected handle.
+- **`available_accounts` special-case — REMOVED.** The auto-inject in `context_injector` is
+  gone; the sole remaining occurrence in `app/` is the `bootstrap.py` comment recording the
+  switch to the provider. (Verified by repo-wide search.)
+- **Env/Accounts pages — SHIPPED.** Env page reads the real `.env` masked; pod lifecycle
+  mint-on-`agent` / hard-delete-on-demote + per-var sensitivity on the env page.
+- **Queued (unchanged):** names (`PRIMARY_USER`/`ASSISTANT_NAME`) out of `.env` → resource
+  files, fold the two name resolvers (separate change).

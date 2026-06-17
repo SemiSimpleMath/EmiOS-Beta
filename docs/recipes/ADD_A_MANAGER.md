@@ -40,66 +40,104 @@ app/assistant/agents/<namespace>/
 
 ## `config.yaml` — the manager
 
-Look at `app/assistant/multi_agents/kg_mutation_manager/config.yaml` for the canonical example. The shape:
+Look at `app/assistant/multi_agents/kg_mutation_manager/config.yaml` and `app/assistant/multi_agents/emi_team_manager/config.yaml` for the canonical examples. Loaded by `ManagerRegistry.preload_all()`. The real shape:
 
 ```yaml
 name: my_domain_manager
 class_name: MultiAgentManager
+display_name: "Pancake"            # optional per-manager persona name
 description: One-line description of what this manager does.
+max_cycles: 80                     # default 30; budgets LLM-agent activations, not loop hops
 
-# Reuse emi_team's delegator + summary; supply your own planner + final_answer.
-agents:
-  - emi_team::delegator
-  - my_domain::planner
-  - emi_team::critic
-  - emi_team::summary
-  - my_domain::final_answer
-
+# role_bindings alias roles to concrete agents. THE ENTRY AGENT IS THE
+# `delegator` binding — there is NO `entry_agent` field.
 role_bindings:
   delegator: emi_team::delegator
+  tool_selector: shared::tool_selector
   planner: my_domain::planner
-  critic: emi_team::critic
-  summary: emi_team::summary
-  final_answer: my_domain::final_answer
 
-entry_agent: emi_team::delegator
+# `agents` is a list of {name, class} bindings to instantiate (NOT bare strings).
+# Reuse emi_team's delegator + summary; supply your own planner + final_answer.
+agents:
+  - name: emi_team::delegator
+    class: Delegator
+  - name: my_domain::planner
+    class: Planner
+  - name: emi_team::summary
+    class: Agent
+  - name: my_domain::final_answer
+    class: Agent
 
-# Deterministic routing through the loop.
-state_map:
-  emi_team::delegator: my_domain::planner
-  my_domain::planner: tool_caller            # control node
-  tool_caller: tool_result_handler
-  tool_result_handler: my_domain::planner    # back to planner unless planner said return_control
-  my_domain::final_answer: manager_exit_node
+# control_nodes is a REQUIRED list of {name, class} bindings (validation
+# demands at least one). Copy the set kg_mutation_manager uses as a baseline.
+control_nodes:
+  - name: tool_caller
+    class: ToolCaller
+  - name: tool_result_handler
+    class: ToolResultHandler
+  - name: tool_return_router
+    class: ToolReturnRouter
+  - name: return_control
+    class: ReturnControlNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+  - name: graceful_exit_control_node
+    class: GracefulExitControlNode
 
-max_cycles: 80
+# `tools` is the manager's plain tool list (separate from the scope layer below).
+tools:
+  allowed_tools:
+    - my_typed_tool
+    - ask_user
+  except_tools: []
 
-# Tool visibility — what your planner sees in its tool catalog.
+# Tool visibility — what your planner SEES in its tool catalog (its own block).
 tool_visibility:
   always_show: [my_typed_tool, ask_user]
-  use_narrower: false           # set true to delegate filtering to shared::tool_narrower
+  use_narrower: false              # true => delegate filtering to shared::tool_narrower
 
-# Tool blocklist (optional; the scope contract is the more durable guard).
-blocked_tools:
-  - kg_create_node             # we're a domain manager, not a writer
-  - kg_create_edge
-
+# The scope layer — distinct from `tools:` above. This is the durable guard.
 scope_contract:
-  scope_id: scope::my_domain_manager
-  approval:
-    authority_level: 100
-  resources:
-    allowed_global_resources: ["all"]
+  tools:
+    allowed_tools:                 # the manager's own surface (a ceiling, narrows-only)
+      - my_typed_tool
+      - ask_user
+    blocked_tools:                 # always unions DOWN to children
+      - kg_create_node
+      - kg_create_edge
+    requires_approval_tools: []    # additive-narrowing only
   writes:
-    write_kg: true              # narrows-only — caller must already grant this
-    write_unified_log: true
+    write_kg: true                 # narrows-only — caller must already grant this
+    allow_fact_extraction: false
+
+# flow_config holds the routing graph (state_map lives HERE, not at top level)
+# plus flow-policy sub-sections (summary, critic, chat_gate, ...).
+flow_config:
+  strict_routing: true
+  tool_return:
+    tool_call_result_handler_node: "tool_result_handler"
+  state_map:
+    "emi_team::delegator": "my_domain::planner"
+    "my_domain::planner": "tool_caller"
+    "tool_result_handler": "tool_return_router"
+    "tool_return_router": "my_domain::planner"
+    "my_domain::planner_return_control": "my_domain::final_answer"
+    "my_domain::final_answer": "manager_exit_node"
+    "graceful_exit": "graceful_exit_control_node"
+    "graceful_exit_control_node": "my_domain::final_answer"
 ```
 
-The `scope_contract` is critical. Two rules to internalize:
+Three things the old shape got wrong and that you must get right:
 
-1. **It can only narrow.** If the inbound Message says `write_kg: false` and your contract says `write_kg: true`, the framework rejects with "scope_contract attempted to expand writes.write_kg from false to true". Fix: have the *caller* seed the inbound Message's scope with the right permissions. See `app/assistant/kg_investigator/finding_executor.py::_mutation_scope` for the pattern.
+- **`agents` and `control_nodes` are `{name, class}` lists**, not bare strings, and `control_nodes` is required (validation rejects a config with no named control node).
+- **`state_map` lives under `flow_config`**, not at the top level. The planner returns control via a synthetic `"<planner>_return_control"` edge — note that key in the state_map above.
+- **The entry agent is `role_bindings.delegator`.** There is no `entry_agent` field.
 
-2. **`requires_approval_tools` is also additive-narrowing only.** A manager can add approval gates to a tool but never lift them.
+The `scope_contract` is critical, and its fields nest under `scope_contract.tools.*` and `scope_contract.writes.*` (not top-level `approval` / `resources` blocks). Two rules to internalize:
+
+1. **It can only narrow.** If the inbound Message says `write_kg: false` and your contract says `write_kg: true`, `ScopeAdapter` rejects with "scope_contract attempted to expand writes.write_kg from false to true" (`manager_runtime/services/scope_adapter.py`). Fix: have the *caller* seed the inbound Message's scope with the right permissions. The kg_investigator's `scope.yaml` (its `_investigation_scope` / `_mutation_scope`) is the reference pattern for a caller that grants `write_kg`.
+
+2. **`blocked_tools` unions down and `requires_approval_tools` is additive-narrowing only.** A manager can add denials and approval gates but never lift them.
 
 ## Write your planner
 
@@ -112,19 +150,18 @@ class_name: Agent
 
 llm_params:
   llm_provider: openai
-  engine: gpt-5-mini
-  model_tier: mini
+  engine: gpt-5.1
+  model_tier: smart
 
 allowed_tools:
   - my_typed_tool
   - ask_user
-  - tool_caller    # special — lets planner call other tools via tool_caller dispatch
-
-allowed_nodes: []
+allowed_nodes: [return_control]    # planner returns control to wrap up
 
 system_context_items:
-  - resource_user_data
-  - tool_descriptions
+  - tool_descriptions              # renders the visible-tool catalog into the prompt
+  - allowed_nodes
+  - task
 
 user_context_items:
   - task
@@ -133,6 +170,8 @@ user_context_items:
 
 action_required: true
 ```
+
+(The planner emits `action`/`action_input`; the control node `tool_caller` dispatches — `tool_caller` is a control node in the state_map, not a value you put in `allowed_tools`.)
 
 `prompts/system.j2`: the role + decision rules. For inspiration, read `app/assistant/agents/kg_mutation/planner/prompts/system.j2` — it has crisp decision rules like "if reversibility=='irreversible' OR confidence < 0.75 → escalate; else → execute + resolve."
 
@@ -235,6 +274,9 @@ If a state_map references a missing agent or control node, the validator surface
 
 ## Common pitfalls
 
+- **`state_map` at the top level.** It must live under `flow_config`. `_validate_strict_routing_config` rejects a config whose `flow_config.state_map` is missing/empty.
+- **`agents` or `control_nodes` written as bare strings.** Both are `{name, class}` lists. And `control_nodes` is required — a config with none fails validation.
+- **Looked for an `entry_agent` field.** There isn't one. The entry agent is the `role_bindings.delegator` binding.
 - **Forgot to seed write_kg in the caller's scope.** Manager rejects with "scope_contract attempted to expand writes.write_kg from false to true". Fix the caller, not the manager.
 - **Reused `emi_team::final_answer` instead of writing your own.** Works but you lose the per-domain structured outcome. Write your own; carry the envelope.
 - **state_map references control nodes by wrong name.** `tool_caller` is correct (singular), not `tool_caller_node`.

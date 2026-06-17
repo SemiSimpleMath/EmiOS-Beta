@@ -32,38 +32,71 @@ Base class for every manager that runs LLM agents in a loop:
 - Event registration (configurable subscriptions).
 
 Invoked through `ManagerInvoker.invoke(manager, message)`; the agent
-loop runs until an exit condition (return_control, max_cycles, error,
-explicit cancel) and returns a `ToolResult`.
+loop (`_run_loop`) runs until an exit condition (exit flag,
+max_cycles, error, explicit cancel) and returns a `ToolResult`.
+
+**`max_cycles` budgets LLM-agent activations, not loop iterations**
+(a 2026-06-11 change in `MultiAgentManager._run_loop`). Deterministic
+plumbing — control nodes, tool dispatch/handler hops — is free; only a
+non-`ControlNode` activation increments `agent_cycles`. A separate
+`iteration_cap = max(max_cycles * 8, 40)` backstops infinite
+control-node spins. (`RoomManager` is the exception — its own loop
+counts every cycle against `max_cycles`; see below.)
+
+On entry, `request_handler` seeds the blackboard (task/information/data,
+room context, scope), then **fails loud if the inbound message carries
+no `scope_context`** — `_apply_no_inbound_scope` raises in production
+and only substitutes a permissive scope under a test harness
+(`EMI_TEST_MODE` / pytest). It also publishes `flow_config`,
+per-node `control_nodes` configs, and the loop counters onto the
+blackboard.
 
 ## RoomManager (`manager_classes/RoomManager.py`)
 
 `MultiAgentManager` subclass with **deterministic routing** (no LLM
 delegator agent). Used for rooms (master_room, dayflow_orchestrator,
 etc.) where the per-turn routing is a static graph rather than an
-LLM-chosen next agent.
+LLM-chosen next agent. It overrides `run_agent_loop` with its own
+`_pick_next_agent_name` loop.
 
-- Routing priority each turn:
-  1. Explicit `next_agent` set on the blackboard
-  2. `state_map[last_agent]` lookup
-- Enforces `max_cycles` (default 30).
-- Exit conditions: cancelled, max_cycles, exit flag, error flag.
+- Routing priority each turn (`_pick_next_agent_name`):
+  1. Explicit `next_agent` set on the blackboard (consumed before activation)
+  2. `flow_config.state_map[last_agent]` lookup
+- Counts **every** cycle against `max_cycles` (default 30) — it does
+  not use the base class's agent-activation budget.
+- Exit conditions: cancelled, max_cycles, exit flag, error flag, or a
+  routing dead-end (no `next_agent` and no `state_map` match → error).
 
 ## Manager invocation chain
 
 ```
 RoomSessionManager.invoke_manager(envelope, request_data)
   -> ManagerInvoker.invoke(manager_instance, user_message)
-    -> RequestPreprocessor.preprocess()    # normalize message
-    -> ScopeAdapter.apply()                # apply scope context
-    -> MultiAgentManager.request_handler()
-      -> Seed blackboard from room history
-      -> Seed resource subscriptions
-      -> Agent loop:
-        -> Pick next agent (state_map or explicit next_agent)
-        -> agent.action_handler(message)
-        -> Loop until exit/max_cycles/error
+    -> MAMInstanceManager.register(...)    # running-invocation record + display_name
+    -> publish "manager_invocation_started" on event_hub
+    -> RequestPreprocessor.preprocess()    # normalize message (may short-circuit)
+    -> ScopeAdapter.apply()                # apply/derive scope context
+    -> manager_instance.request_handler()  # seed blackboard, fail-loud on no scope
+      -> Seed blackboard (task, room ctx, scope, flow_config, counters)
+      -> Seed local messages from data.seeded_chat_messages
+      -> run_agent_loop -> _run_loop:
+        -> drain mailbox (out-of-band @-messages / cancel)
+        -> delegator routes (state_map or explicit next_agent)
+        -> next_agent.action_handler(message)
+        -> Loop until exit/max_cycles/error/cancel
       -> Return ToolResult
+    -> MAMInstanceManager.unregister(...)  # in finally — registry can't drift
 ```
+
+`ManagerInvoker` (`manager_runtime/manager_invoker.py`) is the canonical
+entry. It wraps every call in `MAMInstanceManager.register` /
+`unregister` (try/finally), stashes the `invocation_id` on the
+manager's blackboard (so the mailbox dispatcher can address it), and
+fires a generic `manager_invocation_started` event carrying the
+per-instance `display_name`, `room_id`, and `reply_to`.
+`MAMInstanceManager` (`manager_runtime/mam_instance_manager.py`) owns
+the running-instance registry, display-name assignment, and
+cancel/status surface — `ManagerInvoker` itself is stateless.
 
 `RoutineManager` and the other service managers are NOT invoked
 through this chain. They have their own dispatch mechanisms (cron-style
@@ -72,15 +105,46 @@ daemons).
 
 ## Manager YAML configuration
 
-Agent-orchestrating managers are configured via YAML files loaded by
-`ManagerRegistry`. Each config defines:
+Agent-orchestrating managers are configured via `config.yaml` (one per
+`multi_agents/<name>/` directory) loaded by `ManagerRegistry`. Real
+top-level keys:
 
-- `state_map` — agent routing graph.
-- `role_bindings` — agent aliasing.
-- `entry_agent` — starting agent.
-- `max_cycles` — loop limit.
-- `events` — event subscriptions.
-- `scope` — tool/resource access controls.
+- `name`, `class_name` (`MultiAgentManager` | `RoomManager`),
+  `display_name` (per-manager persona name), `description`.
+- `max_cycles` (default 30), `max_exit_cycles` (graceful-exit budget,
+  default 10).
+- `role_bindings` — agent aliasing. **The entry agent is the
+  `delegator` role binding** (e.g. `delegator: room::delegator`); there
+  is no `entry_agent` field.
+- `agents` — list of `{name, class}` agent bindings to instantiate.
+- `control_nodes` — list of `{name, class}` control-node bindings
+  (required: validation demands ≥1 named node).
+- `tools.allowed_tools` / `tools.except_tools` — the manager tool list.
+- `scope_contract` — the manager's own scope policy block
+  (`tools.allowed_tools` / `blocked_tools` / `requires_approval_tools`,
+  etc.). This is the scope layer, distinct from the `tools:` list above.
+- `flow_config` — routing + flow policy (see below).
+- `events` — event subscriptions (handler `<event>_handler` must exist
+  on the manager or `_register_configured_events` raises).
+- `execution_trace` — opt-in `{enabled: ...}` step recorder.
+
+### flow_config
+
+`flow_config` holds **`state_map`** (the routing graph — note it lives
+*under* `flow_config`, not at top level) plus optional flow-policy
+sub-sections. `_validate_strict_routing_config` (always on) enforces:
+
+- `state_map` is a non-empty dict of non-empty string→string edges.
+- `control_nodes` exists and names ≥1 node.
+- If present, `tool_return.tool_call_result_handler_node` must be a
+  string that exists in `state_map`.
+- If present, `critic` requires `subject_agent` / `critic_agent` /
+  `continue_agent`; `summary` requires `source_agent` / `summary_agent`
+  / `resume_agent`; both must be non-empty strings.
+
+Other common `flow_config` sub-sections: `strict_routing`, `flow`
+(per-mode `source_agent`), and `chat_gate` (`source_agent`,
+`switchboard_agent`, `final_node`, `exit_flag_key`, response/task keys).
 
 Service managers do NOT use these configs.
 
@@ -125,6 +189,12 @@ scope stack:
 - `update_state_value(key, val)` — writes to current (top) scope.
 - `add_msg(message)` — appends to message log.
 
+At the top of every loop cycle the manager **drains its mailbox**
+(`_drain_mailbox` → `MailboxDispatcher.drain_to`), delivering
+out-of-band `@`-messages, cancel signals, and runtime context injected
+from another thread onto the blackboard — always at the safe cycle
+boundary, never mid-LLM-call.
+
 Service managers don't use Blackboard.
 
 ## Lifecycle
@@ -142,9 +212,11 @@ Service managers don't use Blackboard.
 
 | File | Purpose |
 |------|---------|
-| `manager_classes/MultiAgentManager.py` | Base agent orchestrator |
-| `manager_classes/RoomManager.py` | Deterministic-routing subclass |
-| `manager_runtime/manager_invoker.py` | Canonical invocation entry point |
-| `manager_registry/manager_registry.py` | Manager YAML config loading |
-| `multi_agent_manager_factory/` | Manager instance factory |
+| `manager_classes/MultiAgentManager.py` | Base agent orchestrator (`_run_loop`, `_validate_strict_routing_config`, `request_handler`) |
+| `manager_classes/RoomManager.py` | Deterministic-routing subclass (`_pick_next_agent_name`) |
+| `manager_runtime/manager_invoker.py` | Canonical (stateless) invocation entry point |
+| `manager_runtime/mam_instance_manager.py` | Running-invocation registry, display names, cancel/status |
+| `manager_runtime/mailbox.py` | Out-of-band message dispatch into a running invocation |
+| `manager_registry/manager_registry.py` | Loads each `multi_agents/<name>/config.yaml` |
+| `multi_agent_manager_factory/MultiAgentManagerFactory.py` | Manager instance factory |
 | `ServiceLocator/service_locator.py` | DI registry (see [17_SERVICE_LAYER](17_SERVICE_LAYER.md)) |

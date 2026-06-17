@@ -2,7 +2,7 @@
 
 ## What it is
 
-Transports are the surface adapters that bridge the outside world and the EmiOS room/manager loop. A user can reach Emi via the local web UI (Socket.IO), via Twilio SMS, via a Slack channel the bot is in, or via a Telegram chat. Each surface has its own inbound mechanism (WebSocket event, signed HTTP POST), its own outbound delivery path (Socket.IO emit, REST/Twilio SDK call), and its own room-mapping convention. SMS/Slack/Telegram webhooks reach the local Flask app via whatever public tunnel the developer is running externally (ngrok, cloudflared, tailscale funnel, etc.) — there is no in-app tunnel helper. All four flows funnel into a single chokepoint — `RoomSessionManager` — which builds a transport-agnostic `InboundEnvelope`, runs the room manager, and returns an `OutboundIntent` that the surface-specific transport then delivers.
+Transports are the surface adapters that bridge the outside world and the EmiOS room/manager loop. A user can reach the assistant via the local web UI (Socket.IO), via Twilio SMS, via a Slack channel the bot is in, or via a Telegram chat. Each surface has its own inbound mechanism (WebSocket event, signed HTTP POST), its own outbound delivery path (Socket.IO emit, REST/Twilio SDK call), and its own room-mapping convention. SMS/Slack/Telegram webhooks reach the local Flask app via whatever public tunnel the developer is running externally (ngrok, cloudflared, tailscale funnel, etc.) — there is no in-app tunnel helper. All four flows funnel into a single chokepoint — `RoomSessionManager` — which builds a transport-agnostic `InboundEnvelope`, runs the room manager, and returns an `OutboundIntent` that the surface-specific transport then delivers.
 
 Cross-links: see `docs/architecture/03_ROOMS.md` for the room contract and `docs/architecture/02_MANAGERS.md` for the manager loop these envelopes feed.
 
@@ -137,7 +137,7 @@ The handler runs eight checks before doing real work:
 3. Type check: only `event_callback` envelopes proceed.
 4. **Idempotency** — `is_duplicate_slack(event_id)` to avoid double-processing on Slack's retry-on-3s-timeout behavior.
 5. **Team allowlist** check.
-6. **Event filter** (`_extract_message_event`, line 115) — drops `bot_id`/`bot_profile` events (Emi's own messages — without this filter Emi responds to itself in an infinite loop), `subtype in {bot_message, message_changed, message_deleted, channel_join, channel_leave, message_replied}`, and any message with empty text.
+6. **Event filter** (`_extract_message_event`, line 115) — drops `bot_id`/`bot_profile` events (the assistant's own messages — without this filter the assistant responds to itself in an infinite loop), `subtype in {bot_message, message_changed, message_deleted, channel_join, channel_leave, message_replied}`, and any message with empty text.
 7. **Channel allowlist** check.
 8. **Async dispatch** via `start_monitored_thread(owner="slack_events", ...)` running `_process_slack_inbound_async` which calls `room_session_manager.handle_slack_inbound`. The webhook itself returns `{"ok": true}` immediately to satisfy Slack's 3-second response deadline.
 
@@ -166,11 +166,14 @@ Room ids are auto-derived: `slack/<channel_id>` (e.g. `slack/C08AB0R54HM`) via `
 
 ### Outbound
 
-`SlackRoomTransport.send_reply` (`room_transports/slack_transport.py`) calls `SlackTool().handle_send_message({channel_id, text, thread_ts?})`. SlackTool itself enforces the `allow_real_slack_send` gate from `configs/slack_room.json` — when false, it returns a dry-run string and does NOT hit the Slack API. This is the "I forgot to flip the safety switch" guard for shipping.
+Slack has **two distinct outbound codepaths** — don't conflate them. Both end in `slack_sdk.WebClient.chat_postMessage` underneath, but they are separate code:
 
-Bot-vs-human distinction is enforced on inbound only (filter in `_extract_message_event`). On outbound, Emi always posts as the bot user the OAuth token belongs to.
+1. **Synchronous inbound-reply** — `SlackRoomTransport.send_reply(*, channel_id, body, thread_ts="")` (`room_transports/slack_transport.py`) calls `SlackTool().handle_send_message({channel_id, text, thread_ts?})`. This is the in-thread reply on the inbound request. `SlackTool` enforces the `allow_real_slack_send` gate from `configs/slack_room.json` — when false, it returns a dry-run string and does NOT hit the Slack API. This is the "I forgot to flip the safety switch" guard for shipping.
+2. **Asynchronous relay** — when a background event publishes a `socket_emit` whose `reply_to.type == "slack"`, `EmiEventRelay._emit_via_slack` calls `app/services/slack.py::SlackService.send_message(channel_id=, text=, thread_ts=)`. `SlackService` is a minimal sender keyed off `SLACK_TOKEN` / `EMI_SLACK_TOKEN` / `SLACK_BOT_TOKEN` (first non-empty); it does **not** consult the `allow_real_slack_send` gate, so agent-initiated Slack sends go out for real.
 
-> Note: there is a separate dev simulator `POST /slack/room/simulate` in `slack_room.py` that supports a `use_latest=true` mode — pulls the latest non-Emi message from a channel via `SlackTool.handle_get_messages` and runs it through the manager loop without needing Slack to actually POST.
+Bot-vs-human distinction is enforced on inbound only (filter in `_extract_message_event`). On outbound, the assistant always posts as the bot user the OAuth token belongs to.
+
+> Note: there is a separate dev simulator `POST /slack/room/simulate` in `slack_room.py` that supports a `use_latest=true` mode — pulls the latest non-the assistant message from a channel via `SlackTool.handle_get_messages` and runs it through the manager loop without needing Slack to actually POST.
 
 ## Telegram webhook
 
@@ -214,12 +217,12 @@ EmiOS does not bundle a tunnel. To expose the local Flask app to Twilio / Slack 
 
 ## RoomSessionManager — the central hub
 
-`app/assistant/room_session_manager/room_session_manager.py` is a 1032-line class that every transport flows through. Public entry points:
+`app/assistant/room_session_manager/room_session_manager.py` (~1171 lines) holds two classes: `InboundSurfaceAdapter` (the per-surface lambda bundle — `append_inbound` / `append_outbound` / `send_outbound`) and `RoomSessionManager`, the central hub every transport flows through. Public entry points on `RoomSessionManager`:
 
-- `handle_ui_inbound(socket_id, body, room_id, ...)` (line 956)
-- `handle_sms_inbound(from_number, to_number, body, message_sid, room_id, ...)` (line 980)
-- `handle_slack_inbound(channel_id, body, room_id, message_ts, sender_name, sender_id, thread_ts, image_paths, ...)` (line 1002)
-- `handle_telegram_inbound(chat_id, body, room_id, message_id, sender_name, sender_id, ...)` (line 932)
+- `handle_ui_inbound(socket_id, body, room_id, ...)`
+- `handle_sms_inbound(from_number, to_number, body, message_sid, room_id, ...)`
+- `handle_slack_inbound(channel_id, body, room_id, message_ts, sender_name, sender_id, thread_ts, image_paths, ...)`
+- `handle_telegram_inbound(chat_id, body, room_id, message_id, sender_name, sender_id, ...)`
 
 Each delegates to `surface_handler_factory.get(<surface>).handle(self, ...)`. The four surface inbound services all do the same shape of work:
 
@@ -254,19 +257,21 @@ The room's `policy.json` can further block unified-log persistence even when the
 
 ### Slash commands
 
-`RoomSlashCommandRouter.route` (`services/room_slash_command_router.py:56`) recognizes:
+`RoomSlashCommandRouter.route` (`services/room_slash_command_router.py`) recognizes:
 
 | Command | Effect |
 |---------|--------|
 | `/plan [text]`      | Activate `planning_mode`; binds plan_session, sets `meta.room_mode = "planning_mode"` |
-| `/done`, `/end`     | Close active plan/task/doc session, short-circuit reply "X mode closed" |
+| `/done`, `/end`     | Close active plan/task/doc session (also clears any sticky `/actas` binding), short-circuit reply "X mode closed" |
 | `/cancel`           | Close active plan session |
-| `/task [run\|load\|create] [name] [prompt]` | Run / load / create a task (mostly redirects to `/task/create` widget) |
+| `/task`, `/task:create` `[run\|load\|create] [name] [prompt]` | Run / load / create a task (mostly redirects to the `/task/create` page) |
 | `/task:cancel`, `/task:exit`, `/task:done`, `/task:end` | Close task creation session |
-| `/doc [create\|load] [md\|gdoc] [name] [prompt]` | Activate `doc_creation_mode`; loads existing doc into draft store |
+| `/doc`, `/doc:create` `[create\|load] [md\|gdoc] [name] [prompt]` | Redirect to the `doc_editor` room (`/doc/editor`); the legacy in-room `doc_creation_mode` is being phased out |
 | `/doc:cancel`, `/doc:exit`, `/doc:done`, `/doc:end` | Close doc creation session |
 | `/play geoguessr [monitor]` | Activate `game_mode`; start screenshot timer |
 | `/play stop\|pause\|resume\|next` | Game lifecycle controls |
+| `/actas [self\|user]` | Set/clear a **sticky** principal for the room (`/actas self` acts as the assistant's principal; `/actas user`/`jukka`/`normal`/`off` exits; bare `/actas` shows current). Persists across messages until cleared or `/end` |
+| `/pod expand <prefix>` | Deterministic, scope+authority-gated pod read — delegates to the `pod_command` service (`services/pod_command.py`) |
 
 A `SlashCommandResult` either: (a) sets `room_mode` + `*_session_id` in metadata and lets the pipeline continue, or (b) sets `continue_pipeline=False` with an `early_result` that short-circuits the manager loop and replies immediately.
 
@@ -303,10 +308,10 @@ The `ReplyRouter` (`app/services/reply_router.py`) is a thread-safe `request_id 
 | `app/services/twilio_sms.py` | `TwilioSmsService` — outbound SMS via Twilio SDK with retry |
 | `app/routes/slack_events.py` | Slack Events API inbound webhook (signed, async dispatch) |
 | `app/routes/slack_room.py` | Dev-only Slack inbound simulator (supports `use_latest`) |
-| `app/assistant/lib/core_tools/slack/slack.py` | `SlackTool` — Slack Web API client, dry-run safety gate |
+| `app/assistant/lib/core_tools/slack/slack.py` | `SlackTool` — Slack Web API client (synchronous inbound-reply path), dry-run safety gate |
+| `app/services/slack.py` | `SlackService.send_message` — minimal async-relay Slack sender (used by `EmiEventRelay._emit_via_slack`) |
 | `app/routes/telegram_webhook.py` | Telegram webhook inbound |
 | `app/services/telegram_bot.py` | `TelegramBotService` — outbound `sendMessage` via raw HTTPS |
-| `app/routes/ngrok_route.py` | `/ngrok/{start,stop,status}` |
 | `app/routes/webhook_dedup.py` | `WebhookDedupCache` — in-memory idempotency for Twilio/Slack/Telegram retries |
 | `app/assistant/room_session_manager/room_session_manager.py` | Central hub — surface adapters, generic inbound handler |
 | `app/assistant/room_session_manager/contracts.py` | `InboundEnvelope`, `OutboundIntent` |

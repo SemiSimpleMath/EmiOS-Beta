@@ -1,6 +1,6 @@
 # Welcome to EmiOS
 
-You are looking at a personal AI assistant that runs locally on the user's laptop. It has memory (a knowledge graph), it talks across multiple surfaces (UI, SMS, Slack, Telegram), it runs autonomous routines (morning briefing, KG maintenance, wiki refresh), and it composes specialized LLM agents into managers that solve concrete tasks.
+You are looking at a personal AI assistant that runs locally on the user's laptop. It has memory (a knowledge graph, plus a belief engine and a wiki built on top of it), it talks across multiple surfaces (UI, SMS, Slack, Telegram), it runs autonomous routines (morning briefing, KG maintenance, wiki refresh) and an autonomous "subconscious" that proactively reaches out, and it composes specialized LLM agents into managers that solve concrete tasks.
 
 If this is your first day in the codebase, the goal of this page is to get you productive in roughly an afternoon.
 
@@ -13,10 +13,20 @@ In code: when you see `wiki_writer.py`, `/wiki/`, "the wiki vault," etc., that r
 1. A Flask app that serves a chat UI plus a fleet of admin pages.
 2. The chat UI talks to **Rooms** (scoped channels). The main room is `master_room`.
 3. Each room invokes a **Manager** that runs an **Agent loop** (LLM → control node → tool → repeat).
-4. Background **Routines** (schedule definitions in `configs/routines.json`) fire scheduled work — pipelines, tools, tasks, functions.
-5. A **Knowledge Graph** (SQLite + ChromaDB) stores everything Emi knows about the user; pages of it get projected into a markdown **Wiki** the user can browse.
+4. Background **Routines** (one file per routine under `configs/routines/public/`) fire scheduled work — pipelines, tools, tasks, functions.
+5. A **Knowledge Graph** (SQLite + ChromaDB) stores everything the assistant knows about the user; it's the source for a browseable **Wiki**, structured **entity cards**, and a confidence-tracked **belief engine**.
 
 If you understand those five pieces, you understand EmiOS at the architectural level. The rest is detail.
+
+A handful of larger subsystems sit on top of this skeleton — you don't need them on day one, but you should know they exist:
+
+- **Memory** — the **Knowledge Graph** (`kg_core/`, `kg/`) plus what's built on it: the per-entity **Wiki** (EmiPedia) and structured **entity cards**.
+- **Belief engine** (`belief_engine/`) — confidence-tracked beliefs derived from daily insights, with tag-scoped retrieval that agents pull from.
+- **Subconscious** (`subconscious/`) — the autonomous "mind": a concerns register, proactive outreach woven into chat, and proposer/arbiter lanes (meal, wellness, scheduling).
+- **Pods** (`pod_store/`) — URI-addressable artifacts (`datapod:kind:id`); agents pass references instead of bytes.
+- **Scope** (`scope/`) — the permission model: a four-layer gate (allowed-tools ceiling → visibility → authority floor → approval) on every Message.
+
+See **[00_OVERVIEW](../architecture/00_OVERVIEW.md)** for the subsystem map and **[INDEX](../INDEX.md)** for the per-subsystem doc.
 
 ---
 
@@ -25,9 +35,10 @@ If you understand those five pieces, you understand EmiOS at the architectural l
 1. **You are here.** Finish this page.
 2. **[Mental Model](MENTAL_MODEL.md)** — plain-English definitions of Manager, Agent, Planner, Room, Scope, Tool. Read this **before** any architecture doc.
 3. **[Glossary](../GLOSSARY.md)** — keep open in a tab. Refer when a term you don't recognize appears.
-4. **[00_OVERVIEW](../architecture/00_OVERVIEW.md)** — the layered stack diagram.
+4. **[00_OVERVIEW](../architecture/00_OVERVIEW.md)** — the layered stack diagram + the subsystem map.
 5. Then go subsystem-by-subsystem in dependency order: 01_AGENTS → 02_MANAGERS → 04_CONTROL_NODES → 03_ROOMS → 07_TOOLS → 06_PIPELINES_AND_ROUTINES → 09_KG_PIPELINE → the rest.
-6. When you have a concrete task, jump to the relevant **[Recipes](../INDEX.md#recipes-how-to-add-things)** page.
+6. For the bigger subsystems, read the dedicated doc when you need it — belief engine (16), subconscious (SUBCONSCIOUS.md), pods (14), scope (SCOPE.md), entity cards (12). The **[INDEX](../INDEX.md)** lists them all.
+7. When you have a concrete task, jump to the relevant **[Recipes](../INDEX.md#recipes-how-to-add-things)** page.
 
 ---
 
@@ -50,12 +61,11 @@ The app starts at `http://localhost:8000`.
 
 ### Run tests
 
+All tests live under `app/assistant/tests/` (plural). Throwaway probes go in `/scratch/` (gitignored), never in a tests dir.
+
 ```bash
 # pytest unit tests
-.venv\Scripts\python.exe -m pytest app/assistant/test/agent_tests/
-
-# Standalone test scripts (not pytest — run directly)
-.venv\Scripts\python.exe app/assistant/test/tmp_smoke_kg_convergence.py
+.venv\Scripts\python.exe -m pytest app/assistant/tests/agent_tests/
 
 # Manager integration tests (real KG + real LLMs)
 .venv\Scripts\python.exe app/assistant/tests/manager_tests/emi_team/emi_team_test.py
@@ -79,12 +89,17 @@ from app.assistant.ServiceLocator.service_locator import DI
 | `app/assistant/control_nodes/` | Deterministic state machines that route the agent loop |
 | `app/assistant/lib/tools/` | Tool entry-point wrappers (one directory per tool) |
 | `app/assistant/lib/core_tools/` | Tool implementations (the heavy logic) |
-| `app/assistant/rooms/` | Per-room identity, policy, permissions, access |
+| `app/assistant/rooms/` | Per-room config — one `ROOM.md` (frontmatter: policy/permissions/access) + `scope.yaml` per room |
 | `app/assistant/pipelines/` | Step-based pipelines (daily_insights, kg_pipeline, etc.) |
 | `app/assistant/routine_manager/` | The scheduler that fires pipelines + tools + tasks |
 | `app/assistant/kg_core/` | Knowledge graph core (taxonomy, scoring, etc.) |
 | `app/assistant/kg/db/` | KG database models (`Node`, `Edge`) |
 | `app/assistant/wiki_generator/` | The wiki page generation pipeline |
+| `app/assistant/entity_management/` | Entity cards (per-entity "what's true now" snapshots) |
+| `belief_engine/` | The belief engine (top-level package; tables live in `emi.db`) |
+| `app/assistant/subconscious/` | The autonomous "mind": concerns register, proposers, digest, noticer |
+| `app/assistant/pod_store/` | Pods: store, classifier, materializers, ingest |
+| `app/assistant/scope/` | Scope loader + permission contracts |
 | `app/assistant/dayflow_orchestrator/` | The autonomous daily workflow engine |
 | `app/assistant/ServiceLocator/` | The DI container (`from app.assistant.ServiceLocator.service_locator import DI`) |
 | `app/routes/` | Flask routes — UIs and APIs |

@@ -12,7 +12,7 @@ It is **not** the curatorial / admin tool. That's a separate future surface (`/k
 
 ## Three principles
 
-1. **Question-driven, not browse-driven.** Every view is the result of a query. Default landing: seed=Jukka, fresh subgraph rendered at open.
+1. **Question-driven, not browse-driven.** Every view is the result of a query. Default landing: seed=the user, fresh subgraph rendered at open.
 2. **Always bounded.** Soft cap at 50 visible nodes by personalized PageRank score. Beyond that fade and shrink; hard cap at 100 to keep the renderer happy.
 3. **Discoverable by zoom, click, and shift-click.** All data is reachable, just not all at once. Click a node → opens its wiki page (in a side panel). Shift-click a node → it joins the seed set; the view rebalances. Zoom in → faded ranks 51–100 fade in.
 
@@ -21,8 +21,8 @@ It is **not** the curatorial / admin tool. That's a separate future surface (`/k
 Every visible subgraph is computed as: **personalized PageRank seeded by the active seed set, top-K by score**. This generalizes everything:
 
 - Empty seeds (impossible — default is `[jukka_node_id]`).
-- One seed (Jukka) → "what's important to me right now."
-- Two seeds (Jukka + Katy) → "what's important between us."
+- One seed (the user) → "what's important to me right now."
+- Two seeds (the user + the user's partner) → "what's important between us."
 - N seeds → "what's important across this group."
 
 **Shift-click** a visible node → add it to the seed set, recompute, redraw. The graph stays sparse because the cap stays at 50. Removing a seed (chip × button) recomputes back. Plain click opens the wiki page for the node — see "Wiki integration" below.
@@ -41,7 +41,7 @@ The PageRank runs on the time-filtered subgraph, so "important between 2022 and 
 
 ### Edge inclusion
 
-If two non-seed visible nodes have an edge between them (e.g. Annika ↔ Peter, when seeds are Jukka + Katy), show it. The structure between visible nodes is part of the value. Cap doesn't apply to edges — only nodes.
+If two non-seed visible nodes have an edge between them (e.g. a family member ↔ a family member, when seeds are the user + the user's partner), show it. The structure between visible nodes is part of the value. Cap doesn't apply to edges — only nodes.
 
 ## UX shape (v0)
 
@@ -49,7 +49,7 @@ No top bar.
 
 ```
 ┌────────────────────────────────────────────────────┐
-│  [seed chips: Jukka × | Katy ×]                    │  ← hovers above canvas
+│  [seed chips: the user × | the user's partner ×]                    │  ← hovers above canvas
 │                                                    │
 │              [graph canvas, full viewport]         │
 │                                                    │
@@ -116,7 +116,7 @@ The chat input is the primary control beyond click. v0 supports a small set of t
 - `everything about <X>` — replace seeds with [X].
 - `clear` / `reset` — reset to default (seeds=[jukka]).
 
-Implementation v0: hand-rolled regex + entity name fuzzy match against `kg_node_metadata.label/aliases`. If it doesn't match a template, fall back to an LLM call (small/mini tier) that picks a template + fills params. Reasonable cost (~cents per query). The chat shows a one-line summary of what it understood ("focusing on Katy's family between 2022-2024") so user has feedback.
+Implementation v0: hand-rolled regex + entity name fuzzy match against `kg_node_metadata.label/aliases`. If it doesn't match a template, fall back to an LLM call (small/mini tier) that picks a template + fills params. Reasonable cost (~cents per query). The chat shows a one-line summary of what it understood ("focusing on the user's partner's family between 2022-2024") so user has feedback.
 
 Out of scope for v0: full natural-language-to-Cypher. That's a v1+ ambition.
 
@@ -209,9 +209,9 @@ Total: ~2 weeks for a feeling-real v0.
 
 ## Acceptance criteria for v0 ship
 
-1. Open `/me`, see Jukka centered with top-50 personalized-PageRank neighbors.
+1. Open `/me`, see the user centered with top-50 personalized-PageRank neighbors.
 2. Click any node → it joins the seed set; view rebalances within 1s.
-3. Type "Annika's family" → seed=[Annika], family-edge filter applied.
+3. Type "a family member's family" → seed=[a family member], family-edge filter applied.
 4. Type "events between 2022 and 2024" → time-range filter applied to current seeds.
 5. Toggle currently-true vs lifetime → graph updates.
 6. Click flag → finding saved.

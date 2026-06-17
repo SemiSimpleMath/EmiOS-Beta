@@ -1,4 +1,4 @@
-# CLI Emi — design proposal
+# CLI the assistant — design proposal
 
 Status: draft for discussion. No code yet.
 
@@ -12,17 +12,17 @@ Status: draft for discussion. No code yet.
 Both transports route to the same `cli_room` and the same manager runs in both cases. So "make CLI" is two small projects done independently:
 
 1. **Build `cli_room`** (room policy + chat-styled manager). One small build. Available immediately in the Flask UI as a `/cli` page.
-2. **Build the headless transport** (terminal entry point that bypasses Flask). A second small build. Worthwhile when you want to script Emi from a shell.
+2. **Build the headless transport** (terminal entry point that bypasses Flask). A second small build. Worthwhile when you want to script the assistant from a shell.
 
-A third axis — **headless daemon mode** (no UI, no CLI prompt, Emi-as-service) — IS genuinely a different runtime question, because that's about whether Flask runs at all and whether dayflow ticks autonomously. We treat that separately from the room/transport story.
+A third axis — **headless daemon mode** (no UI, no CLI prompt, the assistant-as-service) — IS genuinely a different runtime question, because that's about whether Flask runs at all and whether dayflow ticks autonomously. We treat that separately from the room/transport story.
 
 This doc walks through all three concerns and proposes phases that ship `cli_room` first (smallest, most value), terminal-transport second, daemon last.
 
 ## Goals
 
 1. **Sub-second iteration** on KG / dev / ops tasks without bouncing Flask.
-2. **Scriptable Emi** — pipe input/output, integrate with shell tooling, run in CI.
-3. **Headless deployment** — Emi as a service on a Pi / VPS without UI.
+2. **Scriptable the assistant** — pipe input/output, integrate with shell tooling, run in CI.
+3. **Headless deployment** — the assistant as a service on a Pi / VPS without UI.
 4. **Debug surface** — invoke a single manager or orchestrator in isolation, see exactly what it returns. Doubles as integration-test harness.
 5. **Preserve the guarded principle.** Same scope_contract / authority / tool-approval mechanisms apply. CLI is a different transport, not a backdoor that bypasses guards.
 
@@ -79,7 +79,7 @@ Effort: half a day. Mostly CSS and a thin route.
 
 What it is: a Python entry point that bootstraps DI without Flask, posts a Message to cli_room (or any room you specify), prints the result, exits. Or runs a stdin-loop REPL persisting transcript to JSONL.
 
-What it gets you: scriptable Emi — pipes, shell composition, CI integration, no browser required.
+What it gets you: scriptable the assistant — pipes, shell composition, CI integration, no browser required.
 
 Effort: 1-2 days. Bootstrap-without-Flask is the largest piece. The room itself already exists from Shape 1, so this is purely about transport.
 
@@ -92,15 +92,15 @@ Both are the same code; REPL is "single-shot in a loop with stdin input."
 
 ### Shape 3 — headless daemon
 
-What it is: Emi running as a service with no UI and no interactive prompt. Dayflow ticks. Routines run on schedule. Inputs come from existing ingress (email, telegram, etc.). Outputs go to outbound channels (telegram, sms, log file).
+What it is: the assistant running as a service with no UI and no interactive prompt. Dayflow ticks. Routines run on schedule. Inputs come from existing ingress (email, telegram, etc.). Outputs go to outbound channels (telegram, sms, log file).
 
-This is genuinely different from Shapes 1 and 2 because it's about whether Flask runs at all, not which room is addressed. It's "Emi the autonomous service" rather than "Emi the responsive interface."
+This is genuinely different from Shapes 1 and 2 because it's about whether Flask runs at all, not which room is addressed. It's "the assistant the autonomous service" rather than "the assistant the responsive interface."
 
 Effort: 2-3 days, separate from the room/transport work.
 
-Use cases: home-server Emi on a Pi, VPS deployment, multi-machine setups.
+Use cases: home-server the assistant on a Pi, VPS deployment, multi-machine setups.
 
-**Phasing recommendation:** Shape 1 first (half day, available immediately in Flask). Shape 2 second (1-2 days, scriptable Emi). Shape 3 only if a real deployment target emerges.
+**Phasing recommendation:** Shape 1 first (half day, available immediately in Flask). Shape 2 second (1-2 days, scriptable the assistant). Shape 3 only if a real deployment target emerges.
 
 ## Architecture
 
@@ -275,8 +275,8 @@ This is the full Mode A in ~50 lines. The rest of the work is in `bootstrap_cli`
     "room_facts_only": true
   },
   "participant_identity": {
-    "display_name": "Jukka",
-    "aliases": ["Jukka", "User", "cli_user"]
+    "display_name": "the user",
+    "aliases": ["the user", "User", "cli_user"]
   }
 }
 ```
@@ -355,7 +355,7 @@ So:
 - **Shape 1 (`/cli` page in Flask UI):** no conflict. Same Flask process, no contention.
 - **Shape 2 (terminal one-shot):** safe alongside running Flask if the operation is short and read-mostly. Locking conflict is possible during writes (e.g. `kg_merge_nodes`); the manager would retry or fail.
 - **Shape 2 (terminal REPL):** same caveat, but more likely to do bursts of writes. Practical advice: "stop Flask before opening a REPL for write-heavy work."
-- **Shape 3 (daemon):** mutually exclusive with Flask on the same DB. The daemon IS Emi for that machine.
+- **Shape 3 (daemon):** mutually exclusive with Flask on the same DB. The daemon IS the assistant for that machine.
 
 A future hardening: a small lock file (`emi.db.cli.lock`) that the terminal transport takes on launch for write-intensive sessions; Flask's `process_request` can check for it and refuse to start a new turn while the CLI holds it. Out of scope for v1.
 
@@ -404,7 +404,7 @@ Ship same-day. Available immediately whenever Flask is running. This validates t
 6. `--room`, `--manager`, `--orchestrator`, `--authority`, `--json` flags.
 7. Smoke test: invoke `kg_dev_manager` from a shell; verify result matches Flask output.
 
-Ship after Phase 1. Adds the scriptable / pipeable Emi.
+Ship after Phase 1. Adds the scriptable / pipeable the assistant.
 
 **Phase 3 — Shape 3 (headless daemon, 2-3 days):**
 
@@ -426,8 +426,8 @@ For each, mark which shape covers it:
 - **"Investigate the KG interactively for an hour from a terminal"** — Shape 2 (REPL). Session history persisted to JSONL.
 - **"Run the nightly KG maintenance batch"** — Shape 2 (cron'd one-shot) or Shape 3 (daemon ticks naturally).
 - **"Build an integration test suite that exercises real managers"** — Shape 2 (one-shot). CLI is the test harness.
-- **"Run Emi on a Raspberry Pi at home, no monitor, talks to Telegram"** — Shape 3.
-- **"Pipe email content into Emi, get a structured summary, pipe to next tool"** — Shape 2 with `--json`.
+- **"Run the assistant on a Raspberry Pi at home, no monitor, talks to Telegram"** — Shape 3.
+- **"Pipe email content into the assistant, get a structured summary, pipe to next tool"** — Shape 2 with `--json`.
 - **"Debug why a manager's prompt is producing weird output"** — Shape 1 or 2. Both walk the same runtime; pick by what's faster to launch.
 
 ## Risks
@@ -443,7 +443,7 @@ For each, mark which shape covers it:
 1. **Single-shot default target.** I propose `kg_dev_manager` (most useful for ops). Alternative: `emi_team_manager` for full power. Or no default — require `--manager` always. **Pick one.**
 2. **Authority default.** I propose 99. Alternative: lower by default (say 80) so CLI can't accidentally do high-blast-radius things; require `--root` to elevate. **Trade-off: convenience vs blast-radius.**
 3. **REPL: implicit chat_gate or direct-manager?** Mode B routes through `kg_dev_room_manager` (with chat_gate confirming destructive ops). Alternative: REPL goes direct to a target manager, no gate. **The chat_gate version matches the dev console UX; the direct version is faster for someone who knows what they're doing.**
-4. **Mode C scope.** Headless daemon includes dayflow + routines. Does it ALSO include outbound channels (Telegram, SMS, email)? If yes, the daemon is "full Emi minus UI." If no, it's "scheduled batch worker." **The first is more ambitious.**
+4. **Mode C scope.** Headless daemon includes dayflow + routines. Does it ALSO include outbound channels (Telegram, SMS, email)? If yes, the daemon is "full the assistant minus UI." If no, it's "scheduled batch worker." **The first is more ambitious.**
 5. **Streaming.** Today nothing streams token-by-token. Mode A prints one final result. Should Mode B stream the gate's chat_response as it's generated, like a real shell agent? **Adds complexity; probably v2.**
 6. **Cancellation.** Ctrl-C in REPL — what does that do? Cancel the current manager invocation? Cancel and exit? Both with two presses? **Spec it.**
 7. **Telemetry.** Should CLI log its turns to the same `data/logs/` files as Flask, or get its own log? **Probably the same, with a `surface=cli` tag.**

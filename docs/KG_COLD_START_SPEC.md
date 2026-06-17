@@ -1,3 +1,7 @@
+> **⚠️ ARCHIVED / SPECULATIVE — NOT WIRED (2026-06-17).** A design spec; the referenced runner (`tmp_run_kg_cold_start_pipeline.py`) was deleted and the end-to-end pipeline is not currently runnable (`kg_cold_start_orchestrator/` holds only a config). Model ids are dated. Kept as a design artifact.
+
+---
+
 # KG Cold-Start Investigation Pipeline — Spec
 
 ## Goal

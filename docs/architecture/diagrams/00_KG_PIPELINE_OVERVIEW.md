@@ -5,8 +5,8 @@ out. Each stage is one worker reading from its input bucket and writing
 to its output bucket. Buckets (cylinder shapes) ARE the queues — there's
 no implicit coordination, no shared state.
 
-Click any stage box (in a Mermaid-aware viewer) to drill into that
-stage's internals.
+For each stage's internals (agents, schemas, observability), see the
+matching **Block** section in `../09_KG_PIPELINE.md`.
 
 ```mermaid
 flowchart TD
@@ -18,7 +18,7 @@ flowchart TD
     RM --> S2["<b>Stage 2: Segment</b><br/>conversation_boundary agent<br/>(coherent topic windows)"]
     S2 --> WIN[("kg_window<br/>+ kg_window_message")]
 
-    WIN --> S3["<b>Stage 3: Critique + Extract</b><br/>window_critic agent<br/>+ fact_extractor agent"]
+    WIN --> S3["<b>Stage 3: Critique + Extract</b><br/>window_critic_v2 agent<br/>+ fact_extractor agent"]
     S3 --> EXT[("kg_window_extraction<br/>verdict + nodes/edges JSON")]
 
     EXT --> S35["<b>Stage 3.5: Enrich</b><br/>meta_data_add agent<br/>(per connected component)"]
@@ -27,19 +27,11 @@ flowchart TD
     ENR --> S4["<b>Stage 4: Write proposals</b><br/>deterministic DB writes<br/>(no LLM)"]
     S4 --> CP[("claim_proposal<br/>+ proposal_node/edge/evidence<br/>(the 'shadow KG')")]
 
-    CP --> S5["<b>Stage 5: Promote</b><br/>proposal_promoter routine<br/>+ TTL estimator<br/>+ fact canonicalizer"]
+    CP --> S5["<b>Stage 5: Promote</b><br/>run_promoter routine (dry-run default)<br/>dedupe/merge (node_merger + disambiguation)<br/>+ TTL estimator + fact canonicalizer<br/>+ Chroma embed-at-write"]
     S5 --> KG[("<b>Live KG</b><br/>kg_node_metadata<br/>kg_edge_metadata")]:::live
 
     KG -.->|TTLs expire| DEC["Decay routine<br/>(nightly maintenance)<br/>step_state_decay.py"]
     DEC -.->|close stale eras| KG
-
-    click S1 "01_stage_resolve.md" "Stage 1 internals"
-    click S2 "02_stage_segment.md" "Stage 2 internals"
-    click S3 "03_stage_critic_extract.md" "Stage 3 internals"
-    click S35 "04_stage_enrich.md" "Stage 3.5 internals"
-    click S4 "05_stage_proposals.md" "Stage 4 internals"
-    click S5 "06_stage_promote.md" "Stage 5 internals"
-    click DEC "07_decay_routine.md" "Decay routine"
 
     classDef source fill:#fef3c7,stroke:#92400e,color:#000
     classDef live fill:#dcfce7,stroke:#15803d,color:#000
@@ -60,7 +52,7 @@ flowchart TD
 
 ## What's NOT shown at this level
 
-These live in level-2 drill-downs (linked from the boxes above):
+These are detailed in the Block sections of `../09_KG_PIPELINE.md`:
 
 - The **chat-eligibility filter** baked into Stage 1's input query
   (which `source` / `role` / `room_id` values qualify).
@@ -70,9 +62,11 @@ These live in level-2 drill-downs (linked from the boxes above):
   windows skip the extractor).
 - **Connected-component splitting** in Stage 3.5 (deterministic graph
   algorithm before the LLM enrichment call).
-- The **promotion logic** in Stage 5 — entity resolution, edge dedup,
-  TTL assignment, sentence canonicalization, the per-table evidence
-  rows.
+- The **promotion logic** in Stage 5 — tiered node resolution
+  (label / mention-map / alias / semantic) with the `node_merger` LLM
+  arbiter, Disambiguation binding, edge dedup, TTL assignment, sentence
+  canonicalization, embed-at-write, durable-conflict triage, and the
+  per-table evidence rows.
 - **Manual review** at the `/kg-proposals/` admin UI (sits between
   Stage 4 and Stage 5 when a human wants to vet proposals).
 - The **maintenance pipeline** parallel to this one: `kg_maintenance_pipeline`

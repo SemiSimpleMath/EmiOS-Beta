@@ -23,18 +23,30 @@ new method plus a thin wrapper directory.
 
 ## Handler inventory
 
+`KGMutatorTool` backs **twelve** tool names (the module docstring lists
+them): ten KG-mutation ops plus two finding-lifecycle ops
+(`kg_finding_resolve` / `kg_finding_escalate`). Destructive ops refuse
+user-locked rows (`locked_by_user_at`, the axiom layer) — merge, rename,
+update_field, close_state, delete_node, delete_edge, repoint_edge,
+split_succession; additive `create_*` ops are exempt; `kg_set_user_lock`
+is the ONE op allowed to touch a locked row (it's how the user revokes
+the lock — see `_refuse_if_locked` and its absence from `handle_kg_set_user_lock`).
+
 | Tool | Required args | Side effect | Reversibility | Safety rails |
 |---|---|---|---|---|
-| `kg_merge_nodes` | `keep_id`, `fold_id`, `reason` | Rewrite all `fold_id` edges to `keep_id`; union aliases; delete `fold_id` | partial — node identity gone, but `before_json` carries full snapshot incl. all rewritten edges | Refuses `keep.node_type != fold.node_type`; refuses self-merge (`keep_id == fold_id`) |
-| `kg_rename_label` | `node_id`, `new_label`, `reason` | Set new label; preserve old label as alias | reversible | Refuses if another active node of the same `node_type` already has `new_label` (error message tells the agent to use `kg_merge_nodes` instead) |
-| `kg_update_node_field` | `node_id`, `field`, `value`, `reason` | Single-field update | reversible | `field` must be in `_ALLOWED_UPDATE_FIELDS` allowlist (description, dates, importance, etc.); list-typed fields (`aliases`, `hash_tags`) require a `list_op` of `set` / `add` / `remove` so partial updates don't clobber |
-| `kg_delete_edge` | `edge_id`, `reason` | Single edge removed | reversible (snapshot in `before_json`) | None beyond reason requirement |
-| `kg_delete_node` | `node_id`, `reason` | Cascade-delete node + connected edges | partial — full node + edge snapshots in `before_json` | Refuses if `locked_by_user_at` is non-null |
-| `kg_create_state_node` | `subject_node_id`, `label`, `reason` (+ optional `node_type`, `category`, dates, etc.) | New State or Event node attached to subject | reversible (delete + remove the back-edge) | `node_type` restricted to `_ALLOWED_NEW_NODE_TYPES` (`State`, `Event`); refuses on duplicate label+subject |
-| `kg_create_edge` | `source_id`, `target_id`, `relationship_type`, `reason` | New edge between existing nodes | reversible | Refuses self-edges, refuses if both endpoints don't already exist |
-| `kg_close_state` | `node_id`, `end_date`, `reason` | Set `end_date` (and optional prose) on a State / Event | reversible | Refuses if `node_type` not in `_ALLOWED_NEW_NODE_TYPES`; refuses if `end_date < start_date` |
-| `kg_finding_resolve` | `finding_id`, `action`, `reason` (+ optional `notes`) | Sets finding `status='executed'`, records `executed_by` from scope.actor_id | reversible | None |
-| `kg_finding_escalate` | `finding_id`, `summary`, `suggested_action`, `reason` | Sets finding `status='escalated'` | reversible | None |
+| `kg_merge_nodes` | `keep_id`, `fold_id`, `reason` | Rewrite all `fold_id` edges to `keep_id`; union aliases; rebind dependent rows; delete `fold_id` | partial — node identity gone, but `before_json` carries full snapshot incl. all rewritten edges | Refuses `keep.node_type != fold.node_type`; refuses self-merge; refuses when `fold` outranks `keep` (pagerank / edge count) unless `force=true`; refuses locked rows |
+| `kg_rename_label` | `node_id`, `new_label`, `reason` | Set new label; preserve old label as alias | reversible | Refuses if another active node of the same `node_type` already has `new_label` (error message tells the agent to use `kg_merge_nodes` instead); refuses locked rows |
+| `kg_update_node_field` | `node_id`, `field`, `value`, `reason` | Single-field update | reversible | `field` must be in `_ALLOWED_UPDATE_FIELDS` allowlist (description, dates, importance, etc.); list-typed fields (`aliases`, `hash_tags`) require a `list_op` of `set` / `add` / `remove` so partial updates don't clobber; refuses locked rows |
+| `kg_delete_edge` | `edge_id`, `reason` | Single edge removed | reversible (snapshot in `before_json`) | Refuses if the edge or either endpoint node is locked |
+| `kg_repoint_edge` | `edge_id`, `reason`, ≥1 of `new_source_id` / `new_target_id` | Move one endpoint of an existing edge, keeping the row (id, sentence, evidence linkage) intact | reversible | The Disambiguation-attachment drain op. Refuses self-loops, no-op re-points, a re-point that would duplicate an existing `(source,target,rel)` edge, and any locked edge / endpoint (old or new) |
+| `kg_split_succession` | `node_id`, `split_date`, `reason` | Era-split a role-reference Entity: close old era at `split_date`, mint same-label successor + a Disambiguation park point, chain `old --succeeded_by--> successor`, optionally repoint era-mismatched edges. Delegates to `kg_core/kg_utils/succession.py:split_succession` | reversible (revision log) | Refuses non-Entity nodes, Disambiguation nodes, locked nodes, already-closed eras, `split_date <= start_date` |
+| `kg_set_user_lock` | `node_id`, `locked` (bool), `reason` | Stamp/clear `locked_by_user_at`; set `confidence_tier` to `axiom` (lock) or `provisional` (unlock) | reversible | The ONLY op permitted on a locked row (unlock is how the user revokes the guarantee — backs the KG Lens lock toggle). Refuses missing node + no-op transitions |
+| `kg_delete_node` | `node_id`, `reason` | Delete node + explicitly delete all connected edges (no DB cascade) | partial — full node + edge snapshots in `before_json` | Refuses locked node, refuses node with any locked edge |
+| `kg_create_state_node` | `owner_node_id`, `predicate`, `label`, `reason` (+ optional `node_type`, `category`, dates, etc.) | New State or Event node + owner→state edge, in one transaction | reversible (delete node + edge) | `node_type` restricted to `_ALLOWED_NEW_NODE_TYPES` (`State`, `Event`) |
+| `kg_create_edge` | `source_id`, `target_id`, `relationship_type`, `reason` | New edge between existing nodes | reversible | Refuses self-edges, refuses if both endpoints don't already exist, refuses a duplicate `(source,target,rel)` edge |
+| `kg_close_state` | `node_id`, `end_date`, `reason` | Set `end_date` (and optional prose) on a State / Event | reversible | Refuses if `node_type` not in `_ALLOWED_NEW_NODE_TYPES`; refuses if the node already has an `end_date` unless `force=true`; refuses locked rows |
+| `kg_finding_resolve` | `finding_id`, `action`, `reason` (+ optional `notes`) | Sets finding `status='executed'`, records `executed_by` from scope.actor_id | reversible | Refuses if the finding is already terminal |
+| `kg_finding_escalate` | `finding_id`, `summary`, `suggested_action`, `reason` | Sets finding `status='escalated'` | reversible | Refuses if the finding is already terminal |
 
 **Common contract** across all handlers:
 
@@ -77,7 +89,7 @@ delete, SQLAlchemy's unit-of-work batches them, SQLite sees the delete
 first, the FK cascade nulls out the still-pointing endpoints, and the
 rewritten rows fail their NOT NULL constraint.
 
-The shape that works (`kg_mutator_tool.py:341-351`):
+The shape that works (in `handle_kg_merge_nodes`):
 
 ```python
 for e in in_edges_to_rewrite:
@@ -98,7 +110,14 @@ you.
 
 The same trap applies in reverse for `kg_create_*` ops that need a
 parent row to exist before a child FK fires — see
-`handle_kg_create_state_node` (`kg_mutator_tool.py:674`).
+`handle_kg_create_state_node` (`session.flush()` after `session.add(new_node)`,
+before the edge FK fires).
+
+**Note — `kg_delete_node` no longer relies on a DB cascade.** The
+DB-level `ON DELETE CASCADE` from `Edge.{source,target}_id` to `Node`
+was **dropped 2026-05-10**, so `handle_kg_delete_node` deletes the
+connected edges explicitly (snapshotting each first) before deleting the
+node; without that explicit delete the edges would orphan, not cascade.
 
 ## Cookbook: adding a new mutator op
 
@@ -117,7 +136,7 @@ parent row to exist before a child FK fires — see
    - `prompts/<tool_name>_description.j2` and `prompts/<tool_name>_args.j2`
    - `tool_forms/tool_forms.py` for the Pydantic argument schema
 
-3. **Register with the executor manager** — add the new tool name to `app/assistant/multi_agents/kg_resolution_manager/config.yaml` under `tools.allowed_tools`, `scope_contract.tools.allowed_tools`, and `tool_visibility.always_show`.
+3. **Register with the executor manager** — add the new tool name to all **three** lists in `app/assistant/multi_agents/kg_resolution_manager/config.yaml`: `tools.allowed_tools`, `scope_contract.tools.allowed_tools`, and `tool_visibility.always_show`. Missing any one of the three silently drops the tool (the allowlist is a ceiling, scope re-asserts it, and visibility decides what the selector sees).
 
 4. **Tell the investigator about it** — update the `recommendation` examples in `app/assistant/agents/kg_investigation/planner/prompts/system.j2` so the prose-recommendation language includes the new op as an option.
 
@@ -144,6 +163,7 @@ narrow tools; the dev console sees the full set.
 | Concern | Path |
 |---|---|
 | Mutator tool core (all handlers) | `app/assistant/lib/core_tools/kg_mutator/kg_mutator_tool.py` |
+| Era-split executor (for `kg_split_succession`) | `app/assistant/kg_core/kg_utils/succession.py` (`split_succession`) |
 | Audit log model | `app/assistant/database/kg_revision_log.py` |
 | Tool wrappers | `app/assistant/lib/tools/kg_*/` |
 | Findings store + upsert | `app/assistant/kg_maintenance/store.py` |

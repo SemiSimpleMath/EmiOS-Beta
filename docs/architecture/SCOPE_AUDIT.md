@@ -1,3 +1,7 @@
+> **⚠️ ARCHIVED / HISTORICAL (2026-06-17).** Investigation record of the emi_team→http_manager starvation bug. That bug is **fixed** — via the "a granted manager keeps its whole own tool surface" *ceiling* model (`scope_adapter._apply_manager_narrowing`), not the pure authority-cap this audit proposed (`_intersect_allowed_tools` is still live, not dead as predicted). For current scope behavior see **[SCOPE.md](SCOPE.md)**. Kept for history.
+
+---
+
 # Scope Audit (2026-05-28)
 
 **Status:** investigation document. **No code changes proposed yet.** Companion to `15_EMI_TEAM_AND_SCOPE.md`.
@@ -25,7 +29,7 @@ Defined in `app/assistant/utils/pydantic_classes.py:109`. All sub-policies inher
 | `room_context_id` | Optional[str] | Sub-context within the room (e.g. specific Slack thread). |
 | `visibility` | Literal | `owner_only` / `room_shared` / `global_shared`. |
 | `policy_id` | Optional[str] | Reference to a room policy doc that produced this scope. |
-| `acting_as` | str (default `"user"`) | Principal mode — "user" (Jukka), "emi" (Emi on her own behalf), or future principals. Stamped at chat ingress by keyword detector or explicit `/actas`. |
+| `acting_as` | str (default `"user"`) | Principal mode — "user" (the user), "emi" (the assistant on her own behalf), or future principals. Stamped at chat ingress by keyword detector or explicit `/actas`. |
 | `reply_to` | Optional[Dict] | Surface routing back to the originating chat. |
 
 ### Sub-policies (12 of them)

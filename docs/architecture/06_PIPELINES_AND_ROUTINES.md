@@ -7,11 +7,11 @@ Pipelines are sequential step-based execution frameworks for background data pro
 ### Architecture
 
 **PipelineRunner** (`pipelines/step_runner.py`):
-- Accepts a list of `PipelineStep` implementations
-- Runs steps sequentially
-- Tracks inputs, outputs, timing, errors
-- Writes audit logs to `day_context/.../pipeline_runs/*.json`
-- Idempotent: skips steps if outputs already exist (unless `force=True`)
+- Accepts a list of `PipelineStep` implementations; runs them sequentially.
+- Idempotent: skips a step when all its `outputs(ctx)` already exist (`outputs_exist`), unless `force=True`.
+- Stops on the first step that raises (`overall_status="error"`, `break`); a partial run is still recorded.
+- Always writes an audit JSON to `ctx.audit_path()` (`<day_dir>/pipeline_runs/<run_id>.json`), then prunes the dir to the most recent 1500 files.
+- `only_steps=[...]` restricts the run to named steps.
 
 **PipelineStep Protocol** (`pipelines/step_types.py`):
 ```python
@@ -23,27 +23,31 @@ class PipelineStep:
 ```
 
 **PipelineContext** (`pipelines/context.py`):
-- Date-aligned (boundary hour configurable)
-- Provides: `pipeline_id`, `run_id`, `date_str`, `day_dir`, `snapshots_dir`, `pipeline_runs_dir`
+- Date-aligned to the local day-boundary hour (`boundary_hour_local`, default 5, read from `configs/dayflow_pipeline.json`).
+- Built via `PipelineContext.for_date(pipeline_id=..., target_date=..., run_id=...)`.
+- Provides: `pipeline_id`, `run_id`, `date_str`, `day_dir` (`day_context/<YYYY>/<MM>/<date>`), `snapshots_dir`, `pipeline_runs_dir`, plus `start_local/end_local/since_utc/until_utc`.
 
-### Active Pipelines
+### Registered Pipelines
 
-| Pipeline | ID | Schedule | Purpose |
-|----------|----|----------|---------|
-| Daily Insights | `daily_insights` | daily 00:05 | Archive assessments, tickets, timelines; apply insights |
-| DayFlow | `dayflow` | interval 60s | Activity tracking, sleep analysis, routine scheduling |
-| KG Pipeline | `kg_pipeline` | quiet hours | Ingest chat windows into knowledge graph |
-| Entity Cards | `entity_cards` | daily 00:20 | Generate missing entity cards |
-| Weekly Insights | `weekly_insights` | weekly Mon 00:10 | Cross-day pattern synthesis |
-| Belief Engine (x6) | `belief_engine_*` | daily 00:30-01:00 | Domain-specific belief updates + export |
-| KG Maintenance | `kg_maintenance_pipeline` | weekly Mon 02:00 | Orphan nodes, duplicates, suspect nodes |
-| Entity Card Maintenance | `entity_card_maintenance_pipeline` | daily 02:00 | Broken links, junk names, stale content |
+The pipeline registry (`pipelines/pipeline_registry.py`) lazily registers exactly these via `resolve_pipeline(id)`; a missing optional dependency is logged and skipped, not fatal:
+
+| Pipeline ID | Factory | Purpose |
+|-------------|---------|---------|
+| `daily_insights` | `daily_insights.pipeline.DailyInsightsPipeline` | Archive context + tickets, build timeline, extract insights, apply, build assessment + summary |
+| `dayflow` | `dayflow.pipeline.DayFlowPipeline` | Step-based DayFlow activity/sleep/routine pipeline |
+| `kg_pipeline` | `kg_pipeline.pipeline.KGPipeline` | Ingest chat windows into the knowledge graph (bucket-per-stage) |
+| `weekly_insights` | `weekly_insights.pipeline.WeeklyInsightsPipeline` | Cross-day pattern + belief-candidate synthesis |
+| `belief_engine` | `belief_engine.pipeline.routine_adapter.BeliefEngineAdapter` | **One** pipeline that loops every domain marked enabled in `configs/belief_domains.yaml`, then exports beliefs inline |
+| `belief_engine_export` | `belief_engine.pipeline.routine_adapter.BeliefEngineExportAdapter` | Manual re-export only (belief_engine exports inline at end of its run) |
+| `kg_maintenance_pipeline` | `kg_maintenance_pipeline.pipeline.KGMaintenancePipeline` | Orphan nodes, missing descriptions, suspect nodes, duplicate pairs |
+
+There is **no** `entity_cards` pipeline and **no** `entity_card_maintenance_pipeline`. Entity card upkeep runs as the `entity_card_refresh` **function** routine (`pipelines/entity_cards_v2/refresh_subscriber.run_card_refresh`). `belief_engine` is a single domain-looping pipeline — not six per-domain registrations.
 
 ### Scope Policy
 
-Each pipeline declares its permissions in a `scope.yaml` (permission-only). Identity
+A pipeline OPTIONALLY declares its permissions in a `scope.yaml` (permission-only). Identity
 (`owner_id`, `actor_id`, `surface`) is stamped per run by the caller via
-`load_scope_for_source(kind="pipeline", source_id="<id>")` — never authored in the file:
+`load_scope_for_source(kind=..., source_id="<id>")` — never authored in the file:
 ```yaml
 approval:
   authority_level: 0
@@ -62,33 +66,51 @@ writes:
 
 ## Routines
 
-Routines are the scheduling layer that executes pipelines, tools, tasks, and functions on configurable intervals.
+Routines are the scheduling layer that executes pipelines, tools, tasks, jobs, and functions on triggers (time or event), gated by active windows, AFK/feature/manual guards, and on-error backoff.
 
-### Configuration
+### Configuration model
 
-`configs/routines.json`:
+`configs/routines.json` holds **settings only** — it no longer carries routine entries:
 
 ```json
 {
   "schema_version": 3,
   "enabled": true,
-  "max_workers": 12,
-  "state_resource_file": "resource_routine_status.json",
-  "routines": [
-    {
-      "id": "routine_id",
-      "enabled": true,
-      "name": "Display name",
-      "aliases": ["alias1"],
-      "runner": "tool",
-      "spec": { "tool_name": "get_weather", "arguments": {} },
-      "feature_guard": "weather",
-      "run_policy": { "type": "interval", "min_interval_seconds": 660 },
-      "afk_guard": { "skip_when_afk": true },
-      "manual_toggle": { "resource_file": "resource_control.json" },
-      "notes": "Description"
-    }
-  ]
+  "max_workers": 20,
+  "state_resource_file": "resource_routine_status.json"
+}
+```
+
+Routine entries are **one JSON file per routine**, named `<id>.json`, in two folders (`RoutineManager._load_config`):
+
+- `configs/routines/public/*.json` — tracked, shipped with the repo (universal routines).
+- `configs/routines/private/*.json` — gitignored, personal extras.
+
+Both folders are globbed and merged at load time; on an `id` collision the **private** file wins (`<name>.compiled.json` siblings are skipped — they're compiled task IR, not routine configs). An inline `"routines": [...]` array on `configs/routines.json` is still read as a **legacy fallback** (its entries fold in if not already seen) but new installs don't use it. `RoutineManager` reloads on every refresh tick — edit a file, save, no restart.
+
+Authoritative how-to for the entry shape, triggers, windows, and on_error: `skills/extending-emi-routines/SKILL.md`.
+
+### Routine entry shape
+
+```json
+{
+  "id": "my_routine",
+  "enabled": true,
+  "name": "Human-readable label",
+  "aliases": ["my routine"],
+  "runner": "function",
+  "spec": { "function_name": "my_handler" },
+  "trigger": {
+    "type": "time",
+    "policy": { "type": "interval", "min_interval_seconds": 600 },
+    "active_window": "daytime"
+  },
+  "run_policy": {},
+  "afk_guard": { "skip_when_afk": false },
+  "on_error": { "max_failures": 3, "backoff_base_seconds": 60,
+                "backoff_max_seconds": 3600, "then": "disable_with_ticket" },
+  "max_run_seconds": 300,
+  "notes": "What it does."
 }
 ```
 
@@ -96,89 +118,82 @@ Routines are the scheduling layer that executes pipelines, tools, tasks, and fun
 
 | Runner | Config Key | Purpose |
 |--------|-----------|---------|
+| `function` | `spec.function_name` | Call a Python function from the function registry — **now the dominant runner** |
 | `tool` | `spec.tool_name` + `spec.arguments` | Invoke a registered tool directly |
-| `task` | `spec.task_file` | Execute task spec via multi-agent manager or compiled task |
-| `job` | `spec.job_file` | Orchestrate multiple tasks with dependencies |
-| `function` | `spec.function_name` | Call a Python function from the function registry |
-| `pipeline` | `spec.pipeline_id` | Execute a multi-step pipeline |
+| `task` | `spec.task_file` (+ `spec.compiled_file`) | Execute a (compiled) task spec via multi-agent manager |
+| `pipeline` | `spec.pipeline_id` | Execute a registered multi-step pipeline |
+| `job` | `spec.job_file` | Schedule-only legacy multi-task runner |
 
-### Scheduling Policies (5)
+`RoutineManager` constructs one runner instance per type; `FunctionRoutineRunner` is given the `ROUTINE_FUNCTION_REGISTRY`.
 
-**`interval`** — Run if `now - last_finished >= min_interval_seconds`
+### The function registry + autodiscovery
+
+`function` routines resolve `spec.function_name` against `ROUTINE_FUNCTION_REGISTRY` (`routine_manager/routine_functions.py`). Two ways to register:
+
+1. **Legacy** — add an entry to the registry dict in `routine_functions.py`.
+2. **Autodiscovery (preferred)** — drop `app/assistant/routine_handlers/<name>.py` and decorate a function with `@routine_handler()` (`routine_handlers/__init__.py`). `discover_handlers()` walks the package at import time and folds every decorated function into the registry under its name (or `name="alias"`). A hand-registered entry wins on a name collision (the auto-discovered duplicate drops with a warning). Handlers receive `target_date=`, `routine=`, and — for event routines — `event_message=` kwargs; they should raise on failure so `on_error` can back off.
+
+### Triggers
+
+Each routine carries a `trigger` (`RoutineConfig.trigger`). An entry with only the legacy `run_policy` and no `trigger` is treated as `{"type": "time", "policy": <run_policy>}`. Supported types (validated at load — an unknown type or window name fails loud):
+
+- **`{"type": "time", "policy": <run_policy>, "active_window": <name|inline>}`** — evaluated each refresh tick by `_should_run`. If `trigger.policy` carries the cadence but `run_policy` is empty, the policy is lifted up so the scheduler sees it (otherwise it would fire every tick).
+- **`{"type": "event", "topic": "<event_hub topic>"}`** — fires on `event_hub` publish, not on the polling tick. `_wire_event_triggers` subscribes each event routine exactly once per process; the handler re-reads `enabled` at fire time and honors the same in-flight + AFK guards as time routines. Example: `camera_dispatch` fires on `ring_snapshot_captured` (published by a camera motion-poll routine). Event routines are skipped by the time-polling loop.
+
+### Scheduling policies (3, time triggers only)
+
+`_should_run` reads `run_policy.type` (default `interval`). Only these exist:
+
+**`interval`** — run if `now - last_finished >= min_interval_seconds`
 ```json
 { "type": "interval", "min_interval_seconds": 300 }
 ```
 
-**`daily`** — Run once per calendar day at a specific local time
+**`daily`** — run once per local calendar day at/after a local time
 ```json
 { "type": "daily", "time_local": "07:00" }
 ```
 
-**`weekly`** — Run once per ISO week on a specific day
+**`weekly`** — run once per ISO week on a specific day at/after a local time
 ```json
 { "type": "weekly", "day_of_week": "Monday", "time_local": "02:00" }
 ```
 
-**`quiet_hours`** — Run once daily during configured quiet hour window
-```json
-{ "type": "quiet_hours", "feature": "kg" }
-```
+There is **no** `quiet_hours` policy type. "Quiet hours" / time-of-day restriction is expressed with `trigger.active_window` (see below). (Some entries carry a cosmetic `quiet_hours_ok` flag in `run_policy`; it is not read by `_should_run`.)
+
+### Active windows
+
+`trigger.active_window` is a named window from `configs/windows.json` (e.g. `sleep`, `work_hours`, `morning`, `evening`, `daytime`, `kg_active`) or an inline `{"from": "22:00", "to": "08:00", "local": true, "weekdays_only": false}` (`routine_manager/windows.py`). The window check runs **first** in `_should_run`, before any policy — outside the window the routine is skipped with reason `outside active window`. Windows wrap midnight automatically (`from > to`). Windows are re-resolved each tick so a hot-edit of `configs/windows.json` takes effect without restart.
 
 ### Guards
 
-**Feature Guard** — Skip if feature disabled or API keys missing:
-```json
-{ "feature_guard": "email" }
-```
-Calls `can_run_feature(feature_name)` from user settings.
+**Feature guard** — `"feature_guard": "email"`: skip unless `can_run_feature(name)` (feature enabled + API keys present).
 
-**AFK Guard** — Skip if user is away:
-```json
-{ "afk_guard": { "skip_when_afk": true, "skip_when_potentially_afk": true } }
-```
+**AFK guard** — `"afk_guard": { "skip_when_afk": true, "skip_when_potentially_afk": true }`. Also supports `require_afk` / `require_potentially_afk` (routines that should run only while away). **Fails closed**: if AFK status can't be determined the routine is skipped.
 
-**Manual Toggle** — Skip unless explicitly armed:
-```json
-{ "manual_toggle": { "resource_file": "resource_control.json", "auto_off_time_local": "08:30" } }
-```
+**Manual toggle** — `"manual_toggle": { "resource_file": "...", "auto_off_time_local": "08:30" }`: runs only while the resource file says `enabled=true`; auto-disables (once per local day) at the configured time. Never auto-enables. Distinct from `enabled` (used by armed/disarmed routines like screen capture).
 
-### State Tracking
+### On-error backoff and auto-disable
 
-Persistent state in `resource_routine_status.json`:
-```json
-{
-  "schema_version": 1,
-  "routines": {
-    "routine_id": {
-      "last_run_utc": "...",
-      "last_finished_utc": "...",
-      "last_duration_s": 1.23,
-      "last_status": "success",
-      "last_error": "",
-      "run_count": 42
-    }
-  }
-}
-```
+`on_error` defaults (applied at parse): `{ max_failures: 3, backoff_base_seconds: 60, backoff_max_seconds: 3600, then: "disable_with_ticket", auto_retry_after_seconds: 0 }`.
 
-State survives app restarts (unlike the old in-memory BackgroundTaskManager data fetch tracking).
+- Each failure increments `consecutive_failures` and sets `next_attempt_after_utc` to an exponential backoff (`base * 2^(n-1)`, capped at `backoff_max_seconds`); `_should_run` blocks until that moment passes. Success resets the streak.
+- On the `max_failures`-th consecutive failure: `then="disable_with_ticket"` writes `enabled=false` to the status file and surfaces a `dayflow_notify` ticket. `then="log_only"` keeps it enabled but still backs off.
+- `auto_retry_after_seconds > 0` enables an auto-recovery probe: after that long since the auto-disable, the routine gets ONE attempt; success clears the disable (re-enables), failure pushes the next probe out.
 
-### Capacity Management
+### Watchdog (`max_run_seconds`)
 
-```json
-{
-  "max_workers": 12,
-  "capacity_warn_ratio": 0.80,
-  "capacity_critical_ratio": 0.95,
-  "capacity_alert_cooldown_seconds": 60
-}
-```
+A **soft** watchdog. Each refresh tick walks active threads (`_check_watchdogs`); any run exceeding its `max_run_seconds` logs an error and surfaces a `dayflow_notify` ticket (once per run_id). Python can't kill threads from outside, so the run continues — but the in-flight guard prevents re-entry until it finishes (or the process restarts). `None`/`<=0` disables.
 
-### Data Fetch Routines
+### Spec vs status (the enabled toggle)
 
-Background data fetching (email, calendar, weather, news, tasks, scheduler) is managed as tool runner routines:
+`configs/routines/<...>.json` is the **spec** (declarative: which routines exist, how they're wired, shipped defaults). `resource_routine_status.json` is the **runtime state** written by the `/api/routines/<id>/toggle` UI and by the auto-disable/recover machinery. The status file's `enabled` overrides the spec default per routine (`_read_state_enabled_map`), so user toggles aren't clobbered by repo pulls and personal flags aren't pushed upstream. The status file also holds per-routine `last_*`, `run_count`, `consecutive_failures`, `next_attempt_after_utc`, `auto_disabled_reason/at_utc`.
 
-| Routine | Tool | Interval | Feature Guard |
+### Data fetch routines
+
+Background data fetching is implemented as `tool`-runner routines (each with a `feature_guard`); each tool computes its own defaults when arguments are missing (date ranges, locations, feed URLs):
+
+| Routine | Tool | Interval | Feature guard |
 |---------|------|----------|---------------|
 | `fetch_email` | `get_email` | 300s (5m) | `email` |
 | `fetch_calendar_events` | `get_calendar_events` | 1620s (27m) | `calendar` |
@@ -187,33 +202,34 @@ Background data fetching (email, calendar, weather, news, tasks, scheduler) is m
 | `fetch_news` | `get_news` | 1380s (23m) | `news` |
 | `fetch_scheduler_events` | `get_scheduler_events` | 180s (3m) | `scheduler` |
 
-Tools compute their own defaults when arguments are missing (date ranges, locations, feed URLs).
+### Execution flow
 
-### Execution Flow
+`BackgroundTaskManager._run_routine_cycle()` calls `RoutineManager.refresh()` every ~60s (gated by `is_subsystem_enabled("routine_manager")`):
 
-`BackgroundTaskManager._run_routine_cycle()` calls `RoutineManager.refresh()` every 60 seconds:
+1. Load settings + glob the public/private routine files.
+2. Wire any new event-triggered routines to `event_hub` (once per id per process).
+3. Run watchdog checks; emit capacity alerts (`max_workers`, default 20).
+4. For each time-triggered routine: skip if disabled (unless an auto-recovery probe is due), already running, or at worker capacity; then evaluate guards + window + policy via `_should_run`.
+5. If ready: launch in a monitored background thread → mark running → dispatch to the runner → record result + backoff/auto-disable to the status file.
 
-1. Load config from `configs/routines.json`
-2. For each enabled routine:
-   - Check if already running (prevent duplicates)
-   - Check worker capacity
-   - Evaluate guards (manual toggle, AFK, feature)
-   - Evaluate scheduling policy
-   - If ready: launch in background thread
-3. Thread executes: mark running -> dispatch to runner -> record result
+Routines OPTIONALLY attach a scope (sibling `<id>.scope.yaml`); `tool`/`function` payloads run under it, while `pipeline`/`task`/`job` payloads self-scope. The decision log records every fire/success/failure/interesting-skip under `data/routine_decisions/<YYYY-MM-DD>.jsonl`.
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `routine_manager/routine_manager.py` | Scheduling, guards, state, execution |
-| `routine_manager/runners/tool_runner.py` | Tool invocation runner |
-| `routine_manager/runners/taskrunner/task_runner.py` | Task spec runner |
-| `routine_manager/runners/pipeline_runner.py` | Pipeline runner |
-| `routine_manager/runners/function_runner.py` | Function registry runner |
-| `routine_manager/runners/job_runner.py` | Multi-task job runner |
-| `routine_manager/run_types.py` | RoutineRunContext, RoutineRunResult |
-| `pipelines/step_runner.py` | Sequential pipeline executor |
-| `pipelines/context.py` | Pipeline context (date, paths) |
-| `scope/loader.py` | Pipeline / subsystem scope loading (`load_scope_for_source`) |
-| `configs/routines.json` | Routine definitions |
+| `routine_manager/routine_manager.py` | Trigger eval, guards, windows, on_error, watchdog, state, execution |
+| `routine_manager/windows.py` | Active-window resolution (`configs/windows.json` + inline) |
+| `routine_manager/routine_functions.py` | `ROUTINE_FUNCTION_REGISTRY` + handler autodiscovery wiring |
+| `routine_handlers/__init__.py` | `@routine_handler` decorator + `discover_handlers()` |
+| `routine_manager/runners/{tool,task,pipeline,function,job}_runner.py` | Per-runner dispatch |
+| `routine_manager/run_types.py` | `RoutineRunContext`, `RoutineRunResult` |
+| `pipelines/pipeline_registry.py` | Lazy pipeline registry (`resolve_pipeline`) |
+| `pipelines/step_runner.py` | Sequential idempotent pipeline executor |
+| `pipelines/context.py` | `PipelineContext` (date boundary, paths) |
+| `pipelines/step_types.py` | `PipelineStep` protocol, `StepResult`, `outputs_exist` |
+| `scope/loader.py` | Routine / pipeline scope loading (`load_scope_for_source`) |
+| `configs/routines.json` | Routine manager **settings** (no entries) |
+| `configs/routines/{public,private}/*.json` | One file per routine |
+| `configs/windows.json` | Named active windows |
+| `skills/extending-emi-routines/SKILL.md` | Authoritative how-to for authoring a routine |

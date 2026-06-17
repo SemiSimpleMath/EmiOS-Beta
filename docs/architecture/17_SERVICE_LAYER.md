@@ -21,46 +21,55 @@ There is **no lazy initialization inside the container itself** — every servic
 
 ### Canonical services
 
-| Service key                       | Purpose                                                                 | Registered in                                  |
-|-----------------------------------|-------------------------------------------------------------------------|------------------------------------------------|
-| `event_hub`                       | Pub-sub bus (`EventHub`) — non-blocking publish, worker pool.    | `bootstrap.py:115`                             |
-| `db_manager`                      | Single-writer SQLite coordinator.                                       | `bootstrap.py:121`                             |
-| `user_settings`                   | User flags / preferences storage (`UserSettingsManager`).               | `bootstrap.py:127`                             |
-| `afk_monitor`                     | Active-first idle detector (auto-started).                              | `bootstrap.py:134`                             |
-| `agent_registry`                  | Agent config discovery (`config.yaml` + prompts + form).                | `bootstrap.py:137`                             |
-| `tool_registry`                   | Tool catalog + MCP tool cache.                                          | `bootstrap.py:138`                             |
-| `agent_factory`                   | Constructs agents from registry entries.                                | `bootstrap.py:144`                             |
-| `manager_registry`                | Manager config catalog (file-system scan of `multi_agents/`).           | `bootstrap.py:147`                             |
-| `multi_agent_manager_factory`     | Builds per-call manager instances.                                      | `bootstrap.py:149`                             |
-| `orchestrator_registry`           | Orchestrator catalog, preloaded.                                        | `bootstrap.py:154`                             |
-| `orchestrator_instance_handler`   | Long-lived orchestrator instance bookkeeping.                           | `bootstrap.py:156`                             |
-| `orchestrator_factory`            | Builds orchestrators (parallel to managers).                            | `bootstrap.py:162`                             |
-| `data_conversion_module`          | Cross-format data conversion utilities.                                 | `bootstrap.py:165`                             |
-| `global_blackboard`               | Process-wide in-memory message log + system state summary.              | `bootstrap.py:167`                             |
-| `resource_manager`                | JSON/text resource cache backed by `resources/`.                        | `bootstrap.py:175`                             |
-| `reply_router`                    | Multi-transport reply dispatch (socketio, sms, slack, telegram).        | `bootstrap.py:181`                             |
-| `manager_invoker`                 | Canonical manager invocation entrypoint.                                | `bootstrap.py:185`                             |
-| `agent_components_factory`        | Wires `event_hub` + `resource_manager` + `blackboard` into agents.      | `bootstrap.py:196`                             |
-| `room_session_manager`            | Transport-agnostic room session orchestrator.                           | `bootstrap.py:198`                             |
-| `entity_catalog`                  | Fast entity-name lookup (singleton).                                    | `bootstrap.py:211`                             |
-| `scheduler`                       | `SchedulerService` (APScheduler BackgroundScheduler).                   | `bootstrap.py:218`                             |
-| `ticket_manager`                  | Ticket CRUD with state machine.                                         | `bootstrap.py:228`                             |
-| `background_task_manager`         | Daemon thread pool for routines.                                        | `bootstrap.py:245` (subsystem-gated)           |
-| `dj_manager`                      | Music automation manager.                                               | `bootstrap.py:254` (subsystem-gated)           |
-| `socket_manager`                  | WebSocket session registry; emits to clients.                           | `initialize_system.py:39`                      |
-| `music_afk_relay`                 | Bridges AFK state changes to music client.                              | `initialize_system.py:43`                      |
-| `event_relay`                     | `EmiEventRelay` — event-hub → SocketIO bridge.                          | `initialize_system.py:46`                      |
-| `progress_curator`                | Curates agent progress facts for the progress UI.                       | `initialize_system.py:49`                      |
-| `question_service`                | Ask-user question lifecycle.                                            | `initialize_system.py:50`                      |
-| `emi_result_handler`              | Handles results returned to the user.                                   | `initialize_system.py:54`                      |
-| `emi_reminder_handler`            | Reminder dispatch agent.                                                | `initialize_system.py:57`                      |
-| `notify_user`                     | User-facing notification agent.                                         | `initialize_system.py:61`                      |
-| `slack_interface`                 | Slack polling interface.                                                | `initialize_system.py:67`                      |
-| `signal_router`                   | Reactive intake watcher (subscriber to the gut).                        | `initialize_system.py:76` (subsystem-gated)    |
-| `ingest_service`                  | "The gut" — unified inbound intake.                                     | `initialize_system.py:93` (subsystem-gated)    |
-| `pod_classifier_service`          | Declarative pod-minting from intake envelopes.                          | `initialize_system.py:105` (subsystem-gated)   |
-| `task_ir_runner`                  | Compiled task-IR execution engine.                                      | `initialize_system.py:118`                     |
-| `dayflow_scheduler`               | Event-driven dayflow tick coordinator.                                  | `initialize_system.py:128` (subsystem-gated)   |
+Registration phase is noted (Phase 1 = `bootstrap.py:initialize_services`, Phase 2 =
+`initialize_system.py`); within a phase, order is top-to-bottom of the source.
+
+| Service key                       | Purpose                                                                 | Phase                          |
+|-----------------------------------|-------------------------------------------------------------------------|--------------------------------|
+| `event_hub`                       | Pub-sub bus (`EventHub`) — non-blocking publish, worker pool.           | 1                              |
+| `db_manager`                      | Single-writer SQLite coordinator.                                       | 1                              |
+| `user_settings`                   | User flags / preferences storage (`UserSettingsManager`).               | 1                              |
+| `afk_monitor`                     | Active-first idle detector (auto-started).                              | 1                              |
+| `agent_registry`                  | Agent config discovery (`config.yaml` + prompts + form).                | 1                              |
+| `tool_registry`                   | Tool catalog + MCP tool cache.                                          | 1                              |
+| `agent_factory`                   | Constructs agents from registry entries.                                | 1                              |
+| `manager_registry`                | Manager config catalog (file-system scan of `multi_agents/`).           | 1                              |
+| `multi_agent_manager_factory`     | Builds per-call manager instances.                                      | 1                              |
+| `orchestrator_registry`           | Orchestrator catalog, preloaded.                                        | 1                              |
+| `orchestrator_instance_handler`   | Long-lived orchestrator instance bookkeeping.                           | 1                              |
+| `orchestrator_factory`            | Builds orchestrators (parallel to managers).                            | 1                              |
+| `data_conversion_module`          | Cross-format data conversion utilities.                                 | 1                              |
+| `global_blackboard`               | Process-wide in-memory message log + system state summary.              | 1                              |
+| `resource_manager`                | JSON/text resource cache backed by `resources/`.                        | 1                              |
+| `skill_registry`                  | `SKILL.md` loader (`SkillRegistry`, walks `skills/<name>/SKILL.md`).    | 1                              |
+| `skill_injector`                  | Per-skill `auto_inject_when` trigger evaluation (`SkillInjector`).      | 1                              |
+| `reply_router`                    | Multi-transport reply dispatch (socketio, sms, slack, telegram).        | 1                              |
+| `manager_invoker`                 | Canonical manager invocation entrypoint.                                | 1                              |
+| `agent_components_factory`        | Wires `event_hub` + `resource_manager` + `blackboard` into agents.      | 1                              |
+| `room_session_manager`            | Transport-agnostic room session orchestrator.                           | 1                              |
+| `entity_catalog`                  | Fast entity-name lookup (singleton).                                    | 1                              |
+| `env_registry`                    | `EnvRegistryService` — env/secret + scope-filtered account registry.    | 1                              |
+| `scheduler`                       | `SchedulerService` (APScheduler BackgroundScheduler).                   | 1                              |
+| `ticket_manager`                  | Ticket CRUD with state machine.                                         | 1                              |
+| `background_task_manager`         | Daemon thread pool for routines.                                        | 1 (subsystem-gated)            |
+| `dj_manager`                      | Music automation manager.                                               | 1 (subsystem-gated)            |
+| `socket_manager`                  | WebSocket session registry; emits to clients.                           | 2                              |
+| `music_afk_relay`                 | Bridges AFK state changes to music client.                              | 2                              |
+| `event_relay`                     | `EmiEventRelay` — event-hub → SocketIO bridge.                          | 2                              |
+| `ticket_dispatcher`               | `TicketDispatcherRegistry` — fans `proactive_suggestion` to surface adapters. | 2                        |
+| `progress_curator`                | Curates agent progress facts for the progress UI.                       | 2                              |
+| `chat_narrator`                   | `ChatNarrator` — narrates multi-agent activity into chat.               | 2                              |
+| `mailbox`                         | Manager-runtime `Mailbox`.                                              | 2                              |
+| `mam_instance_manager`            | `MAMInstanceManager` — multi-agent-manager instance bookkeeping.        | 2                              |
+| `outbound_chat_publisher`         | `OutboundChatPublisher` — publishes assistant chat to transports.       | 2                              |
+| `question_service`                | Ask-user question lifecycle.                                            | 2                              |
+| `emi_result_handler`              | Handles results returned to the user (pre-instantiated agent).          | 2                              |
+| `emi_reminder_handler`            | Reminder dispatch agent (pre-instantiated agent).                       | 2                              |
+| `signal_router`                   | Reactive intake watcher (subscriber to the gut).                        | 2 (subsystem-gated)            |
+| `ingest_service`                  | "The gut" — unified inbound intake.                                     | 2 (subsystem-gated)            |
+| `pod_classifier_service`          | Declarative pod-minting from intake envelopes.                          | 2 (subsystem-gated)            |
+| `task_ir_runner`                  | Compiled task-IR execution engine.                                      | 2                              |
+| `dayflow_scheduler`               | Event-driven dayflow tick coordinator.                                  | 2 (subsystem-gated)            |
 
 There are no lazy entries. The proxy will fail loudly if an unregistered key is accessed before its bootstrap step has run, which is also why initialization order matters.
 
@@ -71,65 +80,75 @@ There are no lazy entries. The proxy will fail loudly if an unregistered key is 
 There are two phases, both invoked from `app/create_app.py`.
 
 ```
-create_app()                                   # app/create_app.py:33
+create_app()                                   # app/create_app.py
   Flask + SocketIO + DB engine
   initialize_all_tables()                      # creates SQLite tables
-  initialize_services(app)                     # PHASE 1 — bootstrap.py:102
+  initialize_services(app)                     # PHASE 1 — bootstrap.initialize_services
   app.DI = DI; DI.socket_io = socketio
   register_socket_handlers(socketio)
-  initialize_system()                          # PHASE 2 — initialize_system.py:21
+  initialize_system()                          # PHASE 2 — initialize_system.initialize_system
   socket_manager.start_stale_sweeper(...)
 ```
 
-### Phase 1: `initialize_services` (`bootstrap.py:102`)
+### Phase 1: `initialize_services` (`bootstrap.py`)
 
 Order is load-bearing — each step depends on what came before:
 
-1. `_auto_detect_default_llm_provider()` — sets `DEFAULT_LLM_PROVIDER` env var if exactly one provider key is present (`bootstrap.py:75`).
-2. `event_hub` — `EventHub` constructed with `EMI_EVENT_WORKER_THREADS` workers (default 24). Dispatcher thread starts here.
-3. `db_manager` — single-writer coordinator (`app/models/db_manager.py`).
-4. `user_settings` — required by many downstream consumers.
-5. `afk_monitor` — `.start()` is called immediately; this fires its background thread.
-6. `agent_registry` then `tool_registry` — registry objects, then `load_tools()`, MCP server load, MCP cache load, `load_agents()`. Tools must exist before agents (agents reference allowed tools by name).
-7. `agent_factory` — needs both registries above.
-8. `manager_registry` (file-system scan), `multi_agent_manager_factory`.
-9. `orchestrator_registry.preload_all()`, `orchestrator_instance_handler`, `orchestrator_factory`.
-10. `data_conversion_module`.
-11. `global_blackboard` — empty `GlobalBlackBoard()`. Nothing else can `add_msg` until this exists.
-12. `_seed_personal_resources()` — copies `*.json.example` → `*.json` for personal resources missing on disk (`bootstrap.py:30`).
-13. `resource_manager` — `ResourceManager()` then `load_all_from_directory("resources")`. This is a 3-pass loader (JSON → templates → text) and also publishes every value into `global_blackboard.state_dict` as a side effect, so `global_blackboard` must already exist.
-14. `reply_router`.
-15. `manager_invoker` — wired with explicit `RequestPreprocessor(resource_manager=...)`.
-16. `agent_components_factory` — wired with explicit `event_hub`, `resource_manager`, `global_blackboard`.
-17. `room_session_manager` — wired with explicit `blackboard`, `event_hub`, `reply_router`, `resource_manager`, `manager_registry`, `multi_agent_manager_factory`, `manager_invoker`.
-18. `entity_catalog` (singleton).
-19. `scheduler` — `SchedulerService(app)`. Auto-starts via `TimingEngine.__init__`.
-20. Tickets DB init, Google OAuth DB init, `ticket_manager`. Stale tool-approval tickets are cleared from the previous session.
-21. `background_task_manager`, `dj_manager` — gated by `subsystems.yaml`.
-22. `atexit.register(shutdown_services)` — ensures clean LIFO shutdown.
+1. `_seed_config_templates()` then `_seed_personal_resources()` — first-run seeding: copy `configs/templates/*.template.json` and personal `*.json.example` files into the writable data dir *before* any tool/agent/resource/oauth consumer reads them. (These run at the very top of `initialize_services`.)
+2. `_auto_detect_default_llm_provider()` — sets `DEFAULT_LLM_PROVIDER` env var if exactly one provider key is present.
+3. `event_hub` — `EventHub` constructed with `EMI_EVENT_WORKER_THREADS` workers (default 24). Dispatcher thread starts here.
+4. `db_manager` — single-writer coordinator (`app/models/db_manager.py`).
+5. `user_settings` — required by many downstream consumers.
+6. `afk_monitor` — `.start()` is called immediately; this fires its background thread.
+7. `agent_registry` then `tool_registry` — registry objects, then `load_tools()`, MCP server load, MCP cache load (`load_mcp_tool_cache` + `load_installed_mcp_tools`), `load_agents()`. Tools must exist before agents (agents reference allowed tools by name).
+8. `agent_factory` — needs both registries above.
+9. `manager_registry` (file-system scan), `multi_agent_manager_factory`.
+10. `orchestrator_registry.preload_all()`, `orchestrator_instance_handler`, `orchestrator_factory`.
+11. `data_conversion_module`.
+12. `global_blackboard` — empty `GlobalBlackBoard()`. Nothing else can `add_msg` until this exists.
+13. `resource_manager` — `ResourceManager()` then `load_all_from_directory("resources")`. This is a 3-pass loader (JSON → templates → text) and also publishes every value into `global_blackboard.state_dict` as a side effect, so `global_blackboard` must already exist. Dynamic resource *providers* are registered here too (`resource_accounts`, `resource_email_accounts`) along with the `resource_user_email` acting-as lock.
+14. `skill_registry`, `skill_injector` — `SKILL.md` loader + trigger evaluator.
+15. `reply_router`.
+16. `manager_invoker` — wired with explicit `RequestPreprocessor(resource_manager=...)`.
+17. `agent_components_factory` — wired with explicit `event_hub`, `resource_manager`, `global_blackboard`.
+18. `room_session_manager` — wired with explicit `blackboard`, `event_hub`, `reply_router`, `resource_manager`, `manager_registry`, `multi_agent_manager_factory`, `manager_invoker`.
+19. `entity_catalog` (singleton), then `env_registry` (`EnvRegistryService`).
+20. `scheduler` — `SchedulerService(app)`. Auto-starts via `TimingEngine.__init__`.
+21. Tickets DB init, Google OAuth DB init, `ticket_manager`. Stale tool-approval tickets are cleared from the previous session.
+22. `background_task_manager`, `dj_manager` — gated by `subsystems.yaml`.
+23. `atexit.register(shutdown_services)` — ensures clean LIFO shutdown.
 
-### Phase 2: `initialize_system` (`initialize_system.py:21`)
+### Phase 2: `initialize_system` (`initialize_system.py`)
 
 This phase is for things that need the registry from Phase 1 already present:
 
-1. `manager_registry.preload_all()` — eager-loads every manager's config + agent set.
+1. `manager_registry.preload_all()` — eager-loads every manager's config + agent set, then builds the display-name registry from each manager's `display_name`.
 2. `validate_all(agent_registry)` — validates every agent definition (raises on bad config).
-3. `socket_manager` — registered here, *not* in Phase 1, because socket emits can't happen until SocketIO is bound to the Flask app.
-4. `music_afk_relay`, `event_relay`, `progress_curator`, `question_service`.
-5. Three pre-instantiated agents (`emi_result_handler`, `emi_reminder_handler`, `notify_user`) — these are stateful and shared, so they're constructed once via `agent_factory.create_agent(...)` and registered as services rather than rebuilt per call.
-6. `slack_interface` — polling client.
-7. Subsystem-gated services: `signal_router`, `ingest_service` (the gut), `pod_classifier_service`, `dayflow_scheduler`.
-8. `task_ir_runner` — `ensure_event_subscription()` wires it onto the bus.
+3. `register_kg_embedding_sync()` — installs the KG embedding chokepoint (production process only; skipped under `USE_TEST_DB`).
+4. `socket_manager` — registered here, *not* in Phase 1, because socket emits can't happen until SocketIO is bound to the Flask app.
+5. `music_afk_relay`, `event_relay`.
+6. `ticket_dispatcher` — `TicketDispatcherRegistry` with the socketio / telegram / slack / sms `TicketSurfaceAdapter`s registered, then `subscribe_to_event_hub()`.
+7. `progress_curator`, `chat_narrator`, `mailbox`, `mam_instance_manager`, `outbound_chat_publisher`, `question_service`.
+8. Two pre-instantiated agents (`emi_result_handler`, `emi_reminder_handler`) — stateful and shared, constructed once via `agent_factory.create_agent(...)` and registered as services rather than rebuilt per call.
+9. **Native singleton pre-warm** (on the boot thread, *before* routine fan-out): self-heal corrupt chroma collections, then build the ChromaDB client + KG collections (`get_chroma_manager()`), the embedder (`embed_text("warmup")`), and the belief chroma collection. First-time init of these native libs is not thread-safe — warming serially here prevents the concurrent-first-init crash. Then **LLM SDK pre-warm**: import the Gemini / Anthropic SDKs for whichever providers have a real (non-placeholder) key, so the first agent call isn't cold.
+10. `get_routine_manager().refresh()` (if `routine_manager` enabled) — wires event-triggered routine subscriptions immediately so the first event in the post-boot window isn't dropped.
+11. Subsystem-gated services: `signal_router`, `ingest_service` (the gut) with its subscribers (`signal_router.handle_envelope`, `pod_classifier_service`), `dayflow_scheduler`.
+12. `task_ir_runner` — `ensure_event_subscription()` wires it onto the bus.
+13. `register_ticket_answer_listener()` — routes ticket responses for ticket-mode pending questions back into the subconscious answer loop.
 
-After Phase 2, the stale-socket sweeper starts (`create_app.py:92`).
+The legacy `SlackInterface` polling adapter is gone — Slack inbound is handled
+exclusively by the `/slack/events` webhook (`app/routes/slack_events.py`); the
+poller was retired 2026-05-05 to stop duplicate-message processing.
+
+After Phase 2, the stale-socket sweeper starts (`create_app.py`).
 
 ### Shutdown
 
-`shutdown_services` (`bootstrap.py:268`) runs at process exit in LIFO order: `dj_manager` → `background_task_manager` → `scheduler` → `afk_monitor` → `event_hub` → SQLAlchemy engines. Stopping consumers before the bus prevents handlers from firing into a torn-down hub. Engines come last so any pending commits from those handlers can land.
+`shutdown_services` (`bootstrap.shutdown_services`) runs at process exit in LIFO order: `dj_manager` → `background_task_manager` → `scheduler` → `afk_monitor` → `event_hub` → SQLAlchemy engines. Stopping consumers before the bus prevents handlers from firing into a torn-down hub. Engines come last so any pending commits from those handlers can land.
 
 ## EventHub
 
-Source: `app/assistant/event_hub/event_hub.py`. (The directory is `event_hub/`, not `event_hub/` — the DI key `event_hub` is the alias.)
+Source: `app/assistant/event_hub/event_hub.py`. The DI key matches the module name (`event_hub`).
 
 ### Interface
 
@@ -245,7 +264,7 @@ The log is capped at `_MAX_MESSAGES = 20000`; on overflow it trims to `_TRIM_TAR
 ### What reads from it
 
 - `manager_runtime` / `RoomSessionManager` for cross-invocation chat-history rebuild.
-- `context_memo`, `entity_card_injector`, `slack_interface`, `dj_manager`, daily-context generator — anywhere that needs recent chat slices without hitting SQLite.
+- `context_memo`, `entity_card_injector`, `dj_manager`, daily-context generator — anywhere that needs recent chat slices without hitting SQLite.
 - `get_recent_chat_since_utc(...)` (`global_blackboard.py:196`) is the canonical retrieval API for routing/history building. Defaults are conservative (only `is_chat=True`, excludes meta tags via `DEFAULT_EXCLUDED_CHAT_TAGS`, excludes summarized messages, excludes slash commands unless explicitly allowed).
 
 `add_msg` auto-tags messages produced under a non-`normal` `room_mode` (e.g. `doc_creation_mode`) into `sub_data_type` so dayflow can exclude them via tag filters without touching call sites.
@@ -319,7 +338,7 @@ Source: `app/assistant/utils/pydantic_classes.py`.
 
 These three Pydantic models are the wire format for everything that flows between agents, tools, managers, the event hub, and the blackboards.
 
-### `Message` (`pydantic_classes.py:122`)
+### `Message`
 
 The base envelope. ~50 fields; the load-bearing ones:
 
@@ -344,7 +363,7 @@ The base envelope. ~50 fields; the load-bearing ones:
 
 Constructed in: transport handlers, control nodes, agent runtime, tools. Parsed everywhere downstream. Pydantic validation is strict; do not bypass the constructor.
 
-### `ToolResult` (`pydantic_classes.py:191`)
+### `ToolResult`
 
 ```python
 class ToolResult(BaseModel):
@@ -354,9 +373,9 @@ class ToolResult(BaseModel):
     data: Optional[Any] = None
 ```
 
-Returned by every tool. `result_type` keys into `RESULT_TYPE_HANDLERS_NEW` (`pydantic_classes.py:243`) for dispatch. **Per project memory: `content` must never be truncated** — agents need the full payload to make decisions.
+Returned by every tool. `result_type` keys into `RESULT_TYPE_HANDLERS_NEW` for dispatch. **Per project memory: `content` must never be truncated** — agents need the full payload to make decisions.
 
-### `ToolMessage` (`pydantic_classes.py:198`)
+### `ToolMessage`
 
 `Message` plus tool-specific fields: `tool_name`, `tool_data` (arguments), `tool_result`. Used by `ToolCaller` and `ToolResultHandler` to round-trip a tool invocation through the agent loop.
 

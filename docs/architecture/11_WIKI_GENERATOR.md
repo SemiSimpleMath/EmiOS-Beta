@@ -2,7 +2,9 @@
 
 ## What it is
 
-The wiki generator projects the user's knowledge graph into a Markdown vault on disk (default `<your-home>/EmiWiki`). One file per Entity, Obsidian-compatible, with YAML frontmatter and prose body. Pages are produced by an LLM-driven pipeline that walks the KG neighborhood around an entity, renders bullets, classifies them into biographical sections, writes per-section prose, and stitches the result with a Wikipedia-style lead. A nightly routine refreshes only the sections affected by KG changes since each page's `generated_at`. A Flask blueprint at `/wiki/` serves the vault as a Wikipedia-style read surface.
+The wiki generator projects the user's knowledge graph into a Markdown vault on disk. One file per Entity, Obsidian-compatible, with YAML frontmatter and prose body. Pages are produced by an LLM-driven pipeline that walks the KG neighborhood around an entity, renders bullets, classifies them into biographical sections, writes per-section prose, and stitches the result with a Wikipedia-style lead. A nightly routine refreshes only the sections affected by KG changes since each page's `generated_at`; a second nightly routine grows the vault by writing pages for high-degree node-less entities; and a learning loop closes the gap between what the prose implies and what the KG actually holds. A Flask blueprint at `/wiki/` serves the vault as a Wikipedia-style read surface.
+
+The vault is **per-assistant and lazily resolved**, not a hard-coded path. `nightly_refresh._default_vault()` returns, in order: `$EMI_WIKI_DIR` if set; else `get_data_dir()/wiki` when `$EMI_DATA_DIR` is set; else `~/<AssistantName>Wiki` (the assistant name read from `resources/assistant/assistant_core.json`, default `the assistant`). `DEFAULT_VAULT` is a `_LazyVault` shim that resolves on access, so `DEFAULT_VAULT / "prose"` works without binding the path at import time. `growth.py` keeps its own `DEFAULT_VAULT = Path.home()/"EmiWiki"`, but the routine always passes an explicit `vault_path`, so the resolved per-assistant root wins in production.
 
 ## End-to-end flow
 
@@ -69,7 +71,7 @@ The wiki generator projects the user's knowledge graph into a Markdown vault on 
 
 ## The vault
 
-A vault is a flat folder of Markdown files plus three sidecar subdirectories. Default location is hard-coded as `DEFAULT_VAULT = Path(r"<your-home>/EmiWiki")` in `nightly_refresh.py:45`.
+A vault is a flat folder of Markdown files plus sidecar subdirectories. Its location is resolved per-assistant by `nightly_refresh._default_vault()` (see above), not hard-coded.
 
 ```
 <vault>/
@@ -78,10 +80,16 @@ A vault is a flat folder of Markdown files plus three sidecar subdirectories. De
   log.md                             append-only regen log
   prose/
     <Entity>.md                      final LLM-written article (served by /wiki/)
+  images/
+    <sha256>.<ext>                   materialized profile images (served by /wiki/images/)
   tags/
     <Entity>.json                    bullet_key -> [section_key, ...] cache
   section_outputs/
     <Entity>.json                    section_key -> prose markdown cache
+  bullet_index/
+    <entity>.json                    bullet keys at last rewrite (dirty detection)
+  empty/
+    <stem>.json                      growth give-up markers (edge_count_at_marker)
 ```
 
 The rough `.md` and the prose `prose/<Entity>.md` are both well-formed Markdown with YAML frontmatter. The frontmatter contract (rendered by `wiki_renderer._render_frontmatter`, `wiki_renderer.py:147`) is:
@@ -181,7 +189,7 @@ If `investigate_immediately=True` (the default) and any finding is saved, `kg_in
 
 ## Nightly refresh
 
-`nightly_refresh.run_nightly_wiki_refresh` (`nightly_refresh.py:224`) is wired as a routine function:
+`nightly_refresh.run_nightly_wiki_refresh` is wired as a routine function. Routine JSON lives one file per routine under `configs/routines/public/`, not in a monolithic `configs/routines.json`. `configs/routines/public/wiki_nightly_refresh.json`:
 
 ```json
 "id": "wiki_nightly_refresh",
@@ -189,12 +197,12 @@ If `investigate_immediately=True` (the default) and any finding is saved, `kg_in
 "spec": {
   "function_name": "wiki_nightly_refresh",
   "run_critic": true,
-  "vault_path": "<your-home>/EmiWiki"
+  "vault_path": ""
 },
 "run_policy": { "type": "daily", "time_local": "03:00", "quiet_hours_ok": true }
 ```
 
-Scheduled at 03:00 local, after the `proposal_promoter` at 02:30, so newly-promoted nodes flow into the wiki the same night. See `06_PIPELINES_AND_ROUTINES.md` for routine semantics.
+`vault_path: ""` is falsy, so the runner falls back to `_default_vault()` — the path is never pinned in config. Scheduled at 03:00 local, after the `proposal_promoter` at 02:30, so newly-promoted nodes flow into the wiki the same night. `function_name` resolves through `routine_functions.py`'s `ROUTINE_FUNCTIONS` map. See `06_PIPELINES_AND_ROUTINES.md` for routine semantics.
 
 The flow per scan:
 
@@ -209,6 +217,32 @@ The flow per scan:
    - If empty, skip. Otherwise `regenerate_entity_page` (refresh rough) + `regenerate_affected_sections` + (optional) `run_consistency_critic`.
 
 Output is a per-page summary plus aggregate counts (`pages_scanned`, `updated`, `unchanged`, `full_regen`, `errors`).
+
+## Wiki growth (new-page creation)
+
+Refresh maintains *existing* pages; growth *adds* new ones. `growth.run_wiki_growth` (`growth.py`) is wired as the `wiki_growth` routine function (`configs/routines/public/wiki_growth.json`, daily 03:30, right after the refresh) and builds up to `max_new_pages` (default 5) prose pages per night for the highest-degree Entity nodes that don't yet have one.
+
+- **Target selection** (`pick_growth_targets`): a cheap SQL pre-filter ranks Entity nodes by incident-edge count, keeping only `deg >= min_degree` (default 4); a Python pass then confirms each survivor through `importance.consumers.is_wiki_growth_candidate` (degree + importance floor). Entities whose sanitized stem already has a `prose/` file are skipped.
+- **Give-up markers**: when an entity's prose generation returns empty (the writer LLM produced nothing for any section — tools, generic nouns, abstract concepts), `mark_entity_empty` drops `<vault>/empty/<stem>.json` recording `edge_count_at_marker`. Subsequent ticks skip the entity *unless its edge count has grown past that number*, so dead-ends don't re-burn LLM cost nightly but new KG content auto-retries.
+- **Per-page build** (`build_one_page`) is the end-to-end unit (rough → `generate_prose_page_tagged` → optional `run_consistency_critic`), returning status `ok` / `empty` / `error`. It is independent and idempotent — interruptions don't corrupt anything; the next run resumes (existing pages skipped). The `refresh_wiki_page` agent tool (`lib/tools/refresh_wiki_page/`) wraps this same function so a manager can rebuild one page on demand after KG mutations.
+
+## Synthetic-fact drain (learning loop)
+
+The wiki's prose routinely *implies* facts the KG doesn't hold. The `kg_wiki_inference` routine (`configs/routines/public/kg_wiki_inference.json`, daily 04:15) runs `wiki_connection_investigator` over the freshest prose pages (via `pipelines/kg_maintenance_pipeline/step_wiki_inference.py`) and files those gaps as `synthetic_fact_proposal` findings (note the producer is the investigator; the step's `FINDING_TYPE` is `synthetic_fact_proposal`, not the older `wiki_inferred_fact` its docstring still names). Those used to dead-end in a review queue with no review surface. `synthetic_fact_drain.run_fact_drain` (`synthetic_fact_drain.py`) closes the loop, wired as the `wiki_fact_drain` routine (`configs/routines/public/wiki_fact_drain.json`, `interval` 24h, active 08:00–22:00) via `routine_handlers/wiki.py:wiki_fact_drain_run`. One pass, in order:
+
+1. **Process answers** (`process_drain_answers`): captured answers to this drain's own questions go through `wiki::fact_answer_judge`. `confirmed`/`corrected` → the finding is stamped `status='investigated'` with a `recommendation` + `disposition='auto_apply'`, so the **existing** `kg_finding_executor` drain materializes the fact through the audited mutator suite after its 24h grace (full dedup + revision-log safeguards — no new ingestion machinery). `denied` → dismissed. `unclear` → parked (visible in `execution_notes`, never re-asked).
+2. **Expire** (`expire_stale_drain_questions`): drain questions unanswered past `QUESTION_EXPIRY_HOURS` (96h) close out and park their finding — the user saw it once; no nagging.
+3. **Gate + ask** (`drain_pending_proposals`): each pending proposal goes through `wiki::fact_question_writer`. Taxonomy trivia is dismissed outright; worthy facts become a natural confirmation question ("Am I right that …?") in the pending-question queue, capped at `MAX_QUESTIONS_PER_RUN` (2), delivered and answer-captured by the standard question loop.
+
+The drain owns only its own questions (`created_by='wiki::synthetic_fact_drain'`); question↔finding linkage rides `related_concern_id` with a `finding:` prefix.
+
+## Profile images
+
+`profile_image.materialize_profile_image_for_vault` (`profile_image.py`) finds the entity's best image pod — preferring a `has_profile_image` edge, then `depicted_in`, then any `kind="image"` pod linked to the entity (predicate-agnostic, to survive per-edge canonicalization that renamed the relation) — copies the content-addressed file (sha256-named, so re-runs are idempotent) into `<vault>/images/`, and returns a markdown-relative `../images/<file>` reference for embedding from `prose/<Entity>.md`. The `/wiki/images/<filename>` viewer route serves that directory.
+
+## Section tagging (shared promotion-time tag layer)
+
+Bullet→section classification is not wiki-private. `app/assistant/kg/section_tagging.py` persists per-node tags in two namespaces — `NAMESPACE_CARD` and `NAMESPACE_WIKI` — on the `NodeSectionTag` ORM rows, written **once at promotion time** (`kg_node_section_tagger` agent, `tag_nodes_by_id` / `backfill_untagged_nodes`) and read back by both the entity-card builder and the wiki page builder via a SELECT — neither re-runs the tagger at projection time. `WIKI_SECTION_VOCAB` is the authoritative list of wiki section keys the tagger may emit; a `_processed`/`none` sentinel namespace marks reject/empty results so untaggable nodes don't loop through the LLM every routine run. (The per-page `tags/<Entity>.json` sidecar documented under "Page generation" is the wiki's own bullet-content-hash cache, distinct from this durable KG-side tag layer.)
 
 ## Canonical-sentence contract
 
@@ -239,9 +273,10 @@ Blueprint registered in `app/routes/wiki_viewer.py`. Routes:
 | `GET /wiki/random` | `wiki_random` | 302 to a random article |
 | `GET /wiki/search?q=<q>` | `wiki_search` | Substring scan over article bodies, returns snippets |
 | `GET /wiki/<entity>` | `wiki_article` | Render `<vault>/prose/<entity>.md` (case-insensitive match) |
-| `POST /wiki/<entity>/regenerate` | `wiki_article_regenerate` | Force `regenerate_entity_page` → `generate_prose_page_tagged` → `run_consistency_critic` for one page |
+| `GET /wiki/images/<filename>` | `wiki_image` | `send_from_directory(<vault>/images, ...)` — serves the profile images prose pages embed as `../images/<file>` |
+| `POST /wiki/<entity>/regenerate` | `wiki_article_regenerate` | Force `regenerate_entity_page` → `generate_prose_page_tagged` → `run_consistency_critic` for one page (bootstraps a stub if a KG Entity by that label exists) |
 
-The viewer reads from `WIKI_DIR = Path(r"<your-home>/EmiWiki/prose")` (`wiki_viewer.py:31`). Markdown is rendered through Python `markdown` (extensions: `extra`, `toc`, `sane_lists`, `tables`). After rendering:
+The viewer resolves its vault root per-assistant via `_wiki_vault_root()` (`$EMI_WIKI_DIR` override, else `~/<AssistantName>Wiki`), read fresh each call so a rename is picked up without a restart; prose comes from `_wiki_prose_dir()` (`<root>/prose`). (This is unrelated to `app/routes/dev_wiki.py`, whose `/dev-wiki/` blueprint renders the architecture docs under `docs/` — same "wiki" word, different surface.) Markdown is rendered through Python `markdown` (extensions: `extra`, `toc`, `sane_lists`, `tables`). After rendering:
 - `_wikilink_sub` rewrites `[[Name]]` and `[[Name|display]]` into `<a href="/wiki/Name" class="wikilink">`.
 - `_node_marker_sub` turns any leftover `{node:<uuid>}` markers into small badges linking to `/kg/node/<uuid>`.
 - `_extract_ref_map` parses the appended `## References` section into a `{N: node_id}` map; `_inline_ref_sub` then wraps every prose `[N]` token in an anchor to the corresponding KG node, skipping tokens already inside an `<a>` (so the References list itself is not double-wrapped).
@@ -261,10 +296,16 @@ To trace a bad wiki sentence back to its origin, walk the canonical provenance c
 | `app/assistant/wiki_generator/wiki_writer.py` | `regenerate_entity_page` (rough page), `rebuild_index`, `_append_log` |
 | `app/assistant/wiki_generator/wiki_renderer.py` | Deterministic markdown renderer for the rough page (frontmatter + per-section blocks with `WIKI:DET` markers) |
 | `app/assistant/wiki_generator/lead_writer.py` | `generate_lead` — calls `wiki_lead_writer` |
-| `app/assistant/wiki_generator/nightly_refresh.py` | `run_nightly_wiki_refresh`, `_apply_pre_refresh_revision_log_effects`, `refresh_one_page` |
+| `app/assistant/wiki_generator/nightly_refresh.py` | `run_nightly_wiki_refresh`, `_apply_pre_refresh_revision_log_effects`, `refresh_one_page`, `_default_vault` / `_LazyVault` (per-assistant vault resolver) |
+| `app/assistant/wiki_generator/growth.py` | `run_wiki_growth`, `pick_growth_targets`, `build_one_page`, `mark_entity_empty` — new-page creation |
+| `app/assistant/wiki_generator/synthetic_fact_drain.py` | `run_fact_drain` — gate/ask/judge loop turning `synthetic_fact_proposal` findings into user-confirmed `auto_apply` findings |
+| `app/assistant/wiki_generator/profile_image.py` | `materialize_profile_image_for_vault`, `find_profile_image_pod` — copy entity image pod into `<vault>/images/` |
 | `app/assistant/wiki_generator/consistency_critic.py` | `run_consistency_critic` — files `wiki_contradiction` findings, optional inline investigation |
-| `app/assistant/wiki_generator/source_reconstruct.py` | QA helper to walk a wiki sentence back to its source chat window |
 | `app/assistant/wiki_generator/references.py` | `apply_references` — `{node:<id>}` -> `[N]` + `## References` post-processing |
+| `app/assistant/kg/section_tagging.py` | `NodeSectionTag` reader/writer, `NAMESPACE_WIKI` / `NAMESPACE_CARD` vocab — shared promotion-time tag layer (card + wiki consumers) |
+| `app/assistant/pipelines/kg_maintenance_pipeline/step_wiki_inference.py` | `wiki_connection_investigator` runner — files `synthetic_fact_proposal` findings |
+| `app/assistant/routine_handlers/wiki.py` | `wiki_fact_drain_run` routine handler |
+| `app/assistant/lib/tools/refresh_wiki_page/` | agent tool wrapping `growth.build_one_page` for on-demand single-page rebuild |
 | `app/assistant/kg_projection/neighborhood.py` | `get_entity_neighborhood`, `EntityNeighborhood` and connection dataclasses |
 | `app/assistant/kg_projection/bullets.py` | `Bullet` dataclass, `render_bullets` (single source of truth for bullet text + provenance) |
 | `app/assistant/kg_projection/sections.py` | `SectionSpec`, `load_taxonomy`, `sections_as_prompt_list` |
@@ -275,9 +316,15 @@ To trace a bad wiki sentence back to its origin, walk the canonical provenance c
 | `app/assistant/agents/wiki_lead_writer/` | gpt-5.4 lead writer; reads the assembled body, emits 1-2 paragraphs |
 | `app/assistant/agents/wiki_section_tagger/` | gpt-5.4-mini batched bullet → section classifier |
 | `app/assistant/agents/wiki_consistency_critic/` | gpt-5.4-mini post-render fact checker |
-| `app/routes/wiki_viewer.py` | Flask blueprint serving `/wiki/`, `/wiki/<entity>`, `/wiki/<entity>/regenerate` |
+| `app/assistant/agents/wiki_connection_investigator/` | infers facts the prose implies but the KG lacks → `synthetic_fact_proposal` findings |
+| `app/assistant/agents/wiki_fact_question_writer/`, `wiki_fact_answer_judge/` | drain agents (`wiki::fact_question_writer` / `wiki::fact_answer_judge`): worthiness gate → confirmation question, then judge the user's answer |
+| `app/assistant/agents/kg_node_section_tagger/` | promotion-time card+wiki section tagger feeding `NodeSectionTag` |
+| `app/routes/wiki_viewer.py` | Flask blueprint serving `/wiki/`, `/wiki/<entity>`, `/wiki/<entity>/regenerate`, `/wiki/images/<filename>` |
 | `resources/user/resource_wiki_sections.json` | Section taxonomy (key / title / description) |
-| `configs/routines.json` (`wiki_nightly_refresh`) | Routine entry that wires `run_nightly_wiki_refresh` into the daily 03:00 schedule |
+| `configs/routines/public/wiki_nightly_refresh.json` | Daily 03:00 — incremental refresh of existing pages |
+| `configs/routines/public/wiki_growth.json` | Daily 03:30 — build new pages for high-degree node-less entities |
+| `configs/routines/public/kg_wiki_inference.json` | Daily 04:15 — `wiki_connection_investigator` feeder producing `synthetic_fact_proposal` findings |
+| `configs/routines/public/wiki_fact_drain.json` | Interval 24h (08:00–22:00) — synthetic-fact drain learning loop |
 
 ## How to add a new section type
 

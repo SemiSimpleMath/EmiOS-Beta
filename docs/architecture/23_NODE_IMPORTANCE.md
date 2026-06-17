@@ -1,353 +1,351 @@
 # Node and edge importance
 
 How the KG decides which nodes/edges matter to the user, who scores them,
-when, and where the gaps are.
+when, and how the score flows. This is the signal behind the personalized
+lens, card-worthiness, wiki growth, timeline prominence, and finding
+priority.
+
+The model is **one LLM rater (edges only) + two deterministic
+derivations (nodes).** It shipped 2026-05-12 (commit `f3135cb2`) and
+replaced an earlier per-node LLM Entity rater. Everything lives in
+`app/assistant/importance/`.
 
 ## What gets rated
 
-| Subject | Rater | When | Scale |
+| Subject | How | Where | Scale |
 |---|---|---|---|
-| **Entity** nodes | `me::importance_rater` agent | `kg_importance_rater` routine (interval, every ~30 min, only_unrated) | 0–10 (per agent prompt), persisted to `kg_node_metadata.importance` |
-| **kg_edge** rows | `me::edge_importance_rater` agent | same routine | 0–10 from source's perspective, persisted to `kg_edge_metadata.importance` |
-| **State / Event / Goal / Property** nodes | **(no rater)** | — | column exists; populated only by ad-hoc paths (proposal promotion, manual writes) |
+| **kg_edge** rows | LLM, `me::edge_importance_rater`, source's perspective | `scoring.regenerate_edge_importance` | 0–10 → `kg_edge_metadata.importance` |
+| **Entity / Concept** nodes | derived: `MAX(adjacent edge.importance)` | `scoring.regenerate_entity_importance` | 0–10 → `kg_node_metadata.importance` |
+| **State / Event / Goal / Property** nodes | derived: `MAX(other_end.importance × edge.importance / 10)` | `scoring.regenerate_state_importance` | 0–10 → `kg_node_metadata.importance` |
 
-Code paths:
-- Routine: `app/assistant/routine_manager/routine_functions.py` `_lazy_kg_importance_rater`
-- Entity rater: `app/me/importance.py` `regenerate_importance()` — defaults `only_node_types=["Entity"]`
-- Edge rater: `app/assistant/kg/edge_importance.py` `regenerate_edge_importance()` (relocated from `app/me/` 2026-05-11 — general KG infrastructure, not lens-only)
-- Entity rater agent: `app/assistant/agents/me/importance_rater/`
-- Edge rater agent: `app/assistant/agents/me/edge_importance_rater/`
+The single source-of-truth module is `app/assistant/importance/scoring.py`
+(the three `regenerate_*` writers, each with a long WHY docstring that is
+the authoritative spec). Consumer-side thresholds and gates live in
+`app/assistant/importance/consumers.py`.
 
-Both rater agents live under `me::` because the lens being scored is the
-relationship-from-the-user's-perspective lens.
+> History: the edge rater used to live at `app/assistant/kg/edge_importance.py`
+> and the node deriver at `app/me/importance.py`; both were deleted and
+> folded into `importance/scoring.py` on 2026-05-17. The deprecated LLM
+> Entity rater (`regenerate_importance`) was removed 2026-05-12. The
+> `me::importance_rater` **agent directory still exists on disk but is
+> orphaned** — no live code creates it (only stale comments in
+> `kg/proposal_promoter.py` still name it).
 
-## How Entity importance is determined
+## The pipeline
 
-`me::importance_rater` (`app/assistant/agents/me/importance_rater/`) is
-an LLM agent. The driver `regenerate_importance()` pulls Entity nodes
-in batches of 60, fetches each node's edges (capped per node), renders
-a numbered block per node (label + node_type + category + description
-+ neighbor edges), and asks the agent to return one 0–10 score per id.
+`routine_manager/routine_functions.py::_lazy_kg_importance_rater`
+(registered as the `kg_importance_rater` routine) runs the whole chain.
+Config: `configs/routines/public/kg_importance_rater.json` — interval,
+`min_interval_seconds = 1800` (~30 min), `max_run_seconds = 900`,
+`batch_size_edges = 50`, `max_edges_per_run = 400`. Gated by the
+`kg_edge_importance_rating` subsystem flag.
 
-The prompt anchors calibration explicitly:
+One scope is built at the routine entry and threaded into the two LLM
+steps; the pure-DB derivations take none. Steps, in order:
 
-| Band | Examples |
+1. **Rate edges** — `regenerate_edge_importance(only_unrated=True, max_edges=400)`.
+   The single LLM input. Batches of 50 to `me::edge_importance_rater`.
+2. **Derive Entity / Concept** — `regenerate_entity_importance(only_unrated=False)`.
+   `MAX` over each node's adjacent edge importances.
+3. **Derive State / Event / Goal / Property** — `regenerate_state_importance(only_unrated=False)`.
+   `MAX(src_imp × edge_imp / 10)` over connecting edges.
+4. **Section tagging** — `kg/section_tagging.backfill_untagged_nodes(limit=60)`,
+   which now sees real importance values for its source-entity gate.
+
+The order is load-bearing: step 3 reads the Entity importances written
+by step 2; step 4 reads both. The deferred-dependency chain is
+`promote (NULL importance) → rate edges → derive nodes → tag → card/wiki dirty-sweep`.
+
+Per-run caps (`max_edges`, `max_tags`) pair with `only_unrated` /
+untagged shrinking selectors so a bulk re-extraction converges over
+several runs instead of becoming one graph-wide LLM grind.
+
+## Edge importance — the only LLM rating
+
+`me::edge_importance_rater` (`gpt-5.4-mini`, `agents/me/edge_importance_rater/`)
+rates each edge **from the source node's perspective** on 0–10:
+"how important is this relationship to the source?" `the user --addressee--> the assistant`
+is rated by how much it matters to *the user*, not to the assistant, not in the
+abstract. The number is **single-anchored** — only the source's view is
+stored; a consumer wanting the other side must walk the reverse edge.
+
+Two disciplines from the prompt (`prompts/system.j2`):
+
+1. **Reason before score.** The agent writes a 1–2 sentence `reason`
+   restating what the EDGE SENTENCE describes, why it matters to the
+   source, and which band fits — *before* the number. Forcing the reason
+   first keeps the score honest.
+2. **Read the EDGE SENTENCE, not the `relationship_type`.** `has_state`
+   spans "is deceased" (9–10) to "has email address" (1–2). The label is
+   a coarse extraction bucket; the sentence is what's scored. The prompt
+   block all-caps the edge sentence to anchor the model on it
+   (`scoring._build_edge_block`).
+
+The framing in the prompt: **importance is the blast radius of getting
+it wrong** — score by how much downstream behavior breaks if a consumer
+misreads the edge, not by how interesting the fact feels.
+
+Calibration anchors (integer bands, `.5` between; from the source's
+perspective — most edges connect an Entity source to a State/Event/Goal):
+
+| Band | Examples (EDGE SENTENCE) |
 |---|---|
-| 9.0–10.0 | Self, partner, children, parents, very close family. Critical home/job. Defining lifelong friends. Formative mentors who shaped the user's life path |
-| 7.0–8.9 | Siblings, in-laws, very close friends, primary employer, central long-term project, significant teachers/collaborators |
-| 5.0–6.9 | Cousins, regular colleagues, ongoing pets, regular places (home city, frequent restaurants) |
-| 3.0–4.9 | Old colleagues, neighbors, occasional friends, hobbies, recurring services |
-| 1.0–2.9 | One-off mentions, products / brands / video games / movies / TV shows mentioned in passing |
-| 0.0–0.9 | Generic concepts, taxonomy scaffolding, email subject lines, junk extracted from automated messages |
+| **10** | "married to the user's partner since 2003"; "the user's partner is a family member's mother"; "father is dying of cancer" — most defining relationships/states of a life |
+| **9** | family-tier bonds, primary career anchor: "two beloved dogs walked daily"; "senior engineer at Google — primary career"; "sister, talk monthly" |
+| **8** | in-laws, formative mentors, identity-defining commitments, life-goals: "mother-in-law"; "PhD advisor"; "committed atheist"; "goal: raise his children well" |
+| **7** | identity hobbies, close friends, long-term collaborators, multi-year active goals: "plays chess daily, identifies as a chess player"; "close friends since high school" |
+| **6** | regular routine engagement, not identity-defining: "weekly engineering syncs"; "drinks coffee each morning"; "sees a relative & Joe every couple months" |
+| **5** | casual interests, light recurring states, soft goals: "occasionally plays Disco Elysium"; "likes Bob's Burgers"; "wants to read more this year" |
+| **4** | one-time events that mattered briefly, weekly tools: "great Coachella 2024"; "uses VS Code as primary IDE"; "attended cousin's wedding" |
+| **3** | routines, maintained lists, this-week goals: "Wednesday trash night"; "maintains a Ralph's shopping list"; "wants to clean the garage this weekend" |
+| **2** | single events, list items, transient states, admired public figures: "headache today"; "watched a GOT episode"; "admires Bob Dylan" |
+| **1** | structural metadata, passing brand mentions, momentary intents, contact info: "email is jukka@…"; "mentioned Bjork once" |
+| **0** | extraction noise: data-pipeline labels, `is_a Concept` with no binding, contextless scaffolding |
 
-Plus a **lens-specific bias**: this is a relationship lens. People,
-organizations, places, and groups can score 7+. Phone numbers, email
-addresses, dates, prices, calendar events, devices, files, documents
-score 0–3 regardless of who they belong to or how often they appear.
+Carve-outs the prompt enforces: contact-info targets (phone/email/URL/
+address) → 1–3 regardless ("owning a phone number is not a relationship");
+routine/task/device/list/document targets → 1–3 ("using a thing is not a
+relationship"); family relationship types keep high scores even with an
+empty target description (the type itself is the signal).
 
-Past-tense ("the late X") and closed-era relationships (deceased
-mentor, ex-employer that defined a career) are explicitly NOT lowered
-— they're still defining presences.
+When the LLM omits an edge from its output, `scoring.DEFAULT_EDGE_SCORE = 5.0`
+fills it — mid-scale, neither "important" nor "trivia."
 
-Persisted to `kg_node_metadata.importance`. The routine runs in
-`only_unrated=True` mode by default, so the rater backfills new
-content rather than re-rating settled scores every cycle.
+Failure modes (documented in `regenerate_edge_importance`):
+- **Source-perspective undervaluation** of contact-info edges ("a friend's
+  phone number" isn't important *to a friend*). The entity-cards contact
+  carve-out (a section-tag bypass of `CARD_FACT_FLOOR`) is the workaround.
+- **Self-similar fan-out**: 15 "Purchase Habit --located_in--> Dairy Aisle"
+  edges each score a reasonable 3–4, collectively inflating the hub's
+  *derived* node importance. Addressed downstream by `importance/damping.py`,
+  not by retouching edge scores.
 
-## How Edge importance is determined
+## Entity / Concept importance — MAX over edges
 
-`me::edge_importance_rater` (`app/assistant/agents/me/edge_importance_rater/`)
-rates edges **from the source node's perspective** on the same 0–10
-scale. The driver pulls edges in batches and renders each as
-(source label, relationship_type, target label, edge sentence).
+`regenerate_entity_importance` sets
 
-Two key disciplines from the prompt:
-
-1. **Reason before score.** The agent must write a 1–2 sentence reason
-   restating what the edge sentence describes, why it matters to the
-   source, and which calibration band fits. Forcing the reason first
-   keeps the score honest.
-2. **Read the edge sentence, not the relationship_type.** `has_state`
-   covers everything from "is deceased" (9–10) to "has email address"
-   (1–2). The label is a coarse extraction bucket; the sentence is
-   what's being scored.
-
-Calibration:
-
-| Band | Examples |
-|---|---|
-| 9.0–10.0 | `married_to`, `parent_of`, `child_of`, `sibling_of` to immediate family. Primary employer / lifelong career anchor |
-| 7.0–8.9 | `close_friend_of`, `mentor_of`, formative teacher, central long-term collaborator, in-laws |
-| 5.0–6.9 | `colleague_of`, `friend_of` (regular), `neighbor_of` (engaged), recurring teammates, ongoing pets |
-| 3.0–4.9 | `met_at`, `knows`, peripheral coworkers, one-time collaborators |
-| 1.0–2.9 | `attended`, `participated_in`, public figures admired but never met |
-| 0.0–0.9 | Extraction artifacts, generic concept relations, taxonomy scaffolding, contextless edges |
-
-The "from source's perspective" framing means asymmetry is preserved:
-a father may be defining to his son (10); the same son may be one of
-many to the father (still typically 9–10 for immediate family, but
-the asymmetry shows up at the edges of the band).
-
-Persisted to `kg_edge_metadata.importance`.
-
-## How importance of other node types is determined
-
-**It currently isn't, in any systematic way.** State / Event / Goal /
-Property nodes have an `importance` column that exists and is read by
-many consumers, but no rater fills it. What's there is whatever a
-proposal promoter or manual write happened to set, often the
-documented default `0.5` or `NULL`.
-
-The architectural intent is that these node types inherit importance
-from the edges that touch them — a State linking Jukka and Katy by an
-`is_married` edge weighted 10.0 should be ~10/10; a State linking a
-peripheral entity by a generic `topic` edge should be near zero. The
-edge rater already produces the input to this derivation (per-edge
-importance from the source's perspective). What's missing is the
-aggregation step.
-
-Until a rater is wired in, the runtime workaround in
-`app/assistant/kg_investigator/finding_priority.py` reads
-`state.importance` when set, otherwise computes
-`MAX(edge.importance) / 10` over edges touching the node — the same
-signal a State rater would aggregate. This is per-call, not persisted.
-
-## Compositional techniques in use today
-
-Two patterns are implemented in production code:
-
-### Direct read (`node.importance` / `edge.importance`)
-Cheapest pattern. Reads the rater's stored score. Falls back to
-`DEFAULT_SCORE = 0.5` when the value is NULL — the source of most
-"why does Marika & Joe's marriage rank below Seija's hiking?"
-surprises, since a never-rated marriage and a rated-but-modest
-hiking preference both compare against 0.5.
-
-Used everywhere: every consumer of `kg_node_metadata.importance`.
-
-### Blended importance × PageRank
-`app/assistant/kg_core/kg_utils/node_importance.py:27-28`:
 ```
+Entity.importance = MAX(edge.importance) over all incident edges
+```
+
+(both directions; NULL-importance edges excluded). SQL: a `GROUP BY n.id`
+over `kg_node_metadata JOIN kg_edge_metadata` for `node_type IN ('Entity','Concept')`.
+
+**Why MAX, not sum or average** (the calibration backbone, verbatim from
+the docstring):
+- *Sum rewards fan-out* — 100 mediocre edges would outrank 1 critical
+  edge; Dairy Aisle (15 `located_in` edges) would beat a friend's mother
+  (1 deep `parent_of`).
+- *Average penalizes hubs* — the user has ~2200 edges, a few critical and
+  many incidental; averaging dilutes the signal.
+- *Max picks "the strongest reason anyone cares."* a friend is important
+  because of his close-friendship bond (8.5), not the 50 incidental
+  mention-edges.
+
+**Why derived, not LLM-rated.** The removed LLM Entity rater scored the assistant
+**3.0** despite 346 edges + 154 observations because the prompt
+categorized her as an "AI tool" and the rater anchored on that. The edge
+graph already encodes the truth — "the user cares deeply about the assistant" lives in
+edges like `the user --addressee--> the assistant` at 9. Picking a number was the easy
+part; the edges had done the hard part. Removing the LLM step removed the
+misjudgments and a recurring cost.
+
+Semantically the answer is "important to **someone** in the graph," not
+"important to the user specifically." Where most edges are anchored on the user
+or his circle the two coincide; for nodes deep in someone else's subgraph
+they diverge. That residual "user-POV" layer is what `importance/damping.py`
+is meant to supply (knocking down structural artifacts like Dairy Aisle
+that clear the max-gate but fail any "matters to the user" check).
+
+Failure modes: fan-out hub artifacts (above); sparse-Entity bias (a
+one-edge Entity inherits that edge's optimism); NULL gating (excluded
+edges make the derivation a lower bound that rises as the edge rater
+backfills — which is why step 2 runs after step 1 every cycle).
+
+## State / Event / Goal / Property importance — inherited via the edge chain
+
+`regenerate_state_importance` sets
+
+```
+State.importance = MAX( other_end.importance × edge.importance / 10 )
+                   over all edges touching the State
+```
+
+where `other_end` is the Entity on the far side of each connecting edge.
+Both factors are 0–10; the `/10` keeps the product in 0–10. SQL: a
+self-join from the State to its connecting edge to the far-end node, for
+`node_type IN ('State','Event','Goal','Property')`, filtered on both
+`edge.importance` and `src.importance` being non-NULL.
+
+These node types are **connective tissue** — facts/events/aspirations
+that Entities participate in. "a friend's phone number is X" is a State tying
+a friend to a number node; its importance is borrowed from how much the
+participating Entity cares about the link, which `edge.importance` already
+captures.
+
+**Why multiplication along the chain** (verbatim rationale):
+- A high-importance Entity (a friend 8.5) tied via an unimportant edge (1)
+  shouldn't pull the State up — the State derives importance from the
+  *link* to a friend, not a friend's existence. The product zeroes out un-pulled
+  connections.
+- A low-importance Entity tied via a critical edge still registers
+  (a roommate at 2.5 with a `has_state` at 7). Addition would over-credit
+  the unimportant endpoint; the product captures "how much this PATH
+  conveys."
+
+**Why MAX across edges** — same fan-out concern as Entity importance:
+sum would reward States touching many low-pull participants; max picks
+the single strongest participant-edge combination.
+
+**Why derived, not LLM-rated.** A State has no evaluative standing of its
+own — its importance is fully a function of who participates and how much
+they care. An LLM layer would re-derive the same signal less directly.
+
+**Dependency order is mandatory.** `src.importance` is the Entity-side
+value written in step 2; if it's NULL the join drops the edge and the
+State gets no rating that pass. The routine sequences edge → entity →
+state for exactly this reason. (`Property` nodes are subject-scoped, so
+the subject's edge is the only/strongest tie and the derivation behaves;
+a cross-subject edge from a bad merge would confuse it.)
+
+Both node writers preserve `Node.updated_at` (self-reference in the
+`UPDATE`) so a score-only change does **not** cascade into wiki / entity-card
+refreshes — same protective pattern as `step_pagerank`. Both invalidate
+the lens importance cache (`importance/cache.invalidate`) after writing,
+or lens consumers serve stale values until restart.
+
+## PageRank — weighted, structural, global (not personalized)
+
+`pipelines/kg_maintenance_pipeline/step_pagerank.py` is the
+`pagerank_score` producer (the doc's old "is PageRank done / is it
+personalized?" TODO — resolved here). It runs **in the KG maintenance
+pipeline**, not in the importance routine, and writes
+`kg_node_metadata.pagerank_score`.
+
+Properties:
+- **Edge-weighted.** Weights are `edge.importance` (default `0.5` when
+  NULL), so the edge rater's output is also PageRank's input — heavier
+  edges propagate more influence between endpoints.
+- **Passthrough-collapsed.** State/Event/Goal/Concept/Property nodes are
+  treated as passthrough: every `Entity → Passthrough → Entity` path adds
+  a virtual `Entity→Entity` edge (average of the two hop weights) so
+  intermediate nodes don't absorb score. All nodes still receive a score;
+  the primary signal is Entity-to-Entity connectivity.
+- **Undirected, standard power iteration**: `DAMPING = 0.85`,
+  `MAX_ITER = 100`, `TOLERANCE = 1e-6`; final scores normalized to the max.
+- **Not source-biased.** There is no teleport bias toward the user — this is
+  a global weighted PageRank, *not* a personalized one. (A personalized /
+  source-biased PageRank remains the right tool if multi-path
+  user-relative propagation is ever wanted; it is not what runs today.)
+- Like the node writers, it preserves `updated_at` to avoid nightly
+  refresh storms.
+
+## The lens blend — how consumers combine the two signals
+
+The personalized lens and the node-selection paths don't read raw
+importance alone; they blend it with PageRank. The weights are the single
+source of truth in `consumers.py`:
+
+```python
+LENS_BLEND_IMPORTANCE_WEIGHT = 0.4
+LENS_BLEND_PAGERANK_WEIGHT   = 0.6
 priority = 0.4 × node.importance + 0.6 × node.pagerank_score
 ```
 
-PageRank dominates because it's structural (connectedness × edge
-weights), while raw importance is one rater's per-node call.
-PageRank is computed offline and stored on `kg_node_metadata.pagerank_score`;
-edge weights (the edge rater's output) determine how importance flows
-along each edge during the PageRank computation. Used for ranking
-candidates in the wiki-page generator and the entity-card pipeline.
+`kg_core/kg_utils/node_importance.py` imports both constants and sorts
+candidates by this blend in `get_important_nodes` (structural gate →
+blended priority sort → optional nano-LLM junk filter), used by the
+description-fill and entity-card pipelines. NULL importance/pagerank fall
+back to `DEFAULT_SCORE = 0.5` in the snapshot read.
 
-### Max-of-edges fallback (for unrated nodes)
-The drain ordering in
-`app/assistant/kg_investigator/finding_priority.py` reads
-`node.importance` when set, otherwise computes
-`MAX(edge.importance) / 10` over edges touching the node — same
-signal the State rater would aggregate, computed inline so unrated
-nodes don't get buried until a rater catches up.
+**Why PageRank-favored (0.6).** PageRank is structural (connectedness ×
+edge weights) and stable; node importance is per-node and more current
+but was historically NULL for freshly-promoted nodes — leaning on PR keeps
+a sensible ordering even when importance is incomplete. Now that the
+nightly derivation backfills importance, the weights could shift toward
+importance, but that is a calibrated decision, not a casual edit (keep the
+sum at 1.0 to stay in the 0–10 range).
 
-This is a per-call workaround, not a persisted pattern. The
-intended-but-unbuilt State rater would persist this aggregation.
+## Importance from the source's perspective — the design rationale
 
-## Compositional theory (planned)
+The edge rater's "from the source's perspective" framing is the reason
+the system needs only one persisted importance column per node rather than
+one per (node × lens). Each edge already encodes a node's importance under
+its source's lens; composing along edges recovers any other lens on
+demand.
 
-The patterns above are descriptive — they capture what's wired in
-today. Two further compositions are theoretically useful and would
-become relevant once a State rater exists, but **are not implemented
-anywhere**:
-
-### Multiplicative chain (transitivity along edges) — PLANNED
-
-Importance flows along edges. If the user's friend Alice scores 8 from
-the user's perspective, and Alice's father Bob scores 9 from Alice's
-perspective, then Bob's importance to the user via this chain is:
+The **multiplicative chain** is the general form of that idea, and it is
+exactly what `regenerate_state_importance` implements for the one-hop case
+(Entity → edge → State): `other_end.importance × edge.importance / 10`.
+The summer-house intuition generalizes it:
 
 ```
-imp(Bob from user)  ≈  imp(Alice from user) × imp(Bob from Alice) / 10
-                    =  8 × 9 / 10  =  7.2
+imp(summer_house, from user)  ≈  imp(Alice, user) × imp(summer_house, Alice) / 10
 ```
 
-The `/ 10` keeps the result on the same 0–10 scale (both factors are
-0–10).
+A place the user has never been rates ~2 directly, ~8 under Alice's lens,
+and ~7 "in the context of Alice" via the chain — all three correct for
+different uses (global ranking → direct; conversation-about-Alice ranking
+→ chain through Alice; Alice's wiki page → Alice's own edges). The `/10`
+keeps the result on the 0–10 scale.
 
-**This is the lens-aware importance mechanism.** The architecture has
-one persisted "lens" for entities — the user's lens, computed by
-`me::importance_rater`. But the edge rater scores **every edge from
-the source node's perspective**, not the user's. That means the
-chain composition gives you importance under any other lens for free,
-without storing per-(node × lens) importance columns.
+Where the chain stops being the right tool:
+- **Sign / role changes** — "Alice hates Bob" carries high salience but
+  flips sign; the edge rater stores raw importance, not valence, so chain
+  results read as "high gravity in your network via this path," not "you'd
+  like this node."
+- **Multiple paths** — a single product ignores the others; a relative
+  reachable both directly and through a spouse should accumulate both.
+  This is precisely what PageRank's multi-path propagation handles and the
+  chain does not — which is the division of labor: the deterministic
+  derivations do single-hop inheritance, PageRank does multi-path
+  structural flow, and the lens blends the two.
+- **Long chains** — edge-weight noise compounds multiplicatively; past
+  two or three hops the product says more about chain length than about
+  the relationship.
 
-Canonical example — the friend's summer house:
+## Consumers — who reads importance and for what
 
-| Lens | Score | Interpretation |
-|---|---|---|
-| User direct rating (entity) | ~2 | A place the user has never been; low engagement |
-| Friend Alice's lens (via edges) | ~8 | Alice's vacation home — central to her summers |
-| User's lens via chain through Alice | `imp(Alice, user) × imp(summer_house, Alice) / 10` ≈ `9 × 8 / 10 = 7.2` | "Important to the user **in the context of Alice**" |
+Edge importance (`edge.importance`):
+- PageRank edge weights (`step_pagerank.py`).
+- Entity/State node derivation (steps 2–3 above).
+- Card fact admission fallback when a node's importance is NULL
+  (`entity_cards_v2/builder.py::_collect_candidate_facts`).
+- KG search ranking, convergence-graph activation, graph visualizer
+  thickness/opacity.
 
-All three numbers are correct simultaneously for different uses:
-- Ranking what the user cares about globally → use the direct rating
-- Ranking what to surface during a conversation about Alice → use the
-  chain through Alice
-- Generating Alice's wiki page → use Alice's lens (the edges
-  originating from Alice)
+Node importance (`node.importance`):
+- **Card-worthiness** — `consumers.is_card_worthy`: pass on user-lock, or
+  `observation_count ≥ 2 AND degree ≥ CARD_MIN_DEGREE (15)`, or
+  `observation_count == 1 AND degree ≥ 10`, or
+  `effective_importance ≥ CARD_HIGH_IMPORTANCE_FLOOR (7.0)`. The
+  observation gate alone was too permissive (common nouns "AC", "Lights",
+  "Yogurt" rack up observation counts in ordinary English); the degree
+  conjunction filters that bloat.
+- **Card fact floor** — `CARD_FACT_FLOOR = 0.6` admits a connected fact to
+  a card; `CARD_FACT_MIN_KEEP = 50` is the sparse-entity safety net.
+- **Wiki growth** — `consumers.is_wiki_growth_candidate`:
+  `degree ≥ WIKI_GROWTH_MIN_DEGREE (4) AND effective_importance ≥ WIKI_GROWTH_IMPORTANCE_FLOOR (5.0)`.
+- **Wiki refresh gating** — `WIKI_REFRESH_CHANGE_FLOOR = 4.0`
+  (`wiki_generator/nightly_refresh.py`).
+- **Context-engine activation** — `CONTEXT_ACTIVATION_THRESHOLD = 0.5`,
+  `CONTEXT_ACTIVATION_SECOND_WAVE_THRESHOLD = 0.4` (Entity/Concept admitted
+  by type regardless).
+- **Timeline** — confirmation-prompt floor `TIMELINE_CONFIRMATION_FLOOR = 6.0`;
+  `display.importance_marker` ★ / · band.
+- **State decay** priority and noteworthy-closure floor
+  (`STATE_DECAY_NOTEWORTHY_FLOOR = 5.0`).
+- **Date-gap scan** — `DATE_GAP_WORTH_FLOOR = 4.0` with high/medium bins
+  (`date_gap_priority`).
+- **Lens layout** — the 0.4/0.6 blend above.
+- **KG investigator finding priority**, **section-tagger admission**, and
+  the **graph visualizer** visibility slider.
 
-This is why we don't need per-(node × lens) importance columns. The
-edge rater's "from source's perspective" framing already encodes every
-node's importance under every other node's lens; chain composition
-recovers it on demand.
+`effective_importance` (`importance/effective.py`) is the damping-adjusted
+read used by the gates above, layered on top of the raw derived value.
 
-Where the chain breaks down:
-- **Sign / role changes along the chain.** A friend's hated coworker
-  is not `imp(friend) × imp(coworker, friend) / 10` because the
-  edge "Alice hates Bob" has high *salience* but the relationship
-  changes sign. The current edge rater doesn't carry sign — it rates
-  raw importance to the source. Chain results have to be read as
-  "this node has high gravity in your network via this path," not
-  "you would like this node."
-- **Multiple paths.** The product of one chain ignores the others. A
-  family member with strong direct AND through-spouse paths to the
-  user should accumulate both. PageRank handles this correctly; the
-  chain doesn't.
-- **Long chains.** Edge-weight noise compounds multiplicatively.
-  Past two or three hops, the chain produces nearly-uniform scores
-  that say more about chain length than relationships.
-
-Use cases: cheap "how important is X to me?" queries where X is one
-or two hops away and the relationship sign is unambiguous (family of
-friends, employer of mentor). For longer or branchier paths, fall
-back to personalized PageRank.
-
-### Personalized PageRank (multi-path propagation) — POTENTIALLY ALREADY DONE
-
-Full-graph propagation, source-biased on the user. The right tool
-when multiple paths between the user and a target should sum, not
-take the max of one path. Edge weights (the edge rater's output)
-determine flow rate along each edge.
-
-`kg_node_metadata.pagerank_score` is populated, but I haven't
-verified whether the current pagerank computation is actually
-*personalized* on the user (vs a global pagerank) or whether it
-weights edges by the edge rater's importance scores. Worth verifying
-before relying on it as the multi-path tool. (TODO: read the
-pagerank_score producer.)
-
-### State / Event / Goal rater — PLANNED (the main missing piece)
-
-Two viable shapes:
-
-1. **Deterministic SQL aggregate.** For each unrated State, set
-   `importance = MAX(edge.importance) / 10` over its edges, gated on
-   the edge rater having run. Cheap; aligned with the "state
-   importance comes from edges" intent. Risk: max collapses when many
-   moderate edges exist (a State touching ten 4.0 edges scores the
-   same as one touching a single 4.0 edge). A weighted sum or
-   importance-aware aggregate would handle that better but is more
-   complex.
-2. **Parallel LLM rater.** A prompt similar to `me::importance_rater`
-   but tuned for States (different calibration: life events vs
-   preferences vs background facts). Pass
-   `only_node_types=["State", "Event", "Goal"]` to
-   `regenerate_importance`. More flexible; spends LLM tokens on
-   something the edge data already encodes most of.
-
-Recommendation: ship #1 first (closes the 41% NULL gap deterministic-
-ally and cheaply). Add #2 later if the SQL aggregate produces
-inversions (e.g., a defining-life-event State outranked by a
-trivially-mentioned-many-times State because of edge count).
-
-### Picking the right composition
-
-| You want… | Use | Status |
-|---|---|---|
-| Rank a single node fast | direct read with edge-fallback for nulls | implemented (drain queue) |
-| Rank candidates for wiki / card generation | blended importance + pagerank | implemented |
-| Rank a State that the rater missed | `MAX(edge.importance) / 10` | implemented (drain queue, per-call) |
-| Persist State importance | State rater (deterministic or LLM) | **planned** |
-| "How important is X to me?" — short chain | multiplicative chain | **planned** |
-| "How important is X to me?" — multi-path / hub effects | personalized PageRank | partially built (pagerank_score column populated; verify producer) |
-
-## The gap: State / Event / Goal nodes
-
-State (and Event, Goal, Property) importance values exist but **no agent
-periodically re-rates them.** What's there came from inconsistent paths
-at proposal promotion or earlier code that's no longer wired in.
-
-Distribution snapshot (May 2026, 3,352 State nodes):
-
-| State.importance | Count | % |
-|---|---|---|
-| NULL | 1,381 | 41% |
-| exactly 0.5 (the documented `DEFAULT_SCORE`) | 98 | 3% |
-| < 0.5 | 356 | 11% |
-| > 0.5 | 1,517 | 45% |
-
-`DEFAULT_SCORE = 0.5` lives at `app/assistant/kg_core/kg_utils/node_importance.py:29`
-and gets used by every consumer that does `or DEFAULT_SCORE` when reading
-the column. So a State at exactly 0.5 in the DB is effectively
-indistinguishable from a State the rater never visited.
-
-## The intended-but-unbuilt derivation
-
-State importance is conceptually "how important is this State to the
-entities it connects?" — i.e., a function of the importances of the
-edges that touch it (which the edge rater scores from the source's
-perspective). A State linked to Jukka and Katy by `is_married` edges
-weighted 10.0 should rank ~10/10; a State linked to a peripheral entity
-by a generic `topic` edge weighted 0.8 should rank low.
-
-**There is no code that performs this derivation.** Nothing reads
-`kg_edge_metadata.importance` to compute or backfill
-`kg_node_metadata.importance` for a State node.
-
-Verified empirically:
-
-| State | state.importance | max edge.importance touching it |
-|---|---|---|
-| "Married to Katy" (Jukka–Katy) | 0.95 (rated somehow) | 10.0 |
-| "Marriage" (Marika & Joe) | **0.50** (looks like default fallback) | — |
-| "Residence — Irvine move" (`a4628fc3`) | NULL | 7.0 |
-
-The Marika+Joe case is almost certainly an unrated State sitting at the
-default — the user's surfaced concern that triggered this audit.
-
-## Consumer behavior given the gap
-
-The `kg_finding_priority` drain ordering (`app/assistant/kg_investigator/finding_priority.py`):
-- Reads `state.importance` directly when set
-- Falls back to `MAX(edge.importance) / 10` across edges touching the
-  node when `state.importance IS NULL` — same signal the rater would
-  use, computed inline so unrated nodes don't get buried
-
-The wiki nightly refresh (`app/assistant/wiki_generator/nightly_refresh.py`):
-- Defers re-rendering a page until `kg_importance_rater` has rated the
-  node — but since States never get rated, this affects only Entities
-  in practice.
-
-The lens (`app/me/`) and entity-card pipeline both apply
-`importance × 0.4 + pagerank × 0.6` blends with `or DEFAULT_SCORE` (0.5)
-fallbacks. Half the State nodes contributing through this blend are
-contributing the default rather than a real score.
-
-## What would close the gap
-
-A State/Event importance rater that runs in the existing
-`kg_importance_rater` routine alongside the entity + edge raters. Two
-viable shapes:
-
-1. **Derived (deterministic).** A SQL aggregate: for each unrated
-   State, set `importance = MAX(edge.importance) / 10` over its edges,
-   gated on the edge rater having actually run. Cheap; assumes the edge
-   rater's scoring is the right signal (it generally is — it's already
-   the agreed-upon "from source's perspective" measure).
-2. **LLM-rated (parallel to Entity).** A prompt similar to
-   `me::importance_rater` but tuned for States (different calibration:
-   life events vs preferences vs background facts). Pass
-   `only_node_types=["State", "Event", "Goal"]` to `regenerate_importance`.
-
-Option 1 is cheaper, deterministic, and aligned with the architectural
-intent ("state importance comes from edge importance"). Option 2 is
-more flexible but spends LLM tokens on something the edge data already
-encodes.
-
-Either way, the routine wiring change is small: extend
-`_lazy_kg_importance_rater` to also rate States after edges are scored.
+> Note (out of scope for this doc): `kg/proposal_promoter.py` still carries
+> comments (~lines 1192, 1243) describing `me::importance_rater` as the
+> Entity rater. Those are stale — Entity importance is derived now. The
+> code path is correct (promotion leaves `importance` NULL for the routine
+> to fill); only the comments lag.

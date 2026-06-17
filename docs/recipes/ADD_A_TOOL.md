@@ -2,27 +2,28 @@
 
 Tools are executable capabilities that agents invoke through `tool_caller`. Read [07_TOOLS.md](../architecture/07_TOOLS.md) for the contract.
 
-## Two-directory layout
+## Layout
 
 ```
-app/assistant/lib/tools/<tool_name>/        ← thin wrapper agents see
+app/assistant/lib/tools/<tool_name>/        ← the directory the registry discovers
   __init__.py
-  <tool_name>.py                            ← exports get_tool_class
-  tool_contract.json                        ← metadata: description, inputs, outputs
+  <tool_name>.py                            ← exports get_tool_class (see the three patterns)
+  tool_contract.json                        ← description, inputs, outputs, arguments_prompt, metadata
   tool_forms/
     __init__.py
-    tool_forms.py                           ← Pydantic argument models
+    tool_forms.py                           ← Pydantic models: <tool_name>_args + <tool_name>_arguments
   prompts/
-    <tool_name>_description.j2              ← one-line for planner selection
-    <tool_name>_args.j2                     ← full prompt for ToolArguments agent
-    <tool_name>_select.j2                   ← brief description for tool selection context
+    <tool_name>_description.j2              ← the ONLY .j2 a tool dir loads (planner-facing)
 
-app/assistant/lib/core_tools/<tool_name>/   ← actual implementation
+# Optional second directory — only if you keep the implementation separate:
+app/assistant/lib/core_tools/<core_name>/
   __init__.py
-  <tool_name>_tool.py                       ← MyTool(BaseTool) with execute()
+  <core_name>_tool.py                       ← MyTool(BaseTool) with execute()
 ```
 
-The tool registry auto-discovers `lib/tools/<dir>/`. You don't register manually.
+`ToolRegistry.load_prompts` loads **only** `<tool_name>_description.j2`. There are no `<tool>_args.j2` or `<tool>_select.j2` files in the tree — argument-fill guidance now lives in the contract's `arguments_prompt` string (served verbatim by `get_tool_arguments_prompt()`), not a template.
+
+The registry auto-discovers `lib/tools/<dir>/`; you don't register manually. Whether the implementation lives inline in `lib/tools/<name>/<name>.py` or in a separate `lib/core_tools/` module is up to you — both shapes ship in the tree (see the three `get_tool_class` patterns).
 
 ## The core implementation
 
@@ -97,19 +98,36 @@ def execute(self, tool_message: ToolMessage) -> ToolResult:
 
 Then create one `lib/tools/<name>/` directory per name, each pointing back at the same core class. See `app/assistant/lib/core_tools/kg_mutator/kg_mutator_tool.py` for the canonical example (one core, six tool names).
 
-## The thin wrapper
+## The `<tool_name>.py` — three `get_tool_class()` patterns
+
+`ToolRegistry.load_tool_class` execs `<tool_name>.py` and calls its `get_tool_class()`. Three shapes coexist (all valid — documented in the `ToolRegistry` docstring):
+
+**1. Self-class tool (most tools).** Define the `BaseTool` subclass right here (CamelCase, e.g. `GetWidget`) and return it. The whole implementation can live in this file — see `lib/tools/get_weather/get_weather.py` and `lib/tools/send_email/send_email.py`.
 
 ```python
 # app/assistant/lib/tools/get_widget/get_widget.py
-from app.assistant.lib.core_tools.get_widget.get_widget_tool import GetWidgetTool
-
+class GetWidget(BaseTool): ...
 def get_tool_class():
-    return GetWidgetTool
+    return GetWidget
 ```
 
-That's literally it for the wrapper Python file. The registry calls `get_tool_class()`.
+**2. Shared-core adapter.** When several tools delegate to one core class, the wrapper is three lines using `create_tool_loader` (`lib/tool_utils/shared_tool_loader.py`). Real example: `create_calendar_event` / `delete_calendar_event` / `update_calendar_event` all point at `CalendarTool`; the six `kg_*` mutators all point at `KGMutatorTool`.
+
+```python
+# app/assistant/lib/tools/create_calendar_event/create_calendar_event.py
+from app.assistant.lib.core_tools.calendar_tool.calendar_tool import CalendarTool
+from app.assistant.lib.tool_utils.shared_tool_loader import create_tool_loader
+
+get_tool_class = create_tool_loader(CalendarTool)
+```
+
+**3. Manager-as-tool.** Wrap a `MultiAgentManager` via `ManagerInterface`; the class name is the dir name in snake_case so it lines up with the manager id. See [07_TOOLS.md](../architecture/07_TOOLS.md#managers-as-tools-wrapper-pattern).
+
+`load_tools` is fail-loud: any tool that won't import, or whose contract fails the `min_authority` / `approval_min_authority` range checks, aborts boot.
 
 ## `tool_contract.json`
+
+`arguments_prompt` is a **top-level** key (not under `metadata`) — it's the full argument-fill guidance the `ToolArguments` agent reads. The metadata taxonomy keys are **`domain` / `actions` / `selectors`** (the old `category` / `verbs` / `entities` are legacy aliases the normalizer still reads, but use the new names). `metadata` also carries the access-control fields the four-layer gate reads:
 
 ```json
 {
@@ -118,61 +136,80 @@ That's literally it for the wrapper Python file. The registry calls `get_tool_cl
   "inputs": [
     {"name": "widget_id", "type": "string", "required": true, "description": "Stable widget id"}
   ],
-  "outputs": {
-    "ok": "bool",
-    "widget": "object — widget fields"
-  },
+  "outputs": [
+    {"path": "content", "type": "text", "description": "Human-readable result."},
+    {"path": "data", "type": "object", "description": "{ok, widget}"}
+  ],
   "arguments_prompt": "Always include `widget_id`. The id is the canonical identifier; do not pass `name` or `slug`.",
   "metadata": {
-    "category": "data",
-    "verbs": ["get", "fetch", "read"],
-    "entities": ["widget"],
+    "min_authority": 10,
+    "approval_min_authority": 10,
+    "domain": "data",
+    "actions": ["get", "fetch", "read"],
+    "selectors": ["widget"],
     "risk_level": "low",
-    "side_effects": "none",
-    "cost_level": "cheap"
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "fast"
   }
 }
 ```
 
+Access-control fields (validated at load — a bad value aborts boot):
+
+- **`min_authority`** (0–100) — the L1 see+use floor. A first-party contract that omits it **fails closed at 99**, so always set it. A read-only tool like `get_weather` uses `10`; a destructive one like `send_email` uses `90`.
+- **`approval_min_authority`** (0–100) — the L2 approval threshold. When the caller's authority is below it, the call fires an approval ticket. Set it (or `approval_required: true`) only if the tool needs the owner's sign-off; `delete_calendar_event` uses `95`, `send_email` uses `99`.
+- **`requires_auth`** — list of credential namespaces (e.g. `["google"]`); **`requires_network`** — bool.
+
+See `lib/tools/get_weather/tool_contract.json` (no-auth read, floor 10) and `lib/tools/send_email/tool_contract.json` (floor 90, approval 99, `requires_auth: ["google"]`) for live examples.
+
 ## `tool_forms/tool_forms.py`
+
+Two models, snake_case, named `<tool_name>_args` (the arguments themselves) and `<tool_name>_arguments` (a wrapper carrying `tool_name` + the args). This matches every shipped tool — see `lib/tools/get_weather/tool_forms/tool_forms.py`.
 
 ```python
 from pydantic import BaseModel, Field
 
-class GetWidgetArgs(BaseModel):
+
+class get_widget_args(BaseModel):
     widget_id: str = Field(description="Stable widget id")
+
+
+class get_widget_arguments(BaseModel):
+    tool_name: str
+    arguments: get_widget_args
 ```
 
-## Prompt fragments
+## Prompt fragment (one file)
 
-`prompts/get_widget_description.j2` — one-line for planner tool selection:
+`prompts/get_widget_description.j2` is the **only** `.j2` a tool directory loads — a one-liner for planner tool selection:
+
 ```jinja2
 get_widget — fetch a widget by id (returns widget fields)
 ```
 
-`prompts/get_widget_args.j2` — full argument prompt for the ToolArguments agent:
-```jinja2
-Tool: get_widget
-Purpose: fetch a widget by id from the widget store.
+Do not create `_args.j2` or `_select.j2`; the registry doesn't load them. The full argument-fill guidance that used to live in `_args.j2` now goes in the contract's `arguments_prompt` string.
 
-Arguments:
-- widget_id (required, string): the widget's canonical id
+## The four-layer access gate
 
-Always include widget_id. The id is the canonical identifier — do not pass name or slug.
-```
+A tool call passes through four gates; any one can stop it. The first two bound *which tools exist for this caller*; the last two are enforced at execution by `ToolCaller`. Know which layer your contract values feed:
 
-`prompts/get_widget_select.j2` — brief tool-selection description (often identical to description):
-```jinja2
-get_widget — read a widget by id
-```
+1. **`allowed_tools` ceiling** (manager ingress) — `ScopeAdapter` resolves the manager's effective tool surface, narrowing the inherited list (never widening). This is what a manager's `tools.allowed_tools` / `scope_contract.tools.allowed_tools` / `blocked_tools` set.
+2. **Visibility ceiling** — `ToolPolicyResolver.get_visible_tools()` narrows the allowed set to what's shown in the planner prompt. `tool_visibility.always_show` / `hidden_tools` and the narrower live here. **Visibility never grants permission.**
+3. **L1 authority floor** — `min_authority` from your contract. The call is reachable only when `scope.authority_level >= min_authority`. Omitting it fails closed at 99.
+4. **L2 approval** — `approval_min_authority` / `approval_required` from your contract. Below the threshold, `ToolCaller` fires an approval ticket (always homed to `master_room`) before running the tool.
+
+Full detail in [07_TOOLS.md](../architecture/07_TOOLS.md#tool-access-control-four-layer-gate).
 
 ## Wire it into a manager
 
-Two ways:
-- **Per-agent allowlist**: add `"get_widget"` to that agent's `allowed_tools` list.
-- **Manager-level visibility**: in the manager's `tool_visibility` block, leave it un-hidden so the narrower can suggest it.
+Granting a tool and showing a tool are different layers:
 
-Most tools are added via per-agent allowlists.
+- **Grant (the gate that matters):** add `"get_widget"` to the manager's `tools.allowed_tools` (and, if the manager declares one, `scope_contract.tools.allowed_tools`). This is the ceiling — without it the tool is unreachable no matter what else you set.
+- **Show:** add it to `tool_visibility.always_show`, or leave it un-hidden so the narrower can surface it. Visibility only affects what the planner sees; it never grants reachability.
+- **Authority:** confirm the caller's scope clears your `min_authority`. A high-floor tool is invisible-by-floor to low-authority surfaces even when allowed.
 
 ## Test it
 
@@ -189,10 +226,11 @@ print(tool.execute(msg))
 
 ## Common pitfalls
 
-- **Forgot the `prompts/<tool>_args.j2`.** The ToolArguments agent has nothing to read; tool calls fail at argument-fill time, not at execution.
-- **Multiple wrappers without a `tool_name` dispatch.** If you reuse one core class, the `execute` method needs to switch on `tool_message.tool_name`. Otherwise every wrapper runs the same default handler.
-- **Tool returns raised exception instead of ToolResult.** The caller expects a ToolResult with `data["ok"]=False`; raising kills the manager loop. Wrap everything in a try/except and call `make_tool_error`.
-- **`requires_approval` not honored.** If your tool is risky, set `metadata.requires_approval` in tool_contract.json and confirm the manager's scope grants the right authority level.
+- **Put argument guidance in a `<tool>_args.j2`.** The registry never loads it. Argument-fill guidance goes in the contract's top-level `arguments_prompt` string.
+- **Omitted `min_authority`.** A first-party contract with no `min_authority` fails closed at 99 — effectively admin-only. Always set the floor.
+- **Multiple wrappers without a `tool_name` dispatch.** If you reuse one core class (shared-core adapter), the `execute` method must switch on `tool_message.tool_name` (`handle_<tool_name>` dispatch — see `lib/core_tools/kg_mutator/kg_mutator_tool.py`). Otherwise every wrapper runs the same default handler.
+- **Tool returns a raised exception instead of a ToolResult.** The caller expects a ToolResult (`data["ok"]=False` on failure); raising kills the manager loop. Wrap everything in try/except and return `make_tool_error(...)`.
+- **Approval not honored.** Set `metadata.approval_min_authority` (or `approval_required: true`) in the contract, and confirm the caller's scope authority is below it — the gate only fires when authority < threshold.
 
 ## See also
 

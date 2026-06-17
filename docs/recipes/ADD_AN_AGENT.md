@@ -11,46 +11,62 @@ Agents live under `app/assistant/agents/`. Either:
 - **Top-level**: `app/assistant/agents/my_agent/` — canonical name `my_agent`
 - **Namespaced**: `app/assistant/agents/<namespace>/my_agent/` — canonical name `<namespace>::my_agent`. Use a namespace when several agents share a domain (e.g., `kg_mutation::planner`, `kg_mutation::final_answer`).
 
-## The five files
+## The files
 
 ```
 app/assistant/agents/my_agent/
-  config.yaml
+  config.yaml          # required
   prompts/
-    system.j2
-    user.j2
-  agent_form.py        # optional but strongly recommended
+    system.j2          # required — registry raises FileNotFoundError if missing
+    user.j2            # required — same
+  agent_form.py        # optional but strongly recommended (structured output)
 ```
 
 Sometimes you also want:
-- `prompts/description.j2` — one-line agent description shown to a manager's planner when it picks among allowed_nodes
-- `input_schema.py` — Pydantic input validation
+- `prompts/description.j2` — agent description rendered into another agent's `allowed_nodes` listing (the `{name, description}` pairs a delegator/planner sees)
+- `input_schema.py` — Pydantic input validation (first `BaseModel` subclass is taken)
+- `.ignore` — an empty marker file; its presence skips this agent at load
 
 ### `config.yaml`
 
+Only `name`, `class_name`, and the two prompts are mandatory; everything else is optional. The fields the loader (`agent_registry.py`) and runtime services actually read:
+
 ```yaml
-name: my_agent                       # canonical name; matches directory path
-class_name: Agent                    # one of Agent, Planner, MultiToolAgent
+name: my_agent                       # canonical name; if it contains :: it's taken verbatim,
+                                     # otherwise the namespace is derived from the directory path
+class_name: Agent                    # class file in agent_classes/ (see "Pick a class_name" below)
+action_required: true                # if true, output MUST carry a valid action + action_input
 
 llm_params:
   llm_provider: openai               # openai | gemini | anthropic
-  engine: gpt-5-mini                 # exact model id
-  model_tier: mini                   # mini | smart | strong (informational)
-  # NOTE: GPT-5 family ignores temperature; omit it for those models
+  engine: gpt-5.1                    # exact model id (NOT a top-level `model:` key)
+  model_tier: smart                  # tier hint (nano | mini | smart | strong) — informational
+  # temperature: 0.1                 # OPTIONAL and lives ONLY here, never top-level.
+  #                                  # GPT-5 family ignores temperature — omit it for those models.
 
+# --- Tool / node policy (a permission CEILING, not a grant) ---
 allowed_tools: []                    # list of tool names, or "all"
-allowed_nodes: []                    # which other agents this one can call
+except_tools: []                     # subtract from allowed_tools
+allowed_nodes: []                    # which other agents this one may call (list or "all")
+except_nodes: []
 
+# --- Prompt / context ---
 system_context_items:                # keys injected into system.j2
   - resource_user_data
 user_context_items:                  # keys injected into user.j2
   - date_time
   - task
+required_context_items: []           # hard guard: refuse to run if any of these resolves empty
+strict_template: false               # true => StrictUndefined (an undefined var raises)
 
-action_required: true                # true if the agent must emit action+action_input
+# --- Skills (optional) ---
+skills: []                           # static skills always loaded (each gated by requires_scope)
+accept_auto_skills: true             # allow the SkillInjector to auto-inject skills by trigger
 ```
 
-For more options (events, append_fields, prompt_debug, dynamic_tools, …) see the existing rich configs in `app/assistant/agents/master_room/chat_gate/config.yaml` or `app/assistant/agents/emi_team/planner/config.yaml`.
+There is **no** top-level `model:` or `temperature:` — model selection lives entirely under `llm_params` (`llm_provider` + `engine` + `model_tier`). There is also no `allowed_resources` field; resource access is governed by scope policy plus the `resource_*` context keys.
+
+For more options (entity-card injection, keyword-resource injection, `append_fields`, `global_output_keys`, `events`, `prompt_debug`, …) see [01_AGENTS.md](../architecture/01_AGENTS.md#configyaml) and the rich configs in `app/assistant/agents/master_room/chat_gate/config.yaml` (a `gemini` chat agent, `action_required: false`) and `app/assistant/agents/emi_team/planner/config.yaml` (an `openai` `Planner` with `skills:` + `accept_auto_skills: false`).
 
 ### `prompts/system.j2`
 
@@ -87,7 +103,7 @@ Recent history:
 
 ### `agent_form.py`
 
-The structured-output schema. Pydantic class named `AgentForm` (or the first `BaseModel` subclass).
+The structured-output schema. `agent_registry._load_agent_form` imports the file under a unique per-path module name (so Pydantic forward-refs resolve), then selects the class named **`AgentForm`** if present, otherwise the **first `BaseModel` subclass** found.
 
 ```python
 from pydantic import BaseModel, Field
@@ -102,7 +118,7 @@ class AgentForm(BaseModel):
     )
 ```
 
-If you skip this file, the agent registry falls back to `config.yaml`'s `structured_output` block. Inline JSON schema is harder to maintain — prefer Pydantic.
+If both exist, `agent_form.py` **takes precedence** and a warning is logged. If you skip the file entirely, the registry falls back to `config.yaml`'s `structured_output` JSON-schema block — harder to maintain, so prefer Pydantic.
 
 If your agent needs to be the **final answer** for a manager, follow the established envelope:
 
@@ -125,21 +141,36 @@ class AgentForm(BaseModel):
 
 `FinalAnswerDataItem` is your own Pydantic class with `Optional[str]` fields. Look at `app/assistant/agents/kg_mutation/final_answer/agent_form.py` for the canonical example. The OpenAI structured-output path requires `additionalProperties: false` on every nested object — that's why you can't use `List[dict]`.
 
+## Pick a `class_name`
+
+`class_name` names a file in `app/assistant/agent_classes/`; the registry loads the class of the same name. Most new agents are `Agent`. The available classes (see the table in [01_AGENTS.md](../architecture/01_AGENTS.md#agent-variants)):
+
+`Agent` (standard single-turn decision), `Planner` (multi-step planning with plan validation), `MultiToolAgent` (DAG multi-tool execution), `Delegator` (a manager's routing/entry agent), `OneShotAgent`, `ToolArguments` / `ToolArgumentsPlaywright`, the `Playwright*` browser roles, `SummaryAgent`, and the event-driven `EmiResultHandler` / `EmiReminderHandler` (registered via `events:`).
+
 ## Wire it into a manager
 
-Discovery is automatic — the registry picks up your directory. But discovery doesn't *use* the agent. You make it usable by:
+Discovery is automatic — `AgentRegistry.load_agents()` rglobs `agents/` on startup and picks up any directory with a `config.yaml`. But discovery doesn't *use* the agent. You make it usable by:
 
-1. **Listing it in `allowed_nodes`** of a manager that should be able to call it. Either a hard-coded list (`allowed_nodes: [my_agent, other_agent]`) or `"all"`.
-
-2. **Routing to it from `state_map`** if you want deterministic flow:
+1. **Listing it in a manager's `agents` block** so the manager instantiates it:
 
    ```yaml
-   state_map:
-     prior_agent: my_agent
-     my_agent: post_agent
+   agents:
+     - name: my_namespace::my_agent
+       class: Agent
    ```
 
-3. **Or as the manager's `entry_agent`** if it's the start of the loop.
+2. **Routing to it from `flow_config.state_map`** for deterministic flow (note `state_map` lives *under* `flow_config`, not at top level):
+
+   ```yaml
+   flow_config:
+     state_map:
+       prior_agent: my_namespace::my_agent
+       my_namespace::my_agent: post_agent
+   ```
+
+3. **Or making it the entry agent** — the entry is the manager's `role_bindings.delegator` (there is no `entry_agent` field). See [Add a manager](ADD_A_MANAGER.md).
+
+If another agent (a planner/delegator) should be able to *delegate* to it, also add it to that agent's `allowed_nodes`.
 
 ## Verify
 
@@ -158,7 +189,7 @@ For an end-to-end test, point a small standalone script at your agent — invoke
 
 ## Common pitfalls
 
-- **Forgot to add to `allowed_nodes`.** The agent loads but no manager can call it. The error: planner won't see the action you want.
+- **Forgot to add to a manager's `agents` block (or to a delegating agent's `allowed_nodes`).** The agent loads (auto-discovery always finds it) but no manager instantiates or routes to it, and no planner can name it as an action.
 - **`temperature` set on GPT-5.** The validator warns at startup but the agent still calls. Omit `temperature` for GPT-5 family.
 - **`agent_form.py` has `List[dict]` somewhere.** OpenAI rejects with "additionalProperties is required to be supplied and to be false in 'final_answer_data_list.items'". Replace with a proper Pydantic class.
 - **Context item declared but not used in template.** The validator warns at startup ("user_context_items declares 'X' but it's not found in user.j2"). Either reference `{{ X }}` in the template or remove the declaration.

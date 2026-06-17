@@ -16,19 +16,29 @@ Route based on blackboard state:
 - **`chat_task_router_node.py`** — Routes chat responses: if `handoff_tf=true` -> switchboard, else -> final answer
 - **`master_room_chat_task_router_node.py`** — Master room variant: adds dayflow delegation path
 - **`action_selector_router_node.py`** — Dayflow: routes based on ticket_tf vs handoff_tf
-- **`dayflow_ticket_builder_router_node.py`** — Routes ticket_builder output to create_dayflow_ticket
+- **`tick_router_node.py`** — Top-of-pipeline router for the dayflow orchestrator manager
 - **`tool_return_router.py`** — Routes tool results back to the calling agent
+
+(Other room-specific routers follow the same shape: `emi_code_chat_task_router_node.py`,
+`kg_dev_chat_task_router_node.py`, `geoguessr_router_node.py`,
+`doc_create_final_router_node.py`, `plan_mode_final_router_node.py`,
+`task_create_final_router_node.py`, `task_spec_router_node.py`.)
 
 ### Tool/Action Execution
 
-- **`tool_caller.py`** (~710 lines) — The canonical dispatcher:
+- **`tool_caller.py`** (~480 lines) — The canonical dispatcher:
   - Is the action a **tool**? -> Execute via tool registry with scope enforcement
   - Is the action an **agent**? -> Push call context on blackboard, invoke agent
   - Is the action a **control node**? -> Set `next_agent` to the control node
   - Manages scope creation, approval flows, MCP tool execution
   - Creates `blackboard.push_call_context()` for agent-to-agent calls
+  - Surface-specific subclasses route a single room's dispatch: `chat_tool_caller.py`,
+    `dayflow_tool_caller.py`, `master_room_tool_caller.py` (shared helpers in
+    `_tool_caller_util.py`).
 
 - **`tool_result_handler.py`** — Processes tool results and pops call context
+- **`tool_approve_node.py`** (`ToolApproveNode`) — Resolves a tool's approval gate
+  before dispatch (raises the owner ticket / blocks on the decision)
 
 ### Data Transform Nodes
 
@@ -37,11 +47,13 @@ Route based on blackboard state:
 - **`task_compile_metadata_node.py`** — Builds task metadata
 - **`task_compile_final_output_node.py`** — Compiles final task output
 
-### Flow Gates
+### Flow Gates & Critics
 
-- **`plan_gate_node.py`** — Validates plan outputs
-- **`critic_gate_node.py`** — Quality gates
-- **`cooldown_gate_node.py`** — Timing gates
+- **`critic_pre_node.py` / `critic_post_node.py` / `critic_capture_node.py`** (`CriticPreNode` etc.) — Critic loop: pre-check, post-check, and capture of the critic verdict around an agent step
+- **`relevance_cleaner_gate_node.py`** — Gate in the relevance-cleaner pipeline (paired with `relevance_cleaner_prep_node.py` / `relevance_cleaner_persist_node.py`)
+- **`state_transition_guard_node.py`** — Normalizes/guards dayflow state-transition fields (e.g. maps LLM-facing `reactivate_at` to internal `reactivate_at_utc`)
+- **`triage_spawn_guard_node.py`** (`TriageSpawnGuardNode`) — Guards intake-triage spawning
+- **`task_compile_critic_node.py`** (`TaskCompileCriticNode`) — Quality gate on compiled task output
 
 ### Exit/Return Nodes
 
@@ -53,6 +65,17 @@ Route based on blackboard state:
 
 - **`dayflow_switchboard_arguments_node.py`** — Validates action, persists dispatch records (`action_dispatch:UUID` items), stamps every acted-on item to `state="dispatched"` with `dispatched_at`, injects `trigger_context.acted_on_item_ids` into the outgoing tool arguments, then routes to tool
 - **`post_room_finalize_node.py`** — Closes acted_on items with `state="closed"`, persists state mutations, writes action log entries, materializes plan synopses
+- **`fast_tick_promoter_node.py`** — Fast-tick deterministic promoter (advances items without a full agent pass)
+- **`dag_executor_node.py` / `dag_manager_control_node.py`** (`DagExecutorNode` / `DagManagerControlNode`) — Drive DAG-shaped multi-step execution
+
+### Node families
+
+Many nodes come in per-agent **prep/persist pairs**: a `*_prep_node.py` loads that
+agent's context off the items table before it runs, and a `*_persist_node.py` writes its
+output back. Examples: `context_enricher_prep_node` / `context_enricher_persist_node`,
+`relevance_cleaner_prep/persist`, `state_mover_prep/persist`, `triage_persist_node`,
+`planner_persist_node`, `summary_pre/post_node`, `task_compile_metadata/post/final_output_node`.
+There is no monolithic blackboard builder — each agent's prep node loads its own slice.
 
 ## Blackboard Interaction
 

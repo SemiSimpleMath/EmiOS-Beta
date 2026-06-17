@@ -13,31 +13,37 @@ Tickets, manager handoffs, tool calls — all forms of dispatch — go through t
 ```
 DayflowScheduler (event-driven, debounced)
   -> dayflow_orchestrator_cadence_tick()
-    -> run_dayflow_ingestion()        (chat / email / delegation → items table)
-    -> sweep_stale_dispatches()       (revive items whose dispatch never returned)
+    -> run_dayflow_ingestion()         (chat / email / delegation / pods → items table)
+    -> sweep_stale_dispatches()        ┐
+    -> sweep_orphaned_dispatched_tasks ┤ dispatch_sweeper.py (three sweeps)
+    -> sweep_zombie_waiting_items()    ┘
     -> Invoke dayflow_orchestrator_manager
-      -> Multi-agent pipeline:
-        1. intake_triage      (admit / reject new artifacts)
-        2. strategic_planner  (create / maintain plans)
-        3. state_mover        (lifecycle transitions)
-        4. relevance_cleaner  (close stale / completed items, every 30 min)
-        5. action_selector    (pick what to execute)
-        6. ticket_builder     (when ticketing)
-        7. switchboard        (delegate to manager / tool)
+      -> Deterministic pipeline (state_map order):
+         tick_router -> intake_triage -> triage_persist -> context_enricher
+           -> strategic_planner -> state_mover -> relevance_cleaner_gate
+           -> view_materializer -> action_selector -> switchboard
+           -> dayflow_switchboard_arguments -> dayflow_tool_caller
+           -> action_result_normalizer -> post_room_finalize -> final_answer
       -> post_room_finalize_node persists state mutations + closes acted_on items
 ```
+
+The pipeline is fixed by the manager's `state_map` (`multi_agents/dayflow_orchestrator_manager/config.yaml`), not by free agent handoffs. `relevance_cleaner` runs on a 30-minute gate: `relevance_cleaner_gate_node` either routes into `relevance_cleaner_prep_node -> relevance_cleaner -> relevance_cleaner_persist_node` or skips straight to `view_materializer_node`. A `fast_tick` wake (`tick_router -> fast_tick_promoter -> view_materializer`) bypasses triage/planner/state_mover for a single timer-driven item.
 
 ## DayflowScheduler
 
 `app/assistant/dayflow_orchestrator/dayflow_scheduler.py`
 
-Event-driven scheduling with intelligent debouncing:
-- **Debouncing**: Multiple events within 60s trigger a single run.
-- **Minimum gap**: At least 120s between consecutive runs.
-- **Event subscriptions**: `repo_update`, `afk_state_changed`, `dayflow_ticket_responded`.
-- **Item timers**: Scans for `reactivate_at_utc` and schedules the next run accordingly.
-- **Ceiling tick**: Runs every 30 minutes if no events pending.
-- **Mutual exclusion**: Only one tick runs at a time.
+Event-driven scheduling with intelligent debouncing. Two-tier wake throttle (constants atop the module):
+- **Debouncing** (`DEBOUNCE_SECONDS=60`): multiple events within the window collapse into one run.
+- **Item-tick floor** (`MIN_GAP_SECONDS=120`): mutual-exclusion floor for scheduled-item ticks; a job due at time T still fires at T.
+- **Poke throttle** (`POKE_MIN_INTERVAL_SECONDS=600`): delta/poke wakes (chat/email/AFK/ticket) are held to ≥10 min since the last run, so dayflow doesn't react instantly to every event. Reaction = `max(debounce, floor - age)`, so the 10-min floor only bites when something *just* ran.
+- **Ceiling tick** (`MAX_CEILING_SECONDS=1800`): a tick runs at least every 30 min when no item timers are pending.
+- **Startup delay** (`STARTUP_TICK_DELAY_SECONDS=45`): the first tick after boot is delayed ~45s so it doesn't pile onto the post-restart routine/ingest fan-out and the user's first interaction.
+- **Event subscriptions**: `repo_update` (only `email`/`calendar`/`todo_task`/`scheduler_events`), `afk_state_changed` (on return to `active`), `dayflow_ticket_responded` — each calls `poke()`.
+- **Item timers**: `_schedule_next_from_items()` scans `waiting`/`watching` items for the earliest `reactivate_at_utc`; an item overdue by more than `ANCIENT_ITEM_OVERDUE_SECONDS` (24h) is ignored as broken-and-stuck rather than driving a 2-min reschedule loop. A timer wake carries `triggered_item_id` and becomes a `fast_tick`.
+- **Mutual exclusion**: only one tick runs at a time; a poke arriving mid-run is queued and re-scheduled (throttled) at tick end.
+- **Sooner-run guard**: `_schedule_tick` never pushes an already-scheduled, sooner run later — a throttled poke can't clobber a due item tick (the item tick re-ingests, so it absorbs the pending delta).
+- **Repeated-failure escalation**: APScheduler swallows the re-raise, so `record_tick` tracks consecutive failures; at the 3rd in a row (`_FAILURE_NOTIFY_THRESHOLD`) `_maybe_notify_repeated_failure` raises one owner-visible `dayflow_notify` ticket via the ticket manager's direct write (which does NOT run the dayflow pipeline, so it works even when that pipeline is the thing failing).
 
 ## DayflowTick
 
@@ -45,38 +51,43 @@ Event-driven scheduling with intelligent debouncing:
 
 The heartbeat function `dayflow_orchestrator_cadence_tick()`:
 
-1. **Master-room block check** — if `master_room` recently saw activity, skip this tick (180-second window) so the user isn't talked over.
-2. **Ingest** via `run_dayflow_ingestion()` (`ingestion.py`) — pulls new rows from each source and persists them as dayflow items:
-   - Chat: cross-room chat history within the entitled rooms (`access.json`).
-   - Email: today's important emails from the event repository.
-   - Delegation: tagged messages from `master_room` flagged for the orchestrator.
+1. **Master-room block check** — `orchestrator_status.py` persists a `blocked_until_utc` timestamp when the user chats in `master_room` (`block_dayflow_orchestrator_for_master_chat`, `MASTER_ROOM_BLOCK_SECONDS=180`). If the tick fires inside that window it records `last_skip_reason="blocked_by_master_room_timer"` and returns, so the user isn't talked over.
+2. **Ingest** via `run_dayflow_ingestion()` (`ingestion.py`) — pulls new rows from each source and persists them as dayflow items. Four sources:
+   - **Chat**: cross-room chat from `chat_ingestion_entitled_rooms` (ROOM.md `access:` block; currently `master_room`), watermarked by `chat_ingested_up_to_utc`.
+   - **Email**: today's important emails from the event repository.
+   - **Delegation**: `dayflow_request`-tagged messages from `master_room`.
+   - **Pods** (`_ingest_pods`): pods from `pod_store` whose `(kind, source_kind)` matches the `ingestion_pod_kinds` allowlist (ROOM.md; currently Ring doorbell images), watermarked by `pods_ingested_up_to_utc`. Absent/empty allowlist = pod ingestion off.
    - All deduplicated by `item_id` against existing rows; `assign_short_ids` assigns LLM-facing numeric ids.
-3. **Sweep stale dispatches** via `sweep_stale_dispatches()` — for any `dispatched` item whose room invocation never returned, revives the source item to `actionable`.
+3. **Three sweeps** (`dispatch_sweeper.py`):
+   - `sweep_stale_dispatches()` — closes in-flight `action_dispatch` rows past timeout (soft: no active manager invocation + >10 min; hard: >2h regardless), and revives the acted-on source item to `actionable` only if it is still `dispatched`.
+   - `sweep_orphaned_dispatched_tasks()` — closes tasks stuck in `dispatched` >2h with no live dispatch row pointing at them (→ `closed`, not `actionable`; the planner re-mints from current context if the need is still alive).
+   - `sweep_zombie_waiting_items()` — closes `waiting` items whose `reactivate_at_utc` is >36h past, i.e. aged out of the cleaner's 24h view (the cleaner gets first crack inside that window).
 4. **Build minimal extras** via `build_dayflow_blackboard_extras()` — emits only `day_of_week`. Per-agent prep nodes load their own context (items, dispatches, etc.) off the items table.
-5. **Invoke `dayflow_orchestrator_manager`** with a trigger Message. The manager runs the agent pipeline (see Architecture above).
+5. **Invoke `dayflow_orchestrator_manager`** with a trigger Message carrying `wake_reason`, `fast_tick`, and `triggered_item_id`. The manager runs the pipeline (see Architecture above).
 
 Per-agent prep nodes (e.g., `strategic_planner_prep_node`, `action_selector_prep_node`) call `get_dayflow_items()` and `dispatch_sweeper.list_active_dispatches()` directly at the point of use.
 
 ## State Machine
 
-Canonical transitions live in `dayflow_item_writer.ALLOWED_TRANSITIONS`. `write_dayflow_item` validates every state change against this map; disallowed transitions raise `ValueError`.
+Canonical transitions live in `dayflow_item_writer.ALLOWED_TRANSITIONS`. `write_dayflow_item` validates every state change against this map; disallowed transitions raise `ValueError`. Idempotent no-op transitions (`X → X`, e.g. state_mover refreshing `reactivate_at` on a `waiting` item) are always allowed.
 
 ```
-new ----------> artifact         (context-only, e.g. emails, reference material)
-  |             important_open   (admitted by triage, planner decides next)
-  |             needs_planning   (planner-flagged for plan creation)
-  |             actionable       (ready for action_selector)
-  |             suppressed       (triage rejected)
-  |
-  +-> artifact -----> needs_planning / important_open / actionable / watching / closed / suppressed
-  +-> important_open -> actionable / waiting / watching / dispatched / closed / suppressed
-  +-> actionable ---> dispatched / waiting / watching / closed / suppressed
-  +-> dispatched ---> closed / waiting / actionable
-  +-> waiting ------> actionable / dispatched / closed / suppressed
-  +-> watching -----> actionable / important_open / closed / suppressed
-  +-> closed -------> actionable / suppressed     (reopen allowed)
-  +-> suppressed ---> (terminal)
+new ----------> artifact / needs_planning / important_open / actionable / suppressed
+  +-> artifact ---------> needs_planning / important_open / actionable / watching / closed / suppressed / pending_directive
+  +-> needs_planning ---> important_open / actionable / waiting / closed / suppressed
+  +-> important_open ---> actionable / waiting / watching / dispatched / closed / suppressed / pending_directive
+  +-> actionable -------> dispatched / waiting / watching / closed / suppressed / pending_directive
+  +-> dispatched -------> closed / waiting / actionable / pending_directive
+  +-> waiting ----------> actionable / dispatched / closed / suppressed
+  +-> watching ---------> actionable / important_open / closed / suppressed
+  +-> closed -----------> suppressed / actionable / pending_directive   (reopen / directive-revive)
+  +-> suppressed -------> pending_directive   (narrow exception: a user directive references this artifact)
+  +-> pending_directive -> actionable / dispatched / closed / suppressed
+  +-> active -----------> closed / suppressed   (plan-synopsis lifecycle)
 ```
+
+- **`pending_directive`** — the user replied to a ticket with a follow-up directive; the planner owes a decision (dispatch / ignore / escalate). Reachable from nearly every state, including a narrow re-entry from `suppressed` when a directive references a previously-rejected artifact, so `suppressed` is no longer strictly terminal.
+- **`active`** — plan synopses (`source_type=plan_synopsis`, `build_plan_synopsis_dicts`), context-only guidance the planner authors; closes/suppresses only.
 
 The dispatch-to-close path is owned by the room invocation. When the switchboard dispatches a tool, `dayflow_switchboard_arguments_node` stamps `state="dispatched"` on the acted-on item(s). When the tool returns, `post_room_finalize_node` reads `acted_on_item_ids` from the blackboard and writes `state="closed"` with `reason="action_completed"`.
 
@@ -90,9 +101,9 @@ The dispatch-to-close path is owned by the room invocation. When the switchboard
 
 ## Sub-Agents
 
-Located in `app/assistant/agents/dayflow_orchestrator/`. There are 9 agents:
+The directory `app/assistant/agents/dayflow_orchestrator/` holds **10 agent dirs**, but the manager (`multi_agents/dayflow_orchestrator_manager/config.yaml` `agents:`) only wires **7**: `intake_triage`, `strategic_planner`, `state_mover`, `relevance_cleaner`, `action_selector`, `switchboard`, `plan_mode`.
 
-### Core Pipeline
+### Core Pipeline (wired in `state_map`)
 
 | Agent | Purpose | Output |
 |-------|---------|--------|
@@ -101,15 +112,19 @@ Located in `app/assistant/agents/dayflow_orchestrator/`. There are 9 agents:
 | `state_mover` | Lifecycle transitions for important_open / waiting items | StateMutation records |
 | `relevance_cleaner` | Close stale / completed items (30-minute gate) | close / suppress decisions |
 | `action_selector` | Pick what to execute right now | acted_on_item_ids + action_type |
-| `ticket_builder` | Transform intent into ticket fields | ticket_kind, title, message |
-| `switchboard` | Delegate to manager / tool | delegate_to, task, task_information |
+| `switchboard` | Delegate to manager / tool, or call `create_dayflow_ticket` itself | delegate_to, task, task_information |
 
 ### Supporting
 
 | Agent | Purpose |
 |-------|---------|
-| `room_summary` | Compress orchestrator room conversation history |
-| `plan_mode` | Conversational planning agent (master-room delegation) |
+| `plan_mode` | Conversational planning agent (master-room delegation; `planning_mode` flow) |
+| `result_formatter` | Compresses manager-result text after dispatch. **Not** a pipeline agent — invoked directly via `DI.agent_factory` in `post_room_finalize_node` and `master_room_tool_caller`. |
+| `room_summary` | Compress orchestrator room conversation history (room chat-compaction) |
+
+### Orphaned agent dirs
+
+- `ticket_builder/` — superseded. Ticketing now flows `switchboard → create_dayflow_ticket` **tool** (`app/assistant/lib/tools/create_dayflow_ticket/`), dispatched like any other tool; there is no separate ticket-builder agent in the pipeline. The dir is dead code.
 
 ### Triage
 
@@ -146,9 +161,11 @@ All dayflow items are `Message` objects stored in `unified_log_2026` with `sourc
 - **Upsert key**: `Message.id` = `metadata.item_id`.
 - **State field**: `metadata.state`.
 - **Short IDs**: Numeric `short_id` persisted in metadata for LLM prompts.
-- **Read accessors**: `get_dayflow_items()`, `_load_latest_dayflow_item_map()`.
+- **Read accessors**: `get_dayflow_items()` (the agent-facing view), `_load_latest_dayflow_item_map()` / `load_existing_dayflow_items()` (raw, optionally terminal-inclusive).
 - **Write paths**: `write_dayflow_item()` (singular, merges metadata, validates transition) and `write_dayflow_items_batch()` (bulk upsert).
 - **Metadata access**: `get_meta(item)` for safe dict extraction.
+
+**Freshness windows** (`get_dayflow_items`): suppressed items are excluded (terminal); **active items older than 24h** (`_MAX_AGE_HOURS`) and **closed items older than 2h** (`_CLOSED_MAX_AGE_HOURS`) are filtered out, keyed on `last_reviewed_at`. This is the "plans are same-day" behavior — an untouched item ages out of the agents' view after a day even though it remains in the DB (`load_existing_dayflow_items` still sees it). Action logs are written `closed` so they self-prune after 2h.
 
 ## Input Sources
 
@@ -157,6 +174,7 @@ All dayflow items are `Message` objects stored in `unified_log_2026` with `sourc
 - **Chat**: `source_type='cross_room_chat'`, ingested as `state='closed'` (history-only).
 - **Email**: `source_type='email'`, from event repository (importance >= 5), ingested as `state='artifact'`.
 - **Delegation**: `source_type='user_request'`, from `master_room` chat_gate via `dayflow_request` tagged messages.
+- **Pods**: built by `_build_pod_message` for pods matching the ROOM.md `ingestion_pod_kinds` allowlist (currently Ring doorbell images). Watermarked; first run caps at start-of-day so history isn't replayed.
 
 Calendar events are NOT ingested as dayflow items. The planner sees them via `resource_expected_calendar` and creates plans from them directly.
 
@@ -200,17 +218,20 @@ After the tool returns, `post_room_finalize_node`:
 | `dayflow_orchestrator/ingestion.py` | Per-source ingestion driver |
 | `dayflow_orchestrator/state_store.py` | Read accessors, action log writer |
 | `dayflow_orchestrator/dayflow_item_writer.py` | Single write path, ALLOWED_TRANSITIONS, RESOLVED_STATES |
-| `dayflow_orchestrator/input_message_builder.py` | Per-source Message builders (email, delegation) |
+| `dayflow_orchestrator/input_message_builder.py` | Per-source Message builders (email, delegation, pod) |
+| `dayflow_orchestrator/orchestrator_status.py` | Status resource CRUD, master-room block timer, ingest watermarks |
 | `dayflow_orchestrator/blackboard_builder.py` | Emits day_of_week (per-agent prep nodes own the rest) |
-| `dayflow_orchestrator/dispatch_sweeper.py` | Revives stuck-dispatched items |
+| `dayflow_orchestrator/dispatch_sweeper.py` | Three tick sweeps (stale / orphaned-dispatched / zombie-waiting) + active-dispatch listing |
 | `dayflow_orchestrator/chat_ingestion.py` | Cross-room chat ingestion |
 | `dayflow_orchestrator/contracts.py` | Pydantic validation, get_meta(), short_id utilities |
+| `control_nodes/tick_router_node.py` | Top-of-pipeline router: `fast_tick` → promoter, else full pipeline |
 | `control_nodes/triage_spawn_guard_node.py` | Validates triage decisions, mutates in-memory |
 | `control_nodes/triage_persist_node.py` | Persists ADMIT and REJECT decisions |
 | `control_nodes/state_transition_guard_node.py` | Validates and persists state_mover mutations |
 | `control_nodes/dayflow_switchboard_arguments_node.py` | Pre-dispatch provenance, stamps dispatched state |
-| `control_nodes/post_room_finalize_node.py` | Post-dispatch finalization, closes acted_on items |
+| `control_nodes/post_room_finalize_node.py` | Post-dispatch finalization, closes acted_on items, runs result_formatter |
 | `control_nodes/relevance_cleaner_gate_node.py` | 30-minute gate for cleaner runs |
-| `control_nodes/view_materializer_node.py` | Build agent-facing item views |
-| `rooms/dayflow_orchestrator/` | Room config |
-| `agents/dayflow_orchestrator/` | Sub-agents (9 agents) |
+| `control_nodes/view_materializer_node.py` | Build agent-facing item views (filters items already covered by an in-flight dispatch) |
+| `lib/tools/create_dayflow_ticket/` | The ticket tool the switchboard dispatches (replaces the old ticket_builder agent) |
+| `rooms/dayflow_orchestrator/ROOM.md` | Room config (authority 95, `ingestion_pod_kinds`, `chat_ingestion_entitled_rooms`) |
+| `agents/dayflow_orchestrator/` | 10 agent dirs; 7 wired in the pipeline (ticket_builder orphaned; result_formatter/room_summary out-of-pipeline) |

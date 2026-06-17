@@ -2,7 +2,7 @@
 
 Working roadmap derived from the OpenClaw + Hermes-Agent competitive audit
 (see `scratch/competitive_research_2026-05-17.md` for the source data and
-the per-case re-marks done with Jukka on 2026-05-18).
+the per-case re-marks done with the user on 2026-05-18).
 
 This document is the **main todo for the next several days/weeks**. Each
 capability is a build target; estimated effort is in engineer-weeks (one
@@ -46,7 +46,7 @@ capability should be built to deepen them, not work around them:
 |---|---|---|---|---|
 | 1 | **`gh` CLI / GitHub tool** | 1–2 weeks | ~5 dev cases | Smallest unit-of-work, biggest single-week ROI. Add `gh` to bash_manager allowlist OR build a thin `github_manager` wrapping `gh issue/pr/api`. |
 | 2 | **STT (Whisper local)** | 1–2 weeks | ~4 cases | Independent capability; closes voice asymmetry. Voice memo ingestion regardless of voice channels. |
-| 3 | **HTTP + auth pods (`http_request`)** | 2–3 weeks | ~28 cases | THE meta-unlock. Every future API integration becomes SKILL.md instead of new manager. Pod-aware request/response makes this Emi-uniquely-leveraged. |
+| 3 | **HTTP + auth pods (`http_request`)** | 2–3 weeks | ~28 cases | THE meta-unlock. Every future API integration becomes SKILL.md instead of new manager. Pod-aware request/response makes this the assistant-uniquely-leveraged. |
 | 4 | **Sandboxed code execution (`execute_code`)** | 3–4 weeks | ~15 cases | The other foundation. Docker-backed on Windows-host via WSL2. Allow-listed FS + egress per call. Pairs with HTTP. **"Sandbox is important, people have been asking"** confirmed. |
 | 5 | **FS watcher / event triggers** | 1 week | ~3 cases | Small build; completes the autonomous-trigger story (dayflow already handles events). |
 | 6 | **5–10 SKILL.md packs on HTTP** | 1 day each | ~10 cases | After #3 ships, each platform integration is a skill: X, Reddit, YouTube transcripts, HN, WHOOP, Sonos, OnStar, Spotify, Meta Ads, MS Graph. Dojo amplifies. |
@@ -71,7 +71,7 @@ capability should be built to deepen them, not work around them:
 ## Pod-aware HTTP — the sketch
 
 `http_request` is the highest-leverage individual build. The shape that
-makes it Emi-uniquely-leveraged (not just another LangChain HTTP tool):
+makes it the assistant-uniquely-leveraged (not just another LangChain HTTP tool):
 
 ```
 http_request(
@@ -93,7 +93,7 @@ competitor has this.
 
 **Added 2026-05-19 after the long-running-manager conversation.**
 
-Emi managers run their thinking loop synchronously to completion. There's
+the assistant managers run their thinking loop synchronously to completion. There's
 no native "pause mid-flow and wait for an external event" primitive.
 Workflows that need to wait (booking confirmations, CI builds, calendar
 negotiations, webhook callbacks) must be hand-decomposed into two managers
@@ -114,7 +114,7 @@ moat-matching.
 - `wait_for(...)` becomes first-class control flow inside the agent loop
 - Live coroutine frame is the state — no serialization
 - Cleanest semantics; meaningful refactor across manager classes
-- Worth doing if Emi grows into multi-day persistent autonomous agents
+- Worth doing if the assistant grows into multi-day persistent autonomous agents
 
 **Slotting:** Path A fits the existing capability-tier list as a *small*
 build (a few hours of Claude Code time) once the more foundational items
@@ -128,10 +128,10 @@ sketch, three implementation options, and use-case unlock list.
 
 Confirmed during the audit walkthrough:
 
-- **Multi-user / family / shared agent** — Emi is single-user by design.
+- **Multi-user / family / shared agent** — the assistant is single-user by design.
 - **Web3 / crypto trading / onchain tools** — out of scope, high-risk niche.
 - **Enterprise compliance (EU AI Act, SOC2 audit dashboards)** — not applicable to personal-assistant scope.
-- **Kubernetes multi-cluster, AWS/Azure resource control** — Emi runs on Jukka's Windows box, not clusters.
+- **Kubernetes multi-cluster, AWS/Azure resource control** — the assistant runs on the user's Windows box, not clusters.
 - **Game agents (Minecraft, Mars rover sim)** — novelty.
 - **Remote marketplace for skills** — local skill creation via dojo is sufficient.
 - **Specialty science domains** — drug discovery, robotics, infosec frameworks.
@@ -143,8 +143,8 @@ Confirmed during the audit walkthrough:
    per memory). Enabling write unlocks ~5 dev cases (fix-test-PR loops,
    autonomous game-dev) but changes the autonomy boundary. Not in this
    roadmap until explicitly decided.
-2. **Expose Emi as MCP server (outbound MCP).** Would let Claude Desktop,
-   Cursor, etc. use Emi's KG/belief store as a memory backend. Real
+2. **Expose the assistant as MCP server (outbound MCP).** Would let Claude Desktop,
+   Cursor, etc. use the assistant's KG/belief store as a memory backend. Real
    capability gap if wanted; privacy/scope implications are a one-way
    door. Defer until explicit decision.
 

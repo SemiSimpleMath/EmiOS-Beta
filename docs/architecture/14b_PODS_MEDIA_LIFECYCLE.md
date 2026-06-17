@@ -2,7 +2,7 @@
 
 End-to-end trace of what happens when the user pastes an image (or
 attaches an audio / video file) in chat, through to the moment they
-say "find that picture and email it to Katy" and Gmail sends the
+say "find that picture and email it to the user's partner" and Gmail sends the
 right file. This page is the concrete walkthrough; see
 [14_PODS.md](14_PODS.md) for the underlying primitives (gut,
 classifier, store, search/fetch).
@@ -24,7 +24,7 @@ the user's chat turn.
 
 ```
 Browser:
-  user pastes image, types "Hey Emi here is a picture of me"
+  user pastes image, types "Hey the assistant here is a picture of me"
   POST /process_request with multipart (text + file)
         │
         ▼
@@ -44,18 +44,10 @@ app/assistant/pod_store/image_ingest.py
         ▼
 app/assistant/pod_store/pod_store.py::PodStore.put
   • upsert pod_store row (pod_id deterministic from sha256)
-  • triggers kg_mirror.ensure_pod_node()
-        │
-        ▼
-app/assistant/pod_store/kg_mirror.py
-  • upsert kg_node_metadata row:
-        id           = pod_id (e.g. datapod:image:abc12345...)
-        node_type    = "Pod"
-        category     = "image"
-        label        = pod.one_liner
-        original_sentence = pod.body[:400]   (empty until vision extraction runs)
-        source       = "pod_mirror"
-  • the Pod is now a first-class KG citizen — edges can target it
+  • pod_store is the SOLE source of truth for pod content. There is NO
+    kg_node mirror — `kg_mirror.py` was deleted in the no-mirror
+    migration. No "Pod node" is created here; the KG will only ever
+    hold kg_edge_metadata rows whose endpoint is the pod URI.
         │
         ▼
 process_request.py::handle_normal_processing
@@ -81,12 +73,12 @@ app/assistant/pipelines/kg_pipeline (the gut → window → extract path)
     • prompt rule (entity_resolver/prompts/system.j2): "tokens matching
       datapod:<kind>:<id> are opaque — preserve verbatim, do not
       substitute, do not annotate"
-    • output: "Here is a picture of me (Jukka) datapod:image:abc12345..."
+    • output: "Here is a picture of me (the user) datapod:image:abc12345..."
 
   Stage 2: conversation_boundary agent
     • normal windowing — no special handling for pods
 
-  Stage 3: window_critic + fact_extractor
+  Stage 3: window_critic_v2 + fact_extractor
     • PodInjector pre-hydrates the URI into a PodHeader block in the
       fact_extractor's prompt context — "datapod:image:abc... [image] (no caption yet)"
     • fact_extractor prompt has a "POD URI HANDLING" section with an
@@ -96,8 +88,8 @@ app/assistant/pipelines/kg_pipeline (the gut → window → extract path)
             video: depicted_in, has_video, has_recording
             audio: mentioned_in, has_recording, has_voicemail
             email: mentioned_in, invoiced_via, replied_to
-    • for "Here is a picture of (Jukka) datapod:image:abc..." emits:
-            source: Jukka (entity, temp_id="entity_1")
+    • for "Here is a picture of (the user) datapod:image:abc..." emits:
+            source: the user (entity, temp_id="entity_1")
             target: datapod:image:abc... (verbatim, treated as pre-resolved id)
             edge:   depicted_in       (default-safe — always emit)
             edge:   has_profile_image (intent-flavored — "picture of me" reads canonical)
@@ -110,8 +102,16 @@ app/assistant/pipelines/kg_pipeline (the gut → window → extract path)
       created; target_node_id on the edges = the pod URI literally
 
   Stage 5: proposal_promoter
-    • _resolve_endpoint() accepts pod URIs as already-resolved kg_node ids
-      (the kg_mirror Pod node already exists), bypassing proposal-node lookup
+    • _resolve_endpoint() treats a `datapod:*` URI as an already-resolved
+      endpoint and admits it iff BOTH hold (NOT because any mirror node
+      pre-exists — there is none):
+        1. the URI exists in pod_store (PodStore.get(uri) is not None), AND
+        2. its kind is `kg_admissible: true` in configs/pod_kinds.json
+           (pod_kind_registry.is_kg_admissible — image=true, email/chat_
+           cluster/note=false, unknown→false/fail-closed).
+      Otherwise the proposal ABANDONS with reason "pod_not_admissible"
+      (the dropped FK on kg_edge_metadata endpoints made this admission
+      check the replacement gate).
     • writes kg_edge_metadata rows:
             source_id=<jukka_kg_node_id>
             target_id=datapod:image:abc...
@@ -120,8 +120,9 @@ app/assistant/pipelines/kg_pipeline (the gut → window → extract path)
         │
         ▼
 At rest, the KG now contains:
-  • a Pod node (kg_node_metadata where node_type='Pod', category='image')
-  • two edges from Jukka's entity node to the pod
+  • NO Pod node — only the kg_edge_metadata rows whose target_id is the
+    pod URI (two edges, from the user's entity node to datapod:image:abc...)
+  • the pod itself lives entirely in pod_store (content + metadata)
   • the actual bytes at data/images/<hash[:2]>/<hash>.jpg
   • a sidecar at data/images/<hash[:2]>/<hash>.jpg.emipod.json
 ```
@@ -146,18 +147,25 @@ The plumbing is the same shape; the only differences are:
   frame captions for video, OCR for pdf). All currently land in
   `pod.body` so `pod_search?query=...` works uniformly.
 
-> **Status today (2026-04-29):** image is the only kind wired
-> end-to-end through the chat upload path. Video and audio require
-> (a) extending `image_ingest` into a kind-aware `media_ingest` (or
-> sibling modules), (b) the corresponding storage directories under
-> `data/`, and (c) a vision/transcription extraction pass to populate
-> `pod.body`. The pipeline below it (kg_mirror, fact_extractor with
-> the kind-keyed edge vocabulary, proposal_writer, promoter) already
-> works for any pod kind — no changes needed.
+> **Status today:** generic file ingestion now exists.
+> `pod_store/file_ingest.py::ingest_file` hashes any file, maps its MIME
+> top-level slice to a pod kind (image / video / audio / document /
+> file), content-addresses it under `data/pods/<sha[:2]>/<sha><ext>`
+> (image-shaped files still delegate to the richer `image_ingest`
+> path + `data/images/`), and mints a kind-tagged pod. Vision
+> extraction is built too: `pod_store/image_pod_enrichment.py::
+> enrich_image_pod` runs `image_pod_captioner` on chat-pasted image
+> pods (off the chat turn, in a monitored thread) and writes back
+> `one_liner` / `body` / `tags` / `depicted_entities`, flipping
+> `vision_extraction_status` to `done`. Still kind-specific and
+> pending: transcription for audio/video and OCR for documents to
+> populate `pod.body` for those kinds. The KG-facing pipeline
+> (fact_extractor's kind-keyed edge vocabulary, proposal_writer,
+> promoter admission via `is_kg_admissible`) is already kind-agnostic.
 
 ## Phase 2: retrieval + action
 
-User says: **"find the picture of me from today and email it to Katy."**
+User says: **"find the picture of me from today and email it to the user's partner."**
 
 ```
 chat_gate (master_room) classifies the turn → routes via
@@ -170,7 +178,7 @@ section of its system prompt and emits two tool calls in sequence:
 Step 1 — locate the pod:
   pod_search(
     kind="image",
-    linked_to_entity="Jukka",
+    linked_to_entity="the user",
     linked_via=["depicted_in", "has_profile_image"],
     since="today"
   )
@@ -179,8 +187,13 @@ Step 1 — locate the pod:
 app/assistant/pod_store/pod_store.py::PodStore.query
   • SQL subquery: target_id from kg_edge_metadata
         JOIN kg_node_metadata ON source_id = id
-        WHERE label='Jukka' AND node_type='Entity'
-        AND relationship_type IN ('depicted_in', 'has_profile_image')
+        WHERE node_type='Entity'
+          AND ( lower(label) = 'jukka'           -- exact, case-insensitive
+                OR lower(aliases) LIKE '%"jukka"%' )  -- alias fallback
+          AND relationship_type IN ('depicted_in', 'has_profile_image')
+    (label match is alias-aware: a query for the full name "the user Virtanen"
+     still finds entity "the user" when the full name lives in that node's
+     aliases column)
   • combined with kind='image' and since='today' filters
   • returns one or more PodHeaders ordered by recency
         │
@@ -215,7 +228,7 @@ app/assistant/lib/core_tools/email_tool/utils/gmail_api_client.py::GmailAPIClien
     users().messages().send endpoint
         │
         ▼
-Gmail delivers the email to Katy with the image attached. The tool
+Gmail delivers the email to the user's partner with the image attached. The tool
 result reports message_id and attachments_sent count back up the
 agent loop, which produces a chat reply confirming.
 ```
@@ -245,7 +258,7 @@ file. This keeps:
 | `fact_extractor` misclassifies the intent | `depicted_in` (the default-safe) is always emitted — `has_profile_image` is the upgrade. Worst case: the photo is `depicted_in` only and `pod_search` with `linked_via=["depicted_in"]` still finds it. |
 | `pod_search` returns 0 photos | The planner is instructed to widen `since` and retry; if still 0, ask the user. |
 | `send_email` finds the pod but the file is gone | Refuses the whole send with a clear error rather than partial attachment. The reconciler then reports the dangling pod. |
-| User uploads the same image twice | Content addressing dedupes — same sha256 → same pod_id → same kg_node row. Re-ingest is idempotent; existing edges aren't duplicated. |
+| User uploads the same image twice | Content addressing dedupes — same sha256 → same pod_id → same pod_store row. Re-ingest is idempotent; existing edges aren't duplicated. |
 
 ## Where this lives in code
 
@@ -253,8 +266,10 @@ file. This keeps:
 |---|---|
 | HTTP entry point | `app/routes/process_request.py` |
 | Image storage + pod minting | `app/assistant/pod_store/image_ingest.py` |
+| Generic file ingestion (MIME→kind) | `app/assistant/pod_store/file_ingest.py` |
+| Vision extraction (image pod body) | `app/assistant/pod_store/image_pod_enrichment.py` |
+| Pod kinds registry (`is_kg_admissible`) | `app/assistant/pod_store/pod_kind_registry.py`, `configs/pod_kinds.json` |
 | Pod store | `app/assistant/pod_store/pod_store.py` |
-| KG mirror | `app/assistant/pod_store/kg_mirror.py` |
 | File stamps | `app/assistant/pod_store/file_stamp.py` |
 | Reconciler | `app/assistant/pod_store/image_reconcile.py` |
 | Chat marker | `app/assistant/room_session_manager/services/surfaces/ui_inbound_service.py` |
@@ -270,9 +285,10 @@ file. This keeps:
 
 ## Two-line summary
 
-The image flows: `upload → image_ingest → PodStore.put → kg_mirror →
-[chat continues, kg_pipeline runs in background] → fact_extractor
-emits edges → promoter writes kg_edge rows`.
+The image flows: `upload → image_ingest → PodStore.put (no kg mirror)
+→ [chat continues, kg_pipeline runs in background] → fact_extractor
+emits edges → promoter admits the pod URI (is_kg_admissible) and writes
+kg_edge rows`.
 
 The retrieval flows: `chat turn → personal_admin planner → pod_search
 (kind=image, linked_to_entity=user, since=today) → send_email

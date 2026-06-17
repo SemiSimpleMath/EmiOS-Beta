@@ -2,7 +2,11 @@
 
 ## What it is
 
-A web UI for inspecting and managing every scheduled routine in `configs/routines.json`. Renders four views (hour-by-hour timeline, interval grid, weekly grid, full table), supports inline edits (toggle enabled, change time / day / interval), and runs routines on demand. Edits write back to `configs/routines.json` atomically; the **RoutineManager** re-reads the file on every refresh tick (~60s), so changes apply at the next tick without a restart.
+A web UI for inspecting and managing every scheduled routine. Renders four views (hour-by-hour timeline, interval grid, weekly grid, full table), supports inline edits (toggle enabled, change time / day / interval), and runs routines on demand. The **RoutineManager** re-reads config on every refresh tick (~60s), so edits apply at the next tick without a restart.
+
+Routine specs live as **per-routine files** under `configs/routines/{public,private}/<id>.json` (`_load_config` globs both, private overriding public on id collision — mirroring `RoutineManager._load_config`). The monolithic `configs/routines.json` now holds only top-level settings (`enabled`, `max_workers`) plus a legacy `routines` array fallback for older installs. Writes follow a **spec/status split** (K8s-shape):
+- **Policy edits** (`time_local`/`day_of_week`/`min_interval_seconds`) write back to the routine's own `_source_file` (or `configs/routines/private/<id>.json` for new entries).
+- **`enabled` toggles** write to the status file `resources/resource_routine_status.json`, NOT the spec — toggles are per-machine runtime state, so users can pull upstream schema updates without losing their on/off flags and commit schema changes without pushing personal toggles into the public repo.
 
 This is a thin admin page on top of the routine system documented in [06_PIPELINES_AND_ROUTINES.md](06_PIPELINES_AND_ROUTINES.md). Read that first if you want the underlying scheduler model.
 
@@ -10,10 +14,13 @@ This is a thin admin page on top of the routine system documented in [06_PIPELIN
 
 | File | Purpose |
 |------|---------|
-| `app/routes/routines_admin.py` | Flask blueprint — page route + 4 API endpoints |
+| `app/routes/routines_admin.py` | Flask blueprint — page route + API endpoints |
 | `app/templates/routines_admin.html` | The page shell (no inline CSS, no inline JS) |
 | `app/static/css/routines_admin.css` | All styles |
 | `app/static/js/routines_admin.js` | View rendering + edit modal + polling |
+| `configs/routines/{public,private}/<id>.json` | Per-routine spec files (the policy write-back target) |
+| `configs/routines.json` | Top-level settings (`enabled`, `max_workers`) + legacy routines fallback |
+| `resources/resource_routine_status.json` | Runtime status (`last_*`, `run_count`) + per-routine `enabled` overrides |
 
 Blueprint registration: `app/create_app.py` (search for `routines_admin_bp`).
 
@@ -60,7 +67,11 @@ Blueprint registration: `app/create_app.py` (search for `routines_admin_bp`).
 }
 ```
 
-Live state (`last_*`, `run_count`) is read from `resources/resource_routine_status.json` (the file `RoutineManager` writes after each run).
+Live state (`last_*`, `run_count`, and the per-routine `enabled` override) is read from `resources/resource_routine_status.json` (the file `RoutineManager` writes after each run). `enabled` is resolved as **status-override-wins-over-spec-default** in `_enrich_routine`.
+
+`schedule_label` is derived from the trigger/policy shape:
+- `trigger.type == "event"` → `"on event: <topic>"` — these have **no editable schedule** (the modal shows no time/day/interval input).
+- `daily` → `"daily at HH:MM"`, `weekly` → `"<Day> HH:MM"`, `interval` → `"every <cadence>"`.
 
 ## The four tab views
 
@@ -107,19 +118,24 @@ Cross-type fields are explicitly rejected (`time_local on interval` → 400). Th
 
 ## Atomic write-back
 
-`_save_config` writes via tmp-file + replace under a process-level `_CONFIG_LOCK`:
+Both writers (`_save_config` for policy edits, `_save_state` for toggles) write via tmp-file + replace; policy edits hold the process-level `_CONFIG_LOCK`. `_save_config` writes **each routine to its own `_source_file`** (one file per routine), not a monolith — the synthetic `_source_file` key is stripped before serializing:
 
 ```python
-with tmp.open("w", encoding="utf-8", newline="\n") as f:
-    json.dump(config, f, indent=2, ensure_ascii=False)
-    f.write("\n")
-    f.flush()
-tmp.replace(p)
+for entry in config.get("routines") or []:
+    target = entry.get("_source_file") or str(private_dir / f"{rid}.json")
+    to_write = {k: v for k, v in entry.items() if k != "_source_file"}
+    tmp = Path(target).with_suffix(...".tmp")
+    with tmp.open("w", encoding="utf-8", newline="\n") as f:
+        json.dump(to_write, f, indent=2, ensure_ascii=False)
+        f.write("\n"); f.flush()
+    tmp.replace(target)
 ```
 
-Two encoding details that matter:
+Top-level settings in `configs/routines.json` (`enabled`, `max_workers`, `state_resource_file`) are **not** touched by this path.
+
+Two encoding details that matter (both writers):
 - **`encoding="utf-8"`** is explicit — without it Python defaults to `cp1252` on Windows, which silently mangles em-dashes and other multi-byte characters into mojibake. (See git history around 2026-04-26 for the recovery.)
-- **`ensure_ascii=False`** keeps human-readable Unicode in the file at rest (em-dashes show as `—` not `—`). Diffs after a UI edit stay focused on the actual change.
+- **`ensure_ascii=False`** keeps human-readable Unicode in the file at rest. Diffs after a UI edit stay focused on the actual change.
 
 ## Live status polling
 
@@ -134,10 +150,11 @@ The page polls `/api/routines` every 30 s. No WebSocket — straightforward fetc
 ## How routine edits propagate
 
 ```
-UI edit → POST /api/routines/.../policy → _save_config writes routines.json
+UI edit → POST /api/routines/.../policy → _save_config writes configs/routines/<pub|priv>/<id>.json
+         (toggle → /toggle → _save_state writes resources/resource_routine_status.json)
                                                 |
                                                 v
-RoutineManager.refresh() (every ~60s) → _load_config() → reads routines.json fresh
+RoutineManager.refresh() (every ~60s) → _load_config() → re-globs the per-routine files fresh
                                                 |
                                                 v
                           Routine fires next according to new policy

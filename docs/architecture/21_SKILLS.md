@@ -77,7 +77,7 @@ Skills and resources both end up rendered into agent prompts. They are *not* the
 
 **Mental model**: resources are the `/etc/` of the agent — current configuration and world state. Skills are the `/usr/share/man/` — stable how-to reference the agent looks up when relevant. They share the prompt-injection delivery pipe; their lifecycles, contents, and selection rules are different.
 
-A useful test: *"if this content needs to be updated whenever the user's situation changes, it's a resource. If this content describes a procedure that doesn't change with the user's situation, it's a skill."* `user_bio.json` (resource) updates when the user changes jobs. `slack-formatting` (skill) doesn't change because Jukka moved cities.
+A useful test: *"if this content needs to be updated whenever the user's situation changes, it's a resource. If this content describes a procedure that doesn't change with the user's situation, it's a skill."* `user_bio.json` (resource) updates when the user changes jobs. `slack-formatting` (skill) doesn't change because the user moved cities.
 
 Resources stay where they are (`resources/` tree, see [19_RESOURCES.md](19_RESOURCES.md)). Skills get their own home at `skills/`.
 
@@ -92,7 +92,7 @@ skills/                      # repo root
 
 Repo-root placement is deliberate: it matches the agentskills.io convention every other tool uses, and **Claude Code (which EmiCode shells out to) reads `skills/` natively**. So a skill we author is consumed by both:
 
-- Emi's internal agents (via the SkillRegistry described in §6)
+- the assistant's internal agents (via the SkillRegistry described in §6)
 - The local Claude Code CLI when EmiCode hands a coding task to it
 
 No duplication, no per-agent vendor format.
@@ -118,11 +118,11 @@ This is the simplest pattern and matches the existing static delivery shape used
 
 ### 5.2 Tool-discovered
 
-The agent has `find_skill(query)` and `load_skill(name)` as tools. The planner decides:
+The agent has `discover_skills(query)` and `read_skill(names)` as tools (in `app/assistant/lib/tools/`). The planner decides:
 
 > *"This task involves DoorDash. Let me search for relevant skills."*
 
-`find_skill("doordash food ordering")` → registry returns matching `SkillHeader` records by description match. `load_skill("doordash-ordering")` → body lands in the next prompt's context.
+`discover_skills("doordash food ordering")` → `SkillRegistry.discover` returns matching `SkillHeader` records by description match. `read_skill(["doordash-ordering"])` → `SkillRegistry.get` body lands in the next prompt's context. (Pairs the way `pod_search`↔`pod_fetch` do; `read_skill` takes a list — load several related skills in one turn.)
 
 **Use when**: there are many skills, only a few apply to any given task, and the agent has enough autonomy to pick. Closer to how Anthropic's published skills are typically used (the agent reads metadata, decides, fetches body).
 
@@ -159,6 +159,16 @@ The governing rules (`SkillInjector`, `app/skill_registry/`):
    single check is `SkillInjector.skill_gate_passes`; the resolver
    (`context_injector._resolve_skills_with_provenance`) calls it on every admission.
    A skill with no `requires_scope` passes trivially.
+
+   The gate logic itself lives in a shared primitive, `app/assistant/utils/scope_gate.py`
+   (`scope_gate_passes` over the live identity from `scope_identity`, `canon_field`
+   for per-field canonicalization). `SkillInjector.skill_gate_passes` and its
+   `_scope_*` helpers now delegate there — it was extracted so **RESOURCES gate
+   identically**: a resource declaring the same `requires_scope` lock passes the
+   same check. The allowed `GATE_FIELDS` (`acting_as, surface, room_id,
+   room_context_id, visibility`) are defined once in `scope_gate`. See
+   [SECRETS_ACCOUNTS.md](SECRETS_ACCOUNTS.md) Layer 2 for the resource side. "Scope
+   is the key; the skill *or resource* carries the lock."
 1. **Matching = `(keyword hit, if any) AND (every requires_scope field matches)`.**
 2. **`requires_scope` fields are an explicit identity/context allowlist:**
    `acting_as`, `surface`, `room_id`, `room_context_id`, `visibility`.
@@ -258,26 +268,25 @@ At startup the registry:
 
 ## 7. Implementation phases
 
-Building all three injection patterns at once would over-engineer v1. Phasing:
+The three injection patterns shipped incrementally; v1–v3 are now history, not roadmap.
 
-**v1 — foundation + static binding (this work)**
+**v1 — foundation + static binding — SHIPPED**
 
 - `skills/` directory layout.
-- `SkillRegistry` with `get`, `headers`, `validate`.
-- SKILL.md parser + agentskills.io validator.
+- `SkillRegistry` (`app/skill_registry/skill_registry.py`) with `get`, `discover`, `headers`, `validate`, `reload`.
+- SKILL.md parser + agentskills.io validator (`app/skill_registry/parser.py`, `models.py`).
 - Static-binding injection: agent config gets a `skills:` field, prompt context exposes `{{ skills.<name> }}`.
-- Migrate `resource_slack_format.md` → `skills/slack-formatting/SKILL.md`. First concrete instance.
-- Tests for the registry and validator.
+- `resource_slack_format.md` migrated → `skills/slack-formatting/SKILL.md`.
 
-**v2 — tool-discovery**
+**v2 — tool-discovery — SHIPPED**
 
-- `find_skill` and `load_skill` tools wired into the relevant manager planners.
-- `SkillRegistry.discover(query)` does description-match (LLM-driven or simple keyword scoring; start with the latter).
+- `discover_skills` and `read_skill` tools (`app/assistant/lib/tools/`), bound on the relevant manager planners (e.g. `http_manager`, `sandbox_manager`, `emi_team_manager`, `meal_research_manager`).
+- `SkillRegistry.discover(query)` does description-match.
 
-**v3 — context auto-injection**
+**v3 — context auto-injection — SHIPPED**
 
-- `SkillInjector` parallel to `PodInjector`. Trigger rules in skill metadata or a separate routing config.
-- Move `slack-formatting` from static binding to auto-inject when `room_surface == "slack"`.
+- `SkillInjector` (`app/skill_registry/skill_injector.py`) parallel to `PodInjector`, driven by per-skill `auto_inject_when` metadata (§5.4) — not a separate routing config.
+- Resolved through `context_injector._resolve_skills_with_provenance`, which folds static-bound, keyword-matched, caller-supplied, and scope-stamped (`always_inject`) skills into one `context['skills']` dict, gating every admission through `skill_gate_passes`.
 
 **v4+ — frontier**
 

@@ -40,7 +40,7 @@ resources/
                                        seeded by setup wizard, edited via
                                        /settings/user-bio, injected into chat_gate
                                        prompts via UserBioContextService
-    resource_kg_interests.json       — what the user wants Emi to track
+    resource_kg_interests.json       — what the user wants the assistant to track
     resource_wiki_sections.json      — biographical taxonomy
 
   assistant/                         [setup-seeded, then user-tunable]
@@ -56,8 +56,10 @@ resources/
     resource_activity_log.md
 
   kg_derived/                        [pipeline-derived: belief engine, KG]
-    resource_user_beliefs.json       — exported by belief_engine_export
+    resource_user_beliefs.json       — exported by belief_engine (inline at run end)
+    resource_user_beliefs_v2.json    — v2 export (same shape; cutover-gated)
     resource_user_beliefs_communication_canonicalized.json — on disk, no current reader
+    timelines/<entity>.md            — per-entity narrative timelines
 
   daily_insights_pipeline_outputs/   [pipeline-derived: daily_insights]
     resource_daily_insights.json     — per-day actionable info
@@ -83,6 +85,14 @@ resources/
   day_context/                       [pipeline-derived: per-day archive]
     <YYYY>/<MM>/<YYYY-MM-DD>/       — per-day folders archived by date
 
+  subconscious/                      [pipeline-derived: subconscious + meal/grocery loops]
+    resource_concerns_register.json  — open concerns the mind is tracking
+    resource_digest_state.json
+    resource_grocery_inventory.json, resource_meal_feedback_state.json, ...
+
+  weekly_insights_pipeline_outputs/  [pipeline-derived: weekly_insights]
+    resource_weekly_insights_latest.json
+
   status/                            [runtime snapshots]
     resource_dayflow_orchestrator_status.json
     resource_dayflow_status.json
@@ -100,15 +110,22 @@ resources/
 
   context/                           [pipeline-derived: contextual]
     global/, user/
+  context_engine/                    [pipeline-derived: per-room context engine]
+    master_room/
 
   resource_current_location.json     [flat at root: runtime snapshot]
   resource_routine_status.json       [flat at root: runtime snapshot]
+  resource_emi_accounts.json         [flat at root: account config; gitignored]
+  env_registry_user.json             [flat at root: account/secret registry; gitignored]
 ```
+
+The loader (`load_all_from_directory`) skips a fixed set of directory names anywhere in the path — `skip_dir_names = {tmp, tests, __pycache__, templates, day_context, pointers}` — plus dotfiles and `README*`. `templates/` is excluded here because it's compiled in a separate phase; `day_context/`/`pointers/` because they're indirection, not directly-injectable values.
 
 **Special cases:**
 - **`templates/`** is not a normal resource directory. Files there contain Jinja template tokens (`{{ ... }}` / `{% ... %}`) and **must be compiled to concrete values before injection** — `ResourceManager._assert_concrete_resource()` raises `ValueError` if a resource with template tokens is offered for injection. Compiled outputs land in `instructions/` or other consumer directories.
 - **`pointers/`** is an indirection layer: `resource_X_latest.json` typically contains a path or id pointing at a versioned artifact elsewhere. Useful when the latest version's filename changes but consumers want a stable pointer.
 - **`memory/`** previously held the output of the dead `memory_apply_fact` subsystem; removed 2026-04-28. The one surviving live file (`user_bio.json`) migrated to `resources/user/`.
+- **Personal overlays.** For any text resource `<stem><suffix>`, a sibling `<stem>_personal<suffix>` (e.g. `resource_assistant_guidelines_personal.md`) is auto-appended onto the public base at load time (PHASE 3 of `load_all_from_directory`). The personal content goes *after* the base, so later instructions win at LLM read time and personal directives override the template defaults without editing the public file. `_personal` siblings are not standalone resources (the scan skips any stem ending in `_personal`) and are gitignored — the convention keeps personal preferences out of the public repo while shipping a shared template as the baseline.
 
 ## 4. The metadata envelope (emerging convention, not universal)
 
@@ -121,7 +138,7 @@ Larger pipeline-derived resources tend to wrap their content in an `_metadata` e
     "schema_version": "1.0",
     "generated_at": "2026-04-28T10:30:00Z",
     "entry_count": 183,
-    "description": "Living belief set about Jukka..."
+    "description": "Living belief set about the user..."
   },
   "beliefs": [ ... ]
 }
@@ -144,11 +161,38 @@ The convention isn't enforced — readers are expected to know the shape of each
 - Refuse to inject resources containing template tokens — those must be compiled first (`_assert_concrete_resource`).
 - Mirror values to `DI.global_blackboard` so callers reading directly from the blackboard still see fresh values (best-effort; the ResourceManager cache is the source of truth).
 
-**Read API:** `get_resource(resource_id)` — returns the cached value, auto-refreshing if the backing file is newer.
+**Read API:** `get_resource(*, scope_context, resource_id, required=False)` — `scope_context` is **mandatory** (`ResourceResolver._resolve` raises `ValueError` if it's `None`); the call returns the resolved value, auto-refreshing if the backing file is newer (or computing it, for dynamic resources — see below). `required=True` raises `ValueError` when the value is missing. `get_resources(*, scope_context, resource_ids, ...)` is the batch form.
 
-**Write API:** persistent updates from agents (e.g., learned preferences) go through ResourceManager so the cache and the file stay in sync.
+**Write API:** persistent updates from agents (e.g., learned preferences) go through `update_resource(resource_id, value, persist=True)` so the cache and the file stay in sync (and `refresh_resource(resource_id)` force-reloads one from disk).
 
 **Single instance:** `DI.resource_manager` is the singleton; agents resolve resources through it, never by reading the file directly.
+
+### Scope-gated access
+
+Every read flows through a scope gate before any value is produced. `get_resource` reads `scope_context.resources` and enforces:
+
+- **Denylist:** if `resource_id` ∈ `denied_resources` → `PermissionError`.
+- **Allowlist:** if `allowed_global_resources` is not `"all"` and doesn't contain `resource_id` → `PermissionError` (logged at WARNING with the offending id and the scope's allow set).
+- **Lock (optional, thing-side):** if the resource carries a `requires_scope` lock, the caller's scope must satisfy it via `scope_gate.scope_gate_passes(...)` (the same lock mechanism skills use) → `PermissionError` on mismatch. No lock = free.
+
+`ResourceResolver` (`agent_runtime/services/resource_resolver.py`) is the thin runtime shim agents go through; it re-raises `PermissionError` (logged at DEBUG) and any read error. This is the resource-layer half of the four-layer scope model (`docs/architecture/SCOPE.md`): the scope key on one side, the resource's allow/deny/lock on the other.
+
+### Dynamic / computed resources
+
+Not every resource is file-backed. A resource can be **computed per read** from the caller's scope:
+
+- `register_provider(resource_id, provider, *, requires_scope=None)` registers `resource_id` so that `get_resource` returns `provider(scope_dict)` instead of reading a file. The provider receives the normalized scope dict, so the *same* resource id can yield different values for different callers.
+- `register_lock(resource_id, requires_scope)` attaches a `requires_scope` lock to an existing (file-backed) resource without registering a provider.
+
+Both ride the standard scope-gated `get_resource` path (allow/deny still apply first). Wired in `app/bootstrap.py` — the **only** `register_provider`/`register_lock` call sites today:
+
+| Resource | How it's produced | Lock |
+| --- | --- | --- |
+| `resource_accounts` | `DI.env_registry.render_accounts_for_scope(scope)` — principal- and per-account-authority-filtered account text (NOT file-backed) | — |
+| `resource_email_accounts` | same provider, `categories={"email"}` — the email/calendar/todos domain view, so social accounts never enter that prompt (relevance, not permission) | — |
+| `resource_user_email` | file-backed | `{"acting_as": "user"}` — withheld in `/actas self` mode, where email-as-self governs instead |
+
+These replace the old auto-injected `available_accounts`; see `docs/architecture/SECRETS_ACCOUNTS.md` for the account/secret model.
 
 ## 6. How agents declare resource needs
 
@@ -165,7 +209,7 @@ user_context_items:
 
 Per CLAUDE.md, the **context injector** (`app/assistant/agent_runtime/services/context_injector.py`) walks `user_context_items` and resolves each:
 
-- `resource_*` prefix → `ResourceResolver.resolve(resource_id)` → `ResourceManager.get_resource(...)`.
+- `resource_*` prefix → `ResourceResolver.get_global_resource(resource_id, scope_context=...)` → `ResourceManager.get_resource(...)`. The injector pulls `scope_context` off the agent's blackboard and raises `ValueError` if it's absent — the scope gate (§5) runs on every injected resource, so an agent's declared item still has to clear allow/deny/lock.
 - Special blackboard keys (`active_dayflow_items`, `planned_tasks`, etc.) → resolve from blackboard.
 - `agent_input` → comes from the inbound Message.
 
@@ -182,7 +226,7 @@ Different pipelines own different resource subdirectories:
 | `dayflow_pipeline` (NOT the orchestrator) | `dayflow_pipeline_outputs/` (calendar, health, sleep, diet, activity, daily routine) | Multi-stage, throughout the day |
 | `daily_insights_pipeline` | `daily_insights_pipeline_outputs/` (per-day insights, themes, assessments) | Once per day, midnight-ish |
 | `belief_engine` | `kg_derived/resource_user_beliefs.json` | 00:30 daily (when domain runs); inline export at end of run |
-| `entity_cards_pipeline` | (entity-card-related resources; see `12_ENTITY_CARDS.md`) | Daily |
+| `entity_card_refresh` (function routine) | entity card v2 *tables* (DB-backed, not resource files); see `12_ENTITY_CARDS.md` | Daily 04:30 |
 | `wiki_generator` | (wiki output; see `11_WIKI_GENERATOR.md`) | Daily |
 | KG pipeline | (KG-derived resources e.g. `resource_kg_interests`) | Nightly |
 | Setup wizard | `user/`, `assistant/` (one-time seeding) | Once, on first install |
@@ -227,7 +271,7 @@ A few things that the resource layer enables, and that other AI architectures of
 
 - **Determinism + reproducibility.** Agent input is a function of file contents. The same files plus the same prompt give the same output. Trivial to replay debug runs.
 - **Inspectability.** Every piece of context an agent will see is `cat`-able. No hidden state.
-- **User legibility.** Resources can be opened in a text editor and understood. The user can audit what Emi believes about them.
+- **User legibility.** Resources can be opened in a text editor and understood. The user can audit what the assistant believes about them.
 - **User mutability where it makes sense.** `instructions/` is the user's tuning knob; the pipelines respect what's there.
 - **Decoupling.** Pipelines and agents talk via stable resource names, not direct calls. Either side can be refactored as long as the resource contract holds.
 - **Cheap consumption.** Agents don't pay to re-derive context. The pipeline pays once; everyone reads cheaply.
@@ -248,6 +292,8 @@ A few things that the resource layer enables, and that other AI architectures of
 - `05_DAYFLOW.md` — the dayflow orchestrator (which *consumes* dayflow pipeline resources).
 - `06_PIPELINES_AND_ROUTINES.md` — the pipeline runner that powers most resource writers.
 - `16_BELIEF_ENGINE.md` — `resource_user_beliefs.json` lifecycle.
+- `SECRETS_ACCOUNTS.md` — the account/secret model behind the `resource_accounts` dynamic-resource family.
+- `SCOPE.md` — the four-layer scope model; resources are the allow/deny/lock half.
 - `app/assistant/pipelines/dayflow/RESOURCE_CONTRACTS.md` — per-resource shape contracts for dayflow pipeline outputs.
 
 ## 13. Key files
@@ -258,5 +304,8 @@ A few things that the resource layer enables, and that other AI architectures of
 | `app/assistant/agent_runtime/services/resource_resolver.py` | Thin shim agents use to resolve a resource via DI |
 | `app/assistant/agent_runtime/services/context_injector.py` | Walks `user_context_items` and resolves each |
 | `app/assistant/agent_runtime/services/keyword_resource_index.py` | Keyword-triggered resource injection (`task_keyword_resources`) |
+| `app/bootstrap.py` | Registers the dynamic-resource providers + locks (`resource_accounts`, `resource_email_accounts`, `resource_user_email`) |
+| `app/assistant/env_registry/env_registry_service.py` | `render_accounts_for_scope` — provider behind the `resource_accounts` family |
+| `app/assistant/utils/scope_gate.py` | The lock-side gate shared by resources and skills |
 | `app/assistant/pipelines/dayflow/RESOURCE_CONTRACTS.md` | Shape contracts for dayflow pipeline outputs |
 | `resources/` | The resource tree itself |

@@ -89,15 +89,12 @@ See **[07_TOOLS.md](../architecture/07_TOOLS.md)**.
 
 > A scoped conversation channel with its own identity, permissions, safety rules, and policy.
 
-Each room (`master_room`, `jamie`, `slack/<channel>`, `telegram/<chat>`, `dayflow_orchestrator`, etc.) is a directory under `app/assistant/rooms/<room_id>/` with required files:
+Each room (`master_room`, `jamie`, `slack/<channel>`, `telegram/<chat>`, `dayflow_orchestrator`, etc.) is a directory under `app/assistant/rooms/<room_id>/` with two files:
 
-- `resource_identity.json` — who Emi is in this room
-- `policy.json` — manager, surface, retention, authority level
-- `permissions.json` — what tools are allowed
-- `access.json` — what resources and entities are visible
-- ...and several more (see `rooms/ROOM_CONTRACT.md`)
+- `ROOM.md` — a single Markdown file whose YAML frontmatter holds the room's policy (manager, surface, retention, authority level), permissions (allowed tool classes), and access (visible resources/entities); the body maps onto the blackboard. See `rooms/ROOM_CONTRACT.md`.
+- `scope.yaml` — the room's permission envelope (see Scope, below).
 
-The `master_room` has authority level 99 (full access). Other rooms are narrower. The room's `policy.json` decides which manager handles its inbound messages.
+The `master_room` has authority level 99 (full access). Other rooms are narrower. The `manager_name` in `ROOM.md`'s frontmatter decides which manager handles the room's inbound messages.
 
 Rooms are how EmiOS keeps a Slack conversation from accidentally seeing the user's private context, and how it knows the right "voice" to use per surface. See **[03_ROOMS.md](../architecture/03_ROOMS.md)**.
 
@@ -115,6 +112,8 @@ Rooms are how EmiOS keeps a Slack conversation from accidentally seeing the user
 - `write_kg`, `write_unified_log`, etc. (in `ScopeWritePolicy`) — what side-effects are permitted
 
 **The narrowing-only rule**: a manager's `scope_contract` can only narrow inbound permissions, never widen them. So if you want a manager that needs to write to the KG, the *caller* must pass a Message whose scope already grants `write_kg=True`. See **[15_EMI_TEAM_AND_SCOPE.md](../architecture/15_EMI_TEAM_AND_SCOPE.md)** for the worked example.
+
+When an agent tries to use a tool, that scope is checked by a **four-layer gate**: the allowed-tools list is a *ceiling*, then visibility, then an authority floor, then (for sensitive actions) an approval step. You rarely touch this directly — but when a tool "isn't available" to an agent that should have it, this gate is usually why. The canonical reference is **[SCOPE.md](../architecture/SCOPE.md)**.
 
 ---
 

@@ -1,9 +1,13 @@
+> **⚠️ ARCHIVED / HISTORICAL — DO NOT EXECUTE AS WRITTEN (2026-06-17).** The unified-scope work **shipped via the transitional *overlay* path, NOT the clean cutover** this spec describes. The §5 "DELETE" targets — `_overlay_scope_yaml_permission`, `build_system_scope_context`, `_derive_*_scope`, `SCOPE_CONTRACT_STRICT` — are **live and load-bearing**; deleting them would break scope. For current behavior see **[SCOPE.md](SCOPE.md)**. Kept as the historical plan.
+
+---
+
 # Scope Refactor — Clean Cutover Spec
 
 **Status:** spec / not yet executed. Authored 2026-05-30.
 **Supersedes the *plan* sections of** `SCOPE_AUDIT.md` (which remains the
 investigation record). This is the end-state design + teardown order for the
-unified-scope refactor, written for a **clean cutover** (Emi offline during the
+unified-scope refactor, written for a **clean cutover** (the assistant offline during the
 work) rather than the live, shimmed rollout the earlier steps used.
 
 Companion memory: `project_unified_scope_design`, `feedback_scope_is_locus_of_mode_control`,
@@ -93,7 +97,7 @@ No overlay. No legacy dict to patch. No "no-file → fall back to ROOM.md."
 
 ## 5. What gets DELETED in the clean cutover
 
-These exist ONLY to support live, room-by-room migration. With Emi offline they
+These exist ONLY to support live, room-by-room migration. With the assistant offline they
 are pure cruft:
 
 | Delete | File | Why it was there |
@@ -162,7 +166,7 @@ fail-open default. Each gets reviewed with the user. Do NOT blanket-default them
 to `[all]` "to preserve behavior" — that re-creates the exact fail-open the
 refactor removes.
 
-## 9. Teardown order (clean cutover, Emi offline)
+## 9. Teardown order (clean cutover, the assistant offline)
 
 Each step ends test-green. Intermediate states may be non-runnable (nothing is
 live) — that's the point of doing it offline — but we still go in verifiable
@@ -191,7 +195,7 @@ caught multiple errors this session.
    `for_system_routine`, `for_internal_invocation` → `load_scope` /
    `load_scope_for_source`. Delete `SCOPE_CONTRACT_STRICT` and the non-strict
    branch.
-9. Verify: full suite + boot Emi once, watch it come up clean.
+9. Verify: full suite + boot the assistant once, watch it come up clean.
 
 **Phase D — expand per_manager to 5 sub-blocks (deferred, optional):**
 10. `ScopeToolRule` grows `{authority, resources, entities}` beyond `{allow,
@@ -208,7 +212,7 @@ caught multiple errors this session.
   with a mutation (flip a value, see the test go red, revert).
 - **Fail-closed enforcement** asserted at `check_tool_access` (execution gate),
   not just visibility — `[] → tool denied`.
-- **Boot test** — the final gate is starting Emi and confirming each surface
+- **Boot test** — the final gate is starting the assistant and confirming each surface
   (chat, dayflow tick, a routine, a pipeline) builds a sane scope and runs.
 
 ## 11. Bugs to fix in-flight (found by the audit, independent of the cutover)

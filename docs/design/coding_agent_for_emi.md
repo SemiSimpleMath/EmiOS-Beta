@@ -1,22 +1,22 @@
-# Rudimentary coding-agent capability for Emi
+# Rudimentary coding-agent capability for the assistant
 
 Status: draft for discussion. No code yet. Companion to `cli_emi.md`.
 
 ## TL;DR
 
-Emi has a rich agent runtime, scope/permission discipline, manager system, KG, pods — everything except the **coding-agent primitives** that Claude Code, Aider, Cursor, etc. have built their tools around. The gap is roughly: six new tools, one new planner agent, one new critic agent (approves non-obvious commands, proofreads written Python files, peeks at agent-written executables), one new manager, plus a thought-through sandbox model. Estimate: **2–3 weeks of focused work** to get to a usable v1 with the critic gates in place; another 2-4 weeks to make it actually nice.
+the assistant has a rich agent runtime, scope/permission discipline, manager system, KG, pods — everything except the **coding-agent primitives** that Claude Code, Aider, Cursor, etc. have built their tools around. The gap is roughly: six new tools, one new planner agent, one new critic agent (approves non-obvious commands, proofreads written Python files, peeks at agent-written executables), one new manager, plus a thought-through sandbox model. Estimate: **2–3 weeks of focused work** to get to a usable v1 with the critic gates in place; another 2-4 weeks to make it actually nice.
 
-The interesting design questions are **not** "can it do it" — the runtime is fine. They are: how much sandboxing is enough, what workspace abstraction sits beneath the agent, and how does this slot into Emi's existing room / scope / authority guards without becoming "the room that can do anything."
+The interesting design questions are **not** "can it do it" — the runtime is fine. They are: how much sandboxing is enough, what workspace abstraction sits beneath the agent, and how does this slot into the assistant's existing room / scope / authority guards without becoming "the room that can do anything."
 
 This doc walks through what's missing, what would be built, where the real risk lives, and how to phase it so v1 is usable without v2-v3 ever having to ship.
 
 ## Goals
 
-1. Emi can perform **mechanical coding work** end to end: read a repo, search for symbols, edit files, run tests, commit, iterate.
-2. Coding capability is **scoped to a workspace**, not the whole filesystem. Emi can't accidentally `rm -rf` your home directory.
-3. **Same guards as the rest of Emi** — agents are scoped, tools require approval where appropriate, every shell call is audit-logged.
-4. Usable from **CLI Emi** (Mode A or B from `cli_emi.md`) and from the master_room UI alike. Same manager, two transports.
-5. **Bounded ambition.** v1 is "Emi can change a file and run a test." It is not "Emi builds a SaaS product over a weekend." That's claude-code-level and a different effort budget.
+1. the assistant can perform **mechanical coding work** end to end: read a repo, search for symbols, edit files, run tests, commit, iterate.
+2. Coding capability is **scoped to a workspace**, not the whole filesystem. the assistant can't accidentally `rm -rf` your home directory.
+3. **Same guards as the rest of the assistant** — agents are scoped, tools require approval where appropriate, every shell call is audit-logged.
+4. Usable from **CLI the assistant** (Mode A or B from `cli_emi.md`) and from the master_room UI alike. Same manager, two transports.
+5. **Bounded ambition.** v1 is "the assistant can change a file and run a test." It is not "the assistant builds a SaaS product over a weekend." That's claude-code-level and a different effort budget.
 
 ## Non-goals (for v1)
 
@@ -24,11 +24,11 @@ This doc walks through what's missing, what would be built, where the real risk 
 - Inline diff UI in the existing Flask front-end (terminal output is fine for v1).
 - Long-running background coding ("work on this PR overnight"). Synchronous, foregrounded only.
 - Browser-driving / web-app testing (separate problem; `playwright_manager` is for that).
-- Replacing Claude Code on this same machine. They're not exclusive; the goal is "Emi can also do this when convenient," not "Emi replaces it."
+- Replacing Claude Code on this same machine. They're not exclusive; the goal is "the assistant can also do this when convenient," not "the assistant replaces it."
 
 ## The tool gap — what's missing today
 
-Current Emi text-handling tools (the relevant set):
+Current the assistant text-handling tools (the relevant set):
 
 - `read_text_file` — read a file. Exists.
 - `write_text_file` — overwrite a file. Exists. Overwrite-only is the wrong primitive for iterative coding.
@@ -36,7 +36,7 @@ Current Emi text-handling tools (the relevant set):
 
 Missing primitives that every coding agent needs:
 
-| Tool | Purpose | Existing Emi tool? |
+| Tool | Purpose | Existing the assistant tool? |
 |---|---|---|
 | `edit_file` | Surgical replace of `old_string` → `new_string` in one file. The primary edit primitive. | No |
 | `glob_files` | Find files by glob pattern (`src/**/*.py`). | No |
@@ -50,11 +50,11 @@ Plus a few smaller helpers worth having:
 - `git_status`, `git_diff`, `git_log` — could be `run_shell` invocations, but a typed wrapper is friendlier and easier to scope-gate. Could go via `run_shell` in v1.
 - `apply_patch` — apply a unified diff. Useful when an LLM thinks in patch terms rather than search-and-replace. v2.
 
-**Build cost per tool (with Emi's existing tool framework):** roughly half a day each. Each needs a `tool_contract.json`, two prompt templates (`<name>_description.j2`, `<name>_args.j2`), a Pydantic form, the implementation Python file, and registration. ~3-4 days for the six core tools.
+**Build cost per tool (with the assistant's existing tool framework):** roughly half a day each. Each needs a `tool_contract.json`, two prompt templates (`<name>_description.j2`, `<name>_args.j2`), a Pydantic form, the implementation Python file, and registration. ~3-4 days for the six core tools.
 
 ## The agent gap — coder agent + discipline
 
-Emi's existing planners are generalists. A coder needs different discipline:
+the assistant's existing planners are generalists. A coder needs different discipline:
 
 - **Read before edit.** Never modify a file you haven't read first.
 - **Search before guess.** When the user names a function or module, find it before assuming what it does.
@@ -130,7 +130,7 @@ This is the same template we just walked through for kg_dev. ~half day.
 
 ## Workspace and sandbox model
 
-The single biggest design decision and the largest risk. **Where does Emi's coder agent operate?**
+The single biggest design decision and the largest risk. **Where does the assistant's coder agent operate?**
 
 ### Option 1 — Single fixed workspace
 
@@ -197,7 +197,7 @@ A coding agent's value comes from the inner loop:
 read → think → edit → test → read failure → re-edit → test → commit
 ```
 
-Today Emi planners do `read → action → read result → action`. The coder agent's variant is the same shape with three additions:
+Today the assistant planners do `read → action → read result → action`. The coder agent's variant is the same shape with three additions:
 
 1. **The agent expects multiple actions per task.** A bug fix is rarely one tool call. The planner's `max_cycles` should be generous (~30). `kg_dev::planner` already has 30; same number works.
 2. **Test invocation discipline.** After each non-trivial edit, the agent should consider running tests. The system prompt encodes this. The actual test command is workspace-specific (`pytest`, `npm test`, `cargo test`) — the prompt frames "if this workspace has tests, run them," and the user/agent figures out which.
@@ -213,7 +213,7 @@ What we DO need:
 
 ## UI thoughts (deferred)
 
-For v1, terminal output is fine. CLI Emi (Mode A or B) is the primary entry point.
+For v1, terminal output is fine. CLI the assistant (Mode A or B) is the primary entry point.
 
 For later, the master_room UI could grow:
 - A "diff viewer" panel that renders the coder's changes since session start. Accept/reject buttons.
@@ -234,7 +234,7 @@ This is real frontend work and we should defer until v1 is proven. ~1 week if pu
 6. CLI entry: `emi-cli --manager coder_manager "fix the bug in X"`. ~half day (assumes `cli_emi` Mode A is shipped first).
 7. Real-world dogfooding: have it do 10 small tasks on this repo. Iterate on prompt + tool descriptions + critic discipline. ~1-2 days.
 
-After Phase 1: Emi can do mechanical coding work in CLI mode against a single workspace. Good enough for "fix this typo," "rename this function across the repo," "add a route that does X," "refactor this module." Not good enough for "build a Ring viewer from scratch" — that needs Phase 2.
+After Phase 1: the assistant can do mechanical coding work in CLI mode against a single workspace. Good enough for "fix this typo," "rename this function across the repo," "add a route that does X," "refactor this module." Not good enough for "build a Ring viewer from scratch" — that needs Phase 2.
 
 ### Phase 2 — usability + multi-workspace (3-5 days)
 
@@ -244,7 +244,7 @@ After Phase 1: Emi can do mechanical coding work in CLI mode against a single wo
 4. `workspace_summary` enrichments (recent commits, dirty files, branch name).
 5. Better failure-recovery prompt patterns — if a build fails 3 times in a row, the agent should bail out and ask the user instead of looping.
 
-After Phase 2: Emi can drive moderately complex coding tasks. Enough to attempt "build a Ring viewer page in Flask" because all the pieces exist (Flask templates, routes, JS files are all just-files-to-edit) and the agent has good enough discipline.
+After Phase 2: the assistant can drive moderately complex coding tasks. Enough to attempt "build a Ring viewer page in Flask" because all the pieces exist (Flask templates, routes, JS files are all just-files-to-edit) and the agent has good enough discipline.
 
 ### Phase 3 — UI + isolation (1-2 weeks)
 
@@ -263,11 +263,11 @@ The coder agent must NOT be the sole approver of its own actions. A separate cri
 2. **Every written or edited Python file** before the action is considered done.
 3. **Any executable the agent wrote** before the agent is allowed to run it.
 
-This mirrors Emi's existing `critic_pre_node` / `critic_post_node` pattern (used in `emi_team_manager`), specialized for coding work.
+This mirrors the assistant's existing `critic_pre_node` / `critic_post_node` pattern (used in `emi_team_manager`), specialized for coding work.
 
 ### Where the critic sits in the flow
 
-Two integration points, both reusing Emi's existing control-node pattern:
+Two integration points, both reusing the assistant's existing control-node pattern:
 
 ```
 coder::planner → coder_critic_pre_node → tool_caller → coder_critic_post_node → coder::planner (next cycle)
@@ -348,7 +348,7 @@ Triggered when `run_shell` is about to invoke a file the agent itself created or
 
 - Side-effect operations (file deletion, network, environment variable manipulation)
 - Embedded shell-out (the script itself calling subprocess with risky args)
-- Recursion (the script invokes Emi or runs the agent — would be a loop)
+- Recursion (the script invokes the assistant or runs the agent — would be a loop)
 
 If approved, `run_shell` proceeds. If not, planner is told the script needs revision.
 
@@ -400,7 +400,7 @@ This adds to the Phase 1 estimate:
 
 This design follows your "guarded" principle: every dangerous action passes through a deterministic check, then an LLM second opinion, then is logged. The coder is fast on safe paths and slow on risky paths, exactly the asymmetry you want.
 
-## How this plugs into Emi's guards
+## How this plugs into the assistant's guards
 
 Same three layers as everything else:
 
@@ -410,7 +410,7 @@ Same three layers as everything else:
 
 The chat_gate in front of `coder_manager` confirms before destructive operations exactly the way the kg-dev gate does — same pattern, different vocabulary.
 
-## What CLI Emi gets you on top of this
+## What CLI the assistant gets you on top of this
 
 Most of the time you'd actually use this, you're at a terminal anyway. So the natural entry point is CLI:
 
@@ -428,24 +428,24 @@ $ emi-cli --manager coder_manager "add a /ring route that lists recent snapshots
 Added /ring route with snapshot listing. Created app/routes/ring_viewer.py and registered the blueprint. Tests passing.
 ```
 
-This is what claude-code-style work looks like, on Emi's runtime, against your repo.
+This is what claude-code-style work looks like, on the assistant's runtime, against your repo.
 
 ## Risks
 
 - **Shell execution blast radius.** Heuristic blocklists are not real sandboxes. Single biggest risk in v1. Mitigations: workspace path prefix, timeout, audit log, `requires_approval` for non-trusted rooms. Long-term: Docker isolation.
 - **Agent quality.** Coding agents need iteration on prompts to be reliably useful. v1 will be mediocre and improve over time. Plan for that — don't ship and forget.
-- **Maintenance vs Claude Code.** Claude Code has dedicated team-years on its tools. Emi's coder will always lag. The point isn't to compete; it's to have a workable in-house coder for tasks that involve Emi-specific context (KG, pods, dayflow), where dropping into a separate tool is friction.
-- **Drift between coder agent and the rest of Emi.** Once the coder can edit Emi's own code, it's tempting to let it self-modify. We should set a discipline: the coder edits user workspaces; it does not edit `app/assistant/` of the running Emi process. (Different workspace; if you point it at EmiAi as a workspace, fine — but be aware.)
+- **Maintenance vs Claude Code.** Claude Code has dedicated team-years on its tools. the assistant's coder will always lag. The point isn't to compete; it's to have a workable in-house coder for tasks that involve the assistant-specific context (KG, pods, dayflow), where dropping into a separate tool is friction.
+- **Drift between coder agent and the rest of the assistant.** Once the coder can edit the assistant's own code, it's tempting to let it self-modify. We should set a discipline: the coder edits user workspaces; it does not edit `app/assistant/` of the running the assistant process. (Different workspace; if you point it at EmiAi as a workspace, fine — but be aware.)
 - **Test loop quality.** Without good tests in a workspace, the coder works without a feedback signal. Fine for "edit this typo," dangerous for "refactor this module." The agent's prompt should articulate "if there are no tests for this code path, write a test first."
 
 ## Open questions
 
 1. **What's the v1 workspace default?** Single workspace at `~/emi_workspace`? Or default to wherever the user is when they run `emi-cli`? **Pick one.**
 2. **`run_shell` approval policy.** Default `requires_approval: false` for cli/master_room and `true` for all other surfaces? Or always `true` and you opt out per session? Trade-off: convenience vs blast-radius.
-3. **Do we use the existing `task` system for sub-task tracking?** Claude Code uses `TodoWrite` to track multi-step plans. Emi has a task system (`tasks/specs/`, `tasks/runs/`). Reuse it? Or have the coder use a lightweight in-memory checklist like the existing planner pattern?
+3. **Do we use the existing `task` system for sub-task tracking?** Claude Code uses `TodoWrite` to track multi-step plans. the assistant has a task system (`tasks/specs/`, `tasks/runs/`). Reuse it? Or have the coder use a lightweight in-memory checklist like the existing planner pattern?
 4. **Test command discovery.** Does the coder agent guess (`pytest` for python, `npm test` for js)? Or does the workspace declare it (`workspace.json` with `"test_command": "pytest"`)? The latter is more robust; the former is friendlier in the common case.
-5. **Editing the running Emi.** If `coder_manager` is invoked from CLI Emi while Flask Emi is running, and the coder edits `app/assistant/...`, does Flask hot-reload? Crash? Should we explicitly forbid the coder from touching the workspace it's running inside? **Probably forbid for v1.**
-6. **Pair with `kg_dev_manager`?** A real coding task in this repo often needs to query the KG for examples or check pod tags. Should `coder_manager` have `kg_dev_manager` and `pod_search` in its allowed_tools? Or stay minimal and let the user route those manually? Probably yes — being able to grep AND ask the KG is a unique Emi superpower.
+5. **Editing the running the assistant.** If `coder_manager` is invoked from CLI the assistant while Flask the assistant is running, and the coder edits `app/assistant/...`, does Flask hot-reload? Crash? Should we explicitly forbid the coder from touching the workspace it's running inside? **Probably forbid for v1.**
+6. **Pair with `kg_dev_manager`?** A real coding task in this repo often needs to query the KG for examples or check pod tags. Should `coder_manager` have `kg_dev_manager` and `pod_search` in its allowed_tools? Or stay minimal and let the user route those manually? Probably yes — being able to grep AND ask the KG is a unique the assistant superpower.
 7. **Critic strictness defaults.** Stage B diff review on every Python edit, or skip for trivial diffs (single-line, comment-only)? The strict default is safer; the relaxed default keeps cost down. Recommendation: start strict, relax based on dogfooding.
 8. **Critic veto vs critic warning.** When the critic disapproves a non-allowlisted shell command, does the planner have to obey, or can it override with explicit user confirmation? v1 should be hard-veto (no override). Override requires a user-in-the-loop confirmation pattern.
 9. **Allowlist evolution.** The tier-1 obvious-safe allowlist for shell commands: starts small. Should it auto-grow ("if a command was approved by the critic 5 times in a row, promote to allowlist")? Probably not for v1 — too many ways to game it. Manual curation with audit-log driven additions.
@@ -454,7 +454,7 @@ This is what claude-code-style work looks like, on Emi's runtime, against your r
 
 1. Read this doc + `cli_emi.md`.
 2. Decide on the open questions (or punt to "Phase 1 will inform").
-3. Greenlight Phase 1 (5-7 days). This is the part where you find out if Emi-as-coder is useful for you.
+3. Greenlight Phase 1 (5-7 days). This is the part where you find out if the assistant-as-coder is useful for you.
 4. Use it for two weeks on real tasks. Track which prompts/tools fall short.
 5. Decide Phase 2 + 3 from real experience.
 

@@ -5,7 +5,7 @@ knowledge graph + its derivatives (wiki pages, entity cards). When a
 new finding shows up, this is the doc you want open.
 
 This is the **canonical** description of the self-healing loop as of
-2026-05-07. For the typed mutator tools that actually write to the KG
+2026-06-16. For the typed mutator tools that actually write to the KG
 (handler inventory, FK-cascade trap, `kg_revision_log` schema,
 cookbooks for adding new ops or producers) see
 `13_KG_MUTATOR_TOOLS.md`.
@@ -29,29 +29,47 @@ mutation lands in `kg_revision_log` with before/after snapshots.
 
 ## Daily timeline (cron, local times)
 
+Schedules are the `run_policy` blocks in `configs/routines/public/*.json`
+unless noted. `kg_pipeline` is the exception — it has **no** `run_policy`;
+its `trigger` is `{type: time, policy: {daily, time_local: 23:00},
+active_window: kg_active}`, i.e. fire at 23:00 inside the `kg_active`
+window (`configs/windows.json`). Tune the window, not `time_local`.
+
 ```
 DAILY (every night):
-00:20  entity_cards (pipeline)              ← GENERATE cards (PageRank → write → prune)
-02:00  kg_pipeline (pipeline)               ← INGEST: chat → claim_proposals
-02:00  entity_card_maintenance_pipeline     ← AUDIT cards (6 SQL scans) — flipped to daily 2026-05-07
+23:00  kg_pipeline (pipeline, trigger+active_window) ← INGEST: chat → claim_proposals (fires at start of kg_active)
 02:30  proposal_promoter (function)         ← MERGE BOT: promote claim_proposals to live KG nodes/edges
 02:45  kg_state_decay (function)            ← auto-close stale States (writes findings as 'executed' — skips investigator)
 02:50  kg_goal_dormancy_sweep (function)    ← active → dormant
-02:55  kg_goal_outcome_detect (function)    ← "I finished X" → terminal close
-03:00  kg_finding_backlog_drain (function)  ← INVESTIGATE: 5/day FIFO drain through investigator
-03:00  wiki_nightly_refresh (function)      ← regen wiki pages whose bullets changed
+02:55  kg_goal_outcome_detect (function)    ← "I finished X" → terminal close (limit 10/day)
+03:00  kg_finding_backlog_drain (function)  ← INVESTIGATE: 20/day, excludes duplicate_node/state_missing_dates/synthetic_fact_proposal
+03:00  wiki_nightly_refresh (function)      ← regen wiki pages whose bullets changed + consistency critic
 03:15  kg_state_date_drain (function)       ← INVESTIGATE state_missing_dates findings (8/day, specialized brief)
-03:30  kg_finding_cluster_resolve (function)← group N redundant findings into 1 lead
+03:15  kg_dup_cluster_drain (function)      ← adjudicate duplicate_node clusters (union-find → 1 LLM call/cluster, 50/run)
+03:30  kg_finding_cluster_resolve (function)← group N redundant findings into 1 lead (30 clusters/run)
 03:30  wiki_growth (function)               ← write new wiki pages for high-degree entities
-03:45  kg_finding_executor_drain (function) ← EXECUTE: 10/day; picks auto_apply findings whose 24h grace expired
-04:15  kg_wiki_inference (function)         ← propose new edges from wiki page prose
+03:45  kg_identity_sentence_refresh (function) ← (re)gen graph-derived identity sentences → node_identity_embeddings (≤1500/run)
+04:00  kg_evidence_digestion (function)     ← fold oldest evidence rows of heaviest-evidenced nodes into a digest (5 nodes/night)
+04:15  kg_wiki_inference (function)         ← propose new edges from wiki page prose → claim_proposals
+04:30  entity_card_refresh (function)       ← rebuild ≤10 stale + build ≤5 new cards (7d/card cooldown, card_critic veto), deactivate orphans
+09:00  kg_date_gap_drain (function)         ← enqueue 2 state_missing_dates findings as pending questions (7d/finding cooldown)
+
+INTERVAL:
+every 15 min  kg_finding_executor_drain (function) ← EXECUTE: 10/run; auto_apply findings whose 24h grace expired (+ user-Accepted)
+every 30 min  kg_importance_rater (function)       ← edge LLM rater (≤400 edges/run); node importance DERIVED
+every 60 min  kg_embedding_diff_sync (function)    ← reconcile chroma label/identity/context vs sqlite (≤1200 embeds/run)
+daily (24h, 08:00–22:00 window)  wiki_fact_drain (function) ← confirm synthetic_fact_proposal facts as questions (≤2/run)
 
 WEEKLY:
-Mon 02:00  kg_maintenance_pipeline (pipeline)  ← heavy audit: orphan/embedding/dup/pagerank/desc/missing-dates
-
-EVERY 30 MIN:
-       kg_importance_rater (function)        ← node + edge importance scores (60n / 50e per tick)
+Mon 02:00  kg_maintenance_pipeline (pipeline)  ← heavy audit (step order below)
+Sun 04:10  kg_embedding_full_rebuild (function)← re-embed every node's label+identity+context (belt-and-suspenders floor)
 ```
+
+There is **no** `entity_cards` pipeline routine and **no**
+`entity_card_maintenance_pipeline` — the only card routine is
+`entity_card_refresh` (04:30). The old "generate pipeline + audit
+pipeline + card-findings table" design was removed; card QA is now a
+single L0 `card_critic` veto inside the nightly refresh (see below).
 
 ## Lifecycle of a finding
 
@@ -136,7 +154,7 @@ Manager config: `app/assistant/multi_agents/kg_investigation_manager/config.yaml
 1. `tools.allowed_tools` and `scope_contract.tools.allowed_tools` list **only** `kg_query`. Curated down from a larger set in 2026-05-07; the investigator earns its budget through SQL, not pod search.
 2. `scope_contract.writes.write_kg: false` — even if a tool slipped through, the scope context refuses authorization.
 
-**Planner agent** (`kg_investigation::planner`, `gpt-5.1` smart tier):
+**Planner agent** (`kg_investigation::planner`, `gpt-5.4` powerful tier):
 - Statically binds the `kg-conflict-triage` skill (combined triage doctrine + playbook).
 - `entity_card_level: 0` — only one-liner identity, not the disputed key_facts. Avoids priming the investigator with the very claims under investigation.
 - System prompt teaches: one question per query, counts before bodies, stop early, walk provenance, don't speculate beyond the data.
@@ -178,7 +196,10 @@ Manager config: `app/assistant/multi_agents/kg_resolution_manager/config.yaml`. 
 **Planner agent** (`kg_resolution::planner`, `gpt-5.5` smart tier):
 - Statically binds the `kg-conflict-triage` skill (same doctrine as the investigator).
 - `entity_card_level: 2` (entity context for mutation reasoning).
-- Full mutator toolkit:
+- Full toolkit — 10 mutators + 2 finding-lifecycle ops. The manager
+  config (`tools.allowed_tools`) grants all 12; the planner's own
+  `allowed_tools` lists 8 mutators (it leans on the finding-lifecycle
+  ops and the newer disambiguation ops being visible at the manager level):
 
 | Tool | Purpose |
 |---|---|
@@ -188,8 +209,12 @@ Manager config: `app/assistant/multi_agents/kg_resolution_manager/config.yaml`. 
 | `kg_update_node_field` | Surgical edit to one field (date, label, prose, etc.) |
 | `kg_rename_label` | When the current label is demonstrably wrong |
 | `kg_create_edge` / `kg_delete_edge` | Connecting/removing relationships |
+| `kg_repoint_edge` | Move one edge endpoint (Disambiguation drain) |
+| `kg_split_succession` | Era-split a role-reference entity (close old era, mint successor + Disambiguation, chain `succeeded_by`) |
 | `kg_delete_node` | Remove orphans / fully-superseded nodes |
 | `kg_merge_nodes` | Combine duplicates (label-spacing typos, alternate spellings) |
+| `kg_finding_resolve` | Close a finding `executed` (finding lifecycle) |
+| `kg_finding_escalate` | Route a finding to `escalated` (finding lifecycle) |
 
 **Safety model**: every executor invocation is gated by either the
 24-hour dev-page grace window (auto_apply path) or an explicit human
@@ -258,18 +283,28 @@ Helper module `app/assistant/kg_maintenance/verdict_store.py` exposes:
 
 1. **`step_duplicate_scan._add_pair`** — drops candidate pairs with a prior `'distinct'` verdict before the LLM duplicate-detector runs (logs `prior_verdict_skipped=N` per run). Closes the loop: next month's duplicate scan won't re-flag the same pair.
 2. **`finding_brief.build_finding_brief`** — every brief gets a `## Prior verdicts on these nodes` section listing what was decided before, so the investigator can confirm/supersede instead of re-deriving.
-3. **`proposal_promoter` merge filter** — *planned*. Would drop `'distinct'`-verdict pairs at fact-extraction time, before the proposal_promoter merge logic fires. Higher leverage but more invasive; deferred for a follow-up commit.
+3. **`proposal_promoter` merge filter** — *implemented* (`proposal_promoter._maybe_merge_*` consults `verdict_store.load_distinct_verdicts_among(cand_ids)`). When the maintenance loop already ruled two of the merge candidates `'distinct'` from each other, the promoter **memo-injects** that fact into the `node_merger` agent's candidate payload (`prior_distinct_verdicts`) rather than dropping the pair. Rationale: the verdict says the *candidates* differ from each other, not which (if either) matches the new observation — deterministic proposes, the LLM decides. Closes the loop earlier than the duplicate scan: a new observation can't be re-bound into the wrong twin.
 
 ## Component tables
 
 ### Producers (write findings)
 
+Maintenance-pipeline step order (`kg_maintenance_pipeline/pipeline.py`,
+run Mon 02:00): `orphan_scan` → `context_embedding_backfill` →
+`duplicate_scan` → `pagerank` → `missing_dates_scan` →
+`role_succession_scan` → `date_lint_scan` → `disambiguation_scan` →
+`investigate_findings` (final pass, caps at 20 investigations/run). The
+old `description_fill`/`missing_description` step was deleted 2026-06-10
+(wiki page leads are the authoritative source of `node.description`).
+
 | Producer | Type | finding_type | Notes |
 |---|---|---|---|
 | `step_orphan_scan` | maintenance pipeline step | `orphan_node` | Cheap structural scan |
-| `step_duplicate_scan` | maintenance pipeline step | `duplicate_node` | Three-tier candidate gen + LLM confirm; consults `kg_node_verdict` to skip already-decided pairs |
-| `step_description_gap_scan` | maintenance pipeline step | `missing_description` | Connected nodes only |
-| `step_missing_dates_scan` | maintenance pipeline step | `state_missing_dates` | State/Event nodes missing one or both dates |
+| `step_duplicate_scan` | maintenance pipeline step | `duplicate_node` | Three-tier candidate gen + LLM confirm; consults `kg_node_verdict` to skip already-decided pairs. Drained by `kg_dup_cluster_drain`, not the backlog drain |
+| `step_missing_dates_scan` | maintenance pipeline step | `state_missing_dates` | State/Event nodes missing one or both dates, scored by connected-entity pagerank |
+| `step_role_succession_scan` | maintenance pipeline step | (diachronic disambiguation) | Judges role-reference entities for referent changes before the disambiguation scan |
+| `step_date_lint_scan` | maintenance pipeline step | date-quality findings | Lints date intervals (e.g. inverted start/end) |
+| `step_disambiguation_scan` | maintenance pipeline step | (Disambiguation drain) | Temporal drain that re-points mentions parked at split labels |
 | `step_state_decay` | daily routine | `state_auto_closed` | Closes stale States, writes finding with `initial_status='executed'` so it skips the investigator |
 | `wiki_consistency_critic` | wiki-pipeline agent | `wiki_contradiction` | Bypasses `upsert_finding` — writes rich `evidence_json` directly |
 | `wiki_connection_investigator` | `kg_wiki_inference` routine | `synthetic_fact_proposal` | Investigator handles duplicate-check; promotion path is `synthetic_fact_review` |
@@ -293,7 +328,7 @@ Helper module `app/assistant/kg_maintenance/verdict_store.py` exposes:
 | Manager | Role | Tools | Caller |
 |---|---|---|---|
 | **`kg_investigation_manager`** | read-only investigator | `kg_query` | `kg_finding_backlog_drain`, `kg_state_date_drain`, `/kg-maintenance/api/finding/<id>/investigate` |
-| **`kg_resolution_manager`** | executor with full mutator suite | `kg_query` + 8 mutator tools | `kg_finding_executor_drain`, dev-page Accept button |
+| **`kg_resolution_manager`** | executor with full mutator suite | `kg_query` + 9 mutator tools + 2 finding-lifecycle ops | `kg_finding_executor_drain`, dev-page Accept button |
 | `kg_mutation_manager` *(legacy — `/apply` route only)* | applies a structured `proposed_action` from older investigator reports | typed mutator allowlist | `/api/finding/<id>/apply` (legacy dev-page Apply button) |
 | `kg_dev_manager` | free-form admin console | full mutator suite | `kg_dev_room` chat |
 | `kg_dev_room_manager` | dispatch front for `kg_dev_manager` | `kg_dev_manager` (as a tool) | `kg_dev_room` chat |
@@ -320,33 +355,32 @@ Helper module `app/assistant/kg_maintenance/verdict_store.py` exposes:
 | `wiki_connection_investigator` agent | LLM | Read wiki prose, propose new KG edges |
 | `wiki_renderer` module | code | Render markdown from KG neighborhoods (no LLM) |
 
-### Two card pipelines (producer + auditor)
+### Entity card refresh (single nightly loop)
 
-Despite confusing names, these are **distinct**:
+The earlier "two card pipelines" design (an `entity_cards` generate
+pipeline + an `entity_card_maintenance_pipeline` SQL-scan auditor
+writing to an `entity_card_maintenance_finding` table) was **removed**.
+There is now one routine, `entity_card_refresh` (function, cron 04:30,
+`app/assistant/pipelines/entity_cards_v2/refresh_subscriber.py`), and
+card QA is a single L0 critic veto inside it — not a separate scan loop.
 
-| Component | Type | Purpose | LLM? | Findings table |
-|---|---|---|---|---|
-| **`entity_cards`** (cron 00:20) | pipeline (3 steps: PageRank → Generate → PruneDryRun) | **Generates** cards | yes | n/a |
-| **`entity_card_maintenance_pipeline`** (cron 02:00 daily, was weekly) | pipeline (6 SQL-only scan steps) | **Audits** existing cards | no | `entity_card_maintenance_finding` |
+Each run, against `entity_card_v2`:
+- **Rebuild stale cards** — a card is stale iff its entity node *or any
+  current neighbor node* has `updated_at` newer than the card's
+  `last_built_at`. Damped by a per-card cooldown (default 7 days — changes
+  accumulate, one rebuild fires when the cooldown expires) and a per-night
+  cap (default 10, highest node `importance` first).
+- **Build new cards** for newly card-worthy entities (cap default 5). Each
+  freshly rendered card is judged by `entity_cards::card_critic`
+  (`gpt-5-mini`, mini tier; `app/assistant/agents/entity_cards/card_critic/`)
+  — a 3-verdict L0 quality judge whose **veto** drops noise cards before
+  they go live.
+- **Deactivate orphans** — cards whose entity node no longer exists (merge
+  losers) are flipped `is_active=0`.
 
-Card maintenance was flipped from weekly Tuesday → daily 02:00 on
-2026-05-07 so KG mutations get reflected in cards within ~24h instead
-of up to 7 days. Long-term plan: cards regenerate on KG mutation
-events, similar to how wiki dirty-detection works today.
-
-Card-side findings (separate table, separate review route at
-`/entity-card-maintenance`):
-
-| Step | Output |
-|---|---|
-| `step_blank_content_scan` | `blank_card` (medium) |
-| `step_broken_link_scan` | `broken_card_link` (high → deactivate) |
-| `step_junk_name_scan` | `junk_card_name` (high → deactivate) |
-| `step_low_confidence_scan` | `low_confidence_card` (medium) |
-| `step_no_link_scan` | `unlinked_card` (low) |
-| `step_stale_content_scan` | `stale_content` (low) |
-
-There is no investigator+executor loop on the card side — just SQL scans + manual review.
+There is no investigator+executor loop and no card-findings table on the
+card side — staleness is stateless (the `updated_at` comparison), and the
+only LLM gate is the critic veto on new builds.
 
 ## Dev page (`/kg-maintenance/investigated`)
 
@@ -371,9 +405,6 @@ The autosave endpoints are POSTs that take a single field; the view re-reads and
   duplicate), the promotion path (`approved → extracted → promoted`)
   is currently TBD. Investigator emits `disposition='needs_user_review'`
   for these and the user manually promotes via `/kg-dev`.
-- **`proposal_promoter` verdict filter** — planned (Reader #3 above).
-  Would prevent re-merging at fact-extraction time, before findings
-  are even raised.
 - **No concurrent-execution lock on `execute_one`** — two simultaneous
   execute_one calls on the same finding (cron + dev-page Accept, or
   two crons) will both invoke the LLM. In practice the second run's
@@ -414,11 +445,9 @@ The autosave endpoints are POSTs that take a single field; the view re-reads and
 | `state_missing_dates` | `step_missing_dates_scan` (weekly pipeline) | `kg_maintenance_finding` |
 | `duplicate_node` | `step_duplicate_scan` (weekly pipeline; consults `kg_node_verdict`) | `kg_maintenance_finding` |
 | `orphan_node` | `step_orphan_scan` (weekly pipeline) | `kg_maintenance_finding` |
-| `missing_description` | `step_description_gap_scan` (weekly pipeline) | `kg_maintenance_finding` |
 | `wiki_contradiction` | `wiki_consistency_critic` (during `wiki_nightly_refresh`) | `kg_maintenance_finding` |
 | `synthetic_fact_proposal` | `wiki_connection_investigator` (during `kg_wiki_inference`) | `kg_maintenance_finding` |
 | Cluster lead with `cluster.root_question` | `kg_finding_cluster_resolver` | `kg_maintenance_finding` |
-| `blank_card`, `broken_card_link`, `junk_card_name`, `low_confidence_card`, `unlinked_card`, `stale_content` | `entity_card_maintenance_pipeline` steps (cron 02:00 daily) | `entity_card_maintenance_finding` |
 
 ## Out of scope (mentioned for orientation)
 
@@ -447,4 +476,4 @@ The autosave endpoints are POSTs that take a single field; the view re-reads and
 | Dev-page route | `app/routes/kg_maintenance.py` |
 | Dev-page template | `app/templates/kg_maintenance_investigated.html` |
 
-For mutator-tool mechanics (FK-cascade trap, revision-log schema, six-handler contract, cookbooks for adding new ops or producers) see `docs/architecture/13_KG_MUTATOR_TOOLS.md`.
+For mutator-tool mechanics (FK-cascade trap, revision-log schema, the twelve-handler inventory, cookbooks for adding new ops or producers) see `docs/architecture/13_KG_MUTATOR_TOOLS.md`.

@@ -144,7 +144,7 @@ The validator `_validate_strict_routing_config` (`MultiAgentManager.py:55-115`) 
 
 ## ScopeContext: the permission envelope
 
-`ScopeContext` (`app/assistant/utils/pydantic_classes.py:94-118`) is the Pydantic struct attached to every `Message` that crosses a manager or pipeline boundary. It carries identity (who's calling, on what surface, in what room) and a set of sub-policies that govern what the call can *do*.
+`ScopeContext` (`app/assistant/utils/pydantic_classes.py`, `schema_version="scope_context_v1"`) is the Pydantic struct attached to every `Message` that crosses a manager or pipeline boundary. It carries identity (who's calling, on what surface, in what room) and a set of sub-policies that govern what the call can *do*.
 
 Top-level fields:
 
@@ -166,7 +166,8 @@ Sub-policies (each a `ScopeBaseModel` with `extra="forbid"`):
 |---|---|
 | `history` (`ScopeHistoryPolicy`) | `mode` (none / recent_only / summary_plus_recent), `source` (scope_local / unified_log), `lookback_hours`, `max_messages`. |
 | `resources` (`ScopeResourcePolicy`) | `allowed_global_resources` (or `["all"]`), `allowed_room_resources`, `denied_resources`, `resource_groups` (RAG scopes). |
-| `tools` (`ScopeToolPolicy`) | `allowed_tools` (`["all"]` or explicit list — cannot mix), `blocked_tools`, `requires_approval_tools`, `allow_external_side_effects`. Validator at `pydantic_classes.py:35-41` rejects mixed `["all", "x"]`. |
+| `tools` (`ScopeToolPolicy`) | `allowed_tools` (`["all"]` or explicit list — cannot mix; a field validator rejects `["all", "x"]`), `blocked_tools`, `requires_approval_tools`, `allow_external_side_effects`, and `per_manager` (`Dict[str, ScopeToolRule{allow, block}]` — fires when the named manager runs anywhere in the call tree; the primary surgical lever). |
+| `pods` (`ScopePodPolicy`) | `allowed_scopes` — which pod `scope_id`s this scope may read; `["self"]` default (own room only), `["all"]` for owner cross-room surfaces. Sensitivity/`min_authority` is a separate axis. |
 | `entities` (`ScopeEntityPolicy`) | `enabled`, `allowed_entity_cards`, `pinned_entities`, lookback windows. |
 | `cards` (`ScopeCardPolicy`) | `allowed_cards`, `max_cards_per_turn`, `max_total_chars`. |
 | `writes` (`ScopeWritePolicy`) | `write_unified_log` (default `True`), `write_kg` (default `False`), `allow_fact_extraction` (default `False`), `writable_state_keys`. |
@@ -176,32 +177,45 @@ Sub-policies (each a `ScopeBaseModel` with `extra="forbid"`):
 | `execution` (`ScopeExecutionPolicy`) | `max_turns`, `max_tool_calls`, `timeout_seconds`, `allowed_models`. |
 | `delegation` (`ScopeDelegationPolicy`) | Currently empty — placeholder. |
 
-Where scope is built:
+Where scope is built (`ScopeAdapter` in `scope_adapter.py`):
 
-- **Inbound user messages from a room**: `ScopeAdapter._derive_room_scope` reads `room_policy.json`, `permissions.json`, `access.json` and assembles a scope (`scope_adapter.py:253-363`).
-- **System / background work**: `build_system_scope_context` (`scope_adapter.py:91-170`).
+- **Inbound user messages from a room**: `_derive_room_scope` delegates to the single reference builder `build_scope_contract_for_room_request` (room_scope_builder) so the chat and system ingress vectors produce *identical* permission for the same room.
+- **System / background work**: `build_system_scope_context`.
 - **Pipelines**: `load_scope_for_source(kind="pipeline", source_id=...)` (`app/assistant/scope/loader.py`) — loads the pipeline's `scope.yaml` and stamps per-run identity. Built once at run start, threaded through every step.
 - **Explicit caller-provided scopes**: handed to `ManagerInvoker.invoke` on the `Message`, then passed through `ScopeAdapter.apply` for narrowing.
 
-`ScopeAdapter.apply` (`scope_adapter.py:184-196`) is what the `ManagerInvoker` calls before `request_handler`. It resolves the scope (inherit from message, derive from room, or build from system defaults), applies the manager's `scope_contract` *as a narrowing*, and projects the result into `message.data` so legacy tool-scoping code can keep reading `task_allowed_tools`, `write_kg`, etc.
+`ScopeAdapter.apply` is what `ManagerInvoker` calls before `request_handler`. It resolves the scope (`_resolve_scope_context`: inherit from message → derive from room → system floor), applies the manager's `scope_contract` *as a narrowing* (`_apply_manager_narrowing`), and projects the result onto `message.data` so legacy tool-scoping code can keep reading `task_allowed_tools`, `write_kg`, etc. (`_project_scope_to_runtime_data`).
+
+**Strict ingress (default).** When a request reaches `_resolve_scope_context` with *no* inbound scope, *no* room, and *no* `data.scope_contract`, the adapter **refuses** rather than silently synthesizing a wide system scope. `_strict_scope_enabled()` returns `not test_mode` by default (an explicit `SCOPE_CONTRACT_STRICT` env always wins; `EMI_TEST_MODE=1` / `PYTEST_CURRENT_TEST` relax it to *derive*, mirroring `MultiAgentManager`'s own test-mode substitution). Every live invoker path (chat, dayflow, maintenance, task) already attaches a scope or room, so a scope-less production ingress is an unintended ungated invocation and fails loud. (A narrow exception: `_allow_strict_mode_system_derivation` still derives when the request carries a `task_file`, a `scope_contract` seed, or a resource contract.)
 
 ---
 
-## The narrowing-only rule
+## The narrowing-only rule (ceiling, not per-level grant)
 
-A manager's `scope_contract` block in its `config.yaml` can only **tighten** the inbound scope — never loosen it.
+A manager's `scope_contract` block in its `config.yaml` can only **tighten** the inbound scope — never loosen it. But "tighten" is **not** a blind intersection for the tool surface.
 
-Concretely, `ScopeAdapter._apply_manager_narrowing` (`scope_adapter.py:420-513`) does:
+`ScopeAdapter._apply_manager_narrowing` treats the inbound `allowed_tools` as a **ceiling** and resolves the manager's *own* surface (`scope_contract.tools.allowed_tools` if it declares one, else the manager's `config.tools.allowed_tools`) against it:
 
-- `tools.allowed_tools` -> intersected with the inbound list (with `["all"]` semantics).
-- `tools.blocked_tools` -> set-union with inbound (additive denial).
-- `tools.requires_approval_tools` -> set-union (additive).
-- `tools.allow_external_side_effects` -> can flip from `True` to `False`, never `False` to `True`.
-- `resources.allowed_global_resources` / `allowed_room_resources` -> intersected.
-- `entities.enabled` -> can flip from `True` to `False`, never reverse.
-- `entities.allowed_entity_cards` / `pinned_entities` -> intersected.
-- `writes.{write_unified_log, write_kg, allow_fact_extraction}` -> can flip from `True` to `False`. **Flipping `False` to `True` raises `ValueError`** (lines 485-488).
-- `approval.authority_level` -> may *clamp down* but raises `ValueError` if `requested > parent` (lines 500-504).
+- **parent `["all"]`** → the manager's own surface stands verbatim.
+- **`manager_name` ∈ the parent's allow-list** → the parent **granted** this manager, so its *whole own surface* is allowed (granting a manager grants its subtree — **not** an intersection with the parent's narrowed leaf list).
+- **otherwise** → bounded by the ceiling (intersection); an empty parent → `[]` (allow nothing → the breach wall holds).
+
+This is the **starvation fix**: a sub-manager reached through a narrowed parent (`master_room → emi_team → sandbox`) used to inherit the parent's small leaf allow-list and **lose its own tools**, because only a declared `scope_contract.allowed_tools` triggered the grant. Reading the config surface plus the "granted ⇒ whole subtree" rule is what keeps a granted sub-manager from being starved.
+
+The rest of the narrowing is monotone:
+
+- `tools.blocked_tools` / `requires_approval_tools` → set-union with inbound (additive denial).
+- `tools.allow_external_side_effects` → may flip `True`→`False`, never `False`→`True`.
+- `resources.allowed_global_resources` / `allowed_room_resources` → intersected.
+- `entities.enabled` → may flip `True`→`False`, never reverse; `allowed_entity_cards` / `pinned_entities` → intersected.
+- `writes.{write_unified_log, write_kg, allow_fact_extraction}` → may flip `True`→`False`. **Flipping `False`→`True` raises `ValueError`.**
+- `approval.authority_level` → may *clamp down* but raises `ValueError` if `requested > parent`.
+
+### `per_manager` — the primary surgical lever (and switchboard-locking)
+
+After the ceiling logic, a **scope-level** `tools.per_manager[<manager_name>]` rule (`ScopeToolRule{allow, block}`) is folded into `allowed_tools` so it binds at **execution** (`tool_access_control.check_tool_access` reads `allowed_tools`), not merely at visibility. `allow` (when present, even empty) **replaces** the surface when the ceiling is `["all"]`, else intersects it; `block` is subtracted from the surface **and** unioned into `blocked_tools` so it propagates to children.
+
+This is the lever that survives a room overwriting `allowed_tools`: a room's own `allowed_tools` is *replaced* by its manager's `scope_contract`, so the surviving way to restrict what a room's switchboard may route to is a `per_manager` rule keyed on the **hosting manager** (`room_manager` for non-master rooms — not the room id, not the agent name). See SCOPE.md §6 for the wired switchboard example.
 
 The error a caller will see on a widening attempt:
 
@@ -223,11 +237,11 @@ The fix pattern: when a caller wants a manager to do something more permissive t
 
 ---
 
-## Case study: kg_finding_executor and `_mutation_scope()`
+## Case study: kg_finding_executor and `finding_write_scope()`
 
-`kg_finding_executor.run_executable_findings` (`app/assistant/kg_investigator/finding_executor.py:194-227`) is a routine-driven sweeper that picks up `kg_maintenance_finding` rows whose investigator already proposed an action and hands each one to `kg_mutation_manager` for application. It's a system-initiated call with no inbound user `Message`.
+`kg_finding_executor.run_executable_findings` (`app/assistant/kg_investigator/finding_executor.py`) is a routine-driven sweeper that picks up `kg_maintenance_finding` rows whose investigator already proposed an action and hands each one to `kg_mutation_manager` for application. It's a system-initiated call with no inbound user `Message`.
 
-**The bug.** The first wiring used `Message(task=..., information=...)` with no `scope_context`. `ScopeAdapter` then fell into `_derive_system_scope` (`scope_adapter.py:365-418`), which builds a scope where `writes.write_kg` defaults to `False`. `kg_mutation_manager`'s `scope_contract` says `writes.write_kg: true` (`kg_mutation_manager/config.yaml:92-94`) — and `_apply_manager_narrowing` saw that as the manager *widening* `False` -> `True` and raised:
+**The bug.** The first wiring used `Message(task=..., information=...)` with no `scope_context`. `ScopeAdapter` fell into `_derive_system_scope`, which builds a scope where `writes.write_kg` defaults to `False`. `kg_mutation_manager`'s `scope_contract` says `writes.write_kg: true` — and `_apply_manager_narrowing` saw that as the manager *widening* `False` → `True` and raised:
 
 ```
 ValueError: [kg_mutation_manager] scope_contract attempted to expand writes.write_kg
@@ -236,43 +250,27 @@ ValueError: [kg_mutation_manager] scope_contract attempted to expand writes.writ
 
 **Diagnosis.** The manager's `scope_contract` is not the place to *grant* the right; it's the place to *constrain* it. Granting has to happen at the call site, where the system (not a user message) knows it has authority to mutate.
 
-**The fix.** Add `_mutation_scope()` in the executor that builds an explicit permissive scope and attaches it to the outbound Message (`finding_executor.py:35-52`):
+**The fix.** A `finding_write_scope()` helper (now in `finding_processor.py`, shared by the executor and the resolution manager) builds the permissive scope and attaches it to the outbound Message. Note the *current* shape: it no longer hand-rolls a `ScopeContext(...)` — that would be an anti-pattern (SCOPE.md §12). It goes through the single loader, reading `kg_investigator/scope.yaml`:
 
 ```python
-def _mutation_scope() -> ScopeContext:
-    """Scope context that authorizes the mutation manager to write to the KG.
-
-    The system refuses to widen ``writes.write_kg`` from False to True via
-    the manager's scope_contract; the inbound Message has to already grant
-    the right. So the executor seeds a permissive scope here. The manager's
-    own scope_contract still narrows tools to the typed mutator allowlist.
-    """
-    return ScopeContext(
-        scope_id="scope::kg_investigator::finding_executor",
-        owner_id="primary_user",
+def finding_write_scope() -> ScopeContext:
+    return load_scope_for_source(
+        kind="subsystem",
+        source_id="kg_investigator",
         actor_id="kg_finding_executor",
-        surface="system",
-        room_id=None,
-        approval=ScopeApprovalPolicy(authority_level=100),
-        resources=ScopeResourcePolicy(allowed_global_resources=["all"]),
-        writes=ScopeWritePolicy(write_kg=True, write_unified_log=True),
+        identity_overrides={
+            "owner_id": PRINCIPAL_USER,
+            "actor_id": "kg_finding_executor",
+            "scope_id": "scope::kg_investigator::finding_executor",
+        },
     )
 ```
 
-And use it on the message:
+and is attached on the message: `Message(task=..., information=..., scope_context=finding_write_scope())` → `DI.manager_invoker.invoke(mgr, msg)`.
 
-```python
-msg = Message(
-    task=brief["task"],
-    information=brief["information"],
-    scope_context=_mutation_scope(),
-)
-DI.manager_invoker.invoke(mgr, msg)
-```
+The manager's own `scope_contract` still does its job — `kg_mutation_manager` narrows the tool surface to `kg_query`, `kg_merge_nodes`, `kg_rename_label`, `kg_update_node_field`, `kg_repoint_edge`, `kg_create_state_node`, `kg_close_state`, `kg_finding_resolve`, `kg_finding_escalate`, `ask_user` and explicitly blocks the raw `kg_create_node` / `kg_create_edge` / `kg_delete_node` / `kg_delete_edge` / `kg_update_node` family (plus `install_tool`). The narrowing constrains, not grants.
 
-The manager's own `scope_contract` still does its job — `kg_mutation_manager` narrows the tool surface to `kg_query`, `kg_merge_nodes`, `kg_rename_label`, `kg_update_node_field`, `kg_finding_resolve`, `kg_finding_escalate`, `ask_user` and explicitly blocks the raw `kg_create_*` / `kg_delete_*` / `kg_update_node` family (`kg_mutation_manager/config.yaml:74-91`). The narrowing constrains, not grants.
-
-This is the canonical pattern. Any system-initiated caller that needs to grant something the default `_derive_system_scope` does not (KG writes, fact extraction, raised authority level, broader resource access) needs its own `_*_scope()` helper.
+This is the canonical pattern. Any system-initiated caller that needs to grant something the default `_derive_system_scope` does not (KG writes, fact extraction, raised authority level, broader resource access) builds a scope at the call site — preferably via `load_scope_for_source` against the caller's own `scope.yaml`, as `finding_write_scope()` now does.
 
 ---
 
@@ -294,7 +292,11 @@ Other surfaces default to `0`. Rooms can override via `room_policy.authority_lev
 
 System-initiated background work (pipelines, routines, the finding executor) typically uses `100` because it represents the user's own automation. The narrowing rule still applies — a manager cannot *raise* the level above what the inbound scope grants.
 
-> Note: only `authority_level` is currently configurable per-manager; other approval behavior (dangerous-tool gates, install gates) is not. See the comment at `scope_adapter.py:506-507`.
+> Note: only `authority_level` is currently clamped per-manager; other approval behavior (dangerous-tool gates, install gates) is not configurable in the narrowing.
+
+### The L1 per-tool authority floor
+
+Authority is not only an *approval* dial — it is also a **see+use floor** enforced at the access layer. Each first-party tool contract may carry `metadata.min_authority` (an int 0–100; `tool_access_control.resolve_tool_min_authority` reads it, MCP/dynamic tools have none). `check_tool_access` rejects the call when `scope.approval.authority_level < min_authority` (authority `>= 100` clears every floor; `None` = no floor, ceiling-gated only). This is the wall the Telegram breach lacked: a 40-authority guest could reach `personal_admin_manager` (floor 90) because nothing checked authority at the *access* layer — only the approval gate, which guests never tripped. `approval_min_authority` (in `tool_approval.py`) is the separate L2 dial that decides whether a permitted call still needs a human ack.
 
 ---
 
@@ -316,7 +318,7 @@ The context injector reads these lists when resolving `resource_*` context items
 
 ## Tool scope filtering
 
-`ToolScopeService` (`app/assistant/manager_runtime/services/tool_scope_service.py`) is what consumes the `task_allowed_tools` / `task_except_tools` / `visible_tools` keys that `ScopeAdapter._project_scope_to_runtime_data` puts on `message.data` (`scope_adapter.py:515-584`). It then applies the manager's `tool_visibility` config (`always_show`, `use_narrower`, `hidden_tools`) and, if a compiled task step pinned exact tools, bypasses everything else.
+`ToolScopeService` (`app/assistant/manager_runtime/services/tool_scope_service.py`) is what consumes the `task_allowed_tools` / `task_except_tools` / `visible_tools` keys that `ScopeAdapter._project_scope_to_runtime_data` puts on `message.data`. It then applies the manager's `tool_visibility` config (`always_show`, `use_narrower`, `hidden_tools`) and, if a compiled task step pinned exact tools, bypasses everything else. (Because `per_manager` now folds into `allowed_tools` at narrowing time, visibility *derives from* the execution surface rather than re-deriving `per_manager` itself.)
 
 End-to-end tool resolution order is covered in [07_TOOLS.md](07_TOOLS.md#tool-visibility-and-narrowing). The relevant point for this page: **scope is the upstream gate, visibility is the downstream filter.** Scope decides what the manager *may* call; visibility decides what its planner *sees*.
 
@@ -334,12 +336,13 @@ End-to-end tool resolution order is covered in [07_TOOLS.md](07_TOOLS.md#tool-vi
 | `app/assistant/multi_agents/entertainment_manager/config.yaml` | Research worker; keeps the critic. |
 | `app/assistant/manager_classes/MultiAgentManager.py` | Base class: agent loop, role resolution, blackboard scope context handling. |
 | `app/assistant/manager_runtime/manager_invoker.py` | Calls `ScopeAdapter.apply` then `request_handler`. |
-| `app/assistant/manager_runtime/services/scope_adapter.py` | Builds, derives, and narrows `ScopeContext`. Contains the widening-rejection logic. |
+| `app/assistant/manager_runtime/services/scope_adapter.py` | Builds, derives, and narrows `ScopeContext`. Ceiling-narrowing + `per_manager` folding + strict ingress + widening-rejection. |
+| `app/assistant/lib/tool_execution/tool_access_control.py` | Execution gate: `check_tool_access` (allow/block + the L1 `min_authority` floor). |
 | `app/assistant/manager_runtime/services/tool_scope_service.py` | Downstream tool visibility filter. |
-| `app/assistant/utils/pydantic_classes.py` | `ScopeContext` and all sub-policies. |
-| `app/assistant/utils/surfaces.py` | Surface constants and `DEFAULT_AUTHORITY_BY_SURFACE`. |
-| `app/assistant/scope/loader.py` | `load_scope_for_source(kind="pipeline", ...)` for pipeline-driven work. |
-| `app/assistant/kg_investigator/finding_executor.py` | The `_mutation_scope()` case study. |
+| `app/assistant/utils/pydantic_classes.py` | `ScopeContext` and all sub-policies (`ScopeToolPolicy.per_manager`, `ScopePodPolicy`, …). |
+| `app/assistant/utils/surfaces.py` | Surface constants and `DEFAULT_AUTHORITY_BY_SURFACE` (slack 50 / telegram 40 / sms 40). |
+| `app/assistant/scope/loader.py` | `load_scope_for_source(kind=…)` — the single loader for source-owned `scope.yaml`. |
+| `app/assistant/kg_investigator/finding_processor.py` | `finding_write_scope()` — the case study. |
 
 ---
 
@@ -413,4 +416,4 @@ Rules of thumb:
 - Grant the **minimum** the target manager needs. The manager's own `scope_contract` will narrow further, but if you grant too much you weaken the audit story.
 - `surface="system"` is the right marker for non-user-initiated work. `actor_id` should name the caller distinctly so logs and KG provenance can trace back to the right routine.
 - For a pipeline, prefer `load_scope_for_source(kind="pipeline", source_id=..., actor_id=...)` and put the policy in `app/assistant/pipelines/<pipeline_id>/scope.yaml` — that way the policy lives with the pipeline definition rather than in inline code.
-- For routine-style work calling into a manager that requires a permission the system default does not grant, follow the `_mutation_scope()` pattern in `kg_finding_executor` (`finding_executor.py:35-52`).
+- For routine-style work calling into a manager that requires a permission the system default does not grant, follow the `finding_write_scope()` pattern (`kg_investigator/finding_processor.py`) — build the scope via `load_scope_for_source` against the caller's own `scope.yaml`.

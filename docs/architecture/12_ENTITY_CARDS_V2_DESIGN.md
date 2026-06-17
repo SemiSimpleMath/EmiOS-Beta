@@ -1,3 +1,5 @@
+> SHIPPED 2026-05-10 — superseded by `12_ENTITY_CARDS.md` (as-built). Kept as the historical design record.
+
 # Entity Cards v2 — Section-tagged, Bullet-incremental, NOW-snapshot
 
 **Status:** design — not yet implemented.
@@ -267,7 +269,7 @@ Style:
 - Anchored to the subject. "Works as data scientist at Seyfarth"
   not "is currently employed as a data scientist..."
 - For relationships, first-person framing when subject is a person
-  in <user_name>'s life: "my wife", "the kids" — not "Jukka's wife".
+  in <user_name>'s life: "my wife", "the kids" — not "the user's wife".
 
 Output: just the bullet text.
 ```
@@ -320,7 +322,7 @@ three v2 tables, and only the new builder runs going forward.
    First-pass: `birth`, `wedding`, `marriage_start`, `death`, `move`,
    `graduation`, `hire`. Iterate from real card output.
 
-4. **Card for Jukka himself** — special structure? Probably same shape
+4. **Card for the user himself** — special structure? Probably same shape
    but with sections renamed (the "Connection to user" section makes no
    sense). Could template: Person-Other vs Person-Self.
 
