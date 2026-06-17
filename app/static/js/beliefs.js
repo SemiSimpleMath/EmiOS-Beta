@@ -7,6 +7,7 @@ const el = (tag, cls, txt) => {
   return e;
 };
 let CURRENT = null;
+let CURRENT_ARCHIVED = false;
 
 function fillSelects(domains, counts, kinds) {
   const fd = $("#f-domain");
@@ -36,7 +37,7 @@ async function load() {
   if ($("#f-domain").value) p.set("domain", $("#f-domain").value);
   if ($("#f-kind").value) p.set("kind", $("#f-kind").value);
   if ($("#f-status").value) p.set("status", $("#f-status").value);
-  if ($("#f-suppressed").checked) p.set("include_suppressed", "1");
+  if ($("#f-archived").checked) p.set("include_archived", "1");
 
   const r = await fetch("/api/beliefs/list?" + p.toString());
   const data = await r.json();
@@ -53,7 +54,7 @@ function renderList(beliefs) {
     return;
   }
   beliefs.forEach((b) => {
-    const row = el("div", "bx-item" + (b.suppressed ? " suppressed" : ""));
+    const row = el("div", "bx-item" + (b.archived ? " suppressed" : ""));
     const main = el("div", "bx-item-main");
     main.appendChild(el("div", "bx-stmt", b.statement));
     const tags = el("div", "bx-tags");
@@ -64,8 +65,8 @@ function renderList(beliefs) {
     tags.appendChild(el("span", "bx-badge obs", `${b.obs_count || 0}× · net ${b.net ?? 0}`));
     if (b.last_observed) tags.appendChild(el("span", "bx-badge date", String(b.last_observed).slice(0, 10)));
     if (b.locked) tags.appendChild(el("span", "bx-badge lock", "🔒 locked"));
-    if (b.edited) tags.appendChild(el("span", "bx-badge edited", "✎ edited"));
-    if (b.suppressed) tags.appendChild(el("span", "bx-badge supp", "suppressed"));
+    if (b.status && b.status !== "active") tags.appendChild(el("span", "bx-badge supp", b.status));
+    if (b.archived) tags.appendChild(el("span", "bx-badge supp", "archived"));
     main.appendChild(tags);
     row.appendChild(main);
     row.addEventListener("click", () => openDrawer(b.belief_id));
@@ -73,13 +74,13 @@ function renderList(beliefs) {
   });
 }
 
-function renderTagPicker(selected) {
+function renderTagPicker(selected, readonly) {
   const box = $("#d-tags");
   box.innerHTML = "";
   const sel = new Set(selected || []);
   (window.BX_TAGS || []).forEach((t) => {
     const chip = el("span", "bx-tagchip" + (sel.has(t) ? " on" : ""), t);
-    chip.addEventListener("click", () => chip.classList.toggle("on"));
+    if (!readonly) chip.addEventListener("click", () => chip.classList.toggle("on"));
     box.appendChild(chip);
   });
 }
@@ -90,34 +91,45 @@ async function openDrawer(id) {
   if (data.error) { alert(data.error); return; }
   CURRENT = id;
   const b = data.belief;
-  const ov = data.override || {};
-  const _title = [b.subject, b.predicate, b.object].filter(Boolean).join("  ·  ") || "Belief";
-  $("#d-title").textContent = data.short_id ? `${data.short_id}  ·  ${_title}` : _title;
+  CURRENT_ARCHIVED = !!data.archived;
+  const stmt = b.statement || "";
+  const titleTxt = stmt.length > 64 ? stmt.slice(0, 64) + "…" : stmt;
+  $("#d-title").textContent = (data.short_id ? data.short_id + "  ·  " : "") + (titleTxt || "Belief")
+    + (CURRENT_ARCHIVED ? "   (archived — read only)" : "");
+
   $("#d-meta").innerHTML = "";
-  [["kind", b.kind], ["status", b.status], ["support", b.support], ["contradiction", b.contradiction],
-   ["net", b.net], ["obs", b.obs_count], ["first", String(b.first_observed || "").slice(0, 10)],
-   ["last", String(b.last_observed || "").slice(0, 10)]].forEach(([k, v]) => {
+  [["kind", b.kind], ["status", b.status], ["confidence", b.current_confidence_band || b.confidence],
+   ["net", b.current_net_weight], ["support", b.current_support_weight],
+   ["contradiction", b.current_contradiction_weight], ["obs", b.observation_count],
+   ["first", String(b.first_observed || "").slice(0, 10)],
+   ["last", String(b.last_confirmed || "").slice(0, 10)]].forEach(([k, v]) => {
     const s = el("span", "bx-metaitem");
     s.innerHTML = `<b>${k}</b> ${v ?? "—"}`;
     $("#d-meta").appendChild(s);
   });
-  $("#d-statement").value = ov.statement_override || b.statement_nl || "";
+
+  $("#d-statement").value = stmt;
   $("#d-domain").value = data.domain || "general";
-  $("#d-suppressed").checked = !!ov.suppressed;
-  $("#d-locked").checked = !!ov.locked;
-  renderTagPicker(data.tags || []);
+  $("#d-suppressed").checked = b.status === "deprecated";
+  $("#d-locked").checked = !!b.locked;
+  renderTagPicker(data.tags || [], CURRENT_ARCHIVED);
+
+  // Archived beliefs are cold storage — read-only.
+  ["d-statement", "d-domain", "d-suppressed", "d-locked", "d-save"].forEach((i) => {
+    $("#" + i).disabled = CURRENT_ARCHIVED;
+  });
 
   const ev = $("#d-evidence");
   ev.innerHTML = "";
-  if (!(data.evidence || []).length) ev.appendChild(el("div", "bx-empty", "No observations recorded."));
+  if (!(data.evidence || []).length) ev.appendChild(el("div", "bx-empty", "No evidence recorded."));
   (data.evidence || []).forEach((e) => {
     const row = el("div", "bx-ev");
     const head = el("div", "bx-ev-head");
-    head.appendChild(el("span", "bx-ev-pol " + (e.polarity || ""), e.polarity || ""));
-    head.appendChild(el("span", "bx-ev-src", e.source || ""));
-    head.appendChild(el("span", "bx-ev-date", String(e.occurred_at || "").slice(0, 10)));
+    head.appendChild(el("span", "bx-ev-pol " + (e.signal_type || ""), e.signal_type || ""));
+    head.appendChild(el("span", "bx-ev-src", e.source_type || ""));
+    head.appendChild(el("span", "bx-ev-date", String(e.source_date || "").slice(0, 10)));
     row.appendChild(head);
-    row.appendChild(el("div", "bx-ev-text", e.raw_text || ""));
+    row.appendChild(el("div", "bx-ev-text", e.raw_text || e.summary || ""));
     ev.appendChild(row);
   });
 
@@ -126,7 +138,7 @@ async function openDrawer(id) {
 }
 
 async function save() {
-  if (!CURRENT) return;
+  if (!CURRENT || CURRENT_ARCHIVED) return;
   const body = {
     belief_id: CURRENT,
     domain: $("#d-domain").value,
@@ -201,7 +213,7 @@ function renderTrend(sel, rows, mode) {
 
 $("#f-refresh").addEventListener("click", load);
 $("#f-q").addEventListener("keydown", (e) => { if (e.key === "Enter") load(); });
-["f-domain", "f-kind", "f-status", "f-suppressed"].forEach((id) =>
+["f-domain", "f-kind", "f-status", "f-archived"].forEach((id) =>
   $("#" + id).addEventListener("change", load));
 $("#bx-close").addEventListener("click", () => $("#bx-drawer").classList.add("hidden"));
 $("#d-save").addEventListener("click", save);

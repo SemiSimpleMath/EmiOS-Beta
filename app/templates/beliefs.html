@@ -10,8 +10,8 @@
   <header class="bx-header">
     <h1>Beliefs</h1>
     <div class="bx-sub">
-      belief&#8209;engine v2 &middot; <span id="bx-count">&hellip;</span> shown &middot;
-      edits are <b>durable overrides</b> &mdash; they survive rebuilds and lock against auto&#8209;revert
+      belief&#8209;engine v1 &middot; <span id="bx-count">&hellip;</span> shown &middot;
+      edits write the belief directly &mdash; <b>lock</b> a correction so the nightly engine can&#8217;t re&#8209;evolve it
     </div>
   </header>
 
@@ -27,10 +27,10 @@
       <select id="f-kind"><option value="">all kinds</option></select>
       <select id="f-status">
         <option value="active">active</option>
-        <option value="all">all statuses</option>
-        <option value="dormant">dormant</option>
+        <option value="contested">contested</option>
+        <option value="all">all live</option>
       </select>
-      <label class="bx-chk"><input type="checkbox" id="f-suppressed"> show suppressed</label>
+      <label class="bx-chk"><input type="checkbox" id="f-archived"> include archived</label>
       <button id="f-refresh">refresh</button>
     </div>
     <div id="bx-list" class="bx-list"></div>
@@ -70,7 +70,7 @@
       <h2 id="d-title">Belief</h2>
       <div id="d-meta" class="bx-meta"></div>
 
-      <label class="bx-lbl">Statement <span class="bx-hint">(editing overrides the projected text)</span></label>
+      <label class="bx-lbl">Statement <span class="bx-hint">(edits the belief directly)</span></label>
       <textarea id="d-statement" rows="4"></textarea>
 
       <label class="bx-lbl">Tags <span class="bx-hint">(how consumers pull this belief &mdash; click to toggle)</span></label>
@@ -80,8 +80,8 @@
         <label class="bx-lbl small">Domain
           <select id="d-domain"></select>
         </label>
-        <label class="bx-chk"><input type="checkbox" id="d-suppressed"> suppress &mdash; remove from use</label>
-        <label class="bx-chk"><input type="checkbox" id="d-locked"> lock &mdash; no auto&#8209;revision</label>
+        <label class="bx-chk"><input type="checkbox" id="d-suppressed"> suppress &mdash; deprecate &amp; archive</label>
+        <label class="bx-chk"><input type="checkbox" id="d-locked"> lock &mdash; engine can&#8217;t revise/deprecate</label>
       </div>
 
       <div class="bx-actions">
