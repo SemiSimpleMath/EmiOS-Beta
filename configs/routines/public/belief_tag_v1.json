@@ -1,0 +1,24 @@
+{
+  "id": "belief_tag_v1",
+  "enabled": true,
+  "name": "Belief tag v1 (tag new + changed beliefs)",
+  "aliases": [],
+  "runner": "function",
+  "spec": {
+    "function_name": "belief_tag_v1",
+    "max_per_run": 60
+  },
+  "run_policy": {
+    "type": "daily",
+    "time_local": "05:35"
+  },
+  "max_run_seconds": 600,
+  "on_error": {
+    "max_failures": 3,
+    "backoff_base_seconds": 300,
+    "backoff_max_seconds": 3600,
+    "then": "disable_with_ticket",
+    "auto_retry_after_seconds": 3600
+  },
+  "notes": "Daily at 05:35 local — after the v1 belief_engine rebuild (00:30). Tags active user_beliefs that are untagged OR stale (statement changed since last tagged -> re-tag on evolve/merge), from the standardized vocab (configs/belief_tags.yaml). 'needs' selector + max_per_run cap + max_run_seconds watchdog; on_error self-heals transient failures. Parallel to the v2 belief_tag_new (which tags the v2 store) until the Phase 8 cutover retires v2."
+}

@@ -1,9 +1,12 @@
 """
 Belief Engine — SQLite schema.
 
-Two tables:
+Five tables:
   user_beliefs       — one row per belief, the canonical statement + metadata
   belief_evidence    — one row per piece of evidence that touched a belief
+  belief_tags        — one row per (belief, tag); the standardized retrieval vocabulary
+  belief_short_id    — stable, never-reused 'b<n>' handle per belief
+  belief_merges      — provenance redirect from a merged-away belief to its survivor
 
 Completely independent of the existing memory system.
 Run schema setup with:
@@ -48,4 +51,32 @@ CREATE TABLE IF NOT EXISTS belief_evidence (
 CREATE INDEX IF NOT EXISTS idx_belief_evidence_belief_id   ON belief_evidence(belief_id);
 CREATE INDEX IF NOT EXISTS idx_belief_evidence_source_date ON belief_evidence(source_date);
 CREATE INDEX IF NOT EXISTS idx_belief_evidence_signal_type ON belief_evidence(signal_type);
+
+-- Standardized retrieval tags (configs/belief_tags.yaml). The ADDITIVE retrieval layer;
+-- `domain` stays the derivation lane. Multi-label: a belief carries every tag that applies.
+CREATE TABLE IF NOT EXISTS belief_tags (
+    belief_id   TEXT NOT NULL REFERENCES user_beliefs(id) ON DELETE CASCADE,
+    tag         TEXT NOT NULL,          -- from the standardized vocab
+    assigned_at TEXT,                   -- ISO8601 (used to detect stale tags after a statement change)
+    method      TEXT,                   -- categorizer | manual | domain
+    PRIMARY KEY (belief_id, tag)
+);
+
+CREATE INDEX IF NOT EXISTS idx_belief_tags_tag ON belief_tags(tag);
+
+-- Stable short id (b<n>): a compact, LLM-citable handle assigned ONCE per belief, never reused or
+-- changed. A merged-away belief keeps its short id so it stays citable for provenance.
+CREATE TABLE IF NOT EXISTS belief_short_id (
+    belief_id   TEXT PRIMARY KEY REFERENCES user_beliefs(id) ON DELETE CASCADE,
+    short_id    INTEGER NOT NULL UNIQUE,
+    assigned_at TEXT
+);
+
+-- Merge provenance: a redirect from a merged-away (loser) belief to the survivor it folded into.
+CREATE TABLE IF NOT EXISTS belief_merges (
+    loser_id    TEXT PRIMARY KEY REFERENCES user_beliefs(id) ON DELETE CASCADE,
+    survivor_id TEXT NOT NULL REFERENCES user_beliefs(id) ON DELETE CASCADE,
+    merged_at   TEXT,
+    reason      TEXT
+);
 """

@@ -3,7 +3,9 @@ Step 1: Collect evidence from available sources for a given domain.
 
 Sources:
   1. daily_insights   — actionable items from resource_daily_insights.json (last N days)
-  2. ticket_signals   — accepted/rejected tickets from timeline_merged.json (last N days)
+  2. ticket_signals   — CROSS-DAY behavioral aggregates (dismiss/snooze/accept counts) from
+                        timeline_merged.json. Per-event ticket signal is owned by daily_insights
+                        (extracted from the same timeline); only the across-days pattern is added.
 
 Writes a structured evidence bundle to the run context.
 """
@@ -139,15 +141,15 @@ def _collect_daily_insights(domain: str, lookback_days: int) -> List[EvidenceIte
 
 def _collect_ticket_signals(domain: str, lookback_days: int) -> List[EvidenceItem]:
     """
-    Collect high-signal ticket events.
+    Collect CROSS-DAY behavioral patterns from ticket events.
 
-    Strategy:
-    - ALL rejections are kept (especially with user comments — strong contextual override signal).
-    - Acceptances are only kept if they have a user comment/note attached, since bare
-      acceptances of routine suggestions (finger stretch, standing break, hydration, etc.)
-      add no information beyond what daily_insights already captures.
-    - Aggregate by (stype, outcome) to avoid repeating the same line dozens of times,
-      but surface individual items when a user comment is present.
+    Ticket events also flow through daily_insights (the daily_timeline_insights agent
+    extracts them from the same timeline_merged.json), so the per-event / commented signal
+    is already covered there — re-emitting it here would double-count it. What insights
+    structurally CANNOT see is a pattern across days, because each run sees a single day. So
+    this path keeps ONLY the cross-day aggregate: how many times, over the window, the user
+    dismissed / snoozed / accepted a given suggestion type. That is what reveals a wrong
+    cadence even when the user never comments.
     """
     ticket_types = _domain_ticket_types(domain)
     if not ticket_types:
@@ -155,10 +157,8 @@ def _collect_ticket_signals(domain: str, lookback_days: int) -> List[EvidenceIte
 
     from collections import defaultdict
 
-    # Aggregate bare signals: key=(stype, outcome) → count + date set
+    # Cross-day tally: key=(stype, outcome) → count + the set of days it occurred on.
     tally: Dict[tuple, Dict] = defaultdict(lambda: {"count": 0, "dates": set()})
-    # Individual items worth keeping verbatim (rejections + commented acceptances)
-    verbatim: List[EvidenceItem] = []
 
     root = _day_context_root()
 
@@ -182,91 +182,56 @@ def _collect_ticket_signals(domain: str, lookback_days: int) -> List[EvidenceIte
 
             state = entry.get("state", "")
             user_action = entry.get("user_action", "")
-            user_text = entry.get("user_text", "")
-            title = entry.get("title", stype)
+            if state == "dismissed" or user_action == "skip":
+                outcome = "rejected"
+            elif state == "expired":
+                outcome = "snoozed"
+            elif state == "accepted":
+                outcome = "accepted"
+            else:
+                continue
+            tally[(stype, outcome)]["count"] += 1
+            tally[(stype, outcome)]["dates"].add(date_str)
 
-            # Extract actual user comment if present (format: "...Additional from user: <text>")
-            user_comment = None
-            if "Additional from user:" in (user_text or ""):
-                user_comment = user_text.split("Additional from user:", 1)[1].strip()
-
-            is_rejected = state == "dismissed" or user_action == "skip"
-            is_expired = state == "expired"
-            is_accepted = state == "accepted"
-
-            if is_rejected:
-                verbatim.append(EvidenceItem(
-                    source_type="ticket_rejection",
-                    source_date=date_str,
-                    source_ref=entry.get("ticket_id"),
-                    signal_type="rejects",
-                    summary=(
-                        f"[Rejected '{title}' ({stype}) on {date_str}] User said: \"{user_comment}\""
-                        if user_comment else
-                        f"User rejected '{title}' ({stype}) on {date_str}."
-                    ),
-                    raw_text=user_comment,
-                    weight=4.0 if user_comment else 2.5,
-                ))
-            elif is_expired:
-                if user_comment:
-                    verbatim.append(EvidenceItem(
-                        source_type="ticket_rejection",
-                        source_date=date_str,
-                        source_ref=entry.get("ticket_id"),
-                        signal_type="qualifies",
-                        summary=f"[Snoozed '{title}' ({stype}) on {date_str}] User said: \"{user_comment}\"",
-                        raw_text=user_comment,
-                        weight=2.0,
-                    ))
-                else:
-                    tally[(stype, "expired")]["count"] += 1
-                    tally[(stype, "expired")]["dates"].add(date_str)
-            elif is_accepted:
-                if user_comment:
-                    verbatim.append(EvidenceItem(
-                        source_type="ticket_acceptance",
-                        source_date=date_str,
-                        source_ref=entry.get("ticket_id"),
-                        signal_type="confirms",
-                        summary=f"[Accepted '{title}' ({stype}) on {date_str}] User said: \"{user_comment}\"",
-                        raw_text=user_comment,
-                        weight=2.0,
-                    ))
-                else:
-                    tally[(stype, "accepted")]["count"] += 1
-                    tally[(stype, "accepted")]["dates"].add(date_str)
-
-    # Emit aggregated bare signals only if count is high enough to indicate a pattern,
-    # and only for types that aren't already well-covered by daily_insights.
+    # Emit a signal only when the count over the window indicates a real pattern. Bare
+    # acceptances of routine nudges add nothing beyond what daily_insights already captures.
     _SKIP_BARE_ACCEPTANCE_TYPES = {
         "finger_stretch", "standing_break", "hydration", "movement", "stretch", "walk",
     }
-    items: List[EvidenceItem] = list(verbatim)
+    items: List[EvidenceItem] = []
     for (stype, outcome), stats in tally.items():
         count = stats["count"]
+        days = len(stats["dates"])
         date_range_str = f"{min(stats['dates'])} – {max(stats['dates'])}"
-        if outcome == "accepted" and stype in _SKIP_BARE_ACCEPTANCE_TYPES:
-            continue  # daily_insights covers these; bare counts add nothing
-        if outcome == "accepted":
+        if outcome == "rejected" and count >= 2:
             items.append(EvidenceItem(
-                source_type="ticket_acceptance",
+                source_type="ticket_rejection",
                 source_date=max(stats["dates"]),
                 source_ref=None,
-                signal_type="confirms",
-                summary=f"User accepted '{stype}' {count} time(s) over {len(stats['dates'])} day(s) ({date_range_str}).",
+                signal_type="rejects",
+                summary=f"User dismissed '{stype}' {count} time(s) across {days} day(s) ({date_range_str}) — a recurring rejection; the suggestion or its cadence is likely unwanted.",
                 raw_text=None,
-                weight=1.0 + min(count / 10.0, 2.0),
+                weight=3.0 + min((count - 2) * 0.5, 2.0),  # 3.0 at 2x, up to 5.0
             ))
-        elif outcome == "expired" and count >= 3:
+        elif outcome == "snoozed" and count >= 3:
             items.append(EvidenceItem(
                 source_type="ticket_rejection",
                 source_date=max(stats["dates"]),
                 source_ref=None,
                 signal_type="qualifies",
-                summary=f"User snoozed/deferred '{stype}' without completing {count} time(s) across {len(stats['dates'])} day(s) ({date_range_str}) — current pacing may be too frequent.",
+                summary=f"User snoozed/deferred '{stype}' without completing {count} time(s) across {days} day(s) ({date_range_str}) — current pacing may be too frequent.",
                 raw_text=None,
                 weight=2.5 + min((count - 3) * 0.5, 2.0),  # 2.5 at 3x, up to 4.5 at 7x+
+            ))
+        elif outcome == "accepted" and stype not in _SKIP_BARE_ACCEPTANCE_TYPES:
+            items.append(EvidenceItem(
+                source_type="ticket_acceptance",
+                source_date=max(stats["dates"]),
+                source_ref=None,
+                signal_type="confirms",
+                summary=f"User accepted '{stype}' {count} time(s) over {days} day(s) ({date_range_str}).",
+                raw_text=None,
+                weight=1.0 + min(count / 10.0, 2.0),
             ))
 
     return items

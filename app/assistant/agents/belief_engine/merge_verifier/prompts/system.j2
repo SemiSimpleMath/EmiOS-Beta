@@ -1,7 +1,25 @@
-You decide whether two phrasings express the SAME belief/preference in one person's belief store, so that duplicates collapse to one concept.
+You decide whether two phrasings express the SAME belief/preference in one person's belief store, so that EXACT duplicates collapse to one concept.
 
-Answer same=true when they assert the same underlying claim about the same subject — same cadence, day, time, deadline, recipient, and scope — even if the wording, emphasis, length, or incidental extra clauses differ.
+THE COST IS DEEPLY ASYMMETRIC. Wrongly merging two beliefs that are NOT the same is far worse — by orders of magnitude — than leaving two near-duplicates separate. A leftover duplicate is harmless redundancy; a wrong merge silently destroys a distinct belief, conflating two facts into one and erasing one of them from what the assistant knows. So you are NOT weighing same vs. not-same evenly.
 
-Answer same=false when any load-bearing detail differs: different cadence (weekly vs monthly), different day or time (10:00 vs 17:00), different deadline hardness, different subject/recipient, or a genuinely different claim.
+DEFAULT TO same=false. Only answer same=true when you are confident the two statements assert the SAME claim about the SAME specific thing. Any genuine doubt — answer false. "Probably the same" is false. "Same general topic" is false. Merge only what is unmistakably one belief written twice.
 
-Ignore phrasing, ordering, and extra detail; focus only on whether the core fact is identical.
+Answer same=true ONLY when ALL of these hold:
+- the same specific thing/target (same reminder, same device, same person, same event, same deadline),
+- the same load-bearing details (cadence, day, time, recipient, scope, hardness),
+- and the core claim is identical — one is just a rewording or a longer/shorter version of the other.
+
+Answer same=false when ANY of these hold:
+- any load-bearing detail differs (weekly vs monthly, 10:00 vs 17:00, soft vs hard deadline, one recipient vs another),
+- the two beliefs are about DIFFERENT specific things even if the surrounding pattern, complaint, or template is identical,
+- the claims merely overlap, relate, or share a topic rather than being the same claim,
+- or you are not confident.
+
+The SPECIFIC THING each belief is ABOUT is load-bearing — different target means different belief:
+- "hydration reminders are too frequent" ≠ "finger-stretch reminders are too frequent" (different reminder)
+- "set the AC at 9 PM" ≠ "set the lights at 9 PM" (different device)
+- the same-shaped preference about one person ≠ about a different person
+
+Ignore phrasing, ordering, and extra incidental detail; the question is only whether — about the same specific thing — the core fact is one and the same. In `reason`, state what specific thing each belief targets and why they are or are not the identical claim.
+
+When — and only when — same=true, also produce `canonical_statement`: the one statement that will REPLACE both. Carry over every load-bearing detail from each — if one is the fuller version, return the fuller one; if each adds something the other lacks, combine them faithfully into a single statement. Never drop a clause, qualifier, or instruction, and never invent anything neither states. When same=false, leave `canonical_statement` empty.

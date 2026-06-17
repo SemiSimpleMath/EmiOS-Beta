@@ -338,6 +338,14 @@ class BeliefStore:
         for ev in (evidence or []):
             self._insert_evidence(belief.id, ev, now)
 
+        # Stable short id at creation (no-op on an existing belief). Non-critical: a hiccup must not
+        # break belief creation, and the nightly backfill (assign_short_ids) recovers any miss.
+        try:
+            from belief_engine.identity import ensure_short_id
+            ensure_short_id(belief.id)
+        except Exception:
+            logger.warning("[BeliefStore] short-id assign failed key=%s", belief.belief_key, exc_info=True)
+
         logger.info(
             "[BeliefStore] upsert key=%s status=%s obs=%d",
             belief.belief_key,
@@ -523,10 +531,12 @@ class BeliefStore:
             )
 
         # Deprecate redundant beliefs and remove their Chroma embeddings.
+        loser_ids = []
         for dk in deprecated_keys:
             store.deprecate(dk, reason=f"merged into {surviving_key}: {merge_reasoning[:200]}")
             dep = store.get_by_key(dk)
             if dep:
+                loser_ids.append(dep.id)
                 try:
                     self._chroma.delete(dep.id)
                 except Exception as exc:
@@ -535,6 +545,12 @@ class BeliefStore:
         surviving_final = store.get_by_key(surviving_key)
         if surviving_final is None:
             raise RuntimeError(f"[BeliefStore] merge failed — surviving key {surviving_key!r} not found after write")
+
+        # Provenance: record each merge redirect (loser -> survivor) so a merged-away belief stays
+        # traceable (the deprecated row + its short id are kept).
+        from belief_engine.identity import record_merge
+        for lid in loser_ids:
+            record_merge(lid, surviving_final.id, merge_reasoning)
 
         logger.info(
             "[BeliefStore] merge complete surviving=%s deprecated=%s transferred_obs=%d",

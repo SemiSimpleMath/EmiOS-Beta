@@ -44,6 +44,26 @@ def export_beliefs(*, domain: Optional[str] = None) -> Path:
 
     beliefs = store.list_by_domain(domain) if domain else store.list_all()
 
+    # Tags + stable short id from the additive side tables, so this export matches the shape
+    # consumers read (the same shape as the v2 export). Guarded: an older store without these
+    # tables simply emits empty tags / null short_id.
+    import sqlite3 as _sqlite
+    _tags_by_id: dict = {}
+    _sid_by_id: dict = {}
+    try:
+        _conn = _sqlite.connect(f"file:{get_repo_root() / 'emi.db'}?mode=ro", uri=True)
+        _ids = [b.id for b in beliefs]
+        for _i in range(0, len(_ids), 400):
+            _chunk = _ids[_i:_i + 400]
+            _ph = ",".join("?" for _ in _chunk)
+            for _r in _conn.execute(f"SELECT belief_id, tag FROM belief_tags WHERE belief_id IN ({_ph})", _chunk):
+                _tags_by_id.setdefault(_r[0], []).append(_r[1])
+            for _r in _conn.execute(f"SELECT belief_id, short_id FROM belief_short_id WHERE belief_id IN ({_ph})", _chunk):
+                _sid_by_id[_r[0]] = _r[1]
+        _conn.close()
+    except Exception:
+        logger.warning("[export_beliefs] tags/short_id fetch failed; exporting without them", exc_info=True)
+
     entries = []
     for b in beliefs:
         # Decay v2: prefer the evidence-weighted snapshot band (computed nightly
@@ -54,7 +74,9 @@ def export_beliefs(*, domain: Optional[str] = None) -> Path:
         effective_confidence = b.current_confidence_band or b.confidence
         entry: dict = {
             "belief_key": b.belief_key,
+            "short_id": f"b{_sid_by_id[b.id]}" if b.id in _sid_by_id else None,
             "domain": b.domain,
+            "tags": sorted(_tags_by_id.get(b.id, [])),
             "statement": b.statement,
             "confidence": effective_confidence,
             "scope": b.scope,

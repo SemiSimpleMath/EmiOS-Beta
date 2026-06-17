@@ -128,6 +128,10 @@ class BeliefChroma:
             where={"domain": domain},
             include=["embeddings"],
         )
-        ids = results.get("ids") or []
-        embeddings = results.get("embeddings") or []
+        # chromadb can return embeddings as a numpy array; `or []` would raise on its
+        # ambiguous truth value, so guard with explicit None checks instead.
+        ids = results.get("ids")
+        embeddings = results.get("embeddings")
+        ids = list(ids) if ids is not None else []
+        embeddings = list(embeddings) if embeddings is not None else []
         return list(zip(ids, embeddings))

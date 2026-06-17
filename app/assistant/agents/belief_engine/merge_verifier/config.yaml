@@ -3,9 +3,8 @@ class_name: Agent
 action_required: false
 llm_params:
   llm_provider: "openai"
-  engine: "gpt-5.4-mini"
-  model_tier: "mini"
-  temperature: 0.0
+  engine: "gpt-5.2"
+  model_tier: "strong"
 
 allowed_tools: []
 except_tools: []
