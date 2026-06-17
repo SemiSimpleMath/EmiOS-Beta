@@ -1,0 +1,23 @@
+{
+  "id": "belief_archive",
+  "enabled": true,
+  "name": "Belief archive (evict deprecated beliefs)",
+  "aliases": ["archive beliefs"],
+  "runner": "function",
+  "spec": {
+    "function_name": "belief_archive"
+  },
+  "run_policy": {
+    "type": "daily",
+    "time_local": "05:30"
+  },
+  "max_run_seconds": 300,
+  "on_error": {
+    "max_failures": 3,
+    "backoff_base_seconds": 300,
+    "backoff_max_seconds": 3600,
+    "then": "disable_with_ticket",
+    "auto_retry_after_seconds": 3600
+  },
+  "notes": "Daily at 05:30 local — after the v1 belief_engine rebuild (00:30, which deprecates faded + merged beliefs) and the feedback_extractor drain (04:00-05:00), just before belief_tag_v1 (05:35). Deprecation only flips status; this is the lifecycle terminus that evicts deprecated beliefs (+ their evidence) from the live user_beliefs/belief_evidence into the *_archive tables, so the live store stays lean by construction. Idempotent (no-op when nothing is deprecated). belief_short_id + belief_merges stay live (monotonic counter integrity + provenance)."
+}
