@@ -155,6 +155,19 @@ class UpdateBeliefsStep:
                     logger.warning("[UpdateBeliefsStep] skipping belief with empty key")
                     continue
 
+                # Honor a manual lock: a belief the owner corrected + locked via /beliefs must
+                # not be re-evolved or deprecated. Downgrade a mutating action to no_change so
+                # evidence still attaches and observation_count/last_confirmed advance, but the
+                # statement and status stay exactly as the owner set them.
+                if action in ("update", "deprecate"):
+                    locked_row = store.get_by_key(belief_key)
+                    if locked_row and getattr(locked_row, "locked", 0):
+                        logger.info(
+                            "[UpdateBeliefsStep] %s is LOCKED — preserving manual correction (was action=%s)",
+                            belief_key, action,
+                        )
+                        action = "no_change"
+
                 if action == "deprecate":
                     store.deprecate(belief_key, reason=bo.get("reasoning", ""))
                     stats["deprecated"] += 1

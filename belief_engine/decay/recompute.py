@@ -191,7 +191,7 @@ def recompute_belief_snapshots(
                     session.execute(
                         text(
                             "UPDATE user_beliefs SET status='deprecated', "
-                            "updated_at=:now WHERE id = :id AND status='active'"
+                            "updated_at=:now WHERE id = :id AND status='active' AND COALESCE(locked,0)=0"
                         ),
                         {"now": now.isoformat(), "id": bid},
                     )
@@ -200,7 +200,7 @@ def recompute_belief_snapshots(
                     session.execute(
                         text(
                             "UPDATE user_beliefs SET status='contested', "
-                            "updated_at=:now WHERE id = :id AND status='active'"
+                            "updated_at=:now WHERE id = :id AND status='active' AND COALESCE(locked,0)=0"
                         ),
                         {"now": now.isoformat(), "id": bid},
                     )

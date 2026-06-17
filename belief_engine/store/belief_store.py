@@ -58,6 +58,8 @@ class BeliefRecord:
     current_contradiction_weight: Optional[float] = None
     current_net_weight: Optional[float] = None
     current_confidence_band: Optional[str] = None
+    # Owner lock (1 = manual correction via /beliefs; engine must not modify/deprecate).
+    locked: int = 0
 
 
 @dataclass
@@ -141,6 +143,7 @@ class BeliefStore:
             current_contradiction_weight=getattr(row, "current_contradiction_weight", None),
             current_net_weight=getattr(row, "current_net_weight", None),
             current_confidence_band=getattr(row, "current_confidence_band", None),
+            locked=getattr(row, "locked", 0) or 0,
         )
 
     @staticmethod

@@ -23,6 +23,9 @@ class UserBelief(Base):
     confidence        = Column(String, nullable=False)
     scope             = Column(String, nullable=False)
     status            = Column(String, nullable=False, default="active")
+    # Owner lock: 1 = a manual correction made via /beliefs; the nightly updater,
+    # decay, and canonicalize must not modify or deprecate this belief.
+    locked            = Column(Integer, nullable=False, default=0)
     # Decay model v2 (2026-05-11): drives half-life.
     kind              = Column(String, nullable=True)
     conditions        = Column(Text, nullable=True)

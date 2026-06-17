@@ -116,7 +116,10 @@ def _embeddings_for(store: BeliefStore, beliefs: List[BeliefRecord]):
     if np is None:
         raise RuntimeError("canonicalize requires numpy")
     id_to_vec = dict(store._chroma.get_all_for_domain(beliefs[0].domain)) if beliefs else {}
-    items = [b for b in beliefs if b.id in id_to_vec and (b.statement or "").strip()]
+    # Exclude owner-locked beliefs: a manual correction must never be merged away (as loser)
+    # or have its statement rewritten to a canonical (as survivor).
+    items = [b for b in beliefs
+             if b.id in id_to_vec and (b.statement or "").strip() and not getattr(b, "locked", 0)]
     if len(items) < 2:
         return [], None
     mat = np.asarray([id_to_vec[b.id] for b in items], dtype=float)

@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS user_beliefs (
     confidence          TEXT NOT NULL,          -- high | medium | low
     scope               TEXT NOT NULL,          -- chronic | temporary
     status              TEXT NOT NULL DEFAULT 'active',  -- active | contested | deprecated
+    locked              INTEGER NOT NULL DEFAULT 0,      -- owner lock: 1 = engine must not modify/deprecate (manual correction via /beliefs)
     conditions          TEXT,                   -- JSON, reserved for future structured qualifiers
     observation_count   INTEGER NOT NULL DEFAULT 1,
     first_observed      TEXT,                   -- ISO8601
