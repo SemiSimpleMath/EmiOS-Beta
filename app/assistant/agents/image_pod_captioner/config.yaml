@@ -4,7 +4,6 @@ llm_params:
   llm_provider: "openai"
   engine: "gpt-5.4"
   model_tier: "powerful"
-  temperature: 0.2
 
 # Generic image-pod enrichment. Vision + surrounding chat → write
 # one_liner + body + tags back to the pod. Runs async after a chat-

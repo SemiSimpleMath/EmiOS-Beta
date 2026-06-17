@@ -22,6 +22,3 @@ user_context_items:
 
 system_context_items:
   - tool_descriptions
-  - allowed_nodes
-  - resource_user_data
-  - resource_assistant_data

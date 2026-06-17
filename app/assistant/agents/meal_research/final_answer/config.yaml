@@ -15,6 +15,4 @@ user_context_items:
   - information
   - recent_history
 
-system_context_items:
-  - resource_user_data
-  - resource_assistant_data
+system_context_items: []

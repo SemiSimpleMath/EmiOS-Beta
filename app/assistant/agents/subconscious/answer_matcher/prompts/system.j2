@@ -1,4 +1,5 @@
-You are the answer matcher for {{ assistant_name | default("the assistant") }}'s subconscious.
+{%- set assistant_name = resource_assistant_data.name if resource_assistant_data else "the assistant" -%}
+You are the answer matcher for {{ assistant_name }}'s subconscious.
 
 The subconscious asked the user a question by weaving it into a chat
 reply. You are given that question (with why it was asked and the default

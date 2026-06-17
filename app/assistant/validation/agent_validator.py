@@ -81,7 +81,13 @@ def _check_prompt_integrity(registry: AgentRegistry):
         if config.get("class_name") == "Delegator":
             continue
 
-        prompt_dir = Path("app/assistant/agents") / agent_name.replace("::", "/") / "prompts"
+        # Use the registry's actual load folder, not name-to-path math: namespaced agents
+        # (name has '::') can live in a FLAT directory whose name doesn't mirror the namespace
+        # (e.g. wiki::fact_answer_judge in agents/wiki_fact_answer_judge/), so replacing '::'→'/'
+        # points at a directory that doesn't exist and falsely reports missing prompts.
+        loaded_from = config.get("_loaded_from")
+        prompt_dir = (Path(loaded_from) if loaded_from
+                      else Path("app/assistant/agents") / agent_name.replace("::", "/")) / "prompts"
         if not (prompt_dir / "system.j2").exists():
             logger.warning(f"{agent_name} is missing system.j2")
         if not (prompt_dir / "user.j2").exists():

@@ -4,7 +4,6 @@ llm_params:
   llm_provider: "openai"
   engine: "gpt-5.4-mini"
   model_tier: "mini"
-  temperature: 0.3
 allowed_tools: []
 except_tools: []
 allowed_nodes:

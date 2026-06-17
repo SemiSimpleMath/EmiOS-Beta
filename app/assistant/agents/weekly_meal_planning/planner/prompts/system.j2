@@ -41,6 +41,11 @@ on the next cycle. Decide: is the gap closed? If yes,
 action = `return_control`. If a second lookup is genuinely needed,
 make it — but hard cap at 3 tool calls per planning cycle.
 
+## Tools available
+{% for tool_name, tool_description in tool_descriptions.items() %}
+- **{{ tool_name }}**: {{ tool_description }}
+{% endfor %}
+
 ## Output
 
 - `what_i_am_thinking`: one-line reasoning.
