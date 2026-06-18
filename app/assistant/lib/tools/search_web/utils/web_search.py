@@ -6,9 +6,11 @@ from typing import List, Dict, Any
 from app.assistant.utils.logging_config import get_logger
 logger = get_logger(__name__)
 
-# ---UNCHANGED: These environment variables are still needed---
-GOOGLE_API_KEY = os.getenv('GOOGLE_SEARCH_API_KEY') or os.getenv('GOOGLE_API_KEY')
-CSE_ID = os.getenv('GOOGLE_CSE_ID')
+# API key + CSE id are resolved at CALL time (see execute_search), NOT captured at
+# import. The live app loads .env before importing this module, but other entrypoints
+# (tests/scenarios) may load .env AFTER import — a module-level capture would bind a
+# stale/missing value. GOOGLE_SEARCH_API_KEY lets web search use its own
+# Custom-Search-enabled key, distinct from the Gemini GOOGLE_API_KEY.
 
 # ---UNCHANGED: This function is the core search API call---
 def google_search(query: str, api_key: str, cse_id: str, num_results: int = 10) -> Dict[str, Any]:
@@ -51,7 +53,9 @@ def execute_search(query: str, max_results: int = 5) -> Any:
     """
     try:
         logger.info(f"Executing search for query: {query}")
-        search_results_json = google_search(query, GOOGLE_API_KEY, CSE_ID, num_results=max_results)
+        api_key = os.getenv('GOOGLE_SEARCH_API_KEY') or os.getenv('GOOGLE_API_KEY')
+        cse_id = os.getenv('GOOGLE_CSE_ID')
+        search_results_json = google_search(query, api_key, cse_id, num_results=max_results)
 
         if "error" in search_results_json:
             logger.error(f"Search failed: {search_results_json.get('error')}")
