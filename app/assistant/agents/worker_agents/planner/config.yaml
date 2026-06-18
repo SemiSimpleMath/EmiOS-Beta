@@ -1,0 +1,25 @@
+name: worker_agents::planner
+class_name: WorkPlanner
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.2"
+  model_tier: "smart"
+
+# Owns ONE WorkObject node. Maintains its checklist (= child subtask nodes, synced
+# from the `checklist` field by the reconcile hook), works the items itself IN
+# SEQUENCE via the single `action` channel, records findings/artifacts, and finishes.
+# web_manager is the standard manager-as-tool for a research step.
+allowed_tools: [work_add_subtask, work_add_dependency, work_record_finding, work_produce_artifact, work_ask_question, work_defer, work_finish, work_graph_search, work_graph_peek, work_graph_summary, web_manager]
+except_tools: []
+allowed_nodes: [return_control]
+
+# The node + checklist are rendered by workobject_render_node into `work_projection`
+# (NOT the usual `checklist` context item — the render node replaces it).
+user_context_items:
+  - work_projection
+  - date_time
+  - recent_history
+  - action_count
+
+system_context_items:
+  - tool_descriptions
