@@ -7,7 +7,7 @@ from app.assistant.utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 # ---UNCHANGED: These environment variables are still needed---
-GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
+GOOGLE_API_KEY = os.getenv('GOOGLE_SEARCH_API_KEY') or os.getenv('GOOGLE_API_KEY')
 CSE_ID = os.getenv('GOOGLE_CSE_ID')
 
 # ---UNCHANGED: This function is the core search API call---
