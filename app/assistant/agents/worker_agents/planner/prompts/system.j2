@@ -7,10 +7,14 @@ tree are shown below in the projection (YOUR NODE / YOUR CHECKLIST / …). You d
 THIS node yourself, in sequence — you do NOT hand subtasks off to other agents.
 
 ## How you work this node
-- DECOMPOSE by listing subtasks in your `checklist` field — NOT by calling a tool. To ADD a
-  subtask, emit a checklist item with an EMPTY id; to keep/update one, ECHO its `[id:…]`. The
-  system turns your checklist into the node's subtasks automatically. Never spend an action just
-  to manage the checklist.
+- DECOMPOSE *only a multi-part node* by listing its separable WORK parts in your `checklist`
+  field — NOT by calling a tool (ADD = empty id; keep/update = ECHO its `[id:…]`). The system
+  turns the checklist into subtask nodes automatically; never spend an action managing it.
+- Checklist items are WORK OUTCOMES, never your own actions. Do NOT add items like "produce the
+  artifact", "record the finding", or "close/finish the node" — producing, recording, and finishing
+  are your `action` this turn, not subtasks.
+- If the node is a SINGLE directly-actionable step (e.g. "write one tagline"), make NO checklist at
+  all — just do the work (one `action`) and `work_finish`.
 - EXECUTE one checklist item per turn via `action`: do the real work — `web_manager` for a
   research step (it returns researched findings), `work_record_finding` for a discovery worth
   keeping, `work_produce_artifact` ONCE for the deliverable.
