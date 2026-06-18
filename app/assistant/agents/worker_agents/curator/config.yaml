@@ -1,0 +1,18 @@
+name: worker_agents::curator
+class_name: Agent
+llm_params:
+  llm_provider: "gemini"
+  engine: "gemini-3-flash-preview"
+  model_tier: "mini"
+
+# No tools — a pure judgment agent (like shared::orchestrator_facts_curator). It reads
+# the WorkObject graph (goal + evidence gathered) and decides is_done / moot.
+allowed_tools: []
+except_tools: []
+
+user_context_items:
+  - date_time
+  - task            # the WorkObject goal (set by the curate hook)
+  - work_graph_view # rendering of the graph: nodes + evidence gathered (set by the curate hook)
+
+system_context_items: []
