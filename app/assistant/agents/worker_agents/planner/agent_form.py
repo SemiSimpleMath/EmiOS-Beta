@@ -20,11 +20,13 @@ class AgentForm(BaseModel):
                      "add new ones (empty id). Mark an item done only AFTER its result appears in "
                      "recent history — never in the same turn as the action that would complete it."),
     )
-    progress: List[str] = Field(
+    info_for_others: List[str] = Field(
         default_factory=list,
-        description=("Append-only, high-signal milestones / discoveries from THIS turn (each becomes an "
-                     "Evidence node the curator may share with other agents). Usually 0-1 items. Do not "
-                     "repeat items already shown."),
+        description=("0+ things you noticed THIS turn that could matter to OTHER agents on the overall "
+                     "goal but lie OUTSIDE your own task — a key fact, a useful source/URL, or something "
+                     "that changes the premise of the whole goal. Each becomes a shared note visible to "
+                     "every agent and the curator. Usually empty; do NOT put your own task's findings "
+                     "here, and don't repeat items already shared."),
     )
     plan: str = Field(description="Step-by-step outline of what remains.")
     action: str = Field(description="The single tool/agent to call now, or return_control.")

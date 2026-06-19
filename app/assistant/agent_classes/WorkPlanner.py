@@ -70,6 +70,14 @@ class WorkPlanner(Planner):
             elif not cid:
                 tools.add_subtask(name)
 
+        # info_for_others -> shared fact nodes (root evidence) that `informs` the GOAL, so each
+        # discovery reaches every other agent (render RELEVANT INFO) and the curator (which harvests
+        # goal-informing facts). Deduped by content.
+        for note in (result_dict.get("info_for_others") or []):
+            note = str(note or "").strip()
+            if note:
+                self._attach_shared_fact(store, work_id, note, actor)
+
         # findings_to_pod is handled by the base Planner._mint_research_findings (it mints the durable
         # research pod + research_notebook); the final-answer agent surfaces it as pod_references and
         # the dispatch layer (run_node) attaches that pod to the task node. We do NOT mirror findings
@@ -97,3 +105,30 @@ class WorkPlanner(Planner):
                 _set("abandoned", content=evidence or None)
         except Exception as e:
             logger.debug("subtask transition %s %s->%s skipped: %s", node_id, cur, target, e)
+
+    @staticmethod
+    def _attach_shared_fact(store, work_id, content: str, actor: str) -> None:
+        """Mint a root `evidence` fact node (info useful to OTHER agents) + an `informs` edge to
+        the GOAL — so it reaches every agent (render RELEVANT INFO) and the curator. Deduped by
+        content against facts already informing the goal."""
+        from work_objects.model import new_id
+        try:
+            wo = store.load(work_id)
+            goal_id = wo.goal_node_id
+            if not goal_id:
+                return
+            for e in wo.edges:
+                if e.relation == "informs" and e.dst == goal_id:
+                    n = wo.nodes.get(e.src)
+                    if n is not None and (n.content or "").strip() == content:
+                        return
+            fid = new_id("fact")
+            store.apply("add_node",
+                        {"work_id": work_id, "id": fid, "type": "evidence", "content": content,
+                         "status": "assumed", "created_by": actor},
+                        actor=actor)
+            store.apply("add_edge",
+                        {"work_id": work_id, "src": fid, "dst": goal_id, "relation": "informs"},
+                        actor=actor)
+        except Exception as e:
+            logger.debug("attach shared fact skipped: %s", e)

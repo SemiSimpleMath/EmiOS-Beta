@@ -39,3 +39,11 @@ class AgentForm(BaseModel):
                      "(each becomes a durable pod). Leave empty unless this turn produced real data; "
                      "never pod navigation/snapshots/intermediate scrapes."),
     )
+    info_for_others: List[str] = Field(
+        default_factory=list,
+        description=("0+ things you noticed THIS turn that could matter to OTHER agents on the overall "
+                     "goal but lie OUTSIDE your own task — a key fact, a useful source/URL, or something "
+                     "that changes the premise of the whole goal. Each becomes a shared note visible to "
+                     "every agent and the curator. Usually empty; do NOT put your own task's findings "
+                     "here, and don't repeat items already shared."),
+    )
