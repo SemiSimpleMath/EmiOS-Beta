@@ -1,9 +1,8 @@
-from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
 from app.assistant.lib.tools.search_web.utils import web_search
 from app.assistant.utils.pydantic_classes import (
     ToolMessage,
-    Message, ToolResult
+    ToolResult
 )
 
 from app.assistant.utils.logging_config import get_logger
@@ -32,7 +31,6 @@ class SearchWeb(BaseTool):
 
         arguments = tool_message.tool_data.get('arguments', {})
         search_query = arguments.get('query')
-        task_description = arguments.get('task', "Analyze the following search results for relevant information.")
 
         if not search_query:
             logger.error("Error: 'query' argument is required for search_web tool.")
@@ -61,43 +59,15 @@ class SearchWeb(BaseTool):
                  for idx, res in enumerate(search_results, start=1)]
             )
 
-            # Instantiate `web_parser` agent
-            web_parser_agent = DI.agent_factory.create_agent('web_parser')
-
-            if web_parser_agent is None:
-                logger.error("No web_parser agent found!")
-                exit(1)
-
-            # Send the entire formatted search results to the `web_parser` agent, along with the task description
-            parse_message = Message(
-                agent_input=f"Task: {task_description}\n\nQuery: {search_query}\n\n{formatted_results}"
-            )
-            parsed_result = web_parser_agent.action_handler(parse_message)
-
-            # Agent.action_handler returns a ToolResult with the actual dict in .data field
-            if isinstance(parsed_result, ToolResult):
-                result_data = parsed_result.data
-                content = result_data.get('content', 'No content returned from web_parser')
-                links = result_data.get('links', [])
-            elif isinstance(parsed_result, dict):
-                # Fallback for dict response
-                content = parsed_result.get('content', 'No content returned from web_parser')
-                links = parsed_result.get('links', [])
-            else:
-                # Unexpected type
-                content = str(parsed_result)
-                links = []
-                logger.warning(f"web_parser returned unexpected type: {type(parsed_result)}")
-
-            # Log for debugging
-            logger.info(f"web_parser returned content length: {len(content)}, links count: {len(links)}")
-
-            # Return structured search results as ToolResult
-            # This will go through tool_result_handler and appear in planner's recent_history
+            # Return the structured search results directly to the planner. web_parser (an LLM
+            # pre-digest of these same title/url/snippet results) was removed: the planner is itself
+            # an LLM that reads/ranks these directly, and the parser only added an extra LLM call per
+            # search plus a hardcoded science/space domain bias — without any new information.
+            logger.info(f"SearchWeb: returning {len(search_results)} structured results to caller.")
             return ToolResult(
                 result_type="search_web",
-                content=content,
-                data_list=links
+                content=formatted_results,
+                data_list=search_results,
             )
 
         except Exception as e:
