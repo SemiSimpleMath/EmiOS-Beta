@@ -9,7 +9,7 @@ llm_params:
 # from the `checklist` field by the reconcile hook), works the items itself IN
 # SEQUENCE via the single `action` channel, records findings/artifacts, and finishes.
 # web_manager is the standard manager-as-tool for a research step.
-allowed_tools: [work_add_subtask, work_add_dependency, work_record_finding, work_produce_artifact, work_ask_question, work_defer, work_finish, work_graph_search, work_graph_peek, work_graph_summary, web_manager]
+allowed_tools: [all]   # inherit the work_manager ceiling (its delegable managers + pod tools + ask_user); graph writes are the reconcile hook, not tools
 except_tools: []
 allowed_nodes: [return_control]
 

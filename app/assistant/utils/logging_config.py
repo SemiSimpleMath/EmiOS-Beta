@@ -206,6 +206,26 @@ def get_logger(name: str, level=None, log_file="emi_logs.log"):
     return setup_logger(name, level, log_file)
 
 
+def add_file_sink(name: str, level=None) -> str:
+    """Tee ALL of this process's logging to a dedicated, predictable file
+    ``<data_dir>/logs/<name>.log`` (overwritten each run), on top of the normal
+    ``emi_logs_<pid>.log``. For scripts/scenarios that want their own findable,
+    full-DEBUG log instead of hunting for a PID-named file. Returns the abs path."""
+    global log_listener
+    # ensure the queue listener exists (outside the lock — setup_logger takes it too)
+    get_logger("scenario_sink")
+    logs_dir = ensure_logs_directory()
+    path = os.path.abspath(os.path.join(logs_dir, f"{name}.log"))
+    handler = logging.FileHandler(path, mode="w", encoding="utf-8")
+    handler.setFormatter(LOG_FORMATTER)
+    handler.setLevel(level if level is not None else logging.DEBUG)
+    with log_lock:
+        if log_listener is not None:
+            # append to the running listener's handler tuple (gets all subsequent records)
+            log_listener.handlers = tuple(log_listener.handlers) + (handler,)
+    return path
+
+
 # ========================
 # 6. Runtime Logging Controls (Dev UI)
 # ========================

@@ -20,6 +20,15 @@ class AgentForm(BaseModel):
                      "add new ones (empty id). Mark an item done only AFTER its result appears in "
                      "recent history — never in the same turn as the action that would complete it."),
     )
+    findings: List[str] = Field(
+        default_factory=list,
+        description=("Concrete results/answers you have produced for THIS node — each is recorded "
+                     "DURABLY on the node (the finalizer builds the node's answer from these, and "
+                     "other nodes can reuse them). Add a result the turn after it appears in recent "
+                     "history; for a direct answer, write it as you give it; and ALWAYS write your "
+                     "final result here on the same turn you return_control. Don't repeat ones "
+                     "already recorded."),
+    )
     info_for_others: List[str] = Field(
         default_factory=list,
         description=("0+ things you noticed THIS turn that could matter to OTHER agents on the overall "

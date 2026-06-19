@@ -70,6 +70,23 @@ class WorkPlanner(Planner):
             elif not cid:
                 tools.add_subtask(name)
 
+        # findings -> evidence nodes recorded ON this node (its durable result / deliverable). Minted
+        # as CHILDREN so the render shows them under "RECORDED ON THIS NODE" and the finalizer builds
+        # the node's answer from them. Deduped by content. process_llm_result runs this hook EVERY
+        # turn, INCLUDING the return_control turn, so the planner's final write is always captured.
+        from work_objects.model import new_id as _new_finding_id
+        recorded = {(n.content or "").strip() for n in wo.nodes.values()
+                    if n.parent_id == node_id and n.type == "evidence"}
+        for finding in (result_dict.get("findings") or []):
+            finding = str(finding or "").strip()
+            if finding and finding not in recorded:
+                recorded.add(finding)
+                store.apply("add_node",
+                            {"work_id": work_id, "id": _new_finding_id("finding"), "type": "evidence",
+                             "parent_id": node_id, "content": finding, "status": "assumed",
+                             "created_by": actor},
+                            actor=actor)
+
         # info_for_others -> shared fact nodes (root evidence) that `informs` the GOAL, so each
         # discovery reaches every other agent (render RELEVANT INFO) and the curator (which harvests
         # goal-informing facts). Deduped by content.

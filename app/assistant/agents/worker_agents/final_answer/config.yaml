@@ -1,0 +1,20 @@
+name: worker_agents::final_answer
+class_name: WorkFinalAnswer
+action_required: false
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5-mini"
+  model_tier: "mini"
+
+allowed_tools: []
+except_tools: []
+allowed_nodes: [manager_exit_node]
+
+# Runs once at node termination. work_projection = the node render (task, checklist, recorded
+# outputs); recent_history = what the worker actually did. The verdict is judged from those.
+user_context_items:
+  - date_time
+  - work_projection
+  - recent_history
+
+system_context_items: []
