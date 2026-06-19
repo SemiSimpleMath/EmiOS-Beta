@@ -86,7 +86,8 @@ class WorkObjectRenderNode(ControlNode):
 
         # THE WORK TREE (summaries; mark YOU ARE HERE)
         L.append("")
-        L.append("## THE WORK TREE  (summaries — drill in with work_graph_peek)")
+        L.append("## THE WORK TREE  (other nodes' work; a node tagged ·has-output holds a result you "
+                 "can HYDRATE with work_graph_peek(node_id) — reuse prior work instead of re-deriving it)")
         L.extend(self._tree(wo, ctx.node_id))
         return "\n".join(L)
 
@@ -95,8 +96,11 @@ class WorkObjectRenderNode(ControlNode):
         out: list[str] = []
 
         def walk(node, depth):
-            marker = "   <- YOU ARE HERE" if node.id == here_id else ""
-            out.append(f"  {'  ' * depth}- [{node.type}/{node.status}] {(node.title or '')[:60]}{marker}")
+            here = node.id == here_id
+            marker = "   <- YOU ARE HERE" if here else ""
+            out_tag = " ·has-output" if (not here and (node.content or node.pod_ref)) else ""
+            out.append(f"  {'  ' * depth}- [{node.type}/{node.status}] (id:{node.id}){out_tag} "
+                       f"{(node.title or '')[:60]}{marker}")
             for c in wo.nodes.values():
                 if c.parent_id == node.id:
                     walk(c, depth + 1)

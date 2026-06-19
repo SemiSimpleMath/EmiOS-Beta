@@ -1,0 +1,23 @@
+Today is {{ date_time }}.
+
+{{ work_projection }}
+
+{% if research_notebook %}
+## Research notebook — units already captured to pods (do NOT re-pod these; details are saved)
+{% for n in research_notebook %}
+- {{ n.unit }}: {{ n.one_liner }}  [pod: {{ n.pod_id }}]
+{% endfor %}
+Only emit findings_to_pod for a unit NOT already here (or to correct one with materially new data).
+{% endif %}
+
+{% if recent_history %}
+## What you have done since your last plan (oldest -> newest; last is the most recent tool result)
+{{ recent_history }}
+{% endif %}
+
+{% if action_count %}**Action count:** {{ action_count }}/15 (you have {{ 15 - action_count }} left){% endif %}
+
+Update your `checklist` from YOUR CHECKLIST above — echo each existing item with its **id and name
+verbatim** (only its `status` changes, plus an `evidence` note when you mark it `done`); append a
+NEW item only with an empty id. Then choose ONE `action`. When every item is done or abandoned, set
+action = return_control.

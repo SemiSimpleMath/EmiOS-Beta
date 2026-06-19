@@ -1,0 +1,47 @@
+name: worker_agents::web_planner
+class_name: WorkPlanner
+# = web::planner (same form, prompts, tools, behaviour). The ONLY diff is class_name:
+# WorkPlanner, whose reconcile hook mirrors the checklist -> subtask nodes and findings_to_pod
+# -> Evidence nodes of the WorkObject node this planner owns. No work_* tools: the graph is
+# written declaratively by the hook, not by tool calls.
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.4-mini"
+  model_tier: "mini"
+
+allowed_nodes: [shared::writer, shared::mathematician]
+
+allowed_tools:
+  - search_web
+  - scrape_url
+  - http_request
+  - web_get_content
+  - peak_at_link
+  - summarize_link
+  - web_navigate_snapshot
+  - web_visual_scout
+  - web_modal_scan
+  - find_tool
+  - ask_user
+  # read-only graph tools: hydrate another node's output (·has-output in THE WORK TREE) before searching
+  - work_graph_peek
+  - work_graph_search
+
+except_tools: [emi_team]
+
+append_fields: [progress_report]
+
+user_context_items:
+  - date_time
+  - work_projection      # the render node injects the owned node + checklist (with [id]s) here
+  - research_notebook    # units already podded (so it doesn't re-pod)
+  - recent_history
+  - action_count
+
+system_context_items:
+  - tool_descriptions
+  - allowed_nodes
+  - system_wide_task
+
+skills:
+  - critic-handling
