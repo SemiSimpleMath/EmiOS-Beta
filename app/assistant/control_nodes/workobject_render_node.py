@@ -48,6 +48,24 @@ class WorkObjectRenderNode(ControlNode):
         if goal is not None and goal.id != n.id:
             L.append(f"parent goal: {goal.title}")
 
+        # RELEVANT INFO = fact nodes that `informs` THIS node or the GOAL (goal = shared with all)
+        goal_id = wo.goal_node_id or ""
+        informer_ids, seen = [], set()
+        for e in wo.edges:
+            if e.relation == "informs" and e.dst in {ctx.node_id, goal_id} and e.src not in seen:
+                seen.add(e.src)
+                informer_ids.append(e.src)
+        if informer_ids:
+            L.append("")
+            L.append("## RELEVANT INFO  (facts surfaced for you by the curator/router — use them, do NOT re-derive)")
+            for fid in informer_ids:
+                f = wo.nodes.get(fid)
+                if f is None:
+                    continue
+                detail = (f.content or f.pod_ref or "").strip()
+                if detail:
+                    L.append(f"- {detail}")
+
         # YOUR CHECKLIST = this node's child subtasks
         kids = [m for m in wo.nodes.values() if m.parent_id == ctx.node_id and m.type == "subtask"]
         L.append("")
@@ -66,7 +84,7 @@ class WorkObjectRenderNode(ControlNode):
             L.append("## RECORDED ON THIS NODE")
             for o in outs:
                 detail = (o.content or o.pod_ref or "").strip()
-                L.append(f"- [{o.type}] {o.title}" + (f" -> {detail[:200]}" if detail else ""))
+                L.append(f"- [{o.type}] {o.title}" + (f" -> {detail}" if detail else ""))
 
         # DEPENDENCIES — upstream nodes' produced outputs (content inline; no peeking)
         dep_ids = [e.src for e in wo.edges if e.dst == ctx.node_id and e.relation == "depends_on"]
@@ -82,7 +100,7 @@ class WorkObjectRenderNode(ControlNode):
                     if e.src == did and e.relation == "produces" and e.dst in wo.nodes:
                         p = wo.nodes[e.dst]
                         detail = (p.content or p.pod_ref or "").strip()
-                        L.append(f"    * [{p.type}] {p.title}" + (f" -> {detail[:300]}" if detail else ""))
+                        L.append(f"    * [{p.type}] {p.title}" + (f" -> {detail}" if detail else ""))
 
         # THE WORK TREE (summaries; mark YOU ARE HERE)
         L.append("")
@@ -100,11 +118,14 @@ class WorkObjectRenderNode(ControlNode):
             marker = "   <- YOU ARE HERE" if here else ""
             out_tag = " ·has-output" if (not here and (node.content or node.pod_ref)) else ""
             out.append(f"  {'  ' * depth}- [{node.type}/{node.status}] (id:{node.id}){out_tag} "
-                       f"{(node.title or '')[:60]}{marker}")
+                       f"{(node.title or '')}{marker}")
             for c in wo.nodes.values():
                 if c.parent_id == node.id:
                     walk(c, depth + 1)
 
-        for r in [x for x in wo.nodes.values() if not x.parent_id]:
+        # fact nodes (root `evidence`/`note`) live outside the work spine — they show in
+        # RELEVANT INFO via `informs` edges, not as tree roots.
+        for r in [x for x in wo.nodes.values()
+                  if not x.parent_id and x.type not in {"evidence", "artifact", "note"}]:
             walk(r, 0)
         return out
