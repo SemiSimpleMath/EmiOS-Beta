@@ -1,0 +1,117 @@
+# Node-graph variant of web_manager. Mirrors app/assistant/multi_agents/web_manager/config.yaml; the
+# node deltas are:
+#   node_aware: true     — called as a tool from inside a WorkObject run, ManagerInterface mints a child
+#                          node and runs this manager ON it (manager_interface._run_on_child_node).
+#   node_input: render   — the workobject_render_node loads the owned node into `work_projection` (YOUR
+#                          NODE + YOUR CHECKLIST with [id]s + THE WORK TREE); run_node just says "advance".
+#   workobject_render_node added before the planner (on delegator-entry and tool-return) so the planner
+#                          always sees the current node state.
+#   planner: work_web_manager::planner (class WorkPlanner) replaces web::planner — same web research; its
+#                          prompts are DERIVED from web/planner's (not forked verbatim), and WorkPlanner
+#                          mirrors the checklist / findings_to_pod it produces into the graph. Lives in
+#                          agents/work_web_manager/planner/.
+# Everything else — critic, web_summary, final_answer, mathematician, tools, scope, flow — is web_manager's.
+name: work_web_manager
+node_aware: true
+node_input: render
+class_name: MultiAgentManager
+description: "A team manager that controls a team of web search agents, working on a work-graph node."
+display_name: "Webby (graph)"
+max_cycles: 120
+role_bindings:
+  delegator: web::delegator
+  tool_selector: shared::tool_selector
+  planner: work_web_manager::planner
+
+agents:
+  - name: web::delegator
+    class: Delegator
+  - name: work_web_manager::planner
+    class: WorkPlanner
+  - name: web::critic
+    class: PlaywrightAgent
+  - name: web::web_summary
+    class: Agent
+  - name: shared::final_answer_lite
+    class: Agent
+  - name: shared::mathematician
+    class: Agent
+
+control_nodes:
+  - name: workobject_render_node
+    class: WorkObjectRenderNode
+  - name: tool_return_router
+    class: ToolReturnRouter
+  - name: critic_pre_node
+    class: CriticPreNode
+    config:
+      enabled: true
+      critic_agent: "web::critic"
+      continue_agent: "tool_caller"
+  - name: critic_post_node
+    class: CriticPostNode
+    config:
+      critic_agent: "web::critic"
+  - name: summary_pre_node
+    class: SummaryPreNode
+    config:
+      enabled: true
+      summary_agent: "web::web_summary"
+      resume_agent: "work_web_manager::planner"
+  - name: summary_post_node
+    class: SummaryPostNode
+    config:
+      summary_agent: "web::web_summary"
+      resume_agent: "work_web_manager::planner"
+  - name: tool_caller
+    class: ToolCaller
+  - name: tool_result_handler
+    class: ToolResultHandler
+  - name: return_control
+    class: ReturnControlNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+  - name: graceful_exit_control_node
+    class: GracefulExitControlNode
+
+tools:
+  allowed_tools:
+    - ask_user
+    - find_tool
+    - install_tool
+    - search_web
+    - scrape_url
+    - http_request
+    - mcp::npm/server-google-maps::maps_distance_matrix
+  except_tools: []
+
+scope_contract:
+  tools:
+    allowed_tools:
+      - ask_user
+      - find_tool
+      - install_tool
+      - search_web
+      - scrape_url
+      - http_request
+      - mcp::npm/server-google-maps::maps_distance_matrix
+    blocked_tools:
+      - mcp::npm/playwright-mcp::browser_run_code
+    requires_approval_tools: []
+    allow_external_side_effects: false
+
+flow_config:
+  strict_routing: true
+  tool_return:
+    tool_call_result_handler_node: "tool_result_handler"
+  state_map:
+    "web::delegator": "workobject_render_node"
+    "workobject_render_node": "work_web_manager::planner"
+    "work_web_manager::planner": "critic_pre_node"
+    "web::critic": "critic_post_node"
+    "tool_result_handler": "tool_return_router"
+    "tool_return_router": "workobject_render_node"
+    "work_web_manager::planner_return_control": "shared::final_answer_lite"
+    "shared::final_answer_lite": "manager_exit_node"
+    "graceful_exit": "graceful_exit_control_node"
+    "graceful_exit_control_node": "shared::final_answer_lite"

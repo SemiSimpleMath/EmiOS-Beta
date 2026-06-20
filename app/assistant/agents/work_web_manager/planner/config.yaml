@@ -1,13 +1,17 @@
-name: worker_agents::web_planner
+# work_web_manager::planner — web::planner's research agent (its model, tools, notebook, skills) adapted
+# to OWN a WorkObject graph node. Deltas vs app/assistant/agents/web/planner/config.yaml:
+#   class_name: Planner -> WorkPlanner       (mirrors checklist -> subtask nodes + findings_to_pod -> pods)
+#   + work_graph_peek / work_graph_search    (hydrate a ·has-output node before searching)
+#   user_context_items: work_projection (the render node injects YOUR NODE + checklist with [id]s)
+#                       replaces task / information / checklist — the graph IS the task + checklist now.
+# The prompts (system.j2 / user.j2) are derived from web/planner's — see their headers, keep in sync.
+name: work_web_manager::planner
 class_name: WorkPlanner
-# = web::planner (same form, prompts, tools, behaviour). The ONLY diff is class_name:
-# WorkPlanner, whose reconcile hook mirrors the checklist -> subtask nodes and findings_to_pod
-# -> Evidence nodes of the WorkObject node this planner owns. No work_* tools: the graph is
-# written declaratively by the hook, not by tool calls.
 llm_params:
-  llm_provider: "openai"
-  engine: "gpt-5.4-mini"
+  llm_provider: "gemini"
+  engine: "gemini-3-flash-preview"
   model_tier: "mini"
+  temperature: 1
 
 allowed_nodes: [shared::writer, shared::mathematician]
 

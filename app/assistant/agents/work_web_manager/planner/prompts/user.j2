@@ -17,6 +17,11 @@ Only emit findings_to_pod for a unit NOT already here (or to correct one with ma
 
 {% if action_count %}**Action count:** {{ action_count }}/15 (you have {{ 15 - action_count }} left){% endif %}
 
+{% if action_count and action_count >= 15 %}
+CRITICAL: You have reached the 15-action limit! Wrap up NOW and complete your task even if not fully
+done. No more tool calls — set action to return_control.
+{% endif %}
+
 Update your `checklist` from YOUR CHECKLIST above — echo each existing item with its **id and name
 verbatim** (only its `status` changes, plus an `evidence` note when you mark it `done`); append a
 NEW item only with an empty id. Then choose ONE `action`. When every item is done or abandoned, set

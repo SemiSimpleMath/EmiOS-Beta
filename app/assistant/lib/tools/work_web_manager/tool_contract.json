@@ -1,0 +1,51 @@
+{
+  "name": "work_web_manager",
+  "description": "This is a powerful team of agents that does web search and reasoning.  Best way to use this agent group is to give a very detailed description of what you want.  For example:\n\"please find recipies for picky eaters.  Not just links, provide actual recipies, ingredients and directions.\"  web team can do multi step queries and is capable of returning a report of\nresearched information from the web.\nIf the entire question you are trying to get done can be solved by web research, then pass the whole task to the web team.",
+  "inputs": [
+    {
+      "name": "task",
+      "type": "string",
+      "required": true,
+      "description": ""
+    },
+    {
+      "name": "information",
+      "type": "string",
+      "required": true,
+      "description": ""
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable tool result text."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Structured tool result payload."
+    }
+  ],
+  "arguments_prompt": "Arguments to this tool are:\narguments: task\n\ntask: str\n\ntask should be very descriptive.  This is not a normal search engine.  It is a team of agents using various search\nmethods.  So more they know about the problem the better.  Do not change the meaning of the task!  Copy as much\nverbatim the suggested query as possible.  You may give a task that takes multiple queries to complete.",
+  "metadata": {
+    "min_authority": 30,
+    "approval_min_authority": 30,
+    "domain": "web",
+    "actions": [
+      "orchestrate"
+    ],
+    "selectors": [
+      "web"
+    ],
+    "risk_level": "low",
+    "side_effects": "read_only",
+    "requires_auth": [],
+    "requires_network": true,
+    "cost_level": "high",
+    "latency_class": "slow",
+    "front_door": false,
+    "room_visibility_default": "conditional",
+    "approval_required": false
+  }
+}

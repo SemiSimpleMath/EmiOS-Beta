@@ -1,9 +1,0 @@
-Today is {{ date_time }}.
-
-{{ work_projection }}
-
-## What the worker did on this node (its turns + tool results)
-{% if recent_history %}{{ recent_history }}{% else %}(no recorded work){% endif %}
-
-Synthesize the node's outcome and judge its terminal status (complete / abandoned / error) from the
-work actually done above.

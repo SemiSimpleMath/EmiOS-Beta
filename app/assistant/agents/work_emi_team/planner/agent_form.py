@@ -3,11 +3,11 @@ from pydantic import BaseModel, Field
 
 
 class ChecklistItem(BaseModel):
-    """One subtask of the node this planner owns. The checklist round-trips through
-    the GRAPH: the render node shows each existing subtask with its `id`; ECHO that
-    id for existing items, leave it EMPTY for a new item you are adding this turn."""
+    """One milestone of the node this planner owns. The checklist round-trips through the GRAPH:
+    the render node shows each existing milestone with its `id`; ECHO that id for existing items,
+    leave it EMPTY for a new milestone you are adding this turn. `text` is fixed once written."""
     id: str = Field(default="", description="Echo the [id] shown in YOUR CHECKLIST for an existing item; EMPTY for a new one.")
-    text: str = Field(description="Short, stable, outcome-based description of the subtask.")
+    text: str = Field(description="Short, stable, outcome-based description of the milestone.")
     status: str = Field(default="todo", description="todo | doing | done | abandoned")
     evidence: str = Field(default="", description="On done: a brief note / result / pod_ref proving it.")
 
@@ -16,9 +16,10 @@ class AgentForm(BaseModel):
     what_i_am_thinking: str
     checklist: List[ChecklistItem] = Field(
         default_factory=list,
-        description=("Your durable subtasks for THIS node. Echo existing items (with their id) and "
-                     "add new ones (empty id). Mark an item done only AFTER its result appears in "
-                     "recent history — never in the same turn as the action that would complete it."),
+        description=("Your durable, HIGH-LEVEL milestones for THIS node — each a whole step you will "
+                     "DELEGATE to one specialist manager. Echo existing items (with their id) and add "
+                     "new ones (empty id). Mark an item done only AFTER its result appears in recent "
+                     "history — never in the same turn as the action that would complete it."),
     )
     findings: List[str] = Field(
         default_factory=list,

@@ -1,0 +1,280 @@
+# Node-graph variant of emi_team_manager. This MIRRORS
+# app/assistant/multi_agents/emi_team_manager/config.yaml verbatim; the ONLY deltas are the node wiring:
+#   node_aware: true   — when called as a tool from inside a WorkObject run, ManagerInterface mints a
+#                        child node and runs this manager ON it (manager_interface._run_on_child_node).
+#   node_input: render — the workobject_render_node loads the owned node into `work_projection` (YOUR
+#                        NODE + YOUR CHECKLIST with [id]s + THE WORK TREE); run_node just says "advance".
+#   workobject_render_node added before the planner (delegator-entry + after summary) so it always sees
+#                        the current node state.
+#   planner: work_emi_team::planner (class WorkPlanner) replaces emi_team::planner — same delegating
+#                        generalist; its prompts are DERIVED from emi_team/planner's (delegation, NOT
+#                        decompose), and WorkPlanner mirrors the checklist/findings into the graph.
+#                        Lives in agents/work_emi_team/planner/.
+#   always_show: web_manager -> work_web_manager — research is delegated to the node web worker (so the
+#                        handoff fires); other sub-managers stay production until their node versions exist.
+# The big blocked_tools / hidden_tools lists are copied verbatim for parity — task #39 strips them from
+# emi_team AND here together, once room scopes are confirmed to cover them.
+name: work_emi_team_manager
+node_aware: true
+node_input: render
+class_name: MultiAgentManager
+description: "The emi_team general work horse, working on a work-graph node (emi_team + graph reconcile)."
+display_name: "Waffle (graph)"
+max_cycles: 80  # Prevent infinite loops
+role_bindings:
+  delegator: emi_team::delegator
+  tool_selector: shared::tool_selector
+  planner: work_emi_team::planner
+
+agents:
+  - name: emi_team::delegator
+    class: Delegator
+  - name: work_emi_team::planner
+    class: WorkPlanner
+  - name: emi_team::critic
+    class: PlaywrightAgent
+  - name: emi_team::summary
+    class: Agent
+  - name: emi_team::final_answer
+    class: Agent
+
+control_nodes:
+  - name: workobject_render_node
+    class: WorkObjectRenderNode
+  - name: tool_return_router
+    class: ToolReturnRouter
+  - name: critic_pre_node
+    class: CriticPreNode
+    config:
+      enabled: true
+      critic_agent: "emi_team::critic"
+      continue_agent: "tool_caller"
+  - name: critic_post_node
+    class: CriticPostNode
+    config:
+      critic_agent: "emi_team::critic"
+  - name: summary_pre_node
+    class: SummaryPreNode
+    config:
+      enabled: true
+      summary_agent: "emi_team::summary"
+      resume_agent: "work_emi_team::planner"
+  - name: summary_post_node
+    class: SummaryPostNode
+    config:
+      summary_agent: "emi_team::summary"
+      resume_agent: "work_emi_team::planner"
+  - name: tool_caller
+    class: ToolCaller
+  - name: tool_result_handler
+    class: ToolResultHandler
+  - name: tool_approve_node
+    class: ToolApproveNode
+  - name: return_control
+    class: ReturnControlNode
+  - name: manager_exit_node
+    class: ManagerExitNode
+  - name: graceful_exit_control_node
+    class: GracefulExitControlNode
+
+tools:
+  allowed_tools: [all]
+  except_tools: [work_emi_team_manager, run_routine]
+scope_contract:
+  tools:
+    # emi_team is the general-purpose coordinator — its surface is "all" by
+    # default. Parent scopes narrow it via per_manager rules (e.g. Slack's
+    # ROOM.md per_manager.emi_team_manager.allow restricts to web/pods only).
+    # Without this explicit "all", emi_team would INHERIT the calling
+    # manager's narrow allowed_tools (e.g. room_manager's list which lacks
+    # pod_search), breaking delegations like Slack → emi_team → pod_search.
+    allowed_tools: [all]
+    requires_approval_tools:
+      - playwright_manager
+    # emi_team delegates; it does not call manager-owned leaves directly.
+    # KG mutation surfaces, the http leaf (owned by http_manager), and the
+    # sandbox leaf (owned by sandbox_manager) are all blocked here — each
+    # has a dedicated manager that owns its approval / scope rules.
+    blocked_tools:
+      # Manager-owned leaves — call the wrapping manager instead
+      - http_request          # owned by http_manager
+      - oauth_token_refresh   # owned by http_manager
+      - execute_code          # owned by sandbox_manager
+      - run_shell             # owned by bash_manager
+      # KG leaf mutators
+      - kg_create_node
+      - kg_create_edge
+      - kg_update_node
+      - kg_delete_node
+      - kg_delete_edge
+      - kg_merge_nodes
+      - kg_rename_label
+      - kg_update_node_field
+      - kg_close_state
+      - kg_create_state_node
+      - kg_finding_resolve
+      - kg_finding_escalate
+      # Mutation-surface sub-managers — emi_team must not dispatch into
+      # any path that can edit the KG. Each has its own user-facing
+      # surface (kg_dev room, kg_investigation pipeline) outside emi_team.
+      - kg_dev_manager
+      - kg_mutation_manager
+      - kg_investigation_manager
+tool_visibility:
+  # emi_team mostly delegates. Anything owned by a manager (http_request →
+  # http_manager, execute_code → sandbox_manager, run_shell → bash_manager,
+  # email / calendar / todo / device leaves → their respective managers) is
+  # NOT in always_show and is hidden + blocked below. The planner picks the
+  # manager; the manager runs the leaf.
+  always_show: [personal_admin_manager, devices_manager, work_web_manager, playwright_manager, bash_manager, http_manager, sandbox_manager, find_tool, install_tool, ask_user, pod_search, pod_fetch, mint_pod, ask_kg, discover_skills, read_skill]
+  use_narrower: true
+  hidden_tools:
+    # --- personal_admin_manager leaf tools (call the manager instead) ---
+    - get_email
+    - get_important_emails
+    - get_email_thread
+    - get_email_messages
+    - send_email
+    - find_calendar_event_by_name
+    - get_calendar_events
+    - create_calendar_event
+    - create_repeating_calendar_event
+    - update_calendar_event
+    - delete_calendar_event
+    - delete_repeating_calendar_event
+    - get_todo_tasks
+    - create_todo_task
+    - update_todo_task
+    - delete_todo_task
+    - get_scheduler_events
+    - create_scheduler_event
+    - create_repeating_scheduler_event
+    - delete_scheduler_event
+    - nest_home_control
+    - lights_control
+    - ring_camera_control
+
+    # --- web_manager leaf tools (call the manager instead) ---
+    - search_web
+    - scrape_url
+    - get_news
+    - get_weather
+    - summarize_link
+    - peak_at_link
+    - mcp::npm/server-google-maps::maps_distance_matrix
+    - mcp::npm/server-google-maps::maps_search_places
+    - mcp::npm/server-google-maps::maps_place_details
+
+    # --- playwright_manager leaf tools (call the manager instead) ---
+    - web_navigate_snapshot
+    - web_navigate_back_snapshot
+    - web_click_ref_snapshot
+    - web_click_xy_snapshot
+    - web_fill_xy
+    - web_type_focused
+    - web_page_coords
+    - web_scroll
+    - web_spatial_snapshot
+    - web_visual_scout
+    - playwright_page_overview
+    - playwright_browse
+    - mcp::npm/playwright-mcp::browser_take_screenshot
+    - mcp::npm/playwright-mcp::browser_wait_for
+    - mcp::npm/playwright-mcp::browser_tabs
+    - mcp::npm/playwright-mcp::browser_click
+    - mcp::npm/playwright-mcp::browser_type
+    - mcp::npm/playwright-mcp::browser_mouse_click_xy
+    - mcp::npm/playwright-mcp::browser_hover
+    - mcp::npm/playwright-mcp::browser_run_code
+
+    # --- KG reads ---
+    # Only ask_kg is in always_show. ask_kg is the LLM-driven RAG path
+    # that handles disambiguation, multi-hop, and missing-info gracefully
+    # — emi_team's single KG Q&A surface. The deterministic primitives
+    # (kg_find_node, kg_describe_node, kg_query, kg_find_edge,
+    # kg_describe_edge) are leaf tools used internally and
+    # don't surface here.
+    - kg_find_node
+    - kg_describe_node
+    - kg_query
+    - kg_find_edge
+    - kg_describe_edge
+
+    # --- KG mutators are blocked via scope_contract.tools.blocked_tools.
+    # Hiding them here too keeps them out of the planner prompt.
+    - kg_update_node
+    - kg_create_node
+    - kg_create_edge
+    - kg_delete_node
+    - kg_delete_edge
+    - kg_merge_nodes
+    - kg_rename_label
+    - kg_update_node_field
+    - kg_close_state
+    - kg_create_state_node
+    - kg_finding_resolve
+    - kg_finding_escalate
+
+    # --- Mutation-surface managers — also in blocked_tools ---
+    - kg_dev_manager
+    - kg_mutation_manager
+    - kg_investigation_manager
+
+    # --- Specialist sub-managers not needed at emi_team top-level ---
+    - kg_explorer_manager
+    - event_manager
+    - fast_tool_manager
+    - daily_summary
+    - task_compile_manager
+
+    # --- Low-level system / file tools not appropriate at this level ---
+    - read_text_file
+    - write_text_file
+    - append_text_file
+    - read_tool_result
+    - capture_and_describe_monitors
+    - capture_monitor_screenshot
+    - set_screen_capture_enabled
+    - set_ui_mute
+    - link_children_to_parent
+    - get_event_hierarchy
+    - create_dayflow_ticket
+    - cancel_event_tree
+
+    # --- Manager-owned leaves — emi_team calls the manager, not the leaf ---
+    - http_request      # owned by http_manager
+    - execute_code      # owned by sandbox_manager
+    - run_shell         # owned by bash_manager
+    - oauth_token_refresh  # owned by http_manager
+
+flow_config:
+  tool_return:
+    tool_call_result_handler_node: "tool_result_handler"
+  summary:
+    enabled: true
+    source_agent: "tool_return_router"
+    summary_agent: "emi_team::summary"
+    resume_agent: "work_emi_team::planner"
+    planner_agent: "work_emi_team::planner"
+    cadence_every_actions: 4
+    action_count_state_key: "{planner_agent}_action_count"
+    min_messages: 30
+    trigger_on_large_result_chars: 5000
+    payload_key: "summary_payload"
+    payload_recent_history_messages: 120
+    allow_summarize_latest_tool_result: false
+    protect_last_n_results: 3
+  state_map:
+    "emi_team::delegator": "workobject_render_node"
+    "workobject_render_node": "work_emi_team::planner"
+    "work_emi_team::planner": "critic_pre_node"
+    "emi_team::critic": "critic_post_node"
+    "tool_result_handler": "tool_return_router"
+    "tool_return_router": "summary_pre_node"
+    "summary_pre_node": "workobject_render_node"
+    "emi_team::summary": "summary_post_node"
+    "summary_post_node": "workobject_render_node"
+    "work_emi_team::planner_return_control": "emi_team::final_answer"
+    "emi_team::final_answer": "manager_exit_node"
+    "graceful_exit": "graceful_exit_control_node"
+    "graceful_exit_control_node": "emi_team::final_answer"
