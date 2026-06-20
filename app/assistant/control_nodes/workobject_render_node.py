@@ -20,6 +20,20 @@ from app.assistant.utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 
+def _node_detail(node) -> str:
+    """A node's result detail for the projection: its content, else — if the result lives in a pod —
+    the pod's SUMMARY (one_liner), never a bare datapod:... id. So a viewer always sees WHAT a node
+    produced."""
+    detail = (getattr(node, "content", "") or "").strip()
+    if not detail and getattr(node, "pod_ref", None):
+        try:
+            from work_objects.work_tools import pod_summary
+            detail = pod_summary(node.pod_ref)
+        except Exception:
+            detail = str(node.pod_ref)
+    return detail
+
+
 def render_work_projection(wo, node_id: str) -> str:
     """Render a WorkObject node for a planner/finalizer prompt: its task, RELEVANT INFO,
     checklist, recorded outputs, dependencies, and the work tree. Pure (wo, node_id) -> str,
@@ -51,7 +65,7 @@ def render_work_projection(wo, node_id: str) -> str:
             f = wo.nodes.get(fid)
             if f is None:
                 continue
-            detail = (f.content or f.pod_ref or "").strip()
+            detail = _node_detail(f)
             if detail:
                 L.append(f"- {detail}")
 
@@ -72,7 +86,7 @@ def render_work_projection(wo, node_id: str) -> str:
         L.append("")
         L.append("## RECORDED ON THIS NODE")
         for o in outs:
-            detail = (o.content or o.pod_ref or "").strip()
+            detail = _node_detail(o)
             L.append(f"- [{o.type}] {o.title}" + (f" -> {detail}" if detail else ""))
 
     # DEPENDENCIES — upstream nodes' produced outputs (content inline; no peeking)
@@ -88,7 +102,7 @@ def render_work_projection(wo, node_id: str) -> str:
             for e in wo.edges:
                 if e.src == did and e.relation == "produces" and e.dst in wo.nodes:
                     p = wo.nodes[e.dst]
-                    detail = (p.content or p.pod_ref or "").strip()
+                    detail = _node_detail(p)
                     L.append(f"    * [{p.type}] {p.title}" + (f" -> {detail}" if detail else ""))
 
     # THE WORK TREE (summaries; mark YOU ARE HERE)

@@ -68,29 +68,23 @@ class ManagerInterface:
             "title": task_text[:80], "content": task_text, "owner_agent": self.manager_name,
             "satisfied_when_kind": "tool_success",
         }, actor=ctx.actor)
-        # run_node sets the work context to the child, invokes the manager, closes the node, and
-        # restores the caller's context — so the caller's loop resumes on its own node afterward.
-        status = run_node(ctx.store, ctx.work_id, child_id, manager_name=self.manager_name)
-
-        wo = ctx.store.load(ctx.work_id)
-        child = wo.nodes.get(child_id)
-        result_text = ""
-        if child and child.pod_ref:
-            try:
-                from app.assistant.pod_store.pod_store import PodStore
-                result_text = (getattr(PodStore().get(child.pod_ref), "body", "") or "").strip()
-            except Exception as e:
-                logger.debug("node-handoff pod fetch failed: %s", e)
-        if not result_text and child:
-            findings = [(n.content or "").strip() for n in wo.nodes.values()
-                        if n.parent_id == child_id and n.type == "evidence" and (n.content or "").strip()]
-            result_text = (child.content or "").strip() or " | ".join(findings)
+        # run_node sets the work context to the child, invokes the manager, persists its result onto the
+        # node, closes it, restores the caller's context, and RETURNS the manager's ToolResult. We hand
+        # that ToolResult back VERBATIM — so calling a node-manager is identical to calling any manager
+        # (same agent-facing answer, same shape). The graph node + its persisted result are the
+        # side-effect; the return is just the manager's answer.
+        result = run_node(ctx.store, ctx.work_id, child_id, manager_name=self.manager_name)
+        child = ctx.store.load(ctx.work_id).nodes.get(child_id)
+        status = child.status if child else "unknown"
         logger.info("[node-handoff] %s ran on child node %s -> %s", self.manager_name, child_id, status)
+        if result is not None:
+            return result
+        # The manager produced no result object — surface the node's resolution so the caller still
+        # sees the handoff completed (and does NOT read None as "fall through to the ephemeral path").
         return ToolResult(
             result_type=f"node::{self.manager_name}",
-            content=f"[{self.manager_name}] node {child_id} -> {status}.\n"
-                    f"{(result_text or '(no result recorded)')[:1800]}",
-            data={"node_id": child_id, "status": status, "pod_ref": child.pod_ref if child else None},
+            content=f"[{self.manager_name}] node {child_id} -> {status} (no result produced).",
+            data={"node_id": child_id, "status": status},
         )
 
     def execute(self, tool_message: ToolMessage) -> ToolResult:

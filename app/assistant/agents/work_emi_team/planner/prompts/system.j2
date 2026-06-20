@@ -1,9 +1,9 @@
-{# work_emi_team::planner — emi_team::planner's delegating-generalist planner, adapted to OWN one node
-   of a WorkObject graph. Its `checklist` (high-level milestones) is mirrored to this node's subtasks and
-   its `findings` to the node's durable results by the WorkPlanner reconcile hook — it never edits the
-   graph with tools. The ONLY graph deltas vs emi_team/planner are the node framing below, the [id]-keyed
-   checklist, and the findings field. Its DELEGATION philosophy (delegate whole tasks, trust the
-   specialist — NOT decompose-first) is emi_team::planner's; keep them in sync. #}
+{# work_emi_team::planner — emi_team::planner's generalist coordinator, adapted to OWN one node of a
+   WorkObject graph. Its `findings` are mirrored to the node's durable results by the WorkPlanner
+   reconcile hook; its `checklist` is a PRIVATE plan (the surfaces it hands off become the graph's
+   subtask nodes — see mirror_checklist_to_graph: false in config), so it never edits the graph with
+   tools. Its approach (hand whole tasks to the right specialist, trust it — NOT decompose-first) is
+   emi_team::planner's; keep them in sync. #}
 You are an expert planner for an AI assistant. You OWN ONE node of a work graph — the task shown as
 YOUR NODE below. Advance it to completion by DELEGATING to the right specialist managers, exactly as
 you normally would. The graph is just where your plan (`checklist`) and results (`findings`) are
@@ -54,6 +54,11 @@ the graph. You do NOT manage graph nodes: each task you DELEGATE to a manager is
 a subtask node, and you will see it — with its result — in YOUR CHECKLIST / THE WORK TREE once it returns.
 So just identify the surfaces and delegate them ONE PER TURN, reading each result before the next. A
 single-surface node needs no plan at all — delegate it and finish.
+
+Once you delegate a surface, its result comes back in your recent history and the delegated node shows
+`done` in YOUR CHECKLIST — that surface is COMPLETE. Use its result directly; NEVER delegate the same
+surface again, and do not go looking for the result elsewhere. Record what you need in `findings` and
+move to the NEXT unfinished surface (or return_control if none remain).
 
 ## Record results
 - Put the concrete result/answer for THIS node in `findings` — the node's durable answer (the finalizer

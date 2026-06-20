@@ -57,9 +57,10 @@ class WorkPlanner(Planner):
         # done/abandoned); an empty id adds a new checkpoint. Identity is the id, so a re-worded name
         # can't fork a node — nothing to dedup.
         #
-        # A DELEGATING planner sets mirror_checklist_to_graph: false. Its tracked subtask nodes ARE the
-        # handoff children it dispatches (one per delegated surface) — mirroring the checklist too would
-        # mint a duplicate milestone node beside each handoff child. Its checklist stays a private plan.
+        # A COORDINATING planner — one that hands each surface to a sub-manager rather than doing the
+        # work itself — sets mirror_checklist_to_graph: false. Its tracked subtask nodes ARE the handoff
+        # children it dispatches (one per surface); mirroring the checklist too would mint a duplicate
+        # milestone node beside each handoff child. Its checklist stays a private plan.
         if self.config.get("mirror_checklist_to_graph", True):
             for item in (result_dict.get("checklist") or []):
                 if not isinstance(item, dict):
