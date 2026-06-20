@@ -36,7 +36,7 @@ class WorkPlanner(Planner):
         if not isinstance(result_dict, dict):
             return
         try:
-            from work_objects.runtime import get_work_context
+            from work_objects.runtime import active_attribution_node, get_work_context
             from work_objects.tools import WorkGraphTools
         except Exception:
             return  # work_objects not on path -> not a WorkObject run
@@ -51,45 +51,56 @@ class WorkPlanner(Planner):
         by_id = {n.id: n for n in wo.nodes.values()
                  if n.parent_id == node_id and n.type == "subtask"}
 
-        # checklist -> subtask nodes, mirrored every turn. Items are ChecklistItem dicts: a stable
-        # `id` (echoed back via the render node), an IMMUTABLE `name`, a `status`, and — on close — an
-        # `evidence` note. Match by id and flip status (writing the evidence note ONTO the node on
-        # done/abandoned); an empty id adds a new checkpoint. Identity is the id, so a re-worded name
-        # can't fork a node — nothing to dedup.
-        #
-        # A COORDINATING planner — one that hands each surface to a sub-manager rather than doing the
-        # work itself — sets mirror_checklist_to_graph: false. Its tracked subtask nodes ARE the handoff
-        # children it dispatches (one per surface); mirroring the checklist too would mint a duplicate
-        # milestone node beside each handoff child. Its checklist stays a private plan.
-        if self.config.get("mirror_checklist_to_graph", True):
-            for item in (result_dict.get("checklist") or []):
-                if not isinstance(item, dict):
-                    continue
-                cid = str(item.get("id") or "").strip()
-                name = str(item.get("name") or item.get("text") or "").strip()
-                status = str(item.get("status") or "todo").strip().lower()
-                evidence = str(item.get("evidence") or "").strip()
-                if not name:
-                    continue
-                if cid and cid in by_id:
-                    self._transition_subtask(store, work_id, cid, by_id[cid].status, status, actor, evidence)
-                elif not cid:
-                    tools.add_subtask(name)
+        # checklist -> subtask nodes, mirrored every turn — UNIFORM for every WorkPlanner (coordinator
+        # or worker; the work_* managers are one stack). Items carry a stable `id` (echoed via the render
+        # node), an IMMUTABLE `name`, a `status`, and an `evidence` note on close. The single item the
+        # planner marks in-progress becomes the ACTIVE node: this turn's findings and any manager it
+        # delegates attribute to THAT node (tool results -> its evidence; a delegated manager runs as a
+        # child UNDER it), not the parent the planner owns. Identity is the id, so a re-worded name can't
+        # fork a node.
+        def _spine(planner_status) -> str:
+            s = str(planner_status or "todo").strip().lower()
+            if s in ("in_progress", "in progress", "doing", "active"):
+                return "active"
+            if s in ("done", "complete", "completed"):
+                return "done"
+            if s in ("abandoned", "abandon", "dropped"):
+                return "abandoned"
+            if s in ("incomplete", "paused", "pause", "waiting", "on_hold", "on hold", "parked", "blocked"):
+                return "waiting"   # set aside, re-activatable (the planner resumes it by marking in_progress again)
+            return "todo"
+        for item in (result_dict.get("checklist") or []):
+            if not isinstance(item, dict):
+                continue
+            cid = str(item.get("id") or "").strip()
+            name = str(item.get("name") or item.get("text") or "").strip()
+            target = _spine(item.get("status"))
+            evidence = str(item.get("evidence") or "").strip()
+            if not name:
+                continue
+            if cid and cid in by_id:
+                self._transition_subtask(store, work_id, cid, by_id[cid].status, target, actor, evidence)
+            elif not cid:
+                fresh = tools.add_subtask(name)
+                if target in ("active", "waiting"):   # a brand-new item declared in_progress (or paused) this turn
+                    self._transition_subtask(store, work_id, fresh, "proposed", target, actor, "")
 
-        # findings -> evidence nodes recorded ON this node (its durable result / deliverable). Minted
-        # as CHILDREN so the render shows them under "RECORDED ON THIS NODE" and the finalizer builds
-        # the node's answer from them. Deduped by content. process_llm_result runs this hook EVERY
-        # turn, INCLUDING the return_control turn, so the planner's final write is always captured.
+        # The node this turn's work attributes to: the single in-progress checklist item (set above),
+        # else the owned node (a single-step node with no checklist). findings -> evidence UNDER it (the
+        # node's durable result). Deduped by content. process_llm_result runs EVERY turn, including the
+        # return_control turn, so the planner's final write is always captured.
+        target_node = active_attribution_node(store, work_id, node_id)
         from work_objects.model import new_id as _new_finding_id
+        wo = store.load(work_id)
         recorded = {(n.content or "").strip() for n in wo.nodes.values()
-                    if n.parent_id == node_id and n.type == "evidence"}
+                    if n.parent_id == target_node and n.type == "evidence"}
         for finding in (result_dict.get("findings") or []):
             finding = str(finding or "").strip()
             if finding and finding not in recorded:
                 recorded.add(finding)
                 store.apply("add_node",
                             {"work_id": work_id, "id": _new_finding_id("finding"), "type": "evidence",
-                             "parent_id": node_id, "content": finding, "status": "assumed",
+                             "parent_id": target_node, "content": finding, "status": "assumed",
                              "created_by": actor},
                             actor=actor)
 
@@ -108,9 +119,12 @@ class WorkPlanner(Planner):
 
     @staticmethod
     def _transition_subtask(store, work_id, node_id, cur, target, actor, evidence: str = "") -> None:
-        """Respect the spine state machine (proposed->active->done). A checklist item the owner did
-        itself was never separately dispatched, so it sits 'proposed'; step it through 'active' to
-        reach 'done'. On the closing transition, write the `evidence` note onto the node's content."""
+        """Drive a checklist item along the spine (proposed -> active -> done|abandoned), with PAUSE:
+        active <-> waiting. The planner marks an item in_progress (-> active); to set it aside to work
+        another first it marks it paused/INCOMPLETE (-> waiting, re-activatable), and resumes by marking
+        it in_progress again (waiting -> active). Exactly one item is 'active' at a time, which is what
+        the attribution resolver keys on. On a closing transition the `evidence` note is written onto the
+        node's content."""
         def _set(status, content=None):
             data = {"work_id": work_id, "node_id": node_id, "status": status}
             if content is not None:
@@ -122,8 +136,10 @@ class WorkPlanner(Planner):
                     _set("active"); cur = "active"
                 if cur in {"active", "waiting"}:
                     _set("done", content=evidence or None)
-            elif target == "active" and cur == "proposed":
+            elif target == "active" and cur in {"proposed", "waiting"}:   # start a new item OR RESUME a paused one
                 _set("active")
+            elif target == "waiting" and cur in {"proposed", "active"}:   # PAUSE / set aside — re-activatable later
+                _set("waiting", content=evidence or None)
             elif target == "abandoned" and cur in {"proposed", "active", "waiting", "failed"}:
                 _set("abandoned", content=evidence or None)
         except Exception as e:

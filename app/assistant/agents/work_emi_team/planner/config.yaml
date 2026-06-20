@@ -9,11 +9,10 @@
 # managers (does not decompose a single manager's job).
 name: work_emi_team::planner
 class_name: WorkPlanner
-# Its subtask nodes ARE the handoffs it dispatches (one per surface), so its checklist is a PRIVATE plan
-# — NOT mirrored to graph subtasks (that would duplicate each handoff child). See
-# WorkPlanner._reconcile_to_graph. (work_web_manager::planner keeps the default true — it does the work
-# itself, so its checklist IS its subtask progress.)
-mirror_checklist_to_graph: false
+# Uniform WorkPlanner behaviour (same as work_web_manager::planner): its checklist items mint subtask
+# nodes; the item it marks in_progress is the ACTIVE node, so the manager it delegates that turn nests
+# UNDER that item (goal -> surface item -> delegated child). See WorkPlanner._reconcile_to_graph +
+# work_objects.runtime.active_attribution_node.
 llm_params:
   llm_provider: "openai"
   engine: "gpt-5.1"

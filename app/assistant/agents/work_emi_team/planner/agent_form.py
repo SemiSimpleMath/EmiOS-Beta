@@ -3,22 +3,25 @@ from pydantic import BaseModel, Field
 
 
 class ChecklistItem(BaseModel):
-    """One surface (whole step delegated to one specialist manager) in your PRIVATE running plan. This
-    is scratch for your own reasoning — it is NOT the graph; the tasks you delegate are tracked as graph
-    nodes automatically. List the surfaces and mark each done as its result comes in."""
-    text: str = Field(description="Short, outcome-based description of the surface / step.")
-    status: str = Field(default="todo", description="todo | doing | done | abandoned")
+    """One surface of THIS node — a whole step you hand to one specialist manager. The checklist
+    round-trips through the GRAPH: the render shows each existing surface with its `id`; ECHO that id for
+    existing items, leave it EMPTY for a new one. `text` is fixed once written. Mark exactly ONE
+    in_progress at a time — the manager you delegate this turn nests UNDER that in-progress item."""
+    id: str = Field(default="", description="Echo the [id] shown in YOUR CHECKLIST for an existing item; EMPTY for a new one.")
+    text: str = Field(description="Short, outcome-based description of the surface / step. Fixed once written.")
+    status: str = Field(default="todo", description="todo | in_progress | incomplete (paused, resume later) | done | abandoned")
+    evidence: str = Field(default="", description="On done: a brief note / result proving this surface is complete.")
 
 
 class AgentForm(BaseModel):
     what_i_am_thinking: str
     checklist: List[ChecklistItem] = Field(
         default_factory=list,
-        description=("Your PRIVATE running plan of the SURFACES this node needs — each a whole step you "
-                     "DELEGATE to one specialist manager. This is scratch for your own reasoning; it is "
-                     "NOT the graph (your delegations are tracked as nodes automatically). List the "
-                     "surfaces and mark each done as its result comes in. A single-surface node needs no "
-                     "checklist."),
+        description=("The SURFACES this node needs — each a whole step you DELEGATE to one specialist "
+                     "manager. Mirrored to the graph as subtask nodes: echo existing items (id + text "
+                     "verbatim), add new ones (empty id), and mark exactly ONE in_progress at a time. The "
+                     "manager you delegate this turn nests UNDER the in_progress item. A single-surface "
+                     "node needs no checklist — just delegate it."),
     )
     findings: List[str] = Field(
         default_factory=list,

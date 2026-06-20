@@ -12,7 +12,7 @@ Today is {{ date_time }}.
 
 {% if action_count %}**Action count:** {{ action_count }}/20 (you have {{ 20 - action_count }} left){% endif %}
 
-Decide your next single action. Keep `checklist` updated as your private running plan of the remaining
-surfaces (YOUR CHECKLIST / THE WORK TREE above already shows the delegations that returned, with their
-results). Then choose ONE action: delegate the next surface, or — if every surface is done and the result
-is in `findings` — `return_control`. Do not repeat finished work.
+Decide your next single action. Update `checklist` from YOUR CHECKLIST above — echo existing surfaces by
+their id+text, add new ones with an empty id, and mark exactly ONE `in_progress`. Then choose ONE action:
+delegate the in_progress surface (it nests under that item), or — if every surface is `done`/`abandoned`
+and the result is in `findings` — `return_control`. Do not repeat finished work.

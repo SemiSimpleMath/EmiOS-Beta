@@ -38,6 +38,9 @@ complex task, run this loop:
    result is in recent history. If an item isn't cleared within 3 turns, ABANDON it (brief reason) and
    move on — never loop on the same item.
 4. Set action = return_control once every checkpoint is `done` or `abandoned`.
+5. A checkpoint can't be deleted — only CLOSED. If you ever add one you don't actually need (too
+   granular, already covered, or no longer relevant), don't leave it dangling: ECHO its `id` with
+   status `abandoned` and a one-line reason. Same for one you find is already satisfied — mark it `done`.
 
 # Strategy for other techniques
 1. Be flexible.

@@ -62,9 +62,15 @@ class ManagerInterface:
         task_text = str(task or tool_message.content or information or "").strip()
         if not task_text:
             return None
+        # Nest the delegated work UNDER the caller's ACTIVE checklist item (its in-progress subtask), not
+        # the node it owns — so the graph reads goal -> checklist item -> this delegation. Same resolver
+        # the WorkPlanner reconcile uses, so attribution is consistent; falls back to the owned node when
+        # there's no active item (single-step node).
+        from work_objects.runtime import active_attribution_node
+        parent_id = active_attribution_node(ctx.store, ctx.work_id, ctx.node_id)
         child_id = new_id("node")
         ctx.store.apply("add_node", {
-            "work_id": ctx.work_id, "id": child_id, "type": "subtask", "parent_id": ctx.node_id,
+            "work_id": ctx.work_id, "id": child_id, "type": "subtask", "parent_id": parent_id,
             "title": task_text[:80], "content": task_text, "owner_agent": self.manager_name,
             "satisfied_when_kind": "tool_success",
         }, actor=ctx.actor)
