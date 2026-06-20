@@ -6,13 +6,13 @@
       "name": "task",
       "type": "string",
       "required": true,
-      "description": "The fully disambiguated investigative question."
+      "description": "the whole goal, in detail"
     },
     {
       "name": "information",
       "type": "string",
       "required": true,
-      "description": "Supporting context the planner may need (prior chat snippets, evidence, constraints). Empty string allowed."
+      "description": "supporting context (names, dates, URLs, prior results) or ''"
     }
   ],
   "outputs": [
@@ -49,6 +49,7 @@
     "latency_class": "moderate",
     "front_door": false,
     "room_visibility_default": "conditional",
-    "approval_required": false
+    "approval_required": false,
+    "planner_description": "Investigates AND mutates the live knowledge graph (SQL reads + typed KG mutators). High-trust write surface — NOT for plain Q&A (use ask_kg)."
   }
 }

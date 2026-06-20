@@ -6,13 +6,13 @@
       "name": "task",
       "type": "string",
       "required": true,
-      "description": "The compute / processing task, e.g. 'Resize photo.jpg in ~/Pictures to 512px max and save as thumb.jpg.'"
+      "description": "the whole goal, in detail"
     },
     {
       "name": "information",
       "type": "string",
       "required": true,
-      "description": "Supporting context (pod_ids of inputs, host paths, expected output shape). Empty string allowed."
+      "description": "supporting context (names, dates, URLs, prior results) or ''"
     }
   ],
   "outputs": [
@@ -31,8 +31,29 @@
   "metadata": {
     "min_authority": 99,
     "domain": "compute",
-    "actions": ["compute", "process", "transform", "resize", "extract", "generate", "analyze", "ocr"],
-    "selectors": ["python", "sandbox", "script", "code", "pandas", "numpy", "image", "pdf", "document", "ocr", "data"],
+    "actions": [
+      "compute",
+      "process",
+      "transform",
+      "resize",
+      "extract",
+      "generate",
+      "analyze",
+      "ocr"
+    ],
+    "selectors": [
+      "python",
+      "sandbox",
+      "script",
+      "code",
+      "pandas",
+      "numpy",
+      "image",
+      "pdf",
+      "document",
+      "ocr",
+      "data"
+    ],
     "risk_level": "medium",
     "side_effects": "code_execution",
     "requires_auth": [],
@@ -42,6 +63,6 @@
     "front_door": true,
     "room_visibility_default": "show",
     "approval_min_authority": 99,
-    "planner_description": "Python-sandbox specialist. Wraps execute_code with pod I/O + chain support. Use for compute / data / image / PDF / OCR / file-transformation tasks. NOT for HTTP APIs (http_manager) or browsers (playwright_manager). Requires AUTH_USER."
+    "planner_description": "Runs Python in a Docker sandbox: compute, data analysis, image/PDF/audio processing, file generation. Pods are first-class I/O."
   }
 }

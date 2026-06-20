@@ -6,13 +6,13 @@
       "name": "task",
       "type": "string",
       "required": true,
-      "description": "The disambiguated request, e.g. 'List the top-level folders in ~/Documents'."
+      "description": "the whole goal, in detail"
     },
     {
       "name": "information",
       "type": "string",
       "required": true,
-      "description": "Supporting context (prior chat, constraints). Empty string allowed."
+      "description": "supporting context (names, dates, URLs, prior results) or ''"
     }
   ],
   "outputs": [
@@ -49,6 +49,7 @@
     "front_door": false,
     "room_visibility_default": "conditional",
     "approval_required": true,
-    "approval_min_authority": 99
+    "approval_min_authority": 99,
+    "planner_description": "Read-only local shell (ls/find/cat/grep) over the user's files, their EmiWiki life-pages, and the assistant's own architecture docs."
   }
 }

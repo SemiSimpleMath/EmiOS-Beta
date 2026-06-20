@@ -592,34 +592,40 @@ class ToolRegistry:
         """
         return self.registry.copy()
 
-    def get_tool_description(self, tool_name: str):
-        """Retrieve and render the tool description template."""
+    def get_tool_description(self, tool_name: str, style: str = "full"):
+        """Retrieve and render a tool's planner-facing description.
+
+        style="full" -> description.j2 + Contract Inputs (the verbose legacy render).
+        style="card" -> minimal capability line + one line per input with its req/opt + curated hint
+                        (see _format_tool_card_with_hints). The planner batch (get_tool_descriptions)
+                        uses "card"; "full" stays available for any caller that wants the manual."""
         tool = self.registry.get(tool_name)
         if not tool:
             logger.debug(f"Tool '{tool_name}' not found in registry.")
             return None
 
-        # MCP tools store their description directly (no Jinja templates).
+        # MCP tools store their description directly (no Jinja templates); their generated contract
+        # carries the inputs, so the card render works the same.
         if tool.get("backend") == "mcp":
-            desc = str(tool.get("mcp_description") or "No description available.")
-            return ToolDescription(
-                desc,
-                tool_name=tool_name,
-                description=desc,
-                contract=None,
-            )
+            desc_text = str(tool.get("mcp_description") or "No description available.")
+            contract = tool.get("tool_contract") if isinstance(tool.get("tool_contract"), dict) else None
+            devices_block = ""
+        else:
+            description_template = tool["prompts"].get(f"{tool_name}_description")
+            desc_text = "No description available."
+            if description_template:
+                try:
+                    desc_text = description_template.render()
+                except Exception as e:
+                    logger.error(f"Error rendering description for '{tool_name}': {e}")
+                    desc_text = "Error rendering description."
+            contract = tool.get("tool_contract") if isinstance(tool.get("tool_contract"), dict) else None
+            devices_block = self._smart_home_devices_block(tool_name)
 
-        description_template = tool["prompts"].get(f"{tool_name}_description")
-        desc_text = "No description available."
-        if description_template:
-            try:
-                desc_text = description_template.render()
-            except Exception as e:
-                logger.error(f"Error rendering description for '{tool_name}': {e}")
-                desc_text = "Error rendering description."
-        contract = tool.get("tool_contract") if isinstance(tool.get("tool_contract"), dict) else None
-        devices_block = self._smart_home_devices_block(tool_name)
-        display = self._format_description_with_contract(desc_text, contract, devices_block)
+        if style == "card":
+            display = self._format_tool_card_with_hints(description=desc_text, contract=contract)
+        else:
+            display = self._format_description_with_contract(desc_text, contract, devices_block)
         return ToolDescription(
             display,
             tool_name=tool_name,
@@ -810,6 +816,61 @@ class ToolRegistry:
             parts.append(args_line)
         return " — ".join(parts)
 
+    def _format_tool_card_with_hints(self, *, description, contract) -> str:
+        """Planner-facing tool card: a minimal capability line + one line per input with its req/opt
+        and a short hint — so the planner picks AND fills the call correctly in one pass. The capability
+        line is metadata.planner_description (curated), else the first sentence of the description
+        (capped). Input hints come from tool_contract.inputs[].description (curated); an uncurated input
+        still renders its name + req/opt. The caller prepends the tool NAME, so this returns just the
+        body."""
+        meta = contract.get("metadata") if isinstance(contract, dict) else None
+        meta = meta if isinstance(meta, dict) else {}
+        short = str(meta.get("planner_description") or "").strip()
+        if short and len(short) > 200:   # backstop: a pathological/uncurated planner_description can't balloon
+            short = short[:197].rstrip() + "..."
+        if not short:
+            raw = str(description or "").strip()
+            if raw:
+                first_break = len(raw)
+                for sep in (". ", "\n"):
+                    idx = raw.find(sep)
+                    if idx > 0 and idx < first_break:
+                        first_break = idx
+                short = raw[:first_break].strip()
+                if len(short) > 140:
+                    short = short[:137].rstrip() + "..."
+        if not short:
+            short = "No description available."
+
+        lines = [short]
+        inputs = (contract.get("inputs")
+                  if isinstance(contract, dict) and isinstance(contract.get("inputs"), list) else [])
+        for item in inputs:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            if not name:
+                continue
+            req = "req" if bool(item.get("required", False)) else "opt"
+            # The card shows a SHORT hint — the input's first sentence, capped. Verbose per-arg detail
+            # (e.g. send_email's courier doctrine) belongs in arguments_prompt (args-agent territory),
+            # so an uncurated long description can't balloon the planner card.
+            hint = str(item.get("description") or "").strip()
+            if hint:
+                first_break = len(hint)
+                for sep in (". ", "\n"):
+                    idx = hint.find(sep)
+                    if idx > 0 and idx < first_break:
+                        first_break = idx
+                hint = hint[:first_break].strip()
+                if len(hint) > 120:
+                    hint = hint[:117].rstrip() + "..."
+            line = f"  · {name} ({req})"
+            if hint:
+                line += f": {hint}"
+            lines.append(line)
+        return "\n".join(lines)
+
     def get_tool_description_compact(self, tool_name: str):
         tool = self.registry.get(tool_name)
         if not tool:
@@ -883,17 +944,13 @@ class ToolRegistry:
 
 
     def get_tool_descriptions(self, allowed_tools: list) -> dict:
-        """Retrieve descriptions only for allowed tools.
-
-        Planner-facing render: description.j2 + Contract Inputs (+ tool-specific
-        Outputs when non-boilerplate). The contract's `arguments_prompt` is NOT
-        included — it's args-agent territory, reachable via
-        `get_tool_arguments_prompt()`. Boilerplate `content/data` outputs are
-        suppressed; only tool-specific Outputs render. The compact path is
-        still available via get_tool_description_compact() for callers that
-        explicitly want a one-line summary.
-        """
-        return {tool: self.get_tool_description(tool) for tool in allowed_tools}
+        """Planner-facing tool block for the allowed/visible tools — the "card" render: a minimal
+        capability line + one line per input with its req/opt and a curated hint (so the planner picks
+        AND fills the call in one pass). The verbose manual is NOT shown here; it stays available via
+        get_tool_description(name, style="full"), and detailed arg guidance via
+        get_tool_arguments_prompt() (args-agent territory). Curate per tool: metadata.planner_description
+        (the capability line) + tool_contract.inputs[].description (the per-input hints)."""
+        return {tool: self.get_tool_description(tool, style="card") for tool in allowed_tools}
 
     def get_tool_contract(self, tool_name: str):
         tool = self.registry.get(tool_name)

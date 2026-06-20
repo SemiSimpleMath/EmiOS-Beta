@@ -6,13 +6,13 @@
       "name": "task",
       "type": "string",
       "required": true,
-      "description": "The HTTP-shaped request, e.g. 'Find an interesting post on Bluesky and reply to it.'"
+      "description": "the whole goal, in detail"
     },
     {
       "name": "information",
       "type": "string",
       "required": true,
-      "description": "Supporting context (target service, account handle, any prior state). Empty string allowed."
+      "description": "supporting context (names, dates, URLs, prior results) or ''"
     }
   ],
   "outputs": [
@@ -31,8 +31,33 @@
   "metadata": {
     "min_authority": 70,
     "domain": "web",
-    "actions": ["api", "post", "fetch", "tweet", "skeet", "publish", "comment", "reply"],
-    "selectors": ["http", "rest", "api", "json", "bluesky", "bsky", "atproto", "mastodon", "reddit", "github", "spotify", "whoop", "webhook", "oauth", "social"],
+    "actions": [
+      "api",
+      "post",
+      "fetch",
+      "tweet",
+      "skeet",
+      "publish",
+      "comment",
+      "reply"
+    ],
+    "selectors": [
+      "http",
+      "rest",
+      "api",
+      "json",
+      "bluesky",
+      "bsky",
+      "atproto",
+      "mastodon",
+      "reddit",
+      "github",
+      "spotify",
+      "whoop",
+      "webhook",
+      "oauth",
+      "social"
+    ],
     "risk_level": "medium",
     "side_effects": "external_action",
     "requires_auth": [],
@@ -42,6 +67,6 @@
     "front_door": true,
     "room_visibility_default": "show",
     "approval_min_authority": 70,
-    "planner_description": "HTTP/REST API specialist. Wraps http_request with pod-aware auth + chain support. Use for Bluesky/Mastodon/GitHub/Reddit/etc. — anything with an HTTP API. NOT for browser automation (playwright_manager) or web research (web_manager)."
+    "planner_description": "HTTP/REST API specialist: social posts (Bluesky/Mastodon/Reddit), platform APIs (GitHub/Spotify/WHOOP), webhooks, OAuth. NOT browser pages or web search."
   }
 }
