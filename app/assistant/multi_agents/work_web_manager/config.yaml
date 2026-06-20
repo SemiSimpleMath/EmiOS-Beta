@@ -83,6 +83,9 @@ tools:
     - scrape_url
     - http_request
     - mcp::npm/server-google-maps::maps_distance_matrix
+    # read-only graph tools — hydrate a ·has-output node before searching (work-tree reuse)
+    - work_graph_peek
+    - work_graph_search
   except_tools: []
 
 scope_contract:
@@ -95,6 +98,8 @@ scope_contract:
       - scrape_url
       - http_request
       - mcp::npm/server-google-maps::maps_distance_matrix
+      - work_graph_peek
+      - work_graph_search
     blocked_tools:
       - mcp::npm/playwright-mcp::browser_run_code
     requires_approval_tools: []

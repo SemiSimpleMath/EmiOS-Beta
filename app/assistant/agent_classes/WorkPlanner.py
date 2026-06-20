@@ -56,19 +56,24 @@ class WorkPlanner(Planner):
         # `evidence` note. Match by id and flip status (writing the evidence note ONTO the node on
         # done/abandoned); an empty id adds a new checkpoint. Identity is the id, so a re-worded name
         # can't fork a node — nothing to dedup.
-        for item in (result_dict.get("checklist") or []):
-            if not isinstance(item, dict):
-                continue
-            cid = str(item.get("id") or "").strip()
-            name = str(item.get("name") or item.get("text") or "").strip()
-            status = str(item.get("status") or "todo").strip().lower()
-            evidence = str(item.get("evidence") or "").strip()
-            if not name:
-                continue
-            if cid and cid in by_id:
-                self._transition_subtask(store, work_id, cid, by_id[cid].status, status, actor, evidence)
-            elif not cid:
-                tools.add_subtask(name)
+        #
+        # A DELEGATING planner sets mirror_checklist_to_graph: false. Its tracked subtask nodes ARE the
+        # handoff children it dispatches (one per delegated surface) — mirroring the checklist too would
+        # mint a duplicate milestone node beside each handoff child. Its checklist stays a private plan.
+        if self.config.get("mirror_checklist_to_graph", True):
+            for item in (result_dict.get("checklist") or []):
+                if not isinstance(item, dict):
+                    continue
+                cid = str(item.get("id") or "").strip()
+                name = str(item.get("name") or item.get("text") or "").strip()
+                status = str(item.get("status") or "todo").strip().lower()
+                evidence = str(item.get("evidence") or "").strip()
+                if not name:
+                    continue
+                if cid and cid in by_id:
+                    self._transition_subtask(store, work_id, cid, by_id[cid].status, status, actor, evidence)
+                elif not cid:
+                    tools.add_subtask(name)
 
         # findings -> evidence nodes recorded ON this node (its durable result / deliverable). Minted
         # as CHILDREN so the render shows them under "RECORDED ON THIS NODE" and the finalizer builds

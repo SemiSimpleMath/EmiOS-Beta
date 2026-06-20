@@ -8,6 +8,11 @@
 # Prompts (system.j2 / user.j2) derived from emi_team/planner's — DELEGATION philosophy, not decompose.
 name: work_emi_team::planner
 class_name: WorkPlanner
+# Delegator: its tracked subtask nodes ARE the handoffs it dispatches (one per surface), so its checklist
+# is a PRIVATE plan — NOT mirrored to graph subtasks (that would duplicate each handoff child). See
+# WorkPlanner._reconcile_to_graph. (work_web_manager::planner keeps the default true — it does the work
+# itself, so its checklist IS its subtask progress.)
+mirror_checklist_to_graph: false
 llm_params:
   llm_provider: "openai"
   engine: "gpt-5.1"
