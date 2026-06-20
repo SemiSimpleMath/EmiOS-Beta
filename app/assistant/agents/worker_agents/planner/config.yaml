@@ -9,9 +9,13 @@ llm_params:
 # from the `checklist` field by the reconcile hook), works the items itself IN
 # SEQUENCE via the single `action` channel, records findings/artifacts, and finishes.
 # web_manager is the standard manager-as-tool for a research step.
-allowed_tools: [all]   # inherit the work_manager ceiling (its delegable managers + pod tools + ask_user); graph writes are the reconcile hook, not tools
+allowed_tools: [all]   # inherit the work_manager ceiling (its delegable managers + pod tools + ask_kg); graph writes are the reconcile hook, not tools
 except_tools: []
 allowed_nodes: [return_control]
+# Entity-card injection, like emi_team::planner. Cards are preloaded at startup and matched by plain
+# string (no Chroma) — cheap — and the work manager needs them in production regardless.
+entity_scan_keys: [work_projection, recent_history]
+entity_card_level: 0
 
 # The node + checklist are rendered by workobject_render_node into `work_projection`
 # (NOT the usual `checklist` context item — the render node replaces it).
@@ -20,6 +24,7 @@ user_context_items:
   - date_time
   - recent_history
   - action_count
+  - entity_card
 
 system_context_items:
   - tool_descriptions
