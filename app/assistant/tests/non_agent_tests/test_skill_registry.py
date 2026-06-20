@@ -335,6 +335,30 @@ def test_skill_injector_matches_task_keywords(tmp_path):
     assert inj.matching_skill_names(task="weather report") == []
 
 
+def test_skill_injector_keywords_match_whole_words_only(tmp_path):
+    """Regression: a short keyword must not fire on a partial word inside another word.
+    The github skill's "pr" keyword was matching "diCAPRio" (substring), dumping the
+    GitHub skill into unrelated email tasks. Keywords match whole words/phrases only."""
+    from app.skill_registry.skill_injector import SkillInjector
+    skills_dir = tmp_path / "skills"
+    _write_skill(skills_dir, "github", {
+        "name": "github",
+        "description": "GitHub help.",
+        "metadata": {"auto_inject_when": {"task_keywords": ["github", "pr", "pull request"]}},
+    })
+    reg = SkillRegistry(base_dir=tmp_path)
+    inj = SkillInjector(reg)
+
+    # The bug: "pr" ⊂ "dicaprio" must NOT match; nor inside other words.
+    assert inj.matching_skill_names(task="email about Leonardo DiCaprio's girlfriend") == []
+    assert inj.matching_skill_names(task="just githubbing around") == []
+    assert inj.matching_skill_names(task="the prince took the express") == []
+    # Real whole-word / phrase hits still fire.
+    assert inj.matching_skill_names(task="check my github stats") == ["github"]
+    assert inj.matching_skill_names(task="please review my PR") == ["github"]
+    assert inj.matching_skill_names(task="open a pull request") == ["github"]
+
+
 def test_skill_injector_skips_skills_without_auto_inject_when(tmp_path):
     from app.skill_registry.skill_injector import SkillInjector
     skills_dir = tmp_path / "skills"

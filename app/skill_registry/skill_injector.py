@@ -7,8 +7,9 @@ keyword lists. Each skill carries its own trigger conditions in
 against the current agent context and returns the names of skills that
 should be added to the prompt.
 
-v1 trigger: ``task_keywords`` (substring match against task +
-incoming_message). Other triggers ride in as use cases appear:
+v1 trigger: ``task_keywords`` (whole-word/phrase match against task +
+incoming_message — never a partial-word substring). Other triggers ride in
+as use cases appear:
 ``room_surface``, ``pod_kinds``, ``url_patterns``, etc.
 
 Wired through ``context_injector.resolve_skills`` so static-bound and
@@ -17,6 +18,7 @@ templates render the same way regardless of how the skill arrived.
 """
 from __future__ import annotations
 
+import re
 from typing import List, Optional
 
 from app.assistant.utils.logging_config import get_logger
@@ -24,6 +26,18 @@ from app.assistant.utils import scope_gate
 from app.skill_registry.skill_registry import SkillRegistry
 
 logger = get_logger(__name__)
+
+
+def _keyword_matches(keyword: str, text: str) -> bool:
+    """Whole-word/phrase containment: ``keyword`` must appear in ``text`` bounded by
+    non-word characters (or a string edge) on BOTH sides — so a short keyword like
+    "pr" matches "open a pr" but NOT "dicaprio" or "prince". Skills must never trigger
+    on a partial word. Both args arrive lowercased (search text by the caller, keywords
+    at parse time); ``re`` memoizes the compiled pattern per keyword internally."""
+    kw = (keyword or "").strip()
+    if not kw:
+        return False
+    return re.search(r"(?<!\w)" + re.escape(kw) + r"(?!\w)", text) is not None
 
 
 class SkillInjector:
@@ -43,8 +57,9 @@ class SkillInjector:
         """Return names of skills whose triggers match the given context.
 
         A skill matches iff (AND-conjunction):
-          1. ``auto_inject_when.task_keywords`` — any substring appears in
-             ``task + incoming_message`` (case-insensitive); AND
+          1. ``auto_inject_when.task_keywords`` — any keyword appears as a
+             whole word/phrase in ``task + incoming_message`` (case-insensitive,
+             bounded by non-word chars — "pr" won't match "dicaprio"); AND
           2. ``auto_inject_when.requires_scope`` — EVERY listed field matches
              the live scope. "Scope is the key, the skill carries the lock."
              Allowed fields: acting_as, surface, room_id, room_context_id,
@@ -76,7 +91,7 @@ class SkillInjector:
             keyword_hit = False
             matched_kw = None
             for kw in trigger.task_keywords:
-                if kw and kw in search_text:
+                if kw and _keyword_matches(kw, search_text):
                     keyword_hit = True
                     matched_kw = kw
                     break
