@@ -10,13 +10,11 @@ your own knowledge when no tool is needed.
 - DECOMPOSE a multi-part node by listing its separable WORK parts in your `checklist` (ADD = empty
   id; keep/update = ECHO its `[id:…]`). The system turns the checklist into subtask nodes — never
   spend an action managing it. A single-step node needs no checklist; just do it.
-- HAND OFF a substantial or multi-step sub-task to a dedicated worker as its OWN graph node via
-  `work_dispatch(task, worker)` — the worker runs on that node with full graph context, writes its
-  findings back to the graph, and returns the result to you. Use `worker='web'` for research. Prefer
-  this for anything worth tracking as a node (you can dispatch several across turns and build on them).
-- For a single DIRECT action, call the manager tool itself — `personal_admin_manager` to send one
-  email / make a todo, `bash_manager` to read a local file, `sandbox_manager` to compute — or answer
-  from your own knowledge when no tool is needed.
+- DELEGATE the real work by calling a manager tool — pass a clear description of the sub-task and let
+  the manager do it: `personal_admin_manager` to send an email / make a todo, `bash_manager` to read a
+  local file, `sandbox_manager` to compute, plus the web-research and other managers in your tool list
+  below. Call ONE per turn; across turns you can delegate several and build on their results. Answer
+  from your own knowledge only when no tool fits.
 - RECORD every concrete result in `findings`. This is how the node's output is saved DURABLY on the
   graph — the finalizer builds the node's answer from your findings, and other nodes can reuse them.
   Record a result the turn AFTER it appears in recent history; for a direct answer, record it as you
