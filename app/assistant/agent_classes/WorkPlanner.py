@@ -31,6 +31,34 @@ class WorkPlanner(Planner):
             logger.error("[%s] WorkObject reconcile failed: %s", self.name, e)
             logger.debug("[%s] reconcile exception", self.name, exc_info=True)
 
+    def construct_prompt(self, message=None):
+        # Rebuild `work_projection` from the LIVE graph right before the prompt is built, so the
+        # planner ALWAYS sees current node state (subtasks it just minted, statuses it just changed).
+        # The workobject_render_node pre-node also does this, but the manager's resume path skips it:
+        # tool_return_router pins resume_target -> this planner, so summary/critic route straight back
+        # here on every tool-return turn, bypassing the render node. That left the planner reading a
+        # stale (turn-1, empty) projection -> it re-added surfaces it couldn't see -> duplicate
+        # surfaces. Refreshing here makes projection freshness independent of manager routing.
+        self._refresh_work_projection()
+        return super().construct_prompt(message)
+
+    def _refresh_work_projection(self) -> None:
+        try:
+            from work_objects.runtime import get_work_context
+            from app.assistant.control_nodes.workobject_render_node import render_work_projection
+        except Exception:
+            return  # work_objects not on path -> not a WorkObject run
+        try:
+            ctx = get_work_context()
+        except RuntimeError:
+            return  # this planner is not driving a WorkObject node -> leave the blackboard as-is
+        try:
+            wo = ctx.store.load(ctx.work_id)
+            self.blackboard.update_state_value("work_projection", render_work_projection(wo, ctx.node_id))
+        except Exception as e:
+            logger.error("[%s] work_projection refresh failed: %s", self.name, e)
+            logger.debug("[%s] work_projection refresh exception", self.name, exc_info=True)
+
     # --------------------------------------------------------------------- #
     def _reconcile_to_graph(self, result_dict) -> None:
         if not isinstance(result_dict, dict):
