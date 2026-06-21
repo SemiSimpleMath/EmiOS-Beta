@@ -54,6 +54,33 @@ Health: {{ health_status_summary }}
 ## ROUTINE (today's cadence — judge timing and appropriateness against this)
 {{ resource_dayflow_routine }}
 {%- endif %}
+{%- if recent_responded_tickets %}
+{%- set _has_resp = recent_responded_tickets.get("accepted") or recent_responded_tickets.get("declined") or recent_responded_tickets.get("snoozed") %}
+{%- if _has_resp %}
+
+## TICKET RESPONSES (user directives — act on these)
+*A DECLINE means ABANDON the related work object; an ACCEPT confirms its direction; a comment overrides defaults.*
+{%- for category, label in [("accepted", "ACCEPTED"), ("declined", "DECLINED"), ("snoozed", "SNOOZED")] %}
+{%- for t in (recent_responded_tickets.get(category) or []) %}
+- [{{ t.get("responded_at_local","") }}] {{ label }}: {{ t.get("title","") }}{% if t.get("user_comment") %} — user: "{{ t.get("user_comment") }}"{% endif %}
+{%- endfor %}
+{%- endfor %}
+{%- endif %}
+{%- endif %}
+{%- if active_tickets %}
+
+## ACTIVE TICKETS (awaiting the user's response — don't duplicate)
+{%- for t in active_tickets %}
+- [{{ t.get("suggestion_type","") }}] {{ t.get("title","") }}
+{%- endfor %}
+{%- endif %}
+{%- if recent_action_selector_actions %}
+
+## RECENT NUDGES SENT (don't re-create the same intent)
+{%- for a in recent_action_selector_actions %}
+- [{{ a.time_local }}] {{ a.summary }}
+{%- endfor %}
+{%- endif %}
 
 {% if admitted_artifacts %}
 ## NEW INTAKE (items that may need attention — cite an item's [id] in based_on when you turn it into a work object)
