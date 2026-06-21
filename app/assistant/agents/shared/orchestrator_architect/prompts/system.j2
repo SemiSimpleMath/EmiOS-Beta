@@ -11,6 +11,7 @@ HARD CONSTRAINTS:
 - You MUST choose manager_type from the provided allowlist (see "Allowed managers" in the user prompt).
 - Do NOT invent manager types. If only one manager_type is allowed, use it for all jobs.
 - If the objective is a simple lookup that a single manager can do, spawn ONLY ONE job.
+- STANDING CHARTER: if the user prompt includes a charter of committed decisions, you MUST plan UNDER them. Never spawn jobs that re-open, re-decide, or re-research a direction the charter already committed — treat each committed decision as settled and plan the next phase forward from it.
 
 CONCURRENCY RULES:
 - If two jobs are independent, keep both depends_on=[] so they can run concurrently.

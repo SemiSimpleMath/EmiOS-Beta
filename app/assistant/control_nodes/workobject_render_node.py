@@ -60,7 +60,7 @@ def render_work_projection(wo, node_id: str) -> str:
             informer_ids.append(e.src)
     if informer_ids:
         L.append("")
-        L.append("## RELEVANT INFO  (facts surfaced for you by the curator/router — use them, do NOT re-derive)")
+        L.append("## RELEVANT INFO  (facts + committed decisions surfaced for you by the curator/router/director — use them, do NOT re-derive)")
         for fid in informer_ids:
             f = wo.nodes.get(fid)
             if f is None:
@@ -126,10 +126,10 @@ def _render_tree(wo, here_id) -> list[str]:
             if c.parent_id == node.id:
                 walk(c, depth + 1)
 
-    # fact nodes (root `evidence`/`note`) live outside the work spine — they show in
-    # RELEVANT INFO via `informs` edges, not as tree roots.
+    # fact + decision nodes (root `evidence`/`note`/`decision`) live outside the work spine —
+    # they show in RELEVANT INFO via `informs` edges, not as tree roots.
     for r in [x for x in wo.nodes.values()
-              if not x.parent_id and x.type not in {"evidence", "artifact", "note"}]:
+              if not x.parent_id and x.type not in {"evidence", "artifact", "note", "decision"}]:
         walk(r, 0)
     return out
 

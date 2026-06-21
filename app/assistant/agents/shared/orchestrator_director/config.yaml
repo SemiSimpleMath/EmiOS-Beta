@@ -1,4 +1,4 @@
-name: orchestrator_architect
+name: orchestrator_director
 class_name: Agent
 llm_params:
   llm_provider: "gemini"
@@ -17,12 +17,6 @@ user_context_items:
   - orchestrator_results
   - orchestrator_charter
   - orchestrator_job_map
-  - orchestrator_missing_requirements
   - orchestrator_tick
-  - orchestrator_allowed_child_managers
-  - orchestrator_allowed_child_orchestrators
-  - orchestrator_allowed_manager_catalog
-  - orchestrator_job_bundle
 
 system_context_items: []
-

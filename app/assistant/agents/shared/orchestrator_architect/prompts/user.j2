@@ -8,6 +8,11 @@ Additional info:
 {{ information }}
 {% endif %}
 
+{% if orchestrator_charter %}
+STANDING CHARTER — directional decisions already committed by the director. You MUST plan UNDER these. Do NOT spawn jobs that re-open, re-decide, or re-research a committed direction; build the next phase forward from them:
+{{ orchestrator_charter }}
+{% endif %}
+
 Facts (v{{ orchestrator_facts_version }}):
 {{ orchestrator_facts }}
 
