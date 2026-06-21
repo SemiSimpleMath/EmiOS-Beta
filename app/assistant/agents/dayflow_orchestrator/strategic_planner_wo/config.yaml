@@ -10,6 +10,14 @@ except_tools: []
 
 user_context_items:
   - date_time
+  - day_of_week
+  - resource_afk_statistics_output
+  - location_summary
+  - resource_weather
+  - health_status_summary
+  - resource_expected_calendar
+  - resource_daily_context_generator_output
+  - resource_dayflow_routine
   - admitted_artifacts
   - work_portfolio
   - recent_dispatch_results

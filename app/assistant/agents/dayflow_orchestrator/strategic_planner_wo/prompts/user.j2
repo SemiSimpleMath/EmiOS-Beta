@@ -1,4 +1,59 @@
-Current time: {{ date_time }}.
+Current time: {{ date_time }}. Day: {{ day_of_week }}.
+{%- if resource_afk_statistics_output %}
+{%- if resource_afk_statistics_output.is_afk %}
+Computer: AWAY — idle {{ resource_afk_statistics_output.idle_minutes | default(0) | round | int }} min
+{%- else %}
+Computer: AT KEYBOARD
+{%- endif %}
+{%- endif %}
+{%- if location_summary %}
+Location: {{ location_summary }}
+{%- endif %}
+{%- if resource_weather and resource_weather.current %}
+Weather: {{ resource_weather.location.city }}: {{ resource_weather.current.temperature }} F, {{ resource_weather.current.condition }}
+{%- endif %}
+{%- if health_status_summary %}
+Health: {{ health_status_summary }}
+{%- endif %}
+{%- if resource_expected_calendar and resource_expected_calendar.expected_schedule %}
+
+## TODAY'S SCHEDULE
+{%- for entry in resource_expected_calendar.expected_schedule %}
+- {{ entry.title }} {{ entry.start_local }}{% if entry.end_local %} - {{ entry.end_local }}{% endif %} ({{ entry.status }})
+{%- endfor %}
+{%- endif %}
+{%- if resource_daily_context_generator_output and resource_daily_context_generator_output.day_theme %}
+
+## DAY THEME
+{{ resource_daily_context_generator_output.day_theme }}
+{%- endif %}
+{%- if resource_daily_context_generator_output and resource_daily_context_generator_output.current_status %}
+
+## STATUS
+{{ resource_daily_context_generator_output.current_status }}
+{%- endif %}
+{%- set _subc = resource_daily_context_generator_output or {} %}
+{%- if _subc.active_concerns_this_week %}
+
+## SUBCONSCIOUS — ACTIVE CONCERNS (this week)
+*A concern routed to the dayflow orchestrator may deserve a work object — judge whether it needs genuine multi-step effort.*
+{%- for c in _subc.active_concerns_this_week %}
+- [{{ c.severity }}/{{ c.horizon }}] {{ c.title }} ({{ c.subject }}){% if c.notes %} — {{ c.notes }}{% endif %}
+{%- endfor %}
+{%- endif %}
+{%- if _subc.active_concerns_longer_horizon %}
+
+## SUBCONSCIOUS — LONGER-HORIZON CONCERNS
+*Background awareness; usually not today's work — only create a work object if the horizon is collapsing.*
+{%- for c in _subc.active_concerns_longer_horizon %}
+- [{{ c.severity }}/{{ c.horizon }}] {{ c.title }} ({{ c.subject }})
+{%- endfor %}
+{%- endif %}
+{%- if resource_dayflow_routine %}
+
+## ROUTINE (today's cadence — judge timing and appropriateness against this)
+{{ resource_dayflow_routine }}
+{%- endif %}
 
 {% if admitted_artifacts %}
 ## NEW INTAKE (items that may need attention — cite an item's [id] in based_on when you turn it into a work object)
