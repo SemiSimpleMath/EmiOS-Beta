@@ -60,6 +60,8 @@ control_nodes:
     class: StrategicPlannerWoPrepNode
   - name: strategic_planner_wo_persist_node
     class: StrategicPlannerWoPersistNode
+  - name: work_architect_node
+    class: WorkArchitectNode
   - name: work_execution_node
     class: WorkExecutionNode
   - name: relevance_cleaner_gate_node
@@ -157,7 +159,8 @@ flow_config:
     "context_enricher_persist_node": "strategic_planner_wo_prep_node"
     "strategic_planner_wo_prep_node": "dayflow_orchestrator::strategic_planner_wo"
     "dayflow_orchestrator::strategic_planner_wo": "strategic_planner_wo_persist_node"
-    "strategic_planner_wo_persist_node": "work_execution_node"
+    "strategic_planner_wo_persist_node": "work_architect_node"
+    "work_architect_node": "work_execution_node"
     "work_execution_node": "state_mover_prep_node"
     # old plan-task path (no longer reached from context_enricher_persist_node):
     "strategic_planner_prep_node": "dayflow_orchestrator::strategic_planner"
