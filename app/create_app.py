@@ -155,6 +155,14 @@ def create_app(config_class="config.DevelopmentConfig"):
         from .graph_visualizer.api import graph_api
     except ImportError:
         graph_api = None
+
+    # Work objects viewer — local read-only graph UI (reads the gitignored work.db).
+    # Guarded so an experimental-substrate issue can never break app boot.
+    try:
+        from work_objects.ui.blueprint import work_ui_bp
+    except Exception as _work_ui_err:
+        work_ui_bp = None
+        logger.warning("work_ui blueprint unavailable: %s", _work_ui_err)
     
     app.register_blueprint(index_route_bp)
     app.register_blueprint(main_bp)
@@ -199,6 +207,8 @@ def create_app(config_class="config.DevelopmentConfig"):
     app.register_blueprint(meals_bp)
     from app.routes.subconscious import subconscious_bp
     app.register_blueprint(subconscious_bp)
+    if work_ui_bp is not None:
+        app.register_blueprint(work_ui_bp)
     from app.routes.pod_api import pod_api_bp
     app.register_blueprint(pod_api_bp)
     from app.routes.pods import pods_bp
