@@ -197,6 +197,11 @@ musickit/
 mcp/tool_cache/
 
 # ── Large / local data ────────────────────────────────────────────────────────
+# Blanket-ignore the entire root runtime data dir (DBs, chroma, pods, snapshots,
+# sandbox outputs, per-room state). Nothing under data/ is tracked, so this is
+# safe; the specific entries below predate this rule and are kept as a record of
+# what lives here.
+/data/
 data/music_data/
 data/chroma_chat_memory/
 data/execution_traces/
