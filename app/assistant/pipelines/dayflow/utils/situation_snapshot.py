@@ -34,6 +34,9 @@ def build_situation_snapshot() -> str:
     # ── Active Plans & Tasks ──
     sections.append(_build_active_items())
 
+    # ── Active Work Objects (multi-step work in progress) ──
+    sections.append(_build_work_objects())
+
     # ── Recent Actions ──
     sections.append(_build_recent_actions(now_utc))
 
@@ -174,6 +177,31 @@ def _build_active_items() -> str:
         return "\n".join(lines)
     except Exception as e:
         logger.debug("situation_snapshot: active items failed: %s", e)
+        return ""
+
+
+def _build_work_objects() -> str:
+    """Active work objects — multi-step work executing on the work graph. Without this, the auditor
+    only sees dayflow items and mis-reads ongoing work: a consumed intake item shows 'closed' (it was
+    handed to a work object) so the auditor thinks the task is DONE when it is still in flight."""
+    try:
+        from app.assistant.dayflow_orchestrator.work_portfolio import render_portfolio
+        from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
+
+        store = get_dayflow_work_store()
+        active = [store.load(s["id"]) for s in store.list_work_objects()
+                  if str(s.get("status") or "").lower() not in ("done", "abandoned")]
+        if not active:
+            return ""
+        return (
+            "### Active Work Objects (multi-step work IN PROGRESS — not finished)\n"
+            "*Ongoing multi-step efforts. A related intake item showing 'closed' just means it was "
+            "handed to a work object — the work itself is still live. Flag a work object's scheduled "
+            "action (e.g. a delayed email) only if it collides with something needing the user.*\n"
+            + render_portfolio(active)
+        )
+    except Exception as e:
+        logger.debug("situation_snapshot: work objects failed: %s", e)
         return ""
 
 
