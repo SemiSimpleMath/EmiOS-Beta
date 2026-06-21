@@ -14,23 +14,31 @@ depends_on) can run in any order. depends_on means "A has FINISHED" — it is an
 NOT a wait for the outside world.
 
 ## Waiting — the part that matters
-Real tasks often must PAUSE — for a future time, or for an external event you do not control (a reply to
-an email, a delivery, an approval). Do NOT fold the wait into an action, and do NOT assume the result is
-available immediately. Give the node that must wait a WAKE CONDITION so it parks until the condition is
-met:
-- `wake_kind="time"` + `wake_at` (ISO datetime) — wait until a moment in time.
-- `wake_kind="user_reply"` + `wake_ref` — wait for a reply from someone (describe it).
-- `wake_kind="event"` or `"signal"` + `wake_ref` — wait for some other external event.
+Real tasks often must PAUSE. Give the node that must wait a WAKE CONDITION so it parks until the
+condition is met. There are exactly TWO kinds, and the distinction matters:
+
+1. TIME — a specific clock time, OR a fixed delay ("next Monday 9am", "in 3 days", "24 hours later",
+   "a week after"). Set `wake_kind="time"` and `wake_at` (absolute ISO datetime with offset). You are
+   given the CURRENT TIME in the prompt — for a delay, ADD the delay to it and put the resulting
+   absolute datetime in `wake_at`. ELAPSED TIME IS ALWAYS A TIME WAIT — never model "N hours/days
+   later" as an event.
+
+2. EXTERNAL EVENT — something OUTSIDE your control has to happen first: a reply, a delivery, an
+   approval, someone else acting. Set `wake_kind="user_reply"` (a reply) or `"event"`/`"signal"`, and
+   describe what you are waiting for in `wake_ref`.
+
 A node with no wake_kind runs as soon as its depends_on are complete. A node can have BOTH a depends_on
-and a wake condition (it waits for the upstream node AND the external event).
+AND a wake condition (it waits for the upstream node to finish AND the wake condition).
 
-### Example — "email my brother about the trip, and text me when he replies"
-- node_id="email_brother", detail="Email the brother about the trip.", depends_on=[]
-- node_id="text_user", detail="Text the user summarizing the brother's reply.",
-  depends_on=["email_brother"], wake_kind="user_reply", wake_ref="a reply from the brother to the trip email"
+### Examples
+- "email my brother, and TEXT me when he replies" — the text waits on an EXTERNAL EVENT (his reply):
+  node_id="text_user", depends_on=["email_brother"], wake_kind="user_reply",
+  wake_ref="a reply from the brother to the trip email"
+- "find a movie, then email me 24 HOURS LATER" — the email waits on a TIME delay, NOT an event:
+  node_id="email_result", depends_on=["find_movie"], wake_kind="time",
+  wake_at=<current time + 24h, as an absolute datetime>
 
-The text node fires only when BOTH hold: email_brother is done AND the reply has arrived. It never fires
-early — that is the whole point of the wake condition.
+In both cases the node fires only when its depends_on are done AND its wake condition is met — never early.
 
 ## Keep it lean
 - Don't over-decompose. 1-5 nodes for most goals; a simple goal is ONE node.
