@@ -99,6 +99,25 @@ Snoozed: {% for t in recent_responded_tickets.snoozed %}{{ t.get("title","") }}{
 {{ task_block(needs_placement, "Needs Placement (decide: actionable, waiting, or watching)") }}
 {{ task_block(waiting, "Waiting Tasks (check if conditions are now met)") }}
 {%- endif %}
+{%- if waiting_work_nodes %}
+
+########## WORK-OBJECT WAITS (parked on an external event) ##########
+*Multi-step work parked on an outside event. Time + dependency gates are already handled by the graph —
+your ONLY job here is to decide whether the awaited EVENT has arrived in the RECENT INCOMING below. For
+each that clearly has, emit a `node_wakes` entry (task_id + the arrived content). Match conservatively.*
+{%- for t in waiting_work_nodes %}
+- task_id: {{ t.task_id }}
+  waiting for: {{ t.waiting_for }}{% if t.context %}
+  about: {{ t.context }}{% endif %}
+{%- endfor %}
+{%- if work_wait_intake %}
+
+RECENT INCOMING (match against these):
+{%- for e in work_wait_intake %}
+- {{ e }}
+{%- endfor %}
+{%- endif %}
+{%- endif %}
 {%- if entity_card %}
 
 ##### Entity Context

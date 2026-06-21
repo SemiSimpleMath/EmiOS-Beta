@@ -20,8 +20,6 @@ agents:
     class: Agent
   - name: dayflow_orchestrator::strategic_planner_wo
     class: Agent
-  - name: dayflow_orchestrator::event_waker
-    class: Agent
   - name: dayflow_orchestrator::relevance_cleaner
     class: Agent
   - name: dayflow_orchestrator::plan_mode
@@ -64,10 +62,6 @@ control_nodes:
     class: StrategicPlannerWoPersistNode
   - name: work_architect_node
     class: WorkArchitectNode
-  - name: event_waker_prep_node
-    class: EventWakerPrepNode
-  - name: event_waker_persist_node
-    class: EventWakerPersistNode
   - name: work_execution_node
     class: WorkExecutionNode
   - name: relevance_cleaner_gate_node
@@ -166,10 +160,7 @@ flow_config:
     "strategic_planner_wo_prep_node": "dayflow_orchestrator::strategic_planner_wo"
     "dayflow_orchestrator::strategic_planner_wo": "strategic_planner_wo_persist_node"
     "strategic_planner_wo_persist_node": "work_architect_node"
-    "work_architect_node": "event_waker_prep_node"
-    "event_waker_prep_node": "dayflow_orchestrator::event_waker"
-    "dayflow_orchestrator::event_waker": "event_waker_persist_node"
-    "event_waker_persist_node": "work_execution_node"
+    "work_architect_node": "work_execution_node"
     "work_execution_node": "state_mover_prep_node"
     # old plan-task path (no longer reached from context_enricher_persist_node):
     "strategic_planner_prep_node": "dayflow_orchestrator::strategic_planner"

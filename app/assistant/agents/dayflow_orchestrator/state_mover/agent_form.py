@@ -45,9 +45,20 @@ class StateMutation(BaseModel):
         return self
 
 
+class NodeWake(BaseModel):
+    task_id: str = Field(description="The parked work-object node id EXACTLY as shown (work_id::node_id).")
+    evidence: str = Field(
+        description="The intake content that satisfies the wait — the gist of what arrived — so the "
+        "worker resuming the node has what it needs to act.")
+
+
 class AgentForm(BaseModel):
     state_mover_summary: str = Field(description="Short summary of applied lifecycle moves.")
     state_mutations: List[StateMutation] = Field(
         default_factory=list,
         description="Lifecycle transitions to apply.",
     )
+    node_wakes: List[NodeWake] = Field(
+        default_factory=list,
+        description="Work-object nodes parked on an external event whose event has CLEARLY arrived in "
+        "the recent intake. Omit anything uncertain — it stays parked. Separate from state_mutations.")

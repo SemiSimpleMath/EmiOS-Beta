@@ -105,6 +105,15 @@ class StateMoverPrepNode(ControlNode):
         self.blackboard.update_state_value("recent_dayflow_chat_history", chat_history)
         self.blackboard.update_state_value("recent_responded_tickets", responded_tickets)
 
+        # Work-object nodes parked on an external event — the state_mover wakes these (it replaces the
+        # standalone event_waker). The graph handles their time/dependency gates; only the event match is
+        # the state_mover's job.
+        try:
+            self._build_work_object_waits(all_items)
+        except Exception as e:
+            logger.error("[%s] work-object waits build failed: %s", self.name, e)
+            logger.debug("[%s] work-object waits exception", self.name, exc_info=True)
+
         logger.info(
             "[%s] prepared: active=%d synopses=%d chat=%d",
             self.name,
@@ -113,3 +122,44 @@ class StateMoverPrepNode(ControlNode):
             len(chat_history),
         )
         self.blackboard.update_state_value("last_agent", self.name)
+
+    def _build_work_object_waits(self, all_items):
+        """Find work-object nodes parked on an EXTERNAL event (deps + time already met, so is_ready is
+        True) and the recent incoming intake to match them against. Sets waiting_work_nodes +
+        work_wait_intake on the blackboard. deps/time are the graph's job; only the event match is the
+        state_mover's (this replaces the standalone event_waker)."""
+        from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
+        from work_objects.model import utcnow
+
+        store = get_dayflow_work_store()
+        now = utcnow()
+        waiting: List[Dict[str, Any]] = []
+        for s in store.list_work_objects():
+            if str(s.get("status") or "").lower() in {"done", "abandoned"}:
+                continue
+            wo = store.load(s["id"])
+            for n in wo.nodes.values():
+                if getattr(n, "wake_kind", None) in {"event", "user_reply", "signal"} and wo.is_ready(n, now):
+                    waiting.append({
+                        "task_id": f"{s['id']}::{n.id}",
+                        "waiting_for": getattr(n, "wake_ref", "") or "",
+                        "context": (n.title or n.content or "").strip().replace("\n", " ")[:140],
+                    })
+        self.blackboard.update_state_value("waiting_work_nodes", waiting)
+        if not waiting:
+            return
+
+        intake: List[str] = []
+        for item in all_items:
+            meta = get_meta(item)
+            st = str(meta.get("source_type") or "").strip().lower()
+            if st == "email":
+                summ = meta.get("email_summary", "")
+                intake.append(f"Email from {meta.get('email_sender', 'Unknown')}: "
+                              f"\"{meta.get('email_subject', meta.get('summary', ''))}\""
+                              + (f" — {summ}" if summ else ""))
+            elif st == "chat":
+                summ = str(meta.get("summary") or "").strip()
+                if summ:
+                    intake.append(f"Chat: {summ}")
+        self.blackboard.update_state_value("work_wait_intake", intake[:30])
