@@ -1,9 +1,13 @@
 Current time: {{ date_time }}.
 
 {% if admitted_artifacts %}
-## NEW INTAKE (items that may need attention)
-{% for a in admitted_artifacts %}
-- {{ a.summary if a.summary is defined and a.summary else a }}
+## NEW INTAKE (items that may need attention — cite an item's [id] in based_on when you turn it into a work object)
+{% for m in admitted_artifacts %}
+{%- set meta = m.get("metadata", {}) %}
+- [{{ meta.get("short_id", meta.get("item_id","")) }}] {% if meta.get("source_type","") == "email" %}Email from {{ meta.get("email_sender","Unknown") }}: "{{ meta.get("email_subject", meta.get("summary","")) }}"{% if meta.get("email_summary") %} — {{ meta.get("email_summary") }}{% endif %}{% else %}{{ meta.get("summary","(no summary)") }} ({{ meta.get("source_type","") }}){% endif %}
+{%- if meta.get("enrichment") %}
+  context: {{ meta.get("enrichment") }}
+{%- endif %}
 {% endfor %}
 {% else %}
 ## NEW INTAKE
