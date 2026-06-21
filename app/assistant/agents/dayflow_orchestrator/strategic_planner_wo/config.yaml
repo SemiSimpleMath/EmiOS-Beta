@@ -1,0 +1,17 @@
+name: strategic_planner_wo
+class_name: Agent
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.4-mini"
+  model_tier: "mini"
+
+allowed_tools: []
+except_tools: []
+
+user_context_items:
+  - date_time
+  - admitted_artifacts
+  - work_portfolio
+  - recent_dispatch_results
+
+system_context_items: []

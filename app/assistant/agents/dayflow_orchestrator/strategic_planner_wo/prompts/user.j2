@@ -1,0 +1,33 @@
+Current time: {{ date_time }}.
+
+{% if admitted_artifacts %}
+## NEW INTAKE (items that may need attention)
+{% for a in admitted_artifacts %}
+- {{ a.summary if a.summary is defined and a.summary else a }}
+{% endfor %}
+{% else %}
+## NEW INTAKE
+(nothing new this cycle)
+{% endif %}
+
+## YOUR PORTFOLIO (active work objects)
+{% if work_portfolio %}
+{{ work_portfolio }}
+{% else %}
+(no active work objects)
+{% endif %}
+
+{% if recent_dispatch_results %}
+## RECENT OUTCOMES (workers' results since last cycle)
+{% for r in recent_dispatch_results %}
+- {{ r.summary }}{% if r.execution_result %} -> {{ r.execution_result }}{% endif %}
+
+{% endfor %}
+{% endif %}
+
+Make your steward decisions:
+- CREATE a work object for new multi-step work (state the OBJECTIVE only — no steps; the worker decomposes it).
+- ADVANCE the work objects that are READY and worth pushing now (not waiting/blocked/done).
+- COMPLETE the ones whose objective is fully met; ABANDON the obsolete ones.
+- Skip one-shot actions (a quick reminder/answer) — they don't need a work object.
+Output ONLY what changed this pass.
