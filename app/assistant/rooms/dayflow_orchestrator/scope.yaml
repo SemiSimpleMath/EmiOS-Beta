@@ -13,8 +13,15 @@
 #
 # Full tool surface, all pods (cross-room owner visibility for event
 # correlation — see ROOM.md), KG writes + fact extraction enabled, auto-send
-# enabled. NO per_manager narrowing: the orchestrator runs every manager with
-# its native toolkit.
+# enabled.
+#
+# The one per_manager rule below mirrors master_room's and is NOT a capability
+# cut — it's a narrower-cost reduction. emi_team_manager otherwise runs the LLM
+# tool_narrower over its full ~138-tool surface (~90KB prompt) on EVERY call;
+# restricting its DIRECT pool to the 7 delegate-managers + ask_kg + operational
+# tools collapses that to ~16 with zero loss of reach — the ~120 specialist
+# leaves stay reachable THROUGH those managers (http_request via http_manager,
+# calendar CRUD via personal_admin, etc.).
 #
 # NOTE: write_kg / allow_fact_extraction / pods:[all] / entities:[all] are MORE
 # permissive than the model defaults and MUST be declared explicitly — omitting
@@ -26,7 +33,28 @@ approval:
 tools:
   allowed_tools: [all]
   allow_external_side_effects: true
-  # No per_manager: dayflow_orchestrator runs every manager with its full surface.
+  per_manager:
+    # Narrower-cost reduction only (see header), mirrors master_room. emi_team's
+    # DIRECT pool = the managers it delegates to + ask_kg + its operational tools;
+    # specialist leaves stay reachable through those managers.
+    emi_team_manager:
+      allow:
+        - personal_admin_manager
+        - devices_manager
+        - web_manager
+        - playwright_manager
+        - bash_manager
+        - http_manager
+        - sandbox_manager
+        - find_tool
+        - install_tool
+        - ask_user
+        - pod_search
+        - pod_fetch
+        - mint_pod
+        - ask_kg
+        - discover_skills
+        - read_skill
 
 pods:
   allowed_scopes: [all]
