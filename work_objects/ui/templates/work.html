@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Work Objects</title>
+<style>
+  :root{
+    --bg:#0e1116;--panel:#161b22;--panel2:#1c2230;--border:#2a3240;--text:#d7dee8;
+    --muted:#8b97a7;--accent:#4c8eff;--green:#3fb950;--amber:#d29922;--red:#f85149;--teal:#39c5cf;--gray:#6e7681;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text)}
+  header{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border);background:var(--panel)}
+  header h1{font-size:16px;margin:0;font-weight:600}
+  header .db{color:var(--muted);font-size:12px;font-family:monospace}
+  header .spacer{flex:1}
+  button{background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:5px 10px;cursor:pointer;font-size:13px}
+  button:hover{border-color:var(--accent)}
+  .layout{display:flex;height:calc(100vh - 49px)}
+  .sidebar{width:310px;border-right:1px solid var(--border);overflow-y:auto;background:var(--panel)}
+  .main{flex:1;overflow-y:auto;padding:18px}
+  .wo-card{padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer}
+  .wo-card:hover{background:var(--panel2)}
+  .wo-card.sel{background:var(--panel2);border-left:3px solid var(--accent)}
+  .wo-card .t{font-weight:600;margin-bottom:4px}
+  .wo-card .m{font-size:12px;color:var(--muted);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .badge{display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;font-weight:600}
+  .b-done{background:rgba(63,185,80,.15);color:var(--green)}
+  .b-active{background:rgba(76,142,255,.15);color:var(--accent)}
+  .b-waiting{background:rgba(210,153,34,.15);color:var(--amber)}
+  .b-proposed{background:rgba(110,118,129,.18);color:var(--gray)}
+  .b-fail{background:rgba(248,81,73,.15);color:var(--red)}
+  .b-evidence{background:rgba(57,197,207,.13);color:var(--teal)}
+  .progress{height:6px;background:var(--panel2);border-radius:4px;overflow:hidden;margin:8px 0 2px}
+  .progress > i{display:block;height:100%;background:var(--green)}
+  .remaining{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+  .chip{background:var(--panel2);border:1px solid var(--border);border-radius:6px;padding:4px 9px;font-size:12px}
+  .chip b{font-size:14px}
+  .tree{margin-top:8px}
+  .node{display:flex;align-items:flex-start;gap:8px;padding:5px 8px;border-radius:6px;cursor:pointer}
+  .node:hover{background:var(--panel2)}
+  .node.sel{background:var(--panel2);outline:1px solid var(--accent)}
+  .node .ic{width:18px;text-align:center;flex:none}
+  .node .ti{flex:1;min-width:0}
+  .node .ti .sub{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .node .owner{font-size:11px;color:var(--muted);background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:0 5px;flex:none}
+  .podlink{color:var(--teal);font-size:12px;cursor:pointer;text-decoration:underline;flex:none}
+  .detail{margin-top:16px;border-top:1px solid var(--border);padding-top:12px}
+  .detail h3{margin:0 0 6px}
+  .kv{display:grid;grid-template-columns:140px 1fr;gap:4px 10px;font-size:13px;margin:8px 0}
+  .kv .k{color:var(--muted)}
+  pre.body{background:var(--panel2);border:1px solid var(--border);border-radius:6px;padding:10px;white-space:pre-wrap;word-break:break-word;max-height:360px;overflow:auto;font:12px/1.5 ui-monospace,Consolas,monospace}
+  .empty{color:var(--muted);padding:40px;text-align:center}
+  .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:50}
+  .modal-bg.on{display:flex}
+  .modal{background:var(--panel);border:1px solid var(--border);border-radius:10px;width:min(760px,92vw);max-height:86vh;overflow:auto;padding:18px}
+  .modal h2{margin:0 0 4px;font-size:16px}
+  .modal .pid{font-family:monospace;font-size:12px;color:var(--muted);margin-bottom:10px}
+  .modal a{color:var(--accent)}
+  details{margin-top:16px}
+  summary{cursor:pointer;color:var(--muted)}
+  .evt{font-family:monospace;font-size:12px;padding:3px 0;border-bottom:1px solid var(--border)}
+  .evt .op{color:var(--accent)}
+</style>
+</head>
+<body>
+<header>
+  <h1>🧩 Work Objects</h1>
+  <span class="db" id="dbpath"></span>
+  <span class="spacer"></span>
+  <button onclick="loadList()">↻ Refresh</button>
+</header>
+<div class="layout">
+  <div class="sidebar" id="sidebar"></div>
+  <div class="main" id="main"><div class="empty">Select a work object on the left.</div></div>
+</div>
+<div class="modal-bg" id="modalbg" onclick="if(event.target===this)closeModal()">
+  <div class="modal" id="modal"></div>
+</div>
+<script>
+const TYPE_IC={goal:'🎯',plan:'📋',subtask:'▸',tool:'🔧',evidence:'🔎',artifact:'📄',question:'❓',verification:'✔'};
+const WORK_TYPES=['goal','plan','subtask','tool','question','verification'];
+function badgeClass(s){
+  if(['done','verified','passed','answered'].includes(s))return 'b-done';
+  if(['active','open'].includes(s))return 'b-active';
+  if(s==='waiting')return 'b-waiting';
+  if(['failed','abandoned','superseded','unanswerable','stale'].includes(s))return 'b-fail';
+  if(s==='assumed')return 'b-evidence';
+  return 'b-proposed';
+}
+function badge(s){return `<span class="badge ${badgeClass(s)}">${esc(s)}</span>`}
+function esc(t){return (t==null?'':String(t)).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
+let SEL_WO=null,SEL_NODE=null,DATA=null;
+
+async function loadList(){
+  const j=await (await fetch('/api/work')).json();
+  document.getElementById('dbpath').textContent=j.db||'';
+  const sb=document.getElementById('sidebar');
+  if(!j.work_objects||!j.work_objects.length){sb.innerHTML='<div class="empty">No work objects in this store yet.</div>';return}
+  sb.innerHTML=j.work_objects.map(w=>{
+    const pct=w.total_nodes?Math.round(100*w.done_nodes/w.total_nodes):0;
+    return `<div class="wo-card ${w.id===SEL_WO?'sel':''}" onclick="selectWO('${w.id}')">
+      <div class="t">${esc(w.goal||w.title||w.id)}</div>
+      <div class="m">${badge(w.status)} <span>${w.done_nodes||0}/${w.total_nodes||0} done</span><span>· ${w.remaining_nodes||0} left</span></div>
+      <div class="progress"><i style="width:${pct}%"></i></div>
+    </div>`;
+  }).join('');
+}
+
+async function selectWO(id){
+  SEL_WO=id;SEL_NODE=null;
+  DATA=await (await fetch('/api/work/'+id)).json();
+  loadList();renderMain();
+}
+function childrenOf(pid){return DATA.nodes.filter(n=>n.parent_id===pid)}
+
+function renderNode(n,depth){
+  const ic=TYPE_IC[n.type]||'•';
+  const pod=n.pod_ref?`<span class="podlink" onclick="event.stopPropagation();showPod('${n.pod_ref}')">📦 pod</span>`:'';
+  const owner=n.owner_agent?`<span class="owner">${esc(n.owner_agent)}</span>`:'';
+  const flag=n.ready?'<span class="badge b-active">ready</span>':(n.blocked?'<span class="badge b-waiting">blocked</span>':'');
+  const label=n.title||(n.content||'').slice(0,90)||n.type;
+  const snip=(n.content&&n.title)?`<div class="sub">${esc(n.content)}</div>`:'';
+  let html=`<div class="node ${n.id===SEL_NODE?'sel':''}" style="margin-left:${depth*18}px" onclick="selectNode('${n.id}')">
+     <div class="ic">${ic}</div>
+     <div class="ti"><div>${esc(label)} ${badge(n.status)} ${flag}</div>${snip}</div>
+     ${owner}${pod}
+   </div>`;
+  for(const c of childrenOf(n.id))html+=renderNode(c,depth+1);
+  return html;
+}
+
+function renderMain(){
+  const m=document.getElementById('main');
+  const goal=DATA.nodes.find(n=>n.id===DATA.goal_node_id)||DATA.nodes.find(n=>!n.parent_id);
+  const work=DATA.nodes.filter(n=>!n.is_terminal&&WORK_TYPES.includes(n.type));
+  const ready=work.filter(n=>n.ready).length,active=work.filter(n=>n.status==='active').length,
+        waiting=work.filter(n=>n.status==='waiting').length,blocked=work.filter(n=>n.blocked).length;
+  const roots=goal?[goal]:DATA.nodes.filter(n=>!n.parent_id);
+  const tree=roots.map(n=>renderNode(n,0)).join('');
+  m.innerHTML=`
+    <h2 style="margin:0">${esc(DATA.title||DATA.id)} ${badge(DATA.status)}</h2>
+    <div style="color:var(--muted);font-size:12px;font-family:monospace">${DATA.id} · updated ${esc(DATA.updated_at||'')}</div>
+    <div class="remaining">
+      <span class="chip">remaining <b>${work.length}</b></span>
+      <span class="chip">ready <b style="color:var(--accent)">${ready}</b></span>
+      <span class="chip">active <b style="color:var(--accent)">${active}</b></span>
+      <span class="chip">waiting <b style="color:var(--amber)">${waiting}</b></span>
+      <span class="chip">blocked <b style="color:var(--red)">${blocked}</b></span>
+    </div>
+    <div class="tree">${tree}</div>
+    <div id="detail"></div>
+    <details ontoggle="if(this.open)loadEvents()"><summary>Event log</summary><div id="events"></div></details>
+  `;
+  if(SEL_NODE)renderDetail();
+}
+function selectNode(id){SEL_NODE=id;renderMain();}
+
+function renderDetail(){
+  const n=DATA.nodes.find(x=>x.id===SEL_NODE);if(!n)return;
+  const edges=DATA.edges.filter(e=>e.src===n.id||e.dst===n.id)
+     .map(e=>`${e.src===n.id?'→':'←'} ${esc(e.relation)} ${esc(e.src===n.id?e.dst:e.src)}`).join('<br>')||'—';
+  const pod=n.pod_ref?`<button onclick="showPod('${n.pod_ref}')">📦 open pod</button>`:'';
+  const pay=(n.payload&&Object.keys(n.payload).length)?`<div class="k" style="color:var(--muted)">payload</div><pre class="body">${esc(JSON.stringify(n.payload,null,2))}</pre>`:'';
+  document.getElementById('detail').innerHTML=`<div class="detail">
+    <h3>${TYPE_IC[n.type]||'•'} ${esc(n.title||n.type)} ${badge(n.status)}</h3>
+    <div class="kv">
+      <div class="k">id</div><div style="font-family:monospace">${esc(n.id)}</div>
+      <div class="k">type</div><div>${esc(n.type)}</div>
+      <div class="k">owner</div><div>${esc(n.owner_agent||'—')}</div>
+      <div class="k">satisfied when</div><div>${esc(n.satisfied_when_kind||'—')}</div>
+      <div class="k">side effect</div><div>${esc(n.side_effect||'—')}</div>
+      <div class="k">pod_ref</div><div style="font-family:monospace;font-size:12px">${esc(n.pod_ref||'—')}</div>
+      <div class="k">edges</div><div style="font-family:monospace;font-size:12px">${edges}</div>
+    </div>
+    ${n.content?`<div class="k" style="color:var(--muted)">content / result</div><pre class="body">${esc(n.content)}</pre>`:''}
+    ${pay}${pod}
+  </div>`;
+}
+
+async function showPod(pid){
+  const mb=document.getElementById('modalbg'),md=document.getElementById('modal');
+  md.innerHTML='loading pod…';mb.classList.add('on');
+  const p=await (await fetch('/api/work-pod?id='+encodeURIComponent(pid))).json();
+  if(p.error){md.innerHTML=`<h2>Pod</h2><div class="pid">${esc(pid)}</div><div>${esc(p.error)}</div><div style="margin-top:14px"><button onclick="closeModal()">close</button></div>`;return}
+  const srcs=(p.source_refs||[]).map(s=>`<li><a href="${esc(s)}" target="_blank" rel="noreferrer">${esc(s)}</a></li>`).join('');
+  md.innerHTML=`<h2>${esc(p.one_liner||p.kind)}</h2>
+    <div class="pid">${esc(p.pod_id)} · <span class="chip">${esc(p.kind)}</span>${p.importance!=null?' · importance '+esc(p.importance):''}</div>
+    <pre class="body">${esc(p.body||'(no body)')}</pre>
+    ${srcs?`<div style="margin-top:10px;color:var(--muted)">sources</div><ul>${srcs}</ul>`:''}
+    ${(p.tags||[]).length?`<div style="margin-top:8px">${p.tags.map(t=>`<span class="chip">${esc(t)}</span>`).join(' ')}</div>`:''}
+    <div style="margin-top:14px"><button onclick="closeModal()">close</button></div>`;
+}
+function closeModal(){document.getElementById('modalbg').classList.remove('on')}
+
+function nodeTitle(id){const n=DATA&&DATA.nodes.find(x=>x.id===id);return n?(n.title||(n.content||'').slice(0,60)||n.type):(id||'')}
+function eventLabel(e){
+  const d=e.data||{};
+  if(e.op==='set_status')return `${esc(nodeTitle(d.node_id))} → ${esc(d.status||'')}`;
+  if(e.op==='attach_pod')return `${esc(nodeTitle(d.node_id))} ← 📦 pod`;
+  if(e.op==='defer_node')return `${esc(nodeTitle(d.node_id))} parked`;
+  if(e.op==='add_node')return `+ ${esc(d.title||nodeTitle(d.id)||(d.content||'').slice(0,70)||d.type||'node')}`;
+  if(e.op==='add_edge')return `${esc(d.src||'')} ${esc(d.relation||'')} ${esc(d.dst||'')}`;
+  if(e.op==='create_work_object')return esc(d.title||'');
+  return esc(JSON.stringify(d).slice(0,90));
+}
+async function loadEvents(){
+  const el=document.getElementById('events');if(!el||!SEL_WO)return;
+  const j=await (await fetch('/api/work/'+SEL_WO+'/events')).json();
+  el.innerHTML=(j.events||[]).map(e=>`<div class="evt">#${e.seq} <span style="color:var(--muted)">${esc((e.ts||'').slice(11,19))}</span> <span class="op">${esc(e.op)}</span> ${eventLabel(e)}</div>`).join('')||'—';
+}
+loadList();
+</script>
+</body>
+</html>

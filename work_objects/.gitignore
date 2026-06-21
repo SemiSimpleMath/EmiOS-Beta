@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+data/
+
+# Archived dead code — kept locally for reference, not imported into the repo.
+*.archive

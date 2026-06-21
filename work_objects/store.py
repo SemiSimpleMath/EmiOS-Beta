@@ -1,0 +1,318 @@
+"""
+work_objects.store — own SQLite persistence + the validated writer.
+
+The **event log is the record of truth**; the `nodes`/`edges` tables are the
+live **projection** (a materialized cache you read from, rebuildable from events).
+
+Every mutation goes through `WorkStore.apply(op, data, actor)`:
+    1. load the current projection
+    2. validate the patch  — allowed status transitions + authority ceiling +
+       structural invariants (WorkObject.validate)
+    3. append the event
+    4. update the projection
+    5. recompute the derived rollup (WorkObject.status)
+  Steps 3-5 are ONE atomic sqlite transaction: the event and the projection
+  commit together or not at all — they can never diverge.
+
+Single-writer by design: the WorkOrchestrator tick is the sole caller, so we
+don't lock between the load and the write. Don't call apply() concurrently.
+"""
+from __future__ import annotations
+
+import json
+import sqlite3
+import threading
+from typing import Any, Callable, Optional
+
+from work_objects.model import (
+    WAKE_KINDS, Edge, SCHEMA_SQL, WorkNode, WorkObject, _TERMINAL_STATUSES, utcnow,
+)
+
+# --------------------------------------------------------------------------- #
+# Status state machine, keyed by node FAMILY (inferred from type). A new node
+# type defaults to the "spine" lifecycle until it's mapped here.
+# --------------------------------------------------------------------------- #
+FAMILY_BY_TYPE = {
+    "goal": "spine", "plan": "spine", "subtask": "spine", "tool": "spine",
+    "evidence": "knowledge", "artifact": "knowledge",
+    "question": "question", "verification": "verification",
+}
+TRANSITIONS: dict[str, dict[str, set[str]]] = {
+    "spine": {
+        "proposed": {"active", "waiting", "abandoned"},
+        "active": {"waiting", "done", "failed", "abandoned"},
+        "waiting": {"active", "done", "failed", "abandoned"},
+        "done": {"superseded"},
+        "failed": {"active", "abandoned"},
+        "abandoned": set(), "superseded": set(),
+    },
+    "knowledge": {
+        "proposed": {"assumed", "verified", "done", "abandoned"},
+        "assumed": {"verified", "stale", "superseded", "abandoned"},
+        "verified": {"stale", "superseded"},
+        "done": {"verified", "stale", "superseded"},
+        "stale": {"verified", "superseded"},
+        "superseded": set(), "abandoned": set(),
+    },
+    "question": {
+        "proposed": {"open", "abandoned"},
+        "open": {"answered", "unanswerable", "abandoned"},
+        "answered": {"open"}, "unanswerable": {"open"}, "abandoned": set(),
+    },
+    "verification": {
+        "proposed": {"active", "abandoned"},
+        "active": {"passed", "failed", "abandoned"},
+        "passed": set(), "failed": {"active", "abandoned"}, "abandoned": set(),
+    },
+}
+
+_NODE_COLUMNS = [
+    "id", "work_id", "type", "title", "status", "parent_id", "owner_agent",
+    "satisfied_when_kind", "satisfied_when_ref", "side_effect", "requires_approval",
+    "authority", "deadline", "wake_kind", "wake_at", "wake_ref", "pod_ref",
+    "created_by", "created_at", "updated_at", "content", "payload",
+]
+
+
+def _iso(dt) -> Optional[str]:
+    if dt is None or isinstance(dt, str):
+        return dt
+    return dt.isoformat()
+
+
+class WorkStore:
+    def __init__(self, path: str = "work_objects/work.db"):
+        self.path = path
+        # Single-writer model: one connection shared across threads, with ALL access
+        # serialized by a reentrant lock, so concurrent managers + a writing curator
+        # can never interleave or corrupt the graph. (Reads are serialized too —
+        # fine at this scale; thread-local read connections are the later optimization.)
+        self._lock = threading.RLock()
+        self._conn = sqlite3.connect(path, check_same_thread=False)
+        self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.executescript(SCHEMA_SQL)
+
+    def close(self) -> None:
+        self._conn.close()
+
+    # ----------------------------- read ----------------------------- #
+    def load(self, work_id: str) -> WorkObject:
+        with self._lock:
+            return self._load(work_id)
+
+    def _load(self, work_id: str) -> WorkObject:
+        row = self._conn.execute("SELECT * FROM work_objects WHERE id=?", (work_id,)).fetchone()
+        if row is None:
+            raise KeyError(f"work_object {work_id!r} not found")
+        wo = WorkObject(
+            id=row["id"], title=row["title"] or "", goal_node_id=row["goal_node_id"],
+            status=row["status"], mission_id=row["mission_id"],
+            constraints=json.loads(row["constraints"] or "{}"),
+            created_at=row["created_at"], updated_at=row["updated_at"],
+        )
+        for nrow in self._conn.execute("SELECT * FROM nodes WHERE work_id=?", (work_id,)):
+            wo.nodes[nrow["id"]] = self._row_to_node(nrow)
+        for erow in self._conn.execute("SELECT * FROM edges WHERE work_id=?", (work_id,)):
+            wo.edges.append(Edge(
+                id=erow["id"], work_id=erow["work_id"], src=erow["src"], dst=erow["dst"],
+                relation=erow["relation"], created_at=erow["created_at"],
+                payload=json.loads(erow["payload"] or "{}"),
+            ))
+        return wo
+
+    def events(self, work_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT seq, ts, actor, op, data FROM events WHERE work_id=? ORDER BY seq", (work_id,)
+            ).fetchall()
+        return [{"seq": r["seq"], "ts": r["ts"], "actor": r["actor"], "op": r["op"],
+                 "data": json.loads(r["data"] or "{}")} for r in rows]
+
+    def list_work_objects(self) -> list[dict[str, Any]]:
+        """Summaries of every WorkObject, newest-updated first — for a dashboard / list view."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, title, status, created_at, updated_at FROM work_objects "
+                "ORDER BY updated_at DESC"
+            ).fetchall()
+        return [{"id": r["id"], "title": r["title"] or "", "status": r["status"],
+                 "created_at": r["created_at"], "updated_at": r["updated_at"]} for r in rows]
+
+    @staticmethod
+    def _row_to_node(row: sqlite3.Row) -> WorkNode:
+        d = {k: row[k] for k in _NODE_COLUMNS}
+        d["payload"] = json.loads(d["payload"] or "{}")
+        # pydantic coerces ISO strings -> datetime and 0/1 -> bool.
+        return WorkNode(**d)
+
+    # ------------------------- write (one entrypoint) ------------------------- #
+    def apply(self, op: str, data: dict, actor: Optional[str] = None,
+              work_id: Optional[str] = None) -> WorkObject:
+        handler = self._HANDLERS.get(op)
+        if handler is None:
+            raise ValueError(f"unknown op {op!r}")
+        now = utcnow().isoformat()
+        with self._lock, self._conn:  # serialize writers; atomic event + projection
+            if op == "create_work_object":
+                wo = handler(self, None, data, now)
+            else:
+                wid = work_id or data.get("work_id")
+                if not wid:
+                    raise ValueError(f"op {op!r} requires work_id")
+                wo = self._load(wid)
+                handler(self, wo, data, now)
+            wo.validate()                       # structural invariants
+            self._rollup(wo, now)               # derived WorkObject.status
+            self._conn.execute(
+                "INSERT INTO events(work_id, ts, actor, op, data) VALUES(?,?,?,?,?)",
+                (wo.id, now, actor, op, json.dumps(data, default=str)),
+            )
+            self._persist(wo, now)
+        return wo
+
+    # ----------------------------- op handlers ----------------------------- #
+    # Each mutates the in-memory wo (validation inline); persistence is shared.
+    def _op_create_work_object(self, _wo, data, now) -> WorkObject:
+        wo = WorkObject(title=data.get("title", ""), constraints=data.get("constraints", {}),
+                        created_at=now, updated_at=now)
+        goal = WorkNode(
+            work_id=wo.id, type="goal", title=data.get("title", ""), status="proposed",
+            satisfied_when_kind=data.get("satisfied_when_kind", "all_owned_children_done"),
+            content=data.get("goal_content", ""), created_by=data.get("created_by"),
+            created_at=now, updated_at=now,
+        )
+        wo.add_node(goal)
+        wo.goal_node_id = goal.id
+        return wo
+
+    def _op_add_node(self, wo, data, now) -> None:
+        parent_id = data.get("parent_id")
+        if parent_id is not None and parent_id not in wo.nodes:
+            raise ValueError(f"add_node: parent {parent_id!r} not found")
+        authority = data.get("authority")
+        if parent_id is not None and authority is not None:
+            ceiling = wo.nodes[parent_id].authority
+            if ceiling is not None and authority > ceiling:
+                raise ValueError(f"add_node: authority {authority} exceeds parent ceiling {ceiling}")
+        fields = {k: v for k, v in data.items()
+                  if k in WorkNode.model_fields and k not in {"work_id", "created_at", "updated_at"}}
+        wo.add_node(WorkNode(work_id=wo.id, created_at=now, updated_at=now, **fields))
+
+    def _op_add_edge(self, wo, data, now) -> None:
+        if data["src"] not in wo.nodes or data["dst"] not in wo.nodes:
+            raise ValueError(f"add_edge: endpoints {data['src']!r}->{data['dst']!r} must exist")
+        wo.edges.append(Edge(work_id=wo.id, src=data["src"], dst=data["dst"],
+                             relation=data["relation"], payload=data.get("payload", {}),
+                             created_at=now))
+
+    def _op_set_status(self, wo, data, now) -> None:
+        node = wo.nodes.get(data["node_id"])
+        if node is None:
+            raise KeyError(f"set_status: node {data['node_id']!r} not found")
+        target = data["status"]
+        if target != node.status:
+            family = FAMILY_BY_TYPE.get(node.type, "spine")
+            allowed = TRANSITIONS.get(family, {}).get(node.status, set())
+            if target not in allowed:
+                raise ValueError(
+                    f"illegal transition {node.status!r}->{target!r} for {node.type} ({family})")
+        node.status = target
+        if data.get("content") is not None:   # optional closing note / evidence written on transition
+            node.content = data["content"]
+        node.updated_at = now
+
+    def _op_attach_pod(self, wo, data, now) -> None:
+        node = wo.nodes.get(data["node_id"])
+        if node is None:
+            raise KeyError(f"attach_pod: node {data['node_id']!r} not found")
+        node.pod_ref = data["pod_ref"]
+        node.updated_at = now
+
+    def _op_defer_node(self, wo, data, now) -> None:
+        node = wo.nodes.get(data["node_id"])
+        if node is None:
+            raise KeyError(f"defer_node: node {data['node_id']!r} not found")
+        wake_kind = data.get("wake_kind")
+        if wake_kind is not None and wake_kind not in WAKE_KINDS:
+            raise ValueError(f"defer_node: unknown wake_kind {wake_kind!r}")
+        node.wake_kind = wake_kind
+        node.wake_at = data.get("wake_at")
+        node.wake_ref = data.get("wake_ref")
+        if node.status == "active":
+            node.status = "waiting"
+        node.updated_at = now
+
+    def _op_set_work_status(self, wo, data, now) -> None:
+        """Force the WorkObject's overall status — the steward's authoritative complete/abandon, distinct
+        from the rollup's automatic 'all children done' completion. The forward-only rollup will not reset
+        it; the goal node is mirrored to a matching terminal state for consistency."""
+        target = data["status"]
+        if target not in ("active", "done", "abandoned", "blocked"):
+            raise ValueError(f"set_work_status: bad status {target!r}")
+        wo.status = target
+        goal = wo.nodes.get(wo.goal_node_id or "")
+        if goal is not None and target in ("done", "abandoned") and goal.status not in _TERMINAL_STATUSES:
+            goal.status = target
+            goal.updated_at = now
+
+    # ----------------------------- persistence ----------------------------- #
+    def _persist(self, wo: WorkObject, now: str) -> None:
+        self._conn.execute(
+            "INSERT OR REPLACE INTO work_objects"
+            "(id,title,goal_node_id,status,mission_id,constraints,created_at,updated_at)"
+            " VALUES(?,?,?,?,?,?,?,?)",
+            (wo.id, wo.title, wo.goal_node_id, wo.status, wo.mission_id,
+             json.dumps(wo.constraints, default=str), _iso(wo.created_at), now),
+        )
+        placeholders = ",".join("?" * len(_NODE_COLUMNS))
+        for n in wo.nodes.values():
+            self._conn.execute(
+                f"INSERT OR REPLACE INTO nodes({','.join(_NODE_COLUMNS)}) VALUES({placeholders})",
+                self._node_params(n),
+            )
+        for e in wo.edges:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO edges(id,work_id,src,dst,relation,created_at,payload)"
+                " VALUES(?,?,?,?,?,?,?)",
+                (e.id, e.work_id, e.src, e.dst, e.relation, _iso(e.created_at),
+                 json.dumps(e.payload, default=str)),
+            )
+
+    @staticmethod
+    def _node_params(n: WorkNode) -> tuple:
+        return (
+            n.id, n.work_id, n.type, n.title, n.status, n.parent_id, n.owner_agent,
+            n.satisfied_when_kind, n.satisfied_when_ref, n.side_effect, int(n.requires_approval),
+            n.authority, _iso(n.deadline), n.wake_kind, _iso(n.wake_at), n.wake_ref, n.pod_ref,
+            n.created_by, _iso(n.created_at), _iso(n.updated_at), n.content,
+            json.dumps(n.payload, default=str),
+        )
+
+    def _rollup(self, wo: WorkObject, now: str) -> None:
+        """Derived rollup — when the goal is satisfied, close it and the WorkObject.
+        Forward-only in v1: reopening a done WorkObject after a regression is an
+        explicit curator action (deferred), not an automatic flip-flop here."""
+        if wo.status == "abandoned":      # a force-abandoned WorkObject is terminal — never auto-complete it
+            wo.updated_at = now
+            return
+        goal = wo.nodes.get(wo.goal_node_id or "")
+        if goal is not None and wo.is_satisfied(goal):
+            wo.status = "done"
+            if goal.status == "active":      # close the goal node (active->done is legal)
+                goal.status = "done"
+                goal.updated_at = now
+        wo.updated_at = now
+
+    _HANDLERS: dict[str, Callable] = {}
+
+
+WorkStore._HANDLERS = {
+    "create_work_object": WorkStore._op_create_work_object,
+    "add_node": WorkStore._op_add_node,
+    "add_edge": WorkStore._op_add_edge,
+    "set_status": WorkStore._op_set_status,
+    "set_work_status": WorkStore._op_set_work_status,
+    "attach_pod": WorkStore._op_attach_pod,
+    "defer_node": WorkStore._op_defer_node,
+}
