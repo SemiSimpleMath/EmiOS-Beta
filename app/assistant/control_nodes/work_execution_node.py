@@ -89,7 +89,9 @@ class WorkExecutionNode(ControlNode):
 
     def _notify_user_pass(self, store, active_ids, now):
         """Run the notify-user path for every active work object's READY user_reply node. Per-node
-        failures are logged and never abort the tick."""
+        failures are logged and never abort the tick. Quiet hours are resolved once per tick (lazily —
+        only if there is an ask to make) and passed down to gate NEW notifications."""
+        quiet = None   # resolved on the first user_reply node, then reused for the rest of this tick
         for work_id in active_ids:
             try:
                 wo = store.load(work_id)
@@ -101,17 +103,20 @@ class WorkExecutionNode(ControlNode):
             for n in wo.ready_nodes(now):
                 if n.id == goal_id or getattr(n, "wake_kind", None) != "user_reply":
                     continue
+                if quiet is None:
+                    quiet = self._in_quiet_hours()
                 try:
-                    self._notify_user_for_node(store, work_id, n, now)
+                    self._notify_user_for_node(store, work_id, n, now, quiet)
                 except Exception as e:
                     logger.error("[%s] notify-user failed for %s/%s: %s", self.name, work_id, n.id, e)
                     logger.debug("[%s] notify-user exception", self.name, exc_info=True)
 
-    def _notify_user_for_node(self, store, work_id, node, now):
+    def _notify_user_for_node(self, store, work_id, node, now, quiet=False):
         """THE NOTIFY-USER PATH for one node. (1) If the user has replied to a notification for this node,
         record the reply on the node and clear the wait — PASS 2 / the next tick runs it with the answer.
-        (2) Else if a notification is still live (unexpired), wait. (3) Else surface a new one. The node is
-        never cleared until answered; an unanswered notification expires and gets re-asked."""
+        (2) Else if a notification is still live (unexpired), wait. (3) Else surface a new one — unless
+        `quiet` (the user's quiet hours), in which case leave it parked and re-ask once quiet lifts. The
+        node is never cleared until answered; an unanswered notification expires and gets re-asked."""
         from app.assistant.ticket_manager import get_ticket_manager
         tag = f"{work_id}::{node.id}"
         tm = get_ticket_manager()
@@ -140,7 +145,10 @@ class WorkExecutionNode(ControlNode):
             if state in _LIVE_TICKET_STATES and (valid_until is None or valid_until > now):
                 return
 
-        # (3) Nothing live — surface a notification (the previous expired unanswered, or there is none).
+        # (3) Nothing live — surface a notification, unless the user is in quiet hours (then leave the node
+        # parked and re-ask once quiet lifts; replies are still processed above, even while quiet).
+        if quiet:
+            return
         self._surface_notification(node, tag)
         content = (node.content or "").rstrip()
         store.apply("set_status", {"work_id": work_id, "node_id": node.id, "status": node.status,
@@ -173,6 +181,17 @@ class WorkExecutionNode(ControlNode):
         payload["button_layout"] = "decision"     # expects a reply (matches create_dayflow_ticket's decision kind)
         payload["plan_mode_available"] = True
         DI.event_hub.publish(Message(event_topic="proactive_suggestion", data=payload))
+
+    @staticmethod
+    def _in_quiet_hours():
+        """True if the user's quiet mode is on and now falls inside its window — reuses the same setting
+        the reminder handler gates proactive pings on (is_quiet_mode_active('scheduler')). A settings
+        hiccup never blocks a notification."""
+        try:
+            from app.assistant.user_settings_manager.user_settings import get_settings_manager
+            return bool(get_settings_manager().is_quiet_mode_active("scheduler"))
+        except Exception:
+            return False
 
     @staticmethod
     def _next_runnable(wo, now, work_id, done):
