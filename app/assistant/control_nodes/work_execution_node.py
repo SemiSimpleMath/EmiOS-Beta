@@ -150,16 +150,19 @@ class WorkExecutionNode(ControlNode):
 
     @staticmethod
     def _surface_notification(node, tag):
-        """Create + surface a notification ticket tagged with this node, non-blocking. The reply is matched
-        back on a later tick via trigger_context.work_node."""
+        """Phrase the node's ask into a warm, user-facing question via the ticket_builder agent (the same
+        phrasing LLM create_dayflow_ticket uses), then create + surface the notification ticket tagged with
+        this node, non-blocking. The reply is matched back on a later tick via trigger_context.work_node."""
         from app.assistant.ServiceLocator.service_locator import DI
+        from app.assistant.lib.tools.create_dayflow_ticket.create_dayflow_ticket import CreateDayflowTicketTool
         from app.assistant.ticket_manager import get_ticket_manager
         from app.assistant.utils.pydantic_classes import Message
-        title = (str(getattr(node, "title", "") or "").strip() or "I need your input")[:80]
-        parts = [p for p in [str(node.content or "").strip(),
-                             (f"Specifically, I need: {node.wake_ref}" if getattr(node, "wake_ref", "") else "")]
-                 if p]
-        message = " ".join(parts) or title
+        want = str(getattr(node, "wake_ref", "") or "").strip() or str(node.content or "").strip()
+        brief = (f"Ask the user a question so a task can proceed. Task: {node.title}. "
+                 f"What I need from them: {want}. Phrase it as a warm, direct question addressed to them.")
+        formatted = CreateDayflowTicketTool._format_brief(brief)   # ticket_builder agent (the phrasing LLM)
+        title = (str(formatted.get("title") or node.title or "I need your input").strip())[:80]
+        message = str(formatted.get("message") or want or title).strip()
         tm = get_ticket_manager()
         ticket = tm.create_ticket(ticket_type="dayflow_orchestrator", suggestion_type=_NOTIFY_SUGGESTION_TYPE,
                                   title=title, message=message, trigger_context={"work_node": tag},
