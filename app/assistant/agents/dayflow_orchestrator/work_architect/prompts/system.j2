@@ -15,7 +15,7 @@ NOT a wait for the outside world.
 
 ## Waiting — the part that matters
 Real tasks often must PAUSE. Give the node that must wait a WAKE CONDITION so it parks until the
-condition is met. There are exactly TWO kinds, and the distinction matters:
+condition is met. There are THREE kinds — the distinction matters:
 
 1. TIME — a specific clock time, OR a fixed delay ("next Monday 9am", "in 3 days", "24 hours later",
    "a week after"). Set `wake_kind="time"` and `wake_at` (absolute ISO datetime with offset). You are
@@ -23,22 +23,32 @@ condition is met. There are exactly TWO kinds, and the distinction matters:
    absolute datetime in `wake_at`. ELAPSED TIME IS ALWAYS A TIME WAIT — never model "N hours/days
    later" as an event.
 
-2. EXTERNAL EVENT — something OUTSIDE your control has to happen first: a reply, a delivery, an
-   approval, someone else acting. Set `wake_kind="user_reply"` (a reply) or `"event"`/`"signal"`, and
-   describe what you are waiting for in `wake_ref`.
+2. ASK THE OWNER — this node needs the OWNER (the person we serve) to give us information or make a
+   decision before it can proceed. Set `wake_kind="user_reply"` and put the QUESTION you want asked in
+   `wake_ref` — phrase it as a clear, friendly question addressed TO them, because it is shown to them
+   verbatim. The system notifies them and keeps re-asking until they answer; their reply is handed to
+   the worker. Use this ONLY for asking our own user — never a third party.
+
+3. EXTERNAL EVENT — something OUTSIDE our control must happen first: someone ELSE replies, a delivery
+   arrives, an approval lands. Set `wake_kind="event"` (or `"signal"`) and describe what you are waiting
+   for in `wake_ref`. The state_mover matches the real-world event to that description. A reply from a
+   THIRD PARTY (anyone who is not our owner) is an EXTERNAL EVENT — not "ask the owner".
 
 A node with no wake_kind runs as soon as its depends_on are complete. A node can have BOTH a depends_on
 AND a wake condition (it waits for the upstream node to finish AND the wake condition).
 
 ### Examples
-- "email my brother, and TEXT me when he replies" — the text waits on an EXTERNAL EVENT (his reply):
-  node_id="text_user", depends_on=["email_brother"], wake_kind="user_reply",
+- "email my brother, and TEXT me when HE replies" — his reply is an EXTERNAL EVENT (he is a third party):
+  node_id="text_user", depends_on=["email_brother"], wake_kind="event",
   wake_ref="a reply from the brother to the trip email"
+- "assess my recurring fatigue" — first ASK THE OWNER for the context only they can give:
+  node_id="gather_context", wake_kind="user_reply",
+  wake_ref="When does your fatigue tend to hit, and how have you been sleeping lately?"
 - "find a movie, then email me 24 HOURS LATER" — the email waits on a TIME delay, NOT an event:
   node_id="email_result", depends_on=["find_movie"], wake_kind="time",
   wake_at=<current time + 24h, as an absolute datetime>
 
-In both cases the node fires only when its depends_on are done AND its wake condition is met — never early.
+In each case the node fires only when its depends_on are done AND its wake condition is met — never early.
 
 ## Keep it lean
 - Don't over-decompose. 1-5 nodes for most goals; a simple goal is ONE node.

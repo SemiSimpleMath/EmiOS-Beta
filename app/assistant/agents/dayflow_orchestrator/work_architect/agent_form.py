@@ -27,17 +27,21 @@ class WorkNode(BaseModel):
         description="node_ids that must COMPLETE before this node can run (ordering / prerequisites).")
     wake_kind: Optional[str] = Field(
         default=None,
-        description="Leave null for a node that runs as soon as its depends_on are done. Set to "
-        "'time' | 'user_reply' | 'event' | 'signal' when this node must PARK and wait for an external "
-        "condition before it runs.")
+        description="Leave null for a node that runs as soon as its depends_on are done. Otherwise: "
+        "'time' (a clock time or fixed delay); 'user_reply' (this node needs the OWNER — the person we "
+        "serve — to answer a question or decide; the system notifies them and re-asks until they reply); "
+        "'event'/'signal' (an OUTSIDE party or system must act first — someone else's reply, a delivery, "
+        "an approval).")
     wake_at: Optional[str] = Field(
         default=None,
         description="ISO 8601 datetime with timezone offset; REQUIRED when wake_kind='time'.")
     wake_ref: Optional[str] = Field(
         default=None,
-        description="What is being waited on, in words (e.g. 'a reply from the brother to the trip "
-        "email'); REQUIRED when wake_kind is event/user_reply/signal. The state_mover matches the "
-        "real-world event to this description.")
+        description="REQUIRED when wake_kind is user_reply/event/signal. For 'user_reply', write the "
+        "clear, friendly QUESTION to ask the owner — it is shown to them verbatim (e.g. 'When does your "
+        "fatigue tend to hit, and how have you been sleeping lately?'). For 'event'/'signal', describe "
+        "the real-world event being awaited (e.g. 'a reply from the brother to the trip email') — the "
+        "state_mover matches it.")
     wait_reason: Optional[str] = Field(
         default=None, description="Human-readable reason this node waits.")
 

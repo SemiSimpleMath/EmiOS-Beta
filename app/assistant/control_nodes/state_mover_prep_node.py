@@ -139,7 +139,10 @@ class StateMoverPrepNode(ControlNode):
                 continue
             wo = store.load(s["id"])
             for n in wo.nodes.values():
-                if getattr(n, "wake_kind", None) in {"event", "user_reply", "signal"} and wo.is_ready(n, now):
+                # user_reply is owned by work_execution's notify-user path now (it surfaces a notification
+                # and re-asks until the owner replies). The state_mover only wakes passive EXTERNAL waits
+                # (event/signal) by matching incoming intake.
+                if getattr(n, "wake_kind", None) in {"event", "signal"} and wo.is_ready(n, now):
                     waiting.append({
                         "task_id": f"{s['id']}::{n.id}",
                         "waiting_for": getattr(n, "wake_ref", "") or "",
