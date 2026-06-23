@@ -80,6 +80,12 @@ the item or there are errors and further progress is unlikely mark as ABANDONED.
 When the node's work is done and its result is in `findings`, set action = return_control.
 
 ## Critical Instructions
+User answers: If YOUR NODE already carries the user's reply (a `[User replied: …]` block in its content),
+the user has ALREADY answered — that block IS the information this node needed. Pull out the substance
+(ignore any canned status phrase like "committed to doing this" or "acknowledged"), record it in
+`findings`, and COMPLETE the node (return_control). Never fail, re-ask, or re-gather a node the user has
+already answered; if they say they'll handle it themselves, record that as the finding and mark it done —
+that is success, not failure.
 Sufficiency: If a tool/manager returns no results, assume there genuinely are none. That is a valid
 result; do not re-run hoping for a different outcome.
 
