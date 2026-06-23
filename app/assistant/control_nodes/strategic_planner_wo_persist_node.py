@@ -1,13 +1,13 @@
-"""Post-LLM persist node for strategic_planner_wo (the work-object steward).
+"""Post-LLM persist node for strategic_planner_wo (the dayflow evaluator — formerly the steward).
 
-Applies the steward's output to the dayflow WorkObject store: mint new work objects from
+Applies the evaluator's output to the dayflow WorkObject store: mint new work objects from
 `new_or_changed`, close `complete_work_ids` / `abandon_work_ids` (via the set_work_status op).
-`advance_work_ids` is left on the blackboard for the execution phase (work_execution_node).
+`replan_work_ids` is left on the blackboard for the architect (work_architect_node) to re-plan.
 
 It also HANDS OFF consumed intake: for each work object CREATED this pass, the intake items the
-steward cited in its `based_on` are closed (state -> closed, reason "converted_to_work_object") so the
-direct path (state_mover -> action_selector) does NOT also act on them. One-shot intake the steward
-left alone stays open for the direct path. The work-object analogue of planner_persist_node.
+evaluator cited in its `based_on` are closed (state -> closed, reason "converted_to_work_object") so
+nothing else acts on them. Intake the evaluator did not convert stays open. The work-object analogue
+of planner_persist_node.
 
 Inert until the dayflow manager's state_map routes to it.
 """
@@ -43,9 +43,10 @@ class StrategicPlannerWoPersistNode(ControlNode):
             logger.error("[%s] consumed-item close failed: %s", self.name, e)
             logger.debug("[%s] consumed-item close exception", self.name, exc_info=True)
 
-        # advance_work_ids flows on to the execution phase (work_execution_node).
-        self.blackboard.update_state_value("advance_work_ids",
-                                           self.blackboard.get_state_value("advance_work_ids", []) or [])
+        # replan_work_ids flows on to the architect (re-plan an existing work object's graph).
+        # (advance is gone — work_execution runs every ready node; it never gated on it.)
+        self.blackboard.update_state_value("replan_work_ids",
+                                           self.blackboard.get_state_value("replan_work_ids", []) or [])
         self.blackboard.update_state_value("steward_persist_result", result)
         logger.info("[%s] persisted: created=%d completed=%d abandoned=%d",
                     self.name, len(result.get("created", [])), len(result.get("completed", [])),

@@ -50,6 +50,16 @@ AND a wake condition (it waits for the upstream node to finish AND the wake cond
 
 In each case the node fires only when its depends_on are done AND its wake condition is met — never early.
 
+## An ask is its own node
+If a node's job is to ask the owner a question (`wake_kind="user_reply"`), that is ALL it does — never
+bundle other work into it. The nodes that need the answer `depends_on` it and run once it is answered.
+
+## Passing findings between nodes
+A worker sees ONLY the node it runs — never another node's results. If a later node needs something an
+earlier node produced (a saved finding / pod id, a chosen option, a drafted text), say so in the later
+node's `detail` ("post the findings saved earlier", "use the option chosen upstream"). Reference it so
+the worker isn't blind; don't paste the whole result.
+
 ## Keep it lean
 - Don't over-decompose. 1-5 nodes for most goals; a simple goal is ONE node.
 - Never add nodes whose job is to verify, confirm, record, or clean up other nodes — outcomes are

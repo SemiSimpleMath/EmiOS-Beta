@@ -1,10 +1,15 @@
-"""Decompose freshly-created goals into their DAG (Part 2 of the split planner).
+"""Decompose freshly-created goals into their DAG, and re-plan flagged ones (Part 2 of the split planner).
 
-Runs right after strategic_planner_wo_persist_node. For each work object the steward CREATED this tick,
-invoke dayflow_orchestrator::work_architect on its objective and lay the resulting DAG (subtask nodes,
-depends_on edges, wait-gates) into the graph via apply_architect_dag. work_execution_node then runs the
-ready nodes. Changed/advanced goals are NOT re-decomposed here (that reconcile is #54). Never raises —
-a decompose failure leaves the goal as a bare goal node and the pipeline continues.
+Runs right after strategic_planner_wo_persist_node. Per tick, for ONE work object at a time:
+- CREATE: for each work object the evaluator created this tick, invoke dayflow_orchestrator::work_architect
+  on its objective and lay the resulting DAG (subtask nodes, depends_on edges, wait-gates) into the graph
+  via apply_architect_dag.
+- RE-PLAN: for each work object the evaluator put in `replan_work_ids` (its graph no longer fits), re-invoke
+  the architect with the goal + the existing graph and ADD the missing steps. This is extend-only — pruning
+  / superseding wrong nodes is the graph-reconcile refinement (#54).
+
+work_execution_node then runs the ready nodes. Never raises — a per-object failure leaves that object as-is
+and the pipeline continues.
 
 Inert until the dayflow manager's state_map routes to it.
 """
@@ -15,21 +20,42 @@ from app.assistant.utils.pydantic_classes import Message
 
 logger = get_logger(__name__)
 
+_MAX_REPLANS_PER_TICK = 3
+_TERMINAL_WO_STATES = {"done", "abandoned"}
+
+
+def _render_existing_graph(wo) -> str:
+    """Compact listing of a work object's current subtask nodes, for the re-plan prompt."""
+    lines = []
+    for n in wo.nodes.values():
+        if n.id == wo.goal_node_id:
+            continue
+        wake = f" wake={n.wake_kind}" if getattr(n, "wake_kind", None) else ""
+        lines.append(f"- {n.id} | {n.title} | status={n.status}{wake}")
+    return "\n".join(lines) or "(no subtask nodes yet)"
+
 
 class WorkArchitectNode(ControlNode):
     def action_handler(self, message):
         self.blackboard.update_state_value("next_agent", None)
         decomposed = []
+        replanned = []
         try:
             from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
             from app.assistant.dayflow_orchestrator.work_architect_apply import apply_architect_dag
             store = get_dayflow_work_store()
+
             persist = self.blackboard.get_state_value("steward_persist_result", {}) or {}
             created = [c for c in (persist.get("created") or [])
                        if isinstance(c, dict) and c.get("work_id") and c.get("objective")]
-            if created:
+            replan_ids = [str(w).strip() for w in (self.blackboard.get_state_value("replan_work_ids", []) or [])
+                          if str(w or "").strip()]
+
+            if created or replan_ids:
                 scope = self._scope(message)
                 agent = DI.agent_factory.create_agent("dayflow_orchestrator::work_architect")
+
+                # CREATE — decompose each freshly-minted goal.
                 for c in created:
                     work_id = c["work_id"]
                     try:
@@ -42,11 +68,41 @@ class WorkArchitectNode(ControlNode):
                     except Exception as e:
                         logger.error("[%s] decompose failed for %s: %s", self.name, work_id, e)
                         logger.debug("[%s] decompose exception", self.name, exc_info=True)
+
+                # RE-PLAN — extend the graph of each flagged work object (skip ones also created this tick).
+                created_ids = {c["work_id"] for c in created}
+                for work_id in [w for w in replan_ids if w not in created_ids][:_MAX_REPLANS_PER_TICK]:
+                    try:
+                        wo = store.load(work_id)
+                    except Exception as e:
+                        logger.warning("[%s] re-plan target %s not loadable: %s", self.name, work_id, e)
+                        continue
+                    if str(wo.status or "").lower() in _TERMINAL_WO_STATES:
+                        continue
+                    try:
+                        goal = wo.nodes.get(wo.goal_node_id)
+                        objective = (getattr(goal, "content", "") or getattr(goal, "title", "")) if goal else ""
+                        task = (
+                            f"{objective}\n\nThis goal ALREADY has a partial work graph (below) that no "
+                            f"longer fits — add the steps still missing to reach the goal. Output ONLY NEW "
+                            f"nodes to add; do NOT recreate existing ones (you may reference their node_ids "
+                            f"in depends_on). Existing nodes:\n{_render_existing_graph(wo)}"
+                        )
+                        result = agent.action_handler(Message(task=task, scope_context=scope))
+                        nodes = (getattr(result, "data", {}) or {}).get("nodes", []) or []
+                        res = apply_architect_dag(store, work_id, nodes)
+                        replanned.append({"work_id": work_id, "added": len(res.get("added", []))})
+                        logger.info("[%s] re-planned %s: +%d node(s)",
+                                    self.name, work_id, len(res.get("added", [])))
+                    except Exception as e:
+                        logger.error("[%s] re-plan failed for %s: %s", self.name, work_id, e)
+                        logger.debug("[%s] re-plan exception", self.name, exc_info=True)
         except Exception as e:
             logger.error("[%s] architect node failed: %s", self.name, e)
             logger.debug("[%s] architect node exception", self.name, exc_info=True)
 
         self.blackboard.update_state_value("work_decompose_result", decomposed)
+        self.blackboard.update_state_value("work_replan_result", replanned)
         self.blackboard.update_state_value("last_agent", self.name)
 
     def _scope(self, message):

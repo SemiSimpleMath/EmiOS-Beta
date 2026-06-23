@@ -44,6 +44,13 @@ STARTUP_TICK_DELAY_SECONDS = 45
 # scheduler just stops using it as wake-up bait.
 ANCIENT_ITEM_OVERDUE_SECONDS = 24 * 3600  # 24 hours
 
+# Work-object time-gated nodes get their OWN precise wake event (one APScheduler job per node, id
+# prefixed below), armed directly from the node's wake_at and firing the node via work_emi_team —
+# independent of the planning tick. Re-armed after every tick (idempotent via replace_existing), so
+# newly-planned nodes are picked up and a restart re-arms them from the durable store.
+_WORK_WAKE_JOB_PREFIX = "dayflow_work_wake::"
+_MAX_WORK_WAKES = 200
+
 
 class DayflowScheduler:
 
@@ -268,6 +275,7 @@ class DayflowScheduler:
             # — the "don't clobber a sooner run" guard keeps whichever is earlier, so
             # a due item still wins and the delta is absorbed by it.
             self._schedule_next_from_items()
+            self._arm_work_node_wakes()
             if pending:
                 logger.info(
                     "[DayflowScheduler] Delta queued during run; scheduling throttled poke: %s", pending,
@@ -374,6 +382,80 @@ class DayflowScheduler:
             logger.error("[DayflowScheduler] Failed scanning items for next wake: %s", e)
             logger.debug("[DayflowScheduler] item scan exception details", exc_info=True)
             raise
+
+    def _arm_work_node_wakes(self) -> None:
+        """Arm a precise one-shot per time-gated work-object node, keyed to its wake_at. When it fires,
+        _fire_work_node runs THAT node via work_emi_team — independent of the planning tick. Idempotent
+        (replace_existing) and re-run after every tick, so newly-planned nodes are picked up and a
+        restart re-arms from the durable store. Stale jobs self-no-op (is_ready gate at fire time)."""
+        try:
+            from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
+            store = get_dayflow_work_store()
+            now_utc = datetime.now(timezone.utc)
+            armed = 0
+            for summary in store.list_work_objects():
+                if str(summary.get("status") or "").lower() in ("done", "abandoned"):
+                    continue
+                try:
+                    wo = store.load(summary["id"])
+                except Exception:
+                    continue
+                for node in wo.nodes.values():
+                    if node.wake_kind != "time" or node.status not in ("proposed", "waiting"):
+                        continue
+                    if node.wake_at is None:
+                        continue
+                    if armed >= _MAX_WORK_WAKES:
+                        logger.warning(
+                            "[DayflowScheduler] work-wake cap %d hit — remaining time nodes will be "
+                            "armed on the next tick's scan instead.", _MAX_WORK_WAKES)
+                        return
+                    run_date = node.wake_at if node.wake_at > now_utc else now_utc + timedelta(seconds=2)
+                    job_id = f"{_WORK_WAKE_JOB_PREFIX}{wo.id}::{node.id}"
+                    try:
+                        self._scheduler.add_job(
+                            func=self._fire_work_node, trigger="date", run_date=run_date,
+                            args=[wo.id, node.id], id=job_id, replace_existing=True,
+                            misfire_grace_time=600,
+                        )
+                        armed += 1
+                    except Exception as e:
+                        logger.error("[DayflowScheduler] failed to arm work-wake %s: %s", job_id, e)
+            if armed:
+                logger.info("[DayflowScheduler] armed %d work-object time-wake(s).", armed)
+        except Exception as e:
+            logger.error("[DayflowScheduler] _arm_work_node_wakes failed: %s", e)
+            logger.debug("[DayflowScheduler] arm work-wake exception details", exc_info=True)
+
+    def _fire_work_node(self, work_id: str, node_id: str) -> None:
+        """A work node's time-wake fired: run THAT node via work_emi_team, directly — no planning tick.
+        Gated by is_ready (status proposed/waiting + wake_at reached + deps satisfied), so a re-planned,
+        already-running, completed, or dep-blocked node simply no-ops. Runs in the app context; never
+        propagates (this is a leaf APScheduler job — a raise would just be swallowed)."""
+        if not setup_complete():
+            return
+        try:
+            with self._app.app_context():
+                from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
+                from work_objects.model import utcnow
+                from work_objects.work_runtime import work_on
+                store = get_dayflow_work_store()
+                wo = store.load(work_id)
+                node = wo.nodes.get(node_id)
+                if node is None:
+                    return
+                if not wo.is_ready(node, utcnow()):
+                    logger.info(
+                        "[DayflowScheduler] work-wake %s::%s fired but node not ready (status=%s) — "
+                        "skipping.", work_id, node_id, node.status)
+                    return
+                logger.info("[DayflowScheduler] work-wake firing node %s::%s via work_emi_team.",
+                            work_id, node_id)
+                status = work_on(store, work_id, node_id=node_id)
+                logger.info("[DayflowScheduler] work-wake node %s::%s -> %s", work_id, node_id, status)
+        except Exception as e:
+            logger.error("[DayflowScheduler] _fire_work_node(%s::%s) failed: %s", work_id, node_id, e)
+            logger.debug("[DayflowScheduler] fire work-node exception details", exc_info=True)
 
     # Data types that justify waking the orchestrator.
     _ACTIONABLE_REPO_TYPES = {"email", "calendar", "todo_task", "scheduler_events"}
