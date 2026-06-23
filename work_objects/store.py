@@ -43,7 +43,7 @@ TRANSITIONS: dict[str, dict[str, set[str]]] = {
         "active": {"waiting", "done", "failed", "abandoned"},
         "waiting": {"active", "done", "failed", "abandoned"},
         "done": {"superseded"},
-        "failed": {"active", "abandoned"},
+        "failed": {"active", "proposed", "abandoned"},   # proposed = re-open: the work_repair adjudicator re-issues a failed node
         "abandoned": set(), "superseded": set(),
     },
     "knowledge": {
