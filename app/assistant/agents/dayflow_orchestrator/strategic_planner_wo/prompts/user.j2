@@ -107,6 +107,9 @@ Health: {{ health_status_summary }}
 (no active work objects)
 {% endif %}
 
+## ALREADY DONE — recently completed/handled (do NOT recreate; a recurring routine action that already ran for its occurrence is finished)
+{{ recent_completed_work }}
+
 {% if recent_dispatch_results %}
 ## RECENT OUTCOMES (workers' results since last cycle)
 {% for r in recent_dispatch_results %}

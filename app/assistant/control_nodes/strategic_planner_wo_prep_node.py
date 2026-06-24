@@ -21,21 +21,27 @@ class StrategicPlannerWoPrepNode(ControlNode):
     def action_handler(self, message):
         self.blackboard.update_state_value("next_agent", None)
 
-        # 1) The portfolio — the steward's primary input.
+        # 1) The portfolio (active work objects) + the DONE-LOG (recently completed/abandoned) — the
+        #    evaluator's primary inputs. The done-log is its memory so it does NOT recreate work it just
+        #    finished (especially recurring routine automations that re-appear in the routine each tick).
         portfolio = "(no active work objects)"
+        recent_completed = "(none)"
         n_active = 0
         try:
             from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
             from app.assistant.dayflow_orchestrator.work_portfolio import render_portfolio
             store = get_dayflow_work_store()
-            active = [store.load(s["id"]) for s in store.list_work_objects()
+            summaries = store.list_work_objects()   # newest-updated first
+            active = [store.load(s["id"]) for s in summaries
                       if str(s.get("status") or "").lower() not in _TERMINAL_WO_STATES]
             n_active = len(active)
             portfolio = render_portfolio(active)
+            recent_completed = self._render_recent_completed(summaries)
         except Exception as e:
             logger.error("[%s] portfolio build failed: %s", self.name, e)
             logger.debug("[%s] portfolio build exception", self.name, exc_info=True)
         self.blackboard.update_state_value("work_portfolio", portfolio)
+        self.blackboard.update_state_value("recent_completed_work", recent_completed)
 
         # 2) Situational context — reuse strategic_planner_prep_node's proven builders.
         try:
@@ -46,6 +52,31 @@ class StrategicPlannerWoPrepNode(ControlNode):
 
         logger.info("[%s] prepared: %d active work object(s)", self.name, n_active)
         self.blackboard.update_state_value("last_agent", self.name)
+
+    def _render_recent_completed(self, summaries, max_items=25, window_hours=48):
+        """A compact log of recently completed/abandoned work objects — the evaluator's 'already done'
+        memory, so it does NOT recreate work it just finished (especially recurring routine automations).
+        Mirrors the old strategic_planner's 'RECENTLY CLOSED — do not recreate'. The WO title IS the
+        objective (work_persist sets title=objective[:80]); summaries are newest-updated first."""
+        from datetime import datetime, timedelta, timezone
+
+        from app.assistant.utils.time_utils import parse_iso_utc
+
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=window_hours)
+        lines = []
+        for s in summaries:
+            upd = parse_iso_utc(str(s.get("updated_at") or ""))
+            if upd is not None and upd < cutoff:
+                break   # newest-first → everything after is older than the window
+            status = str(s.get("status") or "").lower()
+            if status not in ("done", "abandoned"):
+                continue
+            title = str(s.get("title") or "").strip()
+            if title:
+                lines.append(f"- [{status}] {title}")
+            if len(lines) >= max_items:
+                break
+        return "\n".join(lines) if lines else f"(nothing completed in the last {window_hours}h)"
 
     def _build_situational_context(self):
         from datetime import datetime, timedelta, timezone
