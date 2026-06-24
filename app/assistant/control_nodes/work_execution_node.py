@@ -26,8 +26,7 @@ _MAX_NODES_PER_TICK = 5
 _TERMINAL_WO_STATES = {"done", "abandoned"}
 _EVENT_WAKES = {"event", "user_reply", "signal"}   # PASS 2 skips all of these
 _NOTIFY_SUGGESTION_TYPE = "work_notify"
-_NOTIFY_VALID_HOURS = 1            # a notification lives this long; unanswered, it expires and PASS 1 re-asks
-_LIVE_TICKET_STATES = {"proposed", "pending"}
+_NOTIFY_VALID_HOURS = 1   # ask ticket lifetime AND the in-flight re-ask interval (node wake_at = now + this)
 
 
 class WorkExecutionNode(ControlNode):
@@ -88,10 +87,14 @@ class WorkExecutionNode(ControlNode):
     # ----------------------------------------------------------------- notify-user path
 
     def _notify_user_pass(self, store, active_ids, now):
-        """Run the notify-user path for every active work object's READY user_reply node. Per-node
-        failures are logged and never abort the tick. Quiet hours are resolved once per tick (lazily —
-        only if there is an ask to make) and passed down to gate NEW notifications."""
-        quiet = None   # resolved on the first user_reply node, then reused for the rest of this tick
+        """Surface the user-reply asks — IN-FLIGHT is tracked entirely on the graph, no ticket-store dedup.
+        An ask node's `wake_at` is its in-flight flag: surfacing sets wake_at = now + the re-ask interval,
+        so is_ready() drops the node from ready_nodes (the orchestrator won't re-ask it); it re-appears when
+        the interval lapses (re-ask), and a reply clears it. At most ONE outstanding ask per work object —
+        if any of its asks is in-flight (future wake_at) we don't surface another; it waits its turn. The
+        ticket is only the user-facing surface + the reply carrier, matched back by the EXACT node id.
+        Replies are always recorded; per-node failures are logged and never abort the tick."""
+        quiet = None   # resolved lazily, only when there is actually an ask to surface
         for work_id in active_ids:
             try:
                 wo = store.load(work_id)
@@ -100,33 +103,65 @@ class WorkExecutionNode(ControlNode):
             if str(wo.status or "").lower() in _TERMINAL_WO_STATES:
                 continue
             goal_id = wo.goal_node_id
-            for n in wo.ready_nodes(now):
-                if n.id == goal_id or getattr(n, "wake_kind", None) != "user_reply":
-                    continue
-                if quiet is None:
-                    quiet = self._in_quiet_hours()
-                try:
-                    self._notify_user_for_node(store, work_id, n, now, quiet)
-                except Exception as e:
-                    logger.error("[%s] notify-user failed for %s/%s: %s", self.name, work_id, n.id, e)
-                    logger.debug("[%s] notify-user exception", self.name, exc_info=True)
+            asks = [n for n in wo.nodes.values()
+                    if n.id != goal_id and getattr(n, "wake_kind", None) == "user_reply"
+                    and n.status in ("proposed", "waiting")]
+            if not asks:
+                continue
 
-    def _notify_user_for_node(self, store, work_id, node, now, quiet=False):
-        """THE NOTIFY-USER PATH for one node. (1) If the user has replied to a notification for this node,
-        record the reply on the node and clear the wait — PASS 2 / the next tick runs it with the answer.
-        (2) Else if a notification is still live (unexpired), wait. (3) Else surface a new one — unless
-        `quiet` (the user's quiet hours), in which case leave it parked and re-ask once quiet lifts. The
-        node is never cleared until answered; an unanswered notification expires and gets re-asked."""
+            # (1) Record any replies (matched by the EXACT node id) — clears the in-flight wake so the
+            #     node becomes runnable and the worker picks it up next.
+            replied = False
+            for n in asks:
+                try:
+                    if self._record_reply(store, work_id, n, now):
+                        replied = True
+                except Exception as e:
+                    logger.error("[%s] reply-record failed for %s::%s: %s", self.name, work_id, n.id, e)
+                    logger.debug("[%s] reply-record exception", self.name, exc_info=True)
+            if replied:
+                wo = store.load(work_id)
+                asks = [n for n in wo.nodes.values()
+                        if n.id != goal_id and getattr(n, "wake_kind", None) == "user_reply"
+                        and n.status in ("proposed", "waiting")]
+
+            # (2) One outstanding ask per work object: if any ask is in-flight (future wake_at), wait.
+            if any(n.wake_at is not None and n.wake_at > now for n in asks):
+                continue
+
+            # (3) Surface the first DUE ask (deps met, not in-flight) — unless quiet hours — and flag it
+            #     in-flight by setting wake_at to the re-ask time. wake_ref (the question) is preserved.
+            due = [n for n in asks if wo.is_ready(n, now)]
+            if not due:
+                continue
+            if quiet is None:
+                quiet = self._in_quiet_hours()
+            if quiet:
+                continue
+            node = due[0]
+            try:
+                self._surface_notification(node, f"{work_id}::{node.id}")
+                store.apply("defer_node", {"work_id": work_id, "node_id": node.id, "wake_kind": "user_reply",
+                                           "wake_at": now + timedelta(hours=_NOTIFY_VALID_HOURS),
+                                           "wake_ref": node.wake_ref}, actor="notify_user")
+                logger.info("[%s] asked user for %s::%s (in-flight until re-ask)", self.name, work_id, node.id)
+            except Exception as e:
+                logger.error("[%s] notify-user failed for %s::%s: %s", self.name, work_id, node.id, e)
+                logger.debug("[%s] notify-user exception", self.name, exc_info=True)
+
+    def _record_reply(self, store, work_id, node, now) -> bool:
+        """If the user has replied to this node's ask — matched by the EXACT id (work_id::node_id) carried
+        on the ticket's trigger_context — record the answer on the node and CLEAR its wake (in-flight flag
+        + question) so the worker runs it next. Returns True if a reply was recorded. The ticket store is
+        read ONLY to fetch the reply text by id; it never decides whether the node is in-flight — that is
+        the node's wake_at."""
         from app.assistant.ticket_manager import get_ticket_manager
         tag = f"{work_id}::{node.id}"
         tm = get_ticket_manager()
-        mine = [t for t in tm.get_tickets(ticket_type="dayflow_orchestrator",
-                                          suggestion_type=_NOTIFY_SUGGESTION_TYPE,
-                                          since_utc=now - timedelta(hours=48), limit=80)
-                if (getattr(t, "trigger_context", {}) or {}).get("work_node") == tag]
-
-        # (1) Replied? Record the answer on the node and clear the wait.
-        for t in mine:
+        for t in tm.get_tickets(ticket_type="dayflow_orchestrator", suggestion_type=_NOTIFY_SUGGESTION_TYPE,
+                                since_utc=now - timedelta(hours=48), limit=80):
+            if (getattr(t, "trigger_context", {}) or {}).get("work_node") != tag:
+                continue
             reply = (getattr(t, "user_text", "") or "").strip()
             if reply:
                 content = (node.content or "").rstrip()
@@ -135,26 +170,9 @@ class WorkExecutionNode(ControlNode):
                             actor="notify_user")
                 store.apply("defer_node", {"work_id": work_id, "node_id": node.id, "wake_kind": None},
                             actor="notify_user")
-                logger.info("[%s] user replied to %s — cleared the wait", self.name, tag)
-                return
-
-        # (2) A notification still live (proposed/pending and unexpired)? Wait — don't re-ask yet.
-        for t in mine:
-            state = str(getattr(t, "state", "") or "").lower()
-            valid_until = getattr(t, "valid_until", None)
-            if state in _LIVE_TICKET_STATES and (valid_until is None or valid_until > now):
-                return
-
-        # (3) Nothing live — surface a notification, unless the user is in quiet hours (then leave the node
-        # parked and re-ask once quiet lifts; replies are still processed above, even while quiet).
-        if quiet:
-            return
-        self._surface_notification(node, tag)
-        content = (node.content or "").rstrip()
-        store.apply("set_status", {"work_id": work_id, "node_id": node.id, "status": node.status,
-                                   "content": f"{content}\n\n[Notified user; awaiting reply, will re-ask if unanswered.]"},
-                    actor="notify_user")
-        logger.info("[%s] notified user for %s", self.name, tag)
+                logger.info("[%s] user replied to %s — cleared the in-flight ask", self.name, tag)
+                return True
+        return False
 
     @staticmethod
     def _surface_notification(node, tag):
