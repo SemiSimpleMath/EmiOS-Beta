@@ -26,7 +26,6 @@ _MAX_NODES_PER_TICK = 5
 _TERMINAL_WO_STATES = {"done", "abandoned"}
 _EVENT_WAKES = {"event", "user_reply", "signal"}   # PASS 2 skips all of these
 _NOTIFY_SUGGESTION_TYPE = "work_notify"
-_ONEWAY_SUGGESTION_TYPE = "work_oneway_notify"   # PASS 1.5 one-way owner notification (no reply expected)
 _NOTIFY_VALID_HOURS = 1   # ask ticket lifetime AND the in-flight re-ask interval (node wake_at = now + this)
 
 
@@ -210,6 +209,9 @@ class WorkExecutionNode(ControlNode):
         """One-way owner notifications: a READY type='notify' node delivers its message as a UI
         notification (no reply expected) and completes immediately — never handed to a worker. Quiet
         hours defer it to a later tick. Per-node failures are logged and never abort the tick."""
+        from app.assistant.lib.tools.create_work_notification.create_work_notification import (
+            CreateWorkNotificationTool,
+        )
         quiet = None
         for work_id in active_ids:
             try:
@@ -230,36 +232,16 @@ class WorkExecutionNode(ControlNode):
                 continue
             for n in notifies:
                 try:
-                    self._surface_owner_notification(n)
+                    if CreateWorkNotificationTool._create(work_id, n.id) is None:
+                        logger.warning("[%s] owner-notify produced no ticket for %s::%s; retry next tick",
+                                       self.name, work_id, n.id)
+                        continue
                     store.apply("set_status", {"work_id": work_id, "node_id": n.id, "status": "done",
                                                "content": (n.content or "")}, actor="notify_owner")
                     logger.info("[%s] notified owner (one-way) for %s::%s", self.name, work_id, n.id)
                 except Exception as e:
                     logger.error("[%s] owner-notify failed for %s::%s: %s", self.name, work_id, n.id, e)
                     logger.debug("[%s] owner-notify exception", self.name, exc_info=True)
-
-    @staticmethod
-    def _surface_owner_notification(node):
-        """Phrase the node's message into a warm one-way heads-up via the ticket_builder agent (the same
-        phrasing LLM create_dayflow_ticket uses), then create + surface a NOTIFY ticket — no reply expected."""
-        from app.assistant.ServiceLocator.service_locator import DI
-        from app.assistant.lib.tools.create_dayflow_ticket.create_dayflow_ticket import CreateDayflowTicketTool
-        from app.assistant.ticket_manager import get_ticket_manager
-        from app.assistant.utils.pydantic_classes import Message
-        msg = str(node.content or node.title or "").strip()
-        brief = (f"Tell the user something — a one-way heads-up, NOT a question. What to convey: {msg}. "
-                 f"Phrase it as a warm, direct notification addressed to them.")
-        formatted = CreateDayflowTicketTool._format_brief(brief)   # ticket_builder agent (the phrasing LLM)
-        title = (str(formatted.get("title") or node.title or "Heads up").strip())[:80]
-        message = str(formatted.get("message") or msg or title).strip()
-        tm = get_ticket_manager()
-        ticket = tm.create_ticket(ticket_type="dayflow_orchestrator", suggestion_type=_ONEWAY_SUGGESTION_TYPE,
-                                  title=title, message=message, valid_hours=_NOTIFY_VALID_HOURS)
-        if not ticket or not tm.mark_proposed(ticket.ticket_id):
-            return
-        payload = ticket.to_dict()
-        payload["button_layout"] = "notify"     # one-way; no reply (create_dayflow_ticket's notify kind)
-        DI.event_hub.publish(Message(event_topic="proactive_suggestion", data=payload))
 
     @staticmethod
     def _in_quiet_hours():

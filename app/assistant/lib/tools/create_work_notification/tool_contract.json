@@ -1,0 +1,47 @@
+{
+  "name": "create_work_notification",
+  "description": "Notify the OWNER one-way about a work-object node (a UI notification, NO reply, never blocks). Given a work_id + node_id, it pulls the node's intent plus its upstream results off the graph and phrases a warm heads-up. This is how a work object's `notify` node reaches the owner — use it instead of send_email for the owner.",
+  "inputs": [
+    {
+      "name": "work_id",
+      "type": "string",
+      "required": true,
+      "description": "The work object id."
+    },
+    {
+      "name": "node_id",
+      "type": "string",
+      "required": true,
+      "description": "The notify node id within that work object (its content is the message intent; its upstream nodes' results are folded in)."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "Human-readable result of the notification."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "Created ticket payload (ticket_id)."
+    }
+  ],
+  "arguments_prompt": "{\n  \"work_id\": \"work_abc123\",\n  \"node_id\": \"notify_result\"\n}",
+  "metadata": {
+    "min_authority": 90,
+    "approval_min_authority": 90,
+    "domain": "workflow",
+    "actions": ["create", "notify"],
+    "selectors": ["notification", "user"],
+    "risk_level": "low",
+    "side_effects": "external_action",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": true,
+    "room_visibility_default": "show",
+    "approval_required": false
+  }
+}
