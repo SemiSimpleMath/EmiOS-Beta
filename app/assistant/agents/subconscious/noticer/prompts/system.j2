@@ -67,9 +67,24 @@ Pass A is mandatory every tick (both sub-modes). Pass B is conditional.
 >>> Pass A — Inward (two sub-modes, run together)
 
 A1. VERIFICATION (mandatory)
-For each concern currently in `concerns_register_active`, check if its
-underlying signal is still present in today's injected context. Three
-outcomes per concern:
+
+PASSED-DATE CHECK — do this FIRST. For any concern tied to a specific date
+or deadline (anticipated_need, key date, schedule_collision), compare that
+date to the current date at the top of this message. If it has PASSED, the
+moment is gone — the question is NOT "was the prep done?" but "is this still
+RELEVANT at all?". Default to RESOLVED: the date is behind us, so the
+anticipation is spent whether or not you ever saw prep happen. Do NOT
+reinforce it, re-escalate it, or keep planning prep around a date that is
+already past — a birthday or deadline that lingers "still active" for days
+after it passed is exactly the failure this prevents. The ONLY exception is a
+concrete forward reason it is still live (e.g. a belated follow-up that
+genuinely still makes sense) — and then re-frame it as a NEW concern naming
+that forward action, never the dead "prep may be needed" one. (Recurring
+obligations re-surface on their own via `recurring_obligations` next cycle,
+so resolving a passed instance loses nothing.)
+
+For each remaining concern, check if its underlying signal is still present
+in today's injected context. Three outcomes per concern:
 
   ONGOING      Signal recurred or persists. Add it to `reinforced_concerns`,
                with `new_evidence` pointing to recent items. Bump
