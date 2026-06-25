@@ -25,6 +25,13 @@ launch_options:
       - npx
       - -y
       - "@playwright/mcp@latest"
+      # Use the real installed Google Chrome (stable channel) instead of
+      # Playwright's bundled Chromium. Real Chrome = genuine fingerprint
+      # (brand strings, proprietary codecs) rather than a Chromium tell.
+      # It shares the persistent --user-data-dir below, so the assistant's
+      # logged-in sessions (e.g. her reddit) are HER own accounts, fully
+      # isolated from your daily Chrome profile (a separate user-data-dir).
+      - --browser=chrome
       # Enable coordinate-based "vision" capabilities (mouse x/y tools).
       - --caps=vision
       # Persist browser profile (cookies, localStorage, site prefs) across sessions.
@@ -33,6 +40,11 @@ launch_options:
       # in the MCP server's working dir, which is transient and gets recorded as
       # a broken link in daily summaries. Force a project-relative persistent dir.
       - --output-dir=${REPO_ROOT}/data/playwright_screenshots
+      # Position + maximize the agent's browser and drop the automation infobar.
+      # This config is GENERATED per-machine from live monitor detection (everyone's
+      # layout differs) into data/ (gitignored) — never committed. Written before
+      # launch by app/assistant/lib/mcp/playwright_window.py (app bootstrap).
+      - --config=${REPO_ROOT}/data/playwright_window_config.json
 
 policy:
   # IMPORTANT: This server can perform real browser interactions.

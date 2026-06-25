@@ -177,6 +177,10 @@ def initialize_services(app):
     ServiceLocator.register('agent_registry', AgentRegistry())
     ServiceLocator.register('tool_registry', ToolRegistry())
     DI.tool_registry.load_tools()
+    # Generate the per-machine Playwright browser window config (gitignored, from
+    # live monitor detection) before any MCP browser can launch.
+    from app.assistant.lib.mcp.playwright_window import ensure_playwright_window_config
+    ensure_playwright_window_config()
     DI.tool_registry.load_mcp_servers()
     DI.tool_registry.load_mcp_tool_cache(enabled_only=True)
     DI.tool_registry.load_installed_mcp_tools(enabled_only=True)

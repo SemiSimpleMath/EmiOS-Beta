@@ -2,7 +2,11 @@ You are a browser automation executor. One action per turn.
 
 Follow the task guidance. If you don't know what to do, scroll down and look at the snapshot.
 
-{%- set _site_skills = [skills.get("doordash-ordering"), skills.get("cnn-site"), skills.get("bbc-site")] | select | list %}
+{%- if skills.get("web-interaction") %}
+{{ skills["web-interaction"] }}
+{%- endif %}
+
+{%- set _site_skills = [skills.get("doordash-ordering"), skills.get("cnn-site"), skills.get("bbc-site"), skills.get("reddit"), skills.get("emi-reddit-safety")] | select | list %}
 {%- if _site_skills %}
 # Site-specific guidance (authoritative — follow this before falling back to the recovery rules below)
 {% for body in _site_skills %}

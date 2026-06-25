@@ -204,6 +204,22 @@ def main(argv: Optional[list[str]] = None) -> int:
     if not isinstance(command, str) or not isinstance(cmd_args, list):
         raise ValueError("launch option must include command (str) and args (list[str]) for stdio")
 
+    # Resolve ${REPO_ROOT} placeholders in args exactly like the live launcher
+    # (app/assistant/lib/mcp/tool_runner.py:84) does — otherwise path args such as
+    # --user-data-dir / --config reach the server literally and it fails to start.
+    cmd_args = [str(a).replace("${REPO_ROOT}", str(REPO_ROOT)) for a in cmd_args]
+
+    # Drop a --config=<path> whose file doesn't exist: it's runtime browser config
+    # (generated, gitignored window geometry) and is irrelevant to listing tools.
+    # Keeps cache refresh working before that config has been generated.
+    _kept = []
+    for a in cmd_args:
+        if a.startswith("--config=") and not Path(a.split("=", 1)[1]).exists():
+            print(f"(note) tool-cache refresh: skipping missing --config {a}")
+            continue
+        _kept.append(a)
+    cmd_args = _kept
+
     # Resolve command for better cross-env behavior (PowerShell vs IDE).
     # - Prefer the current interpreter for python-based launch options.
     # - For other commands, require they exist on PATH (or be a path).
