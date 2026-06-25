@@ -367,5 +367,18 @@ class ViewMaterializerNode(ControlNode):
                 self.name,
             )
             self.blackboard.update_state_value("next_agent", "post_room_finalize_node")
+        else:
+            # LEGACY ITEM LANE (being retired — dayflow unification step C). Once the evaluator converts
+            # every actionable artifact into a work object, nothing should reach action_selector; anything
+            # that does is intake the evaluator FAILED to convert. Surface it loudly so we can confirm this
+            # lane is dormant before deleting it — and see exactly what slipped through.
+            preview = "; ".join(
+                str(x.get("summary") or x.get("item_id") or "?")[:80] for x in actionable_items[:5]
+            )
+            logger.warning(
+                "[%s] LEGACY ITEM LANE fired: %d actionable item(s) reached action_selector "
+                "(evaluator did not convert): %s",
+                self.name, len(actionable_items), preview,
+            )
 
         self.blackboard.update_state_value("last_agent", self.name)
