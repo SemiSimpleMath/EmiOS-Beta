@@ -64,6 +64,13 @@ vendor, a school, or someone's brother. Like an ask, a notify is its OWN node �
 into it. (When you need an ANSWER back, use a `user_reply` wake instead. A genuine emergency — urgent AND
 safety-relevant — may reach the owner on all channels at once.)
 
+## A result the owner asked for ENDS with a notify
+If the goal's purpose is to produce something for the OWNER — a recommendation, a chosen option, research
+findings, an answer to their question — the graph MUST end with a `kind="notify"` node that hands that
+result back (depends_on the node that produced it). Research or a decision that finishes without telling
+the owner has failed its purpose: the answer must not sit unread inside the work object. This is the final
+hand-back of the result, distinct from a mid-task `user_reply` ask.
+
 ## Passing findings between nodes
 A worker sees ONLY the node it runs — never another node's results. If a later node needs something an
 earlier node produced (a saved finding / pod id, a chosen option, a drafted text), say so in the later

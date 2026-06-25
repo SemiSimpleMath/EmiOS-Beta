@@ -6,6 +6,7 @@ hits an isolated SQLite file that is wiped between tests.
 from __future__ import annotations
 
 import os
+import tempfile
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -13,6 +14,9 @@ from typing import Any, Dict, List, Optional
 # ── Force test DB before any project import ──────────────────────
 os.environ["USE_TEST_DB"] = "true"
 os.environ["TEST_DB_NAME"] = "test_dayflow_pipeline"
+# The dayflow WorkObject store honors DAYFLOW_WORK_DB but NOT USE_TEST_DB — without this, tests that
+# create work objects write to the REAL emi.db work store. Sandbox it to a temp DB like the items DB.
+os.environ["DAYFLOW_WORK_DB"] = os.path.join(tempfile.gettempdir(), "emi_test_dayflow_work.db")
 
 # Prevent force_test_db from overriding our DB name to 'test_emidb'.
 # We call get_session() without force_test_db — the env vars above are enough.
@@ -29,6 +33,21 @@ from app.models.base import get_session
 
 
 # ── Fixtures ─────────────────────────────────────────────────────
+
+def _wipe_work_store():
+    """Empty the isolated dayflow work store so each test starts clean (it lives in its own temp DB,
+    routed via DAYFLOW_WORK_DB above — never the real emi.db)."""
+    try:
+        from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
+        store = get_dayflow_work_store()
+        conn = getattr(store, "_conn", None) or getattr(store, "conn", None)
+        if conn is not None:
+            for t in ("events", "edges", "nodes", "work_objects"):
+                conn.execute(f"DELETE FROM {t}")
+            conn.commit()
+    except Exception:
+        pass
+
 
 @pytest.fixture(autouse=True)
 def clean_db():
@@ -47,6 +66,7 @@ def clean_db():
         session.commit()
     finally:
         session.close()
+    _wipe_work_store()
     yield
     session = get_session()
     try:
@@ -54,6 +74,7 @@ def clean_db():
         session.commit()
     finally:
         session.close()
+    _wipe_work_store()
 
 
 class FakeBlackboard:
