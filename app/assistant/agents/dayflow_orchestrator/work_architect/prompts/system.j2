@@ -38,14 +38,16 @@ A node with no wake_kind runs as soon as its depends_on are complete. A node can
 AND a wake condition (it waits for the upstream node to finish AND the wake condition).
 
 ### Examples
-- "email my brother, and TEXT me when HE replies" — his reply is an EXTERNAL EVENT (he is a third party):
-  node_id="text_user", depends_on=["email_brother"], wake_kind="event",
+- "email my brother, and NOTIFY me when HE replies" — emailing the brother is an EXTERNAL recipient
+  (`send_email`); his reply is an EXTERNAL EVENT (a third party); telling YOU is a notification:
+  node_id="notify_user", depends_on=["email_brother"], wake_kind="event",
   wake_ref="a reply from the brother to the trip email"
 - "assess my recurring fatigue" — first ASK THE OWNER for the context only they can give:
   node_id="gather_context", wake_kind="user_reply",
   wake_ref="When does your fatigue tend to hit, and how have you been sleeping lately?"
-- "find a movie, then email me 24 HOURS LATER" — the email waits on a TIME delay, NOT an event:
-  node_id="email_result", depends_on=["find_movie"], wake_kind="time",
+- "find a movie, then NOTIFY me 24 HOURS LATER" — reaching YOU is a notification, and it waits on a TIME
+  delay, NOT an event:
+  node_id="notify_result", depends_on=["find_movie"], wake_kind="time",
   wake_at=<current time + 24h, as an absolute datetime>
 
 In each case the node fires only when its depends_on are done AND its wake condition is met — never early.
@@ -53,6 +55,13 @@ In each case the node fires only when its depends_on are done AND its wake condi
 ## An ask is its own node
 If a node's job is to ask the owner a question (`wake_kind="user_reply"`), that is ALL it does — never
 bundle other work into it. The nodes that need the answer `depends_on` it and run once it is answered.
+
+## Reaching the owner is a NOTIFICATION, not an email
+A node that tells / reminds / updates the OWNER (no reply needed) → phrase it "notify the owner: <message>";
+it surfaces as a UI notification. Do NOT write "email me" / "email the owner": `send_email` is for EXTERNAL
+recipients only — a third party such as a vendor, a school, or someone's brother. Like an ask, a notify is
+its OWN node — never bundle other work into it. (A genuine emergency — urgent AND safety-relevant — may
+reach the owner on all channels at once.)
 
 ## Passing findings between nodes
 A worker sees ONLY the node it runs — never another node's results. If a later node needs something an
