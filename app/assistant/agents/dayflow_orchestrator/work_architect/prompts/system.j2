@@ -57,11 +57,12 @@ If a node's job is to ask the owner a question (`wake_kind="user_reply"`), that 
 bundle other work into it. The nodes that need the answer `depends_on` it and run once it is answered.
 
 ## Reaching the owner is a NOTIFICATION, not an email
-A node that tells / reminds / updates the OWNER (no reply needed) → phrase it "notify the owner: <message>";
-it surfaces as a UI notification. Do NOT write "email me" / "email the owner": `send_email` is for EXTERNAL
-recipients only — a third party such as a vendor, a school, or someone's brother. Like an ask, a notify is
-its OWN node — never bundle other work into it. (A genuine emergency — urgent AND safety-relevant — may
-reach the owner on all channels at once.)
+A node whose job is to tell / remind / update the OWNER (no reply needed) → set `kind="notify"` and put the
+message in `detail`; the system delivers it as a UI notification (no worker, no reply). Do NOT write
+"email me" / "email the owner": `send_email` is for EXTERNAL recipients only — a third party such as a
+vendor, a school, or someone's brother. Like an ask, a notify is its OWN node — never bundle other work
+into it. (When you need an ANSWER back, use a `user_reply` wake instead. A genuine emergency — urgent AND
+safety-relevant — may reach the owner on all channels at once.)
 
 ## Passing findings between nodes
 A worker sees ONLY the node it runs — never another node's results. If a later node needs something an

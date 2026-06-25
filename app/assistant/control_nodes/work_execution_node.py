@@ -26,6 +26,7 @@ _MAX_NODES_PER_TICK = 5
 _TERMINAL_WO_STATES = {"done", "abandoned"}
 _EVENT_WAKES = {"event", "user_reply", "signal"}   # PASS 2 skips all of these
 _NOTIFY_SUGGESTION_TYPE = "work_notify"
+_ONEWAY_SUGGESTION_TYPE = "work_oneway_notify"   # PASS 1.5 one-way owner notification (no reply expected)
 _NOTIFY_VALID_HOURS = 1   # ask ticket lifetime AND the in-flight re-ask interval (node wake_at = now + this)
 
 
@@ -42,8 +43,11 @@ class WorkExecutionNode(ControlNode):
             active_ids = [s["id"] for s in store.list_work_objects()
                           if str(s.get("status") or "").lower() not in _TERMINAL_WO_STATES]
 
-            # PASS 1 — notify-user path (cheap, idempotent, unbounded).
+            # PASS 1 — ask-the-user path (cheap, idempotent, unbounded).
             self._notify_user_pass(store, active_ids, now)
+
+            # PASS 1.5 — one-way owner notifications (type='notify' nodes: fire-and-complete, no worker).
+            self._notify_owner_pass(store, active_ids, now)
 
             # PASS 2 — run ready work nodes (bounded).
             done = set()   # (work_id, node_id) already run THIS tick — never re-run within a tick
@@ -200,6 +204,63 @@ class WorkExecutionNode(ControlNode):
         payload["plan_mode_available"] = True
         DI.event_hub.publish(Message(event_topic="proactive_suggestion", data=payload))
 
+    # ----------------------------------------------------------------- notify-owner path (one-way)
+
+    def _notify_owner_pass(self, store, active_ids, now):
+        """One-way owner notifications: a READY type='notify' node delivers its message as a UI
+        notification (no reply expected) and completes immediately — never handed to a worker. Quiet
+        hours defer it to a later tick. Per-node failures are logged and never abort the tick."""
+        quiet = None
+        for work_id in active_ids:
+            try:
+                wo = store.load(work_id)
+            except Exception:
+                continue
+            if str(wo.status or "").lower() in _TERMINAL_WO_STATES:
+                continue
+            goal_id = wo.goal_node_id
+            notifies = [n for n in wo.nodes.values()
+                        if n.id != goal_id and getattr(n, "type", None) == "notify"
+                        and n.status in ("proposed", "waiting") and wo.is_ready(n, now)]
+            if not notifies:
+                continue
+            if quiet is None:
+                quiet = self._in_quiet_hours()
+            if quiet:
+                continue
+            for n in notifies:
+                try:
+                    self._surface_owner_notification(n)
+                    store.apply("set_status", {"work_id": work_id, "node_id": n.id, "status": "done",
+                                               "content": (n.content or "")}, actor="notify_owner")
+                    logger.info("[%s] notified owner (one-way) for %s::%s", self.name, work_id, n.id)
+                except Exception as e:
+                    logger.error("[%s] owner-notify failed for %s::%s: %s", self.name, work_id, n.id, e)
+                    logger.debug("[%s] owner-notify exception", self.name, exc_info=True)
+
+    @staticmethod
+    def _surface_owner_notification(node):
+        """Phrase the node's message into a warm one-way heads-up via the ticket_builder agent (the same
+        phrasing LLM create_dayflow_ticket uses), then create + surface a NOTIFY ticket — no reply expected."""
+        from app.assistant.ServiceLocator.service_locator import DI
+        from app.assistant.lib.tools.create_dayflow_ticket.create_dayflow_ticket import CreateDayflowTicketTool
+        from app.assistant.ticket_manager import get_ticket_manager
+        from app.assistant.utils.pydantic_classes import Message
+        msg = str(node.content or node.title or "").strip()
+        brief = (f"Tell the user something — a one-way heads-up, NOT a question. What to convey: {msg}. "
+                 f"Phrase it as a warm, direct notification addressed to them.")
+        formatted = CreateDayflowTicketTool._format_brief(brief)   # ticket_builder agent (the phrasing LLM)
+        title = (str(formatted.get("title") or node.title or "Heads up").strip())[:80]
+        message = str(formatted.get("message") or msg or title).strip()
+        tm = get_ticket_manager()
+        ticket = tm.create_ticket(ticket_type="dayflow_orchestrator", suggestion_type=_ONEWAY_SUGGESTION_TYPE,
+                                  title=title, message=message, valid_hours=_NOTIFY_VALID_HOURS)
+        if not ticket or not tm.mark_proposed(ticket.ticket_id):
+            return
+        payload = ticket.to_dict()
+        payload["button_layout"] = "notify"     # one-way; no reply (create_dayflow_ticket's notify kind)
+        DI.event_hub.publish(Message(event_topic="proactive_suggestion", data=payload))
+
     @staticmethod
     def _in_quiet_hours():
         """True if the user's quiet mode is on and now falls inside its window — reuses the same setting
@@ -222,6 +283,8 @@ class WorkExecutionNode(ControlNode):
                 continue
             if (work_id, n.id) in done:
                 continue
+            if getattr(n, "type", None) == "notify":
+                continue   # PASS 1.5 fires these; a notify is never handed to work_emi
             if getattr(n, "wake_kind", None) in _EVENT_WAKES:
                 continue
             return n

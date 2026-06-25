@@ -49,8 +49,9 @@ def apply_architect_dag(store, work_id: str, nodes: List[Dict[str, Any]]) -> Dic
         detail = str(spec.get("detail") or "").strip()
         if not nid or nid in existing or not (title or detail):
             continue
+        node_type = "notify" if str(spec.get("kind") or "").strip().lower() == "notify" else "subtask"
         store.apply("add_node", {
-            "work_id": work_id, "id": nid, "type": "subtask", "parent_id": goal_id,
+            "work_id": work_id, "id": nid, "type": node_type, "parent_id": goal_id,
             "title": title or detail[:60], "content": detail,
         }, actor="architect")
         existing.add(nid)

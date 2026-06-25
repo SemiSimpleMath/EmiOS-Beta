@@ -22,6 +22,12 @@ class WorkNode(BaseModel):
     detail: str = Field(
         description="What this node must accomplish — the objective. The worker decides HOW and which "
         "tools/managers to use; do NOT write step-by-step instructions here.")
+    kind: Optional[str] = Field(
+        default="work",
+        description="What this node IS / who runs it: 'work' (default — a worker carries it out) or "
+        "'notify' (its ONLY job is to tell the OWNER something one-way; put the message in `detail`; the "
+        "system delivers it as a UI notification — no worker, no reply). Use 'notify' for any "
+        "'tell/remind/update me' step; use a `user_reply` wake instead when you need an ANSWER back.")
     depends_on: List[str] = Field(
         default_factory=list,
         description="node_ids that must COMPLETE before this node can run (ordering / prerequisites).")
@@ -47,6 +53,8 @@ class WorkNode(BaseModel):
 
     @model_validator(mode="after")
     def _validate_wake(self):
+        if self.kind is not None and self.kind not in {"work", "notify"}:
+            raise ValueError("kind must be 'work', 'notify', or null.")
         if self.wake_kind is None:
             return self
         if self.wake_kind not in _WAKE_KINDS:
