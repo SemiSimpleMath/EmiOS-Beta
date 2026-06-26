@@ -33,6 +33,7 @@ class WorkNodeDispatchNode(ControlNode):
         self.blackboard.update_state_value("next_agent", None)
         acted = self.blackboard.get_state_value("acted_on_item_ids", []) or []
         delegate_to = str(self.blackboard.get_state_value("delegate_to", "") or "").strip()
+        work_id = node_id = None
         try:
             ref = str(acted[0]) if acted else ""
             if "::" not in ref:
@@ -46,11 +47,33 @@ class WorkNodeDispatchNode(ControlNode):
             else:
                 self._do_work(store, work_id, node_id)
         except Exception as e:
-            logger.error("[%s] node dispatch failed: %s", self.name, e)
-            logger.debug("[%s] dispatch exception", self.name, exc_info=True)
-        # Loop back to materialize + pick the next ready node (this one is now guarded / no longer ready).
+            # Fail LOUD and FAIL THE NODE — never swallow into a silent retry. A node left ready
+            # after a dispatch error re-dispatches every tick (the mechanism that turned the notify
+            # transition bug into duplicate-notification spam). Mark it failed so it leaves the ready
+            # set and work_repair can adjudicate it (retry / escalate / abandon); we still drain the
+            # remaining ready nodes this tick rather than aborting the whole tick.
+            logger.error("[%s] node dispatch failed for %s::%s: %s",
+                         self.name, work_id, node_id, e, exc_info=True)
+            self._fail_node(work_id, node_id)
+        # Loop back to materialize + pick the next ready node (this one is guarded / failed / done).
         self.blackboard.update_state_value("next_agent", _MATERIALIZER)
         self.blackboard.update_state_value("last_agent", self.name)
+
+    def _fail_node(self, work_id, node_id):
+        """Best-effort: mark a node failed after a dispatch error so it leaves the ready set
+        (work_repair adjudicates it) rather than silently re-dispatching every tick. No node to
+        fail (unparseable ref) or an already-terminal node -> the ERROR log above is the loud signal."""
+        if not work_id or not node_id:
+            return
+        try:
+            from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
+            store = get_dayflow_work_store()
+            store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "failed"},
+                        actor="node_dispatch")
+            logger.error("[%s] marked %s::%s failed after dispatch error -> work_repair",
+                         self.name, work_id, node_id)
+        except Exception as e2:
+            logger.error("[%s] could not mark %s::%s failed: %s", self.name, work_id, node_id, e2)
 
     def _guard_add(self, work_id, node_id):
         g = list(self.blackboard.get_state_value("dispatched_this_tick", []) or [])

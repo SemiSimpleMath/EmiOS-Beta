@@ -40,7 +40,7 @@ FAMILY_BY_TYPE = {
 }
 TRANSITIONS: dict[str, dict[str, set[str]]] = {
     "spine": {
-        "proposed": {"active", "waiting", "abandoned"},
+        "proposed": {"active", "waiting", "failed", "abandoned"},   # failed = dispatch broke before the node ran
         "active": {"waiting", "done", "failed", "abandoned"},
         "waiting": {"active", "done", "failed", "abandoned"},
         "done": {"superseded"},
@@ -52,7 +52,7 @@ TRANSITIONS: dict[str, dict[str, set[str]]] = {
         # proposed (the send IS the completion: proposed->done). Otherwise it follows the
         # spine lifecycle — a notify can still be parked (wake-gated), worker-run after a
         # user_reply, abandoned (abandon-propagation), or superseded.
-        "proposed": {"active", "waiting", "done", "abandoned"},
+        "proposed": {"active", "waiting", "done", "failed", "abandoned"},
         "active": {"waiting", "done", "failed", "abandoned"},
         "waiting": {"active", "done", "failed", "abandoned"},
         "done": {"superseded"},
