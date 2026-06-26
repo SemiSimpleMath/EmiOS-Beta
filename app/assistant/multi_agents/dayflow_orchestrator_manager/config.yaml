@@ -66,6 +66,10 @@ control_nodes:
     class: WorkExecutionNode
   - name: work_repair_node
     class: WorkRepairNode
+  - name: work_node_materializer_node
+    class: WorkNodeMaterializerNode
+  - name: work_node_dispatch_node
+    class: WorkNodeDispatchNode
   - name: relevance_cleaner_gate_node
     class: RelevanceCleanerGateNode
   - name: relevance_cleaner_persist_node
@@ -106,6 +110,7 @@ tools:
     # --- Direct action tools the switchboard/orchestrator calls itself ---
     - one_shot_tool_runner
     - create_dayflow_ticket
+    - run_work_node
     - run_task
     - find_tool
     - ask_user
@@ -162,7 +167,7 @@ flow_config:
     "strategic_planner_wo_prep_node": "dayflow_orchestrator::strategic_planner_wo"
     "dayflow_orchestrator::strategic_planner_wo": "strategic_planner_wo_persist_node"
     "strategic_planner_wo_persist_node": "work_architect_node"
-    "work_architect_node": "work_execution_node"
+    "work_architect_node": "work_repair_node"
     "work_execution_node": "work_repair_node"
     "work_repair_node": "state_mover_prep_node"
     # old plan-task path (no longer reached from context_enricher_persist_node):
@@ -172,17 +177,19 @@ flow_config:
     "state_mover_prep_node": "dayflow_orchestrator::state_mover"
     "dayflow_orchestrator::state_mover": "state_transition_guard_node"
     "state_transition_guard_node": "state_mover_persist_node"
-    "state_mover_persist_node": "relevance_cleaner_gate_node"
+    "state_mover_persist_node": "work_node_materializer_node"
     "relevance_cleaner_gate_node": "view_materializer_node"
     "relevance_cleaner_prep_node": "dayflow_orchestrator::relevance_cleaner"
     "dayflow_orchestrator::relevance_cleaner": "relevance_cleaner_persist_node"
     "relevance_cleaner_persist_node": "view_materializer_node"
     "view_materializer_node": "dayflow_orchestrator::action_selector"
+    "work_node_materializer_node": "dayflow_orchestrator::action_selector"
     "dayflow_orchestrator::action_selector": "action_selector_router_node"
     "action_selector_router_node": "dayflow_orchestrator::switchboard"
     "dayflow_orchestrator::plan_mode": "plan_mode_final_router_node"
     "plan_mode_final_router_node": "final_answer_node"
-    "dayflow_orchestrator::switchboard": "dayflow_switchboard_arguments_node"
+    "dayflow_orchestrator::switchboard": "work_node_dispatch_node"
+    "work_node_dispatch_node": "work_node_materializer_node"
     "dayflow_switchboard_arguments_node": "dayflow_tool_caller"
     "dayflow_tool_caller": "action_result_normalizer_node"
     "action_result_normalizer_node": "post_room_finalize_node"

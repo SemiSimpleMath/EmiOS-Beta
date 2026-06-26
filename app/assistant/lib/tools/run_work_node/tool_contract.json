@@ -1,0 +1,47 @@
+{
+  "name": "run_work_node",
+  "description": "Execute ONE work-object node through the work-object runtime (work_on): sets the work context, runs work_emi_team, and records the result on the graph. The dayflow switchboard's WORK client — route a ready WORK node (not a notification) here.",
+  "inputs": [
+    {
+      "name": "work_id",
+      "type": "string",
+      "required": true,
+      "description": "The work object id."
+    },
+    {
+      "name": "node_id",
+      "type": "string",
+      "required": true,
+      "description": "The id of the ready node to execute within that work object."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "The node's result content after execution."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "status, work_id, node_id."
+    }
+  ],
+  "arguments_prompt": "{\n  \"work_id\": \"work_abc123\",\n  \"node_id\": \"find_marketplace\"\n}",
+  "metadata": {
+    "min_authority": 90,
+    "approval_min_authority": 90,
+    "domain": "workflow",
+    "actions": ["execute"],
+    "selectors": ["work_object", "node"],
+    "risk_level": "medium",
+    "side_effects": "external_action",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "medium",
+    "latency_class": "slow",
+    "front_door": true,
+    "room_visibility_default": "show",
+    "approval_required": false
+  }
+}

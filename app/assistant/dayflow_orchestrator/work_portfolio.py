@@ -72,8 +72,8 @@ def render_work_portfolio(wo, now=None) -> str:
                 and (n.content or n.pod_ref)]
     terminal.sort(key=lambda n: getattr(n, "updated_at", now) or now, reverse=True)
     if terminal:
-        L.append(f"\nRECENT OUTCOMES (goal -> result; newest {min(5, len(terminal))} of {len(terminal)}):")
-        for n in terminal[:5]:
+        L.append(f"\nOUTCOMES (goal -> result; {len(terminal)}):")
+        for n in terminal:
             L.append(f"  - [{n.status}] GOAL: {_t(n)}")
             b = _body(n)
             L.append(f"    RESULT: {b if b else ('(pod ' + n.pod_ref + ')' if n.pod_ref else '(no detail)')}")

@@ -53,7 +53,7 @@ class StrategicPlannerWoPrepNode(ControlNode):
         logger.info("[%s] prepared: %d active work object(s)", self.name, n_active)
         self.blackboard.update_state_value("last_agent", self.name)
 
-    def _render_recent_completed(self, summaries, max_items=25, window_hours=48):
+    def _render_recent_completed(self, summaries, window_hours=18):
         """A compact log of recently completed/abandoned work objects — the evaluator's 'already done'
         memory, so it does NOT recreate work it just finished (especially recurring routine automations).
         Mirrors the old strategic_planner's 'RECENTLY CLOSED — do not recreate'. The WO title IS the
@@ -74,8 +74,6 @@ class StrategicPlannerWoPrepNode(ControlNode):
             title = str(s.get("title") or "").strip()
             if title:
                 lines.append(f"- [{status}] {title}")
-            if len(lines) >= max_items:
-                break
         return "\n".join(lines) if lines else f"(nothing completed in the last {window_hours}h)"
 
     def _build_situational_context(self):
