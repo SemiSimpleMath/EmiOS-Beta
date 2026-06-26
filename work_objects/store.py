@@ -34,6 +34,7 @@ from work_objects.model import (
 # --------------------------------------------------------------------------- #
 FAMILY_BY_TYPE = {
     "goal": "spine", "plan": "spine", "subtask": "spine", "tool": "spine",
+    "notify": "notify",                          # one-way owner notification (fire-and-forget)
     "evidence": "knowledge", "artifact": "knowledge",
     "question": "question", "verification": "verification",
 }
@@ -44,6 +45,18 @@ TRANSITIONS: dict[str, dict[str, set[str]]] = {
         "waiting": {"active", "done", "failed", "abandoned"},
         "done": {"superseded"},
         "failed": {"active", "proposed", "abandoned"},   # proposed = re-open: the work_repair adjudicator re-issues a failed node
+        "abandoned": set(), "superseded": set(),
+    },
+    "notify": {
+        # one-way owner notification: fire-and-forget, so it may close straight from
+        # proposed (the send IS the completion: proposed->done). Otherwise it follows the
+        # spine lifecycle — a notify can still be parked (wake-gated), worker-run after a
+        # user_reply, abandoned (abandon-propagation), or superseded.
+        "proposed": {"active", "waiting", "done", "abandoned"},
+        "active": {"waiting", "done", "failed", "abandoned"},
+        "waiting": {"active", "done", "failed", "abandoned"},
+        "done": {"superseded"},
+        "failed": {"active", "proposed", "abandoned"},
         "abandoned": set(), "superseded": set(),
     },
     "knowledge": {
