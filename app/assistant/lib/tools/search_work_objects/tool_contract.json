@@ -1,0 +1,47 @@
+{
+  "name": "search_work_objects",
+  "description": "Search the work-object store by keyword (over titles + step contents) to find prior or ongoing work — e.g. 'washer dryer research'. Returns matching work objects (id, title, status), newest first. Read-only; follow with read_work_object to read one in full.",
+  "inputs": [
+    {
+      "name": "query",
+      "type": "string",
+      "required": true,
+      "description": "Keywords to match (all terms must appear in the work object's title or step contents)."
+    },
+    {
+      "name": "limit",
+      "type": "integer",
+      "required": false,
+      "description": "Max results to return (default 10)."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "The matching work objects."
+    },
+    {
+      "path": "data",
+      "type": "object",
+      "description": "results: list of {work_id, title, status, updated_at}."
+    }
+  ],
+  "arguments_prompt": "{\n  \"query\": \"washer dryer\"\n}",
+  "metadata": {
+    "min_authority": 0,
+    "approval_min_authority": 0,
+    "domain": "workflow",
+    "actions": ["read", "search"],
+    "selectors": ["work_object"],
+    "risk_level": "low",
+    "side_effects": "none",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": true,
+    "room_visibility_default": "show",
+    "approval_required": false
+  }
+}

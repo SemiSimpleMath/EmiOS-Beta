@@ -48,6 +48,8 @@ tools:
         - pod_fetch
         - mint_pod
         - ask_kg
+        - search_work_objects
+        - read_work_object
         - discover_skills
         - read_skill
 

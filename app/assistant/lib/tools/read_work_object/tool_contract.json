@@ -1,0 +1,36 @@
+{
+  "name": "read_work_object",
+  "description": "Read a work object as text — its goal, every step + status, and all results/findings — so you can answer questions about it or reuse its content in another task. Read-only. Use search_work_objects first if you don't have the work_id.",
+  "inputs": [
+    {
+      "name": "work_id",
+      "type": "string",
+      "required": true,
+      "description": "The work object id (e.g. work_3882ca481d7e)."
+    }
+  ],
+  "outputs": [
+    {
+      "path": "content",
+      "type": "text",
+      "description": "The rendered work object (goal, steps, results)."
+    }
+  ],
+  "arguments_prompt": "{\n  \"work_id\": \"work_abc123\"\n}",
+  "metadata": {
+    "min_authority": 0,
+    "approval_min_authority": 0,
+    "domain": "workflow",
+    "actions": ["read"],
+    "selectors": ["work_object"],
+    "risk_level": "low",
+    "side_effects": "none",
+    "requires_auth": [],
+    "requires_network": false,
+    "cost_level": "low",
+    "latency_class": "fast",
+    "front_door": true,
+    "room_visibility_default": "show",
+    "approval_required": false
+  }
+}
