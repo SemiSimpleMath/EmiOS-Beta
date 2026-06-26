@@ -56,8 +56,13 @@ class OutboundChatPublisher:
         if not text or not text.strip():
             return False
         if reply_to is None:
-            logger.debug("[outbound] no reply_to — dropping (sender=%s)", sender)
-            return False
+            # No destination pinned -> owner UI default (master_room), consistent with
+            # EmiEventRelay._resolve_reply_to. A destination-less owner message is a
+            # system/autonomous notification; master_room is the live/active UI surface.
+            # WARN (not silent) so a caller that should have pinned one stays visible,
+            # but DELIVER instead of dropping.
+            logger.warning("[outbound] no reply_to — defaulting to master_room (sender=%s)", sender)
+            reply_to = {"type": "socketio", "room_id": "master_room"}
         surface_type = str(reply_to.get("type") or "").strip().lower()
         try:
             if surface_type == "socketio":

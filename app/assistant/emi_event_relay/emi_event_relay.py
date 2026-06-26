@@ -128,10 +128,18 @@ class EmiEventRelay:
                 continue
 
     def _resolve_reply_to(self, message, preferred_reply_to=None):
-        """Single source of truth: per-message metadata.reply_to -> reply_router(request_id).
+        """Resolve delivery destination, in priority order: preferred_reply_to ->
+        per-message metadata.reply_to -> reply_router(request_id) -> owner UI
+        default (master_room).
 
-        No fallbacks. If neither source yields a reply_to, emission fails loudly.
-        Callers that need a reply_to must ensure one was pinned at ingress.
+        The first three honor a destination pinned at ingress (a room that sent a
+        request gets its reply back — socketio/twilio_sms/slack/telegram). A message
+        that reaches here with NO pinned destination is, by definition, a system /
+        autonomous owner notification (reminders, dayflow tickets, situation-audit);
+        historically these just emitted to the user UI, which is now the logical
+        `master_room`, so default there rather than dropping. master_room is a logical
+        room — socket_manager resolves it to the live/active browser socket and
+        re-points on a browser switch — so it follows whatever surface the owner is on.
         """
         if isinstance(preferred_reply_to, dict) and preferred_reply_to.get("type"):
             return preferred_reply_to
@@ -146,7 +154,13 @@ class EmiEventRelay:
             if isinstance(route, dict) and route.get("type"):
                 return route
 
-        return None
+        # No destination pinned -> owner UI default. WARN (not silent) so a sender that
+        # should have pinned one stays visible, but DELIVER instead of dropping.
+        logger.warning(
+            "reply_to defaulted to master_room for sender=%r — none pinned at ingress",
+            getattr(message, "sender", None),
+        )
+        return {"type": "socketio", "room_id": "master_room"}
 
     # Only master_room is a required UI-emit target. Every other logical room
     # (doc_editor, task_spec::*, dayflow_orchestrator, progress, music, etc.)
