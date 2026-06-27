@@ -139,9 +139,16 @@ class WorkObjectRenderNode(ControlNode):
         try:
             projection = self._render()
         except Exception as e:
-            logger.error("[%s] WorkObject render failed: %s", self.name, e)
-            logger.debug("[%s] render exception", self.name, exc_info=True)
-            projection = ""
+            # FAIL LOUD — never silently hand the worker a blank projection. A starved worker
+            # invents a task and persists the hallucination as the node's [done] result (the
+            # contamination bug). Surface the failure IN the projection so the worker acts only on
+            # the task in its instructions (run_node carries the node's real goal there as the
+            # primary safeguard) instead of fabricating one.
+            logger.error("[%s] WorkObject render failed: %s", self.name, e, exc_info=True)
+            projection = ("## CONTEXT UNAVAILABLE\n"
+                          "This work node could not be rendered (see logs). Act ONLY on the task given "
+                          "in your instructions; do NOT invent a task or fabricate a result. If you "
+                          "cannot proceed from the task alone, finish without recording a result.")
         self.blackboard.update_state_value("work_projection", projection)
         # Route on via state_map: clear the stale next_agent (else the delegator re-runs
         # this node), and set last_agent so it picks state_map[self.name] = the planner.

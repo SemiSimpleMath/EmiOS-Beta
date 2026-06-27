@@ -70,7 +70,16 @@ def run_node(store, work_id: str, node_id: str,
                           information=_render_dependencies(store.load(work_id), node_id),
                           request_id=f"work::{uuid.uuid4()}")
         else:
-            msg = Message(scope_context=orchestrator_scope(work_id=work_id), task="Advance the node you own.",
+            cur = store.load(work_id).nodes[node_id]
+            # Render mode hands the node's DETAIL via work_projection (the render node) and keeps the
+            # message task generic. But if that side-channel comes back empty (missing work context /
+            # a render failure), "advance the node you own" with no detail makes the worker INVENT a
+            # task and persist the hallucination as the node's [done] result (the 06-23 "blockchain
+            # validator" contamination). Carry the node's real goal in the message so the worker stays
+            # grounded even when the projection is degraded.
+            goal_txt = (cur.content or cur.title or "").strip()
+            task = f"Advance the node you own: {goal_txt}" if goal_txt else "Advance the node you own."
+            msg = Message(scope_context=orchestrator_scope(work_id=work_id), task=task,
                           request_id=f"work::{uuid.uuid4()}")
         result = DI.manager_invoker.invoke(manager, msg)
     finally:
