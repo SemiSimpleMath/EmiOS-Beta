@@ -14,3 +14,11 @@ user_context_items:
   - information
 
 system_context_items: []
+
+# Log the rendered SYSTEM + USER prompts to the agents log on every architect call.
+# The architect is invoked directly via work_architect_node, and its prompts are otherwise
+# invisible (suppressed by the prompt_debug gate) - seeing the rendered CONTEXT (ticket
+# replies, portfolio) is key to verifying re-plan behaviour.
+prompt_debug:
+  system: true
+  user: true
