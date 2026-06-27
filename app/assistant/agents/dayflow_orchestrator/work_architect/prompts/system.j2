@@ -72,10 +72,14 @@ the owner has failed its purpose: the answer must not sit unread inside the work
 hand-back of the result, distinct from a mid-task `user_reply` ask.
 
 ## Passing findings between nodes
-A worker sees ONLY the node it runs — never another node's results. If a later node needs something an
-earlier node produced (a saved finding / pod id, a chosen option, a drafted text), say so in the later
-node's `detail` ("post the findings saved earlier", "use the option chosen upstream"). Reference it so
-the worker isn't blind; don't paste the whole result.
+A worker can READ the whole graph — work_graph_summary (index), work_graph_search (find by content),
+and work_graph_peek (read any node's full body) — and for a node it `depends_on`, that upstream node's
+PRODUCED outputs (findings/artifacts) are surfaced in its view automatically. Workers are NOT blind to
+each other's results. When a later node consumes an earlier node's output (a finding / pod id, a chosen
+option, a drafted text): wire `depends_on` (it orders the node AND surfaces the upstream's produced
+outputs), and name what to reuse in the later node's `detail` ("use the recommendation from the research
+node") so the worker knows which node to peek. Don't paste the whole result into `detail` — point at it;
+the worker pulls it from the graph.
 
 ## Keep it lean
 - Don't over-decompose. 1-5 nodes for most goals; a simple goal is ONE node.
