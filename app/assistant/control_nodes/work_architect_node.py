@@ -35,6 +35,34 @@ def _render_existing_graph(wo) -> str:
     return "\n".join(lines) or "(no subtask nodes yet)"
 
 
+def _situational_context(bb) -> str:
+    """The same situational picture the steward sees — user ticket REPLIES (directives), active
+    tickets, the portfolio, and recently-completed work — so the architect re-plans WITH the user's
+    intent in view instead of blind. The steward's prep node loaded these onto the shared (manager)
+    blackboard earlier this tick. Passed as the architect Message's `information` (rendered as CONTEXT)."""
+    parts = []
+    resp = bb.get_state_value("recent_responded_tickets", {}) or {}
+    resp_lines = []
+    for cat, label in (("accepted", "ACCEPTED"), ("declined", "DECLINED"), ("snoozed", "SNOOZED")):
+        for t in (resp.get(cat) or []):
+            c = str(t.get("user_comment") or "").strip()
+            resp_lines.append(f"- {label}: {t.get('title', '')}" + (f' — user: "{c}"' if c else ""))
+    if resp_lines:
+        parts.append("## RECENT TICKET RESPONSES (user directives — incorporate these into the graph)\n"
+                     + "\n".join(resp_lines))
+    active = bb.get_state_value("active_tickets", []) or []
+    if active:
+        parts.append("## ACTIVE TICKETS (awaiting the user)\n"
+                     + "\n".join(f"- [{t.get('suggestion_type', '')}] {t.get('title', '')}" for t in active))
+    portfolio = str(bb.get_state_value("work_portfolio", "") or "").strip()
+    if portfolio:
+        parts.append("## WORK PORTFOLIO\n" + portfolio)
+    completed = str(bb.get_state_value("recent_completed_work", "") or "").strip()
+    if completed:
+        parts.append("## RECENTLY COMPLETED\n" + completed)
+    return "\n\n".join(parts)
+
+
 class WorkArchitectNode(ControlNode):
     def action_handler(self, message):
         self.blackboard.update_state_value("next_agent", None)
@@ -53,13 +81,14 @@ class WorkArchitectNode(ControlNode):
 
             if created or replan_ids:
                 scope = self._scope(message)
+                info = _situational_context(self.blackboard)
                 agent = DI.agent_factory.create_agent("dayflow_orchestrator::work_architect")
 
                 # CREATE — decompose each freshly-minted goal.
                 for c in created:
                     work_id = c["work_id"]
                     try:
-                        result = agent.action_handler(Message(task=c["objective"], scope_context=scope))
+                        result = agent.action_handler(Message(task=c["objective"], information=info, scope_context=scope))
                         nodes = (getattr(result, "data", {}) or {}).get("nodes", []) or []
                         res = apply_architect_dag(store, work_id, nodes)
                         decomposed.append({"work_id": work_id, "nodes": len(res.get("added", []))})
@@ -88,7 +117,7 @@ class WorkArchitectNode(ControlNode):
                             f"nodes to add; do NOT recreate existing ones (you may reference their node_ids "
                             f"in depends_on). Existing nodes:\n{_render_existing_graph(wo)}"
                         )
-                        result = agent.action_handler(Message(task=task, scope_context=scope))
+                        result = agent.action_handler(Message(task=task, information=info, scope_context=scope))
                         nodes = (getattr(result, "data", {}) or {}).get("nodes", []) or []
                         res = apply_architect_dag(store, work_id, nodes)
                         replanned.append({"work_id": work_id, "added": len(res.get("added", []))})
