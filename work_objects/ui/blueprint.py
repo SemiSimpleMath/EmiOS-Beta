@@ -146,3 +146,66 @@ def api_pod():
         "source_refs": srcs, "importance": getattr(pod, "importance", None),
         "metadata": meta, "created_at": _iso(getattr(pod, "created_at", None)),
     })
+
+
+# --------------------------- writes (manual UI edits) --------------------------- #
+# Mutate the LIVE dayflow store. store.apply() takes the store's write lock, so these serialize with the
+# dayflow tick (the other writer). Store errors (illegal transition, not found) come back as 400 + message.
+
+def _apply(op: str, data: dict, actor: str = "work_ui"):
+    try:
+        _get_store().apply(op, data, actor=actor)
+        return jsonify({"ok": True})
+    except Exception as e:
+        logger.info("[work_ui] %s failed: %s", op, e)
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@work_ui_bp.route("/api/work/<work_id>/abandon", methods=["POST"])
+def api_work_abandon(work_id):
+    """Soft-delete: abandon the whole work object (terminal; the worker stops, it drops from active views)."""
+    return _apply("set_work_status", {"work_id": work_id, "status": "abandoned"})
+
+
+@work_ui_bp.route("/api/work/<work_id>/node/<node_id>/status", methods=["POST"])
+def api_node_status(work_id, node_id):
+    status = str((request.get_json(silent=True) or {}).get("status") or "").strip()
+    if not status:
+        return jsonify({"ok": False, "error": "status required"}), 400
+    return _apply("set_status", {"work_id": work_id, "node_id": node_id, "status": status})
+
+
+@work_ui_bp.route("/api/work/<work_id>/node/<node_id>/edit", methods=["POST"])
+def api_node_edit(work_id, node_id):
+    body = request.get_json(silent=True) or {}
+    data = {"work_id": work_id, "node_id": node_id}
+    if "title" in body:
+        data["title"] = body["title"]
+    if "content" in body:
+        data["content"] = body["content"]
+    return _apply("edit_node", data)
+
+
+@work_ui_bp.route("/api/work/<work_id>/node/<node_id>/remove", methods=["POST"])
+def api_node_remove(work_id, node_id):
+    """Soft-remove a single node: abandon it (terminal; it drops out of the active graph)."""
+    return _apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "abandoned"})
+
+
+@work_ui_bp.route("/api/work/<work_id>/node", methods=["POST"])
+def api_node_add(work_id):
+    body = request.get_json(silent=True) or {}
+    title = str(body.get("title") or "").strip()
+    if not title:
+        return jsonify({"ok": False, "error": "title required"}), 400
+    try:
+        wo = _get_store().load(work_id)
+    except Exception:
+        return jsonify({"ok": False, "error": f"work object {work_id!r} not found"}), 404
+    from work_objects.model import new_id
+    return _apply("add_node", {
+        "work_id": work_id, "id": new_id("node"),
+        "type": str(body.get("type") or "subtask"),
+        "parent_id": str(body.get("parent_id") or wo.goal_node_id),
+        "title": title, "content": str(body.get("content") or ""),
+    })

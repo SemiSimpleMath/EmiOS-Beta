@@ -142,6 +142,10 @@ function renderMain(){
   m.innerHTML=`
     <h2 style="margin:0">${esc(DATA.title||DATA.id)} ${badge(DATA.status)}</h2>
     <div style="color:var(--muted);font-size:12px;font-family:monospace">${DATA.id} · updated ${esc(DATA.updated_at||'')}</div>
+    <div style="margin:8px 0;display:flex;gap:6px">
+      <button onclick="addNode('${goal?goal.id:DATA.goal_node_id}')">+ Add task</button>
+      <button onclick="abandonWO()" style="color:var(--red)">🗑 Abandon work object</button>
+    </div>
     <div class="remaining">
       <span class="chip">remaining <b>${work.length}</b></span>
       <span class="chip">ready <b style="color:var(--accent)">${ready}</b></span>
@@ -163,6 +167,9 @@ function renderDetail(){
      .map(e=>`${e.src===n.id?'→':'←'} ${esc(e.relation)} ${esc(e.src===n.id?e.dst:e.src)}`).join('<br>')||'—';
   const pod=n.pod_ref?`<button onclick="showPod('${n.pod_ref}')">📦 open pod</button>`:'';
   const pay=(n.payload&&Object.keys(n.payload).length)?`<div class="k" style="color:var(--muted)">payload</div><pre class="body">${esc(JSON.stringify(n.payload,null,2))}</pre>`:'';
+  const isGoal=n.id===DATA.goal_node_id;
+  const statusBtns=['proposed','actionable','active','waiting','done','failed','abandoned']
+    .map(s=>`<button ${s===n.status?'disabled':''} onclick="setNodeStatus('${n.id}','${s}')">${esc(s)}</button>`).join(' ');
   document.getElementById('detail').innerHTML=`<div class="detail">
     <h3>${TYPE_IC[n.type]||'•'} ${esc(n.title||n.type)} ${badge(n.status)}</h3>
     <div class="kv">
@@ -176,7 +183,21 @@ function renderDetail(){
     </div>
     ${n.content?`<div class="k" style="color:var(--muted)">content / result</div><pre class="body">${esc(n.content)}</pre>`:''}
     ${pay}${pod}
+    <div class="editbox" style="margin-top:14px;border-top:1px dashed var(--border);padding-top:10px">
+      <div class="k" style="color:var(--muted)">✏️ edit ${isGoal?'goal':'node'}</div>
+      <input id="ed-title" placeholder="title" style="width:100%;margin:4px 0;box-sizing:border-box;background:var(--panel2);color:inherit;border:1px solid var(--border);padding:6px;border-radius:4px">
+      <textarea id="ed-content" rows="4" placeholder="content / detail" style="width:100%;box-sizing:border-box;background:var(--panel2);color:inherit;border:1px solid var(--border);padding:6px;border-radius:4px"></textarea>
+      <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">
+        <button onclick="saveNode('${n.id}')">💾 Save</button>
+        <button onclick="addNode('${n.id}')">+ child</button>
+        ${isGoal?'':`<button onclick="removeNode('${n.id}')" style="color:var(--red)">🗑 remove</button>`}
+      </div>
+      <div class="k" style="color:var(--muted);margin-top:8px">set status</div>
+      <div style="display:flex;gap:4px;flex-wrap:wrap">${statusBtns}</div>
+    </div>
   </div>`;
+  const _t=document.getElementById('ed-title');if(_t)_t.value=n.title||'';
+  const _c=document.getElementById('ed-content');if(_c)_c.value=n.content||'';
 }
 
 async function showPod(pid){
@@ -209,6 +230,37 @@ async function loadEvents(){
   const el=document.getElementById('events');if(!el||!SEL_WO)return;
   const j=await (await fetch('/api/work/'+SEL_WO+'/events')).json();
   el.innerHTML=(j.events||[]).map(e=>`<div class="evt">#${e.seq} <span style="color:var(--muted)">${esc((e.ts||'').slice(11,19))}</span> <span class="op">${esc(e.op)}</span> ${eventLabel(e)}</div>`).join('')||'—';
+}
+// --- edits (mutate the live store via the write endpoints) ---
+async function apiPost(url,body){
+  const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
+  let j={};try{j=await r.json()}catch(e){}
+  if(!r.ok||j.ok===false){alert('Error: '+(j.error||('HTTP '+r.status)));return false}
+  return true;
+}
+async function reloadWO(){  // re-fetch + render WITHOUT clearing SEL_NODE (so the detail stays open)
+  if(!SEL_WO)return;
+  DATA=await (await fetch('/api/work/'+SEL_WO)).json();
+  loadList();renderMain();
+}
+async function abandonWO(){
+  if(!SEL_WO||!confirm('Abandon this entire work object? It stops processing and drops from active views.'))return;
+  if(await apiPost('/api/work/'+SEL_WO+'/abandon',{}))await reloadWO();
+}
+async function setNodeStatus(id,status){
+  if(await apiPost('/api/work/'+SEL_WO+'/node/'+id+'/status',{status}))await reloadWO();
+}
+async function saveNode(id){
+  const t=document.getElementById('ed-title'),c=document.getElementById('ed-content');
+  if(await apiPost('/api/work/'+SEL_WO+'/node/'+id+'/edit',{title:t?t.value:'',content:c?c.value:''}))await reloadWO();
+}
+async function removeNode(id){
+  if(!confirm('Remove (abandon) this node?'))return;
+  if(await apiPost('/api/work/'+SEL_WO+'/node/'+id+'/remove',{}))await reloadWO();
+}
+async function addNode(parent_id){
+  const title=prompt('New task title:');if(!title)return;
+  if(await apiPost('/api/work/'+SEL_WO+'/node',{parent_id,title}))await reloadWO();
 }
 loadList();
 </script>

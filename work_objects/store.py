@@ -239,6 +239,18 @@ class WorkStore:
             node.content = data["content"]
         node.updated_at = now
 
+    def _op_edit_node(self, wo, data, now) -> None:
+        """Manual UI edit of a node's title and/or content — no status change, no transition check. For the
+        /work editor; only mutates the fields explicitly provided (a missing key leaves that field alone)."""
+        node = wo.nodes.get(data["node_id"])
+        if node is None:
+            raise KeyError(f"edit_node: node {data['node_id']!r} not found")
+        if data.get("title") is not None:
+            node.title = str(data["title"])
+        if data.get("content") is not None:
+            node.content = str(data["content"])
+        node.updated_at = now
+
     def _op_attach_pod(self, wo, data, now) -> None:
         node = wo.nodes.get(data["node_id"])
         if node is None:
@@ -329,6 +341,7 @@ WorkStore._HANDLERS = {
     "add_node": WorkStore._op_add_node,
     "add_edge": WorkStore._op_add_edge,
     "set_status": WorkStore._op_set_status,
+    "edit_node": WorkStore._op_edit_node,
     "set_work_status": WorkStore._op_set_work_status,
     "attach_pod": WorkStore._op_attach_pod,
     "defer_node": WorkStore._op_defer_node,
