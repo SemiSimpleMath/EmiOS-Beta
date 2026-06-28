@@ -87,30 +87,40 @@ class WorkNodeDispatchNode(ControlNode):
         logger.info("[work_node_dispatch] work %s::%s -> %s", work_id, node_id, status)
 
     def _communicate(self, store, work_id, node_id):
+        from work_objects.store import FAMILY_BY_TYPE
         node = store.load(work_id).nodes.get(node_id)
         if node is None:
             return
-        if str(getattr(node, "wake_kind", None) or "") == "user_reply":
-            self._surface_ask(work_id, node_id, node)
-            from work_objects.model import utcnow
-            # Park the asked node OUT of `actionable` so the action_selector stops seeing it — it is now
-            # in-flight, awaiting the user's reply. The materializer lists by status==actionable (ignoring the
-            # wake), so leaving it `actionable` would re-surface the ticket every tick. defer_node only flips
-            # active->waiting, so set it explicitly first.
-            store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "waiting"},
-                        actor="node_dispatch")
-            store.apply("defer_node", {"work_id": work_id, "node_id": node_id, "wake_kind": "user_reply",
-                                       "wake_at": utcnow() + timedelta(hours=_REASK_HOURS),
-                                       "wake_ref": node.wake_ref}, actor="node_dispatch")
-            logger.info("[work_node_dispatch] asked owner %s::%s (parked until reply/re-ask)", work_id, node_id)
+        wake_kind = str(getattr(node, "wake_kind", None) or "")
+        family = FAMILY_BY_TYPE.get(getattr(node, "type", "") or "", "spine")
+
+        # ONE-WAY NOTIFY — only a NOTIFY-FAMILY node with no reply wake: deliver + close `done` (the notify
+        # family allows actionable->done). A spine WORK node the switchboard sent to the ticket side must NOT
+        # be closed `done` here — actionable->done is illegal for spine (the recurring dispatch failure) AND
+        # the work isn't actually finished by a notification; it falls through to the ASK path below.
+        if family == "notify" and wake_kind != "user_reply":
+            from app.assistant.lib.tools.create_work_notification.create_work_notification import CreateWorkNotificationTool
+            if CreateWorkNotificationTool._create(work_id, node_id) is not None:
+                store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "done",
+                                           "content": (node.content or "")}, actor="node_dispatch")
+                logger.info("[work_node_dispatch] notified + closed %s::%s", work_id, node_id)
+            else:
+                logger.warning("[work_node_dispatch] notify produced no ticket for %s::%s; retry next tick",
+                               work_id, node_id)
             return
-        from app.assistant.lib.tools.create_work_notification.create_work_notification import CreateWorkNotificationTool
-        if CreateWorkNotificationTool._create(work_id, node_id) is not None:
-            store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "done",
-                                       "content": (node.content or "")}, actor="node_dispatch")
-            logger.info("[work_node_dispatch] notified + closed %s::%s", work_id, node_id)
-        else:
-            logger.warning("[work_node_dispatch] notify produced no ticket for %s::%s; retry next tick", work_id, node_id)
+
+        # ASK — a user_reply ask, OR a spine/work node the switchboard judged needs the user (only the user
+        # can do/confirm it). Surface it and park OUT of `actionable` to `waiting` (in-flight, awaiting the
+        # reply; the materializer lists by status==actionable, so leaving it actionable would re-surface every
+        # tick). defer_node only flips active->waiting, so set it explicitly first.
+        self._surface_ask(work_id, node_id, node)
+        from work_objects.model import utcnow
+        store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "waiting"},
+                    actor="node_dispatch")
+        store.apply("defer_node", {"work_id": work_id, "node_id": node_id, "wake_kind": "user_reply",
+                                   "wake_at": utcnow() + timedelta(hours=_REASK_HOURS),
+                                   "wake_ref": node.wake_ref or node.title}, actor="node_dispatch")
+        logger.info("[work_node_dispatch] asked owner %s::%s (parked until reply/re-ask)", work_id, node_id)
 
     @staticmethod
     def _surface_ask(work_id, node_id, node):
