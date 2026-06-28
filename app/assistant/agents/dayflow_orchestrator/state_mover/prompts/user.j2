@@ -118,6 +118,17 @@ RECENT INCOMING (match against these):
 {%- endfor %}
 {%- endif %}
 {%- endif %}
+{%- if ready_work_nodes %}
+
+########## READY WORK NODES (promote by default, or hold for a better moment) ##########
+*Gates already clear. Every one promotes unless you hold it. Hold ONLY for quiet hours, a meeting in
+progress, or the user being away and the node better batched — each via a `held_work_nodes` entry. When in
+doubt, promote.*
+{%- for t in ready_work_nodes %}
+- task_id: {{ t.task_id }}
+  node: {{ t.context }}{% if t.kind %} | kind: {{ t.kind }}{% endif %}
+{%- endfor %}
+{%- endif %}
 {%- if entity_card %}
 
 ##### Entity Context

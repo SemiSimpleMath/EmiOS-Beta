@@ -39,18 +39,22 @@ class StateMoverPersistNode(ControlNode):
         """Promote architect-born ``proposed`` nodes (and unblocked ``waiting`` ones) to ``actionable`` once
         their gates (time + deps) are clear — the work-object analogue of the items lane's
         ``important_open -> actionable`` move. ONLY an ``actionable`` (state_mover-promoted) node is dispatchable
-        by the action_selector; a ``proposed`` node sits in the architect's inbox until promoted here. So a
-        node with no wake is NOT auto-actionable — it must pass through state_mover first.
+        by the action_selector; a ``proposed`` node sits in the architect's inbox until promoted here.
 
-        Deterministic for now (gates clear ⇒ promote), which preserves today's timing; the seam is here for the
-        LLM state_mover to later HOLD a ready node (quiet hours, batching, answered-ask routing). External-event
-        nodes are woken by ``_apply_node_wakes`` (node_wakes), not promoted here."""
+        PROMOTE is the safe default. The state_mover LLM may HOLD a few via ``held_work_nodes`` (quiet hours, a
+        meeting, the user away) — those are parked until their ``reactivate_at`` instead of promoted. Anything
+        the LLM does not list is promoted, so the worst failure mode is "promoted when it could have waited",
+        never a stuck node. External-event nodes are woken by ``_apply_node_wakes`` (node_wakes), not here."""
         from work_objects.model import utcnow
         from work_objects.store import FAMILY_BY_TYPE, TRANSITIONS
         from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
         store = get_dayflow_work_store()
         now = utcnow()
-        promoted = []
+        holds = {}
+        for h in (self.blackboard.get_state_value("held_work_nodes", []) or []):
+            if isinstance(h, dict) and str(h.get("task_id") or "").strip():
+                holds[str(h["task_id"]).strip()] = h
+        promoted, held = [], []
         for s in store.list_work_objects():
             if str(s.get("status") or "").lower() in {"done", "abandoned"}:
                 continue
@@ -70,12 +74,41 @@ class StateMoverPersistNode(ControlNode):
                 family = FAMILY_BY_TYPE.get(n.type, "spine")
                 if "actionable" not in TRANSITIONS.get(family, {}).get(n.status, set()):
                     continue   # non-dispatchable family (knowledge/question/verification)
+                ref = f"{wo.id}::{n.id}"
+                hold = holds.get(ref)
+                if hold:
+                    if self._park_held(store, wo.id, n, hold):
+                        held.append(ref)
+                        continue
+                    # no reactivate_at given -> leave it proposed; re-judged next tick (don't promote now)
+                    held.append(ref)
+                    continue
                 store.apply("set_status", {"work_id": wo.id, "node_id": n.id, "status": "actionable"},
                             actor="state_mover")
-                promoted.append(f"{wo.id}::{n.id}")
+                promoted.append(ref)
         if promoted:
             logger.info("[%s] promoted %d ready node(s) -> actionable", self.name, len(promoted))
             self.blackboard.update_state_value("promoted_work_nodes", promoted)
+        if held:
+            logger.info("[%s] held %d ready node(s) back per state_mover judgment", self.name, len(held))
+
+    def _park_held(self, store, work_id, node, hold) -> bool:
+        """Park a state_mover-held ready node until its reactivate_at, so it isn't re-judged every tick.
+        Returns True if parked; False if no reactivate_at (caller leaves it proposed to re-judge next tick)."""
+        from app.assistant.utils.time_utils import parse_iso_utc
+        ra = str(hold.get("reactivate_at") or "").strip()
+        wake_at = parse_iso_utc(ra) if ra else None
+        if wake_at is None:
+            return False
+        reason = str(hold.get("hold_reason") or "").strip()
+        note = (node.content or "").rstrip()
+        if reason:
+            note = (note + f"\n\n[Held by state_mover: {reason}]").strip()
+        store.apply("set_status", {"work_id": work_id, "node_id": node.id, "status": "waiting",
+                                   "content": note}, actor="state_mover")
+        store.apply("defer_node", {"work_id": work_id, "node_id": node.id,
+                                   "wake_kind": "time", "wake_at": wake_at}, actor="state_mover")
+        return True
 
     def _apply_node_wakes(self):
         node_wakes = self.blackboard.get_state_value("node_wakes", []) or []

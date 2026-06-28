@@ -114,6 +114,14 @@ class StateMoverPrepNode(ControlNode):
             logger.error("[%s] work-object waits build failed: %s", self.name, e)
             logger.debug("[%s] work-object waits exception", self.name, exc_info=True)
 
+        # Ready work nodes (gates clear) — the state_mover promotes these to actionable, or holds the few
+        # that shouldn't reach the user right now (quiet hours, meeting, away). Default is promote.
+        try:
+            self._build_promotion_candidates()
+        except Exception as e:
+            logger.error("[%s] promotion candidates build failed: %s", self.name, e)
+            logger.debug("[%s] promotion candidates exception", self.name, exc_info=True)
+
         logger.info(
             "[%s] prepared: active=%d synopses=%d chat=%d",
             self.name,
@@ -122,6 +130,40 @@ class StateMoverPrepNode(ControlNode):
             len(chat_history),
         )
         self.blackboard.update_state_value("last_agent", self.name)
+
+    def _build_promotion_candidates(self):
+        """Ready work-object nodes (gates clear: status proposed/waiting, time + deps met, NOT parked on an
+        external event) — the nodes the state_mover may promote to `actionable` this tick, or HOLD for a
+        better moment. Same filter the persist node's promotion uses, so what the LLM sees == what gets
+        promoted/held. Sets ``ready_work_nodes`` on the blackboard (rendered like waiting_work_nodes)."""
+        from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
+        from work_objects.model import utcnow
+        from work_objects.store import FAMILY_BY_TYPE, TRANSITIONS
+
+        store = get_dayflow_work_store()
+        now = utcnow()
+        ready: List[Dict[str, Any]] = []
+        for s in store.list_work_objects():
+            if str(s.get("status") or "").lower() in {"done", "abandoned"}:
+                continue
+            wo = store.load(s["id"])
+            goal_id = wo.goal_node_id
+            for n in wo.nodes.values():
+                if n.id == goal_id or n.status not in {"proposed", "waiting"}:
+                    continue
+                if str(getattr(n, "wake_kind", None) or "") in {"event", "signal"}:
+                    continue   # external-event waits are shown in WORK-OBJECT WAITS, not here
+                if not wo.is_ready(n, now):
+                    continue
+                family = FAMILY_BY_TYPE.get(n.type, "spine")
+                if "actionable" not in TRANSITIONS.get(family, {}).get(n.status, set()):
+                    continue   # non-dispatchable family
+                ready.append({
+                    "task_id": f"{s['id']}::{n.id}",
+                    "context": (n.title or n.content or "").strip().replace("\n", " ")[:140],
+                    "kind": str(getattr(n, "type", "") or ""),
+                })
+        self.blackboard.update_state_value("ready_work_nodes", ready)
 
     def _build_work_object_waits(self, all_items):
         """Find work-object nodes parked on an EXTERNAL event (deps + time already met, so is_ready is
