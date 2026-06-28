@@ -3,6 +3,10 @@ Current time: {{ date_time }}.
 A work object is STUCK on a failed step. Its projection:
 
 {{ task }}
+{% if information %}
 
+{{ information }}
+{% endif %}
 Decide the single best disposition (escalate / retry / abandon_goal). For escalate, write the exact,
-first-person `ask` to the user — what they must do or provide.
+first-person `ask` to the user — what they must do or provide. If the USER'S REPLIES above show a decline
+or a "stop / do not attempt", that overrides the "prefer escalate" bias → abandon_goal.

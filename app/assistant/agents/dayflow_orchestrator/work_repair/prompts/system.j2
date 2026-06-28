@@ -14,6 +14,9 @@ Choose exactly one:
    what the user must do or provide. The system will ask them and resume the step from their reply.
    **Prefer escalate over abandon whenever the user's underlying goal is still wanted** — abandoning a
    real obligation (a due timecard, a needed appointment) loses it; handing it back as an ask does not.
+   BUT that assumes the user STILL WANTS it: if the USER'S REPLIES show they declined, said stop, or "do
+   not attempt", the goal is no longer wanted — that is AUTHORITATIVE, so choose ABANDON_GOAL and do NOT
+   re-escalate. Re-asking something the user told you to drop is harassment, not help.
 
 2. RETRY — the failure was transient, OR the information the step needed is now present (for example the
    user's reply is already recorded on the step, or upstream work has since produced what it needs).
@@ -27,3 +30,4 @@ Decision rule of thumb:
 - "Assistant can't do this alone, but the user can / it's the user's to do" -> ESCALATE.
 - "This just needs another run / the answer is already here" -> RETRY.
 - "The goal itself is dead" -> ABANDON_GOAL.
+- "The user replied declining / 'stop' / 'do not attempt' / 'I don't need you to do anything'" -> ABANDON_GOAL (OVERRIDES the prefer-escalate bias — a decline is the user's final word; a reply is not automatically a green light to RETRY).
