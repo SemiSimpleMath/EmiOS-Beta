@@ -107,8 +107,14 @@ Health: {{ health_status_summary }}
 (no active work objects)
 {% endif %}
 
-## ALREADY DONE — recently completed/handled (do NOT recreate; a recurring routine action that already ran for its occurrence is finished)
+## ALREADY COMPLETED — finished, do NOT recreate (a recurring routine action that already ran for its occurrence is finished)
 {{ recent_completed_work }}
+{%- if recent_abandoned_work %}
+
+## RECENTLY DROPPED — abandoned, NOT finished
+*These goals were DROPPED, not completed. Do NOT recreate one the user DECLINED (see ticket responses). Otherwise an abandonment is NOT proof the goal is handled — if it is still genuinely needed, create it fresh.*
+{{ recent_abandoned_work }}
+{%- endif %}
 
 {% if recent_dispatch_results %}
 ## RECENT OUTCOMES (workers' results since last cycle)

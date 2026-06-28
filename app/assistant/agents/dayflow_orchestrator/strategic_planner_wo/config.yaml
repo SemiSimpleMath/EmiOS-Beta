@@ -24,6 +24,7 @@ user_context_items:
   - admitted_artifacts
   - work_portfolio
   - recent_completed_work
+  - recent_abandoned_work
   - recent_dispatch_results
 
 system_context_items:
