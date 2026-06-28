@@ -28,7 +28,54 @@ class StateMoverPersistNode(ControlNode):
         except Exception as e:
             logger.error("[%s] node_wakes apply failed: %s", self.name, e)
             logger.debug("[%s] node_wakes exception", self.name, exc_info=True)
+        try:
+            self._promote_ready_nodes()
+        except Exception as e:
+            logger.error("[%s] node promotion failed: %s", self.name, e)
+            logger.debug("[%s] node promotion exception", self.name, exc_info=True)
         self.blackboard.update_state_value("last_agent", self.name)
+
+    def _promote_ready_nodes(self):
+        """Promote architect-born ``proposed`` nodes (and unblocked ``waiting`` ones) to ``actionable`` once
+        their gates (time + deps) are clear — the work-object analogue of the items lane's
+        ``important_open -> actionable`` move. ONLY an ``actionable`` (state_mover-promoted) node is dispatchable
+        by the action_selector; a ``proposed`` node sits in the architect's inbox until promoted here. So a
+        node with no wake is NOT auto-actionable — it must pass through state_mover first.
+
+        Deterministic for now (gates clear ⇒ promote), which preserves today's timing; the seam is here for the
+        LLM state_mover to later HOLD a ready node (quiet hours, batching, answered-ask routing). External-event
+        nodes are woken by ``_apply_node_wakes`` (node_wakes), not promoted here."""
+        from work_objects.model import utcnow
+        from work_objects.store import FAMILY_BY_TYPE, TRANSITIONS
+        from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
+        store = get_dayflow_work_store()
+        now = utcnow()
+        promoted = []
+        for s in store.list_work_objects():
+            if str(s.get("status") or "").lower() in {"done", "abandoned"}:
+                continue
+            try:
+                wo = store.load(s["id"])
+            except Exception as e:
+                logger.warning("[%s] promote: %s not loadable: %s", self.name, s.get("id"), e)
+                continue
+            goal_id = wo.goal_node_id
+            for n in wo.nodes.values():
+                if n.id == goal_id or n.status not in {"proposed", "waiting"}:
+                    continue
+                if str(getattr(n, "wake_kind", None) or "") in {"event", "signal"}:
+                    continue   # external-event nodes are woken via node_wakes, not promoted here
+                if not wo.is_ready(n, now):
+                    continue   # time/dep gate not clear — leave it parked
+                family = FAMILY_BY_TYPE.get(n.type, "spine")
+                if "actionable" not in TRANSITIONS.get(family, {}).get(n.status, set()):
+                    continue   # non-dispatchable family (knowledge/question/verification)
+                store.apply("set_status", {"work_id": wo.id, "node_id": n.id, "status": "actionable"},
+                            actor="state_mover")
+                promoted.append(f"{wo.id}::{n.id}")
+        if promoted:
+            logger.info("[%s] promoted %d ready node(s) -> actionable", self.name, len(promoted))
+            self.blackboard.update_state_value("promoted_work_nodes", promoted)
 
     def _apply_node_wakes(self):
         node_wakes = self.blackboard.get_state_value("node_wakes", []) or []

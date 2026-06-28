@@ -210,7 +210,9 @@ class WorkObject(BaseModel):
         return node.status in _SATISFIED_STATUSES
 
     def is_ready(self, node: WorkNode, now: Optional[datetime] = None) -> bool:
-        if node.status not in {"proposed", "waiting"}:
+        # proposed/waiting = gate-checkable (state_mover reads this to decide promotion);
+        # actionable = already state_mover-promoted but not yet dispatched — still "ready".
+        if node.status not in {"proposed", "waiting", "actionable"}:
             return False
         now = now or utcnow()
         if node.wake_at is not None and node.wake_at > now:

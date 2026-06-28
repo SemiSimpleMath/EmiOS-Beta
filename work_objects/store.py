@@ -40,9 +40,12 @@ FAMILY_BY_TYPE = {
 }
 TRANSITIONS: dict[str, dict[str, set[str]]] = {
     "spine": {
-        "proposed": {"active", "waiting", "failed", "abandoned"},   # failed = dispatch broke before the node ran
+        # proposed = architect's inbox (born here). state_mover promotes proposed->actionable
+        # when the node's gates (time/deps) are clear; only THEN may the action_selector dispatch it.
+        "proposed": {"actionable", "active", "waiting", "failed", "abandoned"},   # failed = dispatch broke before the node ran
+        "actionable": {"active", "waiting", "failed", "abandoned"},   # state_mover-promoted; awaiting action_selector dispatch
         "active": {"waiting", "done", "failed", "abandoned"},
-        "waiting": {"active", "done", "failed", "abandoned"},
+        "waiting": {"actionable", "active", "done", "failed", "abandoned"},
         "done": {"superseded"},
         "failed": {"active", "proposed", "abandoned"},   # proposed = re-open: the work_repair adjudicator re-issues a failed node
         "abandoned": set(), "superseded": set(),
@@ -52,9 +55,10 @@ TRANSITIONS: dict[str, dict[str, set[str]]] = {
         # proposed (the send IS the completion: proposed->done). Otherwise it follows the
         # spine lifecycle — a notify can still be parked (wake-gated), worker-run after a
         # user_reply, abandoned (abandon-propagation), or superseded.
-        "proposed": {"active", "waiting", "done", "failed", "abandoned"},
+        "proposed": {"actionable", "active", "waiting", "done", "failed", "abandoned"},
+        "actionable": {"active", "waiting", "done", "failed", "abandoned"},   # state_mover-promoted; awaiting action_selector dispatch
         "active": {"waiting", "done", "failed", "abandoned"},
-        "waiting": {"active", "done", "failed", "abandoned"},
+        "waiting": {"actionable", "active", "done", "failed", "abandoned"},
         "done": {"superseded"},
         "failed": {"active", "proposed", "abandoned"},
         "abandoned": set(), "superseded": set(),

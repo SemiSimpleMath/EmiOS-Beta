@@ -16,7 +16,6 @@ from app.assistant.utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 _TERMINAL_WO_STATES = {"done", "abandoned"}
-_EVENT_WAKES = {"event", "signal"}   # the state_mover owns these — not dispatchable from here
 
 
 class WorkNodeMaterializerNode(ControlNode):
@@ -60,15 +59,16 @@ class WorkNodeMaterializerNode(ControlNode):
 
     @staticmethod
     def _node_items(wo, now):
-        """The ready, dispatchable nodes of ONE work object, as action_selector items."""
+        """The ACTIONABLE nodes of ONE work object, as action_selector items. A node is dispatchable ONLY
+        once state_mover has promoted it (proposed/waiting -> actionable); a node still in proposed/waiting
+        sits parked in the architect's inbox and is NOT listed here. (External-event nodes are never promoted
+        — the state_mover wakes them via node_wakes — so they never reach actionable.)"""
         out = []
         goal_id = wo.goal_node_id
         for n in wo.nodes.values():
             if n.id == goal_id:
                 continue
-            if str(getattr(n, "wake_kind", None) or "") in _EVENT_WAKES:
-                continue
-            if not wo.is_ready(n, now):
+            if n.status != "actionable":
                 continue
             task = (f"{n.title}. {n.content}" if n.content else (n.title or "")).strip()
             out.append({
