@@ -93,6 +93,12 @@ class WorkNodeDispatchNode(ControlNode):
         if str(getattr(node, "wake_kind", None) or "") == "user_reply":
             self._surface_ask(work_id, node_id, node)
             from work_objects.model import utcnow
+            # Park the asked node OUT of `actionable` so the action_selector stops seeing it — it is now
+            # in-flight, awaiting the user's reply. The materializer lists by status==actionable (ignoring the
+            # wake), so leaving it `actionable` would re-surface the ticket every tick. defer_node only flips
+            # active->waiting, so set it explicitly first.
+            store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "waiting"},
+                        actor="node_dispatch")
             store.apply("defer_node", {"work_id": work_id, "node_id": node_id, "wake_kind": "user_reply",
                                        "wake_at": utcnow() + timedelta(hours=_REASK_HOURS),
                                        "wake_ref": node.wake_ref}, actor="node_dispatch")

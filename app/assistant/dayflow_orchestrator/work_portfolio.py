@@ -16,6 +16,16 @@ from collections import Counter
 _TITLE_CHARS = 90
 _BODY_CHARS = 400
 
+# A compact glossary of node statuses, prepended to projections so agents reason over the vocabulary
+# unambiguously (esp. `active`, which means in-flight, NOT "open/available").
+STATUS_LEGEND = (
+    "NODE STATUS KEY — proposed: planned, sitting in the architect's inbox (not yet approved to run). "
+    "actionable: the state_mover approved it; it is queued for the action_selector to dispatch. "
+    "active: DISPATCHED / IN-FLIGHT — a worker is running it right now (do not re-dispatch). "
+    "waiting: parked on a time / event / dependency gate. done: finished. "
+    "failed: the step broke and is awaiting work_repair. abandoned: dropped."
+)
+
 
 def _t(n) -> str:
     return (getattr(n, "title", "") or getattr(n, "content", "") or "").strip().replace("\n", " ")[:_TITLE_CHARS]
@@ -114,4 +124,4 @@ def render_portfolio(work_objects, now=None) -> str:
     work_objects = list(work_objects or [])
     if not work_objects:
         return "(no active work objects)"
-    return "\n\n".join(render_work_portfolio(wo, now) for wo in work_objects)
+    return STATUS_LEGEND + "\n\n" + "\n\n".join(render_work_portfolio(wo, now) for wo in work_objects)

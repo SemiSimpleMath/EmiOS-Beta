@@ -47,7 +47,7 @@ class WorkRepairNode(ControlNode):
         repaired = []
         try:
             from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
-            from app.assistant.dayflow_orchestrator.work_portfolio import render_work_portfolio
+            from app.assistant.dayflow_orchestrator.work_portfolio import render_work_portfolio, STATUS_LEGEND
             from app.assistant.dayflow_orchestrator.work_repair_apply import apply_adjudication
             store = get_dayflow_work_store()
 
@@ -66,7 +66,7 @@ class WorkRepairNode(ControlNode):
                 scope = self._scope(message)
                 for wo in stuck[:_MAX_REPAIRS_PER_TICK]:
                     try:
-                        projection = render_work_portfolio(wo)
+                        projection = STATUS_LEGEND + "\n\n" + render_work_portfolio(wo)
                         replies = _extract_user_replies(wo)
                         agent = DI.agent_factory.create_agent("dayflow_orchestrator::work_repair")
                         result = agent.action_handler(
