@@ -181,7 +181,7 @@ All proposers read the arbiter's latest plan back through `context_builder.build
 
 **Easy meals** (`easy_meals.py`) is a structured "go-to dishes the family tolerates" registry in `resources/subconscious/resource_easy_meals.json` (each dish has a `max_days` cadence), seeded on first run from the markdown food registry. "Days since last served" is **derived** (not stored) by token-matching dish names against recent `plan.weekly_meals` + `intention.meal` pods (past dates only). `render_easy_meals_for_planner()` (status: never/due/resting, most-overdue first) is injected into both meal agents.
 
-> **Known issue (live code, not design):** `wellness_persist._mint_intention_wellness_pod` and `romantic_persist._mint_intention_romantic_pod` reference an undefined local `addresses`, raising `NameError` inside a try/except that returns `None` — so those two lanes currently drop every proposal pod silently. The meal lane was deliberately switched to fail-loud after the identical defect (`scratch/MEAL-PLANNING-AUDIT.md`); wellness/romantic still soft-fail.
+> **Note (resolved):** `wellness_persist._mint_intention_wellness_pod` and `romantic_persist._mint_intention_romantic_pod` once dropped every proposal pod silently via a `NameError` on an undefined local `addresses` inside a try/except — the same defect the meal lane hit before it was switched to fail-loud (`scratch/MEAL-PLANNING-AUDIT.md`). **Fixed:** all three lanes now mint their pods correctly.
 
 ### Daily ordering
 
