@@ -62,11 +62,11 @@ EDGE_RELATIONS_KNOWN = {
 }
 NODE_STATUS_KNOWN = {
     # work spine
-    "proposed", "active", "waiting", "done", "failed", "abandoned",
+    "proposed", "actionable", "dispatched", "waiting", "done", "incomplete", "closed", "failed", "abandoned",
     # knowledge (evidence/artifact)
     "assumed", "verified", "stale", "superseded",
-    # question / verification
-    "open", "answered", "unanswerable", "passed",
+    # question / verification ("active" = a verification run in progress)
+    "open", "answered", "unanswerable", "active", "passed",
 }
 SATISFIED_WHEN_KINDS = {
     "tool_success", "all_owned_children_done", "verified_by", "user_signoff", "quality_bar",
@@ -77,7 +77,7 @@ WAKE_KINDS = {"time", "event", "user_reply", "signal"}
 # statuses that count as "this node has delivered what it owes"
 _SATISFIED_STATUSES = {"done", "verified", "passed", "answered"}
 # statuses past which a node will never become ready again
-_TERMINAL_STATUSES = {"done", "failed", "abandoned", "superseded", "verified", "passed", "answered", "unanswerable"}
+_TERMINAL_STATUSES = {"done", "closed", "failed", "abandoned", "superseded", "verified", "passed", "answered", "unanswerable"}
 
 
 def new_id(prefix: str = "node") -> str:

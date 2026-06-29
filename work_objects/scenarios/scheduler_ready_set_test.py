@@ -38,7 +38,7 @@ def main() -> None:
         "satisfied_when_kind": "all_owned_children_done",
     }, actor="test")
     goal_id = wo.goal_node_id
-    store.apply("set_status", {"work_id": wo.id, "node_id": goal_id, "status": "active"})
+    store.apply("set_status", {"work_id": wo.id, "node_id": goal_id, "status": "dispatched"})
 
     store.apply("add_node", {"work_id": wo.id, "type": "subtask", "title": "do now",
                              "parent_id": goal_id}, actor="planner")
@@ -60,7 +60,7 @@ def main() -> None:
         "satisfied_when_kind": "all_owned_children_done",
     }, actor="test")
     g2 = wo2.goal_node_id
-    store.apply("set_status", {"work_id": wo2.id, "node_id": g2, "status": "active"})
+    store.apply("set_status", {"work_id": wo2.id, "node_id": g2, "status": "dispatched"})
     store.apply("add_node", {"work_id": wo2.id, "type": "subtask", "title": "A (upstream)",
                              "parent_id": g2}, actor="planner")
     store.apply("add_node", {"work_id": wo2.id, "type": "subtask", "title": "B (downstream)",
@@ -78,7 +78,7 @@ def main() -> None:
     ck("B is BLOCKED while A is unsatisfied", b.id not in ready)
 
     # satisfy A: spine node steps proposed -> active -> done
-    store.apply("set_status", {"work_id": wo2.id, "node_id": a.id, "status": "active"})
+    store.apply("set_status", {"work_id": wo2.id, "node_id": a.id, "status": "dispatched"})
     store.apply("set_status", {"work_id": wo2.id, "node_id": a.id, "status": "done"})
     wo2 = store.load(wo2.id)
     ready_after = {n.id for n in wo2.ready_nodes(now)}

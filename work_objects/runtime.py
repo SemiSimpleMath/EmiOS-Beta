@@ -44,16 +44,16 @@ def reset_work_context(token: contextvars.Token) -> None:
 
 
 def active_attribution_node(store, work_id: str, owned_node_id: str) -> str:
-    """The node a planner's work attributes to: the single in-progress (status 'active') checklist
+    """The node a planner's work attributes to: the single in-progress (status 'dispatched') checklist
     subtask under the node it owns, else the owned node itself. So a planner's tool results (evidence)
     and the managers it delegates (child nodes) nest UNDER the checklist item it is currently working —
     goal -> checklist item -> this delegation — not the parent it owns. Read identically by the
     WorkPlanner reconcile and the node-handoff, so every work_* manager behaves the same. Ambiguous
-    (0 or >1 active children) -> the owned node."""
+    (0 or >1 in-flight children) -> the owned node."""
     try:
         wo = store.load(work_id)
     except Exception:
         return owned_node_id
-    active = [n.id for n in wo.nodes.values()
-              if n.parent_id == owned_node_id and n.type == "subtask" and n.status == "active"]
-    return active[0] if len(active) == 1 else owned_node_id
+    inflight = [n.id for n in wo.nodes.values()
+                if n.parent_id == owned_node_id and n.type == "subtask" and n.status == "dispatched"]
+    return inflight[0] if len(inflight) == 1 else owned_node_id

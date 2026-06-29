@@ -16,8 +16,26 @@ from __future__ import annotations
 
 import os
 
+from app.assistant.utils.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 _BUSY_TIMEOUT_MS = 10_000
 _stores: dict[str, object] = {}
+
+
+def _migrate_node_active_to_dispatched(conn) -> None:
+    """One-time, idempotent: rename spine/notify node status 'active' -> 'dispatched' (the in-flight marker).
+    A no-op once migrated. Verification nodes keep 'active' (a verification run in progress)."""
+    try:
+        with conn:
+            cur = conn.execute(
+                "UPDATE nodes SET status='dispatched' WHERE status='active' AND type != 'verification'")
+        n = cur.rowcount or 0
+        if n > 0:
+            logger.info("[work_store] migrated %d node(s) status 'active' -> 'dispatched'", n)
+    except Exception as e:
+        logger.error("[work_store] active->dispatched migration failed: %s", e)
 
 
 def dayflow_work_db_path() -> str:
@@ -43,6 +61,7 @@ def get_dayflow_work_store():
             conn = getattr(store, "conn", None) or getattr(store, "_conn", None)
             if conn is not None:
                 conn.execute(f"PRAGMA busy_timeout = {_BUSY_TIMEOUT_MS}")
+                _migrate_node_active_to_dispatched(conn)
         except Exception:
             pass
         _stores[path] = store

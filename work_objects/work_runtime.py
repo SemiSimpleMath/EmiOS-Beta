@@ -50,11 +50,11 @@ def run_node(store, work_id: str, node_id: str,
     determines how the node is handed to it — no manager-name branching here."""
     _ensure_registered()
     cur = store.load(work_id).nodes[node_id]
-    # On pickup, flip the node to `active` = DISPATCHED / in-flight. `actionable` is included because the
+    # On pickup, flip the node to `dispatched` = in-flight. `actionable` is included because the
     # state_mover gate now dispatches nodes from `actionable` (not `proposed`); without this an in-flight node
     # stays `actionable` — the action_selector could re-dispatch it, and the close below (->done) is illegal.
     if cur.status in {"proposed", "waiting", "actionable"}:
-        store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "active"}, actor="manager")
+        store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "dispatched"}, actor="manager")
 
     # The manager's `node_input` config decides how its node is handed to it (no manager-name check):
     #   "task"   -> feed the node content as the task (+ deps as information), web_manager-style; the

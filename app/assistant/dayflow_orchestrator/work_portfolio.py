@@ -17,11 +17,11 @@ _TITLE_CHARS = 90
 _BODY_CHARS = 400
 
 # A compact glossary of node statuses, prepended to projections so agents reason over the vocabulary
-# unambiguously (esp. `active`, which means in-flight, NOT "open/available").
+# unambiguously (esp. `dispatched`, which means in-flight, NOT "open/available").
 STATUS_LEGEND = (
     "NODE STATUS KEY — proposed: planned, sitting in the architect's inbox (not yet approved to run). "
     "actionable: the state_mover approved it; it is queued for the action_selector to dispatch. "
-    "active: DISPATCHED / IN-FLIGHT — a worker is running it right now (do not re-dispatch). "
+    "dispatched: IN-FLIGHT — a worker is on it, or an ask is out (do not re-dispatch). "
     "waiting: parked on a time / event / dependency gate. done: finished. "
     "failed: the step broke and is awaiting work_repair. abandoned: dropped."
 )

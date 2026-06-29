@@ -27,12 +27,12 @@ def test_consumed_artifact_folds_into_goal_and_closes_item():
                              source_type="email"),
     ])
 
-    # A freshly created work object (goal active) — what persist_steward_output would have minted.
+    # A freshly created work object (goal dispatched) — what persist_steward_output would have minted.
     store = get_dayflow_work_store()
     wo = store.apply("create_work_object",
                      {"title": "handle the delayed flight", "goal_content": "Handle the delayed flight"},
                      actor="test")
-    store.apply("set_status", {"work_id": wo.id, "node_id": wo.goal_node_id, "status": "active"}, actor="test")
+    store.apply("set_status", {"work_id": wo.id, "node_id": wo.goal_node_id, "status": "dispatched"}, actor="test")
 
     bb = FakeBlackboard({
         "admitted_artifacts": [
@@ -50,7 +50,7 @@ def test_consumed_artifact_folds_into_goal_and_closes_item():
     goal = reloaded.nodes[reloaded.goal_node_id]
     assert "Flight AA123 delayed" in (goal.content or ""), f"intake not folded into goal: {goal.content!r}"
     assert "Originating intake" in goal.content
-    assert goal.status == "active", "fold must not change the goal status"
+    assert goal.status == "dispatched", "fold must not change the goal status"
 
     # The item is closed (consumed).
     item = load_item_by_id("email:flight1")

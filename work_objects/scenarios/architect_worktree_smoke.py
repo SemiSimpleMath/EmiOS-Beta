@@ -52,7 +52,7 @@ def main() -> None:
     wo = store.apply("create_work_object", {"title": "dinner prep", "goal_content": GOAL,
                                             "satisfied_when_kind": "all_owned_children_done"}, actor="architect")
     wid, goal = wo.id, wo.goal_node_id
-    store.apply("set_status", {"work_id": wid, "node_id": goal, "status": "active"}, actor="architect")
+    store.apply("set_status", {"work_id": wid, "node_id": goal, "status": "dispatched"}, actor="architect")
     job_to_node = {}
     for job in spawn:
         nid = new_id("node")

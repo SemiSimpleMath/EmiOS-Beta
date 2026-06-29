@@ -49,7 +49,7 @@ def main() -> None:
         "satisfied_when_kind": "all_owned_children_done",
     }, actor="test")
     goal_id = wo.goal_node_id
-    store.apply("set_status", {"work_id": wo.id, "node_id": goal_id, "status": "active"})
+    store.apply("set_status", {"work_id": wo.id, "node_id": goal_id, "status": "dispatched"})
 
     # Two top-level task nodes (parent == goal). Pure-knowledge tasks: a sane planner
     # answers from its own knowledge and returns control — no web/tool delegation needed.

@@ -42,12 +42,17 @@ TRANSITIONS: dict[str, dict[str, set[str]]] = {
     "spine": {
         # proposed = architect's inbox (born here). state_mover promotes proposed->actionable
         # when the node's gates (time/deps) are clear; only THEN may the action_selector dispatch it.
-        "proposed": {"actionable", "active", "waiting", "failed", "abandoned"},   # failed = dispatch broke before the node ran
-        "actionable": {"active", "waiting", "failed", "abandoned"},   # state_mover-promoted; awaiting action_selector dispatch
-        "active": {"waiting", "done", "failed", "abandoned"},
-        "waiting": {"actionable", "active", "done", "failed", "abandoned"},
-        "done": {"superseded"},
-        "failed": {"active", "proposed", "abandoned"},   # proposed = re-open: the work_repair adjudicator re-issues a failed node
+        # dispatched = in-flight (a worker is on it, or an ask is out) — the action_selector/gate are blind to it.
+        # done = work was done (manager's verdict) | incomplete = acted on but couldn't (+ why). Both await the
+        # finalizer, which ALONE produces closed (the satisfied terminal). [step 2 keys is_satisfied on closed]
+        "proposed": {"actionable", "dispatched", "waiting", "failed", "abandoned"},   # failed = dispatch broke before the node ran
+        "actionable": {"dispatched", "waiting", "failed", "abandoned"},   # state_mover-promoted; awaiting action_selector dispatch
+        "dispatched": {"waiting", "done", "incomplete", "failed", "abandoned"},
+        "waiting": {"actionable", "dispatched", "done", "incomplete", "failed", "abandoned"},
+        "done": {"closed", "superseded"},
+        "incomplete": {"closed", "actionable", "abandoned"},
+        "closed": {"superseded"},
+        "failed": {"dispatched", "proposed", "abandoned"},   # proposed = re-open: the work_repair adjudicator re-issues a failed node
         "abandoned": set(), "superseded": set(),
     },
     "notify": {
@@ -55,12 +60,14 @@ TRANSITIONS: dict[str, dict[str, set[str]]] = {
         # proposed (the send IS the completion: proposed->done). Otherwise it follows the
         # spine lifecycle — a notify can still be parked (wake-gated), worker-run after a
         # user_reply, abandoned (abandon-propagation), or superseded.
-        "proposed": {"actionable", "active", "waiting", "done", "failed", "abandoned"},
-        "actionable": {"active", "waiting", "done", "failed", "abandoned"},   # state_mover-promoted; awaiting action_selector dispatch
-        "active": {"waiting", "done", "failed", "abandoned"},
-        "waiting": {"actionable", "active", "done", "failed", "abandoned"},
-        "done": {"superseded"},
-        "failed": {"active", "proposed", "abandoned"},
+        "proposed": {"actionable", "dispatched", "waiting", "done", "failed", "abandoned"},
+        "actionable": {"dispatched", "waiting", "done", "failed", "abandoned"},   # state_mover-promoted; awaiting action_selector dispatch
+        "dispatched": {"waiting", "done", "incomplete", "failed", "abandoned"},
+        "waiting": {"actionable", "dispatched", "done", "incomplete", "failed", "abandoned"},
+        "done": {"closed", "superseded"},
+        "incomplete": {"closed", "actionable", "abandoned"},
+        "closed": {"superseded"},
+        "failed": {"dispatched", "proposed", "abandoned"},
         "abandoned": set(), "superseded": set(),
     },
     "knowledge": {
@@ -268,7 +275,7 @@ class WorkStore:
         node.wake_kind = wake_kind
         node.wake_at = data.get("wake_at")
         node.wake_ref = data.get("wake_ref")
-        if node.status == "active":
+        if node.status == "dispatched":
             node.status = "waiting"
         node.updated_at = now
 
@@ -328,7 +335,7 @@ class WorkStore:
         goal = wo.nodes.get(wo.goal_node_id or "")
         if goal is not None and wo.is_satisfied(goal):
             wo.status = "done"
-            if goal.status == "active":      # close the goal node (active->done is legal)
+            if goal.status == "dispatched":      # close the goal node (dispatched->done is legal)
                 goal.status = "done"
                 goal.updated_at = now
         wo.updated_at = now

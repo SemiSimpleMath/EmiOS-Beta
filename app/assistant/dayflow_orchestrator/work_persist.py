@@ -34,7 +34,7 @@ def persist_steward_output(store, output: Dict[str, Any]) -> Dict[str, Any]:
                 "satisfied_when_kind": "all_owned_children_done",
             }, actor="steward")
             store.apply("set_status", {
-                "work_id": wo.id, "node_id": wo.goal_node_id, "status": "active",
+                "work_id": wo.id, "node_id": wo.goal_node_id, "status": "dispatched",
             }, actor="steward")
             created.append({"objective": objective, "work_id": wo.id,
                             "based_on": list(spec.get("based_on") or [])})

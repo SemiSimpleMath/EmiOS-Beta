@@ -61,7 +61,7 @@ def main() -> None:
     ck("7 mutations recorded in the event log (create + 3 nodes + 3 edges)", len(store.events(wo.id)) == 7)
 
     # authority ceiling: a child cannot exceed its parent's authority
-    store.apply("set_status", {"work_id": wo.id, "node_id": goal_id, "status": "active"})  # goal proposed -> active
+    store.apply("set_status", {"work_id": wo.id, "node_id": goal_id, "status": "dispatched"})  # goal proposed -> active
     # give the tool an authority, then try to add a more-privileged child under it
     try:
         store.apply("add_node", {"work_id": wo.id, "type": "subtask", "parent_id": tool_id, "authority": 99}, actor="planner")
@@ -95,7 +95,7 @@ def main() -> None:
     except ValueError as e:
         ck(f"illegal proposed->done rejected ({e})", True)
 
-    store2.apply("set_status", {"work_id": wo.id, "node_id": tool_id, "status": "active"})
+    store2.apply("set_status", {"work_id": wo.id, "node_id": tool_id, "status": "dispatched"})
     store2.apply("set_status", {"work_id": wo.id, "node_id": tool_id, "status": "done"})
     store2.apply("set_status", {"work_id": wo.id, "node_id": artifact_id, "status": "done"})
     wo_final = store2.apply("set_status", {"work_id": wo.id, "node_id": evidence_id, "status": "verified"})

@@ -71,7 +71,7 @@ def main() -> None:
     # --- the subtask's agent records a finding + an artifact, then finishes ---
     # (the WorkManager normally picks up the node proposed->active before running
     # its agent; this test bypasses the manager, so simulate that pickup.)
-    store.apply("set_status", {"work_id": wo.id, "node_id": sub_id, "status": "active"}, actor="manager")
+    store.apply("set_status", {"work_id": wo.id, "node_id": sub_id, "status": "dispatched"}, actor="manager")
     tok = set_work_context(store, wo.id, sub_id, actor="web_researcher")
     fres = call("work_record_finding", {"claim": "X increases Y by ~30%", "confidence": 0.8, "pod_ref": "datapod:x:aaa"})
     call("work_produce_artifact", {"title": "notes on X", "pod_ref": "datapod:x:aaa"})
