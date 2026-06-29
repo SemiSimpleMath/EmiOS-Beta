@@ -88,8 +88,8 @@ class WorkPlanner(Planner):
         # fork a node.
         def _spine(planner_status) -> str:
             s = str(planner_status or "todo").strip().lower()
-            if s in ("in_progress", "in progress", "doing", "active"):
-                return "active"
+            if s in ("in_progress", "in progress", "doing", "active", "dispatched"):
+                return "dispatched"
             if s in ("done", "complete", "completed"):
                 return "done"
             if s in ("abandoned", "abandon", "dropped"):
@@ -110,7 +110,7 @@ class WorkPlanner(Planner):
                 self._transition_subtask(store, work_id, cid, by_id[cid].status, target, actor, evidence)
             elif not cid:
                 fresh = tools.add_subtask(name)
-                if target in ("active", "waiting"):   # a brand-new item declared in_progress (or paused) this turn
+                if target in ("dispatched", "waiting"):   # a brand-new item declared in_progress (or paused) this turn
                     self._transition_subtask(store, work_id, fresh, "proposed", target, actor, "")
 
         # The node this turn's work attributes to: the single in-progress checklist item (set above),
@@ -147,12 +147,12 @@ class WorkPlanner(Planner):
 
     @staticmethod
     def _transition_subtask(store, work_id, node_id, cur, target, actor, evidence: str = "") -> None:
-        """Drive a checklist item along the spine (proposed -> active -> done|abandoned), with PAUSE:
-        active <-> waiting. The planner marks an item in_progress (-> active); to set it aside to work
-        another first it marks it paused/INCOMPLETE (-> waiting, re-activatable), and resumes by marking
-        it in_progress again (waiting -> active). Exactly one item is 'active' at a time, which is what
-        the attribution resolver keys on. On a closing transition the `evidence` note is written onto the
-        node's content."""
+        """Drive a checklist item along the spine (proposed -> dispatched -> done|abandoned), with PAUSE:
+        dispatched <-> waiting. The planner marks an item in_progress (-> dispatched); to set it aside to
+        work another first it marks it paused/INCOMPLETE (-> waiting, re-activatable), and resumes by
+        marking it in_progress again (waiting -> dispatched). Exactly one item is 'dispatched' at a time,
+        which is what the attribution resolver keys on. On a closing transition the `evidence` note is
+        written onto the node's content."""
         def _set(status, content=None):
             data = {"work_id": work_id, "node_id": node_id, "status": status}
             if content is not None:
@@ -161,14 +161,14 @@ class WorkPlanner(Planner):
         try:
             if target == "done" and cur != "done":
                 if cur == "proposed":
-                    _set("active"); cur = "active"
-                if cur in {"active", "waiting"}:
+                    _set("dispatched"); cur = "dispatched"
+                if cur in {"dispatched", "waiting"}:
                     _set("done", content=evidence or None)
-            elif target == "active" and cur in {"proposed", "waiting"}:   # start a new item OR RESUME a paused one
-                _set("active")
-            elif target == "waiting" and cur in {"proposed", "active"}:   # PAUSE / set aside — re-activatable later
+            elif target == "dispatched" and cur in {"proposed", "waiting"}:   # start a new item OR RESUME a paused one
+                _set("dispatched")
+            elif target == "waiting" and cur in {"proposed", "dispatched"}:   # PAUSE / set aside — re-activatable later
                 _set("waiting", content=evidence or None)
-            elif target == "abandoned" and cur in {"proposed", "active", "waiting", "failed"}:
+            elif target == "abandoned" and cur in {"proposed", "dispatched", "waiting", "failed"}:
                 _set("abandoned", content=evidence or None)
         except Exception as e:
             logger.debug("subtask transition %s %s->%s skipped: %s", node_id, cur, target, e)
