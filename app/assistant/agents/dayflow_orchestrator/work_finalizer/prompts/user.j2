@@ -1,0 +1,12 @@
+Current time: {{ date_time }}.
+
+A node in this work object just COMPLETED. The work object's projection:
+
+{{ task }}
+{% if information %}
+
+{{ information }}
+{% endif %}
+Decide the single verdict (proceed / amend / resolve) for how this completed node's result bears on the
+whole goal. Default PROCEED unless the result genuinely changes the plan (AMEND — give the revised intent)
+or settles the goal (RESOLVE — close or abandon).

@@ -26,6 +26,8 @@ agents:
     class: Agent
   - name: dayflow_orchestrator::switchboard
     class: Agent
+  - name: dayflow_orchestrator::work_finalizer
+    class: Agent
 
 control_nodes:
   - name: tick_router_node
@@ -66,6 +68,8 @@ control_nodes:
     class: WorkExecutionNode
   - name: work_repair_node
     class: WorkRepairNode
+  - name: work_finalizer_node
+    class: WorkFinalizerNode
   - name: work_node_materializer_node
     class: WorkNodeMaterializerNode
   - name: work_node_dispatch_node
@@ -169,7 +173,8 @@ flow_config:
     "strategic_planner_wo_persist_node": "work_architect_node"
     "work_architect_node": "work_repair_node"
     "work_execution_node": "work_repair_node"
-    "work_repair_node": "state_mover_prep_node"
+    "work_repair_node": "work_finalizer_node"
+    "work_finalizer_node": "state_mover_prep_node"
     # old plan-task path (no longer reached from context_enricher_persist_node):
     "strategic_planner_prep_node": "dayflow_orchestrator::strategic_planner"
     "dayflow_orchestrator::strategic_planner": "planner_persist_node"
