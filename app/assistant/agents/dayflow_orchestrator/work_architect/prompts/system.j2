@@ -99,3 +99,7 @@ the worker pulls it from the graph.
 ## Output
 - architect_summary: one line on the graph you designed.
 - nodes: the DAG — node_id, title, detail, depends_on, and wake fields ONLY on nodes that must wait.
+- abandon_node_ids: RE-PLAN ONLY. When a goal already has a graph and you are revising it, output a
+  DELTA: add the missing nodes AND abandon (by node_id) any existing node the situation now makes moot or
+  wrong — pruning a dead branch is as much your job as adding. Leave empty on a fresh decomposition.
+  Finished (done/closed) nodes are kept as a record; only un-done moot work is pruned.

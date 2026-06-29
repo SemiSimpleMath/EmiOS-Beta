@@ -33,11 +33,38 @@ def _to_dt(s):
         return None
 
 
-def apply_architect_dag(store, work_id: str, nodes: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Add the architect's nodes as subtasks under the goal, wire depends_on edges, set wake-gates.
-    Idempotent on node_id (a slug already present is skipped). Returns {added, edges, waits}."""
+_ABANDON_SKIP = {"done", "closed", "abandoned", "superseded"}  # finished/finalized — left as a record
+
+
+def apply_architect_dag(store, work_id: str, nodes: List[Dict[str, Any]],
+                        abandon_node_ids: List[str] | None = None) -> Dict[str, Any]:
+    """Apply an architect DELTA onto a work object's graph. On a fresh decompose it just adds nodes; on a
+    RE-PLAN it can also PRUNE: abandon each `abandon_node_ids` node + its un-finished ownership subtree
+    (the store does not cascade — dependent-pruning #54 — so we recurse children here, leaving done/closed
+    nodes as a record). Then add new nodes, wire depends_on, set wake-gates. Idempotent on node_id.
+    Returns {added, edges, waits, abandoned}."""
     wo = store.load(work_id)
     goal_id = wo.goal_node_id
+
+    # 0) PRUNE pass (re-plan) — abandon the named moot nodes + their un-finished subtrees.
+    abandoned: List[str] = []
+    seen: set[str] = set()
+    stack = [str(x).strip() for x in (abandon_node_ids or []) if str(x).strip()]
+    while stack:
+        nid = stack.pop()
+        if nid in seen or nid == goal_id or nid not in wo.nodes:
+            continue
+        seen.add(nid)
+        if wo.nodes[nid].status in _ABANDON_SKIP:
+            continue   # finished/already-gone — preserve the record, don't recurse a done branch
+        try:
+            store.apply("set_status", {"work_id": work_id, "node_id": nid, "status": "abandoned"}, actor="architect")
+            abandoned.append(nid)
+        except Exception as e:
+            logger.warning("apply_architect_dag: abandon %s failed: %s", nid, e)
+            continue
+        stack.extend(c for c in wo.children_of(nid) if c not in seen)
+
     existing = set(wo.nodes.keys())
     specs = [n for n in (nodes or []) if isinstance(n, dict)]
 
@@ -83,5 +110,6 @@ def apply_architect_dag(store, work_id: str, nodes: List[Dict[str, Any]]) -> Dic
             }, actor="architect")
             waits += 1
 
-    logger.info("apply_architect_dag(%s): +%d nodes, +%d deps, +%d waits", work_id, len(added), edges, waits)
-    return {"added": added, "edges": edges, "waits": waits}
+    logger.info("apply_architect_dag(%s): +%d nodes, +%d deps, +%d waits, -%d abandoned",
+                work_id, len(added), edges, waits, len(abandoned))
+    return {"added": added, "edges": edges, "waits": waits, "abandoned": abandoned}

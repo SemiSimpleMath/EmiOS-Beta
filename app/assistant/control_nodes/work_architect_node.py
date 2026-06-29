@@ -113,16 +113,20 @@ class WorkArchitectNode(ControlNode):
                         objective = (getattr(goal, "content", "") or getattr(goal, "title", "")) if goal else ""
                         task = (
                             f"{objective}\n\nThis goal ALREADY has a partial work graph (below) that no "
-                            f"longer fits — add the steps still missing to reach the goal. Output ONLY NEW "
-                            f"nodes to add; do NOT recreate existing ones (you may reference their node_ids "
-                            f"in depends_on). Existing nodes:\n{_render_existing_graph(wo)}"
+                            f"longer fits. RE-PLAN it as a DELTA: ADD the steps still missing, and ABANDON "
+                            f"(list their node_ids in abandon_node_ids) any existing node the situation now "
+                            f"makes moot/wrong — its un-finished sub-steps go with it. Do NOT recreate "
+                            f"existing nodes (reference their node_ids in depends_on). Output the delta only. "
+                            f"Existing nodes:\n{_render_existing_graph(wo)}"
                         )
                         result = agent.action_handler(Message(task=task, information=info, scope_context=scope))
-                        nodes = (getattr(result, "data", {}) or {}).get("nodes", []) or []
-                        res = apply_architect_dag(store, work_id, nodes)
-                        replanned.append({"work_id": work_id, "added": len(res.get("added", []))})
-                        logger.info("[%s] re-planned %s: +%d node(s)",
-                                    self.name, work_id, len(res.get("added", [])))
+                        data = getattr(result, "data", {}) or {}
+                        res = apply_architect_dag(store, work_id, data.get("nodes", []) or [],
+                                                  abandon_node_ids=data.get("abandon_node_ids", []) or [])
+                        replanned.append({"work_id": work_id, "added": len(res.get("added", [])),
+                                          "abandoned": len(res.get("abandoned", []))})
+                        logger.info("[%s] re-planned %s: +%d node(s), -%d abandoned",
+                                    self.name, work_id, len(res.get("added", [])), len(res.get("abandoned", [])))
                     except Exception as e:
                         logger.error("[%s] re-plan failed for %s: %s", self.name, work_id, e)
                         logger.debug("[%s] re-plan exception", self.name, exc_info=True)

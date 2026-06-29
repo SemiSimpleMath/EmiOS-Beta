@@ -71,3 +71,10 @@ class AgentForm(BaseModel):
     nodes: List[WorkNode] = Field(
         default_factory=list,
         description="The DAG of work nodes for this goal. Keep it lean — 1-5 nodes for most goals.")
+    abandon_node_ids: List[str] = Field(
+        default_factory=list,
+        description="RE-PLAN ONLY (leave empty on a fresh decomposition): node_ids of EXISTING nodes the "
+        "latest situation makes moot or wrong — each one AND its un-finished sub-steps are abandoned. Use "
+        "this to PRUNE a dead branch, not only to add. E.g. evidence showed the unit is under warranty, so "
+        "abandon the 'find_contractor' branch and add a 'contact_manufacturer' path. Already-finished "
+        "(done/closed) nodes are left as a record; only un-done moot work is pruned.")
