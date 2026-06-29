@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
@@ -53,6 +54,59 @@ _MIN_REGEN_INTERVAL_SECONDS = 3600
 
 
 _BACKDROP_MIN_HOURS = 4  # items longer than this are treated as backdrops
+
+# ---- routine re-windowing (Option B) -------------------------------------------------------------------
+# The routine doc is LLM markdown, cached + frozen by the delta gate (it regenerates only on a calendar/belief
+# change, never as time passes). To keep the VISIBLE window current without re-running the LLM,
+# _rewindow_cached_doc trims the cached doc to ~now-2h -> end-of-day on each no-delta run: drop the
+# `### HH:MM` hour-sections whose LATEST time is already older than the cutoff. Deterministic, and biased
+# toward KEEPING — it never drops a section with any part still in-window, keeps ## sections / preamble /
+# unparseable headers, and is a pure no-op if the doc has no parseable hour grid.
+_ROUTINE_LOOKBACK_HOURS = 2
+_TIME_TOKEN_RE = re.compile(r"(\d{1,2}):(\d{2})\s*(AM|PM)?", re.IGNORECASE)
+
+
+def _latest_minutes(header: str) -> Optional[int]:
+    """Max minutes-since-midnight among time tokens in a `###` header, or None if none parse. Morning hours
+    are written 24h ('06:00'); afternoon 12h ('01:00 PM') — handle both. Range headers use the END (latest)."""
+    best: Optional[int] = None
+    for h, m, ap in _TIME_TOKEN_RE.findall(header):
+        hh, mm = int(h), int(m)
+        if hh > 23 or mm > 59:
+            continue
+        ap = ap.upper()
+        if ap == "AM" and hh == 12:
+            hh = 0
+        elif ap == "PM" and hh != 12:
+            hh += 12
+        mins = hh * 60 + mm
+        best = mins if best is None else max(best, mins)
+    return best
+
+
+def rewindow_routine(md: str, now_local: datetime, lookback_hours: int = _ROUTINE_LOOKBACK_HOURS) -> str:
+    """Drop the routine's `### ...` hour-sections whose LATEST time is older than now-lookback_hours. Keeps
+    ## sections, the preamble, ambiguous/unparseable `###` sections, and any section with part still in-window
+    (bias toward KEEPING — never drops a future hour). Pure (md, now) -> md; a no-op if no hour grid parses."""
+    cutoff = now_local.hour * 60 + now_local.minute - lookback_hours * 60
+    if cutoff <= 0:
+        return md  # early enough that nothing counts as 'past'
+    out, drop = [], False
+    for ln in md.splitlines():
+        s = ln.lstrip()
+        if s.startswith("### "):
+            latest = _latest_minutes(s[4:])
+            drop = latest is not None and latest < cutoff
+            if drop:
+                continue
+        elif s.startswith("## "):
+            drop = False  # a new top-level section ends any drop region
+        if not drop:
+            out.append(ln)
+    result = "\n".join(out)
+    if md.endswith("\n") and not result.endswith("\n"):
+        result += "\n"  # preserve trailing newline so an unchanged doc compares equal (no needless re-write)
+    return result
 
 
 def _is_backdrop(item: dict) -> bool:
@@ -307,6 +361,30 @@ class DayFlowRoutineStep(BaseStep):
                 return merged
         return data if data else None
 
+    def _rewindow_cached_doc(self, ctx) -> bool:
+        """Re-trim the cached routine doc to ~now-2h->EOD and re-publish it to the SAME two surfaces the regen
+        writes — the live file + the global blackboard — but NOT the day archive (that keeps the full-day
+        record). Lets the visible window slide even when the delta gate skips regeneration. Returns True if it
+        changed; never raises."""
+        try:
+            latest_path = Path(ctx.resources_dir) / _LATEST_FILENAME
+            md = latest_path.read_text(encoding="utf-8")
+            trimmed = rewindow_routine(md, ctx.now_local)
+            if trimmed == md:
+                return False
+            write_text_atomic(latest_path, trimmed)
+            try:
+                from app.assistant.ServiceLocator.service_locator import DI
+                if getattr(DI, "global_blackboard", None) is not None:
+                    DI.global_blackboard.update_state_value("resource_dayflow_routine", trimmed)
+            except Exception:
+                logger.debug("dayflow_routine re-window: could not push to global blackboard", exc_info=True)
+            return True
+        except Exception as e:
+            logger.error("[DayFlowRoutine] re-window failed: %s", e)
+            logger.debug("[DayFlowRoutine] re-window exception", exc_info=True)
+            return False
+
     def run(self, ctx: StepContext) -> StepResult:
         boundary_date_local = self._boundary_date_local(ctx)
         day_of_week = ctx.now_local.strftime("%A")
@@ -327,8 +405,12 @@ class DayFlowRoutineStep(BaseStep):
         prev_pointer = ctx.read_resource(_POINTER_FILENAME)
         prev_fp = prev_pointer.get("inputs_fingerprint") if isinstance(prev_pointer, dict) else None
         if prev_fp == fingerprint and (Path(ctx.resources_dir) / _LATEST_FILENAME).exists():
-            logger.info("[DayFlowRoutine] skipped — no delta in expected calendar or beliefs.")
-            return StepResult(output={"status": "skipped_no_delta"})
+            # No LLM delta — but slide the VISIBLE window: re-trim the cached doc to ~now-2h->EOD so the dead
+            # morning drops as the day advances (the doc is frozen by the gate; only the window should move).
+            # Deterministic, no LLM, biased toward keeping.
+            rewound = self._rewindow_cached_doc(ctx)
+            logger.info("[DayFlowRoutine] skipped — no delta; doc re-windowed=%s.", rewound)
+            return StepResult(output={"status": "skipped_no_delta", "rewound": rewound})
 
         md, change_summary = self._call_agent(
             boundary_date_local=boundary_date_local,
