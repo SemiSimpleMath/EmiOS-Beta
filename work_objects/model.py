@@ -74,8 +74,10 @@ SATISFIED_WHEN_KINDS = {
 SIDE_EFFECTS = {"read", "mutate", "irreversible"}
 WAKE_KINDS = {"time", "event", "user_reply", "signal"}
 
-# statuses that count as "this node has delivered what it owes"
-_SATISFIED_STATUSES = {"done", "verified", "passed", "answered"}
+# statuses that count as "this node has delivered what it owes". `closed` (not `done`) is the spine
+# terminal: a worker-`done` node has only produced a RESULT — the finalizer must judge it and close it
+# before it counts toward the goal (the done->closed gate; see work_finalizer).
+_SATISFIED_STATUSES = {"closed", "verified", "passed", "answered"}
 # statuses past which a node will never become ready again
 _TERMINAL_STATUSES = {"done", "closed", "failed", "abandoned", "superseded", "verified", "passed", "answered", "unanswerable"}
 
@@ -197,9 +199,9 @@ class WorkObject(BaseModel):
     def is_satisfied(self, node: WorkNode) -> bool:
         kind = node.satisfied_when_kind
         if kind == "tool_success":
-            return node.status == "done"
+            return node.status == "closed"   # finalizer-closed, not raw worker `done`
         if kind == "user_signoff":
-            return node.status == "done"
+            return node.status == "closed"
         if kind == "all_owned_children_done":
             kids = [self.nodes[c] for c in self.children_of(node.id) if c in self.nodes]
             return bool(kids) and all(self.is_satisfied(k) for k in kids)

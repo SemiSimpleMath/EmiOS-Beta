@@ -1,85 +1,73 @@
-"""Control node: the WORK FINALIZER pass (SHADOW) — reconcile each freshly-completed node's result into
-its whole work object.
+"""Control node: the WORK FINALIZER pass — reconcile each freshly-completed node's result into its whole
+work object. AUTHORITATIVE (step 3): it is the only thing that produces the `closed` terminal.
 
-Runs after work_repair_node. For each recently-active work object with a recently-`done` node, it invokes
-the work_finalizer adjudicator on {the WO projection + that node's FULL, un-truncated result} and the
-adjudicator returns a verdict: PROCEED (the plan holds) / AMEND (the result changes the plan) / RESOLVE
-(the goal is settled).
+Runs BEFORE the architect each tick. For every TOP-LEVEL node (a direct child of the goal — the architect's
+units; the worker's nested checklist is its own business and never counts toward the goal) that the worker
+left at `done`, it invokes the work_finalizer adjudicator on {the WO projection + that node's FULL,
+un-truncated result} and applies the verdict:
 
-SHADOW MODE: this node ONLY logs the verdict + records it on the blackboard. It does NOT close nodes, flag
-re-plans, or close work objects — the existing rollup still owns closing. This lets the finalizer's
-judgment be validated against real ticks before it is made authoritative (stage 3 flips closing onto it
-and routes AMEND to the architect). Bounded per tick; never raises.
+  - PROCEED  -> close the node (`done` -> `closed`). It now counts toward the goal (is_satisfied keys on
+               `closed`), so its dependents unblock and, when all the goal's children are closed, the rollup
+               completes the WorkObject.
+  - AMEND    -> close the node + flag the WO for re-plan (append to `replan_work_ids`) and stash the revised
+               intent in `finalizer_amend_intents`; the architect (next node in the state_map) revises the
+               graph from it.
+  - RESOLVE  -> the goal itself is settled: `close` -> close the node + set the WorkObject done; `abandon`
+               -> set the WorkObject abandoned.
+
+A worker-`done` node is NOT satisfied on its own anymore (is_satisfied -> `closed`), so nothing closes a goal
+until the finalizer has judged its results — this is what removes the blind auto-completion. Bounded per
+tick; never raises.
 
 Inert until the dayflow manager's state_map routes to it.
 """
-from datetime import timedelta
-
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.control_nodes.control_node import ControlNode
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import Message
-from app.assistant.utils.time_utils import parse_iso_utc
 
 logger = get_logger(__name__)
 
 _MAX_FINALIZE_PER_TICK = 5
-_LOOKBACK_MINUTES = 8     # judge a node done within ~the last couple of ticks (shadow: bounded re-judge, no marker)
 _BODY_CHARS = 4000        # the node's FULL result — un-truncated vs render_work_portfolio's 400-char body
+_TERMINAL_WO = {"done", "abandoned"}
 
 
 class WorkFinalizerNode(ControlNode):
     def action_handler(self, message):
         self.blackboard.update_state_value("next_agent", None)
-        verdicts = []
+        applied, replan_ids, amend_intents = [], [], {}
         try:
             from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
-            from app.assistant.dayflow_orchestrator.work_portfolio import render_work_portfolio, STATUS_LEGEND
-            from work_objects.model import utcnow
             store = get_dayflow_work_store()
-            now = utcnow()
-            cutoff = now - timedelta(minutes=_LOOKBACK_MINUTES)
 
-            # Recently-active work objects (terminal OR not — we WANT to see a goal-completing node even if
-            # the rollup just closed its WO), each with a node that went `done` in the lookback window.
-            candidates = []   # (wo, node)
-            for s in store.list_work_objects():   # newest-updated first
-                upd_wo = parse_iso_utc(str(s.get("updated_at") or ""))
-                if upd_wo is not None and upd_wo < cutoff:
-                    break   # everything after is older than the window
+            candidates = []   # (wo, node) — top-level done nodes awaiting the finalizer's judgment
+            for s in store.list_work_objects():
+                if str(s.get("status") or "").lower() in _TERMINAL_WO:
+                    continue
                 try:
                     wo = store.load(s["id"])
                 except Exception:
                     continue
                 gid = wo.goal_node_id
                 for n in wo.nodes.values():
-                    if n.id == gid or n.status != "done":
-                        continue
-                    upd = getattr(n, "updated_at", None)
-                    if upd is not None and upd >= cutoff:
+                    if n.id != gid and n.parent_id == gid and n.status == "done":
                         candidates.append((wo, n))
 
             if candidates:
                 scope = self._scope(message)
                 for wo, node in candidates[:_MAX_FINALIZE_PER_TICK]:
                     try:
-                        projection = STATUS_LEGEND + "\n\n" + render_work_portfolio(wo)
-                        result_text = (node.content or "").strip() or "(no result text recorded)"
-                        info = (f"JUST-COMPLETED NODE — id: {node.id} | title: {node.title}\n"
-                                f"ITS FULL RESULT:\n{result_text[:_BODY_CHARS]}")
-                        agent = DI.agent_factory.create_agent("dayflow_orchestrator::work_finalizer")
-                        res = agent.action_handler(Message(task=projection, information=info, scope_context=scope))
-                        data = getattr(res, "data", {}) or {}
+                        data = self._judge(wo, node, scope)
                         verdict = str(data.get("verdict") or "").strip().lower()
                         if not verdict:
                             continue
-                        verdicts.append({
-                            "work_id": wo.id, "node_id": node.id, "verdict": verdict,
-                            "amend_intent": str(data.get("amend_intent") or ""),
-                            "resolve_disposition": str(data.get("resolve_disposition") or ""),
-                        })
-                        logger.info("[work_finalizer SHADOW] %s::%s -> %s | %s", wo.id, node.id, verdict,
-                                    (data.get("reasoning") or "")[:140])
+                        res = self._apply(store, wo, node, data, verdict)
+                        if res.get("replan"):
+                            replan_ids.append(wo.id)
+                            amend_intents[wo.id] = res.get("amend_intent", "")
+                        applied.append({"work_id": wo.id, "node_id": node.id, "verdict": verdict})
+                        logger.info("[work_finalizer] %s::%s -> %s | %s", wo.id, node.id, verdict, res.get("note", ""))
                     except Exception as e:
                         logger.error("[%s] finalize failed for %s::%s: %s", self.name, wo.id, node.id, e)
                         logger.debug("[%s] finalize exception", self.name, exc_info=True)
@@ -87,9 +75,43 @@ class WorkFinalizerNode(ControlNode):
             logger.error("[%s] work_finalizer node failed: %s", self.name, e)
             logger.debug("[%s] work_finalizer node exception", self.name, exc_info=True)
 
-        self.blackboard.update_state_value("work_finalizer_shadow_result", verdicts)
-        logger.info("[%s] SHADOW judged %d completed node(s)", self.name, len(verdicts))
+        # Feed the architect (next in the state_map): merge the finalizer's re-plans into replan_work_ids
+        # (the evaluator persist already set some) and stash the revised intents the architect re-plans from.
+        if replan_ids:
+            existing = self.blackboard.get_state_value("replan_work_ids", []) or []
+            self.blackboard.update_state_value("replan_work_ids", list(dict.fromkeys([*existing, *replan_ids])))
+            intents = self.blackboard.get_state_value("finalizer_amend_intents", {}) or {}
+            intents.update(amend_intents)
+            self.blackboard.update_state_value("finalizer_amend_intents", intents)
+        self.blackboard.update_state_value("work_finalizer_result", applied)
+        logger.info("[%s] finalized %d node(s)", self.name, len(applied))
         self.blackboard.update_state_value("last_agent", self.name)
+
+    def _judge(self, wo, node, scope) -> dict:
+        from app.assistant.dayflow_orchestrator.work_portfolio import render_work_portfolio, STATUS_LEGEND
+        projection = STATUS_LEGEND + "\n\n" + render_work_portfolio(wo)
+        result_text = (node.content or "").strip() or "(no result text recorded)"
+        info = (f"JUST-COMPLETED NODE — id: {node.id} | title: {node.title}\n"
+                f"ITS FULL RESULT:\n{result_text[:_BODY_CHARS]}")
+        agent = DI.agent_factory.create_agent("dayflow_orchestrator::work_finalizer")
+        res = agent.action_handler(Message(task=projection, information=info, scope_context=scope))
+        return getattr(res, "data", {}) or {}
+
+    def _apply(self, store, wo, node, data, verdict) -> dict:
+        """Carry out the verdict on the graph. done->closed is the only path to the satisfied terminal."""
+        if verdict == "resolve":
+            disp = str(data.get("resolve_disposition") or "close").strip().lower()
+            if disp == "abandon":
+                store.apply("set_work_status", {"work_id": wo.id, "status": "abandoned"}, actor="finalizer")
+                return {"note": "resolve -> WO abandoned"}
+            store.apply("set_status", {"work_id": wo.id, "node_id": node.id, "status": "closed"}, actor="finalizer")
+            store.apply("set_work_status", {"work_id": wo.id, "status": "done"}, actor="finalizer")
+            return {"note": "resolve -> WO done"}
+        # proceed AND amend both close the node (its result is consumed); amend additionally re-plans.
+        store.apply("set_status", {"work_id": wo.id, "node_id": node.id, "status": "closed"}, actor="finalizer")
+        if verdict == "amend":
+            return {"replan": True, "amend_intent": str(data.get("amend_intent") or ""), "note": "amend -> closed + replan"}
+        return {"note": "proceed -> closed"}
 
     def _scope(self, message):
         scope = getattr(message, "scope_context", None)

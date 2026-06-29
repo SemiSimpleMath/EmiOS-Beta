@@ -4,9 +4,10 @@ Runs right after strategic_planner_wo_persist_node. Per tick, for ONE work objec
 - CREATE: for each work object the evaluator created this tick, invoke dayflow_orchestrator::work_architect
   on its objective and lay the resulting DAG (subtask nodes, depends_on edges, wait-gates) into the graph
   via apply_architect_dag.
-- RE-PLAN: for each work object the evaluator put in `replan_work_ids` (its graph no longer fits), re-invoke
-  the architect with the goal + the existing graph and ADD the missing steps. This is extend-only — pruning
-  / superseding wrong nodes is the graph-reconcile refinement (#54).
+- RE-PLAN: for each work object flagged in `replan_work_ids` (by the evaluator from intake, OR by the
+  work_finalizer's AMEND verdict — its revised intent rides in `finalizer_amend_intents`), re-invoke the
+  architect with the goal + the existing graph and apply the DELTA: ADD the missing steps and ABANDON the
+  nodes the situation made moot.
 
 work_execution_node then runs the ready nodes. Never raises — a per-object failure leaves that object as-is
 and the pipeline continues.
@@ -78,6 +79,8 @@ class WorkArchitectNode(ControlNode):
                        if isinstance(c, dict) and c.get("work_id") and c.get("objective")]
             replan_ids = [str(w).strip() for w in (self.blackboard.get_state_value("replan_work_ids", []) or [])
                           if str(w or "").strip()]
+            # the finalizer's revised intent per WO (AMEND verdicts) — the authoritative "why re-plan".
+            amend_intents = self.blackboard.get_state_value("finalizer_amend_intents", {}) or {}
 
             if created or replan_ids:
                 scope = self._scope(message)
@@ -111,8 +114,11 @@ class WorkArchitectNode(ControlNode):
                     try:
                         goal = wo.nodes.get(wo.goal_node_id)
                         objective = (getattr(goal, "content", "") or getattr(goal, "title", "")) if goal else ""
+                        amend = str(amend_intents.get(work_id) or "").strip()
+                        amend_block = (f"A just-completed step changed the plan. Revised intent: {amend}\n\n"
+                                       if amend else "")
                         task = (
-                            f"{objective}\n\nThis goal ALREADY has a partial work graph (below) that no "
+                            f"{objective}\n\n{amend_block}This goal ALREADY has a partial work graph (below) that no "
                             f"longer fits. RE-PLAN it as a DELTA: ADD the steps still missing, and ABANDON "
                             f"(list their node_ids in abandon_node_ids) any existing node the situation now "
                             f"makes moot/wrong — its un-finished sub-steps go with it. Do NOT recreate "
