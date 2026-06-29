@@ -67,8 +67,9 @@ class StateMoverPersistNode(ControlNode):
             for n in wo.nodes.values():
                 if n.id == goal_id or n.status not in {"proposed", "waiting"}:
                     continue
-                if str(getattr(n, "wake_kind", None) or "") in {"event", "signal"}:
-                    continue   # external-event nodes are woken via node_wakes, not promoted here
+                if str(getattr(n, "wake_kind", None) or "") in {"event", "signal", "user_reply"}:
+                    continue   # event/signal woken via node_wakes; user_reply is in-flight awaiting the
+                    # owner's reply (owned by work_execution's notify path) — not re-promotable here
                 if not wo.is_ready(n, now):
                     continue   # time/dep gate not clear — leave it parked
                 family = FAMILY_BY_TYPE.get(n.type, "spine")

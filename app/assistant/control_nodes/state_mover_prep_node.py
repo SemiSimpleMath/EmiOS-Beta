@@ -151,8 +151,9 @@ class StateMoverPrepNode(ControlNode):
             for n in wo.nodes.values():
                 if n.id == goal_id or n.status not in {"proposed", "waiting"}:
                     continue
-                if str(getattr(n, "wake_kind", None) or "") in {"event", "signal"}:
-                    continue   # external-event waits are shown in WORK-OBJECT WAITS, not here
+                if str(getattr(n, "wake_kind", None) or "") in {"event", "signal", "user_reply"}:
+                    continue   # event/signal shown in WORK-OBJECT WAITS; user_reply is in-flight awaiting
+                    # the owner's reply (owned by work_execution's notify path) — not a promotion candidate
                 if not wo.is_ready(n, now):
                     continue
                 family = FAMILY_BY_TYPE.get(n.type, "spine")
