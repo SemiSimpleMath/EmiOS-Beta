@@ -6,12 +6,12 @@ max_cycles: 30
 role_bindings:
   delegator: emi_team::delegator
   tool_selector: shared::tool_selector
-  planner: emi_team::planner
+  planner: devices::planner
 
 agents:
   - name: emi_team::delegator
     class: Delegator
-  - name: emi_team::planner
+  - name: devices::planner
     class: Planner
   - name: emi_team::summary
     class: Agent
@@ -26,8 +26,8 @@ control_nodes:
     config:
       enabled: true
       summary_agent: "emi_team::summary"
-      resume_agent: "emi_team::planner"
-      planner_agent: "emi_team::planner"
+      resume_agent: "devices::planner"
+      planner_agent: "devices::planner"
       cadence_every_actions: 3
       min_messages: 15
       trigger_on_large_result_chars: 1200
@@ -36,7 +36,7 @@ control_nodes:
     class: SummaryPostNode
     config:
       summary_agent: "emi_team::summary"
-      resume_agent: "emi_team::planner"
+      resume_agent: "devices::planner"
   - name: tool_caller
     class: ToolCaller
   - name: tool_result_handler
@@ -77,8 +77,8 @@ flow_config:
     enabled: true
     source_agent: "tool_return_router"
     summary_agent: "emi_team::summary"
-    resume_agent: "emi_team::planner"
-    planner_agent: "emi_team::planner"
+    resume_agent: "devices::planner"
+    planner_agent: "devices::planner"
     cadence_every_actions: 3
     action_count_state_key: "{planner_agent}_action_count"
     min_messages: 15
@@ -87,14 +87,14 @@ flow_config:
     payload_recent_history_messages: 80
     allow_summarize_latest_tool_result: false
   state_map:
-    "emi_team::delegator": "emi_team::planner"
-    "emi_team::planner": "tool_caller"
+    "emi_team::delegator": "devices::planner"
+    "devices::planner": "tool_caller"
     "tool_result_handler": "tool_return_router"
     "tool_return_router": "summary_pre_node"
-    "summary_pre_node": "emi_team::planner"
+    "summary_pre_node": "devices::planner"
     "emi_team::summary": "summary_post_node"
-    "summary_post_node": "emi_team::planner"
-    "emi_team::planner_return_control": "shared::compact_final_answer"
+    "summary_post_node": "devices::planner"
+    "devices::planner_return_control": "shared::compact_final_answer"
     "shared::compact_final_answer": "manager_exit_node"
     "graceful_exit": "graceful_exit_control_node"
     "graceful_exit_control_node": "shared::compact_final_answer"

@@ -1,0 +1,44 @@
+name: devices::planner
+class_name: Planner
+llm_params:
+  llm_provider: "openai"
+  engine: "gpt-5.1"
+  model_tier: "smart"
+  
+
+allowed_tools: all
+except_tools: [emi_team_manager]
+allowed_nodes: [return_control]
+entity_scan_keys: [incoming_message, task, information, recent_history]
+entity_card_level: 0
+
+user_context_items:
+  - date_time
+  - task
+  - information
+  - task_includes
+  - task_resource_context
+  - recent_history
+  - checklist
+  - progress_report
+  - action_count
+  - entity_card
+  - referenced_pods_block
+  - resource_accounts
+
+system_context_items:
+  - tool_descriptions
+  - allowed_nodes
+  - task
+  - date_time
+
+skills:
+  # devices::planner is Watt's planner — copied from the emi_team generalist, so it keeps the same curated
+  # voice/critic/file skills. Watt acts on a FIXED device toolset (nest / lights / ring), so it needs no
+  # keyword-injected implementation skills; accept_auto_skills stays false.
+  - critic-handling
+  - pod-finder
+  - emi-acting-as-herself   # her voice / stance
+  - emi-values              # her voice / stance
+
+accept_auto_skills: false
