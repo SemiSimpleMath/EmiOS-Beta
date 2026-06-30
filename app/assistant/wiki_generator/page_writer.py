@@ -402,7 +402,11 @@ def generate_prose_page_tagged(
             logger.error("wiki_writer failed on section %s of %s: %s", key, entity_label, e)
 
     if not section_outputs:
-        logger.error("All tag-based section calls returned empty for %s", entity_label)
+        # Expected, not an error: nothing in this entity tagged into a biographical section — it just isn't
+        # biographical enough (a place / org / concept, e.g. "Espoo"). The caller treats None as `empty` /
+        # SKIP and marks the entity so it isn't re-attempted; see growth.build_one_page.
+        logger.info("No biographical sections for %s — not biographical enough (place/org/concept); skipping.",
+                    entity_label)
         return None
 
     # Persist per-section outputs so incremental regen can replace only the
