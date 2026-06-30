@@ -65,11 +65,10 @@ patterns (all bucket 3):
 - Date confidence: `auto_decay` = a decay guess, re-openable; `user_set` /
   `explicit` = authoritative. `*_prose` carries the fuzzy form.
 
-## Tables (the live emi.db — `kg_query` reads these; do NOT guess `kg_nodes`/`nodes`)
+## Tables (the live emi.db — `kg_query` reads these)
 
-The Postgres→SQLite migration renamed the core tables. The KG nodes live in **`kg_node_metadata`**, NOT
-`kg_nodes` and NOT `nodes` (that's the unrelated work-object substrate). The node primary key is **`id`** (a
-UUID); `node_id` is a *foreign key* on the evidence/finding tables, not a column on the node table itself.
+The KG nodes are in **`kg_node_metadata`** (PK `id`, a UUID). Evidence rows and findings reference a node by
+that `id`.
 
 - **`kg_node_metadata`** — KG nodes. PK `id`. Cols: `label`, `node_type` (Entity/Concept/State/Event/Goal/
   Property), `category`, `semantic_label`, `original_sentence`, `description`, `aliases`,
