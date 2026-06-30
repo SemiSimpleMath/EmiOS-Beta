@@ -3,8 +3,8 @@
 Builds the steward's context: the ACTIVE work objects rendered as `work_portfolio` (its primary input),
 plus the situational context that lets it judge timing and act on user decisions — active tickets,
 recent ticket responses, recent dispatch results, recent action-selector nudges. The situational
-builders are REUSED from strategic_planner_prep_node (the old planner's proven prep) so the steward has
-the same awareness the planner had. Resource-backed context (schedule/presence/routine/etc.) is
+builders live in this module (relocated when the legacy strategic_planner_prep_node was retired — this
+prep is now their sole user). Resource-backed context (schedule/presence/routine/etc.) is
 auto-resolved by the context injector and needs no building here.
 
 Inert until the dayflow manager's state_map routes to it.
@@ -15,6 +15,84 @@ from app.assistant.utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 _TERMINAL_WO_STATES = {"done", "abandoned"}
+_ACTION_LOG_HOURS = 18
+_DAYFLOW_TYPES = frozenset({"dayflow_orchestrator"})
+
+
+# Situational-context builders — relocated here when the legacy strategic_planner_prep_node was retired
+# (this work-object steward prep is now their sole user).
+def _load_active_tickets():
+    """Active dayflow tickets from the ticket manager (pending/proposed/snoozed)."""
+    from app.assistant.ticket_manager import get_ticket_manager, TicketState
+    active = get_ticket_manager().get_tickets(
+        states=[TicketState.PENDING, TicketState.PROPOSED, TicketState.SNOOZED], limit=50)
+    result = []
+    for t in active:
+        if (getattr(t, "ticket_type", "") or "").lower() not in _DAYFLOW_TYPES:
+            continue
+        trigger_context = getattr(t, "trigger_context", None) or {}
+        if not isinstance(trigger_context, dict):
+            trigger_context = {}
+        acted_on = trigger_context.get("acted_on_item_ids", [])
+        if not isinstance(acted_on, list):
+            acted_on = []
+        result.append({
+            "title": str(getattr(t, "title", "") or "").strip(),
+            "message": str(getattr(t, "message", "") or "").strip(),
+            "suggestion_type": str(getattr(t, "suggestion_type", "") or "").strip(),
+            "acted_on_item_ids": acted_on,
+        })
+    return result
+
+
+def _load_responded_tickets(since_utc):
+    """Recent dayflow ticket responses, categorized by action."""
+    from app.assistant.pipelines.dayflow.utils.context_sources import get_responded_tickets_categorized
+    return get_responded_tickets_categorized(since_utc=since_utc, ticket_type="dayflow_orchestrator")
+
+
+def _build_recent_dispatch_results(all_items, now_utc, *, max_age_hours=6, limit=10):
+    """Recently-completed dispatches with their full manager result text, so the evaluator can act on what
+    came back instead of treating it as ambient context. Newest first, capped at `limit`."""
+    from datetime import timedelta
+    from app.assistant.dayflow_orchestrator.contracts import get_meta
+    from app.assistant.utils.time_utils import parse_iso_utc
+    cutoff = now_utc - timedelta(hours=max_age_hours)
+    out = []
+    seen_task_ids = set()
+    try:
+        from app.assistant.chat_narrator.display_names import display_name_for
+    except Exception:
+        display_name_for = lambda x: x  # type: ignore[assignment]
+    for item in all_items:
+        meta = get_meta(item)
+        dispatched_to = str(meta.get("dispatched_to") or "").strip()
+        execution_result = str(meta.get("execution_result") or "").strip()
+        if not dispatched_to or not execution_result:
+            continue
+        lower_exec = execution_result.lower()
+        if "inbound ui chat message from system" in lower_exec and "cadence tick" in lower_exec:
+            continue
+        dispatched_at = parse_iso_utc(str(meta.get("dispatched_at") or ""))
+        if dispatched_at is None or dispatched_at < cutoff:
+            continue
+        task_id = str(meta.get("short_id") or meta.get("task_id") or meta.get("item_id") or item.get("id") or "").strip()
+        if task_id and task_id in seen_task_ids:
+            continue
+        if task_id:
+            seen_task_ids.add(task_id)
+        friendly = display_name_for(dispatched_to)
+        out.append({
+            "task_id": task_id,
+            "summary": str(meta.get("summary") or "").strip(),
+            "dispatched_to": dispatched_to,
+            "dispatched_to_display": (friendly if friendly and friendly.lower() != dispatched_to.lower() else ""),
+            "dispatched_at": str(meta.get("dispatched_at_local") or meta.get("dispatched_at") or "").strip(),
+            "execution_result": execution_result,
+            "pod_references": meta.get("pod_references") or [],
+        })
+    out.sort(key=lambda r: r.get("dispatched_at") or "", reverse=True)
+    return out[:limit]
 
 
 class StrategicPlannerWoPrepNode(ControlNode):
@@ -85,10 +163,6 @@ class StrategicPlannerWoPrepNode(ControlNode):
     def _build_situational_context(self):
         from datetime import datetime, timedelta, timezone
 
-        from app.assistant.control_nodes.strategic_planner_prep_node import (
-            _ACTION_LOG_HOURS, _build_recent_dispatch_results, _load_active_tickets,
-            _load_responded_tickets,
-        )
         from app.assistant.dayflow_orchestrator.contracts import get_meta
         from app.assistant.dayflow_orchestrator.state_store import get_dayflow_items
         from app.assistant.utils.time_utils import parse_iso_utc
