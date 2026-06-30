@@ -15,6 +15,7 @@ tool_argument_normalizers:
 
 role_bindings:
   delegator: playwright::delegator
+  planner: playwright::planner
 
 agents:
   - name: playwright::delegator
