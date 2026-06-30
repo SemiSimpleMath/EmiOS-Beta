@@ -4,16 +4,16 @@ description: "Smart-home devices manager for Nest, lights, and Ring controls."
 display_name: "Watt"
 max_cycles: 30
 role_bindings:
-  delegator: emi_team::delegator
+  delegator: devices::delegator
   tool_selector: shared::tool_selector
   planner: devices::planner
 
 agents:
-  - name: emi_team::delegator
+  - name: devices::delegator
     class: Delegator
   - name: devices::planner
     class: Planner
-  - name: emi_team::summary
+  - name: devices::summary
     class: Agent
   - name: shared::compact_final_answer
     class: Agent
@@ -25,7 +25,7 @@ control_nodes:
     class: SummaryPreNode
     config:
       enabled: true
-      summary_agent: "emi_team::summary"
+      summary_agent: "devices::summary"
       resume_agent: "devices::planner"
       planner_agent: "devices::planner"
       cadence_every_actions: 3
@@ -35,7 +35,7 @@ control_nodes:
   - name: summary_post_node
     class: SummaryPostNode
     config:
-      summary_agent: "emi_team::summary"
+      summary_agent: "devices::summary"
       resume_agent: "devices::planner"
   - name: tool_caller
     class: ToolCaller
@@ -76,7 +76,7 @@ flow_config:
   summary:
     enabled: true
     source_agent: "tool_return_router"
-    summary_agent: "emi_team::summary"
+    summary_agent: "devices::summary"
     resume_agent: "devices::planner"
     planner_agent: "devices::planner"
     cadence_every_actions: 3
@@ -87,12 +87,12 @@ flow_config:
     payload_recent_history_messages: 80
     allow_summarize_latest_tool_result: false
   state_map:
-    "emi_team::delegator": "devices::planner"
+    "devices::delegator": "devices::planner"
     "devices::planner": "tool_caller"
     "tool_result_handler": "tool_return_router"
     "tool_return_router": "summary_pre_node"
     "summary_pre_node": "devices::planner"
-    "emi_team::summary": "summary_post_node"
+    "devices::summary": "summary_post_node"
     "summary_post_node": "devices::planner"
     "devices::planner_return_control": "shared::compact_final_answer"
     "shared::compact_final_answer": "manager_exit_node"
