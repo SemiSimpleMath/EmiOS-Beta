@@ -16,8 +16,6 @@ agents:
     class: Agent
   - name: dayflow_orchestrator::action_selector
     class: Agent
-  - name: dayflow_orchestrator::strategic_planner
-    class: Agent
   - name: dayflow_orchestrator::strategic_planner_wo
     class: Agent
   - name: dayflow_orchestrator::relevance_cleaner
@@ -36,8 +34,6 @@ control_nodes:
     class: FastTickPromoterNode
   - name: intake_triage_prep_node
     class: IntakeTriagePrepNode
-  - name: strategic_planner_prep_node
-    class: StrategicPlannerPrepNode
   - name: state_mover_prep_node
     class: StateMoverPrepNode
   - name: relevance_cleaner_prep_node
@@ -56,8 +52,6 @@ control_nodes:
     class: ContextEnricherPersistNode
   - name: state_mover_persist_node
     class: StateMoverPersistNode
-  - name: planner_persist_node
-    class: PlannerPersistNode
   - name: strategic_planner_wo_prep_node
     class: StrategicPlannerWoPrepNode
   - name: strategic_planner_wo_persist_node
@@ -165,7 +159,7 @@ flow_config:
     "context_enricher_prep_node": "context_enricher_persist_node"
     # --- WORK-OBJECT planner path (live): steward EVALUATES → finalizer reconciles completed nodes →
     #     architect (re)plans → repair adjudicates failures → state_mover promotes → the materializer/
-    #     dispatch loop runs them. The old strategic_planner trio below is kept defined but UNREACHED. ---
+    #     dispatch loop runs them. ---
     "context_enricher_persist_node": "strategic_planner_wo_prep_node"
     "strategic_planner_wo_prep_node": "dayflow_orchestrator::strategic_planner_wo"
     "dayflow_orchestrator::strategic_planner_wo": "strategic_planner_wo_persist_node"
@@ -173,10 +167,6 @@ flow_config:
     "work_finalizer_node": "work_architect_node"
     "work_architect_node": "work_repair_node"
     "work_repair_node": "state_mover_prep_node"
-    # old plan-task path (no longer reached from context_enricher_persist_node):
-    "strategic_planner_prep_node": "dayflow_orchestrator::strategic_planner"
-    "dayflow_orchestrator::strategic_planner": "planner_persist_node"
-    "planner_persist_node": "state_mover_prep_node"
     "state_mover_prep_node": "dayflow_orchestrator::state_mover"
     "dayflow_orchestrator::state_mover": "state_transition_guard_node"
     "state_transition_guard_node": "state_mover_persist_node"

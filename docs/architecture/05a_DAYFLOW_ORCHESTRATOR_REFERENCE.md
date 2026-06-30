@@ -149,9 +149,10 @@ responses are authoritative, and an already-DONE recurring automation is never r
 
 **strategic_planner** (LEGACY items-lane planner, `gpt-5.4-mini`) — the older evaluator that emitted
 **plans (DAGs of task nodes) + standalone tasks** instead of work objects, with per-task
-wait/dependency/reactivate fields and plan-synopsis bookkeeping it managed itself. **Unreached** in the
-live flow (`context_enricher_persist_node` now routes to `strategic_planner_wo_prep_node`); defined but
-slated for removal (Phase 4).
+wait/dependency/reactivate fields and plan-synopsis bookkeeping it managed itself. **Retired:** its driving
+control nodes (`StrategicPlannerPrepNode`, `PlannerPersistNode`) were deleted and it was removed from the
+manager's agents list + state_map; `context_enricher_persist_node` routes to the live `strategic_planner_wo`.
+The agent dir is KEPT but unwired — the prompts are preserved as reference (see its `KEEP.md`).
 
 **relevance_cleaner** (`gpt-5-mini`) — the items-lane **janitor** that `close`s finished tasks (mark done,
 keep history) and `suppress`es items safe to forget (irreversible). Driven by a 30-minute gate
@@ -383,10 +384,10 @@ dayflow_switchboard_arguments_node → dayflow_tool_caller → action_result_nor
 post_room_finalize_node`. The pre-work-object dispatch chain; **no inbound edge** in the live map, and
 `view_materializer` logs `LEGACY ITEM LANE fired` if reached. Being retired.
 
-**P13 — Legacy plan-task planner (DORMANT).** `strategic_planner_prep_node → strategic_planner →
-planner_persist_node → state_mover_prep_node`. The old plans-and-tasks evaluator; config marks it "kept
-defined but UNREACHED (Phase 4 removes it)" — `context_enricher_persist_node` routes to the work-object
-evaluator instead.
+**P13 — Legacy plan-task planner (RETIRED).** The old `strategic_planner_prep_node → strategic_planner →
+planner_persist_node` path is gone — the two control nodes were deleted and the agent unwired;
+`context_enricher_persist_node` routes to the work-object evaluator (`strategic_planner_wo`). The agent dir
+(prompts) is kept as reference.
 
 ---
 
@@ -396,14 +397,15 @@ evaluator instead.
 (block-check → ingestion → sweeps → manager) → P3 main tick → P4 dispatch loop (work/notify/ask) → P5
 repair / P5b **finalize** → P6 exit, plus P7 out-of-band node wakes and P8 fast-tick.
 
-**Retired:** `work_execution_node` — deleted once Stage 3 made it fully inert; its notify-user / notify-owner
-/ run-ready-nodes passes are now the `materializer → action_selector → switchboard → dispatch → run_node`
-loop plus `_communicate`.
+**Retired:** `work_execution_node` (deleted once Stage 3 made it fully inert — its passes are now the
+`materializer → action_selector → switchboard → dispatch → run_node` loop plus `_communicate`); the legacy
+`strategic_planner` trio (`StrategicPlannerPrepNode` / `PlannerPersistNode` deleted + the agent unwired — its
+dir is kept, prompts as reference per `KEEP.md`).
 
 **Dormant / legacy (defined, no inbound edge):** the legacy item-lane dispatch chain
 (`dayflow_switchboard_arguments_node`, `dayflow_tool_caller`, `action_result_normalizer_node`,
-`post_room_finalize_node`'s reconciliation work, `result_formatter`), the legacy `strategic_planner` trio,
-the `relevance_cleaner` sub-chain, and the dayflow-specific `room_summary` (no room binds it).
+`post_room_finalize_node`'s reconciliation work, `result_formatter`), the `relevance_cleaner` sub-chain, and
+the dayflow-specific `room_summary` (no room binds it).
 
 **Lifecycle (shipped):** the `active → dispatched` rename (Step 1) and the **finalizer cutover** (Step 3,
 `cb498a40`) are live — `is_satisfied` keys on `closed`, and `work_finalizer_node` (sibling to `work_repair`,
