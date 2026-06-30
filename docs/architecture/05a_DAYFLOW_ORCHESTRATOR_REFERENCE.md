@@ -250,12 +250,6 @@ architect (next node) to re-plan the same tick; **resolve** → close the node +
 (`abandon`) set it `abandoned`. It is the SOLE producer of `closed` — nothing auto-completes a goal until the
 finalizer has judged its results (commit `cb498a40`). Bounded 5/tick; never raises.
 
-**work_execution_node** — **INERT in the live wiring.** Its docstring (PASS-1 asks / PASS-1.5 notifies /
-PASS-2 run ready nodes) describes the *old* execution model. Nothing routes *into* it; live node execution
-is the `materializer → action_selector → switchboard → dispatch → run_node` loop (per commit `cb67befb`).
-The stale docstrings on `work_repair_node` ("runs AFTER work_execution_node") and `work_architect_node`
-still describe it as live — they are out of date.
-
 ### Surface, comms & finalization
 
 **ticket_builder** (`gemini-3-flash-preview`, no tools) — phrases a raw `ticket_brief` into natural
@@ -402,7 +396,11 @@ evaluator instead.
 (block-check → ingestion → sweeps → manager) → P3 main tick → P4 dispatch loop (work/notify/ask) → P5
 repair / P5b **finalize** → P6 exit, plus P7 out-of-band node wakes and P8 fast-tick.
 
-**Dormant / legacy (defined, no inbound edge):** `work_execution_node`, the legacy item-lane dispatch chain
+**Retired:** `work_execution_node` — deleted once Stage 3 made it fully inert; its notify-user / notify-owner
+/ run-ready-nodes passes are now the `materializer → action_selector → switchboard → dispatch → run_node`
+loop plus `_communicate`.
+
+**Dormant / legacy (defined, no inbound edge):** the legacy item-lane dispatch chain
 (`dayflow_switchboard_arguments_node`, `dayflow_tool_caller`, `action_result_normalizer_node`,
 `post_room_finalize_node`'s reconciliation work, `result_formatter`), the legacy `strategic_planner` trio,
 the `relevance_cleaner` sub-chain, and the dayflow-specific `room_summary` (no room binds it).

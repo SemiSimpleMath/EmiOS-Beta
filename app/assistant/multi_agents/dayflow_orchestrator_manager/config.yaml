@@ -64,8 +64,6 @@ control_nodes:
     class: StrategicPlannerWoPersistNode
   - name: work_architect_node
     class: WorkArchitectNode
-  - name: work_execution_node
-    class: WorkExecutionNode
   - name: work_repair_node
     class: WorkRepairNode
   - name: work_finalizer_node
@@ -165,15 +163,15 @@ flow_config:
     "triage_spawn_guard_node": "triage_persist_node"
     "triage_persist_node": "context_enricher_prep_node"
     "context_enricher_prep_node": "context_enricher_persist_node"
-    # --- WORK-OBJECT planner path (live): steward creates work objects, work_execution_node advances
-    #     them. The old strategic_planner trio below is kept defined but UNREACHED (Phase 4 removes it). ---
+    # --- WORK-OBJECT planner path (live): steward EVALUATES → finalizer reconciles completed nodes →
+    #     architect (re)plans → repair adjudicates failures → state_mover promotes → the materializer/
+    #     dispatch loop runs them. The old strategic_planner trio below is kept defined but UNREACHED. ---
     "context_enricher_persist_node": "strategic_planner_wo_prep_node"
     "strategic_planner_wo_prep_node": "dayflow_orchestrator::strategic_planner_wo"
     "dayflow_orchestrator::strategic_planner_wo": "strategic_planner_wo_persist_node"
     "strategic_planner_wo_persist_node": "work_finalizer_node"
     "work_finalizer_node": "work_architect_node"
     "work_architect_node": "work_repair_node"
-    "work_execution_node": "work_repair_node"
     "work_repair_node": "state_mover_prep_node"
     # old plan-task path (no longer reached from context_enricher_persist_node):
     "strategic_planner_prep_node": "dayflow_orchestrator::strategic_planner"

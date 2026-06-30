@@ -9,7 +9,7 @@ Runs right after strategic_planner_wo_persist_node. Per tick, for ONE work objec
   architect with the goal + the existing graph and apply the DELTA: ADD the missing steps and ABANDON the
   nodes the situation made moot.
 
-work_execution_node then runs the ready nodes. Never raises — a per-object failure leaves that object as-is
+The materializer → action_selector → switchboard → dispatch loop then runs the ready nodes. Never raises — a per-object failure leaves that object as-is
 and the pipeline continues.
 
 Inert until the dayflow manager's state_map routes to it.
