@@ -74,12 +74,6 @@ control_nodes:
     class: ActionSelectorRouterNode
   - name: plan_mode_final_router_node
     class: PlanModeFinalRouterNode
-  - name: dayflow_switchboard_arguments_node
-    class: DayflowSwitchboardArgumentsNode
-  - name: dayflow_tool_caller
-    class: DayflowToolCaller
-  - name: action_result_normalizer_node
-    class: ActionResultNormalizerNode
   - name: post_room_finalize_node
     class: PostRoomFinalizeNode
   - name: return_control
@@ -183,9 +177,6 @@ flow_config:
     "plan_mode_final_router_node": "final_answer_node"
     "dayflow_orchestrator::switchboard": "work_node_dispatch_node"
     "work_node_dispatch_node": "work_node_materializer_node"
-    "dayflow_switchboard_arguments_node": "dayflow_tool_caller"
-    "dayflow_tool_caller": "action_result_normalizer_node"
-    "action_result_normalizer_node": "post_room_finalize_node"
     "post_room_finalize_node": "final_answer_node"
     "final_answer_node": "manager_exit_node"
     "graceful_exit": "graceful_exit_control_node"

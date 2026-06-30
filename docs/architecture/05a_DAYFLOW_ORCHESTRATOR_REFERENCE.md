@@ -270,10 +270,10 @@ state machine, so a reply after the wait-timeout cannot be accepted — a known 
 compact 1–3 line task-update (verdict-first, specifics verbatim, no "I" voice). Invoked synchronously
 inside `post_room_finalize_node` — **so reachable only on the legacy item lane** (see flag below).
 
-**room_summary** (`gpt-5-mini`) — a compaction agent for the dayflow internal event log (`hide_ids` /
-`pin_ids` / `summary_pairs`). Runs as a background per-room chat-compaction thread, **not** in the tick
-loop, gated by a room's `ROOM.md chat_compaction` block. **Flag:** the dayflow `ROOM.md` declares no
-`chat_compaction`, so this dayflow-specific variant is purpose-written but **not currently bound to run**.
+**room_summary** — a compaction agent for the dayflow internal event log. The dayflow-specific variant
+(`dayflow_orchestrator::room_summary`) was **retired** — the dayflow `ROOM.md` declared no `chat_compaction`,
+so nothing bound it. The **generic** `room_summary` (per-room chat compaction via `room_chat_summary` /
+`room_summary_service`, e.g. `master_room::room_summary`) is live and untouched.
 
 **plan_mode** (`gemini-3-flash-preview`, no tools) — interactive planning-mode chat; collaborates
 turn-by-turn and stays in planning mode until the user says they're done (`planning_done_tf`), never
@@ -293,10 +293,10 @@ items, applies the state_mover's mutations virtually, drops stale items (> 12 h)
 `LEGACY ITEM LANE fired` WARNING whenever an item reaches `action_selector`, since that means intake the
 evaluator failed to convert into a work object.
 
-**dayflow_switchboard_arguments_node** + **`_switchboard_arguments_util`** — the legacy item-lane
-normalizer/provenance writer (builds `tool_arguments`, writes `action_dispatch` rows, stamps items
-`dispatched`). **No inbound edge** in the live map; `work_node_dispatch_node` is its node-native
-replacement.
+**dayflow_switchboard_arguments_node** (+ `dayflow_tool_caller`, `action_result_normalizer_node`) — the
+legacy item-lane dispatch chain (normalizer/provenance writer → tool caller → result normalizer). **Retired**
+— no inbound edge in the live map; `work_node_dispatch_node` is the node-native replacement. The shared
+`_switchboard_arguments_util` is KEPT (master_room's switchboard-arguments node still uses it).
 
 ---
 
@@ -379,10 +379,10 @@ interval has elapsed) → `relevance_cleaner_prep → relevance_cleaner → rele
 view_materializer_node`. Closes finished/stale items and suppresses safe-to-forget ones. **Currently
 orphaned** — no inbound edge routes into the gate in the live map.
 
-**P12 — Legacy item-lane dispatch (DORMANT).** `view_materializer → action_selector → … →
-dayflow_switchboard_arguments_node → dayflow_tool_caller → action_result_normalizer_node →
-post_room_finalize_node`. The pre-work-object dispatch chain; **no inbound edge** in the live map, and
-`view_materializer` logs `LEGACY ITEM LANE fired` if reached. Being retired.
+**P12 — Legacy item-lane dispatch (RETIRED).** The pre-work-object dispatch chain
+(`dayflow_switchboard_arguments_node → dayflow_tool_caller → action_result_normalizer_node`) was deleted;
+`work_node_dispatch_node` is the node-native replacement. `post_room_finalize_node` stays (live exit path),
+and `view_materializer` still logs `LEGACY ITEM LANE fired` if any item reaches `action_selector`.
 
 **P13 — Legacy plan-task planner (RETIRED).** The old `strategic_planner_prep_node → strategic_planner →
 planner_persist_node` path is gone — the two control nodes were deleted and the agent unwired;
@@ -397,15 +397,16 @@ planner_persist_node` path is gone — the two control nodes were deleted and th
 (block-check → ingestion → sweeps → manager) → P3 main tick → P4 dispatch loop (work/notify/ask) → P5
 repair / P5b **finalize** → P6 exit, plus P7 out-of-band node wakes and P8 fast-tick.
 
-**Retired:** `work_execution_node` (deleted once Stage 3 made it fully inert — its passes are now the
-`materializer → action_selector → switchboard → dispatch → run_node` loop plus `_communicate`); the legacy
-`strategic_planner` trio (`StrategicPlannerPrepNode` / `PlannerPersistNode` deleted + the agent unwired — its
-dir is kept, prompts as reference per `KEEP.md`).
+**Retired:** `work_execution_node` (its passes are now the `materializer → action_selector → switchboard →
+dispatch → run_node` loop + `_communicate`); the legacy `strategic_planner` trio (`StrategicPlannerPrepNode`
+/ `PlannerPersistNode` deleted + the agent unwired — its dir is kept, prompts as reference per `KEEP.md`); the
+legacy item-lane dispatch chain (`dayflow_switchboard_arguments_node`, `dayflow_tool_caller`,
+`action_result_normalizer_node`; `_switchboard_arguments_util` kept — master_room uses it); and
+`dayflow_orchestrator::room_summary` (the generic `room_summary` is untouched).
 
-**Dormant / legacy (defined, no inbound edge):** the legacy item-lane dispatch chain
-(`dayflow_switchboard_arguments_node`, `dayflow_tool_caller`, `action_result_normalizer_node`,
-`post_room_finalize_node`'s reconciliation work, `result_formatter`), the `relevance_cleaner` sub-chain, and
-the dayflow-specific `room_summary` (no room binds it).
+**Dormant / legacy (defined but inert on the work-object lane):** `post_room_finalize_node`'s item-lane
+reconciliation work (the node itself is live in the exit path), `result_formatter`, and the
+`relevance_cleaner` sub-chain (cleans the items lane; orphaned — likely wants re-wiring, not removal).
 
 **Lifecycle (shipped):** the `active → dispatched` rename (Step 1) and the **finalizer cutover** (Step 3,
 `cb498a40`) are live — `is_satisfied` keys on `closed`, and `work_finalizer_node` (sibling to `work_repair`,
