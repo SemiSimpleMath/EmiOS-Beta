@@ -31,7 +31,7 @@ condition is met. There are THREE kinds — the distinction matters:
    absolute datetime in `wake_at`. ELAPSED TIME IS ALWAYS A TIME WAIT — never model "N hours/days
    later" as an event.
 
-2. ASK THE OWNER — this node needs the OWNER (the person we serve) to give us information or make a
+2. ASK THE USER — this node needs the USER (the person we serve) to give us information or make a
    decision before it can proceed. Set `wake_kind="user_reply"` and put the QUESTION you want asked in
    `wake_ref` — phrase it as a clear, friendly question addressed TO them, because it is shown to them
    verbatim. The system notifies them and keeps re-asking until they answer; their reply is handed to
@@ -40,7 +40,7 @@ condition is met. There are THREE kinds — the distinction matters:
 3. EXTERNAL EVENT — something OUTSIDE our control must happen first: someone ELSE replies, a delivery
    arrives, an approval lands. Set `wake_kind="event"` (or `"signal"`) and describe what you are waiting
    for in `wake_ref`. The state_mover matches the real-world event to that description. A reply from a
-   THIRD PARTY (anyone who is not our owner) is an EXTERNAL EVENT — not "ask the owner".
+   THIRD PARTY (anyone who is not our user) is an EXTERNAL EVENT — not "ask the user".
 
 A node with no wake_kind runs as soon as its depends_on are complete. A node can have BOTH a depends_on
 AND a wake condition (it waits for the upstream node to finish AND the wake condition).
@@ -50,7 +50,7 @@ AND a wake condition (it waits for the upstream node to finish AND the wake cond
   (`send_email`); his reply is an EXTERNAL EVENT (a third party); telling YOU is a notification:
   node_id="notify_user", depends_on=["email_brother"], wake_kind="event",
   wake_ref="a reply from the brother to the trip email"
-- "assess my recurring fatigue" — first ASK THE OWNER for the context only they can give:
+- "assess my recurring fatigue" — first ASK THE USER for the context only they can give:
   node_id="gather_context", wake_kind="user_reply",
   wake_ref="When does your fatigue tend to hit, and how have you been sleeping lately?"
 - "find a movie, then NOTIFY me 24 HOURS LATER" — reaching YOU is a notification, and it waits on a TIME
@@ -61,22 +61,22 @@ AND a wake condition (it waits for the upstream node to finish AND the wake cond
 In each case the node fires only when its depends_on are done AND its wake condition is met — never early.
 
 ## An ask is its own node
-If a node's job is to ask the owner a question (`wake_kind="user_reply"`), that is ALL it does — never
+If a node's job is to ask the user a question (`wake_kind="user_reply"`), that is ALL it does — never
 bundle other work into it. The nodes that need the answer `depends_on` it and run once it is answered.
 
-## Reaching the owner is a NOTIFICATION, not an email
-A node whose job is to tell / remind / update the OWNER (no reply needed) → set `kind="notify"` and put the
+## Reaching the user is a NOTIFICATION, not an email
+A node whose job is to tell / remind / update the USER (no reply needed) → set `kind="notify"` and put the
 message in `detail`; the system delivers it as a UI notification (no worker, no reply). Do NOT write
-"email me" / "email the owner": `send_email` is for EXTERNAL recipients only — a third party such as a
+"email me" / "email the user": `send_email` is for EXTERNAL recipients only — a third party such as a
 vendor, a school, or someone's brother. Like an ask, a notify is its OWN node — never bundle other work
 into it. (When you need an ANSWER back, use a `user_reply` wake instead. A genuine emergency — urgent AND
-safety-relevant — may reach the owner on all channels at once.)
+safety-relevant — may reach the user on all channels at once.)
 
-## A result the owner asked for ENDS with a notify
-If the goal's purpose is to produce something for the OWNER — a recommendation, a chosen option, research
+## A result the user asked for ENDS with a notify
+If the goal's purpose is to produce something for the USER — a recommendation, a chosen option, research
 findings, an answer to their question — the graph MUST end with a `kind="notify"` node that hands that
 result back (depends_on the node that produced it). Research or a decision that finishes without telling
-the owner has failed its purpose: the answer must not sit unread inside the work object. This is the final
+the user has failed its purpose: the answer must not sit unread inside the work object. This is the final
 hand-back of the result, distinct from a mid-task `user_reply` ask.
 
 ## Passing findings between nodes
