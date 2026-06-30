@@ -117,18 +117,22 @@ def run_node(store, work_id: str, node_id: str,
 
     # Close the owned node. The node managers reuse the PRODUCTION final_answer (a plain Agent that does
     # NOT mint a graph verdict), so this is the PRIMARY status-setter: clean exit -> done; aborted /
-    # errored -> failed. On a clean close, write the agent-facing answer as the node's result content.
+    # errored -> failed. The node's `content` is its DIRECTIVE — its identity — and is NEVER overwritten;
+    # the manager's final answer (the RESULT on success, the WHY on failure) is recorded as an EVIDENCE node
+    # the spine node produced (a graph row under it), matching how the worker mints its findings.
     final = store.load(work_id).nodes[node_id]
     if final.status not in {"done", "failed", "abandoned", "verified", "passed"}:
         failed = bool(data.get("aborted")) or data.get("exit_state") == "error_exit"
-        patch = {"work_id": work_id, "node_id": node_id, "status": "failed" if failed else "done"}
+        store.apply("set_status", {"work_id": work_id, "node_id": node_id,
+                                   "status": "failed" if failed else "done"}, actor=actor)
         if answer:
-            # Clean close: the answer IS the result. Failure: the answer is the WHY — what the worker tried
-            # and why it couldn't (e.g. "no Canvas login"). This was previously DISCARDED on failure, which
-            # is why the adjudicators couldn't tell a HARD BLOCKER (missing creds/access -> escalate to the
-            # owner) from a TRANSIENT failure (-> retry) and just kept recreating the step.
-            patch["content"] = answer if not failed else f"[failed] {answer}"
-        store.apply("set_status", patch, actor=actor)
+            from work_objects.model import new_id
+            store.apply("add_node",
+                        {"work_id": work_id, "id": new_id("result"), "type": "evidence",
+                         "parent_id": node_id, "status": "assumed", "created_by": actor,
+                         "title": "manager result" if not failed else "manager failure (why)",
+                         "content": answer},
+                        actor=actor)
 
     # Hand back the manager's ToolResult VERBATIM — the node handoff returns it as-is, so calling a
     # node-manager is no different from calling any manager. (Status is a graph property, read above.)

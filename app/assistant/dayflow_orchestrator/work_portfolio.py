@@ -35,6 +35,16 @@ def _body(n) -> str:
     return (getattr(n, "content", "") or "").strip().replace("\n", " ")[:_BODY_CHARS]
 
 
+def node_result(wo, node) -> str:
+    """A node's RESULT is the EVIDENCE it produced — NOT its `content`. `content` is the node's directive,
+    its immutable identity; the manager's answer is recorded as evidence/artifact children (a graph row
+    under the node). Returns the joined text of those children."""
+    parts = [(m.content or "").strip() for m in wo.nodes.values()
+             if m.parent_id == node.id and getattr(m, "type", "") in ("evidence", "artifact")
+             and (m.content or "").strip()]
+    return (" | ".join(parts)).replace("\n", " ")[:_BODY_CHARS]
+
+
 def _ago(dt, now) -> str:
     """Compact 'Nm ago' / 'Nh ago' if within the last 6h, else '' (stale/unknown). Tolerates bad input."""
     if dt is None:
@@ -70,23 +80,23 @@ def render_work_portfolio(wo, now=None) -> str:
     if failed:
         L.append(f"\n⚠ FAILED ({len(failed)}) — goal is BLOCKED until adjudicated (abandon / re-plan / re-issue):")
         for n in failed:
-            L.append(f"  - GOAL: {_t(n)}")
-            b = _body(n)
-            if b:
-                L.append(f"    WHY/RESULT: {b}")
+            L.append(f"  - {_t(n)}")
+            why = node_result(wo, n)
+            if why:
+                L.append(f"    WHY/RESULT: {why}")
 
     # RECENT OUTCOMES — the delta: goal -> agent-facing result, newest first. Lets the steward judge whether
     # each finished node ADVANCED the work object's goal (toward / sideways / wall).
     terminal = [n for n in wo.nodes.values()
-                if n.id != gid and n.status != "failed" and getattr(n, "is_terminal", False)
-                and (n.content or n.pod_ref)]
+                if n.id != gid and n.status != "failed" and getattr(n, "is_terminal", False)]
     terminal.sort(key=lambda n: getattr(n, "updated_at", now) or now, reverse=True)
-    if terminal:
-        L.append(f"\nOUTCOMES (goal -> result; {len(terminal)}):")
-        for n in terminal:
-            L.append(f"  - [{n.status}] GOAL: {_t(n)}")
-            b = _body(n)
-            L.append(f"    RESULT: {b if b else ('(pod ' + n.pod_ref + ')' if n.pod_ref else '(no detail)')}")
+    shown = [(n, node_result(wo, n)) for n in terminal]
+    shown = [(n, r) for n, r in shown if r or n.pod_ref]   # only nodes that actually produced something
+    if shown:
+        L.append(f"\nOUTCOMES (node -> result; {len(shown)}):")
+        for n, r in shown:
+            L.append(f"  - [{n.status}] {_t(n)}")
+            L.append(f"    RESULT: {r if r else ('pod ' + n.pod_ref)}")
 
     # TASKS — compact frontier of what's left, with a failed flag inline.
     if top:

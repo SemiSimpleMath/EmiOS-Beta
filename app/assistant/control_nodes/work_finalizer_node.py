@@ -88,9 +88,12 @@ class WorkFinalizerNode(ControlNode):
         self.blackboard.update_state_value("last_agent", self.name)
 
     def _judge(self, wo, node, scope) -> dict:
-        from app.assistant.dayflow_orchestrator.work_portfolio import render_work_portfolio, STATUS_LEGEND
+        from app.assistant.dayflow_orchestrator.work_portfolio import (
+            node_result, render_work_portfolio, STATUS_LEGEND,
+        )
         projection = STATUS_LEGEND + "\n\n" + render_work_portfolio(wo)
-        result_text = (node.content or "").strip() or "(no result text recorded)"
+        # The node's RESULT is the evidence it produced — `content` is its (immutable) directive.
+        result_text = node_result(wo, node) or "(no result recorded)"
         info = (f"JUST-COMPLETED NODE — id: {node.id} | title: {node.title}\n"
                 f"ITS FULL RESULT:\n{result_text[:_BODY_CHARS]}")
         agent = DI.agent_factory.create_agent("dayflow_orchestrator::work_finalizer")
