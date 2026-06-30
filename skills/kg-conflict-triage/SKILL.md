@@ -65,6 +65,25 @@ patterns (all bucket 3):
 - Date confidence: `auto_decay` = a decay guess, re-openable; `user_set` /
   `explicit` = authoritative. `*_prose` carries the fuzzy form.
 
+## Tables (the live emi.db — `kg_query` reads these; do NOT guess `kg_nodes`/`nodes`)
+
+The Postgres→SQLite migration renamed the core tables. The KG nodes live in **`kg_node_metadata`**, NOT
+`kg_nodes` and NOT `nodes` (that's the unrelated work-object substrate). The node primary key is **`id`** (a
+UUID); `node_id` is a *foreign key* on the evidence/finding tables, not a column on the node table itself.
+
+- **`kg_node_metadata`** — KG nodes. PK `id`. Cols: `label`, `node_type` (Entity/Concept/State/Event/Goal/
+  Property), `category`, `semantic_label`, `original_sentence`, `description`, `aliases`,
+  `start_date`/`end_date` + `start_date_confidence`/`end_date_confidence`/`start_date_prose`/`end_date_prose`,
+  `goal_status`, `confidence`, `importance`, `created_at`.
+- **`kg_edge_metadata`** — edges. `id`, `source_id`, `target_id`, `relationship_type`, `sentence`, `attributes`.
+- **`kg_node_evidence`** — evidence rows per node. `node_id` (→ `kg_node_metadata.id`), `source_text`,
+  `derived_sentence`, `message_timestamp`, `window_id`, `created_at`.
+- **`kg_window`** / **`kg_window_message`** — conversation windows (provenance: `…evidence.window_id` →
+  `kg_window_message` → `unified_log_2026`).
+- **`unified_log_2026`** — the raw message log.
+- **`kg_maintenance_finding`** — findings. `id`, `finding_type`, `status`, `priority`, `primary_node_id`
+  (→ `kg_node_metadata.id`), `secondary_node_id`, `reason`, `suggested_action`, `confidence`.
+
 ## Projection rules
 
 - Cards and wiki pages regenerate automatically after KG mutations — never
