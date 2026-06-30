@@ -1,6 +1,6 @@
 name: personal_admin_manager
 class_name: MultiAgentManager
-description: "Personal admin manager for calendar, todo, reminders, and email workflows."
+description: "Personal admin manager for calendar, todo, reminders, email, and Google Docs (create, read, and edit documents) workflows."
 display_name: "FiloPilo"
 max_cycles: 60
 role_bindings:
