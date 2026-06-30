@@ -101,12 +101,11 @@ class StateMoverPersistNode(ControlNode):
         wake_at = parse_iso_utc(ra) if ra else None
         if wake_at is None:
             return False
-        reason = str(hold.get("hold_reason") or "").strip()
-        note = (node.content or "").rstrip()
-        if reason:
-            note = (note + f"\n\n[Held by state_mover: {reason}]").strip()
-        store.apply("set_status", {"work_id": work_id, "node_id": node.id, "status": "waiting",
-                                   "content": note}, actor="state_mover")
+        # State-only: set `waiting` + the wake, nothing else. The hold reason stays in the LLM's
+        # held_work_nodes output and the log line — it is NOT written into the node's directive. (Writing it
+        # there polluted the worker's task text and ACCUMULATED across successive holds.)
+        store.apply("set_status", {"work_id": work_id, "node_id": node.id, "status": "waiting"},
+                    actor="state_mover")
         store.apply("defer_node", {"work_id": work_id, "node_id": node.id,
                                    "wake_kind": "time", "wake_at": wake_at}, actor="state_mover")
         return True
