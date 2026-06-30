@@ -181,7 +181,9 @@ def work_on(store, work_id: str, node_id: str | None = None,
 
 
 def _render_dependencies(wo, node_id: str) -> str:
-    """Upstream (depends_on) nodes' produced content, rendered as `information` for the planner."""
+    """Upstream (depends_on) nodes' RESULTS, rendered as `information` for the planner. A node's result is
+    the EVIDENCE it produced (evidence/artifact children by parent_id OR linked by a produces edge) — never
+    its `content`, which is the node's directive/identity."""
     dep_ids = [e.src for e in wo.edges if e.dst == node_id and e.relation == "depends_on"]
     if not dep_ids:
         return ""
@@ -190,12 +192,12 @@ def _render_dependencies(wo, node_id: str) -> str:
         d = wo.nodes.get(did)
         if d is None:
             continue
-        for e in wo.edges:
-            if e.src == did and e.relation == "produces" and e.dst in wo.nodes:
-                p = wo.nodes[e.dst]
-                detail = (p.content or p.pod_ref or "").strip()
-                if detail:
-                    lines.append(f"- {d.title}: {detail}")
+        produced = {e.dst for e in wo.edges if e.src == did and e.relation == "produces"}
+        parts = [(m.content or m.pod_ref or "").strip() for m in wo.nodes.values()
+                 if (m.parent_id == did or m.id in produced)
+                 and getattr(m, "type", "") in ("evidence", "artifact") and (m.content or m.pod_ref)]
+        if parts:
+            lines.append(f"- {d.title}: {(' | '.join(parts))[:400]}")
     return "\n".join(lines) if len(lines) > 1 else ""
 
 
