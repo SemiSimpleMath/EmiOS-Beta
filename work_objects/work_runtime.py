@@ -122,8 +122,12 @@ def run_node(store, work_id: str, node_id: str,
     if final.status not in {"done", "failed", "abandoned", "verified", "passed"}:
         failed = bool(data.get("aborted")) or data.get("exit_state") == "error_exit"
         patch = {"work_id": work_id, "node_id": node_id, "status": "failed" if failed else "done"}
-        if answer and not failed:
-            patch["content"] = answer   # node content becomes its RESULT (the agent-facing answer)
+        if answer:
+            # Clean close: the answer IS the result. Failure: the answer is the WHY — what the worker tried
+            # and why it couldn't (e.g. "no Canvas login"). This was previously DISCARDED on failure, which
+            # is why the adjudicators couldn't tell a HARD BLOCKER (missing creds/access -> escalate to the
+            # owner) from a TRANSIENT failure (-> retry) and just kept recreating the step.
+            patch["content"] = answer if not failed else f"[failed] {answer}"
         store.apply("set_status", patch, actor=actor)
 
     # Hand back the manager's ToolResult VERBATIM — the node handoff returns it as-is, so calling a
