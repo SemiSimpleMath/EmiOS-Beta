@@ -1,4 +1,55 @@
-Current time: {{ date_time }}.
+Current time: {{ date_time }}.{% if day_of_week %} Day: {{ day_of_week }}.{% endif %}
+{%- if resource_afk_statistics_output %}
+{%- if resource_afk_statistics_output.is_afk %}
+Computer: AWAY — idle {{ resource_afk_statistics_output.idle_minutes | default(0) | round | int }} min
+{%- else %}
+Computer: AT KEYBOARD
+{%- endif %}
+{%- endif %}
+{%- if location_summary %}
+Location: {{ location_summary }}
+{%- endif %}
+{%- if resource_weather and resource_weather.current %}
+Weather: {{ resource_weather.location.city }}: {{ resource_weather.current.temperature }} F, {{ resource_weather.current.condition }}
+{%- endif %}
+{%- if health_status_summary %}
+Health: {{ health_status_summary }}
+{%- endif %}
+{%- if resource_expected_calendar and resource_expected_calendar.expected_schedule %}
+
+## TODAY'S SCHEDULE
+{%- for entry in resource_expected_calendar.expected_schedule %}
+- {{ entry.title }} {{ entry.start_local }}{% if entry.end_local %} - {{ entry.end_local }}{% endif %} ({{ entry.status }})
+{%- endfor %}
+{%- endif %}
+{%- if resource_daily_context_generator_output and resource_daily_context_generator_output.day_theme %}
+
+## DAY THEME
+{{ resource_daily_context_generator_output.day_theme }}
+{%- endif %}
+{%- if resource_daily_context_generator_output and resource_daily_context_generator_output.current_status %}
+
+## STATUS
+{{ resource_daily_context_generator_output.current_status }}
+{%- endif %}
+{%- if resource_dayflow_routine %}
+
+## ROUTINE (today's cadence — judge the goal's timing and appropriateness against this)
+{{ resource_dayflow_routine }}
+{%- endif %}
+{% if admitted_artifacts %}
+
+## NEW INTAKE (the source items this tick — the goal below likely came from one of these)
+{% for m in admitted_artifacts %}
+{%- set meta = m.get("metadata", {}) %}
+- [{{ meta.get("short_id", meta.get("item_id","")) }}] {% if meta.get("source_type","") == "email" %}Email from {{ meta.get("email_sender","Unknown") }}: "{{ meta.get("email_subject", meta.get("summary","")) }}"{% else %}{{ meta.get("summary","(no summary)") }} ({{ meta.get("source_type","") }}){% endif %}
+{% endfor %}
+{% endif %}
+{% if entity_card %}
+
+## PEOPLE & THINGS (entity cards for what is referenced)
+{{ entity_card }}
+{% endif %}
 
 GOAL TO DECOMPOSE:
 {{ task }}

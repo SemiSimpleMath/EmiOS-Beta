@@ -23,6 +23,15 @@ class WorkObjectSpec(BaseModel):
         description="The goal — one clear sentence of what this work object should achieve, from a "
         "one-step action (e.g. 'set the home AC to 70F tonight at 21:00') up to multi-step work. This "
         "becomes the goal node; the architect decomposes it into the graph. Do NOT list steps here.")
+    rationale: str = Field(
+        default="",
+        description="A short PROSE brief FOR THE ARCHITECT — the architect sees only this plus the "
+        "objective, so never leave it blank. Explain WHY this became a work object, name its SOURCE (the "
+        "calendar event, email, or concern it came from), and state its NATURE plainly: is it (a) a "
+        "REMINDER about the USER'S OWN activity — they do it, you can only notify them at the time (a "
+        "single notify, nothing to execute; e.g. 'walk the dogs', a dentist appointment); (b) work YOU "
+        "carry out via tools/managers; or (c) a result to research/produce and hand back. Give the "
+        "architect the intent and context a human would need to design the right graph.")
     success_criteria: str = Field(default="", description="How to know the objective is fully met.")
     based_on: List[str] = Field(
         default_factory=list,

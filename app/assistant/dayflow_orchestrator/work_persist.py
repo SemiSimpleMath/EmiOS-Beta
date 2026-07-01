@@ -24,6 +24,7 @@ def persist_steward_output(store, output: Dict[str, Any]) -> Dict[str, Any]:
             continue
         work_id = str(spec.get("work_id") or "").strip()
         objective = str(spec.get("objective") or "").strip()
+        rationale = str(spec.get("rationale") or "").strip()
         if not objective:
             continue
         if not work_id:
@@ -36,7 +37,7 @@ def persist_steward_output(store, output: Dict[str, Any]) -> Dict[str, Any]:
             store.apply("set_status", {
                 "work_id": wo.id, "node_id": wo.goal_node_id, "status": "dispatched",
             }, actor="steward")
-            created.append({"objective": objective, "work_id": wo.id,
+            created.append({"objective": objective, "work_id": wo.id, "rationale": rationale,
                             "based_on": list(spec.get("based_on") or [])})
         else:
             # CHANGE — update the goal's objective text in place.

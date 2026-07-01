@@ -124,6 +124,11 @@ Health: {{ health_status_summary }}
 {% endfor %}
 {% endif %}
 
+{% if entity_card %}
+## PEOPLE & THINGS (entity cards for what is referenced above)
+{{ entity_card }}
+{% endif %}
+
 Make your evaluation decisions:
 - CREATE a work object for anything that needs doing — from a one-step action (set the AC tonight, a quick reminder/answer) up to multi-step work. State the OBJECTIVE only; the architect decomposes it.
 - CHANGE a work object whose objective has shifted; FLAG one for RE-PLAN if its current graph no longer fits (off-track / stalled).

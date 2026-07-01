@@ -91,7 +91,11 @@ class WorkArchitectNode(ControlNode):
                 for c in created:
                     work_id = c["work_id"]
                     try:
-                        result = agent.action_handler(Message(task=c["objective"], information=info, scope_context=scope))
+                        rationale = str(c.get("rationale") or "").strip()
+                        why = (f"## WHY THIS IS A WORK OBJECT — the steward's brief (its NATURE + intent; "
+                               f"honor it: a reminder about the user's own activity is a single kind=notify, "
+                               f"not an executable step)\n{rationale}\n\n" if rationale else "")
+                        result = agent.action_handler(Message(task=c["objective"], information=why + info, scope_context=scope))
                         nodes = (getattr(result, "data", {}) or {}).get("nodes", []) or []
                         res = apply_architect_dag(store, work_id, nodes)
                         decomposed.append({"work_id": work_id, "nodes": len(res.get("added", []))})

@@ -8,6 +8,9 @@ llm_params:
 allowed_tools: []
 except_tools: []
 
+entity_scan_keys: [admitted_artifacts, work_portfolio]
+entity_card_level: 0
+
 user_context_items:
   - date_time
   - day_of_week
@@ -26,6 +29,7 @@ user_context_items:
   - recent_completed_work
   - recent_abandoned_work
   - recent_dispatch_results
+  - entity_card
 
 system_context_items:
   - resource_user_data
