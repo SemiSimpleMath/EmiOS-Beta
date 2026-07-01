@@ -101,9 +101,15 @@ class WorkNodeDispatchNode(ControlNode):
         if family == "notify" and wake_kind != "user_reply":
             from app.assistant.lib.tools.create_work_notification.create_work_notification import CreateWorkNotificationTool
             if CreateWorkNotificationTool._create(work_id, node_id) is not None:
-                store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "done",
-                                           "content": (node.content or "")}, actor="node_dispatch")
-                logger.info("[work_node_dispatch] notified + closed %s::%s", work_id, node_id)
+                # The delivered notification IS the tool result — record it as evidence + complete the node,
+                # symmetric with a manager call. The finalizer then closes it (done -> closed).
+                from work_objects.model import new_id
+                store.apply("add_node", {"work_id": work_id, "id": new_id("result"), "type": "evidence",
+                                         "parent_id": node_id, "status": "assumed", "created_by": "node_dispatch",
+                                         "title": "notification delivered", "content": (node.content or "")},
+                            actor="node_dispatch")
+                store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "done"}, actor="node_dispatch")
+                logger.info("[work_node_dispatch] notified %s::%s -> done (finalizer closes)", work_id, node_id)
             else:
                 logger.warning("[work_node_dispatch] notify produced no ticket for %s::%s; retry next tick",
                                work_id, node_id)

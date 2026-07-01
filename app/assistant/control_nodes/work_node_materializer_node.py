@@ -31,8 +31,8 @@ class WorkNodeMaterializerNode(ControlNode):
             for s in store.list_work_objects():
                 if str(s.get("status") or "").lower() in _TERMINAL_WO_STATES:
                     continue
-                # Reply pre-step: record any user reply + clear the ask's wait, so an answered ask becomes
-                # a runnable node the worker then picks up. Idempotent (a cleared ask is no longer user_reply).
+                # Reply pre-step: an ask's reply is its result — record it as evidence + complete the node
+                # (-> done) so the finalizer judges it. Idempotent (a completed ask is no longer user_reply).
                 try:
                     self._record_replies(store, s["id"], now)
                 except Exception as e:
@@ -83,11 +83,16 @@ class WorkNodeMaterializerNode(ControlNode):
         return out
 
     def _record_replies(self, store, work_id, now):
-        """Match user replies back to this work object's ask nodes (by trigger_context.work_node) and, for
-        each answered ask, write the reply onto the node + clear its user_reply wake so the worker runs it
-        next. Read-only on the ticket store (it carries the reply text)."""
+        """Match user replies back to this work object's ask nodes (by trigger_context.work_node). An ask is
+        just a tool call whose result arrives asynchronously: when the reply lands it IS the node's outcome,
+        so record it as EVIDENCE (never mutate the directive) and complete the node -> done. The finalizer
+        then judges the reply like any other tool result — an answer -> PROCEED (unblock the dependents that
+        use it); "stop / not now / I'll handle it" -> AMEND (drop that line) or RESOLVE->abandon. We do NOT
+        clear the wait and re-run the worker; that re-asks a declined ask forever. Read-only on the ticket
+        store (it carries the reply text)."""
         from datetime import timedelta
         from app.assistant.ticket_manager import get_ticket_manager
+        from work_objects.model import new_id
         wo = store.load(work_id)
         goal_id = wo.goal_node_id
         asks = [n for n in wo.nodes.values()
@@ -107,8 +112,12 @@ class WorkNodeMaterializerNode(ControlNode):
             reply = replies.get(f"{work_id}::{n.id}")
             if not reply:
                 continue
-            content = (n.content or "").rstrip()
-            store.apply("set_status", {"work_id": work_id, "node_id": n.id, "status": n.status,
-                                       "content": f"{content}\n\n[User replied: {reply}]"}, actor="reply")
-            store.apply("defer_node", {"work_id": work_id, "node_id": n.id, "wake_kind": None}, actor="reply")
-            logger.info("[%s] recorded reply for %s::%s — ask cleared", self.name, work_id, n.id)
+            # A spine ask can't go proposed->done directly; hop via dispatched (legal for spine + notify).
+            if n.status == "proposed":
+                store.apply("set_status", {"work_id": work_id, "node_id": n.id, "status": "dispatched"}, actor="reply")
+            store.apply("add_node", {"work_id": work_id, "id": new_id("reply"), "type": "evidence",
+                                     "parent_id": n.id, "status": "assumed", "created_by": "reply",
+                                     "title": "user reply", "content": reply}, actor="reply")
+            store.apply("set_status", {"work_id": work_id, "node_id": n.id, "status": "done"}, actor="reply")
+            logger.info("[%s] reply recorded as result for %s::%s — node done -> finalizer judges it",
+                        self.name, work_id, n.id)
