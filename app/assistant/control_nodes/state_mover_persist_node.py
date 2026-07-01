@@ -14,7 +14,7 @@ class StateMoverPersistNode(ControlNode):
     state_transition_guard_node already saved the item ``state_mutations``. This node:
       1. sets ``state_mutations_persisted_tf`` so post_room_finalize_node skips re-applying them, and
       2. applies the state_mover's ``node_wakes`` — for each work-object node whose awaited external
-         event arrived, clear its event-wait (so is_ready / work_execution pick it up next tick) and
+         event arrived, clear its event-wait (so is_ready / the dispatch pick it up next tick) and
          attach the arrived content as the worker's resume context.
 
     This is the work-object-aware half of the state_mover; it replaces the standalone event_waker.
@@ -68,8 +68,8 @@ class StateMoverPersistNode(ControlNode):
                 if n.id == goal_id or n.status not in {"proposed", "waiting"}:
                     continue
                 if str(getattr(n, "wake_kind", None) or "") in {"event", "signal", "user_reply"}:
-                    continue   # event/signal woken via node_wakes; user_reply is in-flight awaiting the
-                    # owner's reply (owned by work_execution's notify path) — not re-promotable here
+                    continue   # event/signal woken via node_wakes; user_reply is an in-flight ask awaiting the
+                    # user's reply (the dispatch surfaced it; the reply is recorded as its result) — not here
                 if not wo.is_ready(n, now):
                     continue   # time/dep gate not clear — leave it parked
                 family = FAMILY_BY_TYPE.get(n.type, "spine")

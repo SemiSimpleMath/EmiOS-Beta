@@ -3,13 +3,13 @@ work object's failed node(s). Surgical + in-place: re-open the failed top-level 
 no re-wiring — dependents stay pointed at the same node and unblock when it finally completes, and subtasks
 satisfy by their own `done` status, so leftover failed descendants don't block.
 
-  escalate     -> re-issue the failed step as a user_reply ASK (the notify path asks the user; the worker
-                  then completes it from the reply via the worker-uses-reply fix). status failed->proposed
-                  + wake_kind=user_reply + wake_ref=the ask.
+  escalate     -> re-issue the failed step as a user_reply ASK (the dispatch asks the user; the reply is
+                  recorded as the node's result). status failed->proposed + wake_kind=user_reply
+                  + wake_ref=the ask.
   retry        -> re-run it as-is — transient failure, or the needed info is now present (e.g. a reply
                   already on the node). status failed->proposed.
   abandon_goal -> the goal is unachievable or no longer wanted; abandon the whole WO (set_work_status,
-                  which propagates: work_execution skips terminal WOs, so the worker stops).
+                  which propagates: the dispatch skips terminal WOs, so the worker stops).
 """
 from app.assistant.utils.logging_config import get_logger
 

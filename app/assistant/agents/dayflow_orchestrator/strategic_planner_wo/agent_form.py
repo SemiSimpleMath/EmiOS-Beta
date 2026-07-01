@@ -5,7 +5,7 @@ objects + new intake and decides only WHAT needs to change: create a new work ob
 one), change an existing objective, flag one for re-planning, or complete/abandon it. The architect
 (work_architect) decomposes/re-plans each flagged work object one at a time; work_emi_team executes.
 
-`advance` is gone — work_execution runs every ready node deterministically, it never gated on it.
+`advance` is gone — the materializer/dispatch loop runs every ready node deterministically, never gated on it.
 `replan_work_ids` is new — it asks the architect to re-plan an existing work object whose graph no
 longer fits (off-track / situation changed / stalled). Per-step fields (dependencies / reactivate_at /
 wake_signals) live on the graph (depends_on edges, node wake_at/wake_kind), set by the architect.

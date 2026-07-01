@@ -2,8 +2,8 @@
 
 Runs after the architect in the work-object pipeline. For each ACTIVE work object that has a failed node, invoke the work_repair
 adjudicator on its projection and apply the disposition (escalate / retry / abandon_goal) via
-apply_adjudication: escalate re-issues the failed step as a user_reply ask (the notify path then asks the
-user and the worker completes it from the reply), retry re-opens it to re-run, abandon_goal drops the WO.
+apply_adjudication: escalate re-issues the failed step as a user_reply ask (the dispatch then asks the
+user and the reply is recorded as the node's result), retry re-opens it to re-run, abandon_goal drops the WO.
 This drains the stuck pile and resolves new failures instead of leaving them 'active'. Bounded per tick;
 never raises.
 

@@ -22,47 +22,34 @@ depends_on) can run in any order. depends_on means "A has FINISHED" — it is an
 NOT a wait for the outside world.
 
 ## Waiting — the part that matters
-Real tasks often must PAUSE. Give the node that must wait a WAKE CONDITION so it parks until the
-condition is met. There are THREE kinds — the distinction matters:
+Real tasks often must PAUSE. A node that must wait carries ONE of two wake primitives (leave both empty for a
+node that runs as soon as its depends_on are complete):
 
-1. TIME — a specific clock time, OR a fixed delay ("next Monday 9am", "in 3 days", "24 hours later",
-   "a week after"). Set `wake_kind="time"` and `wake_at` (absolute ISO datetime with offset). You are
-   given the CURRENT TIME in the prompt — for a delay, ADD the delay to it and put the resulting
-   absolute datetime in `wake_at`. ELAPSED TIME IS ALWAYS A TIME WAIT — never model "N hours/days
-   later" as an event.
+1. `wake_at` — a DETERMINISTIC time. A specific clock time OR a fixed delay ("next Monday 9am", "in 3 days",
+   "24 hours later"). Put the absolute ISO datetime (with offset) in `wake_at`; for a delay, ADD it to the
+   CURRENT TIME in the prompt. ELAPSED TIME IS ALWAYS THIS — never model "N hours/days later" as an event.
 
-2. ASK THE USER — this node needs the USER (the person we serve) to give us information or make a
-   decision before it can proceed. Set `wake_kind="user_reply"` and put the QUESTION you want asked in
-   `wake_ref` — phrase it as a clear, friendly question addressed TO them, because it is shown to them
-   verbatim. The system notifies them and keeps re-asking until they answer; their reply is handed to
-   the worker. Use this ONLY for asking our own user — never a third party.
+2. `wake_ref` — a PROSE condition. Something OUTSIDE our control must happen first: someone ELSE replies, a
+   delivery arrives, an approval lands. Describe it plainly ("a reply from the brother to the trip email");
+   the state_mover matches the real-world event to that description.
 
-3. EXTERNAL EVENT — something OUTSIDE our control must happen first: someone ELSE replies, a delivery
-   arrives, an approval lands. Set `wake_kind="event"` (or `"signal"`) and describe what you are waiting
-   for in `wake_ref`. The state_mover matches the real-world event to that description. A reply from a
-   THIRD PARTY (anyone who is not our user) is an EXTERNAL EVENT — not "ask the user".
+To ASK THE USER a question and use their answer, set `ask=true` and put the clear, friendly QUESTION in
+`wake_ref` — it is shown to them verbatim; their reply becomes the node's result. Only for our OWN user — a
+THIRD PARTY's reply is a `wake_ref` event, NOT an ask. An ask is its OWN node: never bundle other work into
+it; the nodes that need the answer `depends_on` it.
 
-A node with no wake_kind runs as soon as its depends_on are complete. A node can have BOTH a depends_on
-AND a wake condition (it waits for the upstream node to finish AND the wake condition).
+A node can have BOTH a depends_on AND a wake (it waits for the upstream node to finish AND the wake). It
+fires only when its depends_on are done AND its wake condition is met — never early.
 
 ### Examples
 - "email my brother, and NOTIFY me when HE replies" — emailing the brother is an EXTERNAL recipient
-  (`send_email`); his reply is an EXTERNAL EVENT (a third party); telling YOU is a notification:
-  node_id="notify_user", depends_on=["email_brother"], wake_kind="event",
-  wake_ref="a reply from the brother to the trip email"
+  (`send_email`); his reply is an OUTSIDE event; telling YOU is a notification:
+  node_id="notify_user", depends_on=["email_brother"], wake_ref="a reply from the brother to the trip email"
 - "assess my recurring fatigue" — first ASK THE USER for the context only they can give:
-  node_id="gather_context", wake_kind="user_reply",
+  node_id="gather_context", ask=true,
   wake_ref="When does your fatigue tend to hit, and how have you been sleeping lately?"
-- "find a movie, then NOTIFY me 24 HOURS LATER" — reaching YOU is a notification, and it waits on a TIME
-  delay, NOT an event:
-  node_id="notify_result", depends_on=["find_movie"], wake_kind="time",
-  wake_at=<current time + 24h, as an absolute datetime>
-
-In each case the node fires only when its depends_on are done AND its wake condition is met — never early.
-
-## An ask is its own node
-If a node's job is to ask the user a question (`wake_kind="user_reply"`), that is ALL it does — never
-bundle other work into it. The nodes that need the answer `depends_on` it and run once it is answered.
+- "find a movie, then NOTIFY me 24 HOURS LATER" — a deterministic time delay, NOT an event:
+  node_id="notify_result", depends_on=["find_movie"], wake_at=<current time + 24h, as an absolute datetime>
 
 ## Reaching the user is a NOTIFICATION, not an email
 A node whose job is to tell / remind / update the USER (no reply needed) → set `kind="notify"` and put the

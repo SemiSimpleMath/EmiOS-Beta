@@ -4,8 +4,8 @@ The work-object-aware sibling of create_dayflow_ticket: given (work_id, node_id)
 object, pulls the notify node's intent PLUS its upstream results off the graph (so "find a movie, then
 notify me" actually conveys the movie), phrases a warm heads-up via the SAME ticket_builder the regular
 ticket tool uses, and surfaces a NOTIFY ticket. Unlike create_dayflow_ticket it is fire-and-forget — it
-never blocks waiting for a reply (a notify expects none). work_execution's PASS 1.5 calls `_create`
-directly; agents can call it as a tool.
+never blocks waiting for a reply (a notify expects none). The work-node dispatch calls `_create`
+directly for a one-way notify; agents can call it as a tool.
 """
 from __future__ import annotations
 

@@ -4,14 +4,13 @@ The steward (strategic_planner_wo) decides WHAT work exists (creates a goal). Th
 that goal is STRUCTURED: it decomposes the goal into a small DAG of work nodes, with dependencies AND —
 the part the orchestrator_architect lacks — WAIT-GATES for steps that must pause for a future time or an
 external event (a reply, a delivery, an approval). The worker (work_emi_team) executes each node; the
-state_mover fires the wait-gates. Node fields map onto the substrate: depends_on edge, wake_kind/wake_at/
-wake_ref (see work_objects/model.py WAKE_KINDS = time | event | user_reply | signal).
+state_mover judges the wait-gates. The architect authors TWO wake primitives — wake_at (a deterministic
+time) | wake_ref (a prose condition the state_mover matches against reality) — plus an `ask` flag when the
+node's job is to ask the user; work_architect_apply derives the substrate wake_kind from them.
 """
 from typing import List, Optional
 
 from pydantic import BaseModel, Field, model_validator
-
-_WAKE_KINDS = {"time", "event", "user_reply", "signal"}
 
 
 class WorkNode(BaseModel):
@@ -31,23 +30,22 @@ class WorkNode(BaseModel):
     depends_on: List[str] = Field(
         default_factory=list,
         description="node_ids that must COMPLETE before this node can run (ordering / prerequisites).")
-    wake_kind: Optional[str] = Field(
-        default=None,
-        description="Leave null for a node that runs as soon as its depends_on are done. Otherwise: "
-        "'time' (a clock time or fixed delay); 'user_reply' (this node needs the OWNER — the person we "
-        "serve — to answer a question or decide; the system notifies them and re-asks until they reply); "
-        "'event'/'signal' (an OUTSIDE party or system must act first — someone else's reply, a delivery, "
-        "an approval).")
     wake_at: Optional[str] = Field(
         default=None,
-        description="ISO 8601 datetime with timezone offset; REQUIRED when wake_kind='time'.")
+        description="DETERMINISTIC wake — an ISO 8601 datetime with timezone offset. The node parks until this "
+        "exact clock time (a specific time, or now + a fixed delay: add the delay to the CURRENT TIME in the "
+        "prompt). ELAPSED TIME IS ALWAYS THIS — never model 'N hours/days later' as an event.")
     wake_ref: Optional[str] = Field(
         default=None,
-        description="REQUIRED when wake_kind is user_reply/event/signal. For 'user_reply', write the "
-        "clear, friendly QUESTION to ask the owner — it is shown to them verbatim (e.g. 'When does your "
-        "fatigue tend to hit, and how have you been sleeping lately?'). For 'event'/'signal', describe "
-        "the real-world event being awaited (e.g. 'a reply from the brother to the trip email') — the "
-        "state_mover matches it.")
+        description="PROSE wake — the node parks until this natural-language condition is met: an OUTSIDE "
+        "event someone/something else must produce ('a reply from the brother to the trip email', 'the "
+        "package is delivered', 'an approval lands'). The state_mover matches it against reality. If instead "
+        "this node ASKS the user (set `ask=true`), put the clear, friendly QUESTION here — shown verbatim.")
+    ask: bool = Field(
+        default=False,
+        description="True if this node's job is to ASK the USER (the person we serve) a question and use their "
+        "answer — put the question in `wake_ref`. The system surfaces it and the reply becomes the node's "
+        "result. Only for our own user; a THIRD PARTY's reply is a `wake_ref` event, not an ask.")
     wait_reason: Optional[str] = Field(
         default=None, description="Human-readable reason this node waits.")
 
@@ -55,14 +53,10 @@ class WorkNode(BaseModel):
     def _validate_wake(self):
         if self.kind is not None and self.kind not in {"work", "notify"}:
             raise ValueError("kind must be 'work', 'notify', or null.")
-        if self.wake_kind is None:
-            return self
-        if self.wake_kind not in _WAKE_KINDS:
-            raise ValueError(f"wake_kind must be one of {_WAKE_KINDS} or null.")
-        if self.wake_kind == "time" and not str(self.wake_at or "").strip():
-            raise ValueError("wake_at is required when wake_kind='time'.")
-        if self.wake_kind in {"event", "user_reply", "signal"} and not str(self.wake_ref or "").strip():
-            raise ValueError("wake_ref is required when wake_kind is event/user_reply/signal.")
+        if self.ask and not str(self.wake_ref or "").strip():
+            raise ValueError("wake_ref (the question) is required when ask=true.")
+        if str(self.wake_at or "").strip() and str(self.wake_ref or "").strip():
+            raise ValueError("a node waits on a time (wake_at) OR a condition (wake_ref), not both.")
         return self
 
 

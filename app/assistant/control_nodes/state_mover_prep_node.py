@@ -152,8 +152,8 @@ class StateMoverPrepNode(ControlNode):
                 if n.id == goal_id or n.status not in {"proposed", "waiting"}:
                     continue
                 if str(getattr(n, "wake_kind", None) or "") in {"event", "signal", "user_reply"}:
-                    continue   # event/signal shown in WORK-OBJECT WAITS; user_reply is in-flight awaiting
-                    # the owner's reply (owned by work_execution's notify path) — not a promotion candidate
+                    continue   # event/signal shown in WORK-OBJECT WAITS; user_reply is an in-flight ask
+                    # awaiting the user's reply (surfaced by the dispatch; the reply becomes its result)
                 if not wo.is_ready(n, now):
                     continue
                 family = FAMILY_BY_TYPE.get(n.type, "spine")
@@ -182,9 +182,9 @@ class StateMoverPrepNode(ControlNode):
                 continue
             wo = store.load(s["id"])
             for n in wo.nodes.values():
-                # user_reply is owned by work_execution's notify-user path now (it surfaces a notification
-                # and re-asks until the owner replies). The state_mover only wakes passive EXTERNAL waits
-                # (event/signal) by matching incoming intake.
+                # user_reply is an in-flight ask — the dispatch surfaces it and re-asks until the user
+                # replies, and the reply is then recorded as the node's result. The state_mover only wakes
+                # passive EXTERNAL waits (event/signal) by matching incoming intake.
                 if getattr(n, "wake_kind", None) in {"event", "signal"} and wo.is_ready(n, now):
                     waiting.append({
                         "task_id": f"{s['id']}::{n.id}",

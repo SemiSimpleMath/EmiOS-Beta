@@ -98,16 +98,28 @@ def apply_architect_dag(store, work_id: str, nodes: List[Dict[str, Any]],
                 }, actor="architect")
                 edges += 1
 
-    # 3) wake-gates
+    # 3) wake-gates — the architect authors two primitives, wake_at | wake_ref (+ an `ask` flag); DERIVE the
+    #    substrate wake_kind here so the store / state_mover / dispatch are unchanged. wake_at -> a
+    #    deterministic time wake; wake_ref -> a prose external-event wake the state_mover matches; ask ->
+    #    the user_reply ask (wake_ref carries the question).
     waits = 0
     for spec in specs:
         nid = str(spec.get("node_id") or "").strip()
-        wk = spec.get("wake_kind")
-        if nid in existing and wk:
-            store.apply("defer_node", {
-                "work_id": work_id, "node_id": nid, "wake_kind": wk,
-                "wake_at": _to_dt(spec.get("wake_at")), "wake_ref": spec.get("wake_ref"),
-            }, actor="architect")
+        if nid not in existing:
+            continue
+        wake_at = _to_dt(spec.get("wake_at"))
+        wake_ref = spec.get("wake_ref")
+        if bool(spec.get("ask")) and str(wake_ref or "").strip():
+            wk = "user_reply"
+        elif wake_at:
+            wk = "time"
+        elif str(wake_ref or "").strip():
+            wk = "event"
+        else:
+            wk = None
+        if wk:
+            store.apply("defer_node", {"work_id": work_id, "node_id": nid, "wake_kind": wk,
+                                       "wake_at": wake_at, "wake_ref": wake_ref}, actor="architect")
             waits += 1
 
     logger.info("apply_architect_dag(%s): +%d nodes, +%d deps, +%d waits, -%d abandoned",
