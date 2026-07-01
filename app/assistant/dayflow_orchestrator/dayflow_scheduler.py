@@ -428,17 +428,19 @@ class DayflowScheduler:
             logger.debug("[DayflowScheduler] arm work-wake exception details", exc_info=True)
 
     def _fire_work_node(self, work_id: str, node_id: str) -> None:
-        """A work node's time-wake fired: run THAT node via work_emi_team, directly — no planning tick.
-        Gated by is_ready (status proposed/waiting + wake_at reached + deps satisfied), so a re-planned,
-        already-running, completed, or dep-blocked node simply no-ops. Runs in the app context; never
-        propagates (this is a leaf APScheduler job — a raise would just be swallowed)."""
+        """A work node's deterministic time-wake fired: route THAT node through the switchboard NOW — off the
+        planning tick — exactly as the pipeline would (the switchboard reads the node and sends it to the
+        notify tool or the worker). No re-judgment: the wake decision was already made when the state_mover
+        set the timer. Gated by is_ready (status proposed/waiting + wake_at reached + deps satisfied), so a
+        re-planned, already-running, completed, or dep-blocked node simply no-ops. Runs in the app context;
+        never propagates (a leaf APScheduler job — a raise would just be swallowed)."""
         if not setup_complete():
             return
         try:
             with self._app.app_context():
                 from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
+                from app.assistant.dayflow_orchestrator.node_dispatch import route_and_dispatch
                 from work_objects.model import utcnow
-                from work_objects.work_runtime import work_on
                 store = get_dayflow_work_store()
                 wo = store.load(work_id)
                 node = wo.nodes.get(node_id)
@@ -449,10 +451,9 @@ class DayflowScheduler:
                         "[DayflowScheduler] work-wake %s::%s fired but node not ready (status=%s) — "
                         "skipping.", work_id, node_id, node.status)
                     return
-                logger.info("[DayflowScheduler] work-wake firing node %s::%s via work_emi_team.",
+                logger.info("[DayflowScheduler] work-wake firing node %s::%s -> switchboard.",
                             work_id, node_id)
-                status = work_on(store, work_id, node_id=node_id)
-                logger.info("[DayflowScheduler] work-wake node %s::%s -> %s", work_id, node_id, status)
+                route_and_dispatch(store, work_id, node_id)
         except Exception as e:
             logger.error("[DayflowScheduler] _fire_work_node(%s::%s) failed: %s", work_id, node_id, e)
             logger.debug("[DayflowScheduler] fire work-node exception details", exc_info=True)
