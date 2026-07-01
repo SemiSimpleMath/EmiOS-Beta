@@ -33,10 +33,10 @@ node that runs as soon as its depends_on are complete):
    delivery arrives, an approval lands. Describe it plainly ("a reply from the brother to the trip email");
    the state_mover matches the real-world event to that description.
 
-To ASK THE USER a question and use their answer, set `ask=true` and put the clear, friendly QUESTION in
-`wake_ref` — it is shown to them verbatim; their reply becomes the node's result. Only for our OWN user — a
-THIRD PARTY's reply is a `wake_ref` event, NOT an ask. An ask is its OWN node: never bundle other work into
-it; the nodes that need the answer `depends_on` it.
+A node whose job is to ASK THE USER a question is just written as its goal in `detail` ("Ask the user X")
+— you do NOT flag it; the switchboard reads the goal, sees it needs the user, and surfaces it, and their
+reply becomes the node's result. An ask is its OWN node: never bundle other work into it; the nodes that
+need the answer `depends_on` it. (A THIRD PARTY's reply is a `wake_ref` event, not an ask.)
 
 A node can have BOTH a depends_on AND a wake (it waits for the upstream node to finish AND the wake). It
 fires only when its depends_on are done AND its wake condition is met — never early.
@@ -46,8 +46,7 @@ fires only when its depends_on are done AND its wake condition is met — never 
   (`send_email`); his reply is an OUTSIDE event; telling YOU is a notification:
   node_id="notify_user", depends_on=["email_brother"], wake_ref="a reply from the brother to the trip email"
 - "assess my recurring fatigue" — first ASK THE USER for the context only they can give:
-  node_id="gather_context", ask=true,
-  wake_ref="When does your fatigue tend to hit, and how have you been sleeping lately?"
+  node_id="gather_context", detail="Ask the user when their fatigue tends to hit and how they've been sleeping"
 - "find a movie, then NOTIFY me 24 HOURS LATER" — a deterministic time delay, NOT an event:
   node_id="notify_result", depends_on=["find_movie"], wake_at=<current time + 24h, as an absolute datetime>
 

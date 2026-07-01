@@ -21,10 +21,20 @@ _NOTIFY_SUGGESTION_TYPE = "work_notify"
 _REASK_HOURS = 1
 
 
-def dispatch_node(store, work_id: str, node_id: str, delegate_to: str) -> None:
-    """Carry out the switchboard's routing decision for one node."""
+def dispatch_node(store, work_id: str, node_id: str, delegate_to: str, ticket_kind: str = "") -> None:
+    """Carry out the switchboard's routing decision for one node. The switchboard read the node's GOAL and
+    decided both WHERE (delegate_to) and, for the user side, whether it needs a reply (ticket_kind):
+      - create_dayflow_ticket + decision -> ask the user (surface + await the reply, which becomes the result)
+      - create_dayflow_ticket + notify   -> tell the user one-way (deliver + record the result + done)
+      - run_work_node (anything else)     -> the worker does it."""
     if str(delegate_to or "").strip() == "create_dayflow_ticket":
-        _communicate(store, work_id, node_id)
+        node = store.load(work_id).nodes.get(node_id)
+        if node is None:
+            return
+        if str(ticket_kind or "").strip().lower() == "decision":
+            _ask(store, work_id, node_id, node)
+        else:
+            _notify(store, work_id, node_id, node)
     else:
         _do_work(store, work_id, node_id)
 
@@ -41,36 +51,26 @@ def route_and_dispatch(store, work_id: str, node_id: str, scope=None) -> None:
     if scope is None:
         from app.assistant.scope.loader import load_scope_for_source
         scope = load_scope_for_source(kind="pipeline", source_id="dayflow", actor_id="node_dispatch")
+    ticket_kind = ""
     try:
         agent = DI.agent_factory.create_agent("dayflow_orchestrator::switchboard")
         result = agent.action_handler(Message(task=task, scope_context=scope))
-        delegate_to = str((getattr(result, "data", {}) or {}).get("delegate_to", "") or "").strip()
+        data = getattr(result, "data", {}) or {}
+        delegate_to = str(data.get("delegate_to", "") or "").strip()
+        ticket_kind = str(data.get("ticket_kind", "") or "").strip()
     except Exception as e:
         logger.error("[node_dispatch] switchboard routing failed for %s::%s: %s — defaulting to work",
                      work_id, node_id, e)
         delegate_to = ""
-    logger.info("[node_dispatch] routed %s::%s -> %s", work_id, node_id, delegate_to or "run_work_node")
-    dispatch_node(store, work_id, node_id, delegate_to)
+    logger.info("[node_dispatch] routed %s::%s -> %s%s", work_id, node_id, delegate_to or "run_work_node",
+                f" ({ticket_kind})" if ticket_kind else "")
+    dispatch_node(store, work_id, node_id, delegate_to, ticket_kind)
 
 
 def _do_work(store, work_id: str, node_id: str) -> None:
     from work_objects.work_runtime import work_on
     status = work_on(store, work_id, node_id=node_id)   # context + worker + result, all on the graph
     logger.info("[node_dispatch] work %s::%s -> %s", work_id, node_id, status)
-
-
-def _communicate(store, work_id: str, node_id: str) -> None:
-    """The switchboard sent this node to the user side (create_dayflow_ticket). Whether that's a one-way
-    NOTIFY or an ASK that awaits a reply is the node's SHAPE, not its type: a `user_reply` wake -> ask;
-    otherwise -> notify. No node-TYPE check — a work node is anything dispatchable; how to reach the user is
-    read here."""
-    node = store.load(work_id).nodes.get(node_id)
-    if node is None:
-        return
-    if str(getattr(node, "wake_kind", None) or "") == "user_reply":
-        _ask(store, work_id, node_id, node)
-    else:
-        _notify(store, work_id, node_id, node)
 
 
 def _notify(store, work_id: str, node_id: str, node) -> None:

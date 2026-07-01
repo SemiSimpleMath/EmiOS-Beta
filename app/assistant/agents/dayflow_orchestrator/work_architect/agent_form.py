@@ -5,8 +5,9 @@ that goal is STRUCTURED: it decomposes the goal into a small DAG of work nodes, 
 the part the orchestrator_architect lacks — WAIT-GATES for steps that must pause for a future time or an
 external event (a reply, a delivery, an approval). The worker (work_emi_team) executes each node; the
 state_mover judges the wait-gates. The architect authors TWO wake primitives — wake_at (a deterministic
-time) | wake_ref (a prose condition the state_mover matches against reality) — plus an `ask` flag when the
-node's job is to ask the user; work_architect_apply derives the substrate wake_kind from them.
+time) | wake_ref (a prose condition the state_mover matches against reality); work_architect_apply derives
+the substrate wake_kind. Whether a node is work / a notify / an ask is NOT the architect's call — it writes
+the node's GOAL, and the switchboard reads that goal and decides how to reach it.
 """
 from typing import List, Optional
 
@@ -33,20 +34,12 @@ class WorkNode(BaseModel):
         default=None,
         description="PROSE wake — the node parks until this natural-language condition is met: an OUTSIDE "
         "event someone/something else must produce ('a reply from the brother to the trip email', 'the "
-        "package is delivered', 'an approval lands'). The state_mover matches it against reality. If instead "
-        "this node ASKS the user (set `ask=true`), put the clear, friendly QUESTION here — shown verbatim.")
-    ask: bool = Field(
-        default=False,
-        description="True if this node's job is to ASK the USER (the person we serve) a question and use their "
-        "answer — put the question in `wake_ref`. The system surfaces it and the reply becomes the node's "
-        "result. Only for our own user; a THIRD PARTY's reply is a `wake_ref` event, not an ask.")
+        "package is delivered', 'an approval lands'). The state_mover matches it against reality.")
     wait_reason: Optional[str] = Field(
         default=None, description="Human-readable reason this node waits.")
 
     @model_validator(mode="after")
     def _validate_wake(self):
-        if self.ask and not str(self.wake_ref or "").strip():
-            raise ValueError("wake_ref (the question) is required when ask=true.")
         if str(self.wake_at or "").strip() and str(self.wake_ref or "").strip():
             raise ValueError("a node waits on a time (wake_at) OR a condition (wake_ref), not both.")
         return self

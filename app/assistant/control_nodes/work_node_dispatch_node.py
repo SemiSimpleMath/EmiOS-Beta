@@ -19,6 +19,7 @@ class WorkNodeDispatchNode(ControlNode):
     def action_handler(self, message):
         self.blackboard.update_state_value("next_agent", None)
         delegate_to = str(self.blackboard.get_state_value("delegate_to", "") or "").strip()
+        ticket_kind = str(self.blackboard.get_state_value("ticket_kind", "") or "").strip()
         acted = self.blackboard.get_state_value("acted_on_item_ids", []) or []
         work_id = node_id = None
         try:
@@ -30,7 +31,7 @@ class WorkNodeDispatchNode(ControlNode):
             from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
             from app.assistant.dayflow_orchestrator.node_dispatch import dispatch_node
             store = get_dayflow_work_store()
-            dispatch_node(store, work_id, node_id, delegate_to)
+            dispatch_node(store, work_id, node_id, delegate_to, ticket_kind)
         except Exception as e:
             # Fail LOUD and FAIL THE NODE — never swallow into a silent retry. A node left ready after a
             # dispatch error re-dispatches every tick (the mechanism that turned the notify transition bug

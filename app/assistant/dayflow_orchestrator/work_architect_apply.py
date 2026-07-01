@@ -108,9 +108,7 @@ def apply_architect_dag(store, work_id: str, nodes: List[Dict[str, Any]],
             continue
         wake_at = _to_dt(spec.get("wake_at"))
         wake_ref = spec.get("wake_ref")
-        if bool(spec.get("ask")) and str(wake_ref or "").strip():
-            wk = "user_reply"
-        elif wake_at:
+        if wake_at:
             wk = "time"
         elif str(wake_ref or "").strip():
             wk = "event"
