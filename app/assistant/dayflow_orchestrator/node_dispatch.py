@@ -60,36 +60,44 @@ def _do_work(store, work_id: str, node_id: str) -> None:
 
 
 def _communicate(store, work_id: str, node_id: str) -> None:
-    from work_objects.store import FAMILY_BY_TYPE
+    """The switchboard sent this node to the user side (create_dayflow_ticket). Whether that's a one-way
+    NOTIFY or an ASK that awaits a reply is the node's SHAPE, not its type: a `user_reply` wake -> ask;
+    otherwise -> notify. No node-TYPE check — a work node is anything dispatchable; how to reach the user is
+    read here."""
     node = store.load(work_id).nodes.get(node_id)
     if node is None:
         return
-    wake_kind = str(getattr(node, "wake_kind", None) or "")
-    family = FAMILY_BY_TYPE.get(getattr(node, "type", "") or "", "spine")
+    if str(getattr(node, "wake_kind", None) or "") == "user_reply":
+        _ask(store, work_id, node_id, node)
+    else:
+        _notify(store, work_id, node_id, node)
 
-    # ONE-WAY NOTIFY — a notify-family node with no reply wake: deliver it. The delivered notification IS the
-    # tool result — record it as evidence + complete the node (done), symmetric with a manager call; the
-    # finalizer then closes it. A spine WORK node the switchboard sent to the ticket side is NOT a completed
-    # notification, so it falls through to the ASK path.
-    if family == "notify" and wake_kind != "user_reply":
-        from app.assistant.lib.tools.create_work_notification.create_work_notification import CreateWorkNotificationTool
-        if CreateWorkNotificationTool._create(work_id, node_id) is not None:
-            from work_objects.model import new_id
-            store.apply("add_node", {"work_id": work_id, "id": new_id("result"), "type": "evidence",
-                                     "parent_id": node_id, "status": "assumed", "created_by": "node_dispatch",
-                                     "title": "notification delivered", "content": (node.content or "")},
-                        actor="node_dispatch")
-            store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "done"}, actor="node_dispatch")
-            logger.info("[node_dispatch] notified %s::%s -> done (finalizer closes)", work_id, node_id)
-        else:
-            logger.warning("[node_dispatch] notify produced no ticket for %s::%s; retry next tick", work_id, node_id)
+
+def _notify(store, work_id: str, node_id: str, node) -> None:
+    """One-way notification: deliver it. The delivered notification IS the tool result — record it as
+    evidence + complete the node (done), symmetric with a manager call; the finalizer then closes it."""
+    from app.assistant.lib.tools.create_work_notification.create_work_notification import CreateWorkNotificationTool
+    if CreateWorkNotificationTool._create(work_id, node_id) is None:
+        logger.warning("[node_dispatch] notify produced no ticket for %s::%s; retry next tick", work_id, node_id)
         return
+    from work_objects.model import new_id
+    # A spine node can't go actionable->done; hop via dispatched (legal for spine + notify). From
+    # waiting/dispatched -> done is already legal. (This is why we no longer need a `notify` TYPE.)
+    cur = store.load(work_id).nodes.get(node_id)
+    if cur is not None and cur.status not in ("dispatched", "waiting"):
+        store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "dispatched"}, actor="node_dispatch")
+    store.apply("add_node", {"work_id": work_id, "id": new_id("result"), "type": "evidence",
+                             "parent_id": node_id, "status": "assumed", "created_by": "node_dispatch",
+                             "title": "notification delivered", "content": (node.content or "")}, actor="node_dispatch")
+    store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "done"}, actor="node_dispatch")
+    logger.info("[node_dispatch] notified %s::%s -> done (finalizer closes)", work_id, node_id)
 
-    # ASK — a user_reply ask, OR a node the switchboard judged needs the user. Surface it and park OUT of the
-    # ready set to `waiting` (in-flight, awaiting the reply). The materializer records the reply as the node's
-    # result on a later tick.
-    _surface_ask(work_id, node_id, node)
+
+def _ask(store, work_id: str, node_id: str, node) -> None:
+    """An ask: surface the question + park OUT of the ready set to `waiting` (in-flight, awaiting the reply).
+    The materializer records the reply as the node's result on a later tick."""
     from work_objects.model import utcnow
+    _surface_ask(work_id, node_id, node)
     store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "waiting"}, actor="node_dispatch")
     store.apply("defer_node", {"work_id": work_id, "node_id": node_id, "wake_kind": "user_reply",
                                "wake_at": utcnow() + timedelta(hours=_REASK_HOURS),
