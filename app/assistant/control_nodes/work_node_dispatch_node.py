@@ -1,8 +1,9 @@
 """work_node_dispatch_node — carry out the switchboard's routing decision for ONE picked work node.
 
-Reads `delegate_to` (the switchboard's read of the node) plus the picked `work_id::node_id` and hands both
-to the shared dispatch (node_dispatch.dispatch_node): create_dayflow_ticket -> notify/ask; else -> run the
-node via the worker. The SAME dispatch is used by the scheduler's precise time-wake (via
+Reads `delegate_to` (the tool the switchboard picked for the node) plus the picked `work_id::node_id` and
+hands both to the shared dispatch (node_dispatch.dispatch_node): create_dayflow_ticket -> surface a ticket
+to the user (awaits their response); else -> run the node via the worker. The SAME dispatch is used by the
+scheduler's precise time-wake (via
 node_dispatch.route_and_dispatch), so a node routes identically whether it's picked in a tick or woken
 off-tick. Then routes back to the materializer for the next ready node; each node is dispatched at most once
 per tick (dispatched_this_tick guard), and the materializer short-circuits to finalize when none remain.
@@ -19,7 +20,6 @@ class WorkNodeDispatchNode(ControlNode):
     def action_handler(self, message):
         self.blackboard.update_state_value("next_agent", None)
         delegate_to = str(self.blackboard.get_state_value("delegate_to", "") or "").strip()
-        ticket_kind = str(self.blackboard.get_state_value("ticket_kind", "") or "").strip()
         acted = self.blackboard.get_state_value("acted_on_item_ids", []) or []
         work_id = node_id = None
         try:
@@ -31,7 +31,7 @@ class WorkNodeDispatchNode(ControlNode):
             from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
             from app.assistant.dayflow_orchestrator.node_dispatch import dispatch_node
             store = get_dayflow_work_store()
-            dispatch_node(store, work_id, node_id, delegate_to, ticket_kind)
+            dispatch_node(store, work_id, node_id, delegate_to)
         except Exception as e:
             # Fail LOUD and FAIL THE NODE — never swallow into a silent retry. A node left ready after a
             # dispatch error re-dispatches every tick (the mechanism that turned the notify transition bug

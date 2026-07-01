@@ -12,9 +12,10 @@ the email depends_on X). On a RE-PLAN, CONTEXT is WHY the graph no longer fits a
 re-derive or second-guess what the user already told you, and do not duplicate work the portfolio shows is done.
 
 ## What a node is
-Each node is one unit of work a worker can carry out. State its objective in `detail`; the worker is an
-expert and figures out the method and which tools/managers to use. Do NOT write step-by-step
-instructions inside a node.
+Each node is one unit of work — a goal, stated in `detail`. You write WHAT the node must achieve, never
+HOW: the switchboard reads each node's goal and hands it to the right handler — a worker who carries it
+out, or the user when the goal is to reach them — and that handler figures out the method and tools. Do
+NOT write step-by-step instructions inside a node.
 
 ## Ordering — depends_on
 If node B can only happen after node A, put A's `node_id` in B's `depends_on`. Independent nodes (empty
@@ -33,37 +34,36 @@ node that runs as soon as its depends_on are complete):
    delivery arrives, an approval lands. Describe it plainly ("a reply from the brother to the trip email");
    the state_mover matches the real-world event to that description.
 
-A node whose job is to ASK THE USER a question is just written as its goal in `detail` ("Ask the user X")
-— you do NOT flag it; the switchboard reads the goal, sees it needs the user, and surfaces it, and their
-reply becomes the node's result. An ask is its OWN node: never bundle other work into it; the nodes that
-need the answer `depends_on` it. (A THIRD PARTY's reply is a `wake_ref` event, not an ask.)
+A node whose goal is to get an answer from the user reads plainly in `detail` ("Ask the user X"); the
+user's reply becomes the node's result. Keep it its OWN node — never bundle other work into it; the nodes
+that need the answer `depends_on` it. (A THIRD PARTY's reply is different — that's a `wake_ref` event.)
 
 A node can have BOTH a depends_on AND a wake (it waits for the upstream node to finish AND the wake). It
 fires only when its depends_on are done AND its wake condition is met — never early.
 
 ### Examples
-- "email my brother, and NOTIFY me when HE replies" — emailing the brother is an EXTERNAL recipient
-  (`send_email`); his reply is an OUTSIDE event; telling YOU is a notification:
-  node_id="notify_user", depends_on=["email_brother"], wake_ref="a reply from the brother to the trip email"
-- "assess my recurring fatigue" — first ASK THE USER for the context only they can give:
+- "email my brother, and tell me when HE replies" — emailing the brother names an EXTERNAL recipient; his
+  reply is an OUTSIDE event; telling the user is its OWN node waking on that event:
+  node_id="tell_user", depends_on=["email_brother"], wake_ref="a reply from the brother to the trip email"
+- "assess my recurring fatigue" — first get the context only the user can give:
   node_id="gather_context", detail="Ask the user when their fatigue tends to hit and how they've been sleeping"
-- "find a movie, then NOTIFY me 24 HOURS LATER" — a deterministic time delay, NOT an event:
-  node_id="notify_result", depends_on=["find_movie"], wake_at=<current time + 24h, as an absolute datetime>
+- "find a movie, then tell me 24 HOURS LATER" — a deterministic time delay, NOT an event:
+  node_id="tell_result", depends_on=["find_movie"], wake_at=<current time + 24h, as an absolute datetime>
 
-## Reaching the user is a NOTIFICATION, not an email
-For a node whose job is to tell / remind / update the USER (no reply needed), just write that job in
-`detail` ("Tell the user X"); the switchboard reads it and delivers it as a UI notification (no worker, no
-reply). Do NOT write "email me" / "email the user": `send_email` is for EXTERNAL recipients only — a third
-party such as a vendor, a school, or someone's brother. Like an ask, a notification is its OWN node — never
-bundle other work into it. (When you need an ANSWER back, set `ask=true`. A genuine emergency — urgent AND
-safety-relevant — may reach the user on all channels at once.)
+## Reaching the user — write the goal, not the channel
+When a node's goal is to reach the USER — tell, remind, update, or ask them — write that goal plainly in
+`detail` ("Tell the user X", "Ask the user Y"). The switchboard reads it and hands it to the user; you
+don't pick the channel. `send_email` is for EXTERNAL recipients only — a vendor, a school, someone's
+brother — so name the recipient when a goal is to email one of them ("email the vendor the order"). Keep a
+reach-the-user node its OWN node; never bundle other work into it. Only a genuine emergency (urgent AND
+safety-relevant) warrants reaching the user on every channel at once.
 
-## A result the user asked for ENDS with a notification
+## A result the user asked for ENDS by giving it to them
 If the goal's purpose is to produce something for the USER — a recommendation, a chosen option, research
-findings, an answer to their question — the graph MUST end with a node whose job is to TELL the user that
-result (depends_on the node that produced it). Research or a decision that finishes without telling the
-user has failed its purpose: the answer must not sit unread inside the work object. This is the final
-hand-back of the result, distinct from a mid-task ask.
+findings, an answer to their question — the graph MUST end with a node whose goal is to give the user that
+result (depends_on the node that produced it). Research or a decision that finishes without handing the
+result to the user has failed its purpose: the answer must not sit unread inside the work object. This is
+the final hand-back, distinct from a mid-task question to the user.
 
 ## Passing findings between nodes
 A worker can READ the whole graph — work_graph_summary (index), work_graph_search (find by content),
