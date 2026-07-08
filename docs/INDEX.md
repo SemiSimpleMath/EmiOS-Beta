@@ -20,6 +20,7 @@ If you are new, start at **[Welcome](welcome/WELCOME.md)**, then read [Overview]
 | 00 | [Overview](architecture/00_OVERVIEW.md) | The layered stack + a map of every subsystem |
 | 01 | [Agents](architecture/01_AGENTS.md) | LLM decision units; config + prompts + form + runtime services |
 | 02 | [Managers](architecture/02_MANAGERS.md) | MultiAgentManager — the agent-orchestrating loop |
+| 02b | [Runtime Data Contract](architecture/02b_RUNTIME_DATA_CONTRACT.md) | Reserved blackboard keys, FlowController intrinsics, input/result idioms |
 | 03 | [Rooms](architecture/03_ROOMS.md) | Scoped conversation channels; the single-`ROOM.md` contract |
 | 04 | [Control Nodes](architecture/04_CONTROL_NODES.md) | Deterministic nodes in the agent loop; ToolCaller |
 | 07 | [Tools](architecture/07_TOOLS.md) | Tool contract + registry + the four-layer access gate |

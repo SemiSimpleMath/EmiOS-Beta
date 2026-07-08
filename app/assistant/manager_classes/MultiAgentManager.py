@@ -85,6 +85,37 @@ class MultiAgentManager:
         if not control_node_names:
             raise ValueError(f"[{self.name}] control_nodes must include at least one named node.")
 
+        # Routable names: configured agents, control nodes, and role bindings
+        # (both the role alias and its target). state_map KEYS are an open
+        # vocabulary — agents/nodes emit synthetic last_agent signal states
+        # ("<agent>_return_control" from FlowController, "<agent>_execute_dag"
+        # from MultiToolAgent, "graceful_exit"/"max_limit"/"error_exit" from
+        # the exit paths) — but every state_map VALUE must resolve to
+        # something the loop can actually activate, and a *_return_control
+        # key must belong to a configured agent. Both are boot-time config
+        # errors, not runtime dead-ends.
+        agent_names = {
+            str(a.get("name")).strip()
+            for a in (self.manager_config.get("agents") or [])
+            if isinstance(a, dict) and isinstance(a.get("name"), str) and str(a.get("name")).strip()
+        }
+        bindings = self.manager_config.get("role_bindings") or {}
+        routable = agent_names | control_node_names
+        if isinstance(bindings, dict):
+            routable |= {str(k).strip() for k in bindings.keys() if isinstance(k, str)}
+            routable |= {str(v).strip() for v in bindings.values() if isinstance(v, str)}
+        for src, dst in state_map.items():
+            if dst.strip() not in routable:
+                raise ValueError(
+                    f"[{self.name}] state_map['{src}'] -> '{dst}' does not name a configured "
+                    f"agent, control node, or role binding."
+                )
+            if src.endswith("_return_control") and src[: -len("_return_control")] not in routable:
+                raise ValueError(
+                    f"[{self.name}] state_map key '{src}' uses the return_control convention "
+                    f"but its prefix is not a configured agent."
+                )
+
         tool_return_cfg = flow_cfg.get("tool_return")
         if isinstance(tool_return_cfg, dict):
             tool_call_result_handler_node = tool_return_cfg.get("tool_call_result_handler_node")

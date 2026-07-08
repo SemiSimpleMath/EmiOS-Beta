@@ -72,6 +72,11 @@ Rooms enter their flow by seeding `next_agent` in the request data
 `request_handler` writes data keys onto the blackboard, and the first
 delegator pass honors it.
 
+The full registry of runtime-reserved blackboard keys, the synthetic
+`last_agent` signal states (`<agent>_return_control`, …), and the blessed
+input/result idioms live in
+[02b_RUNTIME_DATA_CONTRACT.md](02b_RUNTIME_DATA_CONTRACT.md).
+
 ## Manager invocation chain
 
 ```
