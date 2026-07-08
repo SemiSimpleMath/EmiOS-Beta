@@ -642,12 +642,34 @@ class MultiAgentManager:
         self._finalize_trace(exit_reason)
         if exit_reason == "success":
             return self.handle_exit()
+        elif exit_reason == "cancelled":
+            return self.handle_exit_cancelled()
         elif exit_reason == "max_cycles":
             return self.handle_exit_max_limit()
         elif exit_reason == "error":
             return self.handle_exit_error()
         else:
             return self.handle_unknown_exit()
+
+    def handle_exit_cancelled(self):
+        """A cancel is a user order to stop NOW — return a deterministic aborted
+        ToolResult without re-entering any loop. (The graceful-exit loop would
+        trip the still-set cancelled flag on its first cycle anyway; routing a
+        cancel through it used to fall out of handle_graceful_exit_reason with
+        None, handing callers a non-ToolResult.)"""
+        logger.warning("[%s] Exiting via cancel.", self.name)
+        content = f"{self.name} was cancelled before completing the task. No final answer was produced."
+        return ToolResult(
+            result_type="manager_aborted",
+            content=content,
+            data_list=[{}],
+            data={
+                "aborted": True,
+                "exit_state": "cancelled",
+                "manager_name": self.name,
+                "final_answer_answer": content,
+            },
+        )
 
     def handle_exit(self):
         logger.info("[%s] Exiting via control node.", self.name)
@@ -750,11 +772,15 @@ class MultiAgentManager:
             return self.handle_default_error_exit()
 
     def handle_graceful_exit_reason(self, exit_reason):
+        """Exhaustive on purpose — every branch returns a ToolResult. This used
+        to have no case for "cancelled" (or anything unexpected) and returned
+        None, which callers typed to ToolResult then dereferenced."""
         self._finalize_trace(exit_reason)
         if exit_reason == "success":
             return self.handle_exit()
-        if exit_reason == "max_cycles" or exit_reason == "error":
-            return self.handle_default_error_exit()
+        if exit_reason == "cancelled":
+            return self.handle_exit_cancelled()
+        return self.handle_default_error_exit()
 
     def _finalize_trace(self, exit_reason: str) -> None:
         """End the execution trace recording if one is active."""

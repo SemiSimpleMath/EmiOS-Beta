@@ -211,9 +211,9 @@ class TestCancel:
         r = _register(mam)
         ok = mam.cancel(r.invocation_id)
         assert ok is True
-        # The stub manager's blackboard.update_state_value should have
-        # been called with cancelled=True.
-        r.manager_instance.blackboard.update_state_value.assert_any_call(
+        # Cancel writes the GLOBAL scope — a top-scope write is discarded
+        # when a nested agent-call scope pops (2026-07-08 runtime audit B2).
+        r.manager_instance.blackboard.update_global_state_value.assert_any_call(
             "cancelled", True,
         )
 

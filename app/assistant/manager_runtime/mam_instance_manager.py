@@ -207,11 +207,15 @@ class MAMInstanceManager:
     def cancel(self, invocation_id: str) -> bool:
         """Cooperatively cancel a running invocation.
 
-        Sets ``cancelled=True`` on the manager's blackboard. The MAM loop
-        checks this flag at the top of every cycle and exits via
-        ``handle_exit_error``. Cancellation is best-effort — if the
-        manager is mid-LLM-call when this fires, it cancels at the next
-        cycle boundary.
+        Sets ``cancelled=True`` in the manager blackboard's GLOBAL scope —
+        this write happens from another thread, and the top scope may be a
+        nested agent-call scope that gets popped (taking a top-scope write
+        with it). The global scope survives every pop and the loop's check
+        reads down the stack, so it always sees the flag. The MAM loop
+        checks at the top of every cycle and exits via
+        ``handle_exit_cancelled`` (an aborted ToolResult). Cancellation is
+        best-effort — if the manager is mid-LLM-call when this fires, it
+        cancels at the next cycle boundary.
 
         Returns True if the cancel was issued, False if no such invocation.
         """
@@ -225,7 +229,7 @@ class MAMInstanceManager:
             blackboard = getattr(manager, "blackboard", None)
             if blackboard is None:
                 return False
-            blackboard.update_state_value("cancelled", True)
+            blackboard.update_global_state_value("cancelled", True)
             logger.info(
                 "[mam] cancel issued for invocation_id=%s display_name=%s",
                 invocation_id, record.display_name,
