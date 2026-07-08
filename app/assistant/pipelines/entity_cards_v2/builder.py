@@ -38,7 +38,7 @@ from app.assistant.kg.db.knowledge_graph_db_sqlite import Node, Edge
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import Message
 from app.assistant.utils.time_utils import utc_now
-from app.models.base import get_session
+from app.models.db_manager import get_db_manager
 
 logger = get_logger(__name__)
 
@@ -88,10 +88,17 @@ def build_card(entity_node_id: str) -> Dict[str, Any]:
     sections are wiped and rewritten — incremental refresh has a separate
     entry point.
 
+    Session discipline: DB reads run in short read_session scopes, every
+    LLM call runs with no connection open, and all writes land in one
+    short db_manager transaction at the end (drop-marks + card together).
+
     Returns: summary dict with status, sections, and bullets counts.
     """
-    session = get_session()
-    try:
+    db_manager = get_db_manager()
+
+    # Read phase — entity + gates. The session closes before any LLM work;
+    # `entity` is used below as a detached instance (plain column reads).
+    with db_manager.read_session() as session:
         entity = session.get(Node, entity_node_id)
         if entity is None:
             return {'status': 'error', 'reason': f'node {entity_node_id} not found'}
@@ -139,211 +146,224 @@ def build_card(entity_node_id: str) -> Dict[str, Any]:
                 ),
             }
 
-        # 1. Collect candidate facts (NOW-filtered neighborhood)
-        facts = _collect_candidate_facts(session, entity)
-        if not facts:
-            logger.info("[entity_cards_v2] no candidate facts for %s — skipping", entity.label)
-            return {'status': 'skipped', 'reason': 'no candidate facts after NOW filter'}
+    # 1. Collect candidate facts (NOW-filtered neighborhood). Manages its
+    # own short read sessions; the nano prefilter's LLM calls run with no
+    # connection open.
+    facts = _collect_candidate_facts(entity)
+    if not facts:
+        logger.info("[entity_cards_v2] no candidate facts for %s — skipping", entity.label)
+        return {'status': 'skipped', 'reason': 'no candidate facts after NOW filter'}
 
-        # 2. Tag each fact into a BULLET section (or 'reject').
-        # Prefer persisted tags from kg_node_section_tag (written at promotion
-        # time by section_tagging.tag_nodes_by_id). Fall back to live tagger
-        # only if NO facts have persisted tags — that's transition-period
-        # behavior; once the backfill lands, the live path becomes dead code.
-        section_template = section_template_for(entity.node_type, entity.category)
-        bullet_sections = bullet_section_names(section_template)
+    # 2. Tag each fact into a BULLET section (or 'reject').
+    # Prefer persisted tags from kg_node_section_tag (written at promotion
+    # time by section_tagging.tag_nodes_by_id). Run the live tagger only
+    # when NO facts have persisted tags — that's transition-period
+    # behavior; once the backfill lands, the live path becomes dead code.
+    section_template = section_template_for(entity.node_type, entity.category)
+    bullet_sections = bullet_section_names(section_template)
+    with db_manager.read_session() as session:
         tagged = _tags_from_persisted(session, facts, bullet_sections)
-        if not tagged:
-            logger.info(
-                "[entity_cards_v2] no persisted tags for %s — running live section_tagger fallback",
-                entity.label,
-            )
-            tagged = _run_section_tagger(entity, facts, bullet_sections)
+    if not tagged:
+        logger.info(
+            "[entity_cards_v2] no persisted tags for %s — running live section_tagger",
+            entity.label,
+        )
+        tagged = _run_section_tagger(entity, facts, bullet_sections)
 
-        # 3. Group facts by section. `reject` and hallucinated section names
-        # are NOT silently dropped — the fact already passed the NOW filter
-        # and the top-K cut, so "should it exist on the card" was already
-        # decided. The section_tagger's only job is
-        # bucket selection. Any fact whose chosen section is invalid or
-        # `reject` is routed to `general_facts`, which exists on every
-        # template (see SECTION_TEMPLATES). This was Issue surfaced 2026-05-12
-        # when Place entities (Espoo, Finland, California, ...) hit the
-        # `_default` template, had no semantic fit, and the tagger rejected
-        # all their edges — producing empty cards for real entities.
-        rerouted = 0
-        by_section: Dict[str, List[Dict[str, Any]]] = {}
-        for tag in tagged:
-            if tag['section'] == 'reject' or tag['section'] not in bullet_sections:
-                if 'general_facts' in bullet_sections:
-                    rerouted += 1
-                    by_section.setdefault('general_facts', []).append(
-                        {**tag, 'section': 'general_facts'}
-                    )
+    # 3. Group facts by section. `reject` and hallucinated section names
+    # are NOT silently dropped — the fact already passed the NOW filter
+    # and the top-K cut, so "should it exist on the card" was already
+    # decided. The section_tagger's only job is
+    # bucket selection. Any fact whose chosen section is invalid or
+    # `reject` is routed to `general_facts`, which exists on every
+    # template (see SECTION_TEMPLATES). This was Issue surfaced 2026-05-12
+    # when Place entities (Espoo, Finland, California, ...) hit the
+    # `_default` template, had no semantic fit, and the tagger rejected
+    # all their edges — producing empty cards for real entities.
+    rerouted = 0
+    by_section: Dict[str, List[Dict[str, Any]]] = {}
+    for tag in tagged:
+        if tag['section'] == 'reject' or tag['section'] not in bullet_sections:
+            if 'general_facts' in bullet_sections:
+                rerouted += 1
+                by_section.setdefault('general_facts', []).append(
+                    {**tag, 'section': 'general_facts'}
+                )
+            continue
+        by_section.setdefault(tag['section'], []).append(tag)
+    if rerouted:
+        logger.info(
+            "[entity_cards_v2] %s: %d fact(s) rerouted from reject/hallucinated → general_facts",
+            entity.label, rerouted,
+        )
+
+    # 4. Render bullets per section. Three-stage pipeline:
+    #    a. Chunk the renderer input if section has > RENDERER_CHUNK_SIZE
+    #       facts (so the LLM never fuses over too much at once).
+    #    b. Run bullet_renderer on each chunk; concatenate results.
+    #    c. If concatenated bullets exceed the section's cap, run
+    #       section_distiller to do the final salience cut.
+    # The renderer's job = fuse near-duplicates. The distiller's job =
+    # pick the most identity-defining bullets and drop the rest.
+    fact_by_id = {f['fact_id']: f for f in facts}
+    section_bullets: Dict[str, List[Dict[str, Any]]] = {}
+    # (section_name, tagged facts, persisted bullets) per rendered section —
+    # drop-marks are computed now but written in the single write phase below.
+    pending_drops: List[tuple] = []
+    for section_name, tags in by_section.items():
+        section_facts = [
+            fact_by_id[t['fact_id']] for t in tags
+            if t['fact_id'] in fact_by_id
+        ]
+        if not section_facts:
+            continue
+
+        # Stage 2: chunked rendering
+        rendered_bullets: List[Dict[str, Any]] = []
+        for chunk_start in range(0, len(section_facts), RENDERER_CHUNK_SIZE):
+            chunk = section_facts[chunk_start:chunk_start + RENDERER_CHUNK_SIZE]
+            try:
+                chunk_out = _run_bullet_renderer(entity, section_name, chunk)
+                rendered_bullets.extend(chunk_out)
+            except Exception as e:
+                logger.warning(
+                    "bullet_renderer failed for %s chunk %d: %s",
+                    section_name, chunk_start // RENDERER_CHUNK_SIZE, e,
+                )
+
+        if not rendered_bullets:
+            continue
+
+        # Materialize rendered bullets with id + source-id provenance, so
+        # distiller can pick by id and we can union the source nodes/edges.
+        renderer_bullets: List[Dict[str, Any]] = []
+        for i, rb in enumerate(rendered_bullets):
+            fact_ids = rb.get('source_fact_ids') or []
+            source_facts = [fact_by_id[fid] for fid in fact_ids if fid in fact_by_id]
+            if not source_facts:
                 continue
-            by_section.setdefault(tag['section'], []).append(tag)
-        if rerouted:
-            logger.info(
-                "[entity_cards_v2] %s: %d fact(s) rerouted from reject/hallucinated → general_facts",
-                entity.label, rerouted,
-            )
+            node_ids: List[str] = []
+            edge_ids: List[str] = []
+            for sf in source_facts:
+                for nid in sf['source_node_ids']:
+                    if nid not in node_ids:
+                        node_ids.append(nid)
+                for eid in sf['source_edge_ids']:
+                    if eid not in edge_ids:
+                        edge_ids.append(eid)
+            tiers = [sf.get('confidence_tier', 'provisional') for sf in source_facts]
+            tier_rank = {'inferred': 0, 'provisional': 1, 'confirmed': 2, 'axiom': 3}
+            worst_tier = min(tiers, key=lambda t: tier_rank.get(t, 1))
+            renderer_bullets.append({
+                'bullet_id': f'b{i+1}',
+                'bullet_text': rb['bullet_text'],
+                'source_node_ids': node_ids,
+                'source_edge_ids': edge_ids,
+                'confidence_tier': worst_tier,
+            })
 
-        # 4. Render bullets per section. Three-stage pipeline:
-        #    a. Chunk the renderer input if section has > RENDERER_CHUNK_SIZE
-        #       facts (so the LLM never fuses over too much at once).
-        #    b. Run bullet_renderer on each chunk; concatenate results.
-        #    c. If concatenated bullets exceed the section's cap, run
-        #       section_distiller to do the final salience cut.
-        # The renderer's job = fuse near-duplicates. The distiller's job =
-        # pick the most identity-defining bullets and drop the rest.
-        fact_by_id = {f['fact_id']: f for f in facts}
-        section_bullets: Dict[str, List[Dict[str, Any]]] = {}
-        for section_name, tags in by_section.items():
-            section_facts = [
-                fact_by_id[t['fact_id']] for t in tags
-                if t['fact_id'] in fact_by_id
-            ]
-            if not section_facts:
-                continue
+        # Stage 3: distillation — only when section exceeds its cap
+        cap = bullet_cap_for_section(section_name)
+        if len(renderer_bullets) > cap:
+            try:
+                distilled = _run_section_distiller(entity, section_name, renderer_bullets, cap)
+            except Exception as e:
+                logger.warning(
+                    "section_distiller failed for %s: %s (keeping renderer output)",
+                    section_name, e,
+                )
+                distilled = None
+        else:
+            distilled = None
 
-            # Stage 2: chunked rendering
-            rendered_bullets: List[Dict[str, Any]] = []
-            for chunk_start in range(0, len(section_facts), RENDERER_CHUNK_SIZE):
-                chunk = section_facts[chunk_start:chunk_start + RENDERER_CHUNK_SIZE]
-                try:
-                    chunk_out = _run_bullet_renderer(entity, section_name, chunk)
-                    rendered_bullets.extend(chunk_out)
-                except Exception as e:
-                    logger.warning(
-                        "bullet_renderer failed for %s chunk %d: %s",
-                        section_name, chunk_start // RENDERER_CHUNK_SIZE, e,
-                    )
-
-            if not rendered_bullets:
-                continue
-
-            # Materialize rendered bullets with id + source-id provenance, so
-            # distiller can pick by id and we can union the source nodes/edges.
-            renderer_bullets: List[Dict[str, Any]] = []
-            for i, rb in enumerate(rendered_bullets):
-                fact_ids = rb.get('source_fact_ids') or []
-                source_facts = [fact_by_id[fid] for fid in fact_ids if fid in fact_by_id]
-                if not source_facts:
+        if distilled:
+            # Distiller picked + possibly fused; map source_bullet_ids → renderer bullets
+            rb_by_id = {b['bullet_id']: b for b in renderer_bullets}
+            persisted = []
+            for db in distilled:
+                src_ids = db.get('source_bullet_ids') or []
+                source_rbs = [rb_by_id[bid] for bid in src_ids if bid in rb_by_id]
+                if not source_rbs:
                     continue
-                node_ids: List[str] = []
-                edge_ids: List[str] = []
-                for sf in source_facts:
-                    for nid in sf['source_node_ids']:
+                node_ids = []
+                edge_ids = []
+                tiers = []
+                for srb in source_rbs:
+                    for nid in srb['source_node_ids']:
                         if nid not in node_ids:
                             node_ids.append(nid)
-                    for eid in sf['source_edge_ids']:
+                    for eid in srb['source_edge_ids']:
                         if eid not in edge_ids:
                             edge_ids.append(eid)
-                tiers = [sf.get('confidence_tier', 'provisional') for sf in source_facts]
+                    tiers.append(srb['confidence_tier'])
                 tier_rank = {'inferred': 0, 'provisional': 1, 'confirmed': 2, 'axiom': 3}
-                worst_tier = min(tiers, key=lambda t: tier_rank.get(t, 1))
-                renderer_bullets.append({
-                    'bullet_id': f'b{i+1}',
-                    'bullet_text': rb['bullet_text'],
+                worst_tier = min(tiers, key=lambda t: tier_rank.get(t, 1)) if tiers else 'provisional'
+                persisted.append({
+                    'bullet_text': db['bullet_text'],
                     'source_node_ids': node_ids,
                     'source_edge_ids': edge_ids,
                     'confidence_tier': worst_tier,
                 })
+        else:
+            # No distillation; drop bullet_id (it was only for distiller threading)
+            persisted = [
+                {k: v for k, v in rb.items() if k != 'bullet_id'}
+                for rb in renderer_bullets
+            ]
 
-            # Stage 3: distillation — only when section exceeds its cap
-            cap = bullet_cap_for_section(section_name)
-            if len(renderer_bullets) > cap:
-                try:
-                    distilled = _run_section_distiller(entity, section_name, renderer_bullets, cap)
-                except Exception as e:
-                    logger.warning(
-                        "section_distiller failed for %s: %s (falling back to renderer output truncated)",
-                        section_name, e,
-                    )
-                    distilled = None
-            else:
-                distilled = None
+        if persisted:
+            section_bullets[section_name] = persisted
 
-            if distilled:
-                # Distiller picked + possibly fused; map source_bullet_ids → renderer bullets
-                rb_by_id = {b['bullet_id']: b for b in renderer_bullets}
-                persisted = []
-                for db in distilled:
-                    src_ids = db.get('source_bullet_ids') or []
-                    source_rbs = [rb_by_id[bid] for bid in src_ids if bid in rb_by_id]
-                    if not source_rbs:
-                        continue
-                    node_ids = []
-                    edge_ids = []
-                    tiers = []
-                    for srb in source_rbs:
-                        for nid in srb['source_node_ids']:
-                            if nid not in node_ids:
-                                node_ids.append(nid)
-                        for eid in srb['source_edge_ids']:
-                            if eid not in edge_ids:
-                                edge_ids.append(eid)
-                        tiers.append(srb['confidence_tier'])
-                    tier_rank = {'inferred': 0, 'provisional': 1, 'confirmed': 2, 'axiom': 3}
-                    worst_tier = min(tiers, key=lambda t: tier_rank.get(t, 1)) if tiers else 'provisional'
-                    persisted.append({
-                        'bullet_text': db['bullet_text'],
-                        'source_node_ids': node_ids,
-                        'source_edge_ids': edge_ids,
-                        'confidence_tier': worst_tier,
-                    })
-            else:
-                # No distillation; drop bullet_id (it was only for distiller threading)
-                persisted = [
-                    {k: v for k, v in rb.items() if k != 'bullet_id'}
-                    for rb in renderer_bullets
-                ]
+        # Try-and-mark: any input fact whose primary node did NOT end up
+        # in this section's output bullets was considered and rejected by
+        # the renderer/distiller. The rejection is persisted in the write
+        # phase below, so the next refresh doesn't re-pay LLM cost to
+        # re-discover it. Reconsideration is automatic when (a) node content
+        # changes (hash mismatch) or (b) CARD_BUILDER_VERSION is bumped.
+        pending_drops.append((section_name, tags, persisted))
 
-            if persisted:
-                section_bullets[section_name] = persisted
+    # 5. Build deterministic sections (alias only; contact is now
+    # LLM-tagged via section_tagger like every other BULLETS section).
+    section_intros: Dict[str, str] = {}
+    alias_text = _build_alias_section(entity)
+    if alias_text:
+        section_intros[ALIAS] = alias_text
 
-            # Try-and-mark: any input fact whose primary node did NOT end up
-            # in this section's output bullets was considered and rejected by
-            # the renderer/distiller. Persist the rejection so the next refresh
-            # doesn't re-pay LLM cost to re-discover it. Reconsideration is
-            # automatic when (a) node content changes (hash mismatch) or (b)
-            # CARD_BUILDER_VERSION is bumped.
-            _mark_section_drops(
-                session, by_section[section_name], persisted, section_name, fact_by_id,
-            )
+    # 6. Build summary (LLM) AFTER bullets — uses bullets + alias, NOT contact
+    summary_text = _build_summary_section(entity, section_bullets, alias_text)
+    if summary_text:
+        section_intros[SUMMARY] = summary_text
 
-        # 5. Build deterministic sections (alias only; contact is now
-        # LLM-tagged via section_tagger like every other BULLETS section).
-        section_intros: Dict[str, str] = {}
-        alias_text = _build_alias_section(entity)
-        if alias_text:
-            section_intros[ALIAS] = alias_text
+    # 7. Build level_0 (deterministic head, depends on summary)
+    level_0_text = _build_level_0(entity, summary_text)
+    if level_0_text:
+        section_intros[LEVEL_0] = level_0_text
 
-        # 6. Build summary (LLM) AFTER bullets — uses bullets + alias, NOT contact
-        summary_text = _build_summary_section(entity, section_bullets, alias_text)
-        if summary_text:
-            section_intros[SUMMARY] = summary_text
-
-        # 7. Build level_0 (deterministic head, depends on summary)
-        level_0_text = _build_level_0(entity, summary_text)
-        if level_0_text:
-            section_intros[LEVEL_0] = level_0_text
-
-        # 8. Persist
+    # 8. Persist — the build's only transaction. All LLM work happened above
+    # with no session open; this block holds the global writer slot and must
+    # stay milliseconds (db_manager warns past 5s).
+    with db_manager.transaction(op="entity_cards.build_card") as session:
+        for section_name, tags, persisted in pending_drops:
+            _mark_section_drops(session, tags, persisted, section_name, fact_by_id)
         result = _persist_card(
             session, entity, section_template, section_bullets, section_intros,
         )
-        return {'status': 'ok', **result}
-    finally:
-        session.close()
+    return {'status': 'ok', **result}
 
 
 def refresh_card_for_changed_node(changed_node_id: str) -> Dict[str, Any]:
     """Incremental refresh: find bullets sourced from this node, re-render them.
 
+    Session discipline: one read session snapshots the affected bullets,
+    the re-render LLM calls run with no connection open, and the deletes +
+    text updates land in one short db_manager transaction.
+
     Returns: summary dict with bullet counts.
     """
-    session = get_session()
-    try:
+    db_manager = get_db_manager()
+
+    # Read phase: snapshot everything the re-renders need.
+    with db_manager.read_session() as session:
         rows = session.query(EntityCardBulletSourceNode).filter(
             EntityCardBulletSourceNode.node_id == changed_node_id
         ).all()
@@ -355,40 +375,61 @@ def refresh_card_for_changed_node(changed_node_id: str) -> Dict[str, Any]:
             EntityCardBullet.id.in_(bullet_ids)
         ).all()
 
-        n_updated = 0
-        n_deleted = 0
+        to_delete: List[str] = []
+        to_render: List[Dict[str, Any]] = []
         for bullet in affected:
             sources = _hydrate_sources(session, bullet)
             # Re-evaluate the NOW filter on the source nodes
             if not _any_source_admits(sources):
                 # Source state has moved out of NOW (state closed, etc.)
-                session.delete(bullet)
-                n_deleted += 1
+                to_delete.append(bullet.id)
                 continue
-            # Re-render the bullet from current source state. The renderer
-            # is section-batched and returns a list of {bullet_text, source_fact_ids}
-            # dicts; for a single-fact refresh we expect at most one entry.
             entity = session.get(Node, _get_entity_id_for_section(session, bullet.section_id))
             if entity is None:
                 continue
             section = session.get(EntityCardSection, bullet.section_id)
-            facts = [_fact_from_sources(sources)]
-            try:
-                rendered = _run_bullet_renderer(entity, section.section_name, facts)
-            except Exception as e:
-                logger.warning("re-render failed for bullet %s: %s", bullet.id, e)
-                continue
-            new_text = (rendered[0].get('bullet_text') or '').strip() if rendered else ''
-            if new_text and new_text != bullet.bullet_text:
+            to_render.append({
+                'bullet_id': bullet.id,
+                'old_text': bullet.bullet_text,
+                'entity': entity,  # detached below; plain column reads only
+                'section_name': section.section_name,
+                'facts': [_fact_from_sources(sources)],
+            })
+
+    # LLM phase — no session open. Re-render each surviving bullet from
+    # current source state. The renderer is section-batched and returns a
+    # list of {bullet_text, source_fact_ids} dicts; for a single-fact
+    # refresh we expect at most one entry.
+    updates: List[tuple] = []  # (bullet_id, new_text, new_source_hash)
+    for item in to_render:
+        try:
+            rendered = _run_bullet_renderer(item['entity'], item['section_name'], item['facts'])
+        except Exception as e:
+            logger.warning("re-render failed for bullet %s: %s", item['bullet_id'], e)
+            continue
+        new_text = (rendered[0].get('bullet_text') or '').strip() if rendered else ''
+        if new_text and new_text != item['old_text']:
+            updates.append((item['bullet_id'], new_text, _compute_hash(item['facts'][0])))
+
+    n_updated = 0
+    n_deleted = 0
+    if to_delete or updates:
+        with db_manager.transaction(op="entity_cards.refresh_card") as session:
+            for bid in to_delete:
+                bullet = session.get(EntityCardBullet, bid)
+                if bullet is not None:
+                    session.delete(bullet)
+                    n_deleted += 1
+            for bid, new_text, new_hash in updates:
+                bullet = session.get(EntityCardBullet, bid)
+                if bullet is None:
+                    continue
                 bullet.bullet_text = new_text
-                bullet.source_hash = _compute_hash(facts[0])
+                bullet.source_hash = new_hash
                 bullet.generated_at = utc_now()
                 n_updated += 1
 
-        session.commit()
-        return {'status': 'ok', 'updated': n_updated, 'deleted': n_deleted}
-    finally:
-        session.close()
+    return {'status': 'ok', 'updated': n_updated, 'deleted': n_deleted}
 
 
 def rebuild_all_group_a() -> Dict[str, Any]:
@@ -582,7 +623,7 @@ def _is_user_self_entity(entity: Node) -> bool:
         return False
 
 
-def _collect_candidate_facts(session: Session, entity: Node) -> List[Dict[str, Any]]:
+def _collect_candidate_facts(entity: Node) -> List[Dict[str, Any]]:
     """Walk the entity's edges, build a list of NOW-admissible facts.
 
     A "fact" = one connected node (or its connecting edge) that survives
@@ -591,6 +632,76 @@ def _collect_candidate_facts(session: Session, entity: Node) -> List[Dict[str, A
     After collection, the list is sorted by importance descending and
     truncated to CARD_FACT_TOP_K. On sparse entities the truncation is a
     no-op (count < K); on hubs it keeps the most-important slice.
+
+    DB reads run in short read_session scopes — the KG walk's session is
+    closed before the nano prefilter's LLM calls run.
+    """
+    with get_db_manager().read_session() as session:
+        facts = _walk_candidate_facts(session, entity)
+
+    # Wiki-parity nano prefilter. For hub entities the 1-hop + 2-hop walks
+    # can produce hundreds of facts; running each through section_tagger +
+    # bullet_renderer is slow and dilutes the signal. The same nano agent
+    # the wiki's description_creator uses (kg_maintenance::edge_filter)
+    # picks the informative subset; the existing importance floor + min-
+    # keep top-up then operate on that smaller pool. See _prefilter_facts.
+    facts = _prefilter_facts(facts, entity.label, entity.node_type)
+
+    # Sort by importance descending so downstream rendering chunks see the
+    # high-importance facts FIRST. If the section has 30 input facts and the
+    # renderer chunks them in groups of 10, the top-importance bullets are
+    # guaranteed in the first chunk. NULL importance sorts at the end.
+    def _imp(f: Dict[str, Any]) -> float:
+        # Scale-aware default. When node_importance is NULL (rater hasn't
+        # run yet), use edge_importance / 10 so a missing-rating fact
+        # lands on the same 0-10 scale as State.importance (which is
+        # derived as `max(src_imp × edge_imp / 10)`). Without the /10
+        # rescale, unrated facts scored 5 would dominate properly-rated
+        # States at 0.5–3, distorting card fact ordering.
+        ni = f.get('node_importance')
+        if ni is not None:
+            return float(ni)
+        ei = f.get('edge_importance')
+        if ei is not None:
+            return float(ei) / 10.0
+        return 0
+    facts.sort(key=lambda f: -_imp(f))
+
+    # Apply the selection policy (see CARD_FACT_FLOOR comment).
+    with get_db_manager().read_session() as session:
+        contact_node_ids = _contact_tagged_node_ids(
+            session,
+            [f['source_node_ids'][0] for f in facts if f.get('source_node_ids')],
+        )
+
+    def _is_contact(f: Dict[str, Any]) -> bool:
+        sids = f.get('source_node_ids') or []
+        return bool(sids) and sids[0] in contact_node_ids
+
+    kept = [f for f in facts if _imp(f) >= CARD_FACT_FLOOR or _is_contact(f)]
+
+    if len(kept) < CARD_FACT_MIN_KEEP:
+        kept_fact_ids = {f['fact_id'] for f in kept}
+        for f in facts:
+            if f['fact_id'] in kept_fact_ids:
+                continue
+            kept.append(f)
+            if len(kept) >= CARD_FACT_MIN_KEEP:
+                break
+
+    if len(kept) < len(facts):
+        logger.info(
+            "[entity_cards_v2] %s: %d facts collected, kept %d (floor=%.2f, contact=%d, min=%d)",
+            entity.label, len(facts), len(kept),
+            CARD_FACT_FLOOR, len(contact_node_ids), CARD_FACT_MIN_KEEP,
+        )
+
+    return kept
+
+
+def _walk_candidate_facts(session: Session, entity: Node) -> List[Dict[str, Any]]:
+    """1-hop + 2-hop KG walk. Returns raw NOW-admissible fact dicts,
+    unfiltered and unsorted — selection happens in _collect_candidate_facts.
     """
     facts: List[Dict[str, Any]] = []
     fid_counter = 0
@@ -762,63 +873,7 @@ def _collect_candidate_facts(session: Session, entity: Node) -> List[Dict[str, A
             entity.label, len(seen_2hop_entity_ids),
         )
 
-    # Wiki-parity nano prefilter. For hub entities the 1-hop + 2-hop walks
-    # can produce hundreds of facts; running each through section_tagger +
-    # bullet_renderer is slow and dilutes the signal. The same nano agent
-    # the wiki's description_creator uses (kg_maintenance::edge_filter)
-    # picks the informative subset; the existing importance floor + min-
-    # keep top-up then operate on that smaller pool. See _prefilter_facts.
-    facts = _prefilter_facts(facts, entity.label, entity.node_type)
-
-    # Sort by importance descending so downstream rendering chunks see the
-    # high-importance facts FIRST. If the section has 30 input facts and the
-    # renderer chunks them in groups of 10, the top-importance bullets are
-    # guaranteed in the first chunk. NULL importance sorts at the end.
-    def _imp(f: Dict[str, Any]) -> float:
-        # Scale-aware fallback. When node_importance is NULL (rater hasn't
-        # run yet), fall back to edge_importance / 10 so a missing-rating
-        # fact lands on the same 0-10 scale as State.importance (which
-        # is derived as `max(src_imp × edge_imp / 10)`). Without the /10
-        # rescale, fallbacks rated 5 would dominate properly-rated States
-        # at 0.5–3, distorting card fact ordering.
-        ni = f.get('node_importance')
-        if ni is not None:
-            return float(ni)
-        ei = f.get('edge_importance')
-        if ei is not None:
-            return float(ei) / 10.0
-        return 0
-    facts.sort(key=lambda f: -_imp(f))
-
-    # Apply the selection policy (see CARD_FACT_FLOOR comment).
-    contact_node_ids = _contact_tagged_node_ids(
-        session,
-        [f['source_node_ids'][0] for f in facts if f.get('source_node_ids')],
-    )
-
-    def _is_contact(f: Dict[str, Any]) -> bool:
-        sids = f.get('source_node_ids') or []
-        return bool(sids) and sids[0] in contact_node_ids
-
-    kept = [f for f in facts if _imp(f) >= CARD_FACT_FLOOR or _is_contact(f)]
-
-    if len(kept) < CARD_FACT_MIN_KEEP:
-        kept_fact_ids = {f['fact_id'] for f in kept}
-        for f in facts:
-            if f['fact_id'] in kept_fact_ids:
-                continue
-            kept.append(f)
-            if len(kept) >= CARD_FACT_MIN_KEEP:
-                break
-
-    if len(kept) < len(facts):
-        logger.info(
-            "[entity_cards_v2] %s: %d facts collected, kept %d (floor=%.2f, contact=%d, min=%d)",
-            entity.label, len(facts), len(kept),
-            CARD_FACT_FLOOR, len(contact_node_ids), CARD_FACT_MIN_KEEP,
-        )
-
-    return kept
+    return facts
 
 
 # --- Selection policy helpers ----------------------------------------------
@@ -1148,6 +1203,9 @@ def _persist_card(
 ) -> Dict[str, Any]:
     """Atomic write: delete existing card content, insert new content.
 
+    Runs inside the caller's db_manager transaction — the caller's context
+    commits (or rolls back) the whole card write.
+
     section_template is [(section_name, section_kind), ...] in display order.
     bullets-kind sections get bullets from section_bullets; other kinds
     get intro_text from section_intros.
@@ -1216,7 +1274,6 @@ def _persist_card(
 
     card.last_built_at = utc_now()
     card.last_full_rebuild_at = utc_now()
-    session.commit()
 
     return {
         'card_id': card.id,
