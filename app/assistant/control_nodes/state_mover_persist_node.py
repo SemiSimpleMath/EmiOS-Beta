@@ -67,9 +67,13 @@ class StateMoverPersistNode(ControlNode):
             for n in wo.nodes.values():
                 if n.id == goal_id or n.status not in {"proposed", "waiting"}:
                     continue
-                if str(getattr(n, "wake_kind", None) or "") in {"event", "signal", "user_reply"}:
-                    continue   # event/signal woken via node_wakes; user_reply is an in-flight ask awaiting the
-                    # user's reply (the dispatch surfaced it; the reply is recorded as its result) — not here
+                if str(getattr(n, "wake_kind", None) or "") in {"event", "signal"}:
+                    continue   # external waits are woken via node_wakes when the state_mover matches intake
+                # A user_reply ask rides this same promotion: while the ask is OUT its wake_at (the re-ask
+                # time) is in the future, so is_ready holds it; once the re-ask is due — or for a
+                # repair-escalated ask that has no wake_at and awaits its FIRST surface — it promotes and
+                # the dispatch (re-)tickets it. A reply always wins over a re-ask: the materializer's
+                # reply pre-step runs before dispatch and completes the node.
                 if not wo.is_ready(n, now):
                     continue   # time/dep gate not clear — leave it parked
                 family = FAMILY_BY_TYPE.get(n.type, "spine")
@@ -104,10 +108,14 @@ class StateMoverPersistNode(ControlNode):
         # State-only: set `waiting` + the wake, nothing else. The hold reason stays in the LLM's
         # held_work_nodes output and the log line — it is NOT written into the node's directive. (Writing it
         # there polluted the worker's task text and ACCUMULATED across successive holds.)
+        # A held ASK keeps wake_kind=user_reply (with the pushed-back wake_at) so a reply arriving during
+        # the hold is still matched and recorded; everything else parks as a plain time wake.
+        wake_kind = "user_reply" if getattr(node, "wake_kind", None) == "user_reply" else "time"
         store.apply("set_status", {"work_id": work_id, "node_id": node.id, "status": "waiting"},
                     actor="state_mover")
-        store.apply("defer_node", {"work_id": work_id, "node_id": node.id,
-                                   "wake_kind": "time", "wake_at": wake_at}, actor="state_mover")
+        store.apply("defer_node", {"work_id": work_id, "node_id": node.id, "wake_kind": wake_kind,
+                                   "wake_at": wake_at, "wake_ref": getattr(node, "wake_ref", None)},
+                    actor="state_mover")
         return True
 
     def _apply_node_wakes(self):

@@ -2,13 +2,13 @@
 
 The work-object analogue of view_materializer (which built the list from dayflow items). Each ready node
 becomes ONE actionable item (item_id = "work_id::node_id", summary = the node's task) — exactly the shape
-action_selector consumes. The switchboard then reads each and routes it (notify -> create_dayflow_ticket,
-work -> run_work_node). One node is picked per cycle; the manager loops back here for the next until none
-are ready, then short-circuits to finalize.
+action_selector consumes. The switchboard then reads each and routes it (communicate-with-the-user ->
+create_dayflow_ticket, work -> run_work_node). One node is picked per cycle; the manager loops back here
+for the next until none are ready, then short-circuits to finalize.
 
-Excludes: the goal node; event/signal-waiting nodes (the state_mover wakes those); and not-yet-ready /
-in-flight nodes (future wake_at, e.g. an ask already surfaced and awaiting a reply). Includes ready work,
-notify, and non-in-flight ask (user_reply) nodes.
+Lists every state_mover-promoted (actionable) node: plain work, tell-the-user goals, and asks due for
+their first surface or a re-ask. Everything else stays out — the goal node, event/signal waits (the
+state_mover wakes those), and in-flight nodes (future wake_at, e.g. an ask surfaced within the hour).
 """
 from app.assistant.control_nodes.control_node import ControlNode
 from app.assistant.utils.logging_config import get_logger
@@ -95,9 +95,11 @@ class WorkNodeMaterializerNode(ControlNode):
         from work_objects.model import new_id
         wo = store.load(work_id)
         goal_id = wo.goal_node_id
+        # actionable included: a due re-ask promotes before this pre-step runs, and a reply that arrived
+        # meanwhile must still win over the re-dispatch (this runs before the node is listed).
         asks = [n for n in wo.nodes.values()
                 if n.id != goal_id and getattr(n, "wake_kind", None) == "user_reply"
-                and n.status in ("proposed", "waiting")]
+                and n.status in ("proposed", "waiting", "actionable")]
         if not asks:
             return
         tm = get_ticket_manager()
@@ -112,8 +114,8 @@ class WorkNodeMaterializerNode(ControlNode):
             reply = replies.get(f"{work_id}::{n.id}")
             if not reply:
                 continue
-            # A spine ask can't go proposed->done directly; hop via dispatched (legal for spine + notify).
-            if n.status == "proposed":
+            # A spine ask can't go proposed/actionable->done directly; hop via dispatched first.
+            if n.status in ("proposed", "actionable"):
                 store.apply("set_status", {"work_id": work_id, "node_id": n.id, "status": "dispatched"}, actor="reply")
             store.apply("add_node", {"work_id": work_id, "id": new_id("reply"), "type": "evidence",
                                      "parent_id": n.id, "status": "assumed", "created_by": "reply",

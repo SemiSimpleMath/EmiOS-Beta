@@ -151,9 +151,12 @@ class StateMoverPrepNode(ControlNode):
             for n in wo.nodes.values():
                 if n.id == goal_id or n.status not in {"proposed", "waiting"}:
                     continue
-                if str(getattr(n, "wake_kind", None) or "") in {"event", "signal", "user_reply"}:
-                    continue   # event/signal shown in WORK-OBJECT WAITS; user_reply is an in-flight ask
-                    # awaiting the user's reply (surfaced by the dispatch; the reply becomes its result)
+                if str(getattr(n, "wake_kind", None) or "") in {"event", "signal"}:
+                    continue   # external waits are shown in WORK-OBJECT WAITS instead
+                # user_reply asks appear here once DUE: an in-flight ask has wake_at (its re-ask time) in
+                # the future so is_ready holds it out; a due re-ask — or a repair-escalated ask with no
+                # wake_at awaiting its first surface — is promotable, and the state_mover may HOLD it like
+                # any other ready node (quiet hours, meetings, away).
                 if not wo.is_ready(n, now):
                     continue
                 family = FAMILY_BY_TYPE.get(n.type, "spine")
