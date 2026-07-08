@@ -23,15 +23,12 @@ from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_repo_root
 from app.assistant.utils.pydantic_classes import Message
+from belief_engine.db.paths import belief_db_path as _db_path
 
 logger = get_logger(__name__)
 
 _AGENT = "belief_engine::belief_tagger"
 _BATCH = 15
-
-
-def _db_path() -> str:
-    return str(get_repo_root() / "emi.db")
 
 
 @functools.lru_cache(maxsize=1)

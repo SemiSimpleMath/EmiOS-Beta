@@ -11,11 +11,7 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Optional
 
-from app.assistant.utils.path_utils import get_repo_root
-
-
-def _db_path() -> str:
-    return str(get_repo_root() / "emi.db")
+from belief_engine.db.paths import belief_db_path as _db_path
 
 
 def ensure_tables(conn) -> None:

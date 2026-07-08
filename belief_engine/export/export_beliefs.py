@@ -48,10 +48,11 @@ def export_beliefs(*, domain: Optional[str] = None) -> Path:
     # consumers read (the same shape as the v2 export). Guarded: an older store without these
     # tables simply emits empty tags / null short_id.
     import sqlite3 as _sqlite
+    from belief_engine.db.paths import belief_db_path
     _tags_by_id: dict = {}
     _sid_by_id: dict = {}
     try:
-        _conn = _sqlite.connect(f"file:{get_repo_root() / 'emi.db'}?mode=ro", uri=True)
+        _conn = _sqlite.connect(f"file:{belief_db_path()}?mode=ro", uri=True)
         _ids = [b.id for b in beliefs]
         for _i in range(0, len(_ids), 400):
             _chunk = _ids[_i:_i + 400]

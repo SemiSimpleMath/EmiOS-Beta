@@ -23,17 +23,13 @@ try:
 except Exception:  # pragma: no cover
     np = None  # type: ignore
 
-from app.assistant.utils.path_utils import get_repo_root
+from belief_engine.db.paths import belief_db_path as _db_path
 from belief_engine.tagging import sanitize as _sanitize
 
 _DEFAULT_WEIGHTS = {"relevance": 0.55, "recency": 0.25, "frequency": 0.20}
 _RECENCY_HALF_LIFE_DAYS = 30.0
 _FREQ_SATURATION = 20.0
 _DEFAULT_K = 40
-
-
-def _db_path() -> str:
-    return str(get_repo_root() / "emi.db")
 
 
 def _default_embedder():

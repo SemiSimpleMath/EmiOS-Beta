@@ -17,16 +17,12 @@ import sqlite3
 from typing import Dict, List, Optional
 
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.path_utils import get_repo_root
+from belief_engine.db.paths import belief_db_path as _db_path
 
 logger = get_logger(__name__)
 
 # The deprecated set, reused so the copy and the delete target exactly the same rows.
 _DEP = "(SELECT id FROM user_beliefs WHERE status='deprecated')"
-
-
-def _db_path() -> str:
-    return str(get_repo_root() / "emi.db")
 
 
 def _cols(conn: sqlite3.Connection, table: str) -> List[str]:

@@ -26,8 +26,9 @@ import yaml
 from flask import Blueprint, jsonify, render_template, request
 
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.utils.path_utils import get_configs_dir, get_repo_root
+from app.assistant.utils.path_utils import get_configs_dir
 from app.routes._security import reject_if_not_local
+from belief_engine.db.paths import belief_db_path
 
 logger = get_logger(__name__)
 
@@ -47,7 +48,7 @@ _TREND_LIMIT = 15
 
 
 def _db_path() -> Path:
-    return Path(get_repo_root()) / "emi.db"
+    return Path(belief_db_path())
 
 
 def _connect() -> sqlite3.Connection:
