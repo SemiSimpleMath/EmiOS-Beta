@@ -52,7 +52,7 @@ class EntertainmentAdvisorStep(BaseStep):
 
     def _load_entertainment_beliefs(self) -> List[str]:
         """Leisure/enjoyment beliefs (the `entertainment` pull-set tags) for the advisor."""
-        from belief_engine_v2 import tags as belief_tags
+        from belief_engine import tagging as belief_tags
         try:
             if not _BELIEFS_PATH.exists():
                 return []

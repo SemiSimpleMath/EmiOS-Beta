@@ -5,11 +5,11 @@
 optionally scoped to a tag SET (a consumer's `pull_set` — a belief surfaces if it carries ANY of
 the tags). High-recall by design: `status` is the only HARD filter; the tag scope is applied only
 when the store is actually tagged (else return all, never nothing). Each returned item carries its
-short_id + tags so consumers can cite/route. Mirrors belief_engine_v2.beliefs_for_context but over
-the v1 store (emi.db: user_beliefs + belief_tags + belief_short_id).
+short_id + tags so consumers can cite/route. Reads the v1 store (emi.db: user_beliefs +
+belief_tags + belief_short_id).
 
-v1 has no structured `applies_when` or `surfacing_log`, so the temporal and usage terms from v2 are
-omitted here (add them if those land on v1).
+There is no structured `applies_when` or `surfacing_log` yet, so temporal and usage ranking terms
+are omitted (add them if those land on the store).
 """
 from __future__ import annotations
 

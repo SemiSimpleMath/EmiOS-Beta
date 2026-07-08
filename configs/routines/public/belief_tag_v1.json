@@ -20,5 +20,5 @@
     "then": "disable_with_ticket",
     "auto_retry_after_seconds": 3600
   },
-  "notes": "Daily at 05:35 local — after the v1 belief_engine rebuild (00:30). Tags active user_beliefs that are untagged OR stale (statement changed since last tagged -> re-tag on evolve/merge), from the standardized vocab (configs/belief_tags.yaml). 'needs' selector + max_per_run cap + max_run_seconds watchdog; on_error self-heals transient failures. Parallel to the v2 belief_tag_new (which tags the v2 store) until the Phase 8 cutover retires v2."
+  "notes": "Daily at 05:35 local — after the v1 belief_engine rebuild (00:30). Tags active user_beliefs that are untagged OR stale (statement changed since last tagged -> re-tag on evolve/merge), from the standardized vocab (configs/belief_tags.yaml). 'needs' selector + max_per_run cap + max_run_seconds watchdog; on_error self-heals transient failures. The sole tagging routine (the v2-store belief_tag_new was retired 2026-07-07)."
 }

@@ -2,7 +2,7 @@
 
 What every tracked routine in `configs/routines/public/` actually does. Assembled from the `notes` field of each routine file — the canonical description lives in the JSON, this doc is just the categorized view. Trigger types, policies, active windows, and on_error backoff are documented in `skills/extending-emi-routines/SKILL.md`; the manager mechanics live in `docs/architecture/06_PIPELINES_AND_ROUTINES.md`.
 
-**Total: 57 public routines** — 51 enabled, 6 disabled (`belief_engine_export`, `belief_tag_new`, `example_camera_motion_poll`, `morning_briefing`, `sample_morning_routine`, `timesheet_routine`). The `morning_briefing.compiled.json` sibling is compiled task IR, not a routine.
+**Total: 56 public routines** — 51 enabled, 5 disabled (`belief_engine_export`, `example_camera_motion_poll`, `morning_briefing`, `sample_morning_routine`, `timesheet_routine`). The v2-store `belief_tag_new` was deleted 2026-07-07. The `morning_briefing.compiled.json` sibling is compiled task IR, not a routine.
 
 Personal routines live in `configs/routines/private/` (gitignored) and override matching public ids on collision — see `skills/extending-emi-routines/SKILL.md` for the layout.
 
@@ -189,12 +189,6 @@ After the v1 belief_engine rebuild (00:30, which deprecates faded + merged belie
 **Cadence:** daily 05:35 (function)
 
 After the v1 belief_engine rebuild (00:30). Tags active user_beliefs that are untagged OR stale (statement changed since last tagged), from the standardized vocab (configs/belief_tags.yaml). 'needs' selector + max_per_run cap + max_run_seconds watchdog; on_error self-heals transient failures.
-
-### `belief_tag_new` *(disabled)*
-
-**Cadence:** daily 05:30 (function)
-
-DISABLED 2026-06-16: this tagged the belief-engine v2 store, which is retired. The v1 tagger belief_tag_v1 (05:35) is the live tagger now. Kept (disabled) for reference; remove with the rest of the v2 code in a cleanup pass.
 
 ### `feedback_extractor_daily`
 

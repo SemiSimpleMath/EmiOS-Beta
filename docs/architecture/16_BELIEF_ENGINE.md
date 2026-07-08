@@ -231,15 +231,15 @@ The old "no live DB query path" claim is **only partly true now**. `beliefs_for_
 
 - **`/beliefs` owner surface** — `app/routes/beliefs.py` (`beliefs_admin_bp`, gated by `reject_if_not_local`). The **canonical owner surface**. Lists every live belief with `domain`/`kind`/`status`/`band`/`net` + tags and lets the owner **edit the statement, reclassify domain, retag, suppress (deprecate), or LOCK** it. Routes: `/beliefs`, `/api/beliefs/list` (filterable; `include_archived=1` also reads the archive tables, read-only), `/api/beliefs/item` (full state + evidence trail), `/api/beliefs/update` (direct row update — v1 rows are mutable, no override side tables; the **lock** is the durability mechanism), `/api/beliefs/trends`. The old `/api/insights/beliefs` panel is secondary.
 
-## 11. Three v1-vs-dead-v2 traps (do not edit dead code)
+## 11. Live-vs-dead traps (do not edit dead code)
 
-The v2 rebuild left parallel modules on disk. Each pair below has a **live v1 file** and a **dead v2/legacy file** with near-identical purpose — edit only the live one:
+The v2 satellites were deleted on 2026-07-07 (`subconscious/belief_tagging.py`, the
+`belief_tag_new` routine + handler, `beliefs_shadow` route, `belief_v2_shadow_ingest` step, the
+`beliefs_v2_primary` export guard); `belief_engine_v2/` itself has **zero importers** and awaits
+final removal. Two legacy pairs remain on disk — edit only the live one:
 
-1. **Tagging**: live = `belief_engine/tagging.py` (writes `belief_tags` in `emi.db`, driven by the `belief_tag_v1` routine). Dead = `app/assistant/subconscious/belief_tagging.py` (imports `belief_engine_v2`, writes `belief_v2_live.db`; its routine `belief_tag_new` is **disabled**).
-2. **Decay**: live = `belief_engine/decay/` + `RecomputeBeliefSnapshotStep` (universal, evidence-weighted). Dead = `belief_engine/pipeline/steps/decay_stale_beliefs.py` (`DecayStaleBeliefsStep`) + `BeliefStore.decay_temporary_beliefs` / `flag_stale_chronic_beliefs` — the old time-threshold path, no longer wired into `pipeline.py` (the `decay_enabled` YAML key that gated it is now inert).
-3. **Canonicalization**: live = `belief_engine::merge_verifier` + the pairwise dedup in `canonicalize_belief_set.py`. Dead = the `belief_engine::belief_canonicalizer` agent (chunk-based; on disk, referenced only by `scripts/backup_beliefs.py`, never by the pipeline).
-
-Also dormant: `app/assistant/pipelines/daily_insights/steps/belief_v2_shadow_ingest.py` — with `beliefs_v2_primary=false` it runs in **shadow mode** (writes a comparison `resource_user_beliefs_v2.json`, swallows failures); it would only become authoritative if the flag were flipped on.
+1. **Decay**: live = `belief_engine/decay/` + `RecomputeBeliefSnapshotStep` (universal, evidence-weighted). Dead = `belief_engine/pipeline/steps/decay_stale_beliefs.py` (`DecayStaleBeliefsStep`) + `BeliefStore.decay_temporary_beliefs` / `flag_stale_chronic_beliefs` — the old time-threshold path, no longer wired into `pipeline.py` (the `decay_enabled` YAML key that gated it is now inert). Sandbox-only.
+2. **Canonicalization**: live = `belief_engine::merge_verifier` + the pairwise dedup in `canonicalize_belief_set.py` (durable `belief_distinct_pairs` verdicts, per-domain sweep stamps, per-run call cap). Dead = the `belief_engine::belief_canonicalizer` agent (chunk-based; on disk, referenced only by `scripts/backup_beliefs.py`, never by the pipeline).
 
 ## 12. Scheduling
 
@@ -251,7 +251,6 @@ Routines now live in **`configs/routines/public/*.json`** (one file per routine)
 | `belief_archive.json` | 05:30 | function (`belief_archive`) | Evict deprecated beliefs (+ evidence) to the `*_archive` tables (§9) |
 | `belief_tag_v1.json` | 05:35 | function (`belief_tag_v1`) | Tag untagged/stale active beliefs (`mode="needs"`, `max_per_run=60`) (§7) |
 | `belief_engine_export.json` | (disabled) | pipeline | Manual re-export only; export is now inline. `/run-routine belief_engine_export` for a manual run |
-| `belief_tag_new.json` | (disabled) | function | **Retired** — tagged the v2 store (§11 trap 1) |
 
 Routine functions are registered as `@routine_handler`-decorated handlers in `app/assistant/routine_handlers/` (`belief_archive.py`, `belief_tag_v1.py`), not in `routine_functions.py`.
 

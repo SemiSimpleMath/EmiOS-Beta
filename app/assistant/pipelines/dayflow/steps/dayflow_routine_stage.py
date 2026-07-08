@@ -236,7 +236,7 @@ def _render_belief_block(entries: list) -> str:
     routine items. Importance rises organically from the upstream evidence ranking — no
     hardcoded pin list. Extracted from _format_beliefs so it's unit-testable.
     """
-    from belief_engine_v2 import tags as _belief_tags
+    from belief_engine import tagging as _belief_tags
     routine_tags = set(_belief_tags.pull_set("routine_stage"))
     active = [e for e in entries if e.get("statement") and e.get("status", "active") == "active"]
     rest = [e for e in active

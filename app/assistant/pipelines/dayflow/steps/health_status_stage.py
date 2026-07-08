@@ -51,7 +51,7 @@ def _format_health_beliefs() -> str:
         logger.error("[HealthStatusStage] Failed reading beliefs: %s", exc, exc_info=True)
         return ""
 
-    from belief_engine_v2 import tags as _belief_tags
+    from belief_engine import tagging as _belief_tags
     health_tags = set(_belief_tags.pull_set("health_status"))
     # Health-relevant = a curated health/sleep DOMAIN, OR a health-bridging TAG (dietary,
     # mental_health, exercise) — the tag side catches beliefs filed under another domain
