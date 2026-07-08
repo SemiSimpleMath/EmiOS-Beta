@@ -8,7 +8,7 @@ Read [02_MANAGERS.md](../architecture/02_MANAGERS.md) and [15_EMI_TEAM_AND_SCOPE
 
 | Goal | What to do |
 |------|------------|
-| New room-driven flow | Create a `RoomManager`-class config; add a state_map of room agents. |
+| New room-driven flow | Create a `MultiAgentManager` config; add a state_map of room agents and seed the entry agent from ingress. |
 | New general-purpose worker for a domain | **Derive from emi_team.** Reuse its delegator + summary; write your own planner + final_answer. |
 | New transactional / one-off pipeline | Don't write a manager. Write a **pipeline** ([Add a pipeline](ADD_A_PIPELINE.md)). |
 

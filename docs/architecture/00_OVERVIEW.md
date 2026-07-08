@@ -9,7 +9,7 @@ Transport Layer (UI/WebSocket, SMS, Slack, Telegram)
     |
 Room Session Manager (transport abstraction, session modes, persistence)
     |
-Manager Layer (MultiAgentManager / RoomManager — agent loop; scope applied at ingress)
+Manager Layer (MultiAgentManager — agent loop; scope applied at ingress)
     |
 Agent Layer (LLM decision units with structured output)
     |
@@ -28,7 +28,7 @@ LLM decision units. Each agent has a `config.yaml`, Jinja2 prompt templates (`sy
 See: [01_AGENTS.md](01_AGENTS.md)
 
 ### Managers
-Orchestrators that run agent loops. `MultiAgentManager` is the base; `RoomManager` extends it with deterministic routing via `flow_config.state_map`. Other (service) managers handle infrastructure: `BackgroundTaskManager`, `RoutineManager`, `TicketManager`.
+Orchestrators that run agent loops. `MultiAgentManager` is the one class (rooms included); routing is deterministic via the `Delegator` agent's `flow_config.state_map` lookup. Other (service) managers handle infrastructure: `BackgroundTaskManager`, `RoutineManager`, `TicketManager`.
 
 See: [02_MANAGERS.md](02_MANAGERS.md), [10_SERVICE_MANAGERS.md](10_SERVICE_MANAGERS.md)
 
@@ -103,7 +103,7 @@ User message via WebSocket
     -> Load room context (ROOM.md identity/policy/permissions) + scoped history
     -> ManagerInvoker.invoke(master_room_manager, message)
       -> RequestPreprocessor -> ScopeAdapter.apply() (scope narrowed at ingress)
-      -> RoomManager loop (deterministic state_map):
+      -> MultiAgentManager loop (deterministic state_map):
          chat_gate (reply | handoff | dayflow_delegate)
            -> switchboard (on handoff) -> ToolCaller (tool/agent dispatch + gate + approval)
            -> ToolResultHandler -> final_answer
@@ -131,7 +131,7 @@ app/assistant/
     tool_registry/         # Tool loading
     tool_execution/        # Four-layer tool access gate + approval
     tools/  core_tools/    # Tool wrappers + implementations
-  manager_classes/         # MultiAgentManager, RoomManager
+  manager_classes/         # MultiAgentManager
   manager_runtime/         # Manager invocation pipeline + ScopeAdapter
   pipelines/               # Step-based background processing (daily_insights, kg_pipeline, ...)
   pod_store/               # Pods: store, classifier, materializers, ingest

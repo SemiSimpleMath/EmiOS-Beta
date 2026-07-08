@@ -37,8 +37,7 @@ A manager is *not* an LLM — it is plain Python that says "first call agent X, 
 
 Two base classes:
 
-- **`MultiAgentManager`** — base class. Has a state map of agent → next-agent transitions, plus role bindings, event handlers, tool scope.
-- **`RoomManager`** — extends MultiAgentManager with deterministic routing (`state_map[last_agent]` lookup) and a max-cycle limit. The default for room-driven flows.
+- **`MultiAgentManager`** — the one manager class. A state map of agent → next-agent transitions (looked up each cycle by the deterministic `Delegator` agent), plus role bindings, tool scope, and a max-cycle budget.
 
 Specialized managers (`emi_team_manager`, `kg_investigation_manager`, `kg_mutation_manager`, `devices_manager`, etc.) are built on top of these by editing the YAML config and supplying domain-specific agents. See **[02_MANAGERS.md](../architecture/02_MANAGERS.md)** and **[15_EMI_TEAM_AND_SCOPE.md](../architecture/15_EMI_TEAM_AND_SCOPE.md)**.
 

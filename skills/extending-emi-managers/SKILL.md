@@ -33,7 +33,7 @@ app/assistant/multi_agents/<name>/
 
 ```yaml
 name: my_manager
-class_name: MultiAgentManager      # or RoomManager for room-bound
+class_name: MultiAgentManager
 
 allowed_tools:                     # tools any agent in this manager can call
   - send_email
@@ -106,9 +106,9 @@ assistant uses `emi_team_manager`; KG mutations route through
 
 ## Notes
 
-- `RoomManager` extends `MultiAgentManager` with a room mode router
-  for things like `task_creation_mode` / `doc_creation_mode`. Use
-  it when this manager IS a chat surface, not a sub-handler.
+- Room-bound managers are still `MultiAgentManager`; room modes
+  (`task_creation_mode` / `doc_creation_mode`) are selected at ingress,
+  which seeds `next_agent` with the mode's source agent.
 - Control nodes available out of the box: `tool_caller`,
   `critic_post_node`, `final_answer_node`, `summary_post_node`,
   `approval_node`, `return_control_node`. Register custom nodes by

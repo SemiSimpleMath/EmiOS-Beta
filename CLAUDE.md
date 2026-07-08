@@ -65,7 +65,7 @@ Full architecture docs live in `docs/architecture/`. Key docs: `00_OVERVIEW.md`,
 ```
 Transport (UI, SMS, Slack, Telegram)
   → Room Session Manager (transport abstraction, session modes)
-    → Manager Layer (MultiAgentManager / RoomManager — deterministic agent loop)
+    → Manager Layer (MultiAgentManager — deterministic agent loop)
       → Agent Layer (LLM decisions with structured output)
         → Control Nodes (deterministic routing, tool dispatch)
           → Tool Layer (registered tools with Pydantic schemas)
@@ -85,7 +85,7 @@ Context items in `config.yaml` (`user_context_items`) are resolved by the contex
 
 ### Manager Contract
 
-Managers live in `app/assistant/multi_agents/<name>/manager_config.yaml`. `RoomManager` extends `MultiAgentManager` with a `state_map` for deterministic agent routing. Managers are invoked via `DI.manager_invoker.invoke(manager, message)`.
+Managers live in `app/assistant/multi_agents/<name>/config.yaml`. Every manager (rooms included) is `class_name: MultiAgentManager`; routing is deterministic via the `Delegator` agent's `flow_config.state_map` lookup. Managers are invoked via `DI.manager_invoker.invoke(manager, message)`, one fresh instance per invocation.
 
 ### Dependency Injection
 

@@ -236,7 +236,7 @@ Audit table for KG mutations. Every `kg_mutator_tool` commit writes a row with `
 
 ### Manager
 
-An orchestrator that owns an agent loop. Inherits from `MultiAgentManager` (most general) or `RoomManager` (deterministic routing for room flows). See [02_MANAGERS.md](architecture/02_MANAGERS.md).
+An orchestrator that owns an agent loop. Every agent-orchestrating manager (rooms included) is a `MultiAgentManager`; routing is the deterministic `Delegator` state-map lookup. See [02_MANAGERS.md](architecture/02_MANAGERS.md).
 
 ### ManagerInvoker
 
@@ -348,10 +348,6 @@ A scoped conversation channel — a directory under `app/assistant/rooms/<room_i
 
 The single config file for a **room** (`app/assistant/rooms/<room_id>/ROOM.md`) — YAML frontmatter (three required mappings: `policy`, `permissions`, `access`) plus a markdown body whose H1 sections map to the blackboard keys agents read at prompt time (`# Identity` → `room_identity`, `# Conversation` → `room_conversation`, `# Safety` → `room_safety`, …). The canonical contract is `rooms/ROOM_CONTRACT.md`. Pre-2026-05-09 each room was 7–9 loose JSON files (`policy.json`, `permissions.json`, `access.json`, plus `resource_*.json` wrappers); that shape collapsed into one `ROOM.md` with no backwards-compat fallback (the loose `.json` files may linger on disk but the loader reads only `ROOM.md`). A missing/malformed `ROOM.md` or missing `# Identity` raises loudly. An optional sibling **scope.yaml** is authoritative for the permission bucket. See [03_ROOMS.md](architecture/03_ROOMS.md).
 
-### RoomManager
-
-Manager class extending `MultiAgentManager` with deterministic state-map routing and a max-cycle limit. The default class for room-driven flows.
-
 ### RoomSessionManager
 
 The transport-abstraction layer. Receives messages from any surface (UI / SMS / Slack / Telegram) → `InboundEnvelope` → loads room context → invokes manager → formats outbound reply for the surface. ~1600 LOC in `app/assistant/room_session_manager/`.
@@ -418,7 +414,7 @@ The reactive event-publication sibling of the gut. Subscribes to incoming events
 
 ### state_map
 
-A dict on a manager config mapping `last_agent → next_agent` (or list of candidates). Defines routing through the agent loop in a deterministic way. Used by `RoomManager` and emi_team-derived managers.
+A dict on a manager config mapping `last_agent → next_agent`. Defines routing through the agent loop in a deterministic way; the `Delegator` agent performs the lookup each cycle.
 
 ### Subconscious
 

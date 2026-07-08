@@ -7,54 +7,60 @@ from app.assistant.room_session_manager.room_session_manager import RoomSessionM
 from app.assistant.room_session_manager.services.room_ingress_service import RoomIngressService
 from app.assistant.room_session_manager.services.post_room_service import PostRoomService
 from app.assistant.room_session_manager.services.room_history_builder import RoomHistoryBuilder
+from app.assistant.room_session_manager.services.room_policy_service import (
+    normalize_message_persistence_mode,
+    resolve_room_unified_log_persistence,
+)
 from app.assistant.utils.pydantic_classes import Message
 
 
-def test_room_history_builder_applies_summary_boundary(monkeypatch):
-    base = datetime(2026, 2, 17, 10, 0, tzinfo=timezone.utc)
-    old_msg = Message(
+def test_room_history_builder_hides_prior_day_raw_keeps_summary(monkeypatch):
+    """Prior-day raw chat is hidden from room history; prior-day room summaries
+    and current messages stay (the compaction display contract in
+    RoomHistoryBuilder.build_messages)."""
+    now_utc = datetime.now(timezone.utc)
+    old_raw = Message(
         data_type="user_msg",
         sender="Justin",
         role="user",
         content="older raw that should be hidden",
         is_chat=True,
-        timestamp=base,
+        timestamp=now_utc - timedelta(days=2),
         room_id="justin",
         room_surface="slack",
         room_context_id="main",
     )
-    summary = Message(
+    old_summary = Message(
         data_type="agent_msg",
         sender="room_summary",
         content="summary content",
         is_chat=True,
-        timestamp=base + timedelta(minutes=1),
+        timestamp=now_utc - timedelta(days=2),
         room_id="justin",
         room_surface="slack",
         room_context_id="main",
         sub_data_type=["history_summary"],
-        metadata={"summarized_through_utc": (base + timedelta(minutes=2)).isoformat()},
     )
-    new_msg = Message(
+    new_raw = Message(
         data_type="user_msg",
         sender="Justin",
         role="user",
         content="new raw should appear",
         is_chat=True,
-        timestamp=base + timedelta(minutes=3),
+        timestamp=now_utc - timedelta(minutes=3),
         room_id="justin",
         room_surface="slack",
         room_context_id="main",
     )
 
-    class _Global:
-        @staticmethod
-        def get_recent_chat_since_utc(*args, **kwargs):
-            return [old_msg, summary, new_msg]
-
-    monkeypatch.setattr("app.assistant.room_session_manager.services.room_history_builder.DI.global_blackboard", _Global())
-    out = RoomHistoryBuilder().build_context(room_id="justin", room_surface="slack", room_context_id="main", limit=40)
-    assert "[Chat Summary]: summary content" in out
+    builder = RoomHistoryBuilder()
+    monkeypatch.setattr(
+        builder,
+        "load_room_history_messages",
+        lambda **_kwargs: [old_raw, old_summary, new_raw],
+    )
+    out = builder.build_context(room_id="justin", room_surface="slack", room_context_id="main", limit=40)
+    assert "summary content" in out
     assert "new raw should appear" in out
     assert "older raw that should be hidden" not in out
 
@@ -79,19 +85,18 @@ def test_post_room_service_builds_outbound_intent_send_flag():
     assert intent.delivery_mode == "auto_send"
 
 
-def test_room_session_manager_message_persistence_mode_validation():
-    mgr = RoomSessionManager()
-    assert mgr._normalize_message_persistence_mode("global_blackboard_only") == "global_blackboard_only"
+def test_message_persistence_mode_validation():
+    # Extracted from RoomSessionManager to room_policy_service module functions.
+    assert normalize_message_persistence_mode("global_blackboard_only") == "global_blackboard_only"
     assert (
-        mgr._normalize_message_persistence_mode("global_blackboard_and_unified_log")
+        normalize_message_persistence_mode("global_blackboard_and_unified_log")
         == "global_blackboard_and_unified_log"
     )
     with pytest.raises(ValueError):
-        mgr._normalize_message_persistence_mode("bad_mode")
+        normalize_message_persistence_mode("bad_mode")
 
 
-def test_room_session_manager_room_policy_can_block_unified_log():
-    mgr = RoomSessionManager()
+def test_room_policy_can_block_unified_log():
     room_ctx = {
         "room_policy": {
             "retention": {
@@ -99,7 +104,7 @@ def test_room_session_manager_room_policy_can_block_unified_log():
             }
         }
     }
-    enabled, reason = mgr._resolve_room_unified_log_persistence(
+    enabled, reason = resolve_room_unified_log_persistence(
         message_persistence_mode="global_blackboard_and_unified_log",
         room_ctx=room_ctx,
         room_id="random_contact",
@@ -109,8 +114,7 @@ def test_room_session_manager_room_policy_can_block_unified_log():
     assert reason == "room_policy_blocked"
 
 
-def test_room_session_manager_room_policy_allows_unified_log():
-    mgr = RoomSessionManager()
+def test_room_policy_allows_unified_log():
     room_ctx = {
         "room_policy": {
             "retention": {
@@ -118,7 +122,7 @@ def test_room_session_manager_room_policy_allows_unified_log():
             }
         }
     }
-    enabled, reason = mgr._resolve_room_unified_log_persistence(
+    enabled, reason = resolve_room_unified_log_persistence(
         message_persistence_mode="global_blackboard_and_unified_log",
         room_ctx=room_ctx,
         room_id="phil",
@@ -170,6 +174,9 @@ def test_room_ingress_service_mode_routing_normal_and_planning():
         content="hello",
         timestamp_local="2026-02-17 11:00:00",
         inbound_line="[11:00] User: hello",
+        transport_message_id="",
+        transport_from="socket:1",
+        transport_to="master_room",
     )
     room_ctx = {
         "flow_config": {
@@ -199,6 +206,9 @@ def test_room_ingress_service_mode_routing_normal_and_planning():
         content="continue planning",
         timestamp_local="2026-02-17 11:01:00",
         inbound_line="[11:01] User: continue planning",
+        transport_message_id="",
+        transport_from="socket:1",
+        transport_to="master_room",
         metadata={"room_mode": "planning_mode"},
     )
     planning_data = svc.build_request_data(
@@ -251,7 +261,10 @@ def test_room_ingress_service_apply_room_mode_context_commands():
     assert "Planning mode closed." in str(early_done.get("reply_text") or "")
 
 
-def test_master_room_chat_gate_seeded_history_is_bounded_to_24h(monkeypatch):
+def test_seeded_history_time_bounded_policy_filters_old_messages(monkeypatch):
+    """A room history_policy of scope=time_bounded drops messages older than
+    max_hours from the seeded set (the default 24h cap lives inside
+    RoomHistoryBuilder.build_messages, which this test stubs out)."""
     now_utc = datetime.now(timezone.utc)
     recent = Message(
         data_type="user_msg",
@@ -286,6 +299,7 @@ def test_master_room_chat_gate_seeded_history_is_bounded_to_24h(monkeypatch):
         room_context_id="main",
         shared_chat_room_ids=[],
         current_room_mode="normal",
+        history_policy={"scope": "time_bounded", "max_hours": 24},
     )
 
     contents = [str(item.get("content") or "") for item in seeded if isinstance(item, dict)]

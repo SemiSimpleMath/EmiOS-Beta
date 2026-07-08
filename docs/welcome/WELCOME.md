@@ -85,7 +85,7 @@ from app.assistant.ServiceLocator.service_locator import DI
 |-----------|--------------|
 | `app/assistant/agents/` | Every LLM agent — one directory per agent, with `config.yaml`, `prompts/`, optional `agent_form.py` |
 | `app/assistant/multi_agents/` | Manager configurations (e.g., `emi_team_manager`, `kg_investigation_manager`) |
-| `app/assistant/manager_classes/` | Base classes: `MultiAgentManager`, `RoomManager` |
+| `app/assistant/manager_classes/` | The manager class: `MultiAgentManager` |
 | `app/assistant/control_nodes/` | Deterministic state machines that route the agent loop |
 | `app/assistant/lib/tools/` | Tool entry-point wrappers (one directory per tool) |
 | `app/assistant/lib/core_tools/` | Tool implementations (the heavy logic) |

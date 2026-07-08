@@ -40,8 +40,7 @@ max_cycles, error, explicit cancel) and returns a `ToolResult`.
 plumbing — control nodes, tool dispatch/handler hops — is free; only a
 non-`ControlNode` activation increments `agent_cycles`. A separate
 `iteration_cap = max(max_cycles * 8, 40)` backstops infinite
-control-node spins. (`RoomManager` is the exception — its own loop
-counts every cycle against `max_cycles`; see below.)
+control-node spins.
 
 On entry, `request_handler` seeds the blackboard (task/information/data,
 room context, scope), then **fails loud if the inbound message carries
@@ -51,21 +50,27 @@ and only substitutes a permissive scope under a test harness
 per-node `control_nodes` configs, and the loop counters onto the
 blackboard.
 
-## RoomManager (`manager_classes/RoomManager.py`)
+## One manager class; routing is the Delegator's state_map lookup
 
-`MultiAgentManager` subclass with **deterministic routing** (no LLM
-delegator agent). Used for rooms (master_room, dayflow_orchestrator,
-etc.) where the per-turn routing is a static graph rather than an
-LLM-chosen next agent. It overrides `run_agent_loop` with its own
-`_pick_next_agent_name` loop.
+Every agent-orchestrating manager — rooms included (master_room,
+dayflow_orchestrator) — is `class_name: MultiAgentManager`. There is no
+separate room manager class (a dead `RoomManager` subclass was deleted
+2026-07-08; it had zero references).
 
-- Routing priority each turn (`_pick_next_agent_name`):
-  1. Explicit `next_agent` set on the blackboard (consumed before activation)
-  2. `flow_config.state_map[last_agent]` lookup
-- Counts **every** cycle against `max_cycles` (default 30) — it does
-  not use the base class's agent-activation budget.
-- Exit conditions: cancelled, max_cycles, exit flag, error flag, or a
-  routing dead-end (no `next_agent` and no `state_map` match → error).
+Routing is still deterministic: the `delegator` role binding resolves to
+the `Delegator` agent class, which is a **state-map lookup, not an LLM**
+(`agent_classes/Delegator.py`). Each cycle it:
+
+1. Honors an explicit `next_agent` already set on the blackboard
+   (agents/control nodes/ingress set this; every agent activation clears
+   it on entry, so a set value is always fresh), otherwise
+2. Looks up `flow_config.state_map[last_agent]`.
+3. Dead-end (no match) → error flag, loop exits via the error path.
+
+Rooms enter their flow by seeding `next_agent` in the request data
+(ingress sets the mode's source agent, e.g. `master_room::chat_gate`);
+`request_handler` writes data keys onto the blackboard, and the first
+delegator pass honors it.
 
 ## Manager invocation chain
 
@@ -109,7 +114,7 @@ Agent-orchestrating managers are configured via `config.yaml` (one per
 `multi_agents/<name>/` directory) loaded by `ManagerRegistry`. Real
 top-level keys:
 
-- `name`, `class_name` (`MultiAgentManager` | `RoomManager`),
+- `name`, `class_name` (`MultiAgentManager`),
   `display_name` (per-manager persona name), `description`.
 - `max_cycles` (default 30), `max_exit_cycles` (graceful-exit budget,
   default 10).
@@ -205,15 +210,14 @@ Service managers don't use Blackboard.
 3. **BackgroundTaskManager.start_all()** — start daemon tasks (this
    step is in service-manager territory; see
    [10_SERVICE_MANAGERS](10_SERVICE_MANAGERS.md)).
-4. **RoomSessionManager** — instantiates `RoomManager` instances per
-   room request.
+4. **RoomSessionManager** — creates a fresh manager instance per room
+   request via `multi_agent_manager_factory`.
 
 ## Key files
 
 | File | Purpose |
 |------|---------|
-| `manager_classes/MultiAgentManager.py` | Base agent orchestrator (`_run_loop`, `_validate_strict_routing_config`, `request_handler`) |
-| `manager_classes/RoomManager.py` | Deterministic-routing subclass (`_pick_next_agent_name`) |
+| `manager_classes/MultiAgentManager.py` | The agent orchestrator (`_run_loop`, `_validate_strict_routing_config`, `request_handler`) |
 | `manager_runtime/manager_invoker.py` | Canonical (stateless) invocation entry point |
 | `manager_runtime/mam_instance_manager.py` | Running-invocation registry, display names, cancel/status |
 | `manager_runtime/mailbox.py` | Out-of-band message dispatch into a running invocation |
