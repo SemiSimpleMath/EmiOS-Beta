@@ -26,6 +26,7 @@ from app.assistant.pending_questions.store import (
     mark_answered,
     mark_asked,
     mark_dismissed,
+    set_ask_anchor,
 )
 from app.assistant.pending_questions.injector import (
     QuestionInjector,
@@ -44,6 +45,7 @@ __all__ = [
     "mark_answered",
     "mark_asked",
     "mark_dismissed",
+    "set_ask_anchor",
     "QuestionInjector",
     "pick_question_for_nudge",
 ]

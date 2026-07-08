@@ -88,6 +88,10 @@ def render_digest(
 
     if not new_concerns and not ongoing_concerns and not resolved_recent:
         lines.append("Quiet day. Nothing new to flag.")
+        # A quiet day is still a natural moment to ask — and the runner marks
+        # rendered questions asked (anchored to the digest row), so they must
+        # actually appear whenever they're loaded.
+        _append_pending_questions(lines, pending_questions)
         return "\n".join(lines)
 
     if new_concerns:
@@ -110,20 +114,27 @@ def render_digest(
             lines.append(f"- {title}" + (f" — {reason}" if reason else ""))
         lines.append("")
 
-    if pending_questions:
-        # Cap at 2 — same hard rule as the noticer's own limit
-        for q in pending_questions[:2]:
-            lines.append(f"**Question for when you have a moment:** {q.get('text', '')}")
-            why = (q.get("why_asking") or "").strip()
-            if why:
-                lines.append(f"  _(why: {why})_")
-        lines.append("")
+    _append_pending_questions(lines, pending_questions)
 
     # Footer with stats
     total_active = len(active) + len(addressing)
     lines.append(f"_{total_active} concern{'s' if total_active != 1 else ''} active in total._")
 
     return "\n".join(lines)
+
+
+def _append_pending_questions(lines: List[str], pending_questions: Optional[List[Dict[str, Any]]]) -> None:
+    """Render up to 2 open questions (the noticer's own cap). Shared by the
+    normal and quiet-day paths so the runner's ask-anchoring (mark-asked with
+    the digest row id) always matches what the user actually saw."""
+    if not pending_questions:
+        return
+    for q in pending_questions[:2]:
+        lines.append(f"**Question for when you have a moment:** {q.get('text', '')}")
+        why = (q.get("why_asking") or "").strip()
+        if why:
+            lines.append(f"  _(why: {why})_")
+    lines.append("")
 
 
 def _render_concern_block(c: Dict[str, Any], *, mark_new: bool) -> List[str]:

@@ -44,13 +44,17 @@ def load_latest_pending_questions() -> List[Dict[str, Any]]:
     """Open questions for the digest — read from the pending_question STORE
     (the lifecycle truth), not the tick log's last line. The tick-log version
     showed whatever the noticer emitted at 04:00 even when the question had
-    already been asked and answered in chat by digest time. Display-only: the
-    digest never marks anything asked; delivery stays with the injector
-    bridges."""
+    already been asked and answered in chat by digest time.
+
+    The digest is a real delivery bridge: after the digest row persists,
+    run_digest_pass marks each rendered question asked with that row as the
+    ask ANCHOR, so the user's later reply in master_room is judged by answer
+    capture (an anchor-less ask can only expire). The ids ride along here for
+    that; render_digest only reads "text"."""
     try:
         from app.assistant.pending_questions import get_pending
         rows = get_pending(limit=2)
-        return [{"text": q.question_text} for q in rows]
+        return [{"id": q.id, "text": q.question_text} for q in rows]
     except Exception as e:
         logger.warning("[digest] failed to load pending questions from the store: %s", e)
         return []
@@ -61,13 +65,16 @@ def _persist_digest_to_unified_log(
     digest_text: str,
     room_id: str,
     digest_date: str,
-) -> bool:
+) -> Optional[str]:
     """Append the digest as an assistant message in unified_log_2026.
 
     This is what makes the digest appear in the user's chat history when
     master_room loads, regardless of whether socketio relays are currently
     running. Source is `subconscious_digest` so KG / extraction pipelines
     can route it differently than normal chat if needed.
+
+    Returns the row id (the ask anchor for questions the digest rendered),
+    or None when the write failed.
     """
     try:
         from app.assistant.database.db_handler import UnifiedLog2026
@@ -98,7 +105,7 @@ def _persist_digest_to_unified_log(
             )
             session.add(row)
             session.commit()
-            return True
+            return row_id
         except Exception:
             session.rollback()
             raise
@@ -106,7 +113,7 @@ def _persist_digest_to_unified_log(
             session.close()
     except Exception as e:
         logger.warning("[digest] unified_log write failed: %s", e)
-        return False
+        return None
 
 
 def run_digest_pass(
@@ -145,12 +152,24 @@ def run_digest_pass(
 
     log_ok = None
     live_ok = None
+    questions_anchored = 0
     if post:
-        log_ok = _persist_digest_to_unified_log(
+        digest_row_id = _persist_digest_to_unified_log(
             digest_text=digest_text,
             room_id=room_id,
             digest_date=today_local,
         )
+        log_ok = bool(digest_row_id)
+        # The digest ASKED these questions — mark them asked with the digest
+        # row as the anchor, so the user's later reply in this room is judged
+        # by answer capture (an anchor-less ask can only expire). Preview runs
+        # (post=False) render without consuming anything.
+        if digest_row_id and pending_questions:
+            from app.assistant.pending_questions import mark_asked
+            for q in pending_questions:
+                qid = str(q.get("id") or "").strip()
+                if qid and mark_asked(qid, asked_in_message_id=digest_row_id):
+                    questions_anchored += 1
         # Live socketio push for immediate display when subscribers exist.
         from app.assistant.ServiceLocator.service_locator import DI
         try:
@@ -188,6 +207,7 @@ def run_digest_pass(
         "active_concerns": len(register.get("active") or []),
         "addressing_concerns": len(register.get("addressing") or []),
         "pending_questions": len(pending_questions),
+        "questions_anchored": questions_anchored,
         "wrote_file": str(digest_path) if digest_path else None,
         "unified_log_ok": log_ok,
         "live_push_ok": live_ok,

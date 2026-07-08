@@ -114,13 +114,15 @@ The noticer's `_enqueue_pending_questions` derives each row from its related con
 
 ### Bridge 1 — in-chat nudge (the default)
 
-`pending_questions.injector.pick_question_for_nudge(topic_tag=...)` picks the best candidate (topic match → priority → age), marks it `asked`, returns `(id, text)`. Budget: `DEFAULT_DAILY_BUDGET=6` asked/24h and `DEFAULT_MIN_MINUTES_BETWEEN=10` anti-back-to-back; **`high` priority bypasses both gates**.
+`pending_questions.injector.pick_question_for_nudge(topic_tag=...)` picks the best candidate (topic match → priority → age), marks it `asked`, returns `(id, text)`. Budget: `DEFAULT_DAILY_BUDGET=6` asked/24h and `DEFAULT_MIN_MINUTES_BETWEEN=10` anti-back-to-back; **`high` priority bypasses both gates**. Both gates count by `asked_at` regardless of current status.
+
+**Every surfaced ask carries an ANCHOR** — `asked_in_message_id`, the unified_log row id of the message the ask rode with. Answer capture resolves the asked ROOM from the anchor; an anchor-less ask is skipped by capture and can only expire. Each bridge supplies its own: the chat nudge passes this turn's inbound user-message row id (threaded onto the blackboard by the room session manager as `inbound_message_id`); proactive surfaces anchor AFTER emitting via `set_ask_anchor(question_id, asked_in_message_id=<their outbound row id>)` (first anchor wins).
 
 Wired into the **chat reply path** via the context injector: `app/assistant/agent_runtime/services/context_injector.py` resolves the `chat_nudges` context key by calling `pick_question_for_nudge(topic_tag=None)` and setting `context["chat_nudges"] = question_text`. `master_room::chat_gate` declares `chat_nudges` in its `user_context_items` and renders it in `prompts/user.j2` under a "GOOD TO BRING UP … IF IT FITS NATURALLY" header. It is a **soft hint** — the agent decides whether to weave it into its natural reply; the question is never mechanically appended.
 
 ### Bridge 2 — conversation_starter fast-path
 
-The Dayflow conversation_starter stage (§6) also calls `pick_question_for_nudge()` as a **fast-path**, surfacing the highest-priority queued question proactively (before the user opens a chat) via `_emit_to_user`. Same injector, same budget/dedup. This is preferred over the generic LLM starter because these are real data-gathering asks.
+The Dayflow conversation_starter stage (§6) also calls `pick_question_for_nudge()` as a **fast-path**, surfacing the highest-priority queued question proactively (before the user opens a chat) via `_emit_to_user`. Same injector, same budget/dedup. This is preferred over the generic LLM starter because these are real data-gathering asks. After recording the outbound message it anchors the ask to that row (`set_ask_anchor`), so the reply is captured like any chat-asked question.
 
 ### Ticket delivery (high-stakes)
 
@@ -159,7 +161,7 @@ A daily "what I've been noticing" message — **pure Python templating, no LLM**
 
 `digest_runner.run_digest_pass(room_id="master_room")` loads the register + `resource_digest_state.json` + the last tick's `pending_questions`, renders via `digest_builder.render_digest`, writes `app/subconscious_digests/digest_YYYY-MM-DD.md`, persists an assistant row to `unified_log_2026` (`source="subconscious_digest"`, so it appears in master_room history regardless of live sockets), and pushes to live SocketIO subscribers via `DI.outbound_chat_publisher`.
 
-`render_digest` sections: **New this round** (active/addressing not in `previously_surfaced_concern_ids`, multi-line, severity-sorted), **Still tracking** (one-liners), **Resolved** (≤5 most-recent), and up to **2 pending questions**. Deliberately omits belief updates, dormant concerns, full evidence, and reasoning. After rendering, every currently-active concern id is added to `previously_surfaced_concern_ids` in the state file so it's "ONGOING" next time. Routine `subconscious_digest` → `digest_run` (interval 86400, window 07:30–22:00).
+`render_digest` sections: **New this round** (active/addressing not in `previously_surfaced_concern_ids`, multi-line, severity-sorted), **Still tracking** (one-liners), **Resolved** (≤5 most-recent), and up to **2 pending questions** (rendered on quiet days too — a quiet digest is a natural moment to ask). Deliberately omits belief updates, dormant concerns, full evidence, and reasoning. After rendering, the state file keeps the currently-active concern ids as `previously_surfaced_concern_ids` so they're "ONGOING" next time. **The digest is a third delivery bridge**: questions come from the pending_question store (`get_pending(limit=2)`), and after the digest row persists they are marked `asked` anchored to that row — the user's later reply in master_room goes through the same answer capture as a chat-nudged ask. Preview runs (`post=False`) render without consuming anything. Routine `subconscious_digest` → `digest_run` (interval 86400, window 07:30–22:00).
 
 ## 8. Proposer / Distiller Lanes
 

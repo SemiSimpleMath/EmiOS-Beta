@@ -59,11 +59,20 @@ class QuestionInjector:
         self,
         *,
         topic_tag: Optional[str] = None,
+        asked_in_message_id: Optional[str] = None,
     ) -> Optional[Tuple[str, str]]:
         """Pick a pending question to nudge the chat agent with.
 
         Returns ``(question_id, question_text)`` or None when nothing
         is eligible. Marks the picked question as asked.
+
+        ``asked_in_message_id`` is the ask ANCHOR — the unified_log row id of
+        the message this ask rides with (the inbound user message for the
+        chat nudge; the outbound row for proactive surfaces). Answer capture
+        resolves the asked ROOM from it; without an anchor the question is
+        never judged against chat and can only expire. Callers that don't
+        know their row id at pick time anchor afterwards via
+        ``set_ask_anchor``.
 
         Never raises into the caller. Failures log + return None.
         """
@@ -94,10 +103,11 @@ class QuestionInjector:
                     return None
 
             q = pending[0]
-            mark_asked(q.id)
+            mark_asked(q.id, asked_in_message_id=asked_in_message_id)
             logger.info(
-                "[question_injector] nudged question id=%s tag=%s priority=%s",
+                "[question_injector] nudged question id=%s tag=%s priority=%s anchor=%s",
                 q.id[:8], q.topical_tag, q.priority,
+                (asked_in_message_id or "")[:24] or "(none)",
             )
             return (q.id, q.question_text)
         except Exception:
@@ -110,9 +120,11 @@ _DEFAULT_INJECTOR = QuestionInjector()
 
 
 def pick_question_for_nudge(
-    *, topic_tag: Optional[str] = None,
+    *, topic_tag: Optional[str] = None, asked_in_message_id: Optional[str] = None,
 ) -> Optional[Tuple[str, str]]:
-    return _DEFAULT_INJECTOR.pick_for_nudge(topic_tag=topic_tag)
+    return _DEFAULT_INJECTOR.pick_for_nudge(
+        topic_tag=topic_tag, asked_in_message_id=asked_in_message_id,
+    )
 
 
 def _seconds_since_last_ask() -> Optional[float]:

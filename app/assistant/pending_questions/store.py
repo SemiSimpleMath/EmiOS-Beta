@@ -145,6 +145,34 @@ def mark_asked(question_id: str, *, asked_in_message_id: Optional[str] = None) -
         session.close()
 
 
+def set_ask_anchor(question_id: str, *, asked_in_message_id: str) -> bool:
+    """Late-anchor an already-asked question to the unified_log row that
+    carried it (proactive surfaces — the conversation starter and the digest —
+    only know their outbound row id AFTER emitting). First anchor wins; a row
+    that already has one keeps it. Answer capture resolves the asked room
+    from this anchor, so an anchor-less ask can only expire unanswered."""
+    anchor = str(asked_in_message_id or "").strip()
+    if not anchor:
+        return False
+    session = get_session()
+    try:
+        row = session.query(PendingQuestion).filter_by(id=question_id).first()
+        if row is None or row.status != "asked":
+            return False
+        if row.asked_in_message_id:
+            return False
+        row.asked_in_message_id = anchor
+        session.commit()
+        logger.info("[pending_questions] anchored id=%s to %s", question_id[:8], anchor[:40])
+        return True
+    except Exception:
+        session.rollback()
+        logger.exception("[pending_questions] set_ask_anchor failed id=%s", question_id)
+        return False
+    finally:
+        session.close()
+
+
 def get_asked_unanswered(*, max_age_hours: float = 72.0, limit: int = 20) -> List[PendingQuestion]:
     """Questions asked but not yet answered, newest first — the answer
     capture's working set. Questions older than `max_age_hours` are left

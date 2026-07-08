@@ -453,12 +453,19 @@ class RoomSessionManager:
             *,
             adapter: InboundSurfaceAdapter,
             persist_unified_log: bool,
-    ) -> None:
+    ) -> str | None:
+        """Persist the inbound turn message. Returns its unified_log row id
+        (= the persisted Message's id) so the turn can thread it downstream —
+        it becomes the ask ANCHOR when the chat nudge surfaces a pending
+        question this turn (answer capture resolves the asked room from it).
+        None when nothing reached unified_log (no anchor to give)."""
         if not adapter.persist_to_history:
-            return
+            return None
         inbound_msg = adapter.append_inbound()
         if persist_unified_log and inbound_msg is not None:
             self._persist_message_to_unified_log(message=inbound_msg, source=adapter.inbound_source)
+            return str(inbound_msg.id or "") or None
+        return None
 
     def _prepare_turn_context(
             self,
@@ -789,7 +796,9 @@ class RoomSessionManager:
                 logger.debug("context_engine trigger exception details", exc_info=True)
 
         self._register_reply_route(envelope=envelope)
-        self._persist_inbound_turn(adapter=adapter, persist_unified_log=persist_unified_log)
+        inbound_message_id = self._persist_inbound_turn(
+            adapter=adapter, persist_unified_log=persist_unified_log,
+        )
 
         # Room handler hook: load persistent state (spec/doc) onto the global
         # blackboard BEFORE _prepare_turn_context builds request_data from it.
@@ -814,6 +823,11 @@ class RoomSessionManager:
                 room_contact_name=room_contact_name,
                 adapter=adapter,
             )
+            if inbound_message_id:
+                # Lands on the manager blackboard (request_data keys do); the
+                # chat-nudge injector uses it as the ask anchor when it
+                # surfaces a pending question this turn.
+                request_data["inbound_message_id"] = inbound_message_id
 
             outbound_intent = self._run_room_controller(
                 envelope=envelope,

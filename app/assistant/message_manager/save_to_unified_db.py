@@ -180,7 +180,13 @@ def _to_2026_record(msg: dict, source: str) -> dict:
     }
 
 
-def save_proactive_chat_message(*, content: str, sender: str, sub_data_type: list | None = None) -> None:
+def save_proactive_chat_message(*, content: str, sender: str, sub_data_type: list | None = None) -> str | None:
+    """Persist one proactive assistant message to unified_log (master_room).
+
+    Returns the row id — callers that surfaced a pending question with this
+    message use it as the ask ANCHOR (set_ask_anchor), which is how answer
+    capture resolves the asked room. None when there was nothing to persist.
+    """
     from datetime import datetime, timezone
     import uuid
 
@@ -188,7 +194,7 @@ def save_proactive_chat_message(*, content: str, sender: str, sub_data_type: lis
     now = datetime.now(timezone.utc)
     content_str = str(content or "").strip()
     if not content_str:
-        return
+        return None
 
     payload = {
         "id": msg_id,
@@ -222,6 +228,7 @@ def save_proactive_chat_message(*, content: str, sender: str, sub_data_type: lis
         session.execute(stmt)
         session.commit()
         logger.debug("save_proactive_chat_message: persisted id=%s sender=%s", msg_id, sender)
+        return msg_id
     except Exception as e:
         session.rollback()
         logger.error("save_proactive_chat_message: failed to persist: %s", e)

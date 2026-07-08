@@ -546,11 +546,16 @@ class ConversationStarterStep(BaseStep):
             logger.warning("ConversationStarterStage: failed to emit to user: %s", e)
 
     def _finalize_proactive(self, ctx, *, text: str, sid: str, source: str,
-                            boundary_date_local: str) -> None:
+                            boundary_date_local: str) -> str | None:
         """Record a proactively-sent message (global blackboard + unified_log +
         frequency/rate-limit pointer) so it shows in chat history and counts
         toward the daily cap. Mirrors the LLM-starter success path; used by the
-        non-LLM fast-paths (e.g. the pending-questions bridge)."""
+        non-LLM fast-paths (e.g. the pending-questions bridge).
+
+        Returns the unified_log row id of the recorded message (or None) —
+        the pending-questions bridge anchors its ask to it so answer capture
+        can resolve the asked room."""
+        row_id: str | None = None
         try:
             from app.assistant.ServiceLocator.service_locator import DI
             from app.assistant.utils.identity_names import get_assistant_name
@@ -570,7 +575,7 @@ class ConversationStarterStep(BaseStep):
                 )
             )
             from app.assistant.message_manager.save_to_unified_db import save_proactive_chat_message
-            save_proactive_chat_message(
+            row_id = save_proactive_chat_message(
                 content=text, sender=_assistant_name, sub_data_type=["proactive", source],
             )
         except Exception as e:
@@ -600,6 +605,7 @@ class ConversationStarterStep(BaseStep):
             })
         except Exception as e:
             logger.warning("ConversationStarterStage: failed to update pointer: %s", e)
+        return row_id
 
     def run(self, ctx: StepContext) -> StepResult:
         boundary_date_local = self._boundary_date_local(ctx)
@@ -710,10 +716,21 @@ class ConversationStarterStep(BaseStep):
                 if q_text:
                     sid = _starter_id(q_text)
                     self._emit_to_user(q_text)
-                    self._finalize_proactive(
+                    row_id = self._finalize_proactive(
                         ctx, text=q_text, sid=sid, source="pending_question",
                         boundary_date_local=boundary_date_local,
                     )
+                    # Anchor the ask to the recorded outbound row so answer
+                    # capture can resolve the asked room and judge the user's
+                    # reply. Without the anchor the question can only expire.
+                    if row_id:
+                        from app.assistant.pending_questions import set_ask_anchor
+                        set_ask_anchor(_qid, asked_in_message_id=row_id)
+                    else:
+                        logger.warning(
+                            "ConversationStarterStage: no unified_log row for surfaced "
+                            "question %s — ask is UNANCHORED and can only expire", _qid[:8],
+                        )
                     logger.info("ConversationStarterStage: surfaced pending question id=%s", _qid[:8])
                     return StepResult(output={"status": "sent", "source": "pending_question", "starter_id": sid})
         except Exception as e:

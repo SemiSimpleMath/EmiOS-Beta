@@ -868,11 +868,22 @@ class ContextInjector:
                 # inside pick_question_for_nudge so the same question
                 # doesn't surface every turn (noticer can re-emit if
                 # the underlying concern persists).
+                #
+                # The ask ANCHOR is this turn's inbound message row id
+                # (threaded onto the blackboard by the room session
+                # manager). Answer capture resolves the asked ROOM from
+                # it — without an anchor the question is never judged
+                # against chat and can only expire.
                 try:
                     from app.assistant.pending_questions import (
                         pick_question_for_nudge,
                     )
-                    picked = pick_question_for_nudge(topic_tag=None)
+                    anchor = str(
+                        agent.blackboard.get_state_value("inbound_message_id", "") or ""
+                    ).strip() or None
+                    picked = pick_question_for_nudge(
+                        topic_tag=None, asked_in_message_id=anchor,
+                    )
                     if picked is None:
                         context[key] = ""
                     else:
