@@ -93,15 +93,13 @@ Global service registry: `DI` from `app/assistant/ServiceLocator/service_locator
 
 ### Dayflow Orchestrator
 
-Autonomous daily workflow engine (`app/assistant/dayflow_orchestrator/`). Event-driven via `DayflowScheduler` (debounced, mutual exclusion). Processes items through 9 sub-agents in `app/assistant/agents/dayflow_orchestrator/`.
+Autonomous daily workflow engine (`app/assistant/dayflow_orchestrator/`). Event-driven via `DayflowScheduler` (debounced, mutual exclusion, precise per-node time wakes, work-progress follow-up ticks). Full doc: `docs/architecture/05_DAYFLOW.md`.
 
-**Lifecycle**: `new → artifact / important_open / actionable → dispatched → closed`. Side states: `waiting` (blocked on time/event), `watching` (passive), `suppressed` (rejected, terminal), `needs_planning`. Canonical transitions live in `dayflow_item_writer.ALLOWED_TRANSITIONS` and are enforced by `write_dayflow_item`.
+**Everything actionable is a WORK OBJECT**: a goal plus a small DAG of nodes in the work store (`work_objects/` substrate; four tables in emi.db via `work_store.py`; validated writer with per-family transitions). Tick pipeline (state_map in `multi_agents/dayflow_orchestrator_manager/config.yaml`): intake_triage → evaluator (`strategic_planner_wo` — decides WHAT work exists, converts intake to work objects) → work_finalizer (judges each completed node's full result; SOLE producer of the `closed` terminal) → work_architect (per-goal DAG + re-plan; wake primitives `wake_at` | `wake_ref`) → work_repair (adjudicates failed nodes: escalate/retry/abandon) → state_mover (deterministic `is_ready` promotion, LLM may HOLD for timing; matches external-event wakes) → materializer → action_selector → switchboard (reads each node's GOAL: communicate-with-the-user → `create_dayflow_ticket`, everything else → `run_work_node`/work_emi_team) → dispatch loop.
 
-**Persistent state**: All items stored in `unified_log_2026` as Messages with `source='dayflow_item'`. Upsert by `Message.id` = `metadata.item_id`. Short numeric IDs (`short_id`) in metadata for LLM prompts. `state_store.py` reads; `dayflow_item_writer.py` writes.
+**Asks**: a node whose goal is to ask/tell the user is ticketed and parked `waiting + wake_kind=user_reply + wake_at=<re-ask time>`; the reply is recorded as evidence and the finalizer judges it; an unanswered ask re-promotes when its re-ask is due.
 
-**Tick flow**: `run_dayflow_ingestion()` pulls new chat/email/delegation rows into the items table → `sweep_stale_dispatches()` closes stuck dispatches → manager invocation runs the agent pipeline. Per-agent prep nodes load their own context off the items table; there is no monolithic blackboard builder.
-
-**Tickets are tools, not items**: `create_dayflow_ticket` is a tool the switchboard dispatches like any other. The calling room blocks on the user's response (`threading.Event`); when it returns, `post_room_finalize_node` closes the source item via `acted_on_item_ids`.
+**Items** (`unified_log_2026`, `source='dayflow_item'`, upsert by `Message.id` = `metadata.item_id`, `short_id` for prompts) are now intake + context: ingestion (chat/email/delegation/pods) → triage → the evaluator converts actionable intake and closes it `converted_to_work_object:<id>`. Item transitions live in `dayflow_item_writer.ALLOWED_TRANSITIONS`, enforced by `write_dayflow_item`; `state_store.py` reads. The item dispatch lane is retired (a guard in `work_node_dispatch_node` closes strays loudly).
 
 ### Rooms
 

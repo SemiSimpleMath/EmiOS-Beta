@@ -14,8 +14,9 @@ Every mutation goes through `WorkStore.apply(op, data, actor)`:
   Steps 3-5 are ONE atomic sqlite transaction: the event and the projection
   commit together or not at all — they can never diverge.
 
-Single-writer by design: the WorkOrchestrator tick is the sole caller, so we
-don't lock between the load and the write. Don't call apply() concurrently.
+Writers serialize on the store's in-process RLock — the dayflow pipeline
+nodes, the scheduler's wake threads, the worker, and the /work UI all write
+through here — and each apply() is one short atomic transaction.
 """
 from __future__ import annotations
 
@@ -34,7 +35,7 @@ from work_objects.model import (
 # --------------------------------------------------------------------------- #
 FAMILY_BY_TYPE = {
     "goal": "spine", "plan": "spine", "subtask": "spine", "tool": "spine",
-    "notify": "notify",                          # one-way owner notification (fire-and-forget)
+    "notify": "notify",                          # legacy rows only — kept so old graphs load + transition
     "evidence": "knowledge", "artifact": "knowledge",
     "question": "question", "verification": "verification",
 }
@@ -56,10 +57,10 @@ TRANSITIONS: dict[str, dict[str, set[str]]] = {
         "abandoned": set(), "superseded": set(),
     },
     "notify": {
-        # one-way owner notification: fire-and-forget, so it may close straight from
-        # proposed (the send IS the completion: proposed->done). Otherwise it follows the
-        # spine lifecycle — a notify can still be parked (wake-gated), worker-run after a
-        # user_reply, abandoned (abandon-propagation), or superseded.
+        # LEGACY family (pre-unification notify rows): those could complete straight from
+        # proposed (the send was the completion). New graphs mint plain spine nodes and the
+        # switchboard reads their goals; this family remains so existing rows keep loading
+        # and transitioning legally.
         "proposed": {"actionable", "dispatched", "waiting", "done", "failed", "abandoned"},
         "actionable": {"dispatched", "waiting", "done", "failed", "abandoned"},   # state_mover-promoted; awaiting action_selector dispatch
         "dispatched": {"waiting", "done", "incomplete", "failed", "abandoned"},

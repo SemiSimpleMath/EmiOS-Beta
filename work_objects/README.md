@@ -1,9 +1,14 @@
-# work_objects — experimental WorkObject / MissionObject substrate
+# work_objects — the WorkObject substrate (live)
 
-> **Status: experimental. NOT wired into the live system. NOT in the main repo, NOT pushed to origin.**
-> Excluded from the main EmiOS repo via `.git/info/exclude`; versioned in its own nested git repo (no remote).
-> **Dependency direction is one-way:** code here may `import app.*`; live `app/` code must NEVER import from here.
-> Run with the repo root on the path, like the test harnesses: `PYTHONPATH=. .venv/Scripts/python.exe work_objects/...`
+> **Status: LIVE — the dayflow orchestrator's execution substrate**, in the main repo since 2026-06-21.
+> The production work store lives in **emi.db** (four additive tables, opened via
+> `app/assistant/dayflow_orchestrator/work_store.py`); the `work.db`/`business_run.db` files here serve
+> the scenario harnesses only. Since the cutover the dependency is two-way by design: code here imports
+> `app.*`, and the dayflow orchestrator + the worker managers import `work_objects.*`.
+> The **data model below (§node taxonomy, principles) is authoritative.** For execution, the worker
+> inner loop shipped per `DESIGN.md` (as `work_emi_team_manager`); the outer loop is the dayflow
+> pipeline — evaluate → finalize → architect → repair → promote → dispatch — documented in
+> `docs/architecture/05_DAYFLOW.md`.
 
 ## Why this exists
 A new execution substrate for **long-running, open-ended work** — "improve my life", "run a business", multi-day projects — distinct from the Message-native dayflow/manager stack. Work is a durable, typed **graph that agents mutate**, not flat text/Messages they pass around. The graph is the source of truth; the transcript is just an event log.

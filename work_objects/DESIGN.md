@@ -1,9 +1,11 @@
 # WorkObject Execution Architecture — Worker Versions of the Live Stack
 
-**Status:** canonical design (2026-06-18). Supersedes the *execution-layer* design in
-`README.md` (the from-scratch `WorkOrchestrator` / thin `WorkManager` / runtime-registered
-agent configs). The **WorkObject data model + taxonomy in `README.md` is unchanged and still
-authoritative** — this doc only changes *how work is executed over it*.
+**Status:** design of 2026-06-18; partially shipped. The **inner loop (§4–5b) is LIVE** as
+`work_emi_team_manager` (render node + `WorkPlanner` reconcile hook). The **outer loop (§6–6b,
+the `WorkOrchestrator`) was superseded** by the dayflow orchestrator pipeline — evaluator →
+finalizer → architect → repair → state_mover promotion → materializer/switchboard dispatch —
+see `docs/architecture/05_DAYFLOW.md`. The **WorkObject data model + taxonomy in `README.md`
+is unchanged and still authoritative** — this doc only changes *how work is executed over it*.
 
 ---
 

@@ -1,237 +1,176 @@
 # Dayflow Orchestrator
 
-The Dayflow Orchestrator is an autonomous daily workflow engine that continuously manages the user's tasks, notifications, and proactive actions. It operates as a background "day planner AI."
+The Dayflow Orchestrator is the autonomous daily workflow engine — a background "day planner AI" that
+continuously turns intake (email, chat, calendar-driven routine, delegations) into executed work,
+reminders, and questions for the user.
 
 ## Core Philosophy
 
-Every item has explicit lifecycle state. Nothing silently disappears; everything has a reason for its current state. User feedback is always respected. Actions are tracked and auditable.
+**Everything actionable is a WORK OBJECT** — a goal plus a small DAG of typed nodes in a durable,
+event-sourced graph store. Even a one-shot action is a one-node work object. Items (the older Message
+substrate) are intake and context only; the evaluator is the sole path from intake to action.
 
-Tickets, manager handoffs, tool calls — all forms of dispatch — go through the same path. There is no special two-phase ticket reconciliation. The room invocation owns the in-flight window; when it returns, the source item is closed.
+Every graph mutation goes through a validated writer (allowed transitions per node family, authority
+ceilings, atomic event + projection). Nothing silently disappears: results are recorded as evidence,
+failures surface loudly for adjudication, and user feedback is authoritative at every layer.
+
+Sharp role separation, one bounded LLM judgment per role, deterministic mechanics everywhere else:
+
+| Role | Decides | Deterministic guard |
+|------|---------|---------------------|
+| evaluator (`strategic_planner_wo`) | WHAT work exists (create/change/re-plan/complete/abandon) | `work_persist` applies; intake consumed with provenance |
+| work_finalizer | whether a completed node's RESULT satisfies its step | sole producer of `closed`; `is_satisfied` keys on `closed` |
+| work_architect | the STRUCTURE of one goal (DAG + wake gates) | `work_architect_apply` projects the delta |
+| work_repair | disposition of a FAILED node (escalate/retry/abandon) | `work_repair_apply`, surgical re-open |
+| state_mover | HOLD-only social timing (quiet hours, meetings, away) | promotion itself is deterministic `is_ready` (time + deps) |
+| switchboard | WHERE one ready node goes, by READING its goal | two routes only: ticket the user, or run the worker |
+| worker (`work_emi_team_manager`) | HOW a node gets done | render-loop manager; results land as evidence children |
 
 ## Architecture
 
 ```
-DayflowScheduler (event-driven, debounced)
+DayflowScheduler (event-driven, debounced; precise per-node time wakes; work-progress follow-ups)
   -> dayflow_orchestrator_cadence_tick()
-    -> run_dayflow_ingestion()         (chat / email / delegation / pods → items table)
-    -> sweep_stale_dispatches()        ┐
-    -> sweep_orphaned_dispatched_tasks ┤ dispatch_sweeper.py (three sweeps)
-    -> sweep_zombie_waiting_items()    ┘
-    -> Invoke dayflow_orchestrator_manager
-      -> Deterministic pipeline (state_map order):
+    -> run_dayflow_ingestion()          (chat / email / delegation / pods -> items table)
+    -> three sweeps                     (dispatch_sweeper.py: stale / orphaned-dispatched / zombie-waiting)
+    -> Invoke dayflow_orchestrator_manager (state_map order):
          tick_router -> intake_triage -> triage_persist -> context_enricher
-           -> strategic_planner -> state_mover -> relevance_cleaner_gate
-           -> view_materializer -> action_selector -> switchboard
-           -> dayflow_switchboard_arguments -> dayflow_tool_caller
-           -> action_result_normalizer -> post_room_finalize -> final_answer
-      -> post_room_finalize_node persists state mutations + closes acted_on items
+           -> strategic_planner_wo (EVALUATOR) -> strategic_planner_wo_persist
+           -> work_finalizer_node -> work_architect_node -> work_repair_node
+           -> state_mover -> state_transition_guard -> state_mover_persist (node promotion + event wakes)
+           -> work_node_materializer -> action_selector -> switchboard -> work_node_dispatch
+                 ^------------------- loop: one node per cycle -------------------/
+           -> post_room_finalize -> final_answer
 ```
 
-The pipeline is fixed by the manager's `state_map` (`multi_agents/dayflow_orchestrator_manager/config.yaml`), not by free agent handoffs. `relevance_cleaner` runs on a 30-minute gate: `relevance_cleaner_gate_node` either routes into `relevance_cleaner_prep_node -> relevance_cleaner -> relevance_cleaner_persist_node` or skips straight to `view_materializer_node`. A `fast_tick` wake (`tick_router -> fast_tick_promoter -> view_materializer`) bypasses triage/planner/state_mover for a single timer-driven item.
+The pipeline is fixed by the manager's `state_map`
+(`multi_agents/dayflow_orchestrator_manager/config.yaml`), not by free agent handoffs. The
+materializer/selector/switchboard/dispatch segment LOOPS — one ready node per cycle — until nothing is
+ready, then short-circuits to finalize.
+
+## The work object lifecycle
+
+**Creation.** The evaluator judges the portfolio + new intake each tick and emits only WHAT changed:
+new/changed objectives (with a prose `rationale` brief for the architect and `based_on` provenance),
+`replan_work_ids`, `complete_work_ids`, `abandon_work_ids`. Consumed intake items are closed
+(`converted_to_work_object:<id>`) and their summaries folded into the goal content.
+
+**Decomposition.** The architect turns one goal into 1-5 subtask nodes under the goal node, with
+`depends_on` edges and at most one wake primitive per node:
+- `wake_at` — a deterministic time (absolute ISO datetime; elapsed time is always this),
+- `wake_ref` — a prose external-event condition the state_mover matches against incoming intake.
+A node whose goal is to reach the user is written plainly ("Tell/Ask the user X") — the switchboard
+decides delivery, the architect never picks channels. On re-plan the architect emits a DELTA: new nodes
+plus `abandon_node_ids` for moot branches (pruned recursively, finished nodes kept as a record).
+
+**Readiness and promotion.** `is_ready` (substrate, deterministic) = status in proposed/waiting +
+`wake_at` passed + all `depends_on` satisfied. The state_mover persist node promotes every ready node to
+`actionable`; the state_mover LLM may HOLD a few (`held_work_nodes` with `reactivate_at`) for quiet
+hours / meetings / user-away — the worst LLM failure is "acted when it could have waited", never a stuck
+node. External-event (`wake_ref`) nodes are never promoted; the state_mover wakes them via `node_wakes`
+when the awaited event appears in intake.
+
+**Dispatch.** The materializer lists each actionable node as `work_id::node_id`; the action_selector
+picks ONE; the switchboard reads the node's goal and routes it:
+- **communicate with the user** (notify/remind/tell/ask — a UI ping) -> `create_dayflow_ticket`
+- **everything else** (research, device/calendar/todo changes, composing and SENDING email/text to a
+  recipient) -> `run_work_node` — the worker (`work_emi_team_manager`) picks its own sub-managers/tools.
+`node_dispatch.dispatch_node` is the single dispatch core, shared by the tick loop and the scheduler's
+off-tick time wakes, so a node routes identically wherever it fires.
+
+**Asks (user_reply).** A ticketed node parks `waiting + wake_kind=user_reply + wake_at=<re-ask time>`
+(currently +1h). The reply is matched back by `trigger_context.work_node`, recorded as an EVIDENCE child
+(the node's `content` is its immutable directive), and the node completes -> the finalizer judges the
+reply like any result. An unanswered ask re-promotes when its re-ask time passes and is re-ticketed; the
+state_mover can hold re-asks during quiet hours (a held ask keeps `wake_kind=user_reply` so a reply
+still matches). A repair-escalated ask (`proposed + user_reply`, no wake_at) promotes for its first
+surface the same way. There is no one-way ticket — every ticket awaits a response.
+
+**Completion.** A worker-`done` node is only a RESULT. The finalizer (runs BEFORE the architect, so an
+AMEND re-plans same-tick) reads the node's full result against the whole work object and emits one
+verdict: PROCEED (close it — only `closed` counts toward the goal), AMEND (close + re-plan with a
+revised intent), or RESOLVE (the goal itself is settled: complete or abandon the work object). When all
+of the goal's children are closed, the store's rollup completes the work object.
+
+**Failure.** A failed node blocks its goal until work_repair adjudicates: ESCALATE (re-issue as an ask —
+the user does/provides what the assistant cannot), RETRY (transient, or the needed info arrived), or
+ABANDON_GOAL (declines are authoritative and override the prefer-escalate bias). Dispatch errors mark
+the node failed loudly rather than silently retrying.
 
 ## DayflowScheduler
 
-`app/assistant/dayflow_orchestrator/dayflow_scheduler.py`
+`dayflow_scheduler.py` — event-driven with two-tier throttling:
+- `DEBOUNCE_SECONDS=60`, `MIN_GAP_SECONDS=120` (mutual-exclusion floor), `POKE_MIN_INTERVAL_SECONDS=600`
+  (delta pokes: chat/email/AFK/ticket), `MAX_CEILING_SECONDS=1800`, `STARTUP_TICK_DELAY_SECONDS=45`.
+- **Precise work-node wakes**: one APScheduler one-shot per time-gated node (`dayflow_work_wake::` jobs,
+  re-armed idempotently after every tick, restart-safe from the durable store). Firing is `is_ready`-gated
+  and routes through the SAME switchboard as tick dispatch (`route_and_dispatch`).
+- **Work-progress follow-up**: when a node reaches a result (or a reply is recorded),
+  `dayflow_work_progress` schedules a prompt NON-poke tick (~MIN_GAP), so a sequential chain advances in
+  minutes — finalize -> promote dependents -> dispatch — instead of one step per ceiling tick.
+- **Item timers** still wake the scheduler for `waiting`/`watching` items (fast-tick promotes one item
+  deterministically); ancient overdue items (>24h) are ignored as broken rather than hot-looping.
+- **Failure escalation**: 3 consecutive tick failures surface one owner-visible ticket via the ticket
+  manager's direct write (which does not run this pipeline).
 
-Event-driven scheduling with intelligent debouncing. Two-tier wake throttle (constants atop the module):
-- **Debouncing** (`DEBOUNCE_SECONDS=60`): multiple events within the window collapse into one run.
-- **Item-tick floor** (`MIN_GAP_SECONDS=120`): mutual-exclusion floor for scheduled-item ticks; a job due at time T still fires at T.
-- **Poke throttle** (`POKE_MIN_INTERVAL_SECONDS=600`): delta/poke wakes (chat/email/AFK/ticket) are held to ≥10 min since the last run, so dayflow doesn't react instantly to every event. Reaction = `max(debounce, floor - age)`, so the 10-min floor only bites when something *just* ran.
-- **Ceiling tick** (`MAX_CEILING_SECONDS=1800`): a tick runs at least every 30 min when no item timers are pending.
-- **Startup delay** (`STARTUP_TICK_DELAY_SECONDS=45`): the first tick after boot is delayed ~45s so it doesn't pile onto the post-restart routine/ingest fan-out and the user's first interaction.
-- **Event subscriptions**: `repo_update` (only `email`/`calendar`/`todo_task`/`scheduler_events`), `afk_state_changed` (on return to `active`), `dayflow_ticket_responded` — each calls `poke()`.
-- **Item timers**: `_schedule_next_from_items()` scans `waiting`/`watching` items for the earliest `reactivate_at_utc`; an item overdue by more than `ANCIENT_ITEM_OVERDUE_SECONDS` (24h) is ignored as broken-and-stuck rather than driving a 2-min reschedule loop. A timer wake carries `triggered_item_id` and becomes a `fast_tick`.
-- **Mutual exclusion**: only one tick runs at a time; a poke arriving mid-run is queued and re-scheduled (throttled) at tick end.
-- **Sooner-run guard**: `_schedule_tick` never pushes an already-scheduled, sooner run later — a throttled poke can't clobber a due item tick (the item tick re-ingests, so it absorbs the pending delta).
-- **Repeated-failure escalation**: APScheduler swallows the re-raise, so `record_tick` tracks consecutive failures; at the 3rd in a row (`_FAILURE_NOTIFY_THRESHOLD`) `_maybe_notify_repeated_failure` raises one owner-visible `dayflow_notify` ticket via the ticket manager's direct write (which does NOT run the dayflow pipeline, so it works even when that pipeline is the thing failing).
+## Persistent state — two substrates
 
-## DayflowTick
+**Work objects** (`work_objects/` substrate): four tables in emi.db (`work_objects`, `nodes`, `edges`,
+`events`), opened via `dayflow_orchestrator/work_store.py`. The append-only event log is the source of
+truth; nodes/edges are the rebuildable projection; every mutation is one short atomic transaction through
+`WorkStore.apply` (allowed transitions per node family, authority ceilings, structural validation,
+derived rollup). `DAYFLOW_WORK_DB` overrides the path for tests.
 
-`app/assistant/dayflow_orchestrator/dayflow_tick.py`
+**Items** (`unified_log_2026`, `source='dayflow_item'`): intake + context. Upsert key `Message.id` =
+`metadata.item_id`; numeric `short_id` for prompts; `state_store.py` reads, `dayflow_item_writer.py`
+writes (`ALLOWED_TRANSITIONS` enforced). Freshness windows age untouched items out of the agents' view
+(active >24h, closed >2h). Ingestion sources: cross-room chat (context, `closed`), important email
+(`artifact`), master-room delegations (`user_request`), allowlisted pods. Calendar events are not
+ingested — the evaluator sees them via `resource_expected_calendar` and the routine overlay.
 
-The heartbeat function `dayflow_orchestrator_cadence_tick()`:
+**Legacy item lane (retirement, step C).** The item dispatch path (view_materializer -> action_selector
+with items) survives only on fast-tick/plan flows and is instrumented: anything reaching the selector
+logs `LEGACY ITEM LANE fired`, and an item reaching the work dispatch is closed loudly
+(`legacy_item_lane_dispatch_retired`) — the evaluator should have converted it. The relevance_cleaner
+was retired at the cutover (its files remain, unwired). Full lane deletion is pending a dormancy
+observation window.
 
-1. **Master-room block check** — `orchestrator_status.py` persists a `blocked_until_utc` timestamp when the user chats in `master_room` (`block_dayflow_orchestrator_for_master_chat`, `MASTER_ROOM_BLOCK_SECONDS=180`). If the tick fires inside that window it records `last_skip_reason="blocked_by_master_room_timer"` and returns, so the user isn't talked over.
-2. **Ingest** via `run_dayflow_ingestion()` (`ingestion.py`) — pulls new rows from each source and persists them as dayflow items. Four sources:
-   - **Chat**: cross-room chat from `chat_ingestion_entitled_rooms` (ROOM.md `access:` block; currently `master_room`), watermarked by `chat_ingested_up_to_utc`.
-   - **Email**: today's important emails from the event repository.
-   - **Delegation**: `dayflow_request`-tagged messages from `master_room`.
-   - **Pods** (`_ingest_pods`): pods from `pod_store` whose `(kind, source_kind)` matches the `ingestion_pod_kinds` allowlist (ROOM.md; currently Ring doorbell images), watermarked by `pods_ingested_up_to_utc`. Absent/empty allowlist = pod ingestion off.
-   - All deduplicated by `item_id` against existing rows; `assign_short_ids` assigns LLM-facing numeric ids.
-3. **Three sweeps** (`dispatch_sweeper.py`):
-   - `sweep_stale_dispatches()` — closes in-flight `action_dispatch` rows past timeout (soft: no active manager invocation + >10 min; hard: >2h regardless), and revives the acted-on source item to `actionable` only if it is still `dispatched`.
-   - `sweep_orphaned_dispatched_tasks()` — closes tasks stuck in `dispatched` >2h with no live dispatch row pointing at them (→ `closed`, not `actionable`; the planner re-mints from current context if the need is still alive).
-   - `sweep_zombie_waiting_items()` — closes `waiting` items whose `reactivate_at_utc` is >36h past, i.e. aged out of the cleaner's 24h view (the cleaner gets first crack inside that window).
-4. **Build minimal extras** via `build_dayflow_blackboard_extras()` — emits only `day_of_week`. Per-agent prep nodes load their own context (items, dispatches, etc.) off the items table.
-5. **Invoke `dayflow_orchestrator_manager`** with a trigger Message carrying `wake_reason`, `fast_tick`, and `triggered_item_id`. The manager runs the pipeline (see Architecture above).
+## Tickets
 
-Per-agent prep nodes (e.g., `strategic_planner_prep_node`, `action_selector_prep_node`) call `get_dayflow_items()` and `dispatch_sweeper.list_active_dispatches()` directly at the point of use.
-
-## State Machine
-
-Canonical transitions live in `dayflow_item_writer.ALLOWED_TRANSITIONS`. `write_dayflow_item` validates every state change against this map; disallowed transitions raise `ValueError`. Idempotent no-op transitions (`X → X`, e.g. state_mover refreshing `reactivate_at` on a `waiting` item) are always allowed.
-
-```
-new ----------> artifact / needs_planning / important_open / actionable / suppressed
-  +-> artifact ---------> needs_planning / important_open / actionable / watching / closed / suppressed / pending_directive
-  +-> needs_planning ---> important_open / actionable / waiting / closed / suppressed
-  +-> important_open ---> actionable / waiting / watching / dispatched / closed / suppressed / pending_directive
-  +-> actionable -------> dispatched / waiting / watching / closed / suppressed / pending_directive
-  +-> dispatched -------> closed / waiting / actionable / pending_directive
-  +-> waiting ----------> actionable / dispatched / closed / suppressed
-  +-> watching ---------> actionable / important_open / closed / suppressed
-  +-> closed -----------> suppressed / actionable / pending_directive   (reopen / directive-revive)
-  +-> suppressed -------> pending_directive   (narrow exception: a user directive references this artifact)
-  +-> pending_directive -> actionable / dispatched / closed / suppressed
-  +-> active -----------> closed / suppressed   (plan-synopsis lifecycle)
-```
-
-- **`pending_directive`** — the user replied to a ticket with a follow-up directive; the planner owes a decision (dispatch / ignore / escalate). Reachable from nearly every state, including a narrow re-entry from `suppressed` when a directive references a previously-rejected artifact, so `suppressed` is no longer strictly terminal.
-- **`active`** — plan synopses (`source_type=plan_synopsis`, `build_plan_synopsis_dicts`), context-only guidance the planner authors; closes/suppresses only.
-
-The dispatch-to-close path is owned by the room invocation. When the switchboard dispatches a tool, `dayflow_switchboard_arguments_node` stamps `state="dispatched"` on the acted-on item(s). When the tool returns, `post_room_finalize_node` reads `acted_on_item_ids` from the blackboard and writes `state="closed"` with `reason="action_completed"`.
-
-### Canonical State Constants (`dayflow_item_writer.py`)
-
-- `RESOLVED_STATES = {"closed", "suppressed"}` — item is done, action_selector ignores.
-- `DONE_STATES = {"closed"}` — completed.
-- `TERMINAL_STATES = {"suppressed"}` — permanently invisible to default queries.
-
-`state_store.py` re-exports these for callers; do not redefine them.
-
-## Sub-Agents
-
-The directory `app/assistant/agents/dayflow_orchestrator/` holds **10 agent dirs**, but the manager (`multi_agents/dayflow_orchestrator_manager/config.yaml` `agents:`) only wires **7**: `intake_triage`, `strategic_planner`, `state_mover`, `relevance_cleaner`, `action_selector`, `switchboard`, `plan_mode`.
-
-### Core Pipeline (wired in `state_map`)
-
-| Agent | Purpose | Output |
-|-------|---------|--------|
-| `intake_triage` | Accept or reject new artifacts | ADMIT / REJECT_DUPLICATE / REJECT_NO_ACTION / REJECT_POLICY |
-| `strategic_planner` | Create / maintain plans for goals | planned_tasks, plan_synopses |
-| `state_mover` | Lifecycle transitions for important_open / waiting items | StateMutation records |
-| `relevance_cleaner` | Close stale / completed items (30-minute gate) | close / suppress decisions |
-| `action_selector` | Pick what to execute right now | acted_on_item_ids + action_type |
-| `switchboard` | Delegate to manager / tool, or call `create_dayflow_ticket` itself | delegate_to, task, task_information |
-
-### Supporting
-
-| Agent | Purpose |
-|-------|---------|
-| `plan_mode` | Conversational planning agent (master-room delegation; `planning_mode` flow) |
-| `result_formatter` | Compresses manager-result text after dispatch. **Not** a pipeline agent — invoked directly via `DI.agent_factory` in `post_room_finalize_node` and `master_room_tool_caller`. |
-| `room_summary` | Compress orchestrator room conversation history (room chat-compaction) |
-
-### Orphaned agent dirs
-
-- `ticket_builder/` — superseded. Ticketing now flows `switchboard → create_dayflow_ticket` **tool** (`app/assistant/lib/tools/create_dayflow_ticket/`), dispatched like any other tool; there is no separate ticket-builder agent in the pipeline. The dir is dead code.
-
-### Triage
-
-`intake_triage` is a simple accept / reject gate. Each eligible artifact gets exactly one decision:
-- `ADMIT` → state `artifact`, persisted by `triage_persist_node` for the planner to consider.
-- `REJECT_*` → state `suppressed` with `reason="triage_<flavor>"`, also persisted by `triage_persist_node`. Suppressed is terminal so the rejected item exits the eligible bucket cleanly.
-
-### State Mover
-
-Processes items in `important_open` and `waiting` states only. Moves items to `actionable`, `waiting`, or `watching` based on timing and conditions. `state_transition_guard_node` validates each mutation against `ALLOWED_TRANSITIONS` and forbids targets in `_STATE_MOVER_FORBIDDEN_TARGETS = {closed}` and sources in `_STATE_MOVER_FORBIDDEN_SOURCES = {dispatched, closed}`.
-
-### Action Selector
-
-- Only acts on items in `actionable` state.
-- At most one action per pass.
-- Anti-duplication: checks active dispatches and recently completed.
-- Respects user feedback (declined tickets stay declined via the suppressed state).
-
-## Action Log
-
-`state_store.write_action_log()` writes simple message entries to the DB:
-- `event_type: "dispatch"` — task was dispatched to a manager / tool.
-- `event_type: "result"` — manager / tool returned a result.
-
-Each entry has `task_id` (short_id), `plan_id`, `summary`, `detail`. Entries are idempotent (deterministic id from `dispatch_id|event_type`).
-
-The strategic planner and relevance cleaner see these in the "ACTION LOG (today)" section of their prompts.
-
-## Persistent State
-
-`app/assistant/dayflow_orchestrator/state_store.py` (read path) and `app/assistant/dayflow_orchestrator/dayflow_item_writer.py` (write path).
-
-All dayflow items are `Message` objects stored in `unified_log_2026` with `source='dayflow_item'`:
-- **Upsert key**: `Message.id` = `metadata.item_id`.
-- **State field**: `metadata.state`.
-- **Short IDs**: Numeric `short_id` persisted in metadata for LLM prompts.
-- **Read accessors**: `get_dayflow_items()` (the agent-facing view), `_load_latest_dayflow_item_map()` / `load_existing_dayflow_items()` (raw, optionally terminal-inclusive).
-- **Write paths**: `write_dayflow_item()` (singular, merges metadata, validates transition) and `write_dayflow_items_batch()` (bulk upsert).
-- **Metadata access**: `get_meta(item)` for safe dict extraction.
-
-**Freshness windows** (`get_dayflow_items`): suppressed items are excluded (terminal); **active items older than 24h** (`_MAX_AGE_HOURS`) and **closed items older than 2h** (`_CLOSED_MAX_AGE_HOURS`) are filtered out, keyed on `last_reviewed_at`. This is the "plans are same-day" behavior — an untouched item ages out of the agents' view after a day even though it remains in the DB (`load_existing_dayflow_items` still sees it). Action logs are written `closed` so they self-prune after 2h.
-
-## Input Sources
-
-`app/assistant/dayflow_orchestrator/ingestion.py` orchestrates ingestion. `input_message_builder.py` provides the per-source builders.
-
-- **Chat**: `source_type='cross_room_chat'`, ingested as `state='closed'` (history-only).
-- **Email**: `source_type='email'`, from event repository (importance >= 5), ingested as `state='artifact'`.
-- **Delegation**: `source_type='user_request'`, from `master_room` chat_gate via `dayflow_request` tagged messages.
-- **Pods**: built by `_build_pod_message` for pods matching the ROOM.md `ingestion_pod_kinds` allowlist (currently Ring doorbell images). Watermarked; first run caps at start-of-day so history isn't replayed.
-
-Calendar events are NOT ingested as dayflow items. The planner sees them via `resource_expected_calendar` and creates plans from them directly.
-
-Tickets are NOT ingested as dayflow items either. They are tool-call returns, owned by the room that dispatched them; their state lives in the ticket manager and their effect on dayflow items happens via the dispatching room's `acted_on_item_ids` at finalize.
-
-## Chat Ingestion
-
-`app/assistant/dayflow_orchestrator/chat_ingestion.py`
-
-Cross-room chat ingested as context-only items:
-- Entitled rooms defined in `access.json` (currently `["master_room"]`).
-- Filters out noise (ticket, notification, system content types).
-- Filters out non-normal room modes (task_creation, doc_creation, etc.).
-- State always = `closed` (`reason="chat_ingested_for_history"`).
-
-## Dispatch Provenance
-
-`DayflowSwitchboardArgumentsNode` persists an `action_dispatch:UUID` item before each tool execution:
-- Records: action type, arguments, acted-on item ids.
-- Stamps `state="dispatched"` and `dispatched_at` on every acted-on item via `write_dayflow_item`.
-- Injects `trigger_context.acted_on_item_ids` into the outgoing tool arguments so the tool can backlink.
-
-After the tool returns, `post_room_finalize_node`:
-- Validates `acted_on_item_ids` matches `active_dispatch_records`.
-- Writes `state="closed"` + `reason="action_completed"` for each acted-on item.
-- Persists `action_log` entries (dispatch + result) for the planner's "ACTION LOG (today)" section.
+`create_dayflow_ticket` is a tool; ticket phrasing goes through the `ticket_builder` agent
+(`CreateDayflowTicketTool._format_brief`) so the user sees a warm, first-person message rather than raw
+node text. Ask tickets carry `trigger_context.work_node` for reply matching. Ticket state lives in the
+ticket manager, not in dayflow items.
 
 ## Master Room Integration
 
-- When the user chats in master_room, dayflow is blocked for 180 seconds (`MASTER_ROOM_BLOCK_SECONDS`).
-- Master room chat_gate can delegate to dayflow (`dayflow_delegate_tf=true`).
-- Delegations write a tagged request (`source='dayflow_request'`) that `run_dayflow_ingestion()` picks up on the next tick.
-- Dayflow ingests master_room chat as context items.
+- User chat in `master_room` blocks dayflow for 180s (`MASTER_ROOM_BLOCK_SECONDS`) so it doesn't talk over them.
+- The master-room chat gate can delegate to dayflow (`dayflow_request` tagged messages, ingested next tick).
+- Ticket responses poke the scheduler (`dayflow_ticket_responded`).
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
+| `dayflow_orchestrator/dayflow_scheduler.py` | Event-driven scheduling, precise node wakes, follow-up ticks |
 | `dayflow_orchestrator/dayflow_tick.py` | Cadence tick entry point |
-| `dayflow_orchestrator/dayflow_scheduler.py` | Event-driven scheduling |
-| `dayflow_orchestrator/ingestion.py` | Per-source ingestion driver |
-| `dayflow_orchestrator/state_store.py` | Read accessors, action log writer |
-| `dayflow_orchestrator/dayflow_item_writer.py` | Single write path, ALLOWED_TRANSITIONS, RESOLVED_STATES |
-| `dayflow_orchestrator/input_message_builder.py` | Per-source Message builders (email, delegation, pod) |
-| `dayflow_orchestrator/orchestrator_status.py` | Status resource CRUD, master-room block timer, ingest watermarks |
-| `dayflow_orchestrator/blackboard_builder.py` | Emits day_of_week (per-agent prep nodes own the rest) |
-| `dayflow_orchestrator/dispatch_sweeper.py` | Three tick sweeps (stale / orphaned-dispatched / zombie-waiting) + active-dispatch listing |
-| `dayflow_orchestrator/chat_ingestion.py` | Cross-room chat ingestion |
-| `dayflow_orchestrator/contracts.py` | Pydantic validation, get_meta(), short_id utilities |
-| `control_nodes/tick_router_node.py` | Top-of-pipeline router: `fast_tick` → promoter, else full pipeline |
-| `control_nodes/triage_spawn_guard_node.py` | Validates triage decisions, mutates in-memory |
-| `control_nodes/triage_persist_node.py` | Persists ADMIT and REJECT decisions |
-| `control_nodes/state_transition_guard_node.py` | Validates and persists state_mover mutations |
-| `control_nodes/dayflow_switchboard_arguments_node.py` | Pre-dispatch provenance, stamps dispatched state |
-| `control_nodes/post_room_finalize_node.py` | Post-dispatch finalization, closes acted_on items, runs result_formatter |
-| `control_nodes/relevance_cleaner_gate_node.py` | 30-minute gate for cleaner runs |
-| `control_nodes/view_materializer_node.py` | Build agent-facing item views (filters items already covered by an in-flight dispatch) |
-| `lib/tools/create_dayflow_ticket/` | The ticket tool the switchboard dispatches (replaces the old ticket_builder agent) |
-| `rooms/dayflow_orchestrator/ROOM.md` | Room config (authority 95, `ingestion_pod_kinds`, `chat_ingestion_entitled_rooms`) |
-| `agents/dayflow_orchestrator/` | 10 agent dirs; 7 wired in the pipeline (ticket_builder orphaned; result_formatter/room_summary out-of-pipeline) |
+| `dayflow_orchestrator/ingestion.py` + `input_message_builder.py` | Per-source intake -> items |
+| `dayflow_orchestrator/work_store.py` | The dayflow WorkObject store (emi.db) |
+| `dayflow_orchestrator/work_persist.py` | Applies the evaluator's output (mint/change/complete/abandon) |
+| `dayflow_orchestrator/work_architect_apply.py` | Projects an architect DAG/delta onto the graph |
+| `dayflow_orchestrator/work_repair_apply.py` | Applies a repair disposition |
+| `dayflow_orchestrator/work_portfolio.py` | Strategic projection (failures loud, outcomes as node -> result) |
+| `dayflow_orchestrator/node_dispatch.py` | The single dispatch core (ticket vs worker) + progress signal |
+| `dayflow_orchestrator/state_store.py` / `dayflow_item_writer.py` | Item substrate read / validated write |
+| `dayflow_orchestrator/dispatch_sweeper.py` | Tick sweeps (stale / orphaned / zombie) |
+| `control_nodes/strategic_planner_wo_prep/persist_node.py` | Evaluator context build / output apply |
+| `control_nodes/work_finalizer_node.py` | done -> closed reconciliation (sole closer) |
+| `control_nodes/work_architect_node.py` | Decompose new goals, re-plan flagged ones |
+| `control_nodes/work_repair_node.py` | Failed-node adjudication |
+| `control_nodes/state_mover_prep/persist_node.py` | Waits + promotion candidates / promotion + node wakes |
+| `control_nodes/work_node_materializer_node.py` | Ready-node listing + reply pre-step |
+| `control_nodes/work_node_dispatch_node.py` | Carries out the switchboard's routing (+ legacy-item guard) |
+| `work_objects/model.py` / `store.py` | Substrate: graph model, validated writer, transitions |
+| `work_objects/work_runtime.py` | `work_on`/`run_node` — drives one node through the worker manager |
+| `multi_agents/work_emi_team_manager/config.yaml` | The worker: render-loop manager (DESIGN.md §4) |
+| `agents/dayflow_orchestrator/` | The pipeline agents (evaluator, architect, switchboard, finalizer, repair, ...) |

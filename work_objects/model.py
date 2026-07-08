@@ -50,7 +50,8 @@ from pydantic import BaseModel, ConfigDict, Field
 # --------------------------------------------------------------------------- #
 NODE_TYPES_KNOWN = {
     "goal", "plan", "subtask", "tool",          # work spine
-    "notify",                                    # one-way owner notification (no worker; work_execution fires it)
+    "notify",                                    # legacy rows only — new graphs mint plain nodes and the
+                                                 # switchboard reads each node's GOAL to route it
     "evidence", "artifact",                      # knowledge
     "question",                                  # open loop
     "verification",                              # check
