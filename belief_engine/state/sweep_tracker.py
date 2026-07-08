@@ -1,22 +1,24 @@
-"""Tracks when belief canonicalization last did a full cross-belief sweep.
+"""Tracks when belief canonicalization last did a full cross-belief sweep — PER DOMAIN.
 
-The canonicalizer has two modes (decided per run by `decide_mode`):
+The canonicalizer has two modes (decided per domain by `decide_mode`):
 
   - "new_only" (default 6 of 7 nights) — only canonicalize beliefs created
-    since the last full sweep. Cheap: usually ~5 new beliefs total across
-    all domains.
+    since the domain's last full sweep. Cheap: usually ~5 new beliefs total
+    across all domains.
 
   - "full" (1 of 7 nights, or first run) — full cross-belief sweep of
-    every active belief in each domain. Catches drift / reevaluation
+    every active belief in the domain. Catches drift / reevaluation
     rewrites / cross-belief duplicates that the new-only mode skipped.
 
-State is a single timestamp in a JSON file. Atomic via temp-file rename
-so concurrent reads don't see a half-written file. File is gitignored
-(`data/` is in .gitignore).
+State is a JSON file: a `domains` map of per-domain timestamps, plus the
+legacy global `last_full_sweep_at`, which domains without their own stamp
+read. Per-domain stamping (each domain stamps as ITS full sweep completes,
+inside CanonicalizeBeliefSetStep) is what makes an interrupted multi-domain
+run resumable: completed domains stay completed. Atomic via temp-file
+rename. File is gitignored (`data/`).
 
-Bootstrap behavior: first run sees `last_full_sweep_at` missing →
-forces "full" mode that night. After that, the cadence stabilizes at
-weekly.
+Bootstrap behavior: a domain with no stamp anywhere → "full" that night.
+After that, the cadence stabilizes at weekly per domain.
 """
 import json
 import os
@@ -42,47 +44,40 @@ def _state_path() -> Path:
     return get_repo_root() / "data" / "belief_engine_state.json"
 
 
-def read_last_full_sweep_at() -> Optional[datetime]:
-    """Returns the UTC timestamp of the last completed full sweep, or None
-    if no sweep has been recorded yet (first-run / file-missing case).
-    """
+def _parse_iso(raw) -> Optional[datetime]:
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    s = raw.strip()
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(s)
+    except Exception:
+        return None
+
+
+def _read_state() -> dict:
     p = _state_path()
     if not p.exists():
-        return None
+        return {}
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
-        raw = data.get("last_full_sweep_at")
-        if not isinstance(raw, str) or not raw.strip():
-            return None
-        # Parse ISO 8601. Handle trailing Z and offset shapes.
-        s = raw.strip()
-        if s.endswith("Z"):
-            s = s[:-1] + "+00:00"
-        return datetime.fromisoformat(s)
+        return data if isinstance(data, dict) else {}
     except Exception as e:
         logger.warning("[sweep_tracker] failed to read %s: %s", p, e)
-        return None
+        return {}
 
 
-def mark_full_sweep_completed() -> None:
-    """Record that a full sweep just completed (now, UTC).
-
-    Atomic write — temp file + rename — so a crash mid-write doesn't
-    corrupt the state file.
-    """
+def _write_state(payload: dict) -> None:
+    """Atomic write — temp file + rename — so a crash mid-write doesn't corrupt the file."""
     p = _state_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-    payload = {"last_full_sweep_at": now_iso}
-
     fd, tmp_path = tempfile.mkstemp(dir=str(p.parent), prefix=".belief_state_", suffix=".json")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
         os.replace(tmp_path, p)
-        logger.info("[sweep_tracker] marked full sweep completed at %s", now_iso)
     except Exception:
-        # Clean up the temp file if rename failed
         try:
             os.unlink(tmp_path)
         except Exception:
@@ -90,29 +85,56 @@ def mark_full_sweep_completed() -> None:
         raise
 
 
-def decide_mode(*, now_utc: Optional[datetime] = None, interval_days: int = FULL_SWEEP_INTERVAL_DAYS) -> Mode:
-    """Decide whether tonight is a full-sweep night or new-only night.
+def read_last_full_sweep_at(domain: Optional[str] = None) -> Optional[datetime]:
+    """The UTC timestamp of the domain's last completed full sweep. Falls back to the
+    legacy global stamp for a domain without its own entry; None when nothing is
+    recorded anywhere (first-run / file-missing case). domain=None reads the legacy
+    global stamp only."""
+    data = _read_state()
+    if domain:
+        per_domain = data.get("domains")
+        if isinstance(per_domain, dict):
+            stamped = _parse_iso(per_domain.get(domain))
+            if stamped is not None:
+                return stamped
+    return _parse_iso(data.get("last_full_sweep_at"))
 
-    Returns "full" when:
-      - No prior full sweep has been recorded (bootstrap case), OR
-      - It's been at least `interval_days` since the last full sweep.
 
-    Otherwise returns "new_only".
+def mark_full_sweep_completed(domain: str) -> None:
+    """Record that THIS domain's full sweep just completed (now, UTC). Other domains'
+    stamps and the legacy global stamp are preserved."""
+    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    data = _read_state()
+    per_domain = data.get("domains")
+    if not isinstance(per_domain, dict):
+        per_domain = {}
+    per_domain[str(domain)] = now_iso
+    data["domains"] = per_domain
+    _write_state(data)
+    logger.info("[sweep_tracker] marked full sweep completed for domain=%s at %s", domain, now_iso)
+
+
+def decide_mode(*, domain: str, now_utc: Optional[datetime] = None,
+                interval_days: int = FULL_SWEEP_INTERVAL_DAYS) -> Mode:
+    """Decide whether tonight is a full-sweep night for THIS domain.
+
+    Returns "full" when the domain has no recorded full sweep (bootstrap), or when
+    at least `interval_days` have passed since its last one. Otherwise "new_only".
     """
-    last = read_last_full_sweep_at()
+    last = read_last_full_sweep_at(domain)
     if last is None:
-        logger.info("[sweep_tracker] no prior full sweep recorded → mode=full (bootstrap)")
+        logger.info("[sweep_tracker] %s: no prior full sweep recorded → mode=full (bootstrap)", domain)
         return "full"
     now = now_utc or datetime.now(timezone.utc)
     elapsed_days = (now - last).total_seconds() / 86400.0
     if elapsed_days >= interval_days:
         logger.info(
-            "[sweep_tracker] %.1f days since last full sweep (>= %d) → mode=full",
-            elapsed_days, interval_days,
+            "[sweep_tracker] %s: %.1f days since last full sweep (>= %d) → mode=full",
+            domain, elapsed_days, interval_days,
         )
         return "full"
     logger.info(
-        "[sweep_tracker] %.1f days since last full sweep (< %d) → mode=new_only",
-        elapsed_days, interval_days,
+        "[sweep_tracker] %s: %.1f days since last full sweep (< %d) → mode=new_only",
+        domain, elapsed_days, interval_days,
     )
     return "new_only"

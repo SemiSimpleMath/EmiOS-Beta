@@ -16,10 +16,16 @@ beliefs only against each other, so a new duplicate of an OLD belief leaked unti
 full sweep. Pairwise + whole-set NN fixes both: a focused per-pair decision, and (in
 new_only mode) each new belief is compared against the ENTIRE active set.
 
-Two modes (decided by belief_engine.state.sweep_tracker.decide_mode):
+Two modes (decided PER DOMAIN by belief_engine.state.sweep_tracker.decide_mode):
   - "full" (weekly): propose pairs across ALL active beliefs in the domain.
-  - "new_only" (nightly): propose only pairs that involve a belief created since the last
-    full sweep — but against the whole active set — so a new dup of an old belief is caught.
+  - "new_only" (nightly): propose only pairs that involve a belief created since the domain's
+    last full sweep — but against the whole active set — so a new dup of an old belief is caught.
+
+Durability (2026-07-07): every "not the same" verdict is recorded in belief_distinct_pairs,
+bound to the statements it judged, and skipped on later passes while both statements are
+unchanged. Verifier calls per run are capped, and the domain's full-sweep stamp is written
+only by an un-truncated full pass — so an interrupted or capped sweep RESUMES where it left
+off (paying only new pairs) instead of re-paying every prior verdict from scratch.
 """
 from __future__ import annotations
 
@@ -30,7 +36,12 @@ from typing import Any, Dict, List, Optional, Set
 from app.assistant.ServiceLocator.service_locator import ServiceLocator
 from app.assistant.utils.pydantic_classes import Message
 
-from belief_engine.state.sweep_tracker import decide_mode, read_last_full_sweep_at
+from belief_engine.state.sweep_tracker import (
+    decide_mode,
+    mark_full_sweep_completed,
+    read_last_full_sweep_at,
+)
+from belief_engine.store import distinct_pairs as verdicts
 from belief_engine.store.belief_store import BeliefRecord, BeliefStore
 
 try:
@@ -45,9 +56,13 @@ _AGENT_NAME = "belief_engine::merge_verifier"
 # Embedding cosine at/above which a PAIR is proposed to the verifier. Recall-biased on
 # purpose — the verifier is the precision gate, so propose generously and let it reject.
 MERGE_THRESHOLD = 0.80
-# Backstop on verifier calls per pass (strongest pairs first). High enough not to bite the real
+# Backstop on candidate pairs per pass (strongest pairs first). High enough not to bite the real
 # candidate count (a global sweep is ~1-2k pairs); only a pathological explosion would hit it.
 MAX_PAIRS = 4000
+# Bound on VERIFIER LLM CALLS actually made per run (recorded-distinct skips are free). Keeps one
+# night's spend/runtime bounded; with the verdict memory the sweep converges across nights, and a
+# capped (truncated) full pass leaves the domain's sweep stamp unwritten so the next run resumes.
+MAX_VERIFIER_CALLS_PER_RUN = 400
 
 # Second recall channel — shared distinctive keyword. Pairs of beliefs that share a word whose
 # document frequency across the set is within [MIN, MAX] are also proposed: a lexical complement to
@@ -194,11 +209,16 @@ def _run_verifier_dedup_pass(
 
     `focus_keys` (new_only mode): only propose pairs where at least one belief's key is in the
     set — i.e. compare new beliefs against the whole set without re-checking every old pair.
-    None = propose all pairs (full sweep). Returns the number of merges performed.
+    None = propose all pairs (full sweep).
+
+    Returns {merges, verifier_calls, skipped_distinct, truncated}: `skipped_distinct` pairs were
+    settled by a recorded verdict (no LLM), and `truncated` means the per-run verifier-call cap
+    stopped the pass early (the caller must NOT stamp the sweep complete).
     """
+    result = {"merges": 0, "verifier_calls": 0, "skipped_distinct": 0, "truncated": False}
     items, mat = _embeddings_for(store, beliefs)
     if not items:
-        return 0
+        return result
     sims = mat @ mat.T
     n = len(items)
 
@@ -225,7 +245,7 @@ def _run_verifier_dedup_pass(
     pairs.sort(reverse=True)
     pairs = pairs[:MAX_PAIRS]
     if not pairs:
-        return 0
+        return result
 
     # Local union-find so a belief merged earlier in the pass isn't merged again.
     merged_into: Dict[str, str] = {}
@@ -241,43 +261,67 @@ def _run_verifier_dedup_pass(
     if agent is None:
         raise RuntimeError(f"Agent '{_AGENT_NAME}' not found")
 
-    merges = 0
-    for _s, i, j in pairs:
-        ka, kb = root(items[i].belief_key), root(items[j].belief_key)
-        if ka == kb:
-            continue
-        ra, rb = store.get_by_key(ka), store.get_by_key(kb)
-        if ra is None or rb is None or ra.status != "active" or rb.status != "active":
-            continue
+    # Durable verdict memory. One dormant connection for the pass; each verdict commits its own
+    # short transaction the moment it's rendered (surviving interruption is the point), so no
+    # transaction is ever open across a verifier LLM call.
+    verdict_conn = verdicts.open_conn()
+    try:
+        distinct_map = verdicts.load_distinct_map(verdict_conn)
+        for _s, i, j in pairs:
+            ka, kb = root(items[i].belief_key), root(items[j].belief_key)
+            if ka == kb:
+                continue
+            ra, rb = store.get_by_key(ka), store.get_by_key(kb)
+            if ra is None or rb is None or ra.status != "active" or rb.status != "active":
+                continue
 
-        verdict = _verify_same(agent, ra, rb, scope_context=scope_context)
-        if not verdict.get("same"):
-            continue
+            # A recorded "not the same" verdict settles the pair while both statements are
+            # unchanged — free skip, no LLM.
+            if verdicts.is_recorded_distinct(distinct_map, ra.id, ra.statement, rb.id, rb.statement):
+                result["skipped_distinct"] += 1
+                continue
 
-        # Survivor = the better-supported belief (keeps the more-observed key + its history).
-        # Its statement is REWRITTEN to the verifier's reconciled canonical_statement, so the
-        # surviving key is just identity/provenance — content comes from the verifier.
-        survivor, loser = (ra, rb) if ra.observation_count >= rb.observation_count else (rb, ra)
-        canonical = (verdict.get("canonical_statement") or "").strip() or survivor.statement
-        try:
-            store.merge_belief(
-                surviving_key=survivor.belief_key,
-                surviving_statement=canonical,
-                surviving_confidence=survivor.confidence,
-                surviving_scope=survivor.scope,
-                deprecated_keys=[loser.belief_key],
-                domain=domain,
-                merge_reasoning=(verdict.get("reason") or "")[:300],
-            )
-            merged_into[loser.belief_key] = survivor.belief_key
-            merges += 1
-            logger.info("[CanonicalizeBeliefSet] domain=%s merged %s <- %s",
-                        domain, survivor.belief_key, loser.belief_key)
-        except Exception:
-            logger.exception("[CanonicalizeBeliefSet] domain=%s merge failed surviving=%s",
-                             domain, survivor.belief_key)
+            if result["verifier_calls"] >= MAX_VERIFIER_CALLS_PER_RUN:
+                result["truncated"] = True
+                logger.info(
+                    "[CanonicalizeBeliefSet] domain=%s hit the %d-call cap — pass truncated; "
+                    "the next run resumes from the recorded verdicts.",
+                    domain, MAX_VERIFIER_CALLS_PER_RUN)
+                break
 
-    return merges
+            verdict = _verify_same(agent, ra, rb, scope_context=scope_context)
+            result["verifier_calls"] += 1
+            if not verdict.get("same"):
+                verdicts.record_distinct(verdict_conn, ra.id, ra.statement, rb.id, rb.statement,
+                                         reason=str(verdict.get("reason") or ""))
+                continue
+
+            # Survivor = the better-supported belief (keeps the more-observed key + its history).
+            # Its statement is REWRITTEN to the verifier's reconciled canonical_statement, so the
+            # surviving key is just identity/provenance — content comes from the verifier.
+            survivor, loser = (ra, rb) if ra.observation_count >= rb.observation_count else (rb, ra)
+            canonical = (verdict.get("canonical_statement") or "").strip() or survivor.statement
+            try:
+                store.merge_belief(
+                    surviving_key=survivor.belief_key,
+                    surviving_statement=canonical,
+                    surviving_confidence=survivor.confidence,
+                    surviving_scope=survivor.scope,
+                    deprecated_keys=[loser.belief_key],
+                    domain=domain,
+                    merge_reasoning=(verdict.get("reason") or "")[:300],
+                )
+                merged_into[loser.belief_key] = survivor.belief_key
+                result["merges"] += 1
+                logger.info("[CanonicalizeBeliefSet] domain=%s merged %s <- %s",
+                            domain, survivor.belief_key, loser.belief_key)
+            except Exception:
+                logger.exception("[CanonicalizeBeliefSet] domain=%s merge failed surviving=%s",
+                                 domain, survivor.belief_key)
+    finally:
+        verdict_conn.close()
+
+    return result
 
 
 def _filter_new_beliefs_since(
@@ -326,16 +370,21 @@ class CanonicalizeBeliefSetStep:
         initial = store.list_by_domain(self.domain)
         initial_count = len(initial)
 
+        mode = getattr(ctx, "canonicalization_mode", None) or decide_mode(domain=self.domain)
+        last_sweep = read_last_full_sweep_at(self.domain)
+
         if initial_count < 2:
+            # A domain too small to pair is a trivially-complete full sweep — stamp it so it
+            # doesn't stay in weekly-full mode forever.
+            if mode == "full" and not dry_run:
+                mark_full_sweep_completed(self.domain)
             ctx.canonicalization_result = {
-                "status": "skipped", "reason": "too_few_beliefs", "domain": self.domain,
+                "status": "skipped", "reason": "too_few_beliefs", "mode": mode,
+                "domain": self.domain,
                 "initial_belief_count": initial_count, "final_belief_count": initial_count,
                 "total_merges": 0, "passes": 0,
             }
             return ctx.canonicalization_result
-
-        mode = getattr(ctx, "canonicalization_mode", None) or decide_mode()
-        last_sweep = read_last_full_sweep_at()
 
         focus_keys: Optional[Set[str]] = None
         if mode == "new_only":
@@ -367,17 +416,30 @@ class CanonicalizeBeliefSetStep:
                     self.domain, mode, initial_count,
                     len(focus_keys) if focus_keys is not None else "all")
 
-        merges = _run_verifier_dedup_pass(
+        pass_result = _run_verifier_dedup_pass(
             initial, self.domain, store, agent_factory,
             scope_context=ctx.scope_context, focus_keys=focus_keys,
         )
 
+        # The domain's full-sweep stamp is written HERE, by an un-truncated full pass — so a
+        # multi-domain run interrupted mid-way keeps its completed domains, and a capped pass
+        # stays "full" next run and resumes from the recorded verdicts.
+        if mode == "full" and not pass_result["truncated"]:
+            mark_full_sweep_completed(self.domain)
+
         final_count = len(store.list_by_domain(self.domain))
-        logger.info("[CanonicalizeBeliefSet] domain=%s done: %d -> %d (merges=%d, mode=%s)",
-                    self.domain, initial_count, final_count, merges, mode)
+        logger.info(
+            "[CanonicalizeBeliefSet] domain=%s done: %d -> %d (merges=%d calls=%d "
+            "skipped_distinct=%d truncated=%s mode=%s)",
+            self.domain, initial_count, final_count, pass_result["merges"],
+            pass_result["verifier_calls"], pass_result["skipped_distinct"],
+            pass_result["truncated"], mode)
         ctx.canonicalization_result = {
             "status": "ok", "mode": mode, "domain": self.domain,
             "initial_belief_count": initial_count, "final_belief_count": final_count,
-            "total_merges": merges, "passes": 1,
+            "total_merges": pass_result["merges"], "passes": 1,
+            "verifier_calls": pass_result["verifier_calls"],
+            "skipped_distinct": pass_result["skipped_distinct"],
+            "truncated": pass_result["truncated"],
         }
         return ctx.canonicalization_result

@@ -86,21 +86,13 @@ class BeliefEngineAdapter:
         from belief_engine.config import list_enabled_domains
         from belief_engine.export.export_beliefs import export_beliefs
         from belief_engine.pipeline.pipeline import BeliefEnginePipeline
-        from belief_engine.state.sweep_tracker import (
-            decide_mode,
-            mark_full_sweep_completed,
-        )
 
         parent_run_id = run_id or uuid.uuid4().hex[:12]
 
-        # Decide canonicalization mode ONCE per parent run. All domains use
-        # the same decision so midnight rollover mid-pipeline doesn't make
-        # one domain do "new_only" and another do "full".
-        canonicalization_mode = decide_mode()
-        logger.info(
-            "[BeliefEngineAdapter:%s] canonicalization_mode=%s",
-            parent_run_id, canonicalization_mode,
-        )
+        # Canonicalization mode is decided (and the full-sweep stamp written) PER DOMAIN inside
+        # CanonicalizeBeliefSetStep — that's what makes an interrupted multi-domain run resumable:
+        # domains that completed their full sweep stay completed.
+        canonicalization_mode = None
 
         domains = list_enabled_domains()
         if not domains:
@@ -196,21 +188,6 @@ class BeliefEngineAdapter:
                 f"belief_engine: {failures}/{len(domains)} domains failed: "
                 f"{', '.join(failed_domains)} (successes={successes})"
             )
-
-        # All domains succeeded. If this run was a "full" sweep, stamp
-        # the timestamp so the next 6 nights drop to "new_only" mode.
-        # If this was a "new_only" run, leave the stamp untouched.
-        if canonicalization_mode == "full":
-            try:
-                mark_full_sweep_completed()
-            except Exception as exc:
-                logger.exception(
-                    "[BeliefEngineAdapter:%s] failed to mark full sweep completed: %s",
-                    parent_run_id, exc,
-                )
-                # Don't fail the run — the canonicalization itself succeeded.
-                # Worst case the next run also goes "full" (extra cost, no
-                # correctness issue).
 
         out_path = export_beliefs()
         logger.info(

@@ -1,12 +1,13 @@
 """
 Belief Engine — SQLite schema.
 
-Five tables:
-  user_beliefs       — one row per belief, the canonical statement + metadata
-  belief_evidence    — one row per piece of evidence that touched a belief
-  belief_tags        — one row per (belief, tag); the standardized retrieval vocabulary
-  belief_short_id    — stable, never-reused 'b<n>' handle per belief
-  belief_merges      — provenance redirect from a merged-away belief to its survivor
+Six tables:
+  user_beliefs         — one row per belief, the canonical statement + metadata
+  belief_evidence      — one row per piece of evidence that touched a belief
+  belief_tags          — one row per (belief, tag); the standardized retrieval vocabulary
+  belief_short_id      — stable, never-reused 'b<n>' handle per belief
+  belief_merges        — provenance redirect from a merged-away belief to its survivor
+  belief_distinct_pairs — durable "not the same" merge-verifier verdicts (statement-hash bound)
 
 Completely independent of the existing memory system.
 Run schema setup with:
@@ -78,6 +79,18 @@ CREATE TABLE IF NOT EXISTS belief_merges (
     loser_id    TEXT PRIMARY KEY REFERENCES user_beliefs(id) ON DELETE CASCADE,
     survivor_id TEXT NOT NULL REFERENCES user_beliefs(id) ON DELETE CASCADE,
     merged_at   TEXT,
+    reason      TEXT
+);
+
+-- Durable merge-verifier "not the same" verdicts. A verdict is bound to the two STATEMENTS it
+-- judged (their hashes): the pair is skipped while both statements are unchanged, and either
+-- statement evolving invalidates the verdict so the pair is re-judged. This is what lets an
+-- interrupted canonicalize sweep resume instead of re-paying every prior verdict.
+CREATE TABLE IF NOT EXISTS belief_distinct_pairs (
+    pair_key    TEXT PRIMARY KEY,   -- min(belief_id)|max(belief_id)
+    hash_a      TEXT NOT NULL,      -- statement hash of the lexicographically-smaller id
+    hash_b      TEXT NOT NULL,
+    decided_at  TEXT,
     reason      TEXT
 );
 """
