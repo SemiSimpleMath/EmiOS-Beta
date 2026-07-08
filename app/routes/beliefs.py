@@ -252,6 +252,23 @@ def beliefs_update():
             (bid,)).fetchone())
     finally:
         conn.close()
+
+    # Keep the embedding in sync with the correction — canonicalize's NN recall and the
+    # updater's similar-belief surfacing read the vector store. A corrected statement or a
+    # reclassified domain re-upserts (domain rides the vector's metadata); a suppression
+    # removes the vector (the belief left the live set), and un-suppression re-adds it.
+    if any(k in data for k in ("statement", "domain", "suppressed")):
+        try:
+            from belief_engine.chroma.belief_chroma import get_belief_chroma
+            bc = get_belief_chroma()
+            if data.get("suppressed"):
+                bc.delete(bid)
+            else:
+                bc.upsert(belief_id=bid, statement=row["statement"], domain=row["domain"])
+        except Exception:
+            logger.warning("[beliefs] embedding sync failed for %s (the nightly archive "
+                           "reconcile is the backstop)", bid, exc_info=True)
+
     logger.info("[beliefs] corrected %s: %s", bid, sorted(k for k in data if k != "belief_id"))
     return jsonify({"success": True, "belief": row})
 

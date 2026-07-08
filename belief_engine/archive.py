@@ -46,11 +46,15 @@ def _ensure_archive_schema(conn: sqlite3.Connection) -> None:
                 conn.execute(f"ALTER TABLE {arch} ADD COLUMN {coldef}")
 
 
-def archive_deprecated_beliefs(*, conn: Optional[sqlite3.Connection] = None) -> Dict[str, int]:
-    """Move every `status='deprecated'` belief (and its evidence) into the archive tables.
+def archive_deprecated_beliefs(*, conn: Optional[sqlite3.Connection] = None,
+                               chroma=None) -> Dict[str, int]:
+    """Move every `status='deprecated'` belief (and its evidence) into the archive tables,
+    then reconcile the embedding collection against the live table.
 
-    Returns {'beliefs': n, 'evidence': n}. The move is atomic — a partial archive would split
-    a belief from its evidence — so a failure raises and leaves the live tables untouched.
+    Returns {'beliefs': n, 'evidence': n, 'ghost_vectors_removed': n}. The move is atomic — a
+    partial archive would split a belief from its evidence — so a failure raises and leaves the
+    live tables untouched. The vector reconcile runs even on nights with nothing to archive,
+    which is what heals the historical ghost backlog.
     """
     own = conn is None
     if own:
@@ -60,20 +64,37 @@ def archive_deprecated_beliefs(*, conn: Optional[sqlite3.Connection] = None) -> 
         with conn:
             _ensure_archive_schema(conn)
         n_beliefs = conn.execute("SELECT COUNT(*) FROM user_beliefs WHERE status='deprecated'").fetchone()[0]
-        if not n_beliefs:
-            return {"beliefs": 0, "evidence": 0}
-        n_ev = conn.execute(f"SELECT COUNT(*) FROM belief_evidence WHERE belief_id IN {_DEP}").fetchone()[0]
-        # Explicit column lists (name-matched, order-independent) so a drifted archive still lines up.
-        ub = ", ".join(_cols(conn, "user_beliefs"))
-        be = ", ".join(_cols(conn, "belief_evidence"))
-        with conn:  # atomic: copy across, then drop from live
-            conn.execute(f"INSERT INTO belief_evidence_archive ({be}) SELECT {be} FROM belief_evidence WHERE belief_id IN {_DEP}")
-            conn.execute(f"INSERT INTO user_beliefs_archive ({ub}) SELECT {ub} FROM user_beliefs WHERE status='deprecated'")
-            conn.execute(f"DELETE FROM belief_evidence WHERE belief_id IN {_DEP}")
-            conn.execute(f"DELETE FROM belief_tags WHERE belief_id IN {_DEP}")
-            conn.execute("DELETE FROM user_beliefs WHERE status='deprecated'")
-        logger.info("[belief_archive] archived %d deprecated beliefs + %d evidence rows", n_beliefs, n_ev)
-        return {"beliefs": n_beliefs, "evidence": n_ev}
+        n_ev = 0
+        if n_beliefs:
+            n_ev = conn.execute(f"SELECT COUNT(*) FROM belief_evidence WHERE belief_id IN {_DEP}").fetchone()[0]
+            # Explicit column lists (name-matched, order-independent) so a drifted archive still lines up.
+            ub = ", ".join(_cols(conn, "user_beliefs"))
+            be = ", ".join(_cols(conn, "belief_evidence"))
+            with conn:  # atomic: copy across, then drop from live
+                conn.execute(f"INSERT INTO belief_evidence_archive ({be}) SELECT {be} FROM belief_evidence WHERE belief_id IN {_DEP}")
+                conn.execute(f"INSERT INTO user_beliefs_archive ({ub}) SELECT {ub} FROM user_beliefs WHERE status='deprecated'")
+                conn.execute(f"DELETE FROM belief_evidence WHERE belief_id IN {_DEP}")
+                conn.execute(f"DELETE FROM belief_tags WHERE belief_id IN {_DEP}")
+                conn.execute("DELETE FROM user_beliefs WHERE status='deprecated'")
+            logger.info("[belief_archive] archived %d deprecated beliefs + %d evidence rows", n_beliefs, n_ev)
+        ghosts = _reconcile_chroma_ghosts(conn, chroma)
+        return {"beliefs": n_beliefs, "evidence": n_ev, "ghost_vectors_removed": ghosts}
     finally:
         if own:
             conn.close()
+
+
+def _reconcile_chroma_ghosts(conn: sqlite3.Connection, chroma=None) -> int:
+    """The embedding collection holds live-belief vectors by contract, but historically only
+    merge losers were deleted — updater/reevaluator/fade deprecations, UI suppressions, and the
+    archive eviction all left theirs behind. Remove every vector whose belief id no longer has
+    a live user_beliefs row. Returns how many were removed."""
+    if chroma is None:
+        from belief_engine.chroma.belief_chroma import get_belief_chroma
+        chroma = get_belief_chroma()
+    live = {r[0] for r in conn.execute("SELECT id FROM user_beliefs")}
+    ghosts = [belief_id for belief_id in chroma.all_ids() if belief_id not in live]
+    if ghosts:
+        chroma.delete_many(ghosts)
+        logger.info("[belief_archive] removed %d ghost embedding(s) from the belief collection", len(ghosts))
+    return len(ghosts)

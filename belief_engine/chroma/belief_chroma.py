@@ -78,6 +78,11 @@ class BeliefChroma:
         except Exception as exc:
             logger.debug("[BeliefChroma] delete noop for id=%s: %s", belief_id, exc)
 
+    def delete_many(self, belief_ids: List[str]) -> None:
+        if not belief_ids:
+            return
+        self._collection.delete(ids=list(belief_ids))
+
     # ------------------------------------------------------------------
     # Read
     # ------------------------------------------------------------------
@@ -118,6 +123,12 @@ class BeliefChroma:
 
     def count(self) -> int:
         return self._collection.count()
+
+    def all_ids(self) -> List[str]:
+        """Every belief id in the collection — the archive's ghost reconcile reads this."""
+        results = self._collection.get(include=[])
+        ids = results.get("ids")
+        return list(ids) if ids is not None else []
 
     def get_all_for_domain(self, domain: str) -> List[Tuple[str, List[float]]]:
         """
