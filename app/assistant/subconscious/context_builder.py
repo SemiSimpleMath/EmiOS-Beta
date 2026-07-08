@@ -223,11 +223,14 @@ def _build_recent_friction_signals(
             f"{total} chat clusters scanned, none carried friction)"
         )
 
-    # Sort groups by count desc, then by most recent occurrence
+    # Sort groups by count desc, then by most recent occurrence (two-pass:
+    # newest-first, then a stable re-sort by count).
     sorted_groups = sorted(
         groups.items(),
-        key=lambda kv: (-len(kv[1]), -len(kv[1]) if not kv[1] else 0),
+        key=lambda kv: max((o["created_at"] for o in kv[1]), default=""),
+        reverse=True,
     )
+    sorted_groups.sort(key=lambda kv: -len(kv[1]))
 
     # Split: groups with count >= 2 get full display (these can become
     # patterns). Singletons get a compact tail — they're informational

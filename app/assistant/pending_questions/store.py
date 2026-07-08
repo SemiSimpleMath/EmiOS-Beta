@@ -327,8 +327,14 @@ def expire_stale() -> int:
 
 
 def count_asked_in_window(hours: float = 24.0) -> int:
-    """How many questions have been asked in the last `hours`?
+    """How many questions were asked in the last `hours`?
     Used by the injector to enforce a daily budget.
+
+    Counts by asked_at alone, across ALL statuses: a question that was asked
+    and then answered/closed/expired inside the window still spent a budget
+    slot. (Filtering on status=='asked' made answered questions drop out of
+    the count, leaking the budget upward exactly when the user was most
+    responsive.)
     """
     session = get_session()
     try:
@@ -336,7 +342,6 @@ def count_asked_in_window(hours: float = 24.0) -> int:
         cutoff = now - timedelta(hours=float(hours))
         return int(
             session.query(PendingQuestion)
-            .filter(PendingQuestion.status == "asked")
             .filter(PendingQuestion.asked_at.isnot(None))
             .filter(PendingQuestion.asked_at >= cutoff)
             .count()

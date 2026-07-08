@@ -13,10 +13,12 @@ in EmiResultHandler picks them up and appends them to outbound replies.
 from __future__ import annotations
 
 import json
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from app.assistant.utils.atomic_write import write_json_atomic
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_repo_root
 
@@ -25,6 +27,12 @@ logger = get_logger(__name__)
 
 _REGISTER_REL = "resources/subconscious/resource_concerns_register.json"
 _TICK_LOG_REL = "resources/subconscious/resource_subconscious_tick_log.jsonl"
+
+# The register is the subconscious's spine and has TWO writers (the noticer
+# tick and answer capture's concern journaling, which deliberately runs
+# seconds before a triggered tick). Every read-modify-write of the register
+# holds this lock so neither writer can lose the other's update.
+_REGISTER_LOCK = threading.RLock()
 
 # ── Lifecycle pressure knobs (2026-06-11) ────────────────────────────────
 # A concern reinforced this many times since its last disposition MUST get
@@ -128,7 +136,22 @@ def apply_noticer_output(
     Accepts the raw dict shape (what JSON-roundtrip of AgentForm produces).
     Returns a small summary dict for the runner to print. `register_path`/`tick_log_path`
     default to the real resource files; tests pass temp paths to avoid touching them.
+
+    Holds the register lock for the whole read-modify-write so a concurrent
+    answer-capture journal write can't be lost.
     """
+    with _REGISTER_LOCK:
+        return _apply_noticer_output_locked(
+            output, register_path=register_path, tick_log_path=tick_log_path,
+        )
+
+
+def _apply_noticer_output_locked(
+    output: Dict[str, Any],
+    *,
+    register_path: Optional[Path] = None,
+    tick_log_path: Optional[Path] = None,
+) -> Dict[str, Any]:
     register_path = register_path or (get_repo_root() / _REGISTER_REL)
     tick_log_path = tick_log_path or (get_repo_root() / _TICK_LOG_REL)
 
@@ -460,11 +483,12 @@ def _enqueue_pending_questions(
 
 
 def _load_register(path: Path) -> Dict[str, Any]:
+    """Load the register; a MISSING file bootstraps empty, a CORRUPT file
+    raises. The old behavior (parse failure → fresh register) meant the next
+    save silently destroyed every concern — the spine deserves fail-loud, and
+    the atomic save below makes corruption a should-never state."""
     if path.is_file():
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except Exception as e:
-            logger.error("[noticer.persist] register parse failed; starting fresh: %s", e)
+        return json.loads(path.read_text(encoding="utf-8"))
     return {
         "schema_version": 1,
         "last_updated_utc": None,
@@ -478,7 +502,30 @@ def _load_register(path: Path) -> Dict[str, Any]:
 
 def _save_register(path: Path, register: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(register, indent=2, ensure_ascii=False), encoding="utf-8")
+    write_json_atomic(path, register)
+
+
+def annotate_concern_answer(concern_id: str, *, question_text: str, answer_text: str) -> bool:
+    """Journal a captured answer onto its concern immediately — the noticer
+    formally processes it on its (triggered) next tick. Lives here with the
+    other register writers: one lock, one atomic save. Returns False when the
+    register or the concern doesn't exist; raises on a corrupt register."""
+    path = get_repo_root() / _REGISTER_REL
+    with _REGISTER_LOCK:
+        if not path.is_file():
+            return False
+        register = _load_register(path)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        for bucket in ("active", "addressing"):
+            for c in register.get(bucket) or []:
+                if c.get("concern_id") == concern_id:
+                    c["reinforcement_notes"] = (
+                        (c.get("reinforcement_notes") or "")
+                        + f"\n[{now_iso}] USER ANSWERED ({question_text[:80]}): {answer_text[:200]}"
+                    )
+                    _save_register(path, register)
+                    return True
+    return False
 
 
 _SEVERITY_LADDER = ["low", "medium", "high"]

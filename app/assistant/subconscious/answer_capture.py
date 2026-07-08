@@ -121,32 +121,11 @@ def _judge(question, candidates: List[Dict[str, Any]]) -> Optional[Dict[str, Any
 
 def annotate_concern_answer(concern_id: str, *, question_text: str, answer_text: str) -> bool:
     """Journal the captured answer onto the concern immediately — the
-    noticer formally processes it on its (triggered) next tick."""
-    import json
-
-    from app.assistant.utils.path_utils import get_repo_root
-
-    path = get_repo_root() / "resources" / "subconscious" / "resource_concerns_register.json"
-    if not path.is_file():
-        return False
-    try:
-        register = json.loads(path.read_text(encoding="utf-8"))
-    except Exception as e:
-        logger.error("[answer_capture] register read failed: %s", e)
-        return False
-
-    now_iso = datetime.now(timezone.utc).isoformat()
-    for bucket in ("active", "addressing"):
-        for c in register.get(bucket) or []:
-            if c.get("concern_id") == concern_id:
-                c["reinforcement_notes"] = (
-                    (c.get("reinforcement_notes") or "")
-                    + f"\n[{now_iso}] USER ANSWERED ({question_text[:80]}): {answer_text[:200]}"
-                )
-                from app.assistant.utils.atomic_write import write_json_atomic
-                write_json_atomic(path, register)
-                return True
-    return False
+    noticer formally processes it on its (triggered) next tick. Delegates to
+    persist.annotate_concern_answer: ALL register writes live in persist
+    behind one lock and one atomic writer."""
+    from app.assistant.subconscious.persist import annotate_concern_answer as _annotate
+    return _annotate(concern_id, question_text=question_text, answer_text=answer_text)
 
 
 def trigger_noticer(reason: str) -> bool:

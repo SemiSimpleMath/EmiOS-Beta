@@ -27,12 +27,20 @@ Cadence (local times — see each json for the canonical config):
 """
 from __future__ import annotations
 
+import threading
 from typing import Any, Dict, Optional
 
 from app.assistant.routine_handlers import routine_handler
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+# One noticer tick at a time. The scheduled routine and answer-capture's
+# triggered tick (which calls noticer_run() directly, bypassing the routine
+# manager) can otherwise overlap — two concurrent ticks read the same
+# register and double-enqueue questions. A tick that finds one in flight
+# SKIPS: the running tick reads all captured answers anyway.
+_NOTICER_RUN_LOCK = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -92,29 +100,36 @@ def noticer_run(
     routine: Any = None,
     event_message: Any = None,
 ) -> Dict[str, Any]:
-    """Run one noticer pass. Default trigger_mode='daily'."""
+    """Run one noticer pass. Default trigger_mode='daily'. Serialized: a tick
+    that finds another already in flight skips (see _NOTICER_RUN_LOCK)."""
     from app.assistant.subconscious.context_builder import build_noticer_context
     from app.assistant.subconscious.persist import apply_noticer_output
 
-    context = build_noticer_context(trigger_mode="daily")
-    output = _run_subconscious_agent(
-        handler_label="noticer_run",
-        agent_name="subconscious::noticer",
-        context=context,
-        scope_id="subconscious::noticer",
-        actor_id="routine::noticer_run",
-    )
-    summary = apply_noticer_output(output) or {}
-    logger.info(
-        "[noticer_run] new=%d reinforced=%d resolved=%d escalated=%d beliefs=%d questions=%d",
-        len(output.get("new_concerns") or []),
-        len(output.get("reinforced_concerns") or []),
-        len(output.get("resolved_concerns") or []),
-        len(output.get("escalated_concerns") or []),
-        len(output.get("belief_updates") or []),
-        len(output.get("pending_questions") or []),
-    )
-    return {"status": "ok", **summary}
+    if not _NOTICER_RUN_LOCK.acquire(blocking=False):
+        logger.info("[noticer_run] another noticer tick is in flight — skipping this one")
+        return {"status": "skipped_concurrent_run"}
+    try:
+        context = build_noticer_context(trigger_mode="daily")
+        output = _run_subconscious_agent(
+            handler_label="noticer_run",
+            agent_name="subconscious::noticer",
+            context=context,
+            scope_id="subconscious::noticer",
+            actor_id="routine::noticer_run",
+        )
+        summary = apply_noticer_output(output) or {}
+        logger.info(
+            "[noticer_run] new=%d reinforced=%d resolved=%d escalated=%d beliefs=%d questions=%d",
+            len(output.get("new_concerns") or []),
+            len(output.get("reinforced_concerns") or []),
+            len(output.get("resolved_concerns") or []),
+            len(output.get("escalated_concerns") or []),
+            len(output.get("belief_updates") or []),
+            len(output.get("pending_questions") or []),
+        )
+        return {"status": "ok", **summary}
+    finally:
+        _NOTICER_RUN_LOCK.release()
 
 
 # ---------------------------------------------------------------------------
@@ -130,10 +145,14 @@ def answer_sweep_run(
     event_message: Any = None,
 ) -> Dict[str, Any]:
     """Judge asked-but-unanswered noticer questions against the chat that
-    followed them. FREE when there are none (pure SQL, no LLM)."""
+    followed them. FREE when there are none (pure SQL, no LLM). Also sweeps
+    pending-but-past-expiry rows to 'expired' so the queue lifecycle's
+    pending → expired edge actually runs (it previously had no caller)."""
+    from app.assistant.pending_questions import expire_stale
     from app.assistant.subconscious.answer_capture import check_open_questions
 
     summary = check_open_questions()
+    summary["expired"] = expire_stale()
     return {"status": "ok", **summary}
 
 

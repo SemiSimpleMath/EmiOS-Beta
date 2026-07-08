@@ -19,10 +19,12 @@ Selection rules:
      pending question regardless of tag.
 
 Budget rules:
-  - Default: max 5 asked per 24h.
+  - Default: max 6 asked per 24h (DEFAULT_DAILY_BUDGET).
   - Default: don't surface two questions back-to-back within
     min_minutes_between (10 min default).
   - 'high' priority bypasses both gates.
+  - Both gates count by asked_at regardless of current status — an
+    answered question still spent its slot.
 """
 from __future__ import annotations
 
@@ -114,8 +116,10 @@ def pick_question_for_nudge(
 
 
 def _seconds_since_last_ask() -> Optional[float]:
-    """How many seconds since the most recent asked question? None if
-    never asked. Used for back-to-back gating."""
+    """How many seconds since the most recent ask? None if never asked.
+    Used for back-to-back gating. Keys on asked_at regardless of current
+    status — a question that was asked and instantly answered still counts
+    as the most recent ask."""
     from app.assistant.database.pending_question import PendingQuestion
     from app.models.base import get_session
 
@@ -123,7 +127,6 @@ def _seconds_since_last_ask() -> Optional[float]:
     try:
         row = (
             session.query(PendingQuestion)
-            .filter(PendingQuestion.status == "asked")
             .filter(PendingQuestion.asked_at.isnot(None))
             .order_by(PendingQuestion.asked_at.desc())
             .first()

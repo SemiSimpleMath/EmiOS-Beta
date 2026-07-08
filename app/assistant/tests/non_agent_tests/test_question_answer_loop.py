@@ -268,8 +268,10 @@ def test_annotate_concern_answer_journals_register(tmp_path, monkeypatch):
     path = tmp_path / "resources" / "subconscious" / "resource_concerns_register.json"
     path.parent.mkdir(parents=True)
     path.write_text(json.dumps(register))
+    # The register write lives in persist now (one lock, one atomic writer);
+    # patch its module-level get_repo_root binding.
     monkeypatch.setattr(
-        "app.assistant.utils.path_utils.get_repo_root", lambda: tmp_path,
+        "app.assistant.subconscious.persist.get_repo_root", lambda: tmp_path,
     )
     ok = answer_capture.annotate_concern_answer(
         "c1", question_text="When was it?", answer_text="In April",

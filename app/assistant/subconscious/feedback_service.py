@@ -185,12 +185,17 @@ def list_intentions_for_dashboard(*, days_ahead: int = 14) -> List[Dict[str, Any
 
 
 def list_recent_unprocessed_comments(*, limit: int = 50) -> List[Dict[str, Any]]:
-    """For the future feedback_extractor — feedback.comment pods that
-    haven't been ingested into beliefs yet (processed_at_utc is None).
-    Exposed here so the ingestion step has one place to fetch its queue."""
+    """The feedback_extractor's queue — feedback.comment pods that haven't
+    been ingested into beliefs yet (processed_at_utc is None).
+
+    Queried by the 'unprocessed' TAG (minted on every comment, flipped to
+    'processed' on ingestion), not by a time window: a window silently
+    orphaned any comment that stayed unprocessed longer than it (extractor
+    disabled by on_error, extended downtime). The metadata check below stays
+    authoritative for pods whose tag flip failed."""
     try:
         store = PodStore()
-        candidates = store.query(kind="feedback.comment", since="14d", limit=200)
+        candidates = store.query(kind="feedback.comment", tags=["unprocessed"], limit=200)
     except Exception as e:
         logger.warning("[feedback_service] unprocessed fetch failed: %s", e)
         return []

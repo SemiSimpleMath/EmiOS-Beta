@@ -130,9 +130,13 @@ def apply_feedback_extractor_output(output: Dict[str, Any]) -> Dict[str, Any]:
             logger.warning("[feedback_persist] belief upsert failed: %s — extraction: %r", e, ext)
             failed.append({"extraction": ext, "error": str(e)[:240]})
 
-    # 2. Mark each processed comment pod's metadata
+    # 2. Mark each processed comment pod's metadata. A failed mark is COUNTED
+    # and logged at ERROR: the comment stays tagged 'unprocessed', so the next
+    # run re-drains it and its evidence double-counts — that must be visible,
+    # not a debug-level shrug.
     store = PodStore()
     comment_pods_marked: List[str] = []
+    mark_failed = 0
     for comment_pod_id, exts in by_comment.items():
         try:
             pod = store.get(comment_pod_id)
@@ -156,8 +160,12 @@ def apply_feedback_extractor_output(output: Dict[str, Any]) -> Dict[str, Any]:
             pod.tags = tags
             store.put(pod)
             comment_pods_marked.append(comment_pod_id)
-        except Exception as e:
-            logger.warning("[feedback_persist] failed to mark comment %s processed: %s", comment_pod_id, e)
+        except Exception:
+            mark_failed += 1
+            logger.exception(
+                "[feedback_persist] failed to mark comment %s processed — it will "
+                "be RE-DRAINED next run and its evidence double-counted", comment_pod_id,
+            )
 
     # 3. Also mark skipped comments processed (with 0 extracted_belief_ids)
     for s in skipped:
@@ -183,8 +191,9 @@ def apply_feedback_extractor_output(output: Dict[str, Any]) -> Dict[str, Any]:
             pod.tags = tags
             store.put(pod)
             comment_pods_marked.append(cid)
-        except Exception as e:
-            logger.warning("[feedback_persist] failed to mark skipped comment %s: %s", cid, e)
+        except Exception:
+            mark_failed += 1
+            logger.exception("[feedback_persist] failed to mark skipped comment %s", cid)
 
     return {
         "extractions_count": len(extractions),
@@ -193,6 +202,7 @@ def apply_feedback_extractor_output(output: Dict[str, Any]) -> Dict[str, Any]:
         "upsert_failed_count": len(failed),
         "phantom_skipped_count": len(phantom_skipped),
         "comments_marked_processed": len(comment_pods_marked),
+        "comments_mark_failed": mark_failed,
         "upserted": upserted,
         "phantom_skipped": phantom_skipped,
         "failed": failed[:10],  # cap for readability

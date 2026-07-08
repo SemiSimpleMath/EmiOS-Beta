@@ -42,11 +42,18 @@ def apply_scheduler_arbiter_output(output: Dict[str, Any]) -> Dict[str, Any]:
         now_utc_iso=now_utc_iso,
     )
 
+    # Ticket delivery is partial-failure tolerant ON PURPOSE: the schedule pod
+    # is already minted, and raising mid-loop would make the routine retry
+    # tomorrow and mint a DUPLICATE plan pod. A failed ticket is logged with
+    # its traceback and counted so the summary shows the drop.
     tickets_created: List[str] = []
+    tickets_failed = 0
     for conflict in user_conflicts:
         ticket_id = _surface_user_conflict_ticket(conflict, schedule_pod_id=schedule_pod_id)
         if ticket_id:
             tickets_created.append(ticket_id)
+        else:
+            tickets_failed += 1
 
     return {
         "schedule_pod_id": schedule_pod_id,
@@ -55,6 +62,7 @@ def apply_scheduler_arbiter_output(output: Dict[str, Any]) -> Dict[str, Any]:
         "conflicts_resolved": len(resolved),
         "conflicts_for_user": len(user_conflicts),
         "tickets_created": tickets_created,
+        "tickets_failed": tickets_failed,
     }
 
 
@@ -166,9 +174,13 @@ def _mint_weekly_schedule_pod(
         )
         store.put(pod)
         return pod_id
-    except Exception as e:
-        logger.warning("[arbiter_persist] mint plan.weekly_schedule failed: %s", e)
-        return None
+    except Exception:
+        # Fail loud — this pod is the run's SINGLE product (the weekly source
+        # of truth every proposer honors). A swallowed mint made the routine
+        # report ok while the week's plan evaporated; the meal/wellness/
+        # romantic lanes were elevated to raise for the same reason.
+        logger.exception("[arbiter_persist] mint plan.weekly_schedule failed")
+        raise
 
 
 def _surface_user_conflict_ticket(
@@ -228,6 +240,6 @@ def _surface_user_conflict_ticket(
         result = tool.execute(tm)
         data = getattr(result, "data", None) or {}
         return str(data.get("ticket_id") or "") or None
-    except Exception as e:
-        logger.warning("[arbiter_persist] surface user conflict ticket failed: %s", e)
+    except Exception:
+        logger.exception("[arbiter_persist] surface user conflict ticket failed")
         return None

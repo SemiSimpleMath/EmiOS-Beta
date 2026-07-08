@@ -30,7 +30,6 @@ from app.assistant.utils.time_utils import get_local_time
 logger = get_logger(__name__)
 
 _REGISTER_REL = "resources/subconscious/resource_concerns_register.json"
-_TICK_LOG_REL = "resources/subconscious/resource_subconscious_tick_log.jsonl"
 _DIGEST_DIR_REL = "app/subconscious_digests"
 
 
@@ -42,24 +41,18 @@ def load_register() -> Dict[str, Any]:
 
 
 def load_latest_pending_questions() -> List[Dict[str, Any]]:
-    """The noticer puts pending_questions in each tick's output, not in the
-    register. Read the last tick's output to surface them in the digest."""
-    path = get_repo_root() / _TICK_LOG_REL
-    if not path.is_file():
-        return []
+    """Open questions for the digest — read from the pending_question STORE
+    (the lifecycle truth), not the tick log's last line. The tick-log version
+    showed whatever the noticer emitted at 04:00 even when the question had
+    already been asked and answered in chat by digest time. Display-only: the
+    digest never marks anything asked; delivery stays with the injector
+    bridges."""
     try:
-        last_line = ""
-        with path.open("r", encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if line:
-                    last_line = line
-        if not last_line:
-            return []
-        d = json.loads(last_line)
-        return d.get("output", {}).get("pending_questions") or []
+        from app.assistant.pending_questions import get_pending
+        rows = get_pending(limit=2)
+        return [{"text": q.question_text} for q in rows]
     except Exception as e:
-        logger.warning("[digest] failed to load pending_questions from tick log: %s", e)
+        logger.warning("[digest] failed to load pending questions from the store: %s", e)
         return []
 
 
@@ -173,7 +166,10 @@ def run_digest_pass(
                 sub_data_type=["subconscious_digest"],
             ))
 
-    # Record every currently-active concern as surfaced.
+    # Record every currently-active concern as surfaced. The state keeps ONLY
+    # ids still in active/addressing — a resolved/dormant concern's id has no
+    # future digest to be "ongoing" in, so carrying it forever just grew the
+    # state file monotonically.
     newly_surfaced_ids: Set[str] = set()
     for bucket in ("active", "addressing"):
         for c in register.get(bucket, []) or []:
@@ -182,7 +178,7 @@ def run_digest_pass(
                 newly_surfaced_ids.add(cid)
 
     state["last_digest_at_utc"] = datetime.now(timezone.utc).isoformat()
-    state["previously_surfaced_concern_ids"] = sorted(previously_surfaced | newly_surfaced_ids)
+    state["previously_surfaced_concern_ids"] = sorted(newly_surfaced_ids)
     state["history_count"] = int(state.get("history_count") or 0) + 1
     save_digest_state(state)
 
