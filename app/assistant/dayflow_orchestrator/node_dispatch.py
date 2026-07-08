@@ -65,6 +65,17 @@ def _do_work(store, work_id: str, node_id: str) -> None:
     from work_objects.work_runtime import work_on
     status = work_on(store, work_id, node_id=node_id)   # context + worker + result, all on the graph
     logger.info("[node_dispatch] work %s::%s -> %s", work_id, node_id, status)
+    signal_work_progress(f"{work_id}::{node_id}")
+
+
+def signal_work_progress(ref: str) -> None:
+    """A node just reached a result (done/failed) or a reply landed — nudge the scheduler for a prompt
+    follow-up tick so the finalizer/repair judge it and dependents advance within minutes, instead of at
+    the next ceiling tick. Latency-only: a lost signal just means the next scheduled tick picks it up."""
+    try:
+        DI.event_hub.publish(Message(event_topic="dayflow_work_progress", content=ref))
+    except Exception as e:
+        logger.warning("[node_dispatch] work-progress signal failed for %s: %s", ref, e)
 
 
 def _ticket(store, work_id: str, node_id: str, node) -> None:

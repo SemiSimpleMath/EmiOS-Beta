@@ -123,3 +123,5 @@ class WorkNodeMaterializerNode(ControlNode):
             store.apply("set_status", {"work_id": work_id, "node_id": n.id, "status": "done"}, actor="reply")
             logger.info("[%s] reply recorded as result for %s::%s — node done -> finalizer judges it",
                         self.name, work_id, n.id)
+            from app.assistant.dayflow_orchestrator.node_dispatch import signal_work_progress
+            signal_work_progress(f"{work_id}::{n.id}")

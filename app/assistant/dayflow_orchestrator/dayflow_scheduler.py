@@ -66,6 +66,7 @@ class DayflowScheduler:
         self._running = False
         self._last_run_finished_utc: Optional[datetime] = None
         self._pending_poke_reason: Optional[str] = None
+        self._followup_requested = False
         self._started = False
 
     def start(self) -> None:
@@ -231,6 +232,7 @@ class DayflowScheduler:
                 return
             self._running = True
             self._pending_poke_reason = None
+            self._followup_requested = False
 
         run_id = uuid.uuid4().hex[:8]
         fast_tick = reason == "item_timer" and bool(triggered_item_id)
@@ -267,6 +269,8 @@ class DayflowScheduler:
                 self._last_run_finished_utc = datetime.now(timezone.utc)
                 pending = self._pending_poke_reason
                 self._pending_poke_reason = None
+                followup = self._followup_requested
+                self._followup_requested = False
 
             logger.info("[DayflowScheduler] === TICK END === run_id=%s", run_id)
 
@@ -276,6 +280,13 @@ class DayflowScheduler:
             # a due item still wins and the delta is absorbed by it.
             self._schedule_next_from_items()
             self._arm_work_node_wakes()
+            if followup:
+                # Work progressed during this tick (a node reached a result / a reply landed). Follow up
+                # promptly — the next tick's finalizer/repair judge it and dependents dispatch — so a
+                # sequential chain advances in minutes, not one step per ceiling tick. Non-poke: only the
+                # MIN_GAP floor applies, and the sooner-run guard still keeps any earlier due job.
+                logger.info("[DayflowScheduler] Work progressed during run; scheduling follow-up tick.")
+                self._schedule_tick(delay_seconds=DEBOUNCE_SECONDS, reason="work_progress", is_poke=False)
             if pending:
                 logger.info(
                     "[DayflowScheduler] Delta queued during run; scheduling throttled poke: %s", pending,
@@ -290,6 +301,7 @@ class DayflowScheduler:
         event_hub.register_event("repo_update", self._on_repo_update)
         event_hub.register_event("afk_state_changed", self._on_afk_state_changed)
         event_hub.register_event("dayflow_ticket_responded", self._on_ticket_responded)
+        event_hub.register_event("dayflow_work_progress", self._on_work_progress)
 
         logger.info("[DayflowScheduler] Subscribed to event hub topics")
 
@@ -474,6 +486,20 @@ class DayflowScheduler:
 
     def _on_ticket_responded(self, message: Message) -> None:
         self.poke(reason="ticket_responded")
+
+    def _on_work_progress(self, message: Message) -> None:
+        """A work node reached a result (or a reply was recorded). Follow up promptly so the finalizer/
+        repair judge it and its dependents dispatch — a sequential chain advances in minutes instead of
+        one step per ceiling tick. Usually fires mid-tick (the dispatch loop runs inside the tick), so
+        the common path is just flagging the follow-up consumed at tick end. Non-poke wake: the small
+        MIN_GAP floor applies, not the 10-minute poke throttle."""
+        if not self._started:
+            return
+        with self._lock:
+            if self._running:
+                self._followup_requested = True
+                return
+        self._schedule_tick(delay_seconds=DEBOUNCE_SECONDS, reason="work_progress", is_poke=False)
 
 
 class _SchedulerRoutineStub:
