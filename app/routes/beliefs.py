@@ -63,12 +63,14 @@ def _connect() -> sqlite3.Connection:
 
 def _domains(conn: sqlite3.Connection) -> List[str]:
     """Domain vocabulary for the filters + the reclassify dropdown — the union of the
-    configured domains and any actually present, so nothing is unreachable."""
+    configured domains (belief_engine.config, the single parser of belief_domains.yaml)
+    and any actually present, so nothing is unreachable."""
     present = {r[0] for r in conn.execute("SELECT DISTINCT domain FROM user_beliefs WHERE domain IS NOT NULL")}
     try:
-        cfg = yaml.safe_load((get_configs_dir() / "belief_domains.yaml").read_text(encoding="utf-8")) or {}
-        configured = set((cfg.get("domains") or {}).keys()) if isinstance(cfg.get("domains"), dict) else set()
+        from belief_engine.config import list_all_domain_ids
+        configured = set(list_all_domain_ids())
     except Exception:
+        logger.warning("[beliefs] could not load configured belief domains", exc_info=True)
         configured = set()
     return sorted(present | configured)
 
@@ -216,8 +218,10 @@ def beliefs_update():
         sets.append("statement = ?"); params.append(s)
     if "domain" in data:
         d = (data.get("domain") or "").strip()
-        if not d:
-            return jsonify({"error": "invalid domain"}), 400
+        from belief_engine.config import list_all_domain_ids
+        if not d or d not in list_all_domain_ids():
+            return jsonify({"error": f"unknown domain {d!r} — add it to belief_domains.yaml first "
+                                     f"(unconfigured domains get no nightly maintenance)"}), 400
         sets.append("domain = ?"); params.append(d)
     if "locked" in data:
         sets.append("locked = ?"); params.append(1 if data.get("locked") else 0)

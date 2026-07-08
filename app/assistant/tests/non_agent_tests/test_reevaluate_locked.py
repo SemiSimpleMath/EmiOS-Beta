@@ -45,6 +45,21 @@ def routed_db(monkeypatch, tmp_path):
     return db
 
 
+def test_upsert_rejects_unconfigured_domain(routed_db):
+    """Beliefs outside configs/belief_domains.yaml would get no nightly maintenance — the
+    store now refuses to create them (the orphaning the `meal` domain was added to end)."""
+    from belief_engine.store.belief_store import BeliefStore, BeliefUpsertRequest
+
+    store = BeliefStore()
+    with pytest.raises(ValueError, match="unknown belief domain"):
+        store.upsert_belief(BeliefUpsertRequest(
+            domain="other", belief_key="other.orphan",
+            statement="An orphan nothing would ever maintain.",
+            confidence="low", scope="chronic",
+        ))
+    assert store.get_by_key("other.orphan") is None
+
+
 def test_locked_contested_belief_is_skipped_before_any_llm(routed_db, monkeypatch):
     from belief_engine.store.belief_store import BeliefStore, BeliefUpsertRequest
 

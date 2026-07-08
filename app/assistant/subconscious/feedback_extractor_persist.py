@@ -105,8 +105,10 @@ def apply_feedback_extractor_output(output: Dict[str, Any]) -> Dict[str, Any]:
                     })
                     continue
             else:
+                # This is the MEAL feedback lane — an extraction without a domain belongs to
+                # 'meal' (a configured domain; 'other' was an orphan no pipeline maintains).
                 req = BeliefUpsertRequest(
-                    domain=str(ext.get("domain") or "other"),
+                    domain=str(ext.get("domain") or "meal"),
                     belief_key=belief_key,
                     statement=str(ext.get("statement") or "").strip(),
                     confidence=str(ext.get("confidence") or "medium"),

@@ -266,6 +266,16 @@ class BeliefStore:
         """
         from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
+        # A belief's domain must exist in configs/belief_domains.yaml: the nightly pipeline
+        # loops CONFIGURED domains, so a row outside them would get no recompute / reevaluate /
+        # canonicalize maintenance ever (the orphaning the `meal` domain was added to end).
+        from belief_engine.config import list_all_domain_ids
+        if req.domain not in list_all_domain_ids():
+            raise ValueError(
+                f"[BeliefStore] unknown belief domain {req.domain!r} for key={req.belief_key!r} — "
+                f"add it to configs/belief_domains.yaml first so the nightly maintenance covers it."
+            )
+
         now = _now_iso()
         new_id = str(uuid.uuid4())  # used on insert; ignored on conflict
 
