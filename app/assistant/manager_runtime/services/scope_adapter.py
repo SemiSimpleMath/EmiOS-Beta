@@ -669,11 +669,24 @@ class ScopeAdapter:
             raise
 
     def _project_scope_to_runtime_data(self, *, base_data: dict[str, Any], scope: ScopeContext) -> dict[str, Any]:
+        """Stamp the enforcement flag and compute the EFFECTIVE TOOL POLICY.
+
+        scope_context is the single scope representation downstream — the old
+        full-knob projection (resources/entities/writes/delivery flattened
+        into 11 data keys, plus a post-resolution scope_contract copy) fed
+        zero readers and was retired 2026-07-08 (scope audit Step 5). What
+        remains is genuinely merged content, not a copy: task_allowed_tools /
+        task_except_tools / visible_tools carry scope ∩ task-spec ∩ room
+        restrictions, read by the Planner (prompt filtering), ToolCaller
+        (execution gate), and tool_scope_service (visibility).
+
+        data["scope_contract"] stays an INGRESS-side input seed (written by
+        room ingress, read by _resolve_scope_context) — it is not rewritten
+        here.
+        """
         data = dict(base_data) if isinstance(base_data, dict) else {}
         data["scope_contract_enforced"] = True
-        data["scope_contract"] = scope.model_dump()
 
-        # Bridge contract into existing runtime knobs so managers/agents/tools reuse current scaffolding.
         scoped_allowed = list(scope.tools.allowed_tools or [])
         scoped_blocked = list(scope.tools.blocked_tools or [])
 
@@ -726,15 +739,4 @@ class ScopeAdapter:
                 if name not in visible_out:
                     visible_out.append(name)
             data["visible_tools"] = visible_out
-        data["allowed_global_resources"] = list(scope.resources.allowed_global_resources or [])
-        data["allowed_room_resources"] = list(scope.resources.allowed_room_resources or [])
-        data["allowed_entity_cards"] = list(scope.entities.allowed_entity_cards or [])
-        data["pinned_entities"] = list(scope.entities.pinned_entities or [])
-        data["rag_scopes"] = list(scope.resources.resource_groups or [])
-        data["write_unified_log"] = bool(scope.writes.write_unified_log)
-        data["write_kg"] = bool(scope.writes.write_kg)
-        data["allow_fact_extraction"] = bool(scope.writes.allow_fact_extraction)
-        data["auto_send"] = bool(scope.delivery.auto_send)
-        data["allow_initiation"] = bool(scope.delivery.allow_initiation)
-        data["allowed_reply_types"] = list(scope.delivery.allowed_reply_types or [])
         return data

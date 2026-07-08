@@ -103,13 +103,22 @@ otherwise an open vocabulary on purpose.
 - Aborts return `result_type="manager_aborted"` (graceful-exit report or
   cancel); completions return `result_type="final_answer"`.
 
-## Scope representations (known debt)
+## Scope representations
 
-Scope currently travels in three shapes at once: canonical `scope_context`,
-a `scope_contract` copy in data, and ~16 flattened knobs
-(`task_allowed_tools`, `write_kg`, `auto_send`, ...) written by
-`ScopeAdapter._project_scope_to_runtime_data` for pre-scope readers. The
-flattened knobs are the compatibility bridge from the scope audit
-(SCOPE_AUDIT.md Step 5 is the plan to retire them). Until that lands: treat
-`scope_context` as the source of truth and the knobs as read-only
-projections — never write them from agents or nodes.
+`scope_context` is the single scope representation downstream of manager
+ingress. The old full-knob projection (11 flattened resource/entity/write/
+delivery keys plus a post-resolution `scope_contract` copy) fed zero readers
+and was retired 2026-07-08 (the scope audit's Step-5 knob retirement).
+
+What `_project_scope_to_runtime_data` still writes is genuinely merged
+content, not a copy of scope:
+
+- `scope_contract_enforced` — the enforcement flag all three walls check.
+- `task_allowed_tools` / `task_except_tools` / `visible_tools` — the
+  EFFECTIVE tool policy (scope ∩ task-spec ∩ room restrictions), read by
+  the Planner (prompt filtering), ToolCaller (execution gate), and
+  tool_scope_service (visibility). Never write these from agents or nodes.
+
+`data["scope_contract"]` is an ingress-side INPUT seed only (room ingress
+writes it; `ScopeAdapter._resolve_scope_context` reads it while resolving
+the scope). It is not rewritten after resolution.
