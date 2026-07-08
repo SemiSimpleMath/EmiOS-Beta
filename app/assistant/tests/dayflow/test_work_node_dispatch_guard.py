@@ -35,8 +35,9 @@ class TestLegacyItemGuard:
         meta = get_meta(item)
         assert meta["state"] == "closed"
         assert meta.get("state_reason") == "legacy_item_lane_dispatch_retired"
-        # The loop continues to the materializer for the next ready work node.
-        assert bb.get_state_value("next_agent") == "work_node_materializer_node"
+        # One dispatch per tick: no loop-back — the state_map routes onward to finalize.
+        assert bb.get_state_value("next_agent") is None
+        assert bb.get_state_value("acted_on_item_ids") == []
 
     def test_short_id_ref_resolves_before_close(self):
         seed_items([make_dayflow_message(item_id="task:legacy2", state="actionable", short_id=9)])
@@ -53,4 +54,4 @@ class TestLegacyItemGuard:
     def test_empty_ref_no_crash(self):
         bb = FakeBlackboard({"acted_on_item_ids": [], "delegate_to": ""})
         _make_node(bb).action_handler(message=None)
-        assert bb.get_state_value("next_agent") == "work_node_materializer_node"
+        assert bb.get_state_value("next_agent") is None

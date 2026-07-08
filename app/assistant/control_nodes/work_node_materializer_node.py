@@ -2,9 +2,9 @@
 
 The work-object analogue of view_materializer (which built the list from dayflow items). Each ready node
 becomes ONE actionable item (item_id = "work_id::node_id", summary = the node's task) — exactly the shape
-action_selector consumes. The switchboard then reads each and routes it (communicate-with-the-user ->
-create_dayflow_ticket, work -> run_work_node). One node is picked per cycle; the manager loops back here
-for the next until none are ready, then short-circuits to finalize.
+action_selector consumes. The switchboard reads the ONE picked node and routes it
+(communicate-with-the-user -> create_dayflow_ticket, work -> run_work_node); one dispatch per tick, and
+the dispatch signals a prompt follow-up tick when more ready nodes remain.
 
 Lists every state_mover-promoted (actionable) node: plain work, tell-the-user goals, and asks due for
 their first surface or a re-ask. Everything else stays out — the goal node, event/signal waits (the
@@ -27,7 +27,6 @@ class WorkNodeMaterializerNode(ControlNode):
             from work_objects.model import utcnow
             store = get_dayflow_work_store()
             now = utcnow()
-            guard = set(self.blackboard.get_state_value("dispatched_this_tick", []) or [])
             for s in store.list_work_objects():
                 if str(s.get("status") or "").lower() in _TERMINAL_WO_STATES:
                     continue
@@ -42,9 +41,7 @@ class WorkNodeMaterializerNode(ControlNode):
                 except Exception as e:
                     logger.warning("[%s] work object %s not loadable: %s", self.name, s.get("id"), e)
                     continue
-                for item in self._node_items(wo, now):
-                    if item["item_id"] not in guard:   # never re-list a node already dispatched this tick
-                        items.append(item)
+                items.extend(self._node_items(wo, now))
         except Exception as e:
             logger.error("[%s] work-node materialize failed: %s", self.name, e)
             logger.debug("[%s] materialize exception", self.name, exc_info=True)

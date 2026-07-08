@@ -336,6 +336,94 @@ def sweep_zombie_waiting_items(now_utc: Optional[datetime] = None) -> int:
     return closed
 
 
+# A dispatched work node's job is FROZEN when neither its subtree (a progressing worker writes
+# checklist/evidence via the reconcile hook every planner turn) nor the job itself has shown activity
+# for this long. Generous on purpose: one legitimately long tool call makes no writes.
+_WORK_NODE_FROZEN_TIMEOUT_S = 20 * 60
+
+
+def sweep_stuck_work_nodes(now_utc: Optional[datetime] = None) -> int:
+    """Supervise in-flight work-node jobs (one thread per open task; see node_dispatch).
+
+    Two dead states, both -> mark the node ``failed`` so work_repair adjudicates it
+    (retry / escalate / abandon) on this same tick:
+
+    - ORPHANED: the node is ``dispatched`` but no live job thread owns it — a process
+      restart or a thread crash. Threads die with the process; the graph doesn't.
+    - FROZEN: a job thread exists but neither the node's subtree nor the job has shown
+      activity for ``_WORK_NODE_FROZEN_TIMEOUT_S``.
+
+    The zombie thread (frozen case) is abandoned, not killed: its late ``done`` write is
+    rejected by the transition machine (``failed -> done`` is illegal), so no torn state.
+    Goal nodes are skipped — a goal sits ``dispatched`` by design while its work runs.
+
+    Returns count failed.
+    """
+    from app.assistant.dayflow_orchestrator.node_dispatch import job_alive, job_started_at
+    from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
+
+    now = now_utc or datetime.now(timezone.utc)
+    store = get_dayflow_work_store()
+    failed = 0
+
+    for summary in store.list_work_objects():
+        if str(summary.get("status") or "").lower() in ("done", "abandoned"):
+            continue
+        try:
+            wo = store.load(summary["id"])
+        except Exception:
+            logger.error("dispatch_sweeper: work object %s not loadable during supervision",
+                         summary.get("id"), exc_info=True)
+            continue
+        goal_id = wo.goal_node_id
+        for node in wo.nodes.values():
+            if node.id == goal_id or node.status != "dispatched":
+                continue
+            ref = f"{wo.id}::{node.id}"
+            try:
+                if not job_alive(ref):
+                    reason = "orphaned (no live job thread — restart or thread crash)"
+                elif _job_idle_seconds(wo, node, job_started_at(ref), now) > _WORK_NODE_FROZEN_TIMEOUT_S:
+                    reason = f"frozen (no activity for {_WORK_NODE_FROZEN_TIMEOUT_S // 60}+ min)"
+                else:
+                    continue
+                store.apply("set_status", {"work_id": wo.id, "node_id": node.id, "status": "failed"},
+                            actor="dispatch_sweeper")
+                failed += 1
+                logger.error(
+                    "dispatch_sweeper: work node %s marked failed — %s; work_repair adjudicates. (%r)",
+                    ref, reason, (node.title or "")[:80],
+                )
+            except Exception:
+                logger.error("dispatch_sweeper: supervision failed for %s", ref, exc_info=True)
+
+    if failed:
+        logger.info("dispatch_sweeper: failed %d stuck work node(s).", failed)
+    return failed
+
+
+def _job_idle_seconds(wo, node, started_at, now: datetime) -> float:
+    """Seconds since the job last showed life: the newest updated_at across the node and its owned
+    subtree (the worker's checklist/evidence writes), floored by the job's start time."""
+    latest = started_at
+    stack = [node.id]
+    while stack:
+        nid = stack.pop()
+        n = wo.nodes.get(nid)
+        if n is None:
+            continue
+        ts = getattr(n, "updated_at", None)
+        if isinstance(ts, datetime):
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            if latest is None or ts > latest:
+                latest = ts
+        stack.extend(wo.children_of(nid))
+    if latest is None:
+        return float("inf")
+    return (now - latest).total_seconds()
+
+
 def list_active_dispatches() -> List[Dict[str, Any]]:
     """Return a compact list of in-flight dispatch rows.
 

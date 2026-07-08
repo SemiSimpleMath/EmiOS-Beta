@@ -77,10 +77,14 @@ def dayflow_orchestrator_cadence_tick(
         sweep_stale_dispatches,
         sweep_orphaned_dispatched_tasks,
         sweep_zombie_waiting_items,
+        sweep_stuck_work_nodes,
     )
     sweep_stale_dispatches(now_utc=now_utc)
     sweep_orphaned_dispatched_tasks(now_utc=now_utc)
     sweep_zombie_waiting_items(now_utc=now_utc)
+    # Supervise in-flight work-node job threads (orphaned/frozen -> failed) BEFORE the pipeline runs,
+    # so work_repair adjudicates the casualties on this same tick.
+    sweep_stuck_work_nodes(now_utc=now_utc)
 
     # Build minimal extras (day_of_week). Per-agent prep nodes own the rest.
     blackboard_extras = build_dayflow_blackboard_extras()

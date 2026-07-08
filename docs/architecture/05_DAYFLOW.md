@@ -39,14 +39,17 @@ DayflowScheduler (event-driven, debounced; precise per-node time wakes; work-pro
            -> work_finalizer_node -> work_architect_node -> work_repair_node
            -> state_mover -> state_transition_guard -> state_mover_persist (node promotion + event wakes)
            -> work_node_materializer -> action_selector -> switchboard -> work_node_dispatch
-                 ^------------------- loop: one node per cycle -------------------/
+                (ONE dispatch per tick; the worker detaches onto its own job thread)
            -> post_room_finalize -> final_answer
 ```
 
 The pipeline is fixed by the manager's `state_map`
 (`multi_agents/dayflow_orchestrator_manager/config.yaml`), not by free agent handoffs. The
-materializer/selector/switchboard/dispatch segment LOOPS — one ready node per cycle — until nothing is
-ready, then short-circuits to finalize.
+materializer/selector/switchboard/dispatch segment dispatches ONE node per tick: the worker runs on its
+own job thread and the tick proceeds to finalize; when more ready nodes remain, the work-progress
+follow-up brings the next tick in minutes. Ticks stay mutually exclusive (one planning pass at a time) —
+concurrency comes from job threads overlapping ACROSS ticks, with every pass seeing the in-flight state
+(`dispatched` nodes are structurally excluded from the ready list).
 
 ## The work object lifecycle
 
@@ -76,7 +79,12 @@ picks ONE; the switchboard reads the node's goal and routes it:
 - **everything else** (research, device/calendar/todo changes, composing and SENDING email/text to a
   recipient) -> `run_work_node` — the worker (`work_emi_team_manager`) picks its own sub-managers/tools.
 `node_dispatch.dispatch_node` is the single dispatch core, shared by the tick loop and the scheduler's
-off-tick time wakes, so a node routes identically wherever it fires.
+off-tick time wakes, so a node routes identically wherever it fires. Worker dispatch is ONE THREAD PER
+OPEN TASK: the node is claimed (`dispatched`) synchronously, the worker runs on a detached job thread,
+and the graph is the return channel. Each tick supervises the in-flight jobs
+(`sweep_stuck_work_nodes`): an orphaned job (restart / thread death) or a frozen one (no subtree/job
+activity for 20+ min) fails the node for work_repair — and the transition machine rejects a zombie
+thread's late writes (`failed -> done` is illegal), so no torn state.
 
 **Asks (user_reply).** A ticketed node parks `waiting + wake_kind=user_reply + wake_at=<re-ask time>`
 (currently +1h). The reply is matched back by `trigger_context.work_node`, recorded as an EVIDENCE child
@@ -105,9 +113,9 @@ the node failed loudly rather than silently retrying.
 - **Precise work-node wakes**: one APScheduler one-shot per time-gated node (`dayflow_work_wake::` jobs,
   re-armed idempotently after every tick, restart-safe from the durable store). Firing is `is_ready`-gated
   and routes through the SAME switchboard as tick dispatch (`route_and_dispatch`).
-- **Work-progress follow-up**: when a node reaches a result (or a reply is recorded),
-  `dayflow_work_progress` schedules a prompt NON-poke tick (~MIN_GAP), so a sequential chain advances in
-  minutes — finalize -> promote dependents -> dispatch — instead of one step per ceiling tick.
+- **Work-progress follow-up**: when a node reaches a result, a reply is recorded, or a dispatch leaves
+  more ready nodes waiting, `dayflow_work_progress` schedules a prompt NON-poke tick (~MIN_GAP), so
+  sequential chains and ready queues advance in minutes instead of one step per ceiling tick.
 - **Item timers** still wake the scheduler for `waiting`/`watching` items (fast-tick promotes one item
   deterministically); ancient overdue items (>24h) are ignored as broken rather than hot-looping.
 - **Failure escalation**: 3 consecutive tick failures surface one owner-visible ticket via the ticket

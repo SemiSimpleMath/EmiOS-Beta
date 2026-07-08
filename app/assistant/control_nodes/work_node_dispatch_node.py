@@ -1,19 +1,22 @@
-"""work_node_dispatch_node — carry out the switchboard's routing decision for ONE picked work node.
+"""work_node_dispatch_node — carry out the switchboard's routing decision for THE ONE work node this
+tick dispatches.
 
 Reads `delegate_to` (the tool the switchboard picked for the node) plus the picked `work_id::node_id` and
 hands both to the shared dispatch (node_dispatch.dispatch_node): create_dayflow_ticket -> surface a ticket
-to the user (awaits their response); else -> run the node via the worker. The SAME dispatch is used by the
-scheduler's precise time-wake (via
-node_dispatch.route_and_dispatch), so a node routes identically whether it's picked in a tick or woken
-off-tick. Then routes back to the materializer for the next ready node; each node is dispatched at most once
-per tick (dispatched_this_tick guard), and the materializer short-circuits to finalize when none remain.
+to the user (awaits their response); else -> the worker runs on its OWN job thread and this tick moves on.
+The SAME dispatch is used by the scheduler's precise time-wake (node_dispatch.route_and_dispatch), so a
+node routes identically whether it's picked in a tick or woken off-tick.
+
+ONE dispatch per tick — the master_room model: each planning pass commits one job; concurrency comes from
+job threads overlapping ACROSS ticks, with every pass seeing the in-flight state (`dispatched` nodes are
+structurally excluded from the ready list). When more ready nodes remain, the work-progress signal brings
+the next tick in minutes. The tick then proceeds to finalize (the state_map routes onward); the work-lane
+keys are cleared here so post_room's item-lane bookkeeping never sees a work ref.
 """
 from app.assistant.control_nodes.control_node import ControlNode
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
-
-_MATERIALIZER = "work_node_materializer_node"
 
 
 class WorkNodeDispatchNode(ControlNode):
@@ -23,33 +26,45 @@ class WorkNodeDispatchNode(ControlNode):
         acted = self.blackboard.get_state_value("acted_on_item_ids", []) or []
         work_id = node_id = None
         ref = str(acted[0]) if acted else ""
+        # The work lane consumes the pick; post_room's acted-on bookkeeping is item-lane only and would
+        # otherwise try to close a nonexistent item row named like a work ref.
+        self.blackboard.update_state_value("acted_on_item_ids", [])
         if "::" not in ref:
             # A plain dayflow ITEM reached the work dispatch. The item lane has no dispatch tail anymore
             # (unification step C pending — the evaluator is the sole intake->action path and should have
             # converted this). Close it LOUDLY so it can't re-fire every pass; the evaluator re-mints from
             # current context if the need is still alive.
             self._close_legacy_item(ref)
-            self.blackboard.update_state_value("next_agent", _MATERIALIZER)
-            self.blackboard.update_state_value("last_agent", self.name)
-            return
-        try:
-            work_id, node_id = ref.split("::", 1)
-            self._guard_add(work_id, node_id)   # never re-dispatch this node within the tick
-            from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
-            from app.assistant.dayflow_orchestrator.node_dispatch import dispatch_node
-            store = get_dayflow_work_store()
-            dispatch_node(store, work_id, node_id, delegate_to)
-        except Exception as e:
-            # Fail LOUD and FAIL THE NODE — never swallow into a silent retry. A node left ready after a
-            # dispatch error re-dispatches every tick (the mechanism that turned the notify transition bug
-            # into duplicate-notification spam). Mark it failed so it leaves the ready set and work_repair can
-            # adjudicate it; we still drain the remaining ready nodes this tick rather than aborting.
-            logger.error("[%s] node dispatch failed for %s::%s: %s",
-                         self.name, work_id, node_id, e, exc_info=True)
-            self._fail_node(work_id, node_id)
-        # Loop back to materialize + pick the next ready node (this one is guarded / failed / done).
-        self.blackboard.update_state_value("next_agent", _MATERIALIZER)
+        else:
+            try:
+                work_id, node_id = ref.split("::", 1)
+                from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
+                from app.assistant.dayflow_orchestrator.node_dispatch import dispatch_node
+                store = get_dayflow_work_store()
+                dispatch_node(store, work_id, node_id, delegate_to)
+            except Exception as e:
+                # Fail LOUD and FAIL THE NODE — never swallow into a silent retry. A node left ready after
+                # a dispatch error re-dispatches every pass (the mechanism that turned the notify
+                # transition bug into duplicate-notification spam). Mark it failed so it leaves the ready
+                # set and work_repair adjudicates it next tick.
+                logger.error("[%s] node dispatch failed for %s::%s: %s",
+                             self.name, work_id, node_id, e, exc_info=True)
+                self._fail_node(work_id, node_id)
+        self._signal_if_more_ready(ref)
         self.blackboard.update_state_value("last_agent", self.name)
+
+    def _signal_if_more_ready(self, dispatched_ref):
+        """More ready work nodes were listed this tick beyond the one dispatched — ask the scheduler for
+        a prompt follow-up tick so the next one dispatches in minutes, not at the ceiling."""
+        try:
+            items = self.blackboard.get_state_value("actionable_items", []) or []
+            remaining = [i for i in items
+                         if "::" in str(i.get("item_id") or "") and i.get("item_id") != dispatched_ref]
+            if remaining:
+                from app.assistant.dayflow_orchestrator.node_dispatch import signal_work_progress
+                signal_work_progress(f"more_ready:{len(remaining)}")
+        except Exception as e:
+            logger.warning("[%s] more-ready signal failed: %s", self.name, e)
 
     def _close_legacy_item(self, ref):
         """Close a legacy dayflow item that reached the work dispatch (the retired lane's tail). Loud by
@@ -71,8 +86,8 @@ class WorkNodeDispatchNode(ControlNode):
 
     def _fail_node(self, work_id, node_id):
         """Best-effort: mark a node failed after a dispatch error so it leaves the ready set (work_repair
-        adjudicates it) rather than silently re-dispatching every tick. No node to fail (unparseable ref) or
-        an already-terminal node -> the ERROR log above is the loud signal."""
+        adjudicates it) rather than silently re-dispatching every pass. No node to fail (unparseable ref)
+        or an already-terminal node -> the ERROR log above is the loud signal."""
         if not work_id or not node_id:
             return
         try:
@@ -84,8 +99,3 @@ class WorkNodeDispatchNode(ControlNode):
                          self.name, work_id, node_id)
         except Exception as e2:
             logger.error("[%s] could not mark %s::%s failed: %s", self.name, work_id, node_id, e2)
-
-    def _guard_add(self, work_id, node_id):
-        g = list(self.blackboard.get_state_value("dispatched_this_tick", []) or [])
-        g.append(f"{work_id}::{node_id}")
-        self.blackboard.update_state_value("dispatched_this_tick", g)
