@@ -8,11 +8,16 @@ Two halves, one pass (shared by the routine + the CLI):
    Idempotent: the meal pod is stamped metadata.feedback_asked_at_utc, and the
    question_id -> meal_pod mapping is kept in a small state file.
 
-2. INGEST: for each asked meal question, find the user's reply (the first user
-   message in master_room within ANSWER_WINDOW_HOURS of when the bridge asked it)
-   and mint a feedback.comment pod targeting that meal pod — exactly as a /meals
-   comment would. feedback_extractor then turns it into beliefs. This is the
-   answer-ingestion "harder half" that closes the loop: ask -> answer -> belief.
+2. INGEST: for each asked meal question, collect the user's messages in
+   master_room within ANSWER_WINDOW_HOURS of the ask and JUDGE them with
+   subconscious::answer_matcher (the same cheap judge the subconscious answer
+   capture uses — it biases to no_answer when unsure). Only a verdict of
+   'answered' mints a feedback.comment pod targeting the meal pod, using the
+   matcher's extracted answer_text; feedback_extractor then turns it into
+   beliefs. Judging is what keeps an unrelated first message from becoming a
+   junk belief. An answered verdict ALSO confirms the meal actually happened:
+   the pod gets served_confirmed_at_utc and its ingredients are decremented
+   from inventory (idempotent against the grocery sync's own application).
 
 State: resources/subconscious/resource_meal_feedback_state.json (gitignored).
 Fails LOUD on a corrupt state file (silently resetting would re-ask every meal).
@@ -21,7 +26,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_repo_root
@@ -218,14 +223,24 @@ def _ingest(state: Dict[str, Any], now_utc: datetime, summary: Dict[str, Any], *
             continue                  # not surfaced by the bridge yet — keep waiting
 
         until = asked_at + timedelta(hours=ANSWER_WINDOW_HOURS)
-        reply = _first_user_reply_after(asked_at, min(until, now_utc))
-        if reply:
-            if not dry_run:
+        candidates = _candidate_replies(asked_at, min(until, now_utc))
+        if candidates:
+            if dry_run:
+                # Preview: report a capture opportunity without spending the
+                # judge call or mutating anything.
+                ingested += 1
+                continue
+            verdict = _judge_reply(info, asked_at=asked_at, candidates=candidates)
+            answer_text = str((verdict or {}).get("answer_text") or "").strip()
+            if isinstance(verdict, dict) and verdict.get("verdict") == "answered" and answer_text:
                 mint_feedback_comment(
                     target_pod_id=info["meal_pod_id"],
-                    text=reply,
+                    text=answer_text,
                     actor="user",
                 )
+                # The judged answer doubles as confirmation the meal HAPPENED:
+                # stamp the pod + decrement its ingredients from inventory.
+                _confirm_meal_served(info["meal_pod_id"])
                 mark_dismissed(qid, reason="answered_via_chat")
                 del active[qid]
                 # Answering one meal question makes its same-dish siblings moot
@@ -237,7 +252,14 @@ def _ingest(state: Dict[str, Any], now_utc: datetime, summary: Dict[str, Any], *
                 dropped += _cancel_sibling_dishes(
                     active, answered_toks, skip_qid=qid, mark_dismissed=mark_dismissed
                 )
-            ingested += 1
+                ingested += 1
+            elif now_utc > until:
+                # Judged, nothing in the window was the answer — give up.
+                mark_dismissed(qid, reason="unanswered_window_passed")
+                del active[qid]
+                dropped += 1
+            # else: candidates exist but no answer yet — later messages get
+            # judged on the next pass.
         elif now_utc > until:
             # Asked, window passed, no reply — give up so it doesn't linger.
             if not dry_run:
@@ -265,12 +287,15 @@ def _question_status(qid: str):
         session.close()
 
 
-def _first_user_reply_after(asked_at: datetime, until: datetime) -> Optional[str]:
-    """First non-empty user message in master_room within (asked_at, until].
-    A reply right after the assistant's proactive 'how was dinner?' is almost
-    certainly the answer; feedback_extractor filters quality downstream."""
+_CANDIDATE_REPLY_CAP = 12
+
+
+def _candidate_replies(asked_at: datetime, until: datetime) -> List[Dict[str, Any]]:
+    """User messages in master_room within (asked_at, until], oldest first —
+    the answer_matcher's working set (same shape the subconscious answer
+    capture feeds it)."""
     if until <= asked_at:
-        return None
+        return []
     try:
         from sqlalchemy import select, and_
         from app.assistant.database.db_handler import UnifiedLog2026
@@ -285,23 +310,85 @@ def _first_user_reply_after(asked_at: datetime, until: datetime) -> Optional[str
                     UnifiedLog2026.timestamp <= until,
                 ))
                 .order_by(UnifiedLog2026.timestamp.asc())
-                .limit(20)
+                .limit(_CANDIDATE_REPLY_CAP * 2)
             )
             rows = session.execute(stmt).scalars().all()
         finally:
             session.close()
     except Exception as e:
         logger.warning("[meal_feedback] reply fetch failed: %s", e)
-        return None
+        return []
 
+    out: List[Dict[str, Any]] = []
     for r in rows:
         room = getattr(r, "room_id", None)
         if room not in (None, "", "master_room"):
             continue
         msg = (getattr(r, "message", "") or "").strip()
-        if msg:
-            return msg[:1000]
-    return None
+        if not msg:
+            continue
+        ts = getattr(r, "timestamp", None)
+        out.append({
+            "id": str(getattr(r, "id", "") or ""),
+            "timestamp": ts.isoformat() if ts else "",
+            "text": msg[:600],
+        })
+        if len(out) >= _CANDIDATE_REPLY_CAP:
+            break
+    return out
+
+
+def _judge_reply(info: Dict[str, Any], *, asked_at: datetime,
+                 candidates: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """One subconscious::answer_matcher call: which candidate (if any) answers
+    'How was <dish>?'. The matcher biases to partial/no_answer when unsure —
+    exactly the guard that keeps an unrelated chat message from being minted
+    as meal feedback and distilled into a junk belief."""
+    from app.assistant.routine_handlers.subconscious import _run_subconscious_agent
+
+    question_text = _question_text({
+        "dish": info.get("dish") or "",
+        "meal_window": info.get("meal_window") or "",
+        "date": info.get("date") or "",
+    })
+    agent_input = {
+        "question_text": question_text,
+        "asked_at": asked_at.isoformat() if asked_at else "",
+        "why_asking": "meal feedback — how the dish landed with the household",
+        "related_concern_title": "",
+        "candidate_messages": candidates,
+    }
+    return _run_subconscious_agent(
+        handler_label="meal_feedback_matcher",
+        agent_name="subconscious::answer_matcher",
+        context=agent_input,
+        scope_id="subconscious::meal_feedback_matcher",
+        actor_id="subconscious::meal_feedback",
+    )
+
+
+def _confirm_meal_served(meal_pod_id: str) -> None:
+    """A judged answer to 'How was <dish>?' confirms the meal actually
+    HAPPENED — the confirm loop the planned-history proxies have been waiting
+    for. Stamp the pod and decrement its ingredients from inventory
+    (apply_meal_consumption is idempotent: it no-ops when the grocery sync
+    already applied this pod)."""
+    from app.assistant.pod_store.pod_store import PodStore
+    from app.assistant.subconscious.grocery_inventory import apply_meal_consumption
+
+    store = PodStore()
+    pod = store.get(meal_pod_id)
+    if pod is not None:
+        meta = dict(pod.metadata or {})
+        if not meta.get("served_confirmed_at_utc"):
+            meta["served_confirmed_at_utc"] = datetime.now(timezone.utc).isoformat()
+            pod.metadata = meta
+            store.put(pod)
+    result = apply_meal_consumption(meal_pod_id)
+    logger.info(
+        "[meal_feedback] served-confirmed %s (consumption: %s)",
+        meal_pod_id, result.get("status"),
+    )
 
 
 # ── state ────────────────────────────────────────────────────────────────────
@@ -316,5 +403,5 @@ def _load_state() -> Dict[str, Any]:
 
 def _save_state(state: Dict[str, Any]) -> None:
     path = get_repo_root() / _STATE_REL
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+    from app.assistant.utils.atomic_write import write_json_atomic
+    write_json_atomic(path, state)

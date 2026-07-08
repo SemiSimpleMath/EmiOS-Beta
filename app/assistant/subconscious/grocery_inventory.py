@@ -40,6 +40,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from app.assistant.utils.atomic_write import write_json_atomic
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_repo_root
 
@@ -47,6 +48,10 @@ logger = get_logger(__name__)
 
 
 _INVENTORY_REL = "resources/subconscious/resource_grocery_inventory.json"
+
+# History (consumed + decayed items) is append-only; keep the newest slice so
+# the file doesn't grow forever. 300 ≈ months of household turnover.
+_HISTORY_KEEP = 300
 
 
 # Per-category decay defaults (days). Conservative side — the proposer can
@@ -103,21 +108,25 @@ def categorize_item(name: str) -> str:
 
 
 def load_inventory() -> Dict[str, Any]:
+    """Load the inventory; a MISSING file bootstraps empty, a CORRUPT file
+    raises. The old behavior (parse failure → empty inventory) meant the next
+    mutation — the DAILY 04:30 decay pass — saved the empty state and
+    permanently discarded every item + the history. Its sibling state loaders
+    (grocery sync state, meal-feedback state, easy-meals) already fail loud;
+    the atomic save below makes corruption a should-never state."""
     path = get_repo_root() / _INVENTORY_REL
     if not path.is_file():
         return _empty_inventory()
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception as e:
-        logger.error("[grocery] inventory parse failed: %s", e)
-        return _empty_inventory()
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def save_inventory(inv: Dict[str, Any]) -> None:
     inv["last_updated_utc"] = datetime.now(timezone.utc).isoformat()
+    history = inv.get("history")
+    if isinstance(history, list) and len(history) > _HISTORY_KEEP:
+        inv["history"] = history[-_HISTORY_KEEP:]
     path = get_repo_root() / _INVENTORY_REL
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(inv, indent=2, ensure_ascii=False), encoding="utf-8")
+    write_json_atomic(path, inv)
 
 
 def _empty_inventory() -> Dict[str, Any]:
@@ -361,18 +370,31 @@ def _normalize_item_name(raw: str) -> str:
     return s.lower().strip(" ,.;-")
 
 
+def _item_tokens(name: str) -> set:
+    """Significant word tokens (≥3 chars) of an item name, lowercased."""
+    return {t for t in re.split(r"[^a-z0-9]+", (name or "").lower()) if len(t) >= 3}
+
+
+def _names_match(needle: str, item_name: str) -> bool:
+    """Token-subset match in either direction: 'salmon' consumes 'wild salmon'
+    and 'sweet potato' consumes 'potato' — but 'pepper' no longer consumes
+    'pepperoni' the way bidirectional SUBSTRING matching did (whole tokens
+    must be equal, not merely contained). Names with no ≥3-char tokens
+    compare as exact lowercase strings."""
+    n_toks, i_toks = _item_tokens(needle), _item_tokens(item_name)
+    if not n_toks or not i_toks:
+        return (needle or "").lower().strip() == (item_name or "").lower().strip()
+    return n_toks <= i_toks or i_toks <= n_toks
+
+
 def _find_item_matching(items: List[Dict[str, Any]], needle: str) -> Optional[Dict[str, Any]]:
-    """Substring match against active items by name. Returns the first match
+    """Token match against active items by name. Returns the first match
     (oldest acquired_at), so we consume oldest first naturally."""
     needle = needle.lower().strip()
     if not needle:
         return None
     candidates = [i for i in items if i.get("consumed_at_utc") is None]
-    matches = []
-    for item in candidates:
-        name = (item.get("name") or "").lower()
-        if needle in name or name in needle:
-            matches.append(item)
+    matches = [i for i in candidates if _names_match(needle, i.get("name") or "")]
     if not matches:
         return None
     # Oldest first (FIFO)

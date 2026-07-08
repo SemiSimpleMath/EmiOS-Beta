@@ -77,13 +77,26 @@ def test_produce_skips_already_asked(monkeypatch):
     assert summary["asked"] == 0
 
 
-def test_ingest_mints_feedback_from_reply(monkeypatch):
+def test_ingest_mints_feedback_from_judged_answer(monkeypatch):
     now = datetime(2026, 6, 8, 12, 0, tzinfo=timezone.utc)
     asked_at = now - timedelta(minutes=10)
     state = {"active": {"qid-1": {"meal_pod_id": "datapod:intention.meal:t1", "dish": "Tacos"}}}
 
     monkeypatch.setattr(mfr, "_question_status", lambda qid: ("asked", asked_at))
-    monkeypatch.setattr(mfr, "_first_user_reply_after", lambda a, u: "It was great, kids loved it")
+    monkeypatch.setattr(
+        mfr, "_candidate_replies",
+        lambda a, u: [{"id": "m-1", "timestamp": "", "text": "It was great, kids loved it"}],
+    )
+    # The answer_matcher judged the reply as the answer.
+    monkeypatch.setattr(
+        mfr, "_judge_reply",
+        lambda info, *, asked_at, candidates: {
+            "verdict": "answered", "answer_text": "It was great, kids loved it",
+            "answer_message_id": "m-1",
+        },
+    )
+    confirmed = []
+    monkeypatch.setattr(mfr, "_confirm_meal_served", lambda pod_id: confirmed.append(pod_id))
 
     minted = {}
     monkeypatch.setattr(
@@ -103,8 +116,42 @@ def test_ingest_mints_feedback_from_reply(monkeypatch):
     assert minted["target"] == "datapod:intention.meal:t1"
     assert "great" in minted["text"]
     assert minted["actor"] == "user"
+    # The judged answer confirms the meal happened (served stamp + consumption).
+    assert confirmed == ["datapod:intention.meal:t1"]
     assert dismissed and dismissed[0] == ("qid-1", "answered_via_chat")
     assert "qid-1" not in state["active"]          # cleared so it isn't re-ingested
+
+
+def test_ingest_unrelated_reply_is_not_minted(monkeypatch):
+    """The judge is the junk-belief guard: a chat message in the window that
+    is NOT the answer must not become meal feedback. Inside the window the
+    question keeps waiting for later messages."""
+    now = datetime(2026, 6, 8, 12, 0, tzinfo=timezone.utc)
+    asked_at = now - timedelta(minutes=10)
+    state = {"active": {"qid-2": {"meal_pod_id": "datapod:intention.meal:t2", "dish": "Salmon"}}}
+
+    monkeypatch.setattr(mfr, "_question_status", lambda qid: ("asked", asked_at))
+    monkeypatch.setattr(
+        mfr, "_candidate_replies",
+        lambda a, u: [{"id": "m-9", "timestamp": "", "text": "can you check my calendar for tomorrow"}],
+    )
+    monkeypatch.setattr(
+        mfr, "_judge_reply",
+        lambda info, *, asked_at, candidates: {"verdict": "no_answer", "answer_text": ""},
+    )
+    monkeypatch.setattr(
+        "app.assistant.subconscious.feedback_service.mint_feedback_comment",
+        lambda **k: (_ for _ in ()).throw(AssertionError("unrelated reply must not mint feedback")),
+    )
+    monkeypatch.setattr(
+        mfr, "_confirm_meal_served",
+        lambda pod_id: (_ for _ in ()).throw(AssertionError("must not confirm served")),
+    )
+
+    summary = {}
+    mfr._ingest(state, now, summary, dry_run=False)
+    assert summary["ingested"] == 0
+    assert "qid-2" in state["active"]              # still waiting inside the window
 
 
 def test_ingest_drops_after_window_with_no_reply(monkeypatch):
@@ -112,7 +159,7 @@ def test_ingest_drops_after_window_with_no_reply(monkeypatch):
     asked_at = now - timedelta(hours=mfr.ANSWER_WINDOW_HOURS + 1)   # window passed
     state = {"active": {"qid-9": {"meal_pod_id": "datapod:intention.meal:t9"}}}
     monkeypatch.setattr(mfr, "_question_status", lambda qid: ("asked", asked_at))
-    monkeypatch.setattr(mfr, "_first_user_reply_after", lambda a, u: None)
+    monkeypatch.setattr(mfr, "_candidate_replies", lambda a, u: [])
     dismissed = []
     monkeypatch.setattr(
         "app.assistant.pending_questions.store.mark_dismissed",

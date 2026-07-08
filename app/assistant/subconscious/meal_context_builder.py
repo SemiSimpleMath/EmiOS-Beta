@@ -635,25 +635,74 @@ def _build_recent_planned_meals() -> str:
     return "\n".join(out).rstrip()
 
 
+_FAST_FOOD_SLOT_TYPES = {"fast_food", "takeout", "dine_out"}
+
+
+def _fast_food_pressure(plan_pods, intent_pods, *, today) -> Dict[str, Any]:
+    """Pure derivation: (date, window)-keyed non-home meals over the last 7
+    days. Plan slots give the baseline type per slot; intention.meal pods
+    OVERLAY it (the daily proposal is the fresher signal — it can both add a
+    fast-food meal the plan didn't have and replace a planned fast-food slot
+    with a home cook). Returns {count, hits, window}."""
+    start_iso = (today - timedelta(days=6)).isoformat()
+    end_iso = today.isoformat()
+    typed: Dict[tuple, Dict[str, str]] = {}
+    for p in plan_pods:
+        meta = getattr(p, "metadata", None) or {}
+        for slot in meta.get("slots") or []:
+            d = str(slot.get("date") or "")
+            if not (start_iso <= d <= end_iso):
+                continue
+            slot_type = str(slot.get("slot_type") or "").lower()
+            if slot_type:
+                key = (d, str(slot.get("meal_window") or "").lower())
+                typed[key] = {"type": slot_type, "dish": str(slot.get("dish") or "")}
+    for p in intent_pods:
+        meta = getattr(p, "metadata", None) or {}
+        d = str(meta.get("date") or "")
+        if not (start_iso <= d <= end_iso):
+            continue
+        source = str(meta.get("source") or "").lower()
+        if source:
+            key = (d, str(meta.get("meal_window") or "").lower())
+            typed[key] = {"type": source, "dish": str(meta.get("dish") or "")}
+    hits = sorted(
+        (d, w, v["type"], v["dish"])
+        for (d, w), v in typed.items()
+        if v["type"] in _FAST_FOOD_SLOT_TYPES
+    )
+    return {"count": len(hits), "hits": hits, "window": (start_iso, end_iso)}
+
+
 def _build_fast_food_count() -> str:
-    """Scan diet_log for delivery/restaurant entries in last 7 days.
-
-    For Phase 1a, this is approximate — reads the diet_log markdown looking
-    for 'delivery' or 'restaurant' tags. Better integration once diet_log
-    has structured source labels.
-    """
-    md_path = get_repo_root() / "resources" / "dayflow_pipeline_outputs" / "resource_diet_log_today_text.md"
-    if not md_path.is_file():
-        return "0 (no diet log to scan)"
+    """Planned/proposed fast-food, takeout and dine-out meals in the last 7
+    days, derived from plan.weekly_meals slots overlaid with intention.meal
+    proposals. Replaces the old rough scan, which counted distinct keywords
+    in TODAY's diet-log file while labeled as a 7-day count."""
     try:
-        text = md_path.read_text(encoding="utf-8").lower()
-    except Exception:
-        return "0 (error)"
+        from app.assistant.pod_store.pod_store import PodStore
+        store = PodStore()
+        plan_pods = store.query(kind="plan.weekly_meals", since="21d", limit=6)
+        intent_pods = store.query(kind="intention.meal", since="10d", limit=100)
+    except Exception as e:
+        logger.warning("[meal_context] fast-food pressure fetch failed: %s", e)
+        return "(fast-food pressure unavailable — pod store unreadable)"
 
-    # Crude but useful for v0
-    keywords = ("delivery", "doordash", "uber eats", "restaurant", "fast food", "mcd", "takeout")
-    count = sum(1 for k in keywords if k in text)
-    return f"{count} (rough scan; structured fast-food tagging is Phase 1b)"
+    today = get_local_time().date()
+    pressure = _fast_food_pressure(plan_pods, intent_pods, today=today)
+    start_iso, end_iso = pressure["window"]
+    if not pressure["count"]:
+        return (
+            f"0 planned fast-food/takeout/dine-out meals in the last 7 days "
+            f"({start_iso}..{end_iso})"
+        )
+    lines = [
+        f"{pressure['count']} planned fast-food/takeout/dine-out meal(s) in the "
+        f"last 7 days ({start_iso}..{end_iso}):"
+    ]
+    for d, w, meal_type, dish in pressure["hits"]:
+        lines.append(f"- {d} {w}: [{meal_type}] {dish}".rstrip())
+    return "\n".join(lines)
 
 
 # ── Phase 1c.1: external lists (Ralphs standing + agent's weekly) ─────────
@@ -688,8 +737,8 @@ def load_weekly_doc_state() -> Dict[str, Any]:
 
 def save_weekly_doc_state(state: Dict[str, Any]) -> None:
     path = get_repo_root() / _WEEKLY_DOC_STATE_REL
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+    from app.assistant.utils.atomic_write import write_json_atomic
+    write_json_atomic(path, state)
 
 
 def _build_ralphs_standing_list() -> str:

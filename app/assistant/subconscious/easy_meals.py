@@ -64,8 +64,8 @@ def load_easy_meals() -> Dict[str, Any]:
 def save_easy_meals(data: Dict[str, Any]) -> None:
     data["last_updated_utc"] = datetime.now(timezone.utc).isoformat()
     path = get_repo_root() / _EASY_MEALS_REL
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    from app.assistant.utils.atomic_write import write_json_atomic
+    write_json_atomic(path, data)
 
 
 def _seed_from_registry() -> List[Dict[str, Any]]:

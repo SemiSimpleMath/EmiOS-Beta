@@ -71,12 +71,15 @@ def run_grocery_sync_pass(
         return summary
 
     applied = 0
+    skipped_low_confidence = 0
     for intent in intents:
         if intent.get("confidence") == "low":
+            skipped_low_confidence += 1
             continue
         _apply_intent(intent)
         applied += 1
     summary["intents_applied"] = applied
+    summary["intents_skipped_low_confidence"] = skipped_low_confidence
     summary["decay"] = apply_decay()
 
     # Mark these chat ids scanned so we don't re-apply on the next tick (idempotency).
@@ -205,5 +208,5 @@ def _load_sync_state() -> Dict[str, Any]:
 
 def _save_sync_state(state: Dict[str, Any]) -> None:
     path = get_repo_root() / _SYNC_STATE_REL
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+    from app.assistant.utils.atomic_write import write_json_atomic
+    write_json_atomic(path, state)
