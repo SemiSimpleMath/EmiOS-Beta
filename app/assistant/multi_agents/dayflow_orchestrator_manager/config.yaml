@@ -18,8 +18,6 @@ agents:
     class: Agent
   - name: dayflow_orchestrator::strategic_planner_wo
     class: Agent
-  - name: dayflow_orchestrator::relevance_cleaner
-    class: Agent
   - name: dayflow_orchestrator::plan_mode
     class: Agent
   - name: dayflow_orchestrator::switchboard
@@ -36,8 +34,6 @@ control_nodes:
     class: IntakeTriagePrepNode
   - name: state_mover_prep_node
     class: StateMoverPrepNode
-  - name: relevance_cleaner_prep_node
-    class: RelevanceCleanerPrepNode
   - name: state_transition_guard_node
     class: StateTransitionGuardNode
   - name: triage_spawn_guard_node
@@ -66,10 +62,6 @@ control_nodes:
     class: WorkNodeMaterializerNode
   - name: work_node_dispatch_node
     class: WorkNodeDispatchNode
-  - name: relevance_cleaner_gate_node
-    class: RelevanceCleanerGateNode
-  - name: relevance_cleaner_persist_node
-    class: RelevanceCleanerPersistNode
   - name: action_selector_router_node
     class: ActionSelectorRouterNode
   - name: plan_mode_final_router_node
@@ -165,10 +157,9 @@ flow_config:
     "dayflow_orchestrator::state_mover": "state_transition_guard_node"
     "state_transition_guard_node": "state_mover_persist_node"
     "state_mover_persist_node": "work_node_materializer_node"
-    "relevance_cleaner_gate_node": "view_materializer_node"
-    "relevance_cleaner_prep_node": "dayflow_orchestrator::relevance_cleaner"
-    "dayflow_orchestrator::relevance_cleaner": "relevance_cleaner_persist_node"
-    "relevance_cleaner_persist_node": "view_materializer_node"
+    # relevance_cleaner was retired at the work-object cutover (it cleaned ITEMS; stale items now age
+    # out via the freshness windows + tick sweeps). Its agent/node files remain under
+    # agents/dayflow_orchestrator/relevance_cleaner + control_nodes/relevance_cleaner_*.py, unwired.
     "view_materializer_node": "dayflow_orchestrator::action_selector"
     "work_node_materializer_node": "dayflow_orchestrator::action_selector"
     "dayflow_orchestrator::action_selector": "action_selector_router_node"

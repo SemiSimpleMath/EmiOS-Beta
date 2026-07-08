@@ -20,27 +20,6 @@ _MAX_REPAIRS_PER_TICK = 3
 _TERMINAL_WO_STATES = {"done", "abandoned"}
 
 
-def _extract_user_replies(wo) -> str:
-    """The user's actual replies on the failed step(s). `_record_replies` stamps them onto the node content
-    as '[User replied: ...]', but render_work_portfolio truncates the node body to 400 chars — so a decline
-    that sits past the cutoff (after a pile of re-issue stamps) never reaches the adjudicator, and it
-    re-escalates forever. Surface them UN-truncated so a 'do not attempt' is seen and honored."""
-    import re
-    seen, replies = set(), []
-    for n in wo.nodes.values():
-        if n.status != "failed":
-            continue
-        for m in re.findall(r"\[User replied:\s*(.+?)\]", n.content or "", flags=re.DOTALL):
-            r = " ".join(m.split()).strip()
-            if r and r not in seen:
-                seen.add(r)
-                replies.append(r)
-    if not replies:
-        return ""
-    return ("USER'S REPLIES on the failed step (a DECLINE / 'stop' / 'do not attempt' here is AUTHORITATIVE — "
-            "abandon_goal, do NOT re-escalate):\n" + "\n".join(f"- {r}" for r in replies))
-
-
 class WorkRepairNode(ControlNode):
     def action_handler(self, message):
         self.blackboard.update_state_value("next_agent", None)
@@ -66,11 +45,11 @@ class WorkRepairNode(ControlNode):
                 scope = self._scope(message)
                 for wo in stuck[:_MAX_REPAIRS_PER_TICK]:
                     try:
+                        # User replies live as evidence children of the ask node and render in the
+                        # projection's WHY/RESULT lines — the adjudicator reads declines from there.
                         projection = STATUS_LEGEND + "\n\n" + render_work_portfolio(wo)
-                        replies = _extract_user_replies(wo)
                         agent = DI.agent_factory.create_agent("dayflow_orchestrator::work_repair")
-                        result = agent.action_handler(
-                            Message(task=projection, information=replies, scope_context=scope))
+                        result = agent.action_handler(Message(task=projection, scope_context=scope))
                         data = getattr(result, "data", {}) or {}
                         disp = str(data.get("disposition") or "").strip().lower()
                         ask = str(data.get("ask") or "")

@@ -22,10 +22,17 @@ class WorkNodeDispatchNode(ControlNode):
         delegate_to = str(self.blackboard.get_state_value("delegate_to", "") or "").strip()
         acted = self.blackboard.get_state_value("acted_on_item_ids", []) or []
         work_id = node_id = None
+        ref = str(acted[0]) if acted else ""
+        if "::" not in ref:
+            # A plain dayflow ITEM reached the work dispatch. The item lane has no dispatch tail anymore
+            # (unification step C pending — the evaluator is the sole intake->action path and should have
+            # converted this). Close it LOUDLY so it can't re-fire every pass; the evaluator re-mints from
+            # current context if the need is still alive.
+            self._close_legacy_item(ref)
+            self.blackboard.update_state_value("next_agent", _MATERIALIZER)
+            self.blackboard.update_state_value("last_agent", self.name)
+            return
         try:
-            ref = str(acted[0]) if acted else ""
-            if "::" not in ref:
-                raise ValueError(f"expected a work_id::node_id ref, got {ref!r}")
             work_id, node_id = ref.split("::", 1)
             self._guard_add(work_id, node_id)   # never re-dispatch this node within the tick
             from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
@@ -43,6 +50,24 @@ class WorkNodeDispatchNode(ControlNode):
         # Loop back to materialize + pick the next ready node (this one is guarded / failed / done).
         self.blackboard.update_state_value("next_agent", _MATERIALIZER)
         self.blackboard.update_state_value("last_agent", self.name)
+
+    def _close_legacy_item(self, ref):
+        """Close a legacy dayflow item that reached the work dispatch (the retired lane's tail). Loud by
+        design: this firing at all means the evaluator left an actionable item unconverted."""
+        logger.error(
+            "[%s] LEGACY ITEM LANE reached dispatch with item %r — closing it "
+            "(reason=legacy_item_lane_dispatch_retired); the evaluator did not convert this intake.",
+            self.name, ref)
+        if not ref:
+            return
+        try:
+            from app.assistant.dayflow_orchestrator.dayflow_item_writer import (
+                resolve_short_id, write_dayflow_item,
+            )
+            write_dayflow_item(resolve_short_id(ref), state="closed",
+                               reason="legacy_item_lane_dispatch_retired", caller=self.name)
+        except Exception as e:
+            logger.error("[%s] could not close legacy item %r: %s", self.name, ref, e)
 
     def _fail_node(self, work_id, node_id):
         """Best-effort: mark a node failed after a dispatch error so it leaves the ready set (work_repair
