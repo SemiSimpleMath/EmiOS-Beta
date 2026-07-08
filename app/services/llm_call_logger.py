@@ -9,19 +9,32 @@ Agent attribution rides a contextvar set at the agent-runtime layer
 (`LLMClient.call_structured_output`) so the lower layers don't need
 to thread agent_name through every kwarg signature.
 
-Failure-tolerant: a DB write failure logs a warning and swallows the
-exception. Telemetry must never break the actual LLM call.
+Failure-tolerant AND non-blocking: record_llm_call() builds the row
+(timestamps + contextvars captured in the calling thread) and enqueues
+it — the caller never touches a DB connection, so telemetry can
+neither break nor stall the actual LLM call, and can never extend a
+write transaction the calling thread holds (the 2026-07-07 lock-storm
+amplifier: each telemetry insert burned the 30s busy_timeout inside
+the holder's thread). A single daemon thread drains the queue and
+lands rows in batches through db_manager once they are absolutely
+ready. Rows land moments after the call; a hard process kill loses
+whatever is still queued — acceptable for accounting telemetry.
+Queue overflow and exhausted flush retries log warnings with counts.
 
 Phase 1: OpenAI provider only. Anthropic + Gemini follow in Phase 2.
 """
 
 import contextvars
 import json
+import queue
+import threading
+import time
 from pathlib import Path
 from typing import Any, Optional
 
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_repo_root
+from app.assistant.utils.time_utils import utc_now
 
 logger = get_logger(__name__)
 
@@ -148,8 +161,19 @@ def _cost_for(
 
 
 # --------------------------------------------------------------------------
-# Record helper
+# Record helper — enqueue in the caller, batch-write in a daemon thread
 # --------------------------------------------------------------------------
+
+# ~30 min of storm-rate traffic; beyond that, new rows drop with a warning
+# rather than ever blocking an LLM thread.
+_QUEUE_MAX = 10_000
+_BATCH_MAX = 200
+_FLUSH_ATTEMPTS = 3
+_FLUSH_RETRY_SLEEP_S = 5.0
+
+_row_queue: "queue.Queue[dict]" = queue.Queue(maxsize=_QUEUE_MAX)
+_writer_started = False
+_writer_start_lock = threading.Lock()
 
 
 def record_llm_call(
@@ -160,7 +184,13 @@ def record_llm_call(
     duration_ms: int,
     status: str = "ok",
 ) -> None:
-    """Write one row to llm_call_log. Failure-tolerant.
+    """Enqueue one llm_call_log row. Failure-tolerant, never blocks.
+
+    The row (including ts_utc and the attribution contextvars) is fully
+    materialized here in the calling thread; the background writer only
+    persists it. This function must stay connection-free — it runs in
+    the finally block of every LLM call, including inside threads that
+    hold open write transactions.
 
     `usage` is the raw usage object from the provider response (or None
     when the call failed before the response arrived, or when the
@@ -175,34 +205,93 @@ def record_llm_call(
         in_cost, out_cost = _cost_for(engine, input_tokens, output_tokens, cached_tokens)
         ctx = get_current_call_context()
 
-        from app.models.base import get_session
-        from app.models.llm_call_log import LLMCallLog
-
-        session = get_session()
-        try:
-            row = LLMCallLog(
-                agent_name=ctx.get("agent_name") or "(unknown)",
-                caller_request_id=ctx.get("caller_request_id"),
-                caller_manager_id=ctx.get("caller_manager_id"),
-                caller_scope_id=ctx.get("caller_scope_id"),
-                engine=engine,
-                provider=provider,
-                input_tokens=int(input_tokens),
-                output_tokens=int(output_tokens),
-                cached_tokens=int(cached_tokens),
-                input_cost_usd=round(in_cost, 6),
-                output_cost_usd=round(out_cost, 6),
-                total_cost_usd=round(in_cost + out_cost, 6),
-                duration_ms=int(duration_ms),
-                status=status,
-            )
-            session.add(row)
-            session.commit()
-        finally:
-            session.close()
+        row = {
+            "ts_utc": utc_now(),
+            "agent_name": ctx.get("agent_name") or "(unknown)",
+            "caller_request_id": ctx.get("caller_request_id"),
+            "caller_manager_id": ctx.get("caller_manager_id"),
+            "caller_scope_id": ctx.get("caller_scope_id"),
+            "engine": engine,
+            "provider": provider,
+            "input_tokens": int(input_tokens),
+            "output_tokens": int(output_tokens),
+            "cached_tokens": int(cached_tokens),
+            "input_cost_usd": round(in_cost, 6),
+            "output_cost_usd": round(out_cost, 6),
+            "total_cost_usd": round(in_cost + out_cost, 6),
+            "duration_ms": int(duration_ms),
+            "status": status,
+        }
+        _ensure_writer_thread()
+        _row_queue.put_nowait(row)
+    except queue.Full:
+        logger.warning(
+            "[llm_call_logger] telemetry queue full (%d) — dropped llm_call row",
+            _QUEUE_MAX,
+        )
     except Exception as e:
         # Never break the actual LLM call because telemetry failed.
         logger.warning("[llm_call_logger] failed to record llm_call: %s", e)
+
+
+def _ensure_writer_thread() -> None:
+    global _writer_started
+    if _writer_started:
+        return
+    with _writer_start_lock:
+        if _writer_started:
+            return
+        t = threading.Thread(
+            target=_writer_loop, name="llm-call-log-writer", daemon=True
+        )
+        t.start()
+        _writer_started = True
+
+
+def _writer_loop() -> None:
+    """Drain the queue forever, writing rows in batches.
+
+    The loop must survive anything — a dead writer thread would mean
+    silent telemetry loss for the rest of the process lifetime.
+    """
+    while True:
+        try:
+            rows = [_row_queue.get()]
+            try:
+                while len(rows) < _BATCH_MAX:
+                    rows.append(_row_queue.get_nowait())
+            except queue.Empty:
+                pass
+            _flush_batch(rows)
+        except Exception as e:
+            logger.warning("[llm_call_logger] writer loop error: %s", e)
+
+
+def _flush_batch(rows: list) -> None:
+    """Write one batch through db_manager (short transaction, rows ready).
+
+    Retries ride out transient write-lock contention: the thread has
+    nothing else to do, so waiting here is free and the rows survive.
+    """
+    from app.models.db_manager import get_db_manager
+    from app.models.llm_call_log import LLMCallLog
+
+    for attempt in range(1, _FLUSH_ATTEMPTS + 1):
+        try:
+            # Fresh ORM objects per attempt — instances from a rolled-back
+            # session are not safely re-addable.
+            get_db_manager().write_many(
+                (LLMCallLog(**r) for r in rows), op="llm_call_logger.flush"
+            )
+            return
+        except Exception as e:
+            if attempt == _FLUSH_ATTEMPTS:
+                logger.warning(
+                    "[llm_call_logger] dropped %d llm_call row(s) after %d flush attempts: %s",
+                    len(rows), attempt, e,
+                )
+            else:
+                time.sleep(_FLUSH_RETRY_SLEEP_S)
 
 
 def _extract_usage_counts(usage: Any) -> tuple[int, int, int]:
