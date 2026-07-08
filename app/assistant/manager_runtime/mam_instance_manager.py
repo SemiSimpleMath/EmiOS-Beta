@@ -128,6 +128,11 @@ class MAMInstanceManager:
         When the last record in a namespace unregisters, drops the
         namespace's high-water counter so the next register in the same
         namespace starts fresh at plain base name.
+
+        Also clears the invocation's mailbox queue — nobody will ever
+        drain it again (queues are keyed by the globally-unique
+        invocation_id), so a post that raced the manager's exit must not
+        sit in memory until process restart.
         """
         with self._lock:
             removed = self._records.pop(invocation_id, None)
@@ -145,6 +150,13 @@ class MAMInstanceManager:
                 "[mam] unregistered invocation_id=%s display_name=%s",
                 invocation_id, removed.display_name,
             )
+            try:
+                from app.assistant.ServiceLocator.service_locator import DI
+                mailbox = getattr(DI, "mailbox", None)
+                if mailbox is not None:
+                    mailbox.clear(invocation_id)
+            except Exception:
+                logger.debug("[mam] mailbox clear failed at unregister", exc_info=True)
         self._publish_status_to_disk()
 
     # ------------------------------------------------------------------

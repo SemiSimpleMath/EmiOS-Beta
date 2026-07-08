@@ -18,22 +18,24 @@ Built-in message types (interpreted by the manager's drain handler):
                       the manager's role bindings, then by direct name).
                       The agent renders its own slot during prompt assembly.
 
-  ``blackboard_write`` payload = ``{key: value, ...}``
-                      ``blackboard.update_state_value(key, value)`` for each.
-                      Useful for setting flags like ``cancelled`` from outside.
-
 New types can be added later (pause / resume / replan / etc.) without changing
 the mailbox itself — only the manager's drain handler grows new cases.
+(Out-of-band FLAGS travel outside the mailbox: cancel is a direct
+global-scope blackboard write via ``MAMInstanceManager.cancel``.)
 
 Senders own message wrapping. The mailbox stores the payload verbatim. For
 ``agent_inject`` text, the sender is responsible for any user-facing framing
 (``+++++ Latest instruction from user +++ User: <body> +++++``); the manager
 only routes.
 
-In-memory only. Per-invocation queues live as long as the process. Stale
-messages are dropped at drain time via TTL so a message that arrived after
-the manager already exited doesn't get applied to a later same-named-but-
-different invocation by accident.
+In-memory only. Queues are keyed by invocation_id (globally unique — a
+message can never apply to a different invocation), and
+``MAMInstanceManager.unregister`` clears an invocation's queue when it ends,
+so posts that raced the manager's exit don't linger. The TTL is a backstop
+for messages parked while a single cycle runs pathologically long — sized in
+MINUTES so steering posted during an ordinary long tool call (browser work
+routinely exceeds two minutes) is delivered at the next cycle boundary, not
+silently dropped.
 """
 from __future__ import annotations
 
@@ -48,11 +50,13 @@ from app.assistant.utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 
-# Default TTL: messages older than this are dropped at drain time.
-# Tuned long enough that a slow tool call completing doesn't lose a steering
-# message; short enough that a message from many minutes ago doesn't quietly
-# apply to a subsequent unrelated cycle.
-_DEFAULT_TTL_SECONDS = 120.0
+# Default TTL: messages older than this are dropped at drain time. A pure
+# backstop — cross-invocation misdelivery is impossible (unique invocation
+# ids) and ended invocations get their queue cleared at unregister — so this
+# only guards a cycle that runs pathologically long. 30 minutes clears any
+# real tool call (browser steps routinely exceed the old 120s, which was
+# silently eating @mention steering exactly when the user wanted to steer).
+_DEFAULT_TTL_SECONDS = 1800.0
 
 
 @dataclass(frozen=True)
@@ -253,10 +257,6 @@ class MailboxDispatcher:
             )
             return
 
-        if mtype == "blackboard_write":
-            self._apply_blackboard_write(payload, blackboard)
-            return
-
         logger.warning("MailboxDispatcher: unknown message_type=%r — dropped", mtype)
 
     @staticmethod
@@ -284,13 +284,6 @@ class MailboxDispatcher:
                 blackboard, target.strip(), content.strip(),
                 posted_at_utc=posted_at_utc, from_who=from_who,
             )
-
-    @staticmethod
-    def _apply_blackboard_write(payload: dict, blackboard) -> None:
-        for key, value in payload.items():
-            if not isinstance(key, str) or not key.strip():
-                continue
-            blackboard.update_state_value(key.strip(), value)
 
     @staticmethod
     def _append_runtime_injection(

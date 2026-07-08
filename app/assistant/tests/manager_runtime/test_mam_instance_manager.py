@@ -219,3 +219,26 @@ class TestCancel:
 
     def test_cancel_unknown_invocation_returns_false(self, mam):
         assert mam.cancel("nonexistent") is False
+
+
+# ── Unregister clears the invocation's mailbox queue ──────────────
+
+
+def test_unregister_clears_mailbox_queue(mam, monkeypatch):
+    from app.assistant.manager_runtime.mailbox import Mailbox
+    from app.assistant.ServiceLocator import service_locator
+
+    mailbox = Mailbox(ttl_seconds=60.0)
+    monkeypatch.setattr(service_locator.DI, "mailbox", mailbox, raising=False)
+
+    r = _register(mam)
+    mailbox.post(
+        invocation_id=r.invocation_id,
+        message_type="agent_inject",
+        payload={"planner": "raced the exit"},
+    )
+    assert mailbox.peek_count(r.invocation_id) == 1
+
+    mam.unregister(r.invocation_id)
+    # Nobody can ever drain this queue again — it must not linger.
+    assert mailbox.peek_count(r.invocation_id) == 0
