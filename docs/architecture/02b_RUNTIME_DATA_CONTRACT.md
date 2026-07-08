@@ -97,9 +97,12 @@ otherwise an open vocabulary on purpose.
   `pod_references`) and `data_list` (lifted leftover keys, stringified).
 - The normalizer's envelope stringifies structure (leftover keys become
   `data_list` strings) — callers needing an agent's raw STRUCTURED output
-  have no first-class channel yet and resort to scraping blackboard audit
-  messages (`_recover_weekly_meal_planner_output` is the canonical example).
-  Known debt; a raw-payload carry-through on the exit envelope is the plan.
+  read **`data["final_answer_raw"]`** on the returned ToolResult: the exit
+  nodes stash the pre-normalization payload (manager_exit_node additionally
+  captures the terminal agent's output when no `result`/`final_answer_*`
+  was routed — the form-driven-last-agent flow shape), and `handle_exit`
+  attaches it on success exits. Never scrape a finished manager's
+  blackboard audit messages for output.
 - Aborts return `result_type="manager_aborted"` (graceful-exit report or
   cancel); completions return `result_type="final_answer"`.
 

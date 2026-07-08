@@ -693,6 +693,18 @@ class MultiAgentManager:
         else:
             content = final_raw if isinstance(final_raw, str) else json.dumps(final_raw)
 
+        # Attach the pre-normalization payload so callers can read the
+        # winning agent's STRUCTURED output (the normalized envelope
+        # stringifies structure into data_list). Copied — never mutate the
+        # blackboard's final_answer dict — and kept out of `content` so
+        # relayed prompt text doesn't double the payload. Success exits
+        # only: an abort's raw would be a stale pre-abort payload.
+        if not is_aborted and isinstance(final_data, dict):
+            raw_payload = self.blackboard.get_state_value("final_answer_raw")
+            if raw_payload is not None:
+                final_data = dict(final_data)
+                final_data["final_answer_raw"] = raw_payload
+
         return ToolResult(
             result_type="manager_aborted" if is_aborted else "final_answer",
             content=content,

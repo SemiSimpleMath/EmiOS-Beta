@@ -50,23 +50,16 @@ def _ensure_manager_runtime_registered() -> None:
         )
 
 
-def _recover_weekly_meal_planner_output(manager) -> Dict[str, Any]:
-    """Pull the weekly_meal_planner agent's structured output off the manager blackboard.
-    Iterate in REVERSE so a multi-cycle run returns the LATEST emission, not the first."""
-    bb = getattr(manager, "blackboard", None)
-    if bb is None:
+def _planner_output_from_result(result) -> Dict[str, Any]:
+    """The weekly_meal_planner's structured output rides the manager's
+    ToolResult as data.final_answer_raw (manager_exit_node's terminal-agent
+    capture) — the typed result channel that replaced scraping the finished
+    manager's blackboard audit messages."""
+    data = getattr(result, "data", None)
+    if not isinstance(data, dict):
         return {}
-    try:
-        msgs = list(bb.get_messages())
-    except Exception as e:
-        logger.warning("[weekly_meal_planning] blackboard read failed: %s", e)
-        return {}
-    for m in reversed(msgs):
-        if str(getattr(m, "sender", "") or "") == "weekly_meal_planner":
-            data = getattr(m, "data", None) or {}
-            if isinstance(data, dict) and data:
-                return data
-    return {}
+    raw = data.get("final_answer_raw")
+    return raw if isinstance(raw, dict) and raw else {}
 
 
 def run_weekly_meal_planning_chain(
@@ -128,11 +121,14 @@ def run_weekly_meal_planning_chain(
     bb = manager.blackboard
     for k, v in manager_context.items():
         bb.update_state_value(k, v)
-    DI.manager_invoker.invoke(manager, Message(agent_input=manager_context, scope_context=mgr_scope))
+    result = DI.manager_invoker.invoke(manager, Message(agent_input=manager_context, scope_context=mgr_scope))
 
-    output = _recover_weekly_meal_planner_output(manager)
+    output = _planner_output_from_result(result)
     if not output:
-        raise RuntimeError("weekly_meal_planning_chain: no weekly_meal_planner output recovered")
+        raise RuntimeError(
+            "weekly_meal_planning_chain: manager result carried no final_answer_raw "
+            f"(result_type={getattr(result, 'result_type', None)!r})"
+        )
 
     summary: Dict[str, Any] = {
         "week_start_date": week_iso,

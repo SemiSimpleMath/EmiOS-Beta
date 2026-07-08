@@ -80,6 +80,7 @@ class FinalAnswerNormalizer:
             "exit",
             "pod_references",
             "result_summary",
+            "final_answer_raw",
         }
         lifted: List[Dict[str, str]] = []
         for key, value in result_dict.items():

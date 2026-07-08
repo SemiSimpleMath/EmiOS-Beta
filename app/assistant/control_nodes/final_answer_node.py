@@ -42,6 +42,10 @@ class FinalAnswerNode(ControlNode):
         normalized = FinalAnswerNormalizer.normalize(raw_result)
 
         self.blackboard.update_state_value("final_answer", normalized)
+        # The pre-normalization payload — handle_exit attaches it to the
+        # ToolResult as data.final_answer_raw so callers get the structured
+        # output the envelope's stringified data_list can't carry.
+        self.blackboard.update_state_value("final_answer_raw", raw_result)
         self.blackboard.update_state_value("exit", True)
         self.blackboard.update_state_value("next_agent", None)
         self.blackboard.update_state_value("last_agent", self.name)
