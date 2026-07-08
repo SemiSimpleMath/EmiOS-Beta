@@ -18,10 +18,6 @@ class Delegator(Agent):
         super().__init__(name, blackboard, agent_registry, tool_registry, llm_params, parent=parent)
         self.flow_config = None
 
-    def resolve_role_binding(self, role_name):
-        bindings = self.blackboard.get_state_value("manager_role_bindings", {})
-        return bindings.get(role_name, role_name)
-
     def action_handler(self, message: Message):
         flow_data = message.data if isinstance(message.data, dict) else {}
         self.flow_config = flow_data.get("flow_config")

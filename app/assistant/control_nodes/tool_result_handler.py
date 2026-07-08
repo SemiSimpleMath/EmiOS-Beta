@@ -412,10 +412,8 @@ class ToolResultHandler(ControlNode):
             logger.error("[%s] Failed to update dynamic tool scope: %s", self.name, e)
             logger.debug("[%s] dynamic tool scope update exception details", self.name, exc_info=True)
 
-        # Enforce strict tool error contract before any routing decisions.
-        if self._maybe_fail_for_invalid_tool_error_contract(tool_result=tool_result):
-            clear_pending_tool(self.blackboard)
-            return
+        # Normalize non-conforming tool errors before any routing decisions.
+        self._normalize_nonconforming_tool_error(tool_result=tool_result)
 
         # Fail closed for clearance-dependent failures (ask_user / approval-gated tools).
         if self._maybe_abort_task_for_clearance_error(selected_tool=selected_tool, tool_result=tool_result):
@@ -599,10 +597,13 @@ class ToolResultHandler(ControlNode):
 
         return False
 
-    def _maybe_fail_for_invalid_tool_error_contract(self, *, tool_result) -> bool:
+    def _normalize_nonconforming_tool_error(self, *, tool_result) -> None:
+        """Rewrite a contract-violating error result into a conforming,
+        RECOVERABLE abort_tool shape in place. Never aborts the manager —
+        the planner sees one failed tool call and decides what to do next."""
         valid, reason = validate_tool_error_contract(tool_result)
         if valid:
-            return False
+            return
         # Non-conforming error responses from external/third-party tools are common
         # (e.g. scrape_url returning data=null when a URL is paywalled and
         # the playwright fallback isn't installed; one_shot_tool_runner
@@ -637,11 +638,6 @@ class ToolResultHandler(ControlNode):
                 "[%s] Failed to normalize tool_result.data — letting it flow as-is",
                 self.name, exc_info=True,
             )
-        # Return False so the handler continues processing this result
-        # through the normal tool-return path. The planner sees the error
-        # content in its history and decides what to do next; the manager
-        # loop does NOT abort.
-        return False
 
     def _update_dynamic_tool_scope(
         self,

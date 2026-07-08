@@ -1,9 +1,7 @@
-import json
-from typing import List, Any
-from app.assistant.utils.pydantic_classes import Message, PlanStruct
+from typing import List
+from app.assistant.utils.pydantic_classes import Message
 from app.assistant.utils.logging_config import get_logger
 logger = get_logger(__name__)
-from datetime import datetime, timezone
 
 class Blackboard:
     def __init__(self):
@@ -24,7 +22,6 @@ class Blackboard:
 
         # Messages are a single, global log for the entire task.
         self.messages: List[Message] = []
-        self.messages = []
         self.results = []
         self.tool_results = []
         self.history = []
@@ -36,17 +33,8 @@ class Blackboard:
             return []
         return [msg for msg in self.messages if msg.scope_id == scope_id]
 
-    def set_task(self, task):
-        """Set the task inside the state dictionary."""
-        self.state_dict["task"] = task
-
     def get_task(self):
-        """Retrieve the stored task from state dictionary."""
         return self.get_state_value("task")
-
-
-    def increment_num_cycles(self):
-        self.state_dict["num_cycles"] += 1
 
     def get_cycles(self):
         return self.get_state_value("num_cycles", 0)
@@ -86,50 +74,12 @@ class Blackboard:
         
         # Reset the call stack (critical for manager reuse!)
         self.call_stack = []
-        
-        # Also reset state_dict for backward compatibility with old code
-        self.state_dict = {}
-        self.state_dict.update({
-            "task": "",
-            "information": "",
-            "discovered_info": [],
-            "summary": [],
-            "links": {},
-            "visited_links": {},
-            "final_answer_content": [],
-            "checklist": [],
-            "progress": [],
-            "request_id": None,
-            "last_agent": None,
-            "num_cycles": 0,
-            "final_result": None,
-            "exit": False,
-            "error": False,
-            "call_stack": [],
-            "current_agent": None,
-        })
-
-
 
     def add_request_id(self, request_id):
         self.request_id = request_id
 
     def get_request_id(self):
         return self.request_id
-
-    def remove_messages_before_last_plan(self):
-        """
-        Removes all messages before the most recent 'plan' tag.
-        """
-        last_plan_index = None
-        for i in range(len(self.messages) - 1, -1, -1):
-            if "plan" in (getattr(self.messages[i], "sub_data_type", []) or []):
-                last_plan_index = i
-                break
-
-        if last_plan_index is not None:
-            # Remove all messages before the most recent plan
-            self.messages = self.messages[last_plan_index:]
 
     def get_messages(self, n=None):
         if n:
@@ -145,40 +95,6 @@ class Blackboard:
         if self.call_stack:
             return self.call_stack[-1][2] # (caller, callee, scope_id)
         return None
-
-    def get_messages_after_last_plan(self) -> List[Message]:
-        """
-        Retrieve all messages after and including the most recent 'plan' tag.
-        """
-        last_plan_index = None
-        for i in range(len(self.messages) - 1, -1, -1):
-            if "plan" in (getattr(self.messages[i], "sub_data_type", []) or []):
-                last_plan_index = i
-                break
-
-        # If no plan message is found, return all messages
-        if last_plan_index is None:
-            return self.messages
-
-        # Return all messages from the last plan message onward (including the plan)
-        return self.messages[last_plan_index + 1:]
-
-    def get_messages_before_last_plan(self) -> List[Message]:
-        """
-        Retrieve all messages before the most recent 'plan' tag.
-        """
-        last_plan_index = None
-        for i in range(len(self.messages) - 1, -1, -1):
-            if "plan" in (getattr(self.messages[i], "sub_data_type", []) or []):
-                last_plan_index = i
-                break
-
-        # If no plan message is found, return an empty list (nothing to summarize)
-        if last_plan_index is None:
-            return []
-
-        # Return all messages before the last plan message
-        return self.messages[:last_plan_index]
 
     def clear_messages(self):
         self.messages = []
@@ -255,30 +171,7 @@ class Blackboard:
 
 
 
-    def time_to_summarize(self):
-        plan_counter = 0
-        for i in range(len(self.messages)):
-            if "plan" in (getattr(self.messages[i], "sub_data_type", []) or []):
-                plan_counter += 1
-        return plan_counter >= 2
-
-
-
-    def debug_print_state(self):
-        """
-        Prints the entire blackboard state in a readable JSON format.
-        """
-        debug_info = {
-            "state_dict": self.state_dict,
-            "messages": [msg.dict() for msg in self.messages],  # Convert Pydantic objects to dict
-            "results": self.results,
-            "tool_results": self.tool_results,
-            "history": self.history,
-            "request_id": self.request_id,
-            "num_cycles": self.get_cycles()
-        }
-
-    # --- NEW: Scope-Aware Call Stack Management ---
+    # --- Scope-Aware Call Stack Management ---
 
     def push_call_context(self, calling_agent: str, called_agent: str, scope_id: str):
         """
@@ -320,25 +213,5 @@ class Blackboard:
         if self.call_stack:
             return self.call_stack[-1]
         return None
-
-    def get_messages_for_agent(self, agent_name: str) -> List[Message]:
-        """
-        Get messages relevant to a specific agent.
-        Returns messages that:
-        1. Are owned by this agent
-        2. Are part of this agent's call context
-        3. Are global (no owner specified)
-        """
-        relevant_messages = []
-        
-        for msg in self.messages:
-            # Include if this agent owns the message
-            if msg.sender == agent_name or msg.receiver == agent_name:
-                relevant_messages.append(msg)
-            # Include global messages (no owner specified) that are tool results
-            elif msg.receiver is None or msg.receiver == "Any" and msg.data_type in ["tool_result", "tool_request"]:
-                relevant_messages.append(msg)
-        
-        return relevant_messages
 
 

@@ -68,10 +68,6 @@ class Agent:
         self._active_reply_to: Optional[dict] = None
         self._active_request_id: Optional[str] = None
 
-    def resolve_role_binding(self, role_name):
-        bindings = self.blackboard.get_state_value('manager_role_bindings', {})
-        return bindings.get(role_name, role_name)
-
     def get_llm_interface(self):
         return self.components.llm_client.get_llm_interface(agent=self)
 

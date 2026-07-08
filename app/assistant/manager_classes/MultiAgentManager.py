@@ -335,8 +335,6 @@ class MultiAgentManager:
                 raise
 
             # Initialize pipeline state (global) for this request.
-
-            ### This has a code smell....
             try:
                 ps = ensure_pipeline_state(self.blackboard)
                 ps["stage"] = None
@@ -426,14 +424,6 @@ class MultiAgentManager:
                 resolved_data.get("seeded_chat_messages"),
                 target_scope_id=target_scope_id if isinstance(target_scope_id, str) and target_scope_id.strip() else None,
             )
-            incoming_payload = resolved_data.get("seeded_chat_messages")
-            logger.info(
-                "[HISTORY_DIAG:C/D] seed_local_blackboard_messages: incoming_type=%s incoming_len=%s seeded_count=%d target_scope_id=%s",
-                type(incoming_payload).__name__,
-                len(incoming_payload) if hasattr(incoming_payload, "__len__") else "n/a",
-                seeded_count,
-                target_scope_id,
-            )
             if seeded_count > 0:
                 self.blackboard.update_state_value("seeded_chat_messages_count", seeded_count)
 
@@ -503,8 +493,9 @@ class MultiAgentManager:
             # boundary — never mid-LLM-call.
             self._drain_mailbox()
 
-            # Cooperative cancellation hook (used by orchestrators).
-            if self.blackboard.get_state_value("cancelled", False) or self.blackboard.get_state_value("cancel", False):
+            # Cooperative cancellation hook (mam_instance_manager.cancel /
+            # Orchestrator._request_cancel_instance write this, global scope).
+            if self.blackboard.get_state_value("cancelled", False):
                 logger.warning(f"⚠️ {self.name} cancelled. Exiting loop.")
                 return "cancelled"
             
