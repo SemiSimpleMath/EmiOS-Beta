@@ -42,7 +42,6 @@ class MultiAgentManager:
         self.flow_config = manager_config.get("flow_config") or {}
         self._validate_strict_routing_config()
         self.tool_scope_service = ToolScopeService()
-        self._register_configured_events()
         self.set_manager_role_binding()
 
     def set_manager_role_binding(self):
@@ -144,28 +143,6 @@ class MultiAgentManager:
                 v = summary_cfg.get(k)
                 if not isinstance(v, str) or not v.strip():
                     raise ValueError(f"[{self.name}] flow_config.summary.{k} must be a non-empty string.")
-
-    def _register_configured_events(self):
-        events = self.manager_config.get("events", [])
-        for event_name in events:
-            handler_name = f"{event_name}_handler"
-            handler = getattr(self, handler_name, None)
-            if handler is None:
-                raise ValueError(f"Handler '{handler_name}' not found in manager '{self.name}' for event '{event_name}'")
-            event_hub = DI.event_hub
-            try:
-                event_hub.register_event(event_name, handler)
-            except Exception:
-                # Duplicate registration or conflicting handler
-                logger.error(
-                    "Event registration failed in manager '%s' for event '%s' (handler=%r, id=%s)",
-                    self.name,
-                    event_name,
-                    handler,
-                    id(handler),
-                )
-                logger.debug("event registration exception details", exc_info=True)
-                raise
 
     def _emit_route_trace(
         self,

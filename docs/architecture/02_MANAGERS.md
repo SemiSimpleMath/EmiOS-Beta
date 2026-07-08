@@ -29,7 +29,6 @@ Base class for every manager that runs LLM agents in a loop:
 - Manages role bindings (flexible agent aliasing — e.g.
   `delegator: shared::delegator`).
 - Tool scope filtering via `ToolScopeService`.
-- Event registration (configurable subscriptions).
 
 Invoked through `ManagerInvoker.invoke(manager, message)`; the agent
 loop (`_run_loop`) runs until an exit condition (exit flag,
@@ -134,9 +133,11 @@ top-level keys:
   (`tools.allowed_tools` / `blocked_tools` / `requires_approval_tools`,
   etc.). This is the scope layer, distinct from the `tools:` list above.
 - `flow_config` — routing + flow policy (see below).
-- `events` — event subscriptions (handler `<event>_handler` must exist
-  on the manager or `_register_configured_events` raises).
 - `execution_trace` — opt-in `{enabled: ...}` step recorder.
+
+(There is no manager-level `events:` key. Managers are fresh instances
+per invocation, so a per-instance event_hub subscription would leak one
+handler per request; the unused feature was removed 2026-07-08.)
 
 ### flow_config
 
