@@ -51,7 +51,7 @@ def canonical_pod_id(kind: str, *parts: Any) -> str:
     """Build a canonical pod id ``datapod:<kind>:<12-hex token>`` where the token is a
     deterministic hash of ``parts`` (re-minting the same logical unit upserts ONE pod, and the
     id always matches ``pod_uri.POD_URI_RE`` so the PodInjector and the chat linkifier recognize
-    it). Dotted kinds keep their dots (``intention.meal``). Use this instead of hand-formatting
+    it). Dotted kinds keep their dots (``auth.bearer``). Use this instead of hand-formatting
     pod ids — that is the bug the audit caught, twice."""
     kind_slug = _slug_kind(kind)
     raw = "|".join(str(p) for p in parts) if parts else kind_slug
@@ -59,6 +59,73 @@ def canonical_pod_id(kind: str, *parts: Any) -> str:
     pod_id = f"datapod:{kind_slug}:{token}"
     if not POD_URI_RE.fullmatch(pod_id):
         raise ValueError(f"canonical_pod_id produced a non-canonical id: {pod_id!r}")
+    return pod_id
+
+
+def mint_pod(
+    *,
+    kind: str,
+    one_liner: str,
+    created_by: str,
+    variant: "Optional[str]" = None,
+    body: "Optional[str]" = None,
+    tags: "Optional[List[str]]" = None,
+    metadata: "Optional[Dict[str, Any]]" = None,
+    scope_id: "Optional[str]" = None,
+    source_refs: "Optional[list]" = None,
+    for_agents: "Optional[List[str]]" = None,
+    min_authority: "Optional[int]" = None,
+    importance: "Optional[float]" = None,
+    identity: "Optional[List[Any]]" = None,
+    store: "Optional[PodStore]" = None,
+) -> str:
+    """THE unified content-pod minter — one id builder, one tag assembly, one
+    write path, so no minter re-invents the format (put() still enforces it;
+    this is the constructor every lane shares so the gate never fires).
+
+    - ``variant`` is the governed routing tag for family kinds (intention/
+      plan/feedback); it is prepended to ``tags`` automatically. Role tags
+      (e.g. ``run_summary``) and extras ride in ``tags``.
+    - ``identity``: deterministic parts hashed into the id — re-minting the
+      same logical unit upserts ONE pod. CAUTION: put() replaces metadata
+      wholesale, so only use identity where later metadata stamps
+      (inventory_applied_at_utc, feedback_asked_at_utc) either don't exist or
+      may be reset by a re-mint. Omit for a fresh uuid-backed id per call
+      (the lane default).
+    - ``scope_id`` is EXPLICIT — the caller states the mint scope rule
+      (originating room / account / None = owner-only); the helper never
+      guesses.
+
+    Returns the pod_id. Raises whatever put()'s format/registry/variant gate
+    raises — minting an unreferenceable pod is always loud.
+    """
+    import uuid as _uuid
+    parts = list(identity) if identity else [_uuid.uuid4().hex]
+    pod_id = canonical_pod_id(kind, *parts)
+
+    assembled_tags: List[str] = []
+    if variant:
+        assembled_tags.append(str(variant))
+    for t in (tags or []):
+        t_str = str(t).strip()
+        if t_str and t_str not in assembled_tags:
+            assembled_tags.append(t_str)
+
+    pod = Pod(
+        pod_id=pod_id,
+        kind=kind,
+        tags=assembled_tags,
+        one_liner=one_liner,
+        body=body,
+        source_refs=list(source_refs or []),
+        for_agents=list(for_agents or []),
+        scope_id=scope_id,
+        created_by=created_by,
+        metadata=dict(metadata or {}),
+        min_authority=min_authority,
+        importance=importance,
+    )
+    (store or PodStore()).put(pod)
     return pod_id
 
 

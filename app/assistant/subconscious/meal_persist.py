@@ -14,13 +14,12 @@ the digest's "ideas inbox" section once we wire that.
 """
 from __future__ import annotations
 
-import json
-import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from app.assistant.pod_store.contracts import Pod, PodSourceRef
+from app.assistant.pod_store.contracts import PodSourceRef
 from app.assistant.pod_store.pod_store import PodStore
+from app.assistant.pod_store.pod_utils import mint_pod
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -294,7 +293,6 @@ def _mint_intention_meal_pod(
 ) -> Optional[str]:
     """One pod per proposed meal."""
     try:
-        pod_id = f"datapod:intention:{uuid.uuid4().hex[:24]}"
         actors = proposal.get("actors") or []
         meal_window = proposal.get("meal_window") or "meal"
         date = proposal.get("date") or ""
@@ -336,24 +334,17 @@ def _mint_intention_meal_pod(
         if novelty_rationale:
             body_parts += ["", "**Why this novel pick:**", novelty_rationale]
 
-        body = "\n".join(body_parts)
-        # Two-axis: kind=intention (handling class) + #meal (governed variant).
-        tags = ["meal", meal_window]
+        extra_tags = [meal_window]
         if novelty == "novel":
-            tags.append("novel")
+            extra_tags.append("novel")
 
-        pod = Pod(
-            pod_id=pod_id,
+        return mint_pod(
             kind="intention",
-            tags=tags,
+            variant="meal",
             one_liner=one_liner,
-            body=body,
-            # PodSourceRef.kind is strict-Literal (unified_log /
-            # event_repository:email / resource / image_file). Concern_ids
-            # and intra-pod references don't fit. Keep those in metadata.
-            source_refs=[],
-            for_agents=[],
-            scope_id=None,
+            body="\n".join(body_parts),
+            tags=extra_tags,
+            scope_id=None,   # system lane — owner-only
             created_by=agent_name,
             metadata={
                 "proposed_at_utc": now_utc_iso,
@@ -367,13 +358,12 @@ def _mint_intention_meal_pod(
                 "needs_shopping": needs,
                 "primary_ingredients": ingredients,
             },
+            store=store,
         )
-        store.put(pod)
-        return pod_id
     except Exception:
         # Fail loud — a swallowed warning here hid a NameError that silently dropped
         # EVERY meal pod in production (see scratch/MEAL-PLANNING-AUDIT.md).
-        logger.exception("[meal_persist] mint intention.meal failed")
+        logger.exception("[meal_persist] mint meal intention failed")
         raise
 
 
@@ -385,7 +375,6 @@ def _mint_intention_shopping_pod(
     agent_name: str,
 ) -> Optional[str]:
     try:
-        pod_id = f"datapod:intention:{uuid.uuid4().hex[:24]}"
         items = shopping_run.get("items") or []
         suggested = shopping_run.get("suggested_date") or ""
         reasoning = (shopping_run.get("reasoning") or "").strip()
@@ -399,26 +388,22 @@ def _mint_intention_shopping_pod(
         if reasoning:
             body_parts += ["", "**Reasoning:**", reasoning]
 
-        pod = Pod(
-            pod_id=pod_id,
+        return mint_pod(
             kind="intention",
-            tags=["shopping"],
+            variant="shopping",
             one_liner=one_liner,
             body="\n".join(body_parts),
-            source_refs=[],
-            for_agents=[],
-            scope_id=None,
+            scope_id=None,   # system lane — owner-only
             created_by=agent_name,
             metadata={
                 "proposed_at_utc": now_utc_iso,
                 "suggested_date": suggested,
                 "items": items,
             },
+            store=store,
         )
-        store.put(pod)
-        return pod_id
     except Exception:
-        logger.exception("[meal_persist] mint intention.shopping failed")
+        logger.exception("[meal_persist] mint shopping intention failed")
         raise
 
 
@@ -436,8 +421,6 @@ def _mint_intention_meal_set_pod(
     """One pod per meal_proposer run — captures narrative + advisory +
     references to all the per-meal/shopping pods. The digest reads this."""
     try:
-        pod_id = f"datapod:intention:{uuid.uuid4().hex[:24]}"
-
         body_parts = [
             f"# Meal proposer set — {now_utc_iso}",
             "",
@@ -467,22 +450,21 @@ def _mint_intention_meal_set_pod(
             one_liner_parts.append("+ advisory")
         one_liner = ", ".join(one_liner_parts)
 
-        pod = Pod(
-            pod_id=pod_id,
-            # The run summary is the same handling class with a ROLE, not a
-            # separate kind: #meal variant + #run_summary. Item consumers key
-            # on metadata shape (date/dish), so it passes through them inert.
+        # The run summary is the same handling class with a ROLE, not a
+        # separate kind: #meal variant + #run_summary. Item consumers key
+        # on metadata shape (date/dish), so it passes through them inert.
+        return mint_pod(
             kind="intention",
-            tags=["meal", "run_summary"],
+            variant="meal",
             one_liner=one_liner,
             body="\n".join(body_parts),
+            tags=["run_summary"],
+            scope_id=None,   # system lane — owner-only
+            created_by=agent_name,
             source_refs=[
                 PodSourceRef(kind="pod", id=pid)
-                for pid in [*proposal_pod_ids, *( [shopping_pod_id] if shopping_pod_id else [] )]
+                for pid in [*proposal_pod_ids, *([shopping_pod_id] if shopping_pod_id else [])]
             ],
-            for_agents=[],
-            scope_id=None,
-            created_by=agent_name,
             metadata={
                 "proposed_at_utc": now_utc_iso,
                 "proposal_pod_ids": proposal_pod_ids,
@@ -490,9 +472,8 @@ def _mint_intention_meal_set_pod(
                 "fast_food_advisory": fast_food_advisory,
                 "skipped_meals": skipped_meals,
             },
+            store=store,
         )
-        store.put(pod)
-        return pod_id
     except Exception:
         logger.exception("[meal_persist] mint meal run-summary pod failed")
         raise
@@ -505,14 +486,13 @@ def _mint_weekly_plan_pod(
     free_form_thinking: str,
     now_utc_iso: str,
 ) -> Optional[str]:
-    """Mint the plan.weekly_meals pod that the daily_meal_proposer reads.
+    """Mint the `plan` #weekly_meals pod that the daily_meal_proposer reads.
 
     Body is a human-readable markdown rendering of the 7-day slot grid
     plus theme. Metadata carries the structured slot list for
     programmatic readers.
     """
     try:
-        pod_id = f"datapod:plan:{uuid.uuid4().hex[:24]}"
         week_start = weekly_plan.get("week_start_date") or "?"
         slots = weekly_plan.get("slots") or []
         theme = (weekly_plan.get("week_theme") or "").strip()
@@ -554,24 +534,21 @@ def _mint_weekly_plan_pod(
         if free_form_thinking:
             body_parts += ["## Thinking", free_form_thinking]
 
-        pod = Pod(
-            pod_id=pod_id,
+        return mint_pod(
             kind="plan",
-            tags=["weekly_meals"],
+            variant="weekly_meals",
             one_liner=one_liner,
             body="\n".join([p for p in body_parts if p is not None]),
-            source_refs=[],
-            for_agents=["daily_meal_proposer"],
-            scope_id=None,
+            scope_id=None,   # system lane — owner-only
             created_by="weekly_meal_planner",
+            for_agents=["daily_meal_proposer"],
             metadata={
                 "produced_at_utc": now_utc_iso,
                 "week_start_date": week_start,
                 "slots": slots,
             },
+            store=store,
         )
-        store.put(pod)
-        return pod_id
     except Exception:
         logger.exception("[meal_persist] mint plan.weekly_meals failed")
         raise

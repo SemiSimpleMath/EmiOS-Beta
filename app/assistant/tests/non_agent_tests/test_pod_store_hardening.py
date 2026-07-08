@@ -216,6 +216,46 @@ def test_retention_malformed_policy_fails_loud(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# the unified minter (pod_utils.mint_pod)
+# ---------------------------------------------------------------------------
+
+def test_mint_pod_helper_builds_canonical_and_assembles_variant():
+    pid = pod_utils.mint_pod(
+        kind="intention",
+        variant="meal",
+        one_liner="dinner idea",
+        body="pasta",
+        tags=["dinner", "meal"],       # duplicate variant deduped, extras kept
+        scope_id=None,
+        created_by="unit_test",
+    )
+    assert POD_URI_RE.fullmatch(pid) and pid.startswith("datapod:intention:")
+    pod = PodStore().get(pid)
+    assert pod.tags == ["meal", "dinner"]
+    assert pod.created_by == "unit_test"
+
+
+def test_mint_pod_helper_deterministic_identity_upserts():
+    a = pod_utils.mint_pod(
+        kind="note", one_liner="v1", body="b1",
+        created_by="unit_test", identity=["same", "unit"],
+    )
+    b = pod_utils.mint_pod(
+        kind="note", one_liner="v2", body="b2",
+        created_by="unit_test", identity=["same", "unit"],
+    )
+    assert a == b                          # one logical unit, one pod
+    assert PodStore().get(a).one_liner == "v2"   # re-mint upserted
+
+
+def test_mint_pod_helper_is_gated():
+    with pytest.raises(ValueError, match="EXACTLY ONE variant"):
+        pod_utils.mint_pod(
+            kind="intention", one_liner="x", created_by="unit_test",
+        )
+
+
+# ---------------------------------------------------------------------------
 # minter round-trips through the REAL store (the format gate included)
 # ---------------------------------------------------------------------------
 

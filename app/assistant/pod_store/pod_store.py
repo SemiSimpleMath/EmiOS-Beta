@@ -552,6 +552,10 @@ class PodStore:
         from app.models.db_manager import get_db_manager
 
         pod_id = f"datapod:{pod_type}:{uuid.uuid4().hex[:16]}"
+        # The same format/registry gate every content pod passes — no mint
+        # path skips it (secret kinds declare no variants, so the check is
+        # registry + grammar + kind/id identity).
+        self._validate_new_pod_id(Pod(pod_id=pod_id, kind=pod_type, one_liner=name))
         check_authority(
             pod_id=pod_id, projection=None,
             required=AUTH_USER, scope=scope,

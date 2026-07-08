@@ -15,12 +15,12 @@ The intention pods auto-surface in:
 """
 from __future__ import annotations
 
-import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from app.assistant.pod_store.contracts import Pod, PodSourceRef
+from app.assistant.pod_store.contracts import PodSourceRef
 from app.assistant.pod_store.pod_store import PodStore
+from app.assistant.pod_store.pod_utils import mint_pod
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -67,7 +67,6 @@ def _mint_intention_wellness_pod(
 ) -> Optional[str]:
     """One pod per proposed wellness intention."""
     try:
-        pod_id = f"datapod:intention:{uuid.uuid4().hex[:24]}"
         kind = proposal.get("kind") or "wellness"
         actors = proposal.get("actors") or []
         date = proposal.get("date") or ""
@@ -108,23 +107,19 @@ def _mint_intention_wellness_pod(
         if novelty_rationale:
             body_parts += ["", "**Why this novel pick:**", novelty_rationale]
 
-        body = "\n".join(body_parts)
-        # Two-axis: kind=intention (handling class) + #wellness (governed variant).
-        tags = ["wellness", kind]
+        extra_tags = [kind]
         if novelty == "novel":
-            tags.append("novel")
+            extra_tags.append("novel")
         if intensity:
-            tags.append(f"intensity:{intensity}")
+            extra_tags.append(f"intensity:{intensity}")
 
-        pod = Pod(
-            pod_id=pod_id,
+        return mint_pod(
             kind="intention",
-            tags=tags,
+            variant="wellness",
             one_liner=one_liner,
-            body=body,
-            source_refs=[],  # concern_ids + intra-pod refs live in metadata
-            for_agents=[],
-            scope_id=None,
+            body="\n".join(body_parts),
+            tags=extra_tags,
+            scope_id=None,   # system lane — owner-only
             created_by="wellness_proposer",
             metadata={
                 "proposed_at_utc": now_utc_iso,
@@ -141,13 +136,12 @@ def _mint_intention_wellness_pod(
                 "equipment_used": equipment,
                 "proposed_start_local": start_local,
             },
+            store=store,
         )
-        store.put(pod)
-        return pod_id
     except Exception:
         # Fail loud — a swallowed warning here previously hid a NameError
         # (undefined `addresses`) that silently dropped EVERY wellness pod.
-        logger.exception("[wellness_persist] mint intention.wellness failed")
+        logger.exception("[wellness_persist] mint wellness intention failed")
         raise
 
 
@@ -163,8 +157,6 @@ def _mint_intention_wellness_set_pod(
     """Aggregate pod per wellness_proposer run — captures narrative +
     rest-day advisory + references to all per-intention pods."""
     try:
-        pod_id = f"datapod:intention:{uuid.uuid4().hex[:24]}"
-
         body_parts = [
             f"# Wellness proposer set — {now_utc_iso}",
             "",
@@ -186,27 +178,25 @@ def _mint_intention_wellness_set_pod(
             one_liner_parts.append(f"+ {len(skipped_today)} skipped")
         one_liner = ", ".join(one_liner_parts)
 
-        pod = Pod(
-            pod_id=pod_id,
-            # Run summary = same handling class with a ROLE: #wellness +
-            # #run_summary. Item consumers key on metadata shape.
+        # Run summary = same handling class with a ROLE: #wellness +
+        # #run_summary. Item consumers key on metadata shape.
+        return mint_pod(
             kind="intention",
-            tags=["wellness", "run_summary"],
+            variant="wellness",
             one_liner=one_liner,
             body="\n".join(body_parts),
-            source_refs=[PodSourceRef(kind="pod", id=pid) for pid in proposal_pod_ids],
-            for_agents=[],
-            scope_id=None,
+            tags=["run_summary"],
+            scope_id=None,   # system lane — owner-only
             created_by="wellness_proposer",
+            source_refs=[PodSourceRef(kind="pod", id=pid) for pid in proposal_pod_ids],
             metadata={
                 "proposed_at_utc": now_utc_iso,
                 "proposal_pod_ids": proposal_pod_ids,
                 "rest_day_advisory": rest_day_advisory,
                 "skipped_today": skipped_today,
             },
+            store=store,
         )
-        store.put(pod)
-        return pod_id
     except Exception:
         logger.exception("[wellness_persist] mint wellness run-summary pod failed")
         raise

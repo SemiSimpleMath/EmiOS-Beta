@@ -11,12 +11,12 @@ created_by="emi/romantic_proposer".
 """
 from __future__ import annotations
 
-import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from app.assistant.pod_store.contracts import Pod, PodSourceRef
+from app.assistant.pod_store.contracts import PodSourceRef
 from app.assistant.pod_store.pod_store import PodStore
+from app.assistant.pod_store.pod_utils import mint_pod
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -60,7 +60,6 @@ def _mint_intention_romantic_pod(
 ) -> Optional[str]:
     """One pod per proposed romantic intention."""
     try:
-        pod_id = f"datapod:intention:{uuid.uuid4().hex[:24]}"
         kind = proposal.get("kind") or "romantic"
         actors = proposal.get("actors") or []
         date = proposal.get("date") or ""
@@ -101,23 +100,19 @@ def _mint_intention_romantic_pod(
         if novelty_rationale:
             body_parts += ["", "**Why this novel pick:**", novelty_rationale]
 
-        body = "\n".join(body_parts)
-        # Two-axis: kind=intention (handling class) + #romantic (governed variant).
-        tags = ["romantic", kind]
+        extra_tags = [kind]
         if novelty == "novel":
-            tags.append("novel")
+            extra_tags.append("novel")
         if babysitter:
-            tags.append("needs_sitter")
+            extra_tags.append("needs_sitter")
 
-        pod = Pod(
-            pod_id=pod_id,
+        return mint_pod(
             kind="intention",
-            tags=tags,
+            variant="romantic",
             one_liner=one_liner,
-            body=body,
-            source_refs=[],  # concern_ids + intra-pod refs live in metadata
-            for_agents=[],
-            scope_id=None,
+            body="\n".join(body_parts),
+            tags=extra_tags,
+            scope_id=None,   # system lane — owner-only
             created_by="romantic_proposer",
             metadata={
                 "proposed_at_utc": now_utc_iso,
@@ -134,13 +129,12 @@ def _mint_intention_romantic_pod(
                 "duration_minutes": duration,
                 "proposed_start_local": start_local,
             },
+            store=store,
         )
-        store.put(pod)
-        return pod_id
     except Exception:
         # Fail loud — a swallowed warning here previously hid a NameError
         # (undefined `addresses`) that silently dropped EVERY romantic pod.
-        logger.exception("[romantic_persist] mint intention.romantic failed")
+        logger.exception("[romantic_persist] mint romantic intention failed")
         raise
 
 
@@ -155,8 +149,6 @@ def _mint_intention_romantic_set_pod(
     """Aggregate pod per romantic_proposer run — captures the narrative +
     references to all per-intention pods."""
     try:
-        pod_id = f"datapod:intention:{uuid.uuid4().hex[:24]}"
-
         body_parts = [
             f"# Romantic proposer set — {now_utc_iso}",
             "",
@@ -174,26 +166,24 @@ def _mint_intention_romantic_set_pod(
             one_liner_parts.append(f"+ {len(skipped_today)} deliberate-skip")
         one_liner = ", ".join(one_liner_parts) if one_liner_parts else "no proposals"
 
-        pod = Pod(
-            pod_id=pod_id,
-            # Run summary = same handling class with a ROLE: #romantic +
-            # #run_summary. Item consumers key on metadata shape.
+        # Run summary = same handling class with a ROLE: #romantic +
+        # #run_summary. Item consumers key on metadata shape.
+        return mint_pod(
             kind="intention",
-            tags=["romantic", "run_summary"],
+            variant="romantic",
             one_liner=one_liner,
             body="\n".join(body_parts),
-            source_refs=[PodSourceRef(kind="pod", id=pid) for pid in proposal_pod_ids],
-            for_agents=[],
-            scope_id=None,
+            tags=["run_summary"],
+            scope_id=None,   # system lane — owner-only
             created_by="romantic_proposer",
+            source_refs=[PodSourceRef(kind="pod", id=pid) for pid in proposal_pod_ids],
             metadata={
                 "proposed_at_utc": now_utc_iso,
                 "proposal_pod_ids": proposal_pod_ids,
                 "skipped_today": skipped_today,
             },
+            store=store,
         )
-        store.put(pod)
-        return pod_id
     except Exception:
         logger.exception("[romantic_persist] mint romantic run-summary pod failed")
         raise

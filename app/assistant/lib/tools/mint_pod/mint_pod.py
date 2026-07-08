@@ -8,11 +8,8 @@ forward to later turns and can be reopened with ``pod_fetch``. Mirrors
 """
 from __future__ import annotations
 
-import uuid
-
 from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
-from app.assistant.pod_store.contracts import Pod
-from app.assistant.pod_store.pod_store import PodStore
+from app.assistant.pod_store import pod_utils
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import ToolMessage, ToolResult
 
@@ -78,21 +75,20 @@ class MintPodTool(BaseTool):
             scope_id = getattr(scope, "room_id", None) or None
             actor = getattr(scope, "actor_id", None)
 
-        pod = Pod(
-            pod_id=f"datapod:{kind}:{uuid.uuid4().hex}",
-            kind=kind,
-            tags=tags,
-            one_liner=title,
-            body=body,
-            scope_id=scope_id,
-            created_by=actor or "mint_pod",
-            metadata={"source_kind": "manual_mint"},
-            min_authority=min_authority,
-            importance=importance,
-        )
-
         try:
-            PodStore().put(pod)
+            # The unified minter: one id builder, one tag assembly, one
+            # write path (put()'s format/registry gate included).
+            pod_id = pod_utils.mint_pod(
+                kind=kind,
+                one_liner=title,
+                body=body,
+                tags=tags,
+                scope_id=scope_id,
+                created_by=actor or "mint_pod",
+                metadata={"source_kind": "manual_mint"},
+                min_authority=min_authority,
+                importance=importance,
+            )
         except Exception as e:
             logger.exception("[mint_pod] failed to persist pod")
             return ToolResult(
@@ -101,11 +97,11 @@ class MintPodTool(BaseTool):
                 data={"ok": False},
             )
 
-        logger.info("[mint_pod] minted %s kind=%s scope=%s tags=%s", pod.pod_id, kind, scope_id, tags)
+        logger.info("[mint_pod] minted %s kind=%s scope=%s tags=%s", pod_id, kind, scope_id, tags)
         return ToolResult(
             result_type="mint_pod_result",
             content=(
-                f"Minted pod {pod.pod_id}\n"
+                f"Minted pod {pod_id}\n"
                 f"  kind:  {kind}\n"
                 f"  title: {title}\n"
                 f"  tags:  {tags}\n"
@@ -114,7 +110,7 @@ class MintPodTool(BaseTool):
             ),
             data={
                 "ok": True,
-                "pod_id": pod.pod_id,
+                "pod_id": pod_id,
                 "kind": kind,
                 "importance": importance,
                 "min_authority": min_authority,

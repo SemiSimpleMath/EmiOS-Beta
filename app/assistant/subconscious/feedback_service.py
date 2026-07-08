@@ -11,12 +11,12 @@ pods to emit belief_updates.
 """
 from __future__ import annotations
 
-import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from app.assistant.pod_store.contracts import Pod
+from app.assistant.pod_store.contracts import PodSourceRef
 from app.assistant.pod_store.pod_store import PodStore
+from app.assistant.pod_store.pod_utils import mint_pod
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -57,7 +57,6 @@ def mint_feedback_comment(
         return None
     try:
         now_utc_iso = datetime.now(timezone.utc).isoformat()
-        pod_id = f"datapod:feedback:{uuid.uuid4().hex[:24]}"
         snippet = text_stripped[:140]
         body_parts = [
             f"# Feedback comment — {now_utc_iso}",
@@ -67,18 +66,20 @@ def mint_feedback_comment(
         if target_scope:
             body_parts.append(f"**Target scope:** {target_scope}")
         body_parts += ["", "**Comment:**", text_stripped]
-        pod = Pod(
-            pod_id=pod_id,
-            # Two-axis: kind=feedback (handling class) + #comment (variant);
-            # #unprocessed is the extractor-queue lifecycle tag.
+        # Two-axis: kind=feedback (handling class) + #comment (variant);
+        # #unprocessed is the extractor-queue lifecycle tag. The commented
+        # pod is referenced first-class (source_refs kind="pod") as well as
+        # via metadata.target_pod_id.
+        return mint_pod(
             kind="feedback",
-            tags=["comment", "user_comment", "unprocessed"],
+            variant="comment",
             one_liner=f"Comment on {target}: {snippet}",
             body="\n".join(body_parts),
-            source_refs=[],
-            for_agents=["feedback_extractor"],
+            tags=["user_comment", "unprocessed"],
             scope_id=None,
             created_by=actor,
+            for_agents=["feedback_extractor"],
+            source_refs=[PodSourceRef(kind="pod", id=target)],
             metadata={
                 "submitted_at_utc": now_utc_iso,
                 "target_pod_id": target,
@@ -88,10 +89,8 @@ def mint_feedback_comment(
                 "extracted_belief_ids": [],
             },
         )
-        PodStore().put(pod)
-        return pod_id
     except Exception as e:
-        logger.warning("[feedback_service] mint feedback.comment failed: %s", e)
+        logger.warning("[feedback_service] mint feedback comment failed: %s", e)
         return None
 
 

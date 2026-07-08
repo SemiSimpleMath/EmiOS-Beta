@@ -10,13 +10,11 @@ answered concern and re-resolve.
 """
 from __future__ import annotations
 
-import json
-import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from app.assistant.pod_store.contracts import Pod
 from app.assistant.pod_store.pod_store import PodStore
+from app.assistant.pod_store.pod_utils import mint_pod
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -77,8 +75,6 @@ def _mint_weekly_schedule_pod(
     now_utc_iso: str,
 ) -> Optional[str]:
     try:
-        pod_id = f"datapod:plan:{uuid.uuid4().hex[:24]}"
-
         anchor_count = sum(1 for s in schedule if s.get("is_anchor"))
         one_liner = (
             f"Week of {week_start_date} — {len(schedule)} items "
@@ -151,19 +147,17 @@ def _mint_weekly_schedule_pod(
             body_parts.append("## Arbiter thinking")
             body_parts.append(free_form_thinking)
 
-        pod = Pod(
-            pod_id=pod_id,
+        return mint_pod(
             kind="plan",
-            tags=["weekly_schedule"],
+            variant="weekly_schedule",
             one_liner=one_liner,
             body="\n".join(body_parts),
-            source_refs=[],
+            scope_id=None,   # system lane — owner-only
+            created_by="scheduler_arbiter",
             for_agents=[
                 "meal_proposer", "daily_meal_proposer", "weekly_meal_planner",
                 "wellness_proposer", "romantic_proposer",
             ],
-            scope_id=None,
-            created_by="scheduler_arbiter",
             metadata={
                 "produced_at_utc": now_utc_iso,
                 "week_start_date": week_start_date,
@@ -171,9 +165,8 @@ def _mint_weekly_schedule_pod(
                 "conflicts_resolved": resolved,
                 "conflicts_for_user": user_conflicts,
             },
+            store=store,
         )
-        store.put(pod)
-        return pod_id
     except Exception:
         # Fail loud — this pod is the run's SINGLE product (the weekly source
         # of truth every proposer honors). A swallowed mint made the routine
