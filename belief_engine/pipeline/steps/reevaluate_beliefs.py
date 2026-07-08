@@ -81,7 +81,8 @@ class ReevaluateBeliefsStep:
         if agent_factory is None:
             raise RuntimeError("agent_factory not available in DI")
 
-        stats = {"rewritten": 0, "qualified": 0, "split": 0, "deprecated": 0, "confirmed": 0, "errors": 0}
+        stats = {"rewritten": 0, "qualified": 0, "split": 0, "deprecated": 0, "confirmed": 0,
+                 "locked_skipped": 0, "errors": 0}
         notes_collected: List[str] = []
         today_iso = datetime.now(timezone.utc).date().isoformat()
 
@@ -89,6 +90,16 @@ class ReevaluateBeliefsStep:
             belief = store.get_by_key(belief_key)
             if belief is None:
                 logger.warning("[ReevaluateBeliefs] belief not found: %s", belief_key)
+                continue
+
+            # Honor a manual lock: a belief the owner corrected + locked via /beliefs keeps its
+            # statement and status exactly as the owner set them — no rewrite, split, or
+            # deprecation here, and no LLM spent on it. (/beliefs normalizes contested->active
+            # at lock time, so a locked belief reaching this list is a legacy edge.)
+            if getattr(belief, "locked", 0):
+                stats["locked_skipped"] += 1
+                logger.info("[ReevaluateBeliefs] %s is LOCKED — preserving the owner's correction",
+                            belief_key)
                 continue
 
             try:

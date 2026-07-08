@@ -228,8 +228,14 @@ def beliefs_update():
 
     conn = _connect()
     try:
-        if not conn.execute("SELECT 1 FROM user_beliefs WHERE id=?", (bid,)).fetchone():
+        current = conn.execute("SELECT status FROM user_beliefs WHERE id=?", (bid,)).fetchone()
+        if not current:
             return jsonify({"error": "not found (archived beliefs are read-only)"}), 404
+        # Locking is the owner endorsing the belief as true-as-written: a contested belief
+        # normalizes to active so it doesn't sit in the reevaluator's contested pool forever
+        # (the reevaluator skips locked beliefs). An explicit suppress in the same payload wins.
+        if data.get("locked") and "suppressed" not in data and current["status"] == "contested":
+            sets.append("status = ?"); params.append("active")
         if sets:
             sets.append("updated_at = ?"); params.append(datetime.now(timezone.utc).isoformat())
             conn.execute(f"UPDATE user_beliefs SET {', '.join(sets)} WHERE id=?", (*params, bid))
