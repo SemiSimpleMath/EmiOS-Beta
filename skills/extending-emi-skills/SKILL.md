@@ -42,7 +42,7 @@ name: my-skill                       # lowercase a-z 0-9 -, 1-64 chars, MUST mat
 description: One-line that triggers usage. The HEADER (name + description) is always in agent context for tier-1 discovery; the body loads only on activation.
 license: Apache-2.0
 compatibility: emi-1                 # optional
-allowed_tools: ""                    # experimental — space-separated
+allowed_tools: ""                    # accepted for spec portability; NOT enforced — tool permission comes from the scope contract
 metadata:
   author: jukka
   version: "1.0"

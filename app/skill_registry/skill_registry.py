@@ -48,11 +48,13 @@ class SkillRegistry:
 
         Normally skills are stable (loaded once at construction). The /skills
         editor UI calls this after a user edits a skill body so the change takes
-        effect without a process restart. Thread-safe; rebuilds atomically.
+        effect without a process restart. The new index is built COMPLETELY
+        off to the side and swapped in under the lock in one assignment — a
+        prompt built concurrently with a reload sees either the old set or the
+        new set, never an empty or partial registry (the old clear-then-load
+        had exactly that window). A crash mid-scan leaves the old index
+        serving.
         """
-        with self._lock:
-            self._skills = {}
-            self._validations = {}
         self._load_all()
 
     def get(self, name: str) -> Optional[Skill]:
@@ -112,29 +114,51 @@ class SkillRegistry:
     # ── load ────────────────────────────────────────────────────────
 
     def _load_all(self) -> None:
+        """Build the full index off to the side, then swap it in under the
+        lock in ONE assignment. Readers concurrent with a (re)load see either
+        the previous index or the complete new one — never a partial. A
+        missing skills/ dir keeps whatever is currently served."""
         if not self._skills_dir.is_dir():
             logger.info("[skill_registry] no skills/ directory at %s — registry empty", self._skills_dir)
             return
+
+        skills: Dict[str, Skill] = {}
+        validations: Dict[str, ValidationResult] = {}
 
         # Two roots: skills/ (generic, public, tracked) and skills/private/
         # (per-user persona/actas skills — gitignored, never committed). Both
         # are scanned identically; `private` is just where a user's own,
         # non-shareable skills live so they can't leak into the public repo.
-        public_loaded, public_skipped = self._load_skills_from(self._skills_dir, skip_names={"private"})
+        public_loaded, public_skipped = self._load_skills_from(
+            self._skills_dir, skills=skills, validations=validations, skip_names={"private"},
+        )
         private_dir = (self._skills_dir / "private").resolve()
         private_loaded, private_skipped = (
-            self._load_skills_from(private_dir) if private_dir.is_dir() else (0, 0)
+            self._load_skills_from(private_dir, skills=skills, validations=validations)
+            if private_dir.is_dir() else (0, 0)
         )
         loaded = public_loaded + private_loaded
         skipped = public_skipped + private_skipped
+
+        with self._lock:
+            self._skills = skills
+            self._validations = validations
 
         logger.info(
             "[skill_registry] loaded %d skill(s) (%d public, %d private), skipped %d",
             loaded, public_loaded, private_loaded, skipped,
         )
 
-    def _load_skills_from(self, root: Path, *, skip_names: Optional[set] = None) -> tuple[int, int]:
-        """Scan one directory of ``<name>/SKILL.md`` skill dirs. Returns (loaded, skipped)."""
+    def _load_skills_from(
+        self,
+        root: Path,
+        *,
+        skills: Dict[str, Skill],
+        validations: Dict[str, ValidationResult],
+        skip_names: Optional[set] = None,
+    ) -> tuple[int, int]:
+        """Scan one directory of ``<name>/SKILL.md`` skill dirs into the
+        caller's staging dicts. Returns (loaded, skipped)."""
         skip = skip_names or set()
         loaded = 0
         skipped = 0
@@ -153,7 +177,7 @@ class SkillRegistry:
                 skipped += 1
                 continue
             skill, result = parse_skill_md(skill_md)
-            self._validations[child.name] = result
+            validations[child.name] = result
             if skill is None:
                 logger.warning(
                     "[skill_registry] skill %s failed validation: %s",
@@ -161,8 +185,7 @@ class SkillRegistry:
                 )
                 skipped += 1
                 continue
-            with self._lock:
-                self._skills[skill.name] = skill
+            skills[skill.name] = skill
             loaded += 1
             if result.warnings:
                 logger.info(

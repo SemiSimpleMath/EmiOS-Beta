@@ -45,7 +45,7 @@ compatibility: ...                    # OPTIONAL, 1-500 chars (env requirements)
 metadata:                             # OPTIONAL, free-form key/value
   author: jukka
   version: "1.0"
-allowed-tools: ...                    # OPTIONAL (experimental)
+allowed-tools: ...                    # OPTIONAL — accepted for spec portability, NOT enforced (parse warns; see below)
 ---
 
 # Body
@@ -61,6 +61,14 @@ The standard expects three load tiers:
 3. **Resources** (`scripts/`, `references/`, `assets/`) — loaded on demand from inside the skill.
 
 Keep `SKILL.md` short. Move detail to `references/` files the agent reads only when it needs them.
+The resolver logs a warning when one prompt's injected skills exceed ~30K chars combined
+(`context_injector._SKILLS_CHARS_WARN`) — if you see it, a body belongs in `references/`.
+
+**`allowed-tools` is not enforced.** EmiOS accepts the field for agentskills.io
+portability and carries it on the skill header, but tool permission flows from the
+scope contract (`tools.allowed_tools` / `per_manager`), never from a skill — a skill
+gates *relevance*, not *authorization*. The parser emits a warning on any skill that
+declares it so authors don't mistake it for a working control.
 
 ## 3. Skills vs resources — the cut
 
@@ -188,6 +196,14 @@ The governing rules (`SkillInjector`, `app/skill_registry/`):
      `scope.skills.always_inject`, which **propagates to every downstream agent** for
      the whole task (it doesn't depend on any agent seeing a keyword).
    - **neither** → inert (static-bind only, 5.1).
+6. **Keyword auto-injection is per-agent opt-in** (`accept_auto_skills: true` in the
+   agent config — the team planners and the subconscious/meal lanes opt in). The
+   chat-surface agents (master_room's chat gate and conversational agents)
+   deliberately do NOT: a keyword-triggered how-to skill influences the agents that
+   DO work (the planners downstream), not the pure-chat reply itself. Chat replies
+   get their skills from static bindings and the scope-stamped `always_inject`
+   persona packs. Authoring a keyword skill and expecting it to change a plain chat
+   answer will not work — that's this rule, not a bug.
 
 #### Worked examples
 

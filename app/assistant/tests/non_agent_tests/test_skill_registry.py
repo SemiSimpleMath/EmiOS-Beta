@@ -413,3 +413,54 @@ def test_skill_injector_searches_incoming_message_too(tmp_path):
     assert inj.matching_skill_names(
         task="order food", incoming_message="from doordash please",
     ) == ["doordash-ordering"]
+
+
+# ─── 2026-07-07 skills audit: K1 allowed-tools honesty, K2 atomic reload ──
+
+
+def test_allowed_tools_warns_not_enforced(tmp_path):
+    """K1: 'allowed-tools' is accepted for spec portability but EmiOS does not
+    enforce it — the parser must SAY so, not let an author believe it works."""
+    p = _write_skill(tmp_path, "with-tools", {
+        "name": "with-tools",
+        "description": "x",
+        "allowed-tools": "Bash Read",
+    })
+    skill, result = parse_skill_md(p)
+    assert result.ok
+    assert skill.allowed_tools == "Bash Read"           # still carried on the header
+    assert any("NOT enforced" in w for w in result.warnings)
+
+
+def test_reload_swaps_in_new_index(tmp_path):
+    skills_dir = tmp_path / "skills"
+    _write_skill(skills_dir, "alpha", {"name": "alpha", "description": "a"})
+    reg = SkillRegistry(base_dir=tmp_path)
+    assert [h.name for h in reg.headers()] == ["alpha"]
+
+    _write_skill(skills_dir, "beta", {"name": "beta", "description": "b"})
+    reg.reload()
+    assert sorted(h.name for h in reg.headers()) == ["alpha", "beta"]
+
+
+def test_reload_crash_keeps_old_index(tmp_path, monkeypatch):
+    """K2: the new index is built off to the side and swapped in one
+    assignment — a scan that blows up mid-reload leaves the OLD index
+    serving (the old clear-then-load produced an empty registry window,
+    silently dropping every skill from concurrently-built prompts)."""
+    skills_dir = tmp_path / "skills"
+    _write_skill(skills_dir, "alpha", {"name": "alpha", "description": "a"})
+    reg = SkillRegistry(base_dir=tmp_path)
+    assert [h.name for h in reg.headers()] == ["alpha"]
+
+    import app.skill_registry.skill_registry as sr
+
+    def _boom(path):
+        raise RuntimeError("simulated parse crash")
+
+    monkeypatch.setattr(sr, "parse_skill_md", _boom)
+    with pytest.raises(RuntimeError, match="simulated parse crash"):
+        reg.reload()
+    # The crash did not clear what was already serving.
+    assert [h.name for h in reg.headers()] == ["alpha"]
+    assert reg.get("alpha") is not None

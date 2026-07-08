@@ -17,6 +17,12 @@ from app.assistant.utils.identity_names import get_assistant_name
 
 logger = get_logger(__name__)
 
+# Cumulative injected-skill weight per prompt that earns a warning. Bodies
+# ride the prompt whole and always-inject persona packs stack onto every
+# downstream agent of a task — this makes the bloat visible before it becomes
+# a cost bug (2026-07-07 skills audit).
+_SKILLS_CHARS_WARN = 30_000
+
 
 def _filter_msgs_by_session_start(msgs: list, agent: Any) -> list:
     """
@@ -603,6 +609,17 @@ class ContextInjector:
                 if isinstance(name, str) and name.strip() in resolved:
                     del resolved[name.strip()]
                     logger.debug("[%s] scope-denied skill=%s", agent.name, name)
+
+        # Size visibility: surface the cumulative skill weight once it crosses
+        # the threshold — which skills, how heavy — so a fat SKILL.md or a
+        # stacking persona pack shows up in logs instead of only on the bill.
+        total_chars = sum(len(body or "") for body in resolved.values())
+        if total_chars > _SKILLS_CHARS_WARN:
+            logger.warning(
+                "[%s] injected skills total %d chars across %d skill(s) (warn threshold %d): %s",
+                agent.name, total_chars, len(resolved), _SKILLS_CHARS_WARN,
+                sorted(resolved.keys()),
+            )
 
         # Compute dynamic-names list — preserves insertion order from the
         # resolved dict (Python 3.7+), filters out static-config skills.

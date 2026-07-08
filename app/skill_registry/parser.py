@@ -134,6 +134,15 @@ def parse_skill_md(path: Path) -> Tuple[Optional[Skill], ValidationResult]:
     allowed_tools = fm.get("allowed-tools") or fm.get("allowed_tools")
     if allowed_tools is not None and not isinstance(allowed_tools, str):
         result.errors.append("Frontmatter 'allowed-tools' must be a string when provided.")
+    elif allowed_tools is not None:
+        # Accepted for agentskills.io portability, carried on the header, but
+        # EmiOS does not enforce it — tool permission flows from ScopeContext
+        # (allowed_tools/per_manager), never from a skill. Warn so an author
+        # doesn't mistake it for a working control (2026-07-07 skills audit).
+        result.warnings.append(
+            "'allowed-tools' is accepted for spec portability but NOT enforced by "
+            "EmiOS — tool permission comes from the scope contract, not skills."
+        )
 
     # auto_inject_when (parsed from metadata.auto_inject_when) — EmiOS extension.
     # Per spec, metadata is free-form; this key is invisible to other clients
