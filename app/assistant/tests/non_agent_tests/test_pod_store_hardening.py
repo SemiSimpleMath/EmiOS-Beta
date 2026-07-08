@@ -117,9 +117,23 @@ def _pod(pod_id, kind, **kw):
 
 
 def test_put_accepts_registered_dotted_kind():
-    pid = pod_utils.canonical_pod_id("intention.meal", "t1")
-    PodStore().put(_pod(pid, "intention.meal"))
+    pid = pod_utils.canonical_pod_id("auth.session", "t1")
+    PodStore().put(_pod(pid, "auth.session"))
     assert PodStore().get(pid) is not None
+
+
+def test_put_family_kind_requires_exactly_one_variant():
+    """Two-axis model: a kind declaring `variants` must carry exactly one of
+    them as a tag — the governed vocabulary can't fork the way kinds did."""
+    # No variant tag → refuse.
+    with pytest.raises(ValueError, match="EXACTLY ONE variant"):
+        PodStore().put(_pod("datapod:intention:aaa111", "intention"))
+    # Two variant tags → refuse.
+    with pytest.raises(ValueError, match="EXACTLY ONE variant"):
+        PodStore().put(_pod("datapod:intention:aaa222", "intention", tags=["meal", "wellness"]))
+    # One variant (+ role/extra tags) → OK.
+    PodStore().put(_pod("datapod:intention:aaa333", "intention", tags=["meal", "run_summary", "dinner"]))
+    assert PodStore().get("datapod:intention:aaa333") is not None
 
 
 def test_put_rejects_unregistered_kind():
@@ -199,6 +213,47 @@ def test_retention_malformed_policy_fails_loud(monkeypatch):
     monkeypatch.setattr(reg, "get_kind", lambda k: {"retention": {"mode": "keep_days"}})
     with pytest.raises(ValueError, match="retention.days"):
         run_pod_retention_sweep()
+
+
+# ---------------------------------------------------------------------------
+# minter round-trips through the REAL store (the format gate included)
+# ---------------------------------------------------------------------------
+
+def test_subconscious_minters_round_trip_the_real_store():
+    """The lane persisters run against the REAL PodStore, so put()'s
+    format/registry/variant gate exercises their actual ids and tags — a
+    kind/id mismatch in a minter fails HERE, not in production. (The
+    fake-store mint guards can't see the gate.)"""
+    from app.assistant.subconscious.meal_persist import apply_daily_meal_proposer_output
+    from app.assistant.subconscious.wellness_persist import apply_wellness_proposer_output
+
+    meal_out = apply_daily_meal_proposer_output({
+        "proposals": [{
+            "actors": ["household"], "dish": "Pasta", "meal_window": "dinner",
+            "date": "2026-07-09", "source": "home_cook", "novelty": "familiar",
+            "confidence": "high", "primary_ingredients": ["pasta"],
+        }],
+        "shopping_run": {"items": ["pasta"], "suggested_date": "2026-07-09"},
+        "free_form_thinking": "",
+        "skipped_meals": [],
+    })
+    assert meal_out["proposal_pod_count"] == 1
+    store = PodStore()
+    meal_pod = store.get(meal_out["proposal_pod_ids"][0])
+    assert meal_pod.kind == "intention" and "meal" in meal_pod.tags
+    set_pod = store.get(meal_out["set_pod_id"])
+    assert set_pod.kind == "intention"
+    assert "meal" in set_pod.tags and "run_summary" in set_pod.tags
+
+    wellness_out = apply_wellness_proposer_output({
+        "proposals": [{
+            "kind": "workout", "actors": ["the user"], "date": "2026-07-09",
+            "summary": "30 min ride", "source": "routine", "confidence": "high",
+            "novelty": "familiar",
+        }],
+    })
+    w_pod = store.get(wellness_out["proposal_pod_ids"][0])
+    assert w_pod.kind == "intention" and "wellness" in w_pod.tags
 
 
 # ---------------------------------------------------------------------------

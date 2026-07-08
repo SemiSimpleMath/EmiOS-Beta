@@ -1,8 +1,8 @@
 """Persist romantic_proposer output as intention pods.
 
 Mirrors wellness_persist shape:
-- Each RomanticProposal becomes one pod of kind=`intention.romantic`
-- One summary pod of kind=`intention.romantic_set` per run
+- Each RomanticProposal becomes one `intention` #romantic pod
+- One run-summary pod (`intention` #romantic #run_summary) per run
 
 No calendar writes from this layer. When the calendar projection button
 ships (mirroring the meal calendar approach), it'll read these pods and
@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from app.assistant.pod_store.contracts import Pod
+from app.assistant.pod_store.contracts import Pod, PodSourceRef
 from app.assistant.pod_store.pod_store import PodStore
 from app.assistant.utils.logging_config import get_logger
 
@@ -60,7 +60,7 @@ def _mint_intention_romantic_pod(
 ) -> Optional[str]:
     """One pod per proposed romantic intention."""
     try:
-        pod_id = f"datapod:intention.romantic:{uuid.uuid4().hex[:24]}"
+        pod_id = f"datapod:intention:{uuid.uuid4().hex[:24]}"
         kind = proposal.get("kind") or "romantic"
         actors = proposal.get("actors") or []
         date = proposal.get("date") or ""
@@ -102,7 +102,8 @@ def _mint_intention_romantic_pod(
             body_parts += ["", "**Why this novel pick:**", novelty_rationale]
 
         body = "\n".join(body_parts)
-        tags = ["intention", "romantic", kind]
+        # Two-axis: kind=intention (handling class) + #romantic (governed variant).
+        tags = ["romantic", kind]
         if novelty == "novel":
             tags.append("novel")
         if babysitter:
@@ -110,7 +111,7 @@ def _mint_intention_romantic_pod(
 
         pod = Pod(
             pod_id=pod_id,
-            kind="intention.romantic",
+            kind="intention",
             tags=tags,
             one_liner=one_liner,
             body=body,
@@ -154,7 +155,7 @@ def _mint_intention_romantic_set_pod(
     """Aggregate pod per romantic_proposer run — captures the narrative +
     references to all per-intention pods."""
     try:
-        pod_id = f"datapod:intention.romantic_set:{uuid.uuid4().hex[:24]}"
+        pod_id = f"datapod:intention:{uuid.uuid4().hex[:24]}"
 
         body_parts = [
             f"# Romantic proposer set — {now_utc_iso}",
@@ -175,11 +176,13 @@ def _mint_intention_romantic_set_pod(
 
         pod = Pod(
             pod_id=pod_id,
-            kind="intention.romantic_set",
-            tags=["intention", "romantic_set"],
+            # Run summary = same handling class with a ROLE: #romantic +
+            # #run_summary. Item consumers key on metadata shape.
+            kind="intention",
+            tags=["romantic", "run_summary"],
             one_liner=one_liner,
             body="\n".join(body_parts),
-            source_refs=[],
+            source_refs=[PodSourceRef(kind="pod", id=pid) for pid in proposal_pod_ids],
             for_agents=[],
             scope_id=None,
             created_by="romantic_proposer",
@@ -192,5 +195,5 @@ def _mint_intention_romantic_set_pod(
         store.put(pod)
         return pod_id
     except Exception:
-        logger.exception("[romantic_persist] mint intention.romantic_set failed")
+        logger.exception("[romantic_persist] mint romantic run-summary pod failed")
         raise

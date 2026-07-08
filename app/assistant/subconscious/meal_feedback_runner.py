@@ -78,9 +78,9 @@ def _produce(state: Dict[str, Any], now_utc: datetime, summary: Dict[str, Any], 
     store = PodStore()
     target_dates = {(now_utc.date() - timedelta(days=d)).isoformat() for d in range(1, PAST_DAYS + 1)}
     try:
-        pods = store.query(kind="intention.meal", since_utc=now_utc - timedelta(days=PAST_DAYS + 2), limit=200)
+        pods = store.query(kind="intention", tags=["meal"], since_utc=now_utc - timedelta(days=PAST_DAYS + 2), limit=200)
     except Exception as e:
-        logger.warning("[meal_feedback] intention.meal fetch failed: %s", e)
+        logger.warning("[meal_feedback] meal intention fetch failed: %s", e)
         return
 
     asked = 0

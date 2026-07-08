@@ -14,7 +14,7 @@ Shape:
           "category": "fresh_fish",
           "acquired_at_utc": "2026-05-19T...",
           "decay_at_utc":    "2026-05-22T...",
-          "source_intention_id": "datapod:intention.shopping:...",
+          "source_intention_id": "datapod:intention:...",
           "consumed_at_utc": null
         }
       ],

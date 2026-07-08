@@ -157,16 +157,19 @@ class PodStore:
     def _validate_new_pod_id(pod: Pod) -> None:
         """The post-processing format gate for NEW pods: the kind must be
         registered in configs/pod_kinds.json, the id must match the canonical
-        URI grammar, and the id's kind segment must equal the pod's ``kind``
-        field. Minters use ``pod_utils.canonical_pod_id`` to build conforming
-        ids; whatever produced a non-conforming one fails LOUD here instead of
-        minting an unreferenceable pod (or forking the kind vocabulary — the
-        registry check is what keeps research_finding from growing a
-        research.finding twin again)."""
+        URI grammar, the id's kind segment must equal the pod's ``kind``
+        field, and — for family kinds that declare ``variants`` — the pod must
+        carry EXACTLY ONE variant tag (the two-axis model: kind = handling
+        class, variant tag = the governed routing handle; enforcement here is
+        what keeps the variant vocabulary from forking the way kinds once
+        did). Minters use ``pod_utils.canonical_pod_id`` to build conforming
+        ids; whatever produced a non-conforming pod fails LOUD here instead of
+        minting an unreferenceable one."""
         from app.assistant.pod_store.pod_kind_registry import get_kind
         from app.assistant.pod_store.pod_uri import POD_URI_RE
         kind = str(pod.kind or "")
-        if get_kind(kind) is None:
+        entry = get_kind(kind)
+        if entry is None:
             raise ValueError(
                 f"pod kind {kind!r} is not registered in configs/pod_kinds.json — "
                 "register the kind first (see skills/extending-emi-pod-kinds), "
@@ -185,6 +188,15 @@ class PodStore:
                 f"pod_id {pid!r} carries kind segment {id_kind!r} but the pod's "
                 f"kind field is {kind!r} — the two must be identical."
             )
+        variants = entry.get("variants")
+        if isinstance(variants, list) and variants:
+            carried = [t for t in (pod.tags or []) if t in set(variants)]
+            if len(carried) != 1:
+                raise ValueError(
+                    f"pod kind {kind!r} requires EXACTLY ONE variant tag from "
+                    f"{sorted(variants)}; this pod carries {carried or 'none'} "
+                    f"(tags={list(pod.tags or [])})."
+                )
 
     def get(self, pod_id: str) -> Optional[Pod]:
         session = get_session()

@@ -7,9 +7,11 @@ Policy lives on each kind's registry entry (``configs/pod_kinds.json``):
     "retention": {"mode": "keep_days", "days": 365, "keep_latest": 8}
 
 ``keep_days`` removes pods of that kind older than the cutoff;
-``keep_latest`` additionally protects the newest M of the kind regardless
-of age (the planner lanes read "the latest plan" — it must survive even
-if the lane was off for a season).
+``keep_latest`` additionally protects the newest M regardless of age (the
+planner lanes read "the latest plan" — it must survive even if the lane
+was off for a season). For a family kind that declares ``variants``,
+keep_latest applies PER VARIANT: the newest M weekly_meals AND the newest
+M weekly_schedule survive, not the newest M of the union.
 
 Hard guards, independent of policy:
 - pods with ``pod_projection`` rows (secret/identity pods) are NEVER swept;
@@ -76,16 +78,30 @@ def run_pod_retention_sweep(*, dry_run: bool = False, now_utc: datetime | None =
 
         from app.models.db_manager import get_db_manager
         with get_db_manager().transaction(op=f"pod_retention.{kind}") as session:
-            # Newest keep_latest of the kind survive regardless of age.
+            # Newest keep_latest survive regardless of age — per VARIANT when
+            # the kind declares variants (each variant's latest matters
+            # independently), else per kind.
             protected_ids: set = set()
             if keep_latest:
-                newest = session.execute(
-                    select(PodRow.pod_id)
-                    .where(PodRow.kind == kind)
-                    .order_by(PodRow.created_at.desc())
-                    .limit(keep_latest)
-                ).scalars().all()
-                protected_ids = set(newest)
+                variants = entry.get("variants")
+                if isinstance(variants, list) and variants:
+                    for variant in variants:
+                        newest = session.execute(
+                            select(PodRow.pod_id)
+                            .where(PodRow.kind == kind)
+                            .where(PodRow.tags_json.like(f'%"{variant}"%'))
+                            .order_by(PodRow.created_at.desc())
+                            .limit(keep_latest)
+                        ).scalars().all()
+                        protected_ids.update(newest)
+                else:
+                    newest = session.execute(
+                        select(PodRow.pod_id)
+                        .where(PodRow.kind == kind)
+                        .order_by(PodRow.created_at.desc())
+                        .limit(keep_latest)
+                    ).scalars().all()
+                    protected_ids = set(newest)
 
             candidates = session.execute(
                 select(PodRow.pod_id)

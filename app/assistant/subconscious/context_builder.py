@@ -857,7 +857,7 @@ def build_weekly_schedule_block() -> str:
     try:
         from app.assistant.pod_store.pod_store import PodStore
         store = PodStore()
-        results = store.query(kind="plan.weekly_schedule", since="10d", limit=1)
+        results = store.query(kind="plan", tags=["weekly_schedule"], since="10d", limit=1)
     except Exception as e:
         logger.warning("[context_builder] weekly_schedule fetch failed: %s", e)
         return "(no weekly schedule readable — plan independently and let scheduler_arbiter resolve)"

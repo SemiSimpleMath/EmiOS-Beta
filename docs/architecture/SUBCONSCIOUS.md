@@ -233,19 +233,23 @@ All share `on_error: {max_failures:3, then:"disable_with_ticket"}` with backoff 
 
 SQLite: `pending_question` table (`app/assistant/database/pending_question.py`). The belief store (`user_beliefs` / `belief_evidence`) is written by `feedback_extractor`.
 
-### Pod kinds
+### Pod kinds (two-axis: kind = handling class, variant tag = routing handle)
 
-| Kind | Minted by | Consumed by |
+| Kind + variant | Minted by | Consumed by |
 |------|-----------|-------------|
-| `intention.meal` / `.shopping` / `.meal_set` | `daily_meal_proposer` | arbiter, dashboard, skill_distiller, easy_meals |
-| `intention.wellness` / `.wellness_set` | `wellness_proposer` | arbiter, dashboard, skill_distiller |
-| `intention.romantic` / `.romantic_set` | `romantic_proposer` | arbiter, dashboard, skill_distiller |
-| `plan.weekly_meals` | `weekly_meal_planner` | `daily_meal_proposer`, easy_meals |
-| `plan.weekly_schedule` | `scheduler_arbiter` | all proposers (`build_weekly_schedule_block`) |
-| `feedback.comment` | `/subconscious/comment`, `meal_feedback_runner` | `feedback_extractor` |
+| `intention` #meal / #shopping (+#run_summary per run) | `daily_meal_proposer` | arbiter, dashboard, skill_distiller, easy_meals |
+| `intention` #wellness (+#run_summary) | `wellness_proposer` | arbiter, dashboard, skill_distiller |
+| `intention` #romantic (+#run_summary) | `romantic_proposer` | arbiter, dashboard, skill_distiller |
+| `plan` #weekly_meals | `weekly_meal_planner` | `daily_meal_proposer`, easy_meals |
+| `plan` #weekly_schedule | `scheduler_arbiter` | all proposers (`build_weekly_schedule_block`) |
+| `feedback` #comment | `/subconscious/comment`, `meal_feedback_runner` | `feedback_extractor` |
 | `chat_cluster` | upstream (pod classifier) | noticer (friction signals), skill_distiller |
 | `exploration_attempt` | upstream | noticer (`exploration_outcomes_30d`) |
 
+Consumers query `store.query(kind="intention", tags=["meal"])`; a family pod
+must carry exactly one variant tag (enforced at `PodStore.put`). Run-summary
+pods carry the domain variant plus `#run_summary` and no `metadata.date`, so
+item consumers (which key on date/dish metadata) pass over them naturally.
 All pod ids follow `datapod:<kind>:<uuid4-hex-24>`. See [14_PODS.md](14_PODS.md).
 
 ## Key Files

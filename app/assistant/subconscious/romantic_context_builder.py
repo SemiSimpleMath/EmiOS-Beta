@@ -200,11 +200,11 @@ def _build_addressable_concerns() -> str:
 
 
 def _build_recent_romantic_intentions() -> str:
-    """Last 30 days of intention.romantic pods."""
+    """Last 30 days of romantic intention pods (items + #run_summary recaps)."""
     try:
         from app.assistant.pod_store.pod_store import PodStore
         store = PodStore()
-        results = store.query(kind="intention.romantic", since="30d", limit=20)
+        results = store.query(kind="intention", tags=["romantic"], since="30d", limit=20)
     except Exception as e:
         logger.warning("[romantic_context] recent intentions fetch failed: %s", e)
         return "(no recent romantic intentions readable)"

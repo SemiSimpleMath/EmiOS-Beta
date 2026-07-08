@@ -71,8 +71,15 @@ def test_daily_proposer_mints_meal_shopping_and_set_pods(monkeypatch):
     assert summary["shopping_pod_id"], summary
     assert summary["set_pod_id"], summary
 
-    # One meal + one shopping + one set pod, all stamped with the calling agent.
-    assert _kinds(store) == ["intention.meal", "intention.shopping", "intention.meal_set"]
+    # One meal + one shopping + one run-summary pod, all kind=intention with
+    # the governed variant tag (two-axis model), stamped with the calling agent.
+    assert _kinds(store) == ["intention", "intention", "intention"]
+    meal_pod, shopping_pod, set_pod = store.pods
+    assert "meal" in meal_pod.tags and "run_summary" not in meal_pod.tags
+    assert "shopping" in shopping_pod.tags
+    assert "meal" in set_pod.tags and "run_summary" in set_pod.tags
+    # The run summary references its items first-class (source_refs kind="pod").
+    assert {r.id for r in set_pod.source_refs} == {meal_pod.pod_id, shopping_pod.pod_id}
     assert all(p.created_by == "daily_meal_proposer" for p in store.pods)
 
 
@@ -102,5 +109,6 @@ def test_weekly_planner_mints_plan_pod(monkeypatch):
     summary = meal_persist.apply_weekly_meal_planner_output(output)
 
     assert summary["plan_pod_id"], summary
-    assert _kinds(store) == ["plan.weekly_meals"]
+    assert _kinds(store) == ["plan"]
+    assert "weekly_meals" in store.pods[0].tags
     assert store.pods[0].created_by == "weekly_meal_planner"

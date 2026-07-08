@@ -174,7 +174,8 @@ def project_weekly_schedule_excerpt() -> Dict[str, Any]:
                     """
                     SELECT pod_id, one_liner, body, created_at
                     FROM pod_store
-                    WHERE kind = 'plan.weekly_schedule'
+                    WHERE kind = 'plan'
+                      AND tags_json LIKE '%"weekly_schedule"%'
                     ORDER BY created_at DESC
                     LIMIT 1
                     """

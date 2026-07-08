@@ -594,7 +594,7 @@ def _build_recent_planned_meals() -> str:
 
     try:
         store = PodStore()
-        pods = store.query(kind="plan.weekly_meals", since="28d", limit=8)
+        pods = store.query(kind="plan", tags=["weekly_meals"], since="28d", limit=8)
     except Exception as e:
         logger.warning("[meal_context] recent_planned_meals fetch failed: %s", e)
         return "(error reading recent plans — proceed without variety/cadence check)"
@@ -682,8 +682,8 @@ def _build_fast_food_count() -> str:
     try:
         from app.assistant.pod_store.pod_store import PodStore
         store = PodStore()
-        plan_pods = store.query(kind="plan.weekly_meals", since="21d", limit=6)
-        intent_pods = store.query(kind="intention.meal", since="10d", limit=100)
+        plan_pods = store.query(kind="plan", tags=["weekly_meals"], since="21d", limit=6)
+        intent_pods = store.query(kind="intention", tags=["meal"], since="10d", limit=100)
     except Exception as e:
         logger.warning("[meal_context] fast-food pressure fetch failed: %s", e)
         return "(fast-food pressure unavailable — pod store unreadable)"
@@ -840,7 +840,7 @@ def _build_latest_weekly_plan() -> str:
         from app.assistant.pod_store.pod_store import PodStore
         store = PodStore()
         since = datetime.now(timezone.utc) - timedelta(days=10)
-        results = store.query(kind="plan.weekly_meals", since_utc=since, limit=5)
+        results = store.query(kind="plan", tags=["weekly_meals"], since_utc=since, limit=5)
     except Exception as e:
         logger.warning("[meal_context] weekly plan fetch failed: %s", e)
         return "(no weekly plan available — propose from inventory + recipes + concerns; set fills_weekly_plan_slot=null)"

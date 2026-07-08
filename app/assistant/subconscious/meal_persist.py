@@ -1,10 +1,10 @@
-"""Persist meal_proposer output as intention pods.
+"""Persist meal_proposer output as intention pods (two-axis: kind=intention
++ governed variant tag).
 
-v0 (Phase 1a) is propose-only:
-- Each MealProposal becomes one pod of kind=`intention.meal`
-- The ShoppingRun (if any) becomes one pod of kind=`intention.shopping`
-- Fast food advisory + free_form_thinking ride in a single
-  pod of kind=`intention.meal_set` so the noticer's digest can surface them
+- Each MealProposal becomes one `intention` #meal pod
+- The ShoppingRun (if any) becomes one `intention` #shopping pod
+- Fast food advisory + free_form_thinking ride in the run-summary pod
+  (`intention` #meal #run_summary) so the noticer's digest can surface them
 
 No calendar writes from this layer. That's Phase 1c.
 
@@ -294,7 +294,7 @@ def _mint_intention_meal_pod(
 ) -> Optional[str]:
     """One pod per proposed meal."""
     try:
-        pod_id = f"datapod:intention.meal:{uuid.uuid4().hex[:24]}"
+        pod_id = f"datapod:intention:{uuid.uuid4().hex[:24]}"
         actors = proposal.get("actors") or []
         meal_window = proposal.get("meal_window") or "meal"
         date = proposal.get("date") or ""
@@ -337,13 +337,14 @@ def _mint_intention_meal_pod(
             body_parts += ["", "**Why this novel pick:**", novelty_rationale]
 
         body = "\n".join(body_parts)
-        tags = ["intention", "meal_proposal", meal_window]
+        # Two-axis: kind=intention (handling class) + #meal (governed variant).
+        tags = ["meal", meal_window]
         if novelty == "novel":
             tags.append("novel")
 
         pod = Pod(
             pod_id=pod_id,
-            kind="intention.meal",
+            kind="intention",
             tags=tags,
             one_liner=one_liner,
             body=body,
@@ -384,7 +385,7 @@ def _mint_intention_shopping_pod(
     agent_name: str,
 ) -> Optional[str]:
     try:
-        pod_id = f"datapod:intention.shopping:{uuid.uuid4().hex[:24]}"
+        pod_id = f"datapod:intention:{uuid.uuid4().hex[:24]}"
         items = shopping_run.get("items") or []
         suggested = shopping_run.get("suggested_date") or ""
         reasoning = (shopping_run.get("reasoning") or "").strip()
@@ -400,8 +401,8 @@ def _mint_intention_shopping_pod(
 
         pod = Pod(
             pod_id=pod_id,
-            kind="intention.shopping",
-            tags=["intention", "shopping"],
+            kind="intention",
+            tags=["shopping"],
             one_liner=one_liner,
             body="\n".join(body_parts),
             source_refs=[],
@@ -435,7 +436,7 @@ def _mint_intention_meal_set_pod(
     """One pod per meal_proposer run — captures narrative + advisory +
     references to all the per-meal/shopping pods. The digest reads this."""
     try:
-        pod_id = f"datapod:intention.meal_set:{uuid.uuid4().hex[:24]}"
+        pod_id = f"datapod:intention:{uuid.uuid4().hex[:24]}"
 
         body_parts = [
             f"# Meal proposer set — {now_utc_iso}",
@@ -468,11 +469,17 @@ def _mint_intention_meal_set_pod(
 
         pod = Pod(
             pod_id=pod_id,
-            kind="intention.meal_set",
-            tags=["intention", "meal_set"],
+            # The run summary is the same handling class with a ROLE, not a
+            # separate kind: #meal variant + #run_summary. Item consumers key
+            # on metadata shape (date/dish), so it passes through them inert.
+            kind="intention",
+            tags=["meal", "run_summary"],
             one_liner=one_liner,
             body="\n".join(body_parts),
-            source_refs=[],  # see note on intention.meal — same constraint
+            source_refs=[
+                PodSourceRef(kind="pod", id=pid)
+                for pid in [*proposal_pod_ids, *( [shopping_pod_id] if shopping_pod_id else [] )]
+            ],
             for_agents=[],
             scope_id=None,
             created_by=agent_name,
@@ -487,7 +494,7 @@ def _mint_intention_meal_set_pod(
         store.put(pod)
         return pod_id
     except Exception:
-        logger.exception("[meal_persist] mint intention.meal_set failed")
+        logger.exception("[meal_persist] mint meal run-summary pod failed")
         raise
 
 
@@ -505,7 +512,7 @@ def _mint_weekly_plan_pod(
     programmatic readers.
     """
     try:
-        pod_id = f"datapod:plan.weekly_meals:{uuid.uuid4().hex[:24]}"
+        pod_id = f"datapod:plan:{uuid.uuid4().hex[:24]}"
         week_start = weekly_plan.get("week_start_date") or "?"
         slots = weekly_plan.get("slots") or []
         theme = (weekly_plan.get("week_theme") or "").strip()
@@ -549,8 +556,8 @@ def _mint_weekly_plan_pod(
 
         pod = Pod(
             pod_id=pod_id,
-            kind="plan.weekly_meals",
-            tags=["plan", "weekly_meals"],
+            kind="plan",
+            tags=["weekly_meals"],
             one_liner=one_liner,
             body="\n".join([p for p in body_parts if p is not None]),
             source_refs=[],

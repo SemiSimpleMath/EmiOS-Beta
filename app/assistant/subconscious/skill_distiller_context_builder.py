@@ -19,15 +19,10 @@ from app.assistant.utils.time_utils import get_local_time
 logger = get_logger(__name__)
 
 
-_INTENTION_KINDS = [
-    "intention.meal",
-    "intention.wellness",
-    "intention.romantic",
-    "intention.shopping",
-    "intention.meal_set",
-    "intention.wellness_set",
-    "intention.romantic_set",
-]
+# Intention variants (two-axis model: kind="intention" + governed variant
+# tag). The distiller reads EVERYTHING intention — items and #run_summary
+# pods alike — so one kind query covers what used to be seven.
+_INTENTION_VARIANTS = ("meal", "wellness", "romantic", "shopping")
 
 
 def build_skill_distiller_context() -> Dict[str, str]:
@@ -52,34 +47,31 @@ def build_skill_distiller_context() -> Dict[str, str]:
 
 
 def _build_recent_intentions_summary() -> str:
-    """Group all intention.* pods from the past 7 days by domain."""
+    """Group all intention pods from the past 7 days by variant (run
+    summaries bucket separately under '<variant> run_summary')."""
     try:
         from app.assistant.pod_store.pod_store import PodStore
         store = PodStore()
-        pods: List[Any] = []
-        for kind in _INTENTION_KINDS:
-            pods.extend(store.query(kind=kind, since="7d", limit=200))
+        pods: List[Any] = store.query(kind="intention", since="7d", limit=600)
     except Exception as e:
         logger.warning("[skill_distiller_context] intention fetch failed: %s", e)
         return "(no intention pods readable)"
 
     if not pods:
-        return "(no intention.* pods in the last 7 days)"
+        return "(no intention pods in the last 7 days)"
 
     grouped: Dict[str, List[Any]] = {}
     for pod in pods:
-        # bucket by the kind segment after "intention."
-        kind = pod.kind
-        if "." in kind:
-            domain = kind.split(".", 1)[1]
-        else:
-            domain = "other"
+        tags = set(pod.tags or [])
+        domain = next((v for v in _INTENTION_VARIANTS if v in tags), "other")
+        if "run_summary" in tags:
+            domain = f"{domain} run_summary"
         grouped.setdefault(domain, []).append(pod)
 
-    lines: List[str] = [f"# {len(pods)} intention pods in the last 7 days, grouped by kind", ""]
+    lines: List[str] = [f"# {len(pods)} intention pods in the last 7 days, grouped by variant", ""]
     for domain in sorted(grouped.keys()):
         bucket = grouped[domain]
-        lines.append(f"## intention.{domain} ({len(bucket)})")
+        lines.append(f"## intention #{domain} ({len(bucket)})")
         for pod in bucket[:30]:  # cap per-domain to avoid runaway
             meta = pod.metadata or {}
             head_bits: List[str] = []
@@ -110,7 +102,7 @@ def _build_recent_arbiter_decisions() -> str:
     try:
         from app.assistant.pod_store.pod_store import PodStore
         store = PodStore()
-        results = store.query(kind="plan.weekly_schedule", since="7d", limit=10)
+        results = store.query(kind="plan", tags=["weekly_schedule"], since="7d", limit=10)
     except Exception as e:
         logger.warning("[skill_distiller_context] arbiter fetch failed: %s", e)
         return "(no arbiter decisions readable)"

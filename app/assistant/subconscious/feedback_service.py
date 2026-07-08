@@ -22,13 +22,14 @@ from app.assistant.utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 
-# Pod kinds the /subconscious dashboard surfaces for comment.
-# Adding a future domain (intention.finance, etc.) just means appending here.
-DASHBOARD_INTENTION_KINDS = [
-    "intention.meal",
-    "intention.wellness",
-    "intention.romantic",
-    "intention.shopping",
+# Intention variants the /subconscious dashboard surfaces for comment
+# (two-axis model: kind="intention" + governed variant tag). Adding a
+# future domain is one variant word here + in pod_kinds.json.
+DASHBOARD_INTENTION_VARIANTS = [
+    "meal",
+    "wellness",
+    "romantic",
+    "shopping",
 ]
 
 
@@ -56,7 +57,7 @@ def mint_feedback_comment(
         return None
     try:
         now_utc_iso = datetime.now(timezone.utc).isoformat()
-        pod_id = f"datapod:feedback.comment:{uuid.uuid4().hex[:24]}"
+        pod_id = f"datapod:feedback:{uuid.uuid4().hex[:24]}"
         snippet = text_stripped[:140]
         body_parts = [
             f"# Feedback comment — {now_utc_iso}",
@@ -68,8 +69,10 @@ def mint_feedback_comment(
         body_parts += ["", "**Comment:**", text_stripped]
         pod = Pod(
             pod_id=pod_id,
-            kind="feedback.comment",
-            tags=["feedback", "user_comment", "unprocessed"],
+            # Two-axis: kind=feedback (handling class) + #comment (variant);
+            # #unprocessed is the extractor-queue lifecycle tag.
+            kind="feedback",
+            tags=["comment", "user_comment", "unprocessed"],
             one_liner=f"Comment on {target}: {snippet}",
             body="\n".join(body_parts),
             source_refs=[],
@@ -104,7 +107,7 @@ def fetch_comments_for(target_pod_id: str, *, limit: int = 20) -> List[Dict[str,
         store = PodStore()
         # Coarse query; we filter precisely below. since=120d gives 4 months
         # of recent comments to scan — plenty for the dashboard.
-        candidates = store.query(kind="feedback.comment", since="120d", limit=200)
+        candidates = store.query(kind="feedback", tags=["comment"], since="120d", limit=200)
     except Exception as e:
         logger.warning("[feedback_service] fetch comments failed: %s", e)
         return []
@@ -128,11 +131,12 @@ def fetch_comments_for(target_pod_id: str, *, limit: int = 20) -> List[Dict[str,
 
 
 def list_intentions_for_dashboard(*, days_ahead: int = 14) -> List[Dict[str, Any]]:
-    """Every intention.* pod with a date in [today, today+days_ahead].
+    """Every intention pod with a date in [today, today+days_ahead].
 
     Returns dicts (pod_id, kind, domain, date, summary, actors, source,
     confidence, novelty, comments_count) grouped is the caller's job;
-    here we return a flat sorted list by date+domain.
+    here we return a flat sorted list by date+domain. Run-summary pods
+    carry no metadata.date, so they drop out at the date parse.
     """
     from datetime import date, timedelta
     today = date.today()
@@ -140,9 +144,10 @@ def list_intentions_for_dashboard(*, days_ahead: int = 14) -> List[Dict[str, Any
 
     try:
         store = PodStore()
-        pods: List[Any] = []
-        for kind in DASHBOARD_INTENTION_KINDS:
-            pods.extend(store.query(kind=kind, since="14d", limit=200))
+        pods: List[Any] = store.query(
+            kind="intention", tags=list(DASHBOARD_INTENTION_VARIANTS),
+            since="14d", limit=400,
+        )
     except Exception as e:
         logger.warning("[feedback_service] dashboard intention fetch failed: %s", e)
         return []
@@ -157,7 +162,10 @@ def list_intentions_for_dashboard(*, days_ahead: int = 14) -> List[Dict[str, Any
             continue
         if d < today or d > horizon:
             continue
-        domain = pod.kind.split(".", 1)[1] if "." in pod.kind else pod.kind
+        domain = next(
+            (t for t in (pod.tags or []) if t in DASHBOARD_INTENTION_VARIANTS),
+            pod.kind,
+        )
         rows.append({
             "pod_id": pod.pod_id,
             "kind": pod.kind,
@@ -195,7 +203,7 @@ def list_recent_unprocessed_comments(*, limit: int = 50) -> List[Dict[str, Any]]
     authoritative for pods whose tag flip failed."""
     try:
         store = PodStore()
-        candidates = store.query(kind="feedback.comment", tags=["unprocessed"], limit=200)
+        candidates = store.query(kind="feedback", tags=["unprocessed"], limit=200)
     except Exception as e:
         logger.warning("[feedback_service] unprocessed fetch failed: %s", e)
         return []

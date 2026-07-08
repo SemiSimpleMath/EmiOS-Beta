@@ -77,7 +77,7 @@ def _mint_weekly_schedule_pod(
     now_utc_iso: str,
 ) -> Optional[str]:
     try:
-        pod_id = f"datapod:plan.weekly_schedule:{uuid.uuid4().hex[:24]}"
+        pod_id = f"datapod:plan:{uuid.uuid4().hex[:24]}"
 
         anchor_count = sum(1 for s in schedule if s.get("is_anchor"))
         one_liner = (
@@ -153,8 +153,8 @@ def _mint_weekly_schedule_pod(
 
         pod = Pod(
             pod_id=pod_id,
-            kind="plan.weekly_schedule",
-            tags=["plan", "weekly_schedule"],
+            kind="plan",
+            tags=["weekly_schedule"],
             one_liner=one_liner,
             body="\n".join(body_parts),
             source_refs=[],

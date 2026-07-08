@@ -24,12 +24,15 @@ from app.assistant.utils.time_utils import get_local_time
 logger = get_logger(__name__)
 
 
-# Pod kinds the arbiter considers candidates. Adding a future domain
-# (family_proposer, finance_proposer) just means appending here.
-_INTENTION_KINDS = [
-    "intention.meal",
-    "intention.wellness",
-    "intention.romantic",
+# Intention variants the arbiter considers candidates (two-axis model:
+# kind="intention" + governed variant tag). Adding a future domain
+# (family, finance) is one variant word here + in pod_kinds.json.
+# Shopping intentions are deliberately absent — runs get scheduled by the
+# meal lane, not arbitrated.
+_INTENTION_VARIANTS = [
+    "meal",
+    "wellness",
+    "romantic",
 ]
 
 
@@ -55,17 +58,18 @@ def _compute_week_start_date(now_local: datetime) -> str:
 
 
 def _build_candidate_intentions(*, now_local: datetime) -> str:
-    """Pull every intention.* pod whose `metadata.date` is in
-    [today, today+14d]. Pods without a date metadata field are still
-    included but flagged."""
+    """Pull every intention pod (candidate variants) whose `metadata.date`
+    is in [today, today+14d]. Run-summary pods carry no date and drop out
+    at the date check."""
     try:
         from app.assistant.pod_store.pod_store import PodStore
         store = PodStore()
         horizon = (now_local + timedelta(days=14)).date()
         today = now_local.date()
-        pods: List[Any] = []
-        for kind in _INTENTION_KINDS:
-            pods.extend(store.query(kind=kind, since="14d", limit=100))
+        # tags= is OR-semantics: one query covers all candidate variants.
+        pods: List[Any] = store.query(
+            kind="intention", tags=list(_INTENTION_VARIANTS), since="14d", limit=300,
+        )
     except Exception as e:
         logger.warning("[arbiter_context] intention pod fetch failed: %s", e)
         return "(no intention pods readable)"
@@ -98,7 +102,7 @@ def _build_candidate_intentions(*, now_local: datetime) -> str:
     for it in in_window:
         pod = it["pod"]
         meta = it["meta"]
-        domain = pod.kind.split(".")[-1] if "." in pod.kind else pod.kind
+        domain = next((t for t in (pod.tags or []) if t in _INTENTION_VARIANTS), pod.kind)
         kind = meta.get("kind") or domain
         actors = meta.get("actors") or []
         date = meta.get("date") or "?"
@@ -138,7 +142,7 @@ def _build_existing_schedule() -> str:
     try:
         from app.assistant.pod_store.pod_store import PodStore
         store = PodStore()
-        results = store.query(kind="plan.weekly_schedule", since="10d", limit=1)
+        results = store.query(kind="plan", tags=["weekly_schedule"], since="10d", limit=1)
     except Exception as e:
         logger.warning("[arbiter_context] existing schedule fetch failed: %s", e)
         return "(no existing schedule readable)"

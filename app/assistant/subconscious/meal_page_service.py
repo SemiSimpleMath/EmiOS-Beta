@@ -23,10 +23,10 @@ logger = get_logger(__name__)
 
 
 def load_latest_weekly_plan_pod() -> Optional[Pod]:
-    """Most recent plan.weekly_meals pod (across all weeks). Returns None
+    """Most recent weekly-meals plan pod (across all weeks). Returns None
     if no plan exists yet."""
     store = PodStore()
-    results = store.query(kind="plan.weekly_meals", limit=1)
+    results = store.query(kind="plan", tags=["weekly_meals"], limit=1)
     return results[0] if results else None
 
 
@@ -44,7 +44,7 @@ def load_plan_pod_for_week(week_start: str) -> Optional[Pod]:
     store = PodStore()
     # Pull a generous window so we don't miss a plan written a few weeks
     # before the user navigates back to it.
-    candidates = store.query(kind="plan.weekly_meals", since="365d", limit=200)
+    candidates = store.query(kind="plan", tags=["weekly_meals"], since="365d", limit=200)
     for p in candidates:
         if str((p.metadata or {}).get("week_start_date") or "") == week_start:
             return p
@@ -57,7 +57,7 @@ def list_existing_plan_week_starts() -> List[str]:
     live to weeks with plans, otherwise points at the empty state with
     a Generate button."""
     store = PodStore()
-    candidates = store.query(kind="plan.weekly_meals", since="365d", limit=500)
+    candidates = store.query(kind="plan", tags=["weekly_meals"], since="365d", limit=500)
     starts = {
         str((p.metadata or {}).get("week_start_date") or "")
         for p in candidates
@@ -66,11 +66,11 @@ def list_existing_plan_week_starts() -> List[str]:
 
 
 def load_recent_intention_shopping_pods(*, days: int = 14) -> List[Pod]:
-    """intention.shopping pods from the past `days` — the ad-hoc additions
+    """Shopping intention pods from the past `days` — the ad-hoc additions
     daily_meal_proposer mints when a meal needs items outside the weekly
     list."""
     store = PodStore()
-    return store.query(kind="intention.shopping", since=f"{days}d", limit=50)
+    return store.query(kind="intention", tags=["shopping"], since=f"{days}d", limit=50)
 
 
 def fetch_weekly_shopping_doc_body() -> Optional[str]:

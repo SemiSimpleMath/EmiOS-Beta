@@ -155,7 +155,7 @@ def _load_dish_history() -> List[Tuple[str, str]]:
     store = PodStore()
     out: List[Tuple[str, str]] = []
     try:
-        for pod in store.query(kind="plan.weekly_meals", limit=16):
+        for pod in store.query(kind="plan", tags=["weekly_meals"], limit=16):
             for slot in (pod.metadata or {}).get("slots") or []:
                 d, dish = slot.get("date"), slot.get("dish")
                 if d and dish:
@@ -164,7 +164,7 @@ def _load_dish_history() -> List[Tuple[str, str]]:
         logger.warning("[easy_meals] plan history fetch failed: %s", e)
     try:
         since = datetime.now(timezone.utc) - timedelta(days=_HISTORY_LOOKBACK_DAYS)
-        for pod in store.query(kind="intention.meal", since_utc=since, limit=300):
+        for pod in store.query(kind="intention", tags=["meal"], since_utc=since, limit=300):
             md = pod.metadata or {}
             d, dish = md.get("date"), md.get("dish")
             if d and dish:

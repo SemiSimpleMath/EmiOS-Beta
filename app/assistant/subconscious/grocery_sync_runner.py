@@ -99,8 +99,8 @@ def _build_scanner_context(*, hours: int, exclude_msg_ids: Set[str]) -> Dict[str
     return {
         "date_time": now_utc.isoformat(),
         "recent_user_messages": _load_recent_user_messages(now_utc=now_utc, hours=hours, exclude=exclude_msg_ids),
-        "active_shopping_intentions": _load_active_intentions(kind="intention.shopping", since=now_utc - timedelta(days=7)),
-        "active_meal_intentions": _load_active_intentions(kind="intention.meal", since=now_utc - timedelta(days=4)),
+        "active_shopping_intentions": _load_active_intentions(variant="shopping", since=now_utc - timedelta(days=7)),
+        "active_meal_intentions": _load_active_intentions(variant="meal", since=now_utc - timedelta(days=4)),
     }
 
 
@@ -143,16 +143,18 @@ def _load_recent_user_messages(*, now_utc: datetime, hours: int, exclude: Set[st
     return "\n".join(lines) if lines else "(no new user messages in window)"
 
 
-def _load_active_intentions(*, kind: str, since: datetime) -> str:
-    """Pull intention.* pods that haven't been applied yet (no
-    metadata.inventory_applied_at_utc)."""
+def _load_active_intentions(*, variant: str, since: datetime) -> str:
+    """Pull intention pods of one variant (#shopping / #meal) that haven't
+    been applied yet (no metadata.inventory_applied_at_utc). Run-summary
+    pods carry neither items nor dish metadata, so they render as bare
+    header lines the scanner has nothing to do with."""
     try:
         from app.assistant.pod_store.pod_store import PodStore
         store = PodStore()
-        results = store.query(kind=kind, since_utc=since, limit=40)
+        results = store.query(kind="intention", tags=[variant], since_utc=since, limit=40)
     except Exception as e:
-        logger.warning("[grocery_sync] %s fetch failed: %s", kind, e)
-        return f"(no {kind} pods available)"
+        logger.warning("[grocery_sync] %s intention fetch failed: %s", variant, e)
+        return f"(no {variant} intention pods available)"
 
     lines: List[str] = []
     for pod in results:
@@ -160,13 +162,13 @@ def _load_active_intentions(*, kind: str, since: datetime) -> str:
         if meta.get("inventory_applied_at_utc"):
             continue
         lines.append(f"- {pod.pod_id} — {pod.one_liner}")
-        if kind == "intention.shopping":
+        if variant == "shopping":
             items = meta.get("items") or []
             if items:
                 lines.append(f"    items: {', '.join(items[:20])}")
             if meta.get("suggested_date"):
                 lines.append(f"    suggested_date: {meta['suggested_date']}")
-        elif kind == "intention.meal":
+        elif variant == "meal":
             if meta.get("dish"):
                 lines.append(f"    dish: {meta['dish']}")
             if meta.get("date"):
@@ -175,7 +177,7 @@ def _load_active_intentions(*, kind: str, since: datetime) -> str:
             if ings:
                 lines.append(f"    primary_ingredients: {', '.join(ings)}")
     if not lines:
-        return f"(no unapplied {kind} pods)"
+        return f"(no unapplied {variant} intention pods)"
     return "\n".join(lines)
 
 

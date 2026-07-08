@@ -1,5 +1,5 @@
 {
-  "_doc": "Pod kinds registry. Every pod 'kind' minted anywhere has an entry here — PodStore.put refuses NEW pods with unregistered kinds (register first, mint second). `kg_admissible` controls whether kg_edge_metadata may reference this pod kind by URI — pod_store remains the sole source of truth for pod content (no kg_node mirror). `retention` drives the nightly pod_retention sweep: {\"mode\": \"keep_forever\"} (default when omitted) or {\"mode\": \"keep_days\", \"days\": N, \"keep_latest\": M} — the newest M survive regardless of age; pods with projection rows (secrets) are never swept.",
+  "_doc": "Pod kinds registry — the TWO-AXIS model: `kind` is the HANDLING class (extraction, KG admissibility, lifecycle, materializer) and a governed VARIANT TAG is the routing handle consumers filter by (query(kind='intention', tags=['meal'])). Every pod 'kind' minted anywhere has an entry here — PodStore.put refuses NEW pods with unregistered kinds, and when an entry declares `variants`, a new pod must carry EXACTLY ONE of them as a tag (register first, mint second; a governed vocabulary can't fork). `role_tags` are additional documented tags (e.g. run_summary) — additive, not enforced. `kg_admissible` controls whether kg_edge_metadata may reference this pod kind by URI — pod_store remains the sole source of truth for pod content (no kg_node mirror). `retention` drives the nightly pod_retention sweep: {\"mode\": \"keep_forever\"} (default when omitted) or {\"mode\": \"keep_days\", \"days\": N, \"keep_latest\": M} — the newest M survive regardless of age (per VARIANT when the kind declares variants); pods with projection rows (secrets) are never swept. A NEW KIND is justified only when HANDLING differs; a new domain or producer reuses a family kind + a new variant word.",
   "_canonical_example": "Append a new entry to 'kinds' as a starting point for a new pod kind. See skills/extending-emi-pod-kinds/SKILL.md for the field reference.",
 
   "kinds": {
@@ -69,83 +69,31 @@
       "retention": {"mode": "keep_days", "days": 180}
     },
 
-    "feedback.comment": {
-      "description": "A user comment on a suggestion pod (from /subconscious, /meals, ...) awaiting the feedback_extractor. Tag 'unprocessed' flips to 'processed' after belief extraction; kept as belief-evidence provenance.",
+    "feedback": {
+      "description": "User feedback on a suggestion pod. Variant tag names the channel: #comment (from /subconscious, /meals, chat-judged meal replies) awaiting the feedback_extractor — its 'unprocessed' tag flips to 'processed' after belief extraction; kept as belief-evidence provenance. metadata.target_pod_id points at the pod the feedback is about.",
       "kg_admissible": false,
       "body_extraction": "verbatim",
       "default_for_agents": ["feedback_extractor"],
+      "variants": ["comment"],
       "retention": {"mode": "keep_forever"}
     },
 
-    "intention.meal": {
-      "description": "One proposed meal from the daily_meal_proposer (dish, window, date, ingredients). Advisory — the scheduler arbiter decides what reaches the calendar. Superseded daily.",
+    "intention": {
+      "description": "One advisory proposal from a subconscious lane — the arbiter decides what reaches the calendar; superseded daily. Variant tag names the domain: #meal (dish/window/date/ingredients), #wellness, #romantic, #shopping (items + suggested date; grocery sync applies on user confirmation). A lane's per-run summary pod carries the domain variant PLUS the #run_summary role tag and references its items via metadata (item consumers key on metadata shape — date/dish — so summaries pass through them inert).",
       "kg_admissible": false,
       "body_extraction": "verbatim",
       "default_for_agents": [],
+      "variants": ["meal", "wellness", "romantic", "shopping"],
+      "role_tags": ["run_summary"],
       "retention": {"mode": "keep_days", "days": 90}
     },
 
-    "intention.meal_set": {
-      "description": "Per-run summary pod from the daily_meal_proposer (narrative + advisory + refs to the per-meal pods).",
+    "plan": {
+      "description": "A standing plan pod the lanes honor. Variant tag names which: #weekly_meals (the weekly planner's 7-day slot grid + theme; the daily proposer's skeleton, easy-meals served-history source) and #weekly_schedule (the scheduler arbiter's single weekly source of truth; is_anchor items are locked constraints every proposer reads back). keep_latest protects the newest per VARIANT.",
       "kg_admissible": false,
       "body_extraction": "verbatim",
-      "default_for_agents": [],
-      "retention": {"mode": "keep_days", "days": 90}
-    },
-
-    "intention.shopping": {
-      "description": "A proposed shopping run (items + suggested date) from the meal lane. The grocery sync applies it to inventory when the user confirms the trip.",
-      "kg_admissible": false,
-      "body_extraction": "verbatim",
-      "default_for_agents": [],
-      "retention": {"mode": "keep_days", "days": 90}
-    },
-
-    "intention.wellness": {
-      "description": "One proposed wellness activity from the wellness_proposer. Advisory input to the scheduler arbiter. Superseded daily.",
-      "kg_admissible": false,
-      "body_extraction": "verbatim",
-      "default_for_agents": [],
-      "retention": {"mode": "keep_days", "days": 90}
-    },
-
-    "intention.wellness_set": {
-      "description": "Per-run summary pod from the wellness_proposer (rest-day advisory + refs to the per-intention pods).",
-      "kg_admissible": false,
-      "body_extraction": "verbatim",
-      "default_for_agents": [],
-      "retention": {"mode": "keep_days", "days": 90}
-    },
-
-    "intention.romantic": {
-      "description": "One proposed romantic gesture/date idea from the romantic_proposer. Advisory input to the scheduler arbiter. Superseded daily.",
-      "kg_admissible": false,
-      "body_extraction": "verbatim",
-      "default_for_agents": [],
-      "retention": {"mode": "keep_days", "days": 90}
-    },
-
-    "intention.romantic_set": {
-      "description": "Per-run summary pod from the romantic_proposer (narrative + refs to the per-intention pods).",
-      "kg_admissible": false,
-      "body_extraction": "verbatim",
-      "default_for_agents": [],
-      "retention": {"mode": "keep_days", "days": 90}
-    },
-
-    "plan.weekly_meals": {
-      "description": "The weekly meal planner's 7-day slot grid + theme. The daily proposer reads the latest as its skeleton; easy-meals rotation derives served-history from slots. One per planner run.",
-      "kg_admissible": false,
-      "body_extraction": "verbatim",
-      "default_for_agents": ["daily_meal_proposer"],
-      "retention": {"mode": "keep_days", "days": 365, "keep_latest": 8}
-    },
-
-    "plan.weekly_schedule": {
-      "description": "The scheduler arbiter's single weekly source of truth (is_anchor items are locked constraints). Every proposer reads the latest back on its next run.",
-      "kg_admissible": false,
-      "body_extraction": "verbatim",
-      "default_for_agents": ["meal_proposer", "daily_meal_proposer", "weekly_meal_planner", "wellness_proposer", "romantic_proposer"],
+      "default_for_agents": ["daily_meal_proposer", "weekly_meal_planner", "wellness_proposer", "romantic_proposer"],
+      "variants": ["weekly_meals", "weekly_schedule"],
       "retention": {"mode": "keep_days", "days": 365, "keep_latest": 8}
     },
 

@@ -63,8 +63,9 @@ def test_wellness_proposal_mints_a_pod(monkeypatch):
         {"proposals": [_WELLNESS_PROPOSAL]}
     )
     assert out["proposal_pod_count"] == 1
-    assert out["proposal_pod_ids"][0].startswith("datapod:intention.wellness:")
-    assert out["set_pod_id"].startswith("datapod:intention.wellness_set:")
+    # Two-axis model: kind=intention in the id; the #wellness variant rides as a tag.
+    assert out["proposal_pod_ids"][0].startswith("datapod:intention:")
+    assert out["set_pod_id"].startswith("datapod:intention:")
 
 
 def test_romantic_proposal_mints_a_pod(monkeypatch):
@@ -73,8 +74,8 @@ def test_romantic_proposal_mints_a_pod(monkeypatch):
         {"proposals": [_ROMANTIC_PROPOSAL]}
     )
     assert out["proposal_pod_count"] == 1
-    assert out["proposal_pod_ids"][0].startswith("datapod:intention.romantic:")
-    assert out["set_pod_id"].startswith("datapod:intention.romantic_set:")
+    assert out["proposal_pod_ids"][0].startswith("datapod:intention:")
+    assert out["set_pod_id"].startswith("datapod:intention:")
 
 
 def test_wellness_mint_failure_is_loud(monkeypatch):

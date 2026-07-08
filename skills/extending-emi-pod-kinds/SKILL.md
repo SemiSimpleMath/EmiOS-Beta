@@ -24,6 +24,23 @@ new pods whose kind is unregistered (register FIRST, mint second), and
 the KG promoter consults `kg_admissible` before writing any edge with a
 `datapod:*` endpoint.
 
+## The two-axis rule: kind vs variant tag
+
+`kind` is the HANDLING class — it answers what the store must know: how
+the body gets extracted, whether the KG may reference it, what lifecycle
+it gets, and (for secrets) which materializer builds its projections.
+The VARIANT TAG is the routing handle consumers filter by:
+`query(kind="intention", tags=["meal"])`. A kind that declares
+`variants` requires exactly one of them on every new pod (enforced at
+`PodStore.put`), so the variant vocabulary can't fork.
+
+**A new kind is justified only when handling differs.** A new domain or
+producer reuses a family kind and adds one variant word to its entry —
+e.g. a garden proposer mints `kind="intention"` with a new `garden`
+variant, not `intention.garden`. Per-run summaries are the same kind
+with the domain variant plus the `run_summary` role tag, referencing
+their items via `source_refs` kind="pod".
+
 ## Kind name + pod id format (the canonical grammar)
 
 A kind name is snake_case segments joined by dots — the dot is the

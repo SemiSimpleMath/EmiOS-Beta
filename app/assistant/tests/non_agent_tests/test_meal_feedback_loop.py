@@ -26,8 +26,9 @@ class _FakeStore:
         self._pods = pods
         self.put_calls = []
 
-    def query(self, *, kind, since_utc=None, limit=200):
-        return self._pods if kind == "intention.meal" else []
+    def query(self, *, kind, tags=None, since_utc=None, limit=200):
+        # Two-axis: the runner asks for kind="intention" + the #meal variant.
+        return self._pods if kind == "intention" and "meal" in (tags or []) else []
 
     def put(self, pod):
         self.put_calls.append(pod)

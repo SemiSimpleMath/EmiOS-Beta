@@ -1,9 +1,9 @@
-"""Persist wellness_proposer output as intention pods.
+"""Persist wellness_proposer output as intention pods (two-axis:
+kind=intention + governed variant tag; mirrors meal_persist's shape).
 
-v0 (mirrors meal_persist's intention.meal shape):
-- Each WellnessProposal becomes one pod of kind=`intention.wellness`
-- One summary pod of kind=`intention.wellness_set` per run (carries
-  rest_day_advisory + skipped_today + free_form_thinking + refs)
+- Each WellnessProposal becomes one `intention` #wellness pod
+- One run-summary pod (`intention` #wellness #run_summary) per run (carries
+  rest_day_advisory + skipped_today + free_form_thinking + item refs)
 
 No calendar writes from this layer yet — that's the "Post to Wellness
 Calendar" button (deferred, same shape as the meal calendar sync).
@@ -19,7 +19,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from app.assistant.pod_store.contracts import Pod
+from app.assistant.pod_store.contracts import Pod, PodSourceRef
 from app.assistant.pod_store.pod_store import PodStore
 from app.assistant.utils.logging_config import get_logger
 
@@ -67,7 +67,7 @@ def _mint_intention_wellness_pod(
 ) -> Optional[str]:
     """One pod per proposed wellness intention."""
     try:
-        pod_id = f"datapod:intention.wellness:{uuid.uuid4().hex[:24]}"
+        pod_id = f"datapod:intention:{uuid.uuid4().hex[:24]}"
         kind = proposal.get("kind") or "wellness"
         actors = proposal.get("actors") or []
         date = proposal.get("date") or ""
@@ -109,7 +109,8 @@ def _mint_intention_wellness_pod(
             body_parts += ["", "**Why this novel pick:**", novelty_rationale]
 
         body = "\n".join(body_parts)
-        tags = ["intention", "wellness", kind]
+        # Two-axis: kind=intention (handling class) + #wellness (governed variant).
+        tags = ["wellness", kind]
         if novelty == "novel":
             tags.append("novel")
         if intensity:
@@ -117,7 +118,7 @@ def _mint_intention_wellness_pod(
 
         pod = Pod(
             pod_id=pod_id,
-            kind="intention.wellness",
+            kind="intention",
             tags=tags,
             one_liner=one_liner,
             body=body,
@@ -162,7 +163,7 @@ def _mint_intention_wellness_set_pod(
     """Aggregate pod per wellness_proposer run — captures narrative +
     rest-day advisory + references to all per-intention pods."""
     try:
-        pod_id = f"datapod:intention.wellness_set:{uuid.uuid4().hex[:24]}"
+        pod_id = f"datapod:intention:{uuid.uuid4().hex[:24]}"
 
         body_parts = [
             f"# Wellness proposer set — {now_utc_iso}",
@@ -187,11 +188,13 @@ def _mint_intention_wellness_set_pod(
 
         pod = Pod(
             pod_id=pod_id,
-            kind="intention.wellness_set",
-            tags=["intention", "wellness_set"],
+            # Run summary = same handling class with a ROLE: #wellness +
+            # #run_summary. Item consumers key on metadata shape.
+            kind="intention",
+            tags=["wellness", "run_summary"],
             one_liner=one_liner,
             body="\n".join(body_parts),
-            source_refs=[],
+            source_refs=[PodSourceRef(kind="pod", id=pid) for pid in proposal_pod_ids],
             for_agents=[],
             scope_id=None,
             created_by="wellness_proposer",
@@ -205,5 +208,5 @@ def _mint_intention_wellness_set_pod(
         store.put(pod)
         return pod_id
     except Exception:
-        logger.exception("[wellness_persist] mint intention.wellness_set failed")
+        logger.exception("[wellness_persist] mint wellness run-summary pod failed")
         raise

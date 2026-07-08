@@ -211,12 +211,13 @@ def _build_addressable_concerns() -> str:
 
 
 def _build_recent_wellness_intentions() -> str:
-    """Read recent intention.wellness pods (last 7 days) so the proposer
-    doesn't repeat itself unintentionally."""
+    """Read recent wellness intention pods (last 7 days) so the proposer
+    doesn't repeat itself unintentionally. Includes the lane's #run_summary
+    pods — a compact recap of the prior run is useful context here."""
     try:
         from app.assistant.pod_store.pod_store import PodStore
         store = PodStore()
-        results = store.query(kind="intention.wellness", since="7d", limit=20)
+        results = store.query(kind="intention", tags=["wellness"], since="7d", limit=20)
     except Exception as e:
         logger.warning("[wellness_context] recent intentions fetch failed: %s", e)
         return "(no recent wellness intentions readable)"

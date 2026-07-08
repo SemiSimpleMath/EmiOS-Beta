@@ -114,10 +114,13 @@ and treats `is_anchor` items as locked. So the meal loop is:
 
 ### Data stores
 
-- **Pods**: `plan.weekly_meals` (weekly grid), `intention.meal` (per proposal),
-  `intention.shopping` (ad-hoc run), `intention.meal_set` (per-run summary),
-  `plan.weekly_schedule` (arbiter output, shared by all proposers),
-  `feedback.comment` (a user comment awaiting extraction).
+- **Pods** (two-axis: kind + variant tag): `plan` #weekly_meals (weekly grid),
+  `intention` #meal (per proposal), `intention` #shopping (ad-hoc run),
+  `intention` #meal #run_summary (per-run summary),
+  `plan` #weekly_schedule (arbiter output, shared by all proposers),
+  `feedback` #comment (a user comment awaiting extraction). Consumers query
+  `kind="intention", tags=["meal"]`; exactly one variant tag per family pod
+  is enforced at mint.
 - **Resources** (gitignored, food PII): `resource_easy_meals.json` (easy-meals registry,
   seeded once from the markdown food registry's "Comfort food subset").
 - **Resources** (`resources/subconscious/`, gitignored where they hold personal data):
