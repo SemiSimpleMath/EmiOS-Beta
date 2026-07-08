@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 import json
+import threading
 import uuid
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.lib.blackboard.Blackboard import Blackboard
@@ -13,12 +14,21 @@ class EmiResultHandler(Agent):
     def __init__(self, name, blackboard, agent_registry, tool_registry, llm_params=None, parent=None):
         super().__init__(name, blackboard, agent_registry, tool_registry, llm_params, parent)
         self.blackboard = Blackboard()
+        # Serializes event-driven activations: this handler owns ONE private
+        # blackboard and resets it per result, so two managers finishing at
+        # the same moment would otherwise interleave reset/prompt-build and
+        # cross-contaminate. (_set_agent_busy is a status flag, not a lock.)
+        self._handle_lock = threading.Lock()
 
     def emi_result_request_handler(self, message: Message):
         logger.info(f"[{self.name}] Handling external EMI result message")
         self.action_handler(message)
 
     def action_handler(self, message: Message):
+        with self._handle_lock:
+            return self._handle_result(message)
+
+    def _handle_result(self, message: Message):
         self._set_agent_busy()
         try:
             self._update_blackboard_state(message)
