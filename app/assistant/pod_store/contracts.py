@@ -16,16 +16,10 @@ PodSourceKind = Literal[
     "event_repository:email",
     "resource",
     "image_file",
-]
-
-
-PodKind = Literal[
-    "chat_cluster",
-    "email",
-    "image",
-    "tool_result",
-    "summary",
-    "resource_snapshot",
+    # A pod built FROM other pods (a plan referencing its intentions, a
+    # summary referencing its sources) points back with kind="pod",
+    # id=<pod_id> — the first-class pod→pod reference.
+    "pod",
 ]
 
 
@@ -36,13 +30,26 @@ class PodSourceRef(BaseModel):
 
 
 class Pod(BaseModel):
-    """Full in-memory shape of a pod row."""
+    """Full in-memory shape of a pod row.
+
+    Pod kinds are registered strings (configs/pod_kinds.json — PodStore.put
+    refuses unregistered kinds on new pods); the kind grammar and the
+    canonical id grammar live in ``pod_uri``.
+
+    Pod→pod references: use ``source_refs`` with kind="pod" for evidence
+    lineage, or the ``metadata.related_pods`` list-of-pod_ids convention for
+    lighter same-run groupings (the *_set pods' proposal_pod_ids predate the
+    convention and stay as-is).
+    """
     pod_id: str
     kind: str
     tags: List[str] = Field(default_factory=list)
     one_liner: str
     body: Optional[str] = None
     source_refs: List[PodSourceRef] = Field(default_factory=list)
+    # Informational only — the tag-subscription routing this denormalized
+    # for was never adopted (no pod_interest declarers, no for_agent
+    # queries); consumers find pods by kind/tags/scope instead.
     for_agents: List[str] = Field(default_factory=list)
     scope_id: Optional[str] = None
     created_by: Optional[str] = None

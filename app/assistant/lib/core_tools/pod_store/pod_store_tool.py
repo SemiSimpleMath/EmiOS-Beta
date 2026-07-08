@@ -152,6 +152,19 @@ class PodStoreTool(BaseTool):
                     seen.add(pod.pod_id)
                     merged.append(pod)
             pods = merged[:limit]
+
+        # Authority floor on HEADERS: a pod whose min_authority the caller
+        # doesn't clear stays out of search results entirely — its one_liner
+        # is part of what the floor protects (a secret pod's floor is its
+        # LOWEST projection band on purpose, so listability is a per-pod
+        # decision, not a search-tool one). A None scope is a trusted
+        # system-internal caller — unfiltered, matching pod_fetch.
+        scope_ctx = getattr(tool_message, "scope_context", None)
+        if scope_ctx is not None:
+            from app.assistant.pod_store import pod_utils
+            from app.assistant.pod_store.authority import caller_authority
+            authority = caller_authority(pod_utils.as_scope_object(scope_ctx))
+            pods = [p for p in pods if pod_utils.pod_min_authority(p) <= authority]
         headers = [_pod_to_header(p) for p in pods]
         summary_line = (
             f"Found {len(headers)} pod(s)"

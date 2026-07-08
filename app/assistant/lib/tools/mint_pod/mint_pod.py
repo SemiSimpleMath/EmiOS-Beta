@@ -66,14 +66,16 @@ class MintPodTool(BaseTool):
         except (TypeError, ValueError):
             importance = None
 
-        # Bind the pod to the originating room so the owner surface can read it
-        # back; fall back to system-wide (None) only when the caller carries no
-        # scope room.
+        # THE mint scope rule: a pod minted from a room context carries that
+        # room_id; a caller without a room mints owner-only (None — readable
+        # by the all-scope surfaces). The full scope_id string is an identity
+        # token, not a pod scope — stamping it produced pods no room's
+        # allowed_scopes could ever match.
         scope = getattr(tool_message, "scope_context", None)
         scope_id = None
         actor = None
         if scope is not None:
-            scope_id = getattr(scope, "room_id", None) or getattr(scope, "scope_id", None)
+            scope_id = getattr(scope, "room_id", None) or None
             actor = getattr(scope, "actor_id", None)
 
         pod = Pod(

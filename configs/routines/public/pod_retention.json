@@ -1,0 +1,30 @@
+{
+  "id": "pod_retention",
+  "enabled": true,
+  "name": "Pod retention — nightly per-kind sweep",
+  "runner": "function",
+  "spec": {
+    "function_name": "pod_retention_run"
+  },
+  "run_policy": {
+    "type": "interval",
+    "min_interval_seconds": 86400
+  },
+  "trigger": {
+    "type": "time",
+    "active_window": {
+      "from": "04:50",
+      "to": "22:00",
+      "local": true
+    }
+  },
+  "max_run_seconds": 300,
+  "on_error": {
+    "max_failures": 3,
+    "backoff_base_seconds": 300,
+    "backoff_max_seconds": 3600,
+    "then": "disable_with_ticket",
+    "auto_retry_after_seconds": 3600
+  },
+  "notes": "Applies each pod kind's registry retention policy (configs/pod_kinds.json `retention`): keep_days kinds lose pods older than the cutoff, keep_latest newest survive regardless of age, pods with projection rows (secrets) are never swept. Keeps the store bounded under the query layer's scan ceiling (2026-07-08 pod audit R4). Runs after the 04:00-04:30 subconscious lanes, before the day's minting."
+}

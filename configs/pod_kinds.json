@@ -1,13 +1,14 @@
 {
-  "_doc": "Pod kinds registry. Each pod 'kind' field used in the codebase has an entry here. `kg_admissible` controls whether kg_edge_metadata is allowed to reference this pod kind by URI — pod_store remains the sole source of truth for pod content (no kg_node mirror). The promoter calls pod_kind_registry.is_kg_admissible() before writing any edge with a `datapod:*` endpoint.",
+  "_doc": "Pod kinds registry. Every pod 'kind' minted anywhere has an entry here — PodStore.put refuses NEW pods with unregistered kinds (register first, mint second). `kg_admissible` controls whether kg_edge_metadata may reference this pod kind by URI — pod_store remains the sole source of truth for pod content (no kg_node mirror). `retention` drives the nightly pod_retention sweep: {\"mode\": \"keep_forever\"} (default when omitted) or {\"mode\": \"keep_days\", \"days\": N, \"keep_latest\": M} — the newest M survive regardless of age; pods with projection rows (secrets) are never swept.",
   "_canonical_example": "Append a new entry to 'kinds' as a starting point for a new pod kind. See skills/extending-emi-pod-kinds/SKILL.md for the field reference.",
 
   "kinds": {
     "image": {
-      "description": "Image artifact (PNG/JPEG/etc) posted to chat. Stored content-addressed under data/images/<sha>.<ext>. Body is populated by the vision-extraction pass (caption + OCR). Admissible to the KG because user-shared photos are referenced by entities/events ('Katy depicted_in datapod:image:...').",
+      "description": "Image artifact (PNG/JPEG/etc) posted to chat. Stored content-addressed under data/images/<sha>.<ext>. Body is populated by the vision-extraction pass (caption + OCR). Admissible to the KG because user-shared photos are referenced by entities/events (a person depicted_in datapod:image:...).",
       "kg_admissible": true,
       "body_extraction": "vision_pass",
-      "default_for_agents": []
+      "default_for_agents": [],
+      "retention": {"mode": "keep_forever"}
     },
 
     "email": {
@@ -15,6 +16,7 @@
       "kg_admissible": false,
       "body_extraction": "verbatim",
       "default_for_agents": [],
+      "retention": {"mode": "keep_forever"},
       "_doc_excluded_from_kg": "Email content is noisy, sensitive, and token-heavy. Not referenced by KG edges."
     },
 
@@ -23,6 +25,7 @@
       "kg_admissible": false,
       "body_extraction": "verbatim",
       "default_for_agents": [],
+      "retention": {"mode": "keep_forever"},
       "_doc_excluded_from_kg": "Chat clusters are conversation context, not facts. KG ingests facts extracted FROM clusters; clusters themselves are not KG citizens."
     },
 
@@ -30,14 +33,168 @@
       "description": "Freeform authored content pod — a user- or agent-curated note, list, or collection (e.g. a contacts/email list). one_liner=title, body=verbatim content. Minted on demand via the mint_pod tool.",
       "kg_admissible": false,
       "body_extraction": "verbatim",
-      "default_for_agents": []
+      "default_for_agents": [],
+      "retention": {"mode": "keep_forever"}
+    },
+
+    "file": {
+      "description": "User file ingested from disk (PDF, document, archive, ...) via mint_pod_from_path / file_ingest. Content-addressed copy; metadata.stored_path points at the backing file for attachment.",
+      "kg_admissible": true,
+      "body_extraction": "none",
+      "default_for_agents": [],
+      "retention": {"mode": "keep_forever"}
+    },
+
+    "tool_result": {
+      "description": "Output artifact from a tool run (execute_code sandbox outputs: result files, generated documents, images). one_liner names the file; text content inline in body, binary content at metadata.stored_path. Superseded working artifacts — retention-swept.",
+      "kg_admissible": false,
+      "body_extraction": "verbatim",
+      "default_for_agents": [],
+      "retention": {"mode": "keep_days", "days": 90}
     },
 
     "service_loop": {
       "description": "Internal pod_classifier service-loop placeholder. Not user-facing content; emitted to keep the pipeline running when there's nothing to classify.",
       "kg_admissible": false,
       "body_extraction": "none",
-      "default_for_agents": []
+      "default_for_agents": [],
+      "retention": {"mode": "keep_days", "days": 7}
+    },
+
+    "research_finding": {
+      "description": "One durable research finding minted by the planner's findings_to_pod path (canonical id hash of run+unit). Read back as context by later research and by /subconscious surfaces.",
+      "kg_admissible": false,
+      "body_extraction": "verbatim",
+      "default_for_agents": [],
+      "retention": {"mode": "keep_days", "days": 180}
+    },
+
+    "feedback.comment": {
+      "description": "A user comment on a suggestion pod (from /subconscious, /meals, ...) awaiting the feedback_extractor. Tag 'unprocessed' flips to 'processed' after belief extraction; kept as belief-evidence provenance.",
+      "kg_admissible": false,
+      "body_extraction": "verbatim",
+      "default_for_agents": ["feedback_extractor"],
+      "retention": {"mode": "keep_forever"}
+    },
+
+    "intention.meal": {
+      "description": "One proposed meal from the daily_meal_proposer (dish, window, date, ingredients). Advisory — the scheduler arbiter decides what reaches the calendar. Superseded daily.",
+      "kg_admissible": false,
+      "body_extraction": "verbatim",
+      "default_for_agents": [],
+      "retention": {"mode": "keep_days", "days": 90}
+    },
+
+    "intention.meal_set": {
+      "description": "Per-run summary pod from the daily_meal_proposer (narrative + advisory + refs to the per-meal pods).",
+      "kg_admissible": false,
+      "body_extraction": "verbatim",
+      "default_for_agents": [],
+      "retention": {"mode": "keep_days", "days": 90}
+    },
+
+    "intention.shopping": {
+      "description": "A proposed shopping run (items + suggested date) from the meal lane. The grocery sync applies it to inventory when the user confirms the trip.",
+      "kg_admissible": false,
+      "body_extraction": "verbatim",
+      "default_for_agents": [],
+      "retention": {"mode": "keep_days", "days": 90}
+    },
+
+    "intention.wellness": {
+      "description": "One proposed wellness activity from the wellness_proposer. Advisory input to the scheduler arbiter. Superseded daily.",
+      "kg_admissible": false,
+      "body_extraction": "verbatim",
+      "default_for_agents": [],
+      "retention": {"mode": "keep_days", "days": 90}
+    },
+
+    "intention.wellness_set": {
+      "description": "Per-run summary pod from the wellness_proposer (rest-day advisory + refs to the per-intention pods).",
+      "kg_admissible": false,
+      "body_extraction": "verbatim",
+      "default_for_agents": [],
+      "retention": {"mode": "keep_days", "days": 90}
+    },
+
+    "intention.romantic": {
+      "description": "One proposed romantic gesture/date idea from the romantic_proposer. Advisory input to the scheduler arbiter. Superseded daily.",
+      "kg_admissible": false,
+      "body_extraction": "verbatim",
+      "default_for_agents": [],
+      "retention": {"mode": "keep_days", "days": 90}
+    },
+
+    "intention.romantic_set": {
+      "description": "Per-run summary pod from the romantic_proposer (narrative + refs to the per-intention pods).",
+      "kg_admissible": false,
+      "body_extraction": "verbatim",
+      "default_for_agents": [],
+      "retention": {"mode": "keep_days", "days": 90}
+    },
+
+    "plan.weekly_meals": {
+      "description": "The weekly meal planner's 7-day slot grid + theme. The daily proposer reads the latest as its skeleton; easy-meals rotation derives served-history from slots. One per planner run.",
+      "kg_admissible": false,
+      "body_extraction": "verbatim",
+      "default_for_agents": ["daily_meal_proposer"],
+      "retention": {"mode": "keep_days", "days": 365, "keep_latest": 8}
+    },
+
+    "plan.weekly_schedule": {
+      "description": "The scheduler arbiter's single weekly source of truth (is_anchor items are locked constraints). Every proposer reads the latest back on its next run.",
+      "kg_admissible": false,
+      "body_extraction": "verbatim",
+      "default_for_agents": ["meal_proposer", "daily_meal_proposer", "weekly_meal_planner", "wellness_proposer", "romantic_proposer"],
+      "retention": {"mode": "keep_days", "days": 365, "keep_latest": 8}
+    },
+
+    "delivery.email": {
+      "description": "Audit record of an outbound email send (what was sent, to whom, when) minted by the sending surface.",
+      "kg_admissible": false,
+      "body_extraction": "verbatim",
+      "default_for_agents": [],
+      "retention": {"mode": "keep_days", "days": 365}
+    },
+
+    "health.private": {
+      "description": "Sealed response content carrying private health data (http_request/execute_code seal paths). Body readable only above the kind's authority floor; never inlined into LLM context by the sealing tool.",
+      "kg_admissible": false,
+      "body_extraction": "verbatim",
+      "default_for_agents": [],
+      "retention": {"mode": "keep_forever"}
+    },
+
+    "auth.session": {
+      "description": "Sealed web session state minted by http_request (cookies/session tokens by pointer). Handled by courier code paths; not LLM-readable content.",
+      "kg_admissible": false,
+      "body_extraction": "none",
+      "default_for_agents": [],
+      "retention": {"mode": "keep_forever"}
+    },
+
+    "auth.bearer": {
+      "description": "Identity-style secret pod: bearer/API token referenced by env pointer, materialized into authority-banded projections. Minted via put_secret_pod only.",
+      "kg_admissible": false,
+      "body_extraction": "none",
+      "default_for_agents": [],
+      "retention": {"mode": "keep_forever"}
+    },
+
+    "auth.oauth": {
+      "description": "Identity-style secret pod: OAuth credential set (access/refresh token pointers + provider config), materialized into authority-banded projections. Minted via put_secret_pod only.",
+      "kg_admissible": false,
+      "body_extraction": "none",
+      "default_for_agents": [],
+      "retention": {"mode": "keep_forever"}
+    },
+
+    "identity.ssn": {
+      "description": "Identity-style secret pod: SSN referenced by env pointer with banded projections (full=courier-only, last4/redacted/format lower bands). Minted via put_secret_pod only.",
+      "kg_admissible": false,
+      "body_extraction": "none",
+      "default_for_agents": [],
+      "retention": {"mode": "keep_forever"}
     }
   },
 

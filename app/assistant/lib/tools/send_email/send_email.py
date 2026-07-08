@@ -108,30 +108,43 @@ class SendEmail(BaseTool):
                     retryable=True,
                 ))
 
-            # Resolve pod_ids to absolute file paths via PodStore + metadata.
+            # Resolve pod_ids to absolute file paths via the GATED pod read.
             # File-backed pods (image/document/audio/video) attach as their
             # stored file. Body-only pods (email/text/transcript/note) get
             # rendered to a tempfile here and attached — agent never reads
             # the body, render happens outside any LLM context. See
             # ``pod_render`` for the rendering rules.
+            #
+            # Attaching IS dereferencing on the agent's behalf, so it goes
+            # through the same walls as pod_fetch (get_pod_gated: scope wall
+            # + the pod's min_authority floor). Out-of-scope reads as missing
+            # (no existence oracle); an authority denial is reported as
+            # denied. Without this gate an agent could EMAIL a pod it isn't
+            # allowed to pod_fetch (2026-07-08 pod audit R2).
             attachment_paths: list = []
-            missing_pods: list = []   # pod_id has no row in PodStore
+            missing_pods: list = []   # no row in PodStore OR out of scope
             empty_pods: list = []     # pod exists but has no file AND no body
+            denied_pods: list = []    # in scope, but authority below the pod's floor
             tempdir: str = ""
             import shutil
+            from app.assistant.pod_store.authority import PodAuthorityError
+            from app.assistant.pod_store.pod_utils import PodNotFound, get_pod_gated
+            caller_scope = getattr(tool_message, "scope_context", None)
             if pod_ids:
                 import tempfile
                 from app.assistant.lib.tools.send_email.pod_render import (
                     render_pod_to_attachment,
                 )
-                from app.assistant.pod_store.pod_store import PodStore
                 from app.assistant.utils.path_utils import get_repo_root
-                store = PodStore()
                 repo_root = get_repo_root()
                 for pid in pod_ids:
-                    pod = store.get(pid)
-                    if pod is None:
+                    try:
+                        pod = get_pod_gated(pid, caller_scope)
+                    except PodNotFound:
                         missing_pods.append(pid)
+                        continue
+                    except PodAuthorityError:
+                        denied_pods.append(pid)
                         continue
                     md = pod.metadata or {}
                     rel = (md.get("stored_path") or "").strip()
@@ -150,7 +163,7 @@ class SendEmail(BaseTool):
                         continue
                     empty_pods.append(pid)
 
-                if missing_pods or empty_pods:
+                if missing_pods or empty_pods or denied_pods:
                     msgs = []
                     if missing_pods:
                         msgs.append(
@@ -167,6 +180,12 @@ class SendEmail(BaseTool):
                             f"{empty_pods}. These pods are empty and cannot "
                             f"be sent — check the pod_ids are correct."
                         )
+                    if denied_pods:
+                        msgs.append(
+                            f"Pods requiring higher authority than this scope "
+                            f"carries: {denied_pods}. They cannot be attached "
+                            f"from here."
+                        )
                     if tempdir:
                         shutil.rmtree(tempdir, ignore_errors=True)
                     return self.publish_msg(make_tool_error(
@@ -177,6 +196,7 @@ class SendEmail(BaseTool):
                         details={
                             "missing_pod_ids": list(missing_pods),
                             "empty_pod_ids": list(empty_pods),
+                            "denied_pod_ids": list(denied_pods),
                             "received_pod_ids": list(pod_ids),
                         },
                     ))
@@ -189,21 +209,27 @@ class SendEmail(BaseTool):
                 from app.assistant.lib.tools.send_email.pod_render import (
                     render_pod_as_inline_block,
                 )
-                from app.assistant.pod_store.pod_store import PodStore as _PS
-                inline_store = _PS()
                 inline_blocks = []
                 inline_missing = []
                 inline_empty = []
+                inline_denied = []
                 for pid in inline_pod_ids:
-                    pod = inline_store.get(pid)
-                    if pod is None:
+                    # Same gated dereference as the attachment path — inlining
+                    # a body into an outbound email is a read on the agent's
+                    # behalf and clears the same walls.
+                    try:
+                        pod = get_pod_gated(pid, caller_scope)
+                    except PodNotFound:
                         inline_missing.append(pid)
+                        continue
+                    except PodAuthorityError:
+                        inline_denied.append(pid)
                         continue
                     if not pod.body:
                         inline_empty.append(pid)
                         continue
                     inline_blocks.append(render_pod_as_inline_block(pod))
-                if inline_missing or inline_empty:
+                if inline_missing or inline_empty or inline_denied:
                     msgs = []
                     if inline_missing:
                         msgs.append(
@@ -215,6 +241,11 @@ class SendEmail(BaseTool):
                             f"inline_pod_ids with empty body: {inline_empty}. "
                             f"Cannot inline a pod with no body."
                         )
+                    if inline_denied:
+                        msgs.append(
+                            f"inline_pod_ids requiring higher authority than "
+                            f"this scope carries: {inline_denied}."
+                        )
                     if tempdir:
                         shutil.rmtree(tempdir, ignore_errors=True)
                     return self.publish_msg(make_tool_error(
@@ -225,6 +256,7 @@ class SendEmail(BaseTool):
                         details={
                             "inline_missing_pod_ids": list(inline_missing),
                             "inline_empty_pod_ids": list(inline_empty),
+                            "inline_denied_pod_ids": list(inline_denied),
                             "received_inline_pod_ids": list(inline_pod_ids),
                         },
                     ))

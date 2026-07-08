@@ -49,13 +49,18 @@ class PodRow(Base):
     # kind ∈ {"unified_log", "event_repository:email", "resource"}
     source_refs_json = Column(JSON, nullable=False, default=list)
 
-    # Subscribers who care about this pod. Computed at mint time as the
-    # union of agents whose pod_interest.tags intersects this pod's tags.
-    # Denormalized for fast query-by-agent.
+    # Informational only. The tag-subscription routing this denormalized for
+    # (pod_interest → query-by-agent) was never adopted; consumers find pods
+    # by kind/tags/scope. Kept for existing rows and human inspection.
     for_agents_json = Column(JSON, nullable=False, default=list)
 
-    # Scope binding. Pods inherit the originating room/scope; cross-scope
-    # reads must be explicit. Null means system-wide.
+    # Scope binding — the pod-privacy wall. THE RULE AT MINT: a pod minted
+    # from a room context carries that room_id; email pods carry their
+    # account_id; system-lane pods (routines, dayflow work) leave it Null.
+    # Null means OWNER-ONLY: pod_in_scope puts a Null-scoped pod in no
+    # concrete scope, so only all-scope surfaces (master_room /
+    # dayflow_orchestrator, pods:[all]) and trusted internal callers can
+    # read it. A room whose pods.allowed_scopes is ["self"] never sees it.
     scope_id = Column(String, nullable=True, index=True)
 
     # Minimum scope authority required to read this pod's body. Defaults to

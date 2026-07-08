@@ -39,12 +39,21 @@ def _slug(text: Any) -> str:
     return s or "x"
 
 
+def _slug_kind(kind: str) -> str:
+    """Kind slug that PRESERVES dots — the dot is the kind-namespace separator
+    (``intention.meal``, ``auth.bearer``); everything else slugs to snake_case
+    per segment. The result matches the kind grammar in ``pod_uri``."""
+    segments = [seg for seg in str(kind or "").strip().lower().split(".") if seg]
+    return ".".join(_slug(seg) for seg in segments) or "x"
+
+
 def canonical_pod_id(kind: str, *parts: Any) -> str:
-    """Build a canonical pod id ``datapod:<snake_kind>:<12-hex token>`` where the token is a
+    """Build a canonical pod id ``datapod:<kind>:<12-hex token>`` where the token is a
     deterministic hash of ``parts`` (re-minting the same logical unit upserts ONE pod, and the
     id always matches ``pod_uri.POD_URI_RE`` so the PodInjector and the chat linkifier recognize
-    it). Use this instead of hand-formatting pod ids — that is the bug the audit caught."""
-    kind_slug = _slug(kind)
+    it). Dotted kinds keep their dots (``intention.meal``). Use this instead of hand-formatting
+    pod ids — that is the bug the audit caught, twice."""
+    kind_slug = _slug_kind(kind)
     raw = "|".join(str(p) for p in parts) if parts else kind_slug
     token = hashlib.blake2b(raw.encode("utf-8"), digest_size=6).hexdigest()
     pod_id = f"datapod:{kind_slug}:{token}"
@@ -163,15 +172,19 @@ def as_scope_object(scope: Any) -> Any:
     return scope
 
 
-def read_pod_gated(pod_id: str, scope: Any) -> Dict[str, Any]:
-    """THE pod read gate. Applies the scope wall then the authority wall, returns the body.
+def get_pod_gated(pod_id: str, scope: Any) -> Pod:
+    """THE single-pod dereference gate, returning the full ``Pod`` object.
 
-    Used by every surface that dereferences a single pod (pod_fetch siblings, /pod expand,
-    /api/pods). Returns ``{pod_id, kind, one_liner, body, source_urls, scope_id}``.
-    Raises ``PodNotFound`` (missing OR out of scope — indistinguishable on purpose) or
-    ``PodAuthorityError`` (in scope but authority below the pod's floor). A None scope is a trusted
-    system-internal read: scope is unrestricted and the authority wall is skipped (no caller authority
-    to clear) — matching the existing pod_fetch behavior for routine/dayflow callers."""
+    Applies the scope wall then the authority wall. Raises ``PodNotFound``
+    (missing OR out of scope — indistinguishable on purpose) or
+    ``PodAuthorityError`` (in scope but authority below the pod's floor).
+    A None scope is a trusted system-internal read: scope is unrestricted and
+    the authority wall is skipped (no caller authority to clear).
+
+    Every surface that dereferences a pod on an AGENT'S BEHALF goes through
+    this — pod_fetch, /pod expand, /api/pods (via ``read_pod_gated``), and
+    send_email's attach/inline paths (which need the Pod's metadata, hence
+    this object-returning form)."""
     scope_obj = as_scope_object(scope)
     pod = PodStore().get(pod_id)
     if pod is None:
@@ -181,6 +194,14 @@ def read_pod_gated(pod_id: str, scope: Any) -> Dict[str, Any]:
         raise PodNotFound(pod_id)
     if scope_obj is not None:
         check_authority(pod_id=pod_id, projection=None, required=pod_min_authority(pod), scope=scope_obj)
+    return pod
+
+
+def read_pod_gated(pod_id: str, scope: Any) -> Dict[str, Any]:
+    """``get_pod_gated`` rendered to the dict shape the read surfaces consume:
+    ``{pod_id, kind, one_liner, body, tags, created_at, source_urls, scope_id}``.
+    Same walls, same exceptions."""
+    pod = get_pod_gated(pod_id, scope)
     meta = pod.metadata or {}
     return {
         "pod_id": pod.pod_id,

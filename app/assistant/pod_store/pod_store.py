@@ -1,13 +1,28 @@
 """Read/write API for the pod_store table.
 
-Minimal operations needed right now:
-- ``ensure_tables()`` at startup to create the table if missing.
-- ``put(pod)`` insert/upsert by pod_id.
-- ``get(pod_id)`` fetch one.
-- ``query(tags, for_agent, since_utc, limit)`` find pods for a consumer.
+Operations:
+- ``put(pod)`` insert/upsert by pod_id (new pods are format- and
+  registry-validated at this boundary).
+- ``get(pod_id)`` fetch one; ``query(...)`` find pods for a consumer.
+- The authority-gated projection API (``fetch_projection`` /
+  ``list_projections`` / ``put_secret_pod`` / ``revoke_secret_pod``) for
+  identity/secret pods.
 
-Scope enforcement and retention policies can grow here later; kept
-narrow for now so PodClassifier can begin minting.
+## The trust contract (who is walled, who isn't)
+
+This module is the TRUSTED store: ``get``/``query``/``put`` enforce no
+scope or authority — they serve deterministic Python that already holds
+the data (the classifier, the subconscious lanes, retention). Everything
+that dereferences a pod ON AN AGENT'S BEHALF must go through the walled
+surfaces instead: ``pod_utils.get_pod_gated``/``read_pod_gated`` (scope
+wall + authority floor — pod_fetch, /pod expand, /api/pods, send_email's
+attach/inline) and ``pod_store_tool.handle_pod_search`` (scope filter +
+authority floor on headers). A ``scope=None`` at those gates means a
+trusted internal caller and is unrestricted. Adding a new agent-reachable
+pod path? It calls the gate, not this store.
+
+Retention is the nightly ``pod_retention`` sweep driven by each kind's
+registry entry.
 """
 from __future__ import annotations
 
@@ -63,26 +78,41 @@ def _parse_since(value: Union[datetime, str]) -> datetime:
 
 
 class PodStore:
+    # Table creation runs ONCE per process. Call sites construct PodStore()
+    # freely (it's stateless beyond this), so per-instance work must be nil.
+    # Serialization of writes is db_manager's job (the single application
+    # writer); reads are safely concurrent — there is deliberately no
+    # instance lock (the old per-instance RLock guarded nothing, since every
+    # caller had its own instance).
+    _tables_ensured: bool = False
+    _tables_lock = threading.Lock()
+
     def __init__(self) -> None:
-        self._lock = threading.RLock()
         self._ensure_tables()
 
-    def _ensure_tables(self) -> None:
-        session = get_session()
-        try:
-            engine = session.bind
-            from app.assistant.pod_store.models import PodProjection, PodAudit
-            Base.metadata.create_all(
-                engine,
-                tables=[
-                    PodRow.__table__,
-                    PodProjection.__table__,
-                    PodAudit.__table__,
-                ],
-                checkfirst=True,
-            )
-        finally:
-            session.close()
+    @classmethod
+    def _ensure_tables(cls) -> None:
+        if cls._tables_ensured:
+            return
+        with cls._tables_lock:
+            if cls._tables_ensured:
+                return
+            session = get_session()
+            try:
+                engine = session.bind
+                from app.assistant.pod_store.models import PodProjection, PodAudit
+                Base.metadata.create_all(
+                    engine,
+                    tables=[
+                        PodRow.__table__,
+                        PodProjection.__table__,
+                        PodAudit.__table__,
+                    ],
+                    checkfirst=True,
+                )
+            finally:
+                session.close()
+            cls._tables_ensured = True
 
     def put(self, pod: Pod) -> None:
         """Insert a new pod or update an existing one (idempotent by pod_id).
@@ -91,42 +121,80 @@ class PodStore:
         references pods by URI directly (no kg_node mirror); the promoter
         checks `pod_kind_registry.is_kg_admissible()` when writing edges
         with `datapod:*` endpoints.
+
+        Format is ENFORCED here, at the store boundary (2026-07-08 audit R1):
+        a NEW pod's id must match the canonical URI grammar in ``pod_uri`` —
+        that grammar is what makes a pod id a working REFERENCE (the
+        PodInjector, chat linkifier and /pod expand all recognize exactly it).
+        Updates to pre-grammar legacy rows keep working (grandfathered).
         """
         # Serialize through the single application writer (db_manager) so pod
         # minting — pod_classifier fires it during the post-boot storm — queues
         # instead of colliding on SQLite's single-writer lock. The Pod (incl. any
         # embedding) is built upstream; this is a short read-modify-write.
         from app.models.db_manager import get_db_manager
-        with self._lock:
-            with get_db_manager().transaction(op="pod_store.put") as session:
-                row = session.query(PodRow).filter_by(pod_id=pod.pod_id).one_or_none()
-                if row is None:
-                    row = PodRow(pod_id=pod.pod_id)
-                row.kind = pod.kind
-                row.tags_json = list(pod.tags)
-                row.one_liner = pod.one_liner
-                row.body = pod.body
-                row.source_refs_json = [sr.model_dump() for sr in pod.source_refs]
-                row.for_agents_json = list(pod.for_agents)
-                row.scope_id = pod.scope_id
-                row.created_by = pod.created_by
-                row.metadata_json = dict(pod.metadata) if pod.metadata else None
-                if pod.min_authority is not None:
-                    row.min_authority = int(pod.min_authority)
-                if pod.importance is not None:
-                    row.importance = float(pod.importance)
-                session.add(row)
+        with get_db_manager().transaction(op="pod_store.put") as session:
+            row = session.query(PodRow).filter_by(pod_id=pod.pod_id).one_or_none()
+            if row is None:
+                self._validate_new_pod_id(pod)
+                row = PodRow(pod_id=pod.pod_id)
+            row.kind = pod.kind
+            row.tags_json = list(pod.tags)
+            row.one_liner = pod.one_liner
+            row.body = pod.body
+            row.source_refs_json = [sr.model_dump() for sr in pod.source_refs]
+            row.for_agents_json = list(pod.for_agents)
+            row.scope_id = pod.scope_id
+            row.created_by = pod.created_by
+            row.metadata_json = dict(pod.metadata) if pod.metadata else None
+            if pod.min_authority is not None:
+                row.min_authority = int(pod.min_authority)
+            if pod.importance is not None:
+                row.importance = float(pod.importance)
+            session.add(row)
+
+    @staticmethod
+    def _validate_new_pod_id(pod: Pod) -> None:
+        """The post-processing format gate for NEW pods: the kind must be
+        registered in configs/pod_kinds.json, the id must match the canonical
+        URI grammar, and the id's kind segment must equal the pod's ``kind``
+        field. Minters use ``pod_utils.canonical_pod_id`` to build conforming
+        ids; whatever produced a non-conforming one fails LOUD here instead of
+        minting an unreferenceable pod (or forking the kind vocabulary — the
+        registry check is what keeps research_finding from growing a
+        research.finding twin again)."""
+        from app.assistant.pod_store.pod_kind_registry import get_kind
+        from app.assistant.pod_store.pod_uri import POD_URI_RE
+        kind = str(pod.kind or "")
+        if get_kind(kind) is None:
+            raise ValueError(
+                f"pod kind {kind!r} is not registered in configs/pod_kinds.json — "
+                "register the kind first (see skills/extending-emi-pod-kinds), "
+                "then mint."
+            )
+        pid = str(pod.pod_id or "")
+        if not POD_URI_RE.fullmatch(pid):
+            raise ValueError(
+                f"pod_id {pid!r} does not match the canonical pod URI grammar "
+                "datapod:<kind>:<id> (kind = dotted snake_case segments; id = "
+                "[a-z0-9][a-z0-9_]{5,}). Build ids with pod_utils.canonical_pod_id."
+            )
+        id_kind = pid.split(":", 2)[1]
+        if id_kind != kind:
+            raise ValueError(
+                f"pod_id {pid!r} carries kind segment {id_kind!r} but the pod's "
+                f"kind field is {kind!r} — the two must be identical."
+            )
 
     def get(self, pod_id: str) -> Optional[Pod]:
-        with self._lock:
-            session = get_session()
-            try:
-                row = session.query(PodRow).filter_by(pod_id=pod_id).one_or_none()
-                if row is None:
-                    return None
-                return self._row_to_pod(row)
-            finally:
-                session.close()
+        session = get_session()
+        try:
+            row = session.query(PodRow).filter_by(pod_id=pod_id).one_or_none()
+            if row is None:
+                return None
+            return self._row_to_pod(row)
+        finally:
+            session.close()
 
     def update_curation(self, pod_id: str, *, importance=_UNSET, min_authority=_UNSET) -> None:
         """Update the owner-editable curation fields on an existing pod.
@@ -139,21 +207,19 @@ class PodStore:
         ``pod_id`` exists (fail loud — the caller passed a bad id).
         """
         from app.models.db_manager import get_db_manager
-        with self._lock:
-            with get_db_manager().transaction(op="pod_store.update_curation") as session:
-                row = session.query(PodRow).filter_by(pod_id=pod_id).one_or_none()
-                if row is None:
-                    raise KeyError(f"pod {pod_id!r} not found")
-                if importance is not _UNSET:
-                    row.importance = None if importance is None else float(importance)
-                if min_authority is not _UNSET:
-                    row.min_authority = int(min_authority)
-                session.add(row)
+        with get_db_manager().transaction(op="pod_store.update_curation") as session:
+            row = session.query(PodRow).filter_by(pod_id=pod_id).one_or_none()
+            if row is None:
+                raise KeyError(f"pod {pod_id!r} not found")
+            if importance is not _UNSET:
+                row.importance = None if importance is None else float(importance)
+            if min_authority is not _UNSET:
+                row.min_authority = int(min_authority)
+            session.add(row)
 
     def query(
         self,
         *,
-        for_agent: Optional[str] = None,
         tags: Optional[Sequence[str]] = None,
         scope: Optional[str] = None,
         kind: Optional[str] = None,
@@ -166,10 +232,10 @@ class PodStore:
     ) -> List[Pod]:
         """Fetch pods a consumer cares about.
 
-        - ``for_agent``: only pods whose ``for_agents`` contains this name.
-          SQLite JSON membership is expressed via LIKE-against-serialized
-          JSON (good enough at small scale; revisit for >10k pods).
         - ``tags``: restrict to pods whose tags include any of these.
+          SQLite JSON membership is expressed via LIKE-against-serialized
+          JSON (good enough at small scale; revisit for >10k pods — the
+          nightly pod_retention sweep keeps volume under that ceiling).
         - ``scope``: only pods whose ``scope_id`` exactly matches (room_id).
         - ``kind``: only pods of this kind (e.g. ``"email"``,
           ``"chat_cluster"``). Useful to narrow a free-text query to one
@@ -199,116 +265,110 @@ class PodStore:
         needle = str(query or "").strip()
         max_rows = max(1, int(limit or 50))
 
-        with self._lock:
-            session = get_session()
-            try:
-                q = session.query(PodRow)
-                if resolved_since is not None:
-                    q = q.filter(PodRow.created_at >= resolved_since)
-                if scope:
-                    q = q.filter(PodRow.scope_id == scope)
-                if kind:
-                    q = q.filter(PodRow.kind == kind)
-                if linked_to_entity:
-                    # Sub-select pod_ids that are the target of a KG edge
-                    # from an Entity node matching the label. Both pod_store
-                    # and kg_*_metadata live in emi.db so a cross-table
-                    # subquery on the same engine is fine.
-                    #
-                    # Label match is alias-aware: exact case-insensitive
-                    # label first, then a JSON-LIKE fallback against the
-                    # node's `aliases` column. This handles the case where
-                    # an agent searches with the full name ("Jukka Virtanen")
-                    # but the KG entity is labeled with just the first name
-                    # ("Jukka") — the full name lives in aliases.
-                    from sqlalchemy import func
-                    from app.assistant.kg.db.knowledge_graph_db import Edge, Node
-                    label_lower = str(linked_to_entity).strip().lower()
-                    alias_needle = f'%"{label_lower}"%'
-                    pod_id_subq = (
-                        session.query(Edge.target_id)
-                        .join(Node, Node.id == Edge.source_id)
-                        .filter(Node.node_type == "Entity")
-                        .filter(
-                            or_(
-                                func.lower(Node.label) == label_lower,
-                                func.lower(
-                                    func.coalesce(
-                                        func.cast(Node.aliases, type_=__import__("sqlalchemy").String),
-                                        "",
-                                    )
-                                ).like(alias_needle),
-                            )
+        session = get_session()
+        try:
+            q = session.query(PodRow)
+            if resolved_since is not None:
+                q = q.filter(PodRow.created_at >= resolved_since)
+            if scope:
+                q = q.filter(PodRow.scope_id == scope)
+            if kind:
+                q = q.filter(PodRow.kind == kind)
+            if linked_to_entity:
+                # Sub-select pod_ids that are the target of a KG edge
+                # from an Entity node matching the label. Both pod_store
+                # and kg_*_metadata live in emi.db so a cross-table
+                # subquery on the same engine is fine.
+                #
+                # Label match is alias-aware: exact case-insensitive
+                # label match, plus a JSON-LIKE match against the
+                # node's `aliases` column. This handles the case where
+                # an agent searches with a full name ("Alex Smith")
+                # but the KG entity is labeled with just the first name
+                # ("Alex") — the full name lives in aliases.
+                from sqlalchemy import func
+                from app.assistant.kg.db.knowledge_graph_db import Edge, Node
+                label_lower = str(linked_to_entity).strip().lower()
+                alias_needle = f'%"{label_lower}"%'
+                pod_id_subq = (
+                    session.query(Edge.target_id)
+                    .join(Node, Node.id == Edge.source_id)
+                    .filter(Node.node_type == "Entity")
+                    .filter(
+                        or_(
+                            func.lower(Node.label) == label_lower,
+                            func.lower(
+                                func.coalesce(
+                                    func.cast(Node.aliases, type_=__import__("sqlalchemy").String),
+                                    "",
+                                )
+                            ).like(alias_needle),
                         )
                     )
-                    if linked_via:
-                        pod_id_subq = pod_id_subq.filter(
-                            Edge.relationship_type.in_(list(linked_via))
-                        )
-                    q = q.filter(PodRow.pod_id.in_(pod_id_subq))
-                if for_agent:
-                    # LIKE on the JSON-serialized list. SQLite stores JSON
-                    # arrays as text like `["meal_planner","health_watcher"]`.
-                    agent_needle = json.dumps(for_agent)
-                    q = q.filter(PodRow.for_agents_json.like(f"%{agent_needle}%"))
-                if tags:
-                    tag_filters = [PodRow.tags_json.like(f"%{json.dumps(t)}%") for t in tags]
-                    q = q.filter(or_(*tag_filters))
-                if needle:
-                    # Tokenize the query; multi-word searches match pods that
-                    # contain ANY of the tokens (OR), then rank by how many
-                    # tokens hit and whether they hit the one_liner. Never
-                    # return zero when some tokens match something — prefer
-                    # the best partial match to silence.
-                    #
-                    # Tokens ending in 's' with length > 3 are also matched
-                    # in their singular form (trailing-s stem).
-                    tokens = [t for t in re.split(r"[\s,]+", needle) if t]
-                    token_stems: list[tuple[str, set[str]]] = []
-                    all_filters = []
-                    for tok in tokens:
-                        stems = {tok}
-                        if len(tok) > 3 and tok.lower().endswith("s"):
-                            stems.add(tok[:-1])
-                        token_stems.append((tok, stems))
-                        for stem in stems:
-                            like_pattern = f"%{stem}%"
-                            all_filters.append(PodRow.one_liner.ilike(like_pattern))
-                            all_filters.append(PodRow.body.ilike(like_pattern))
-                    q = q.filter(or_(*all_filters))
-                    # Wider pool so Python-side ranking has room to promote
-                    # pods hitting more tokens above pods hitting fewer.
-                    q = q.order_by(PodRow.created_at.desc()).limit(max_rows * 5)
-                    rows = q.all()
+                )
+                if linked_via:
+                    pod_id_subq = pod_id_subq.filter(
+                        Edge.relationship_type.in_(list(linked_via))
+                    )
+                q = q.filter(PodRow.pod_id.in_(pod_id_subq))
+            if tags:
+                tag_filters = [PodRow.tags_json.like(f"%{json.dumps(t)}%") for t in tags]
+                q = q.filter(or_(*tag_filters))
+            if needle:
+                # Tokenize the query; multi-word searches match pods that
+                # contain ANY of the tokens (OR), then rank by how many
+                # tokens hit and whether they hit the one_liner. Never
+                # return zero when some tokens match something — prefer
+                # the best partial match to silence.
+                #
+                # Tokens ending in 's' with length > 3 are also matched
+                # in their singular form (trailing-s stem).
+                tokens = [t for t in re.split(r"[\s,]+", needle) if t]
+                token_stems: list[tuple[str, set[str]]] = []
+                all_filters = []
+                for tok in tokens:
+                    stems = {tok}
+                    if len(tok) > 3 and tok.lower().endswith("s"):
+                        stems.add(tok[:-1])
+                    token_stems.append((tok, stems))
+                    for stem in stems:
+                        like_pattern = f"%{stem}%"
+                        all_filters.append(PodRow.one_liner.ilike(like_pattern))
+                        all_filters.append(PodRow.body.ilike(like_pattern))
+                q = q.filter(or_(*all_filters))
+                # Wider pool so Python-side ranking has room to promote
+                # pods hitting more tokens above pods hitting fewer.
+                q = q.order_by(PodRow.created_at.desc()).limit(max_rows * 5)
+                rows = q.all()
 
-                    def _score(row: PodRow) -> tuple:
-                        # one_liner is curated/dense, body is long/noisy.
-                        # Rank by one_liner hits first — body matches are
-                        # only used as a tiebreaker and as a last-resort
-                        # signal when no pod has any one_liner hits.
-                        ol = (row.one_liner or "").lower()
-                        body = (row.body or "").lower()
-                        tokens_matched = 0
-                        one_liner_matched = 0
-                        for _tok, stems in token_stems:
-                            stems_lower = [s.lower() for s in stems]
-                            in_ol = any(s in ol for s in stems_lower)
-                            in_body = any(s in body for s in stems_lower)
-                            if in_ol or in_body:
-                                tokens_matched += 1
-                                if in_ol:
-                                    one_liner_matched += 1
-                        ts = row.created_at.timestamp() if row.created_at else 0
-                        return (-one_liner_matched, -tokens_matched, -ts)
+                def _score(row: PodRow) -> tuple:
+                    # one_liner is curated/dense, body is long/noisy.
+                    # Rank by one_liner hits first — body matches are
+                    # only used as a tiebreaker and as a last-resort
+                    # signal when no pod has any one_liner hits.
+                    ol = (row.one_liner or "").lower()
+                    body = (row.body or "").lower()
+                    tokens_matched = 0
+                    one_liner_matched = 0
+                    for _tok, stems in token_stems:
+                        stems_lower = [s.lower() for s in stems]
+                        in_ol = any(s in ol for s in stems_lower)
+                        in_body = any(s in body for s in stems_lower)
+                        if in_ol or in_body:
+                            tokens_matched += 1
+                            if in_ol:
+                                one_liner_matched += 1
+                    ts = row.created_at.timestamp() if row.created_at else 0
+                    return (-one_liner_matched, -tokens_matched, -ts)
 
-                    rows.sort(key=_score)
-                    rows = rows[:max_rows]
-                else:
-                    q = q.order_by(PodRow.created_at.desc()).limit(max_rows)
-                    rows = q.all()
-                return [self._row_to_pod(r) for r in rows]
-            finally:
-                session.close()
+                rows.sort(key=_score)
+                rows = rows[:max_rows]
+            else:
+                q = q.order_by(PodRow.created_at.desc()).limit(max_rows)
+                rows = q.all()
+            return [self._row_to_pod(r) for r in rows]
+        finally:
+            session.close()
 
     # ── Authority-gated projection API ────────────────────────────────────
     #
@@ -477,38 +537,41 @@ class PodStore:
         )
         from app.assistant.pod_store.resolvers import PodValueMissing
         from app.assistant.pod_store.materializers import get_materializer
+        from app.models.db_manager import get_db_manager
 
         pod_id = f"datapod:{pod_type}:{uuid.uuid4().hex[:16]}"
-        session = get_session()
-        try:
-            check_authority(
-                pod_id=pod_id, projection=None,
-                required=AUTH_USER, scope=scope,
+        check_authority(
+            pod_id=pod_id, projection=None,
+            required=AUTH_USER, scope=scope,
+        )
+        raw_value = os.environ.get(env_ref)
+        if not raw_value:
+            raise PodValueMissing(
+                f"env var {env_ref!r} is unset or empty — add it "
+                f"to .env and restart Flask, then retry"
             )
-            raw_value = os.environ.get(env_ref)
-            if not raw_value:
-                raise PodValueMissing(
-                    f"env var {env_ref!r} is unset or empty — add it "
-                    f"to .env and restart Flask, then retry"
-                )
-            materialize = get_materializer(pod_type)
-            extra_kwargs = dict(materializer_kwargs or {})
-            specs = materialize(raw_value=raw_value, env_ref=env_ref, **extra_kwargs)
-            # raw_value goes out of scope here; only the env_ref pointer
-            # persists in the database for the full projection.
-            del raw_value
+        materialize = get_materializer(pod_type)
+        extra_kwargs = dict(materializer_kwargs or {})
+        specs = materialize(raw_value=raw_value, env_ref=env_ref, **extra_kwargs)
+        # raw_value goes out of scope here; only the env_ref pointer
+        # persists in the database for the full projection.
+        del raw_value
 
-            # Determine pod-level min_authority as the lowest projection
-            # band (any agent who can read any projection should at
-            # least be able to query the pod's existence).
-            pod_min_authority = min(s.min_authority for s in specs)
+        # Determine pod-level min_authority as the lowest projection
+        # band (any agent who can read any projection should at
+        # least be able to query the pod's existence).
+        pod_min_authority = min(s.min_authority for s in specs)
 
-            row_metadata = {
-                "owner_subject_id": owner_subject_id,
-                "env_ref_root": env_ref,
-            }
-            if metadata:
-                row_metadata.update(dict(metadata))
+        row_metadata = {
+            "owner_subject_id": owner_subject_id,
+            "env_ref_root": env_ref,
+        }
+        if metadata:
+            row_metadata.update(dict(metadata))
+
+        # Materialization is pure compute; only this short write holds the
+        # single application writer (db_manager).
+        with get_db_manager().transaction(op="pod_store.put_secret_pod") as session:
             row = PodRow(
                 pod_id=pod_id,
                 kind=pod_type,
@@ -542,10 +605,7 @@ class PodStore:
                 outcome="allowed",
                 detail=f"type={pod_type} projections={len(specs)}",
             )
-            session.commit()
-            return pod_id
-        finally:
-            session.close()
+        return pod_id
 
     def revoke_secret_pod(self, pod_id: str, *, scope) -> bool:
         """Hard-delete a secret pod and ALL its projections — used when a var is
@@ -556,28 +616,20 @@ class PodStore:
         """
         from app.assistant.pod_store.models import PodProjection
         from app.assistant.pod_store.authority import check_authority, AUTH_USER
-        with self._lock:
-            session = get_session()
-            try:
-                check_authority(pod_id=pod_id, projection=None, required=AUTH_USER, scope=scope)
-                row = session.query(PodRow).filter_by(pod_id=pod_id).one_or_none()
-                if row is None:
-                    self._audit(session, pod_id=pod_id, projection=None, operation="revoke",
-                                scope=scope, outcome="noop", detail="pod not found")
-                    session.commit()
-                    return False
-                n = session.query(PodProjection).filter_by(pod_id=pod_id).delete()
-                session.delete(row)
+        from app.models.db_manager import get_db_manager
+        check_authority(pod_id=pod_id, projection=None, required=AUTH_USER, scope=scope)
+        with get_db_manager().transaction(op="pod_store.revoke_secret_pod") as session:
+            row = session.query(PodRow).filter_by(pod_id=pod_id).one_or_none()
+            if row is None:
                 self._audit(session, pod_id=pod_id, projection=None, operation="revoke",
-                            scope=scope, outcome="allowed",
-                            detail=f"hard-deleted pod + {n} projections")
-                session.commit()
-                return True
-            except Exception:
-                session.rollback()
-                raise
-            finally:
-                session.close()
+                            scope=scope, outcome="noop", detail="pod not found")
+                return False
+            n = session.query(PodProjection).filter_by(pod_id=pod_id).delete()
+            session.delete(row)
+            self._audit(session, pod_id=pod_id, projection=None, operation="revoke",
+                        scope=scope, outcome="allowed",
+                        detail=f"hard-deleted pod + {n} projections")
+            return True
 
     def _audit(
         self,

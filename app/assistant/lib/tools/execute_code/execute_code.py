@@ -600,7 +600,13 @@ class ExecuteCode(BaseTool):
                     persist_path = persist_dir / f.name
                     shutil.copyfile(f, persist_path)
                     stored_rel = str(persist_path.resolve().relative_to(repo_root)).replace("\\", "/")
-                pod_id = f"datapod:tool_result:exec_{call_id}_{f.name}"
+                # Canonical id via the SSOT builder — deterministic on
+                # (call_id, filename) so re-runs upsert one pod, and the id
+                # matches the pod URI grammar (the old exec_<id>_<filename>
+                # shape embedded dots/hyphens, so the PodInjector/linkifier
+                # never recognized it). The filename lives in metadata.
+                from app.assistant.pod_store.pod_utils import canonical_pod_id
+                pod_id = canonical_pod_id("tool_result", call_id, f.name)
                 metadata = {
                     "filename": f.name,
                     "bytes": len(data),

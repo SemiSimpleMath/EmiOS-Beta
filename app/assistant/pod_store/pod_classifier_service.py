@@ -79,7 +79,6 @@ class PodClassifierService:
         self._tick_interval_seconds = max(1, int(tick_interval_seconds))
 
         self._tag_vocabulary: Dict[str, Any] = self._load_tag_vocabulary()
-        self._tag_to_agents: Dict[str, List[str]] = self._build_tag_subscription_map()
 
         # Per-room buffer of envelopes (chronological order of arrival) and
         # last-activity timestamp. Monotonic time is used for the timer.
@@ -281,7 +280,6 @@ class PodClassifierService:
 
         pod_body = "\n\n".join(annotated_sections) if annotated_sections else burst_text
 
-        for_agents = self._compute_for_agents(tags)
         pod_id = self._make_cluster_pod_id(envelopes)
         source_refs = [
             PodSourceRef(kind="unified_log", id=str(env.signal_id))
@@ -309,15 +307,14 @@ class PodClassifierService:
             one_liner=one_liner,
             body=pod_body,
             source_refs=source_refs,
-            for_agents=for_agents,
             scope_id=room_id,
             created_by="pod_classifier",
             metadata=pod_metadata,
         )
         self._pod_store.put(pod)
         logger.info(
-            "PodClassifier minted pod id=%s room=%s tags=%s for_agents=%s size=%d",
-            pod_id, room_id, tags, for_agents, len(envelopes),
+            "PodClassifier minted pod id=%s room=%s tags=%s size=%d",
+            pod_id, room_id, tags, len(envelopes),
         )
 
     # ──────────────────────────────────────────────────────────────────
@@ -631,16 +628,6 @@ class PodClassifierService:
             lines.append(f"{prefix}{speaker}: {content}")
         return "\n".join(lines)
 
-    def _compute_for_agents(self, tags: List[str]) -> List[str]:
-        agents: List[str] = []
-        seen: set[str] = set()
-        for tag in tags:
-            for agent_name in self._tag_to_agents.get(tag, []):
-                if agent_name not in seen:
-                    seen.add(agent_name)
-                    agents.append(agent_name)
-        return agents
-
     @staticmethod
     def _make_cluster_pod_id(envelopes: List[IngestEnvelope]) -> str:
         """Deterministic pod_id from the sorted signal_ids of the envelopes."""
@@ -663,44 +650,3 @@ class PodClassifierService:
             logger.error("PodClassifier: failed loading tag vocabulary: %s", e)
             logger.debug("pod classifier tag load exception details", exc_info=True)
             return {}
-
-    def _build_tag_subscription_map(self) -> Dict[str, List[str]]:
-        """Scan agent registry for pod_interest.tags declarations.
-
-        Returns dict of tag_name -> [agent_name, ...]. Empty map is fine —
-        it just means no consumer has registered yet, so pods are minted
-        with an empty for_agents list until consumers declare interest.
-        """
-        mapping: Dict[str, List[str]] = defaultdict(list)
-        try:
-            from app.assistant.ServiceLocator.service_locator import DI
-            registry = DI.agent_registry
-        except Exception:
-            logger.debug("PodClassifier: agent_registry unavailable, skipping interest scan")
-            return {}
-        try:
-            names = registry.get_all_agent_names() if hasattr(registry, "get_all_agent_names") else []
-        except Exception as e:
-            logger.error("PodClassifier: could not list agent names: %s", e)
-            return {}
-        for name in names:
-            cfg = registry.get_agent_config(name) if hasattr(registry, "get_agent_config") else None
-            if not isinstance(cfg, dict):
-                continue
-            pod_interest = cfg.get("pod_interest")
-            if not isinstance(pod_interest, dict):
-                continue
-            tags = pod_interest.get("tags")
-            if not isinstance(tags, list):
-                continue
-            for t in tags:
-                if isinstance(t, str) and t.strip():
-                    mapping[t.strip()].append(name)
-        if mapping:
-            logger.info(
-                "PodClassifier tag subscriptions: %s",
-                {k: v for k, v in mapping.items()},
-            )
-        else:
-            logger.info("PodClassifier: no agents declared pod_interest yet")
-        return dict(mapping)

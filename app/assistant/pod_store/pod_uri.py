@@ -4,9 +4,19 @@ Used wherever the system scans free-form text for pod references:
 the PodInjector, tool argument scanners, audit loggers, etc.
 
 Canonical pod URI shape: ``datapod:<kind>:<id>``
-  - ``<kind>`` is a snake_case identifier (e.g. ``chat_cluster``, ``email``).
-  - ``<id>`` is lowercase alphanumeric, 6+ chars (old ids are 24 hex,
-    new ids are 6 base36; both match).
+  - ``<kind>`` is snake_case segments joined by dots — the dot is the
+    namespace separator (``chat_cluster``, ``intention.meal``,
+    ``plan.weekly_schedule``, ``auth.bearer``). This is the ONE kind
+    grammar; the ``kind`` column and the id's kind segment use it
+    identically.
+  - ``<id>`` is a lowercase [a-z0-9_] token, 6+ chars, starting
+    alphanumeric (24-hex, uuid hex, 12-hex canonical tokens, and
+    ``execcode_<hex>`` all match).
+
+``pod_utils.canonical_pod_id`` builds conforming ids; ``PodStore.put``
+enforces the shape on every NEW pod (2026-07-08 audit R1 — the old
+regex had no dots, so the injector/linkifier were blind to every
+dotted kind).
 """
 from __future__ import annotations
 
@@ -20,7 +30,9 @@ from app.assistant.utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 
-POD_URI_RE = re.compile(r"\bdatapod:[a-z_][a-z_0-9]*:[a-z0-9]{6,}\b")
+POD_URI_RE = re.compile(
+    r"\bdatapod:[a-z_][a-z_0-9]*(?:\.[a-z_0-9]+)*:[a-z0-9][a-z0-9_]{5,}\b"
+)
 
 
 def extract_pod_ids(text: str) -> List[str]:
