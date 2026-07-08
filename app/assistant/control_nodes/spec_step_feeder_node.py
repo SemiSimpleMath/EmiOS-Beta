@@ -160,6 +160,10 @@ class SpecStepFeederNode(ControlNode):
                         "playwright_latest_snapshot_summary",
                         ToolResultHandler._format_snapshot_card(snapshot_card),
                     )
+                    # Tool-visible copy — ref tools resolve labels from the
+                    # global blackboard (see ToolResultHandler's same write).
+                    from app.assistant.ServiceLocator.service_locator import DI
+                    DI.global_blackboard.update_state_value("playwright_latest_snapshot", snapshot_card)
                     logger.info("[%s] Took fresh snapshot after step transition.", self.name)
         except Exception:
             logger.debug("[%s] Failed to take step-transition snapshot", self.name, exc_info=True)

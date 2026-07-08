@@ -475,6 +475,11 @@ class ToolResultHandler(ControlNode):
                 "playwright_latest_snapshot_summary",
                 self._format_snapshot_card(snapshot_card),
             )
+            # Tools run outside the manager's blackboard — web_fill_ref /
+            # web_click_ref_snapshot resolve ref -> element label from the
+            # global blackboard (the tool-visible layer, same bridge the
+            # bluesky tools use for their ref maps).
+            DI.global_blackboard.update_state_value("playwright_latest_snapshot", snapshot_card)
         except Exception:
             logger.debug(
                 "[%s] Failed to update latest playwright snapshot state",
