@@ -100,8 +100,25 @@ class ToolCaller(ControlNode):
         scope_contract_enforced = bool(self.blackboard.get_state_value("scope_contract_enforced", False))
         scope_context = self.blackboard.get_state_value("scope_context")
         if not scope_contract_enforced:
+            # Every production invocation reaches this node with the flag set
+            # (scope_adapter stamps it at manager ingress; MultiAgentManager
+            # refuses scope-less requests). An unset flag here means the
+            # invocation bypassed ingress entirely — fail loud rather than run
+            # the tool ungated. Test harnesses that drive this node directly
+            # keep the old warn-and-run behavior.
+            import os
+            test_mode = (
+                os.environ.get("EMI_TEST_MODE") == "1"
+                or "PYTEST_CURRENT_TEST" in os.environ
+            )
+            if not test_mode:
+                raise ValueError(
+                    f"[{self.name}] scope_contract_enforced is not set for target "
+                    f"'{selected_target}' — refusing ungated tool execution. Route the "
+                    "invocation through manager ingress (scope_adapter attaches the scope)."
+                )
             logger.warning(
-                "[%s] scope_contract_enforced=False for target '%s' — tool executing without scope enforcement.",
+                "[%s] scope_contract_enforced=False for target '%s' — tool executing without scope enforcement (test mode).",
                 self.name,
                 selected_target,
             )

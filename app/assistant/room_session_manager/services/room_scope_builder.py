@@ -16,6 +16,7 @@ from app.assistant.manager_runtime.services.scope_adapter import (
 )
 from app.assistant.rooms.room_resource_loader import resolve_room_config_dir
 from app.assistant.scope.loader import load_scope
+from app.assistant.utils.identity_names import PRINCIPAL_USER
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import ScopeContext
 
@@ -81,6 +82,37 @@ def _overlay_scope_yaml_permission(*, room_id: str, scope_dict: Dict[str, Any]) 
     return out
 
 
+def resolve_room_pod_scopes(*, room_id: str, room_permissions: Dict[str, Any]) -> List[str]:
+    """The room's EFFECTIVE pods.allowed_scopes — ONE source for every lane.
+
+    A room that declares scope.yaml gets its pods block from the file (the
+    file is authoritative for permission, exactly like the overlay); other
+    rooms read ROOM.md ``permissions.pod_scopes``; absent both → ["self"]
+    (fail-closed). Shared by the manager lane (this builder) and the direct
+    readers (/pod command + /api/pods via ``pod_command.build_room_scope``)
+    so the two lanes can never drift (2026-07-07 scope audit F3).
+    """
+    rid = str(room_id or "").strip()
+    if rid:
+        scope_path = None
+        try:
+            scope_path = resolve_room_config_dir(rid) / _SCOPE_FILE_NAME
+        except Exception as e:
+            logger.debug("pod-scope resolution: no config dir for room_id=%s: %s", rid, e, exc_info=True)
+        if scope_path is not None and scope_path.exists():
+            permission = load_scope(scope_path, identity={
+                "owner_id": PRINCIPAL_USER,
+                "actor_id": "pod_scope_resolver",
+                "surface": "internal",
+            })
+            return list(permission.pods.allowed_scopes or ["self"])
+    raw = room_permissions.get("pod_scopes") if isinstance(room_permissions, dict) else None
+    if isinstance(raw, list):
+        cleaned = [str(s).strip() for s in raw if isinstance(s, str) and str(s).strip()]
+        return cleaned or ["self"]
+    return ["self"]
+
+
 # (Always-on persona/scope skills are now data-driven: skills self-declare a
 # keyword-less requires_scope gate and the injector discovers them — see
 # always_inject_skill_names. The old hardcoded _PRINCIPAL_SKILL_PACKS dict was
@@ -118,20 +150,15 @@ def build_scope_contract_for_room_request(
         raise ValueError("task_except_tools must be a list when provided.")
 
     # Pod scope visibility: which pod scope_ids this room can read.
-    # Read from ROOM.md frontmatter's `permissions.pod_scopes` block.
     # Special tokens:
     #   - "all": see all pods regardless of scope_id (owner surfaces — master_room)
     #   - "self": see only this room's own pods (default — slack channels, sms, etc.)
     # Mixing "all" with specific ids is invalid (validator rejects).
-    # Default if unset: ["self"] (most restrictive — fail-closed).
-    raw_pod_scopes = room_permissions.get("pod_scopes")
-    if isinstance(raw_pod_scopes, list):
-        pod_scopes_resolved = [
-            str(s).strip() for s in raw_pod_scopes
-            if isinstance(s, str) and str(s).strip()
-        ] or ["self"]
-    else:
-        pod_scopes_resolved = ["self"]
+    # Resolved through the shared single-source helper: scope.yaml when the
+    # room declares one, else ROOM.md permissions.pod_scopes, else ["self"].
+    pod_scopes_resolved = resolve_room_pod_scopes(
+        room_id=str(envelope.room_id or ""), room_permissions=room_permissions,
+    )
 
     # Per-manager rules: read from ROOM.md frontmatter's `permissions.per_manager`.
     # Shape:
@@ -202,7 +229,12 @@ def build_scope_contract_for_room_request(
     scope_dict: Dict[str, Any] = {
         "schema_version": "scope_context_v1",
         "scope_id": f"scope::{envelope.surface}::{envelope.room_id}::{envelope.context_id or 'main'}::{uuid.uuid4().hex[:8]}",
-        "owner_id": str(envelope.room_id or "").strip() or "unknown_owner",
+        # owner_id = WHOSE DATA this scope touches — the primary human
+        # principal for every room (the room itself lives in room_id; the
+        # speaker lives in actor_id). Canonical rule from the 2026-07-07
+        # scope audit: PRINCIPAL_USER unless the data is genuinely
+        # system-owned.
+        "owner_id": PRINCIPAL_USER,
         "actor_id": str(envelope.speaker_external_id or envelope.speaker_name or "unknown_actor").strip(),
         "surface": str(envelope.surface or "").strip() or "unknown",
         "room_id": str(envelope.room_id or "").strip() or None,
@@ -273,8 +305,6 @@ def build_scope_contract_for_room_request(
             "denied_skills": [],
         },
     }
-    # Unified-scope transition: if the room declares a scope.yaml, it is the
-    # authoritative source for the permission bucket. No-op for rooms without one.
     # Unified-scope transition: if the room declares a scope.yaml, it is the
     # authoritative source for the permission bucket. No-op for rooms without one.
     scope_dict = _overlay_scope_yaml_permission(room_id=str(envelope.room_id or ""), scope_dict=scope_dict)

@@ -307,6 +307,11 @@ class ScopeAdapter:
             return room_scope
 
         data = message.data if isinstance(message.data, dict) else {}
+        # TRUSTED-CALLER SEAM (2026-07-07 scope audit F4): a data-seeded
+        # contract (and the strict-mode derive below, which reads
+        # data.authority_level) accepts whatever the in-process caller shaped —
+        # including authority 100. The strict gate guards against ACCIDENTAL
+        # ungated invocations, not against code that constructs its own scope.
         data_scope = data.get("scope_contract")
         if isinstance(data_scope, dict):
             return ScopeContext.model_validate(data_scope)

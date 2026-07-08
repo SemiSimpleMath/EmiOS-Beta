@@ -31,13 +31,11 @@ permissions:
     transformational: true
     external_action: true
     sensitive: true
-  # dayflow is an owner-internal system surface — it operates autonomously on
-  # behalf of the user across all surfaces (slack, master_room, telegram, sms,
-  # routine outputs). It needs cross-room pod visibility to correlate events
-  # (e.g., notice an unanswered slack message + a calendar conflict + a
-  # weekly_meal_planner pod). Sensitivity-band gating (min_authority) still
+  # Pod visibility for this room lives in scope.yaml (pods.allowed_scopes) —
+  # the single permission source for rooms that declare one. dayflow gets
+  # cross-room pod visibility via its scope.yaml `pods: [all]` (it correlates
+  # events across surfaces); sensitivity-band gating (min_authority) still
   # applies to per-pod content like SSN regardless.
-  pod_scopes: [all]
   allow_images: false
 access:
   allowed_global_resources:

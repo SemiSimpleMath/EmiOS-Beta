@@ -74,14 +74,16 @@ def test_full_tool_surface(built):
     assert set(per_mgr.keys()) == {"emi_team_manager"}
     allow = per_mgr["emi_team_manager"]["allow"]
     # the 7 delegate managers + ask_kg + emi_team operational tools (incl. the
-    # pod read/write trio pod_search/pod_fetch/mint_pod) = 16 total.
+    # pod read/write trio pod_search/pod_fetch/mint_pod and the work-object
+    # read pair search_work_objects/read_work_object, 829ca1ec) = 18 total.
     assert "web_manager" in allow and "http_manager" in allow
     assert "personal_admin_manager" in allow and "ask_kg" in allow
     assert "pod_search" in allow and "ask_user" in allow
     assert "mint_pod" in allow  # emi_team can persist a content pod directly
+    assert "search_work_objects" in allow and "read_work_object" in allow
     assert "kg_query_manager" not in allow  # retired (superseded by ask_kg)
     assert "create_dayflow_ticket" not in allow  # switchboard-only, not emi_team's
-    assert len(allow) == 16
+    assert len(allow) == 18
 
 
 def test_all_pods_visible(built):
@@ -112,7 +114,9 @@ def test_room_behavior_preserved(built):
     assert built["history"]["mode"] == "summary_plus_recent"
     assert built["retention"]["persist_tool_results"] is True
     assert built["surface"] == "ui"
-    assert built["owner_id"] == "master_room"
+    # owner_id = the primary human principal (whose data), NOT the room id —
+    # the room lives in room_id. Canonical rule from the 2026-07-07 scope audit.
+    assert built["owner_id"] == "user"
     assert built["actor_id"] == "U_jukka"
     assert built["visibility"] == "owner_only"
 

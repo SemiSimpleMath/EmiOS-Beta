@@ -11,6 +11,11 @@ class ScopeBaseModel(BaseModel):
 
 
 class ScopeHistoryPolicy(ScopeBaseModel):
+    """DECLARED, NOT ENFORCED (2026-07-07 scope audit): no runtime reads any
+    field of this policy — history assembly is owned by RoomHistoryBuilder and
+    per-agent context items. Declaring values here changes nothing. Kept so the
+    dimension has a home when a consumer is wired; wire the consumer FIRST,
+    then author values."""
     mode: Literal["none", "recent_only", "summary_plus_recent"] = "recent_only"
     source: Literal["scope_local", "unified_log"] = "unified_log"
     include_room_scoped: bool = False
@@ -94,6 +99,9 @@ class ScopePodPolicy(ScopeBaseModel):
 
 
 class ScopeEntityPolicy(ScopeBaseModel):
+    # ENFORCED: allowed_entity_cards + pinned_entities (projected to runtime
+    # data; entity_injector reads them). NOT ENFORCED: enabled and the two
+    # lookback knobs — no consumers (2026-07-07 scope audit).
     enabled: bool = True
     allowed_entity_cards: List[str] = Field(default_factory=list)
     pinned_entities: List[str] = Field(default_factory=list)
@@ -102,6 +110,8 @@ class ScopeEntityPolicy(ScopeBaseModel):
 
 
 class ScopeCardPolicy(ScopeBaseModel):
+    """DECLARED, NOT ENFORCED (2026-07-07 scope audit): no runtime consumer.
+    Wire the consumer FIRST, then author values."""
     enabled: bool = True
     allowed_cards: List[str] = Field(default_factory=list)
     max_cards_per_turn: Optional[int] = None
@@ -109,6 +119,10 @@ class ScopeCardPolicy(ScopeBaseModel):
 
 
 class ScopeWritePolicy(ScopeBaseModel):
+    # ENFORCED: write_unified_log + write_kg (projected to runtime data;
+    # kg_investigator's finding processor gates on write_kg). NOT ENFORCED:
+    # allow_fact_extraction + writable_state_keys — projected but never read
+    # (2026-07-07 scope audit).
     write_unified_log: bool = True
     write_kg: bool = False
     allow_fact_extraction: bool = False
@@ -116,6 +130,10 @@ class ScopeWritePolicy(ScopeBaseModel):
 
 
 class ScopeDeliveryPolicy(ScopeBaseModel):
+    # ENFORCED: auto_send (room ingress / mode-exit / persistence / post_room
+    # + chat_task_router read the projected knob). NOT ENFORCED:
+    # allow_initiation + allowed_reply_types — projected but never read
+    # (2026-07-07 scope audit).
     auto_send: bool = True
     allow_initiation: bool = False
     allowed_reply_types: List[str] = Field(default_factory=list)
@@ -126,6 +144,9 @@ class ScopeApprovalPolicy(ScopeBaseModel):
 
 
 class ScopeRetentionPolicy(ScopeBaseModel):
+    """DECLARED, NOT ENFORCED (2026-07-07 scope audit): no runtime reads any
+    field — persistence behavior lives in the room services and ROOM.md policy.
+    Wire the consumer FIRST, then author values."""
     persist_chat: bool = True
     persist_tool_results: bool = True
     allow_context_summarization: bool = True
@@ -133,6 +154,9 @@ class ScopeRetentionPolicy(ScopeBaseModel):
 
 
 class ScopeExecutionPolicy(ScopeBaseModel):
+    """DECLARED, NOT ENFORCED (2026-07-07 scope audit): no runtime reads any
+    field — turn/tool/timeout limits live in the manager runtime today. Wire
+    the consumer FIRST, then author values."""
     max_turns: Optional[int] = None
     max_tool_calls: Optional[int] = None
     timeout_seconds: Optional[int] = None
@@ -140,6 +164,8 @@ class ScopeExecutionPolicy(ScopeBaseModel):
 
 
 class ScopeDelegationPolicy(ScopeBaseModel):
+    """Reserved dimension — carries no fields and no runtime consumer
+    (2026-07-07 scope audit)."""
     pass
 
 

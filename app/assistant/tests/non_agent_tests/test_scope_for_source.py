@@ -46,7 +46,9 @@ def test_kg_pipeline_writes_faithful():
 
 def test_identity_stamped_from_call():
     s = _kg()
-    assert s.owner_id == "kg_pipeline"
+    # owner_id defaults to the primary human principal (whose data), not the
+    # source name (canonical rule, 2026-07-07 scope audit).
+    assert s.owner_id == "user"
     assert s.actor_id == "resolve_messages"
     assert s.surface == "pipeline"
 
@@ -79,7 +81,7 @@ def test_weekly_insights_scope_loads_with_no_tools():
     assert s.resources.resource_groups == ["chat", "memory"]
     assert s.writes.write_kg is False
     assert s.surface == "pipeline"
-    assert s.owner_id == "weekly_insights"
+    assert s.owner_id == "user"
 
 
 def test_routine_with_no_scope_yaml_returns_none():

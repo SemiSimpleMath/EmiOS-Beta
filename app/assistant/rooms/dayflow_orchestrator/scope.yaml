@@ -37,6 +37,10 @@ tools:
     # Narrower-cost reduction only (see header), mirrors master_room. emi_team's
     # DIRECT pool = the managers it delegates to + ask_kg + its operational tools;
     # specialist leaves stay reachable through those managers.
+    # Deliberately WITHOUT master_room's search_work_objects/read_work_object:
+    # those serve the owner's status questions in chat; the orchestrator reads
+    # work objects natively through its pipeline stages and dispatches via the
+    # work_objects substrate (which narrows its own coordinator separately).
     emi_team_manager:
       allow:
         - personal_admin_manager

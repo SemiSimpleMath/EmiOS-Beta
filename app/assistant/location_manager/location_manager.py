@@ -451,10 +451,11 @@ class LocationManager:
             # Use agent to infer locations for ALL events
             location_agent = DI.agent_factory.create_agent('location_inference')
             logger.debug("Calling agent.action_handler()...")
+            from app.assistant.utils.identity_names import PRINCIPAL_USER
             from app.assistant.utils.pydantic_classes import ScopeContext, ScopeResourcePolicy
             scope = ScopeContext(
                 scope_id="location_inference",
-                owner_id="system",
+                owner_id=PRINCIPAL_USER,
                 actor_id="location_manager",
                 room_id="system",
                 surface="system",

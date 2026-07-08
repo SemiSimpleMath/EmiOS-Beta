@@ -16,6 +16,9 @@ from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+# One warning per process when the approval kill switch is active.
+_BYPASS_APPROVAL_WARNED = False
+
 
 def compute_approval_reasons(
     *,
@@ -34,6 +37,18 @@ def compute_approval_reasons(
     """
     import os
     if os.environ.get("EMI_BYPASS_APPROVAL") == "1":
+        # Deliberate process-wide kill switch (the execution-trace dojo sets it
+        # around replay/training runs; tests set it for harness convenience).
+        # Warn once per process so an unexpectedly-set var is visible in logs
+        # instead of silently disabling the approval layer (2026-07-07 scope
+        # audit F6).
+        global _BYPASS_APPROVAL_WARNED
+        if not _BYPASS_APPROVAL_WARNED:
+            logger.warning(
+                "[tool_approval] EMI_BYPASS_APPROVAL=1 — ALL tool approvals are "
+                "bypassed process-wide while this variable is set."
+            )
+            _BYPASS_APPROVAL_WARNED = True
         return []
 
     reasons: list[str] = []

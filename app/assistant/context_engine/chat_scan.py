@@ -66,9 +66,10 @@ def scan_for_activation(
     if agent is None:
         raise RuntimeError(f"chat_scan: agent_factory returned None for '{_AGENT_NAME}'")
 
+    from app.assistant.utils.identity_names import PRINCIPAL_USER
     scope = ScopeContext(
         scope_id=f"scope::chat_scan::{owner_id or 'default'}",
-        owner_id=owner_id or "",
+        owner_id=owner_id or PRINCIPAL_USER,
         actor_id="context_engine_chat_scan",
         surface="internal",
     )

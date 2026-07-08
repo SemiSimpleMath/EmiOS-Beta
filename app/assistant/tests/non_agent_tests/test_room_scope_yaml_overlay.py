@@ -158,6 +158,7 @@ def test_builder_room_behavior_preserved():
     assert d["history"]["lookback_hours"] == 48
     assert d["retention"]["persist_tool_results"] is True
     assert d["delivery"]["allowed_reply_types"] == ["slack"]
-    # identity stamped
-    assert d["owner_id"] == _ROOM_ID
+    # identity stamped — owner_id is the primary human principal (whose data),
+    # not the room id (canonical rule, 2026-07-07 scope audit)
+    assert d["owner_id"] == "user"
     assert d["actor_id"] == "U_test"

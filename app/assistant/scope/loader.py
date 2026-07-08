@@ -154,9 +154,9 @@ def load_scope_for_source(
     The unified entry point for non-room sources (pipelines first; routines/jobs
     as their layout settles). Maps ``(kind, source_id)`` to the source's
     ``scope.yaml`` path, builds a default identity envelope appropriate to the
-    kind (``owner_id = source_id``, ``surface = kind``, plus the caller's
-    ``actor_id``), applies any ``identity_overrides``, and delegates to
-    :func:`load_scope`.
+    kind (``owner_id = PRINCIPAL_USER`` — whose data, not which machinery;
+    ``surface = kind``, plus the caller's ``actor_id``), applies any
+    ``identity_overrides``, and delegates to :func:`load_scope`.
 
     Build this ONCE at the start of a run and thread it through every step — do
     not call per-step. (Replaces the per-step ``build_pipeline_scope_context``
@@ -215,7 +215,12 @@ def load_scope_for_source(
     else:
         raise ValueError(f"load_scope_for_source: unknown source kind {kind!r}.")
 
-    identity: Dict[str, Any] = {"owner_id": sid, "actor_id": str(actor_id or "").strip() or f"{sid}_runner"}
+    # owner_id = WHOSE DATA the scope touches, not which machinery runs. All
+    # these sources process the primary user's data; the source's own name is
+    # already carried by scope_id/actor defaults. Callers with genuinely
+    # system-owned data override it (canonical rule, 2026-07-07 scope audit).
+    from app.assistant.utils.identity_names import PRINCIPAL_USER
+    identity: Dict[str, Any] = {"owner_id": PRINCIPAL_USER, "actor_id": str(actor_id or "").strip() or f"{sid}_runner"}
     if default_surface is not None:
         identity["surface"] = default_surface
     if identity_overrides:

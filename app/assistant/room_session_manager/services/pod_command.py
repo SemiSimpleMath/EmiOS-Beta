@@ -31,19 +31,20 @@ def _token(pod_id: str) -> str:
 
 
 def build_room_scope(room_id: str, surface: str):
-    """The room's read scope: authority from ROOM.md policy, pod_scopes from permissions. Shared
-    so the /api/pods web route and the /pod command build the gating scope the same way."""
+    """The room's read scope: authority from ROOM.md policy, pod scopes from the
+    shared single-source resolver (scope.yaml when the room declares one, else
+    ROOM.md permissions) — the same effective value the manager lane gets, so
+    the /pod command and /api/pods can never drift from it."""
     from app.assistant.rooms.room_resource_loader import load_room_context_for_manager
     from app.assistant.room_session_manager.services.room_policy_service import resolve_room_authority_level
+    from app.assistant.room_session_manager.services.room_scope_builder import resolve_room_pod_scopes
     from app.assistant.utils.pydantic_classes import ScopeContext, ScopeApprovalPolicy, ScopePodPolicy
 
     ctx = load_room_context_for_manager(room_id)
     policy = ctx.get("room_policy") or {}
     perms = ctx.get("room_permissions") or {}
     authority = resolve_room_authority_level(room_policy=policy, surface=surface)
-    pod_scopes = perms.get("pod_scopes")
-    if not isinstance(pod_scopes, list) or not pod_scopes:
-        pod_scopes = ["self"]
+    pod_scopes = resolve_room_pod_scopes(room_id=room_id, room_permissions=perms)
     return ScopeContext(
         scope_id=f"pod_command::{room_id}",
         owner_id="user",          # the primary human principal (PRINCIPAL_USER)
@@ -51,7 +52,7 @@ def build_room_scope(room_id: str, surface: str):
         surface=surface or "unknown",
         room_id=room_id,
         approval=ScopeApprovalPolicy(authority_level=int(authority)),
-        pods=ScopePodPolicy(allowed_scopes=[str(s).strip() for s in pod_scopes if str(s).strip()]),
+        pods=ScopePodPolicy(allowed_scopes=pod_scopes),
     )
 
 

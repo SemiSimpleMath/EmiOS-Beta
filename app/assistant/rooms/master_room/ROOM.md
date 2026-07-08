@@ -36,11 +36,9 @@ permissions:
     transformational: true
     external_action: true
     sensitive: true
-  # master_room is the owner's primary surface — sees pods from every room
-  # (slack channels, telegram chats, SMS, dayflow, etc.). Other rooms default
-  # to pod_scopes: [self] (their own room only) — this declaration is what
-  # makes master_room different.
-  pod_scopes: [all]
+  # Pod visibility for this room lives in scope.yaml (pods.allowed_scopes) —
+  # the single permission source for rooms that declare one. master_room sees
+  # pods from every room via its scope.yaml `pods: [all]`.
   allow_images: true
 access:
   allowed_global_resources:

@@ -25,8 +25,10 @@ from app.assistant.scope.loader import load_scope
 _ROOM_ID = "slack/__test__"
 
 # Identity envelope (stamped at load; not part of the permission assertions).
+# owner_id models the room builder's canonical value: the primary human
+# principal, never the room id (2026-07-07 scope audit).
 _IDENTITY = {
-    "owner_id": _ROOM_ID,
+    "owner_id": "user",
     "actor_id": "U_test",
     "surface": "slack",
     "room_id": _ROOM_ID,
@@ -111,7 +113,7 @@ def test_delivery_permission_bits():
 
 def test_identity_stamped():
     s = _loaded()
-    assert s.owner_id == _ROOM_ID
+    assert s.owner_id == "user"
     assert s.actor_id == "U_test"
     assert s.surface == "slack"
     assert s.visibility == "room_shared"
