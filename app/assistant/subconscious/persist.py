@@ -6,9 +6,10 @@ v0 storage:
   for audit + later replay
 
 Belief updates are still recorded in the tick log only.
-Pending questions are persisted into the pending_question queue
-(app/assistant/database/pending_question.py); the chat-reply injector
-in EmiResultHandler picks them up and appends them to outbound replies.
+Pending questions are persisted into the pending_question queue; the
+chat-reply injector (pending_questions/injector.py, consulted by the
+context injector at prompt time) surfaces them as nudges the chat agent
+can weave into its replies.
 """
 from __future__ import annotations
 
@@ -347,8 +348,8 @@ def _apply_noticer_output_locked(
         }, ensure_ascii=False) + "\n")
 
     # 6. Pending questions → pending_question queue. Each becomes a row the
-    # chat-reply injector (EmiResultHandler) consults next time Emi sends
-    # a reply. Topic tag, priority, and expiration are derived from the
+    # chat-reply injector (pending_questions/injector.py) consults at
+    # prompt time. Topic tag, priority, and expiration are derived from the
     # related concern when one is named — otherwise reasonable defaults.
     # Include new_concerns in the lookup so a question linked to a
     # just-minted concern still inherits its tags + severity.

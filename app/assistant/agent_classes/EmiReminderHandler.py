@@ -18,8 +18,8 @@ class EmiReminderHandler(Agent):
         # Reminder handler should keep scheduler payload shaping isolated from global chat state.
         self.blackboard = Blackboard()
         # Serializes scheduler-fired activations over the ONE private
-        # blackboard this handler resets per reminder (same contract as
-        # EmiResultHandler; _set_agent_busy is a status flag, not a lock).
+        # blackboard this handler resets per reminder (_set_agent_busy is a
+        # status flag, not a lock).
         self._handle_lock = threading.Lock()
 
     def scheduler_event_interval_handler(self, message):

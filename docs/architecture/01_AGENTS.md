@@ -130,7 +130,7 @@ task_keyword_resources:             # per-agent keyword -> resource_id map
 skills: [critic-handling]           # Static skills always loaded (gated by requires_scope)
 accept_auto_skills: true            # Allow SkillInjector to auto-inject by trigger
 
-events: [event_name]                # Event handlers to register (EmiResultHandler etc.)
+events: [event_name]                # Event handlers to register (EmiReminderHandler etc.)
 prompt_debug: {system: true, user: true, results: true}   # Debug logging flags
 ```
 
@@ -275,7 +275,7 @@ Available classes:
 | `ToolArguments` / `ToolArgumentsPlaywright` | Tool-argument assembly agents |
 | `PlaywrightAgent` / `PlaywrightCritic` / `PlaywrightWatchdog` | Browser-automation roles |
 | `SummaryAgent` | Conversation/room summarization |
-| `EmiResultHandler` / `EmiReminderHandler` | Event-driven handlers (register via `events:`) |
+| `EmiReminderHandler` | Event-driven handler (registers via `events:`) |
 
 ## How to Add a New Agent
 

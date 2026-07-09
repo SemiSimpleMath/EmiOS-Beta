@@ -145,7 +145,7 @@ class AgentForm(BaseModel):
 
 `class_name` names a file in `app/assistant/agent_classes/`; the registry loads the class of the same name. Most new agents are `Agent`. The available classes (see the table in [01_AGENTS.md](../architecture/01_AGENTS.md#agent-variants)):
 
-`Agent` (standard single-turn decision), `Planner` (multi-step planning with plan validation), `MultiToolAgent` (DAG multi-tool execution), `Delegator` (a manager's routing/entry agent), `OneShotAgent`, `ToolArguments` / `ToolArgumentsPlaywright`, the `Playwright*` browser roles, `SummaryAgent`, and the event-driven `EmiResultHandler` / `EmiReminderHandler` (registered via `events:`).
+`Agent` (standard single-turn decision), `Planner` (multi-step planning with plan validation), `MultiToolAgent` (DAG multi-tool execution), `Delegator` (a manager's routing/entry agent), `OneShotAgent`, `ToolArguments` / `ToolArgumentsPlaywright`, the `Playwright*` browser roles, `SummaryAgent`, and the event-driven `EmiReminderHandler` (registered via `events:`).
 
 ## Wire it into a manager
 

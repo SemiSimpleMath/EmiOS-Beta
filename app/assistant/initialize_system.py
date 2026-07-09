@@ -110,10 +110,6 @@ def initialize_system():
     ServiceLocator.register("outbound_chat_publisher", OutboundChatPublisher())
     ServiceLocator.register("question_service", QuestionService())
 
-    logger.info("Loading emi_result_handler...")
-    emi_result_handler = DI.agent_factory.create_agent('emi_result_handler', DI.global_blackboard)
-    ServiceLocator.register('emi_result_handler', emi_result_handler)
-
     logger.info("Loading emi_reminder_handler...")
     emi_reminder_handler = DI.agent_factory.create_agent('emi_reminder_handler', DI.global_blackboard)
     ServiceLocator.register('emi_reminder_handler', emi_reminder_handler)

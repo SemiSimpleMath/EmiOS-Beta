@@ -63,7 +63,6 @@ Registration phase is noted (Phase 1 = `bootstrap.py:initialize_services`, Phase
 | `mam_instance_manager`            | `MAMInstanceManager` — multi-agent-manager instance bookkeeping.        | 2                              |
 | `outbound_chat_publisher`         | `OutboundChatPublisher` — publishes assistant chat to transports.       | 2                              |
 | `question_service`                | Ask-user question lifecycle.                                            | 2                              |
-| `emi_result_handler`              | Handles results returned to the user (pre-instantiated agent).          | 2                              |
 | `emi_reminder_handler`            | Reminder dispatch agent (pre-instantiated agent).                       | 2                              |
 | `signal_router`                   | Reactive intake watcher (subscriber to the gut).                        | 2 (subsystem-gated)            |
 | `ingest_service`                  | "The gut" — unified inbound intake.                                     | 2 (subsystem-gated)            |
@@ -129,7 +128,7 @@ This phase is for things that need the registry from Phase 1 already present:
 5. `music_afk_relay`, `event_relay`.
 6. `ticket_dispatcher` — `TicketDispatcherRegistry` with the socketio / telegram / slack / sms `TicketSurfaceAdapter`s registered, then `subscribe_to_event_hub()`.
 7. `progress_curator`, `chat_narrator`, `mailbox`, `mam_instance_manager`, `outbound_chat_publisher`, `question_service`.
-8. Two pre-instantiated agents (`emi_result_handler`, `emi_reminder_handler`) — stateful and shared, constructed once via `agent_factory.create_agent(...)` and registered as services rather than rebuilt per call.
+8. One pre-instantiated agent (`emi_reminder_handler`) — stateful and shared, constructed once via `agent_factory.create_agent(...)` and registered as a service rather than rebuilt per call. (Its sibling `emi_result_handler` was deleted 2026-07-08 — nothing invoked it.)
 9. **Native singleton pre-warm** (on the boot thread, *before* routine fan-out): self-heal corrupt chroma collections, then build the ChromaDB client + KG collections (`get_chroma_manager()`), the embedder (`embed_text("warmup")`), and the belief chroma collection. First-time init of these native libs is not thread-safe — warming serially here prevents the concurrent-first-init crash. Then **LLM SDK pre-warm**: import the Gemini / Anthropic SDKs for whichever providers have a real (non-placeholder) key, so the first agent call isn't cold.
 10. `get_routine_manager().refresh()` (if `routine_manager` enabled) — wires event-triggered routine subscriptions immediately so the first event in the post-boot window isn't dropped.
 11. Subsystem-gated services: `signal_router`, `ingest_service` (the gut) with its subscribers (`signal_router.handle_envelope`, `pod_classifier_service`), `dayflow_scheduler`.
@@ -254,7 +253,6 @@ The log is capped at `_MAX_MESSAGES = 20000`; on overflow it trims to `_TRIM_TAR
 ### What writes to it
 
 - `agent_classes/NotifyUser.py:48` — every user-visible chat message.
-- `agent_classes/EmiResultHandler.py:65,152` — task results and synthesized user messages.
 - `control_nodes/master_room_chat_task_router_node.py:142` — guard messages on the master room path.
 - `control_nodes/chat_task_router_node.py:170` — outbound chat messages.
 - `context_engine/context_memo.py:110` — context memo writes.

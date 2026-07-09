@@ -14,13 +14,10 @@ class _LocalBlackboard:
         self.items.append(msg)
 
 
-# The two EmiResultHandler tests that lived here were deleted 2026-07-08:
-# they pinned superseded shapes (direct event_hub publishing that moved to
-# components.chat_publisher; a Message.tool_result field that only exists on
-# ToolMessage) — and the handler itself has no live invoker: nothing
-# publishes "emi_result_request" and nothing calls DI.emi_result_handler.
-# The handler's fate (delete vs rewire) is an open call; see the 2026-07-08
-# runtime audit notes.
+# EmiResultHandler (and its two tests here) was DELETED 2026-07-08: it had
+# no live invoker — nothing published "emi_result_request" and nothing
+# called the DI.emi_result_handler service boot used to register. Its
+# chat-relay job lives in the one-shot/ticket/router paths today.
 
 
 def test_emi_reminder_handler_action_handler_validates_scheduler_payload(monkeypatch):
