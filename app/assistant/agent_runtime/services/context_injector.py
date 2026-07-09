@@ -540,21 +540,31 @@ class ContextInjector:
                 # manager). Answer capture resolves the asked ROOM from
                 # it — without an anchor the question is never judged
                 # against chat and can only expire.
+                #
+                # Picking is SIDE-EFFECTING (mark-asked + daily budget),
+                # and prompt assembly can render more than once per turn
+                # (system + user lists, debug paths, re-renders) — so the
+                # pick is memoized on the per-invocation blackboard: one
+                # question spent per turn, repeat renders reuse it.
                 try:
-                    from app.assistant.pending_questions import (
-                        pick_question_for_nudge,
-                    )
                     anchor = str(
                         agent.blackboard.get_state_value("inbound_message_id", "") or ""
                     ).strip() or None
+                    memo = agent.blackboard.get_state_value("_chat_nudge_pick")
+                    if isinstance(memo, dict) and memo.get("anchor") == anchor:
+                        context[key] = str(memo.get("text") or "")
+                        continue
+                    from app.assistant.pending_questions import (
+                        pick_question_for_nudge,
+                    )
                     picked = pick_question_for_nudge(
                         topic_tag=None, asked_in_message_id=anchor,
                     )
-                    if picked is None:
-                        context[key] = ""
-                    else:
-                        _qid, q_text = picked
-                        context[key] = q_text
+                    q_text = "" if picked is None else picked[1]
+                    agent.blackboard.update_state_value(
+                        "_chat_nudge_pick", {"anchor": anchor, "text": q_text},
+                    )
+                    context[key] = q_text
                 except Exception as e:
                     logger.debug(
                         "[%s] chat_nudges lookup failed: %s",
