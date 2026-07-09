@@ -1,6 +1,6 @@
 {
   "name": "run_routine",
-  "description": "Run a pre-built task (from resources/config_routines.json) by name or id.\n\nUse this when the user says \"run task X\" or wants to manually trigger a pre-built task.",
+  "description": "Run a configured routine (configs/routines/public|private/<id>.json) by name or id.\n\nUse this when the user says \"run task X\" or wants to manually trigger a pre-built routine.",
   "inputs": [
     {
       "name": "routine_id",

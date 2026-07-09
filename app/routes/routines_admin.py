@@ -196,10 +196,12 @@ def _enrich_routine(item: Dict[str, Any], state: Dict[str, Any]) -> Dict[str, An
     # Effective enabled: status override wins over spec default.
     # Same spec/status separation the routine_manager uses at scheduler time
     # — keeps the UI honest about what's actually running on this machine.
+    # Spec default is True, matching RoutineManager._load_routines (a
+    # key-less routine RUNS; the UI must not show it disabled).
     if isinstance(state_entry, dict) and "enabled" in state_entry:
         effective_enabled = bool(state_entry["enabled"])
     else:
-        effective_enabled = bool(item.get("enabled", False))
+        effective_enabled = bool(item.get("enabled", True))
 
     on_error = item.get("on_error") if isinstance(item.get("on_error"), dict) else {}
 

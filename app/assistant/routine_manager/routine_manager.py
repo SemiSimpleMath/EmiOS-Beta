@@ -1143,10 +1143,10 @@ class RoutineManager:
 
         Idempotent per routine_id for the lifetime of the process: each
         routine is subscribed at most once even if `refresh()` runs many
-        times. The handler closure re-reads `routine.enabled` at fire time
-        (via `_resolve_current_routine`), so toggling a routine on/off via
-        the admin UI takes effect on the next event fire — no resubscribe
-        needed.
+        times. The handler closure re-reads the routine's current config
+        (including `enabled`) at fire time, so toggling a routine on/off
+        via the admin UI takes effect on the next event fire — no
+        resubscribe needed.
 
         Subscribes regardless of `enabled` state at startup; the handler
         short-circuits when disabled. Subscription is cheap and avoids
@@ -1188,12 +1188,17 @@ class RoutineManager:
         """Handler invoked by event_hub when a subscribed event publishes.
 
         Re-reads the current routine from config so toggles take effect
-        without restart. Honors the same concurrency caps and AFK guard
-        as time-triggered routines. Passes the triggering message through
-        to the runner so handlers can read the payload.
+        without restart. Honors the same concurrency caps (in-flight +
+        max_workers) and AFK guard as time-triggered routines. Passes the
+        triggering message through to the runner so handlers can read the
+        payload.
         """
         try:
-            routine = self._resolve_current_routine(routine_id)
+            config = self._load_config()
+            routine = next(
+                (r for r in self._load_routines(config) if r.routine_id == routine_id),
+                None,
+            )
             if routine is None:
                 return  # routine removed from config since wiring; ignore
             if not routine.enabled:
@@ -1204,12 +1209,24 @@ class RoutineManager:
                 return
 
             # Concurrency: same in-flight + worker-cap rules as time-polling.
+            max_workers = int(config.get("max_workers") or 2)
             with self._lock:
                 if routine_id in self._running:
                     logger.info(
                         "Routine skipped (event): %s (already running)", routine_id,
                     )
                     return
+                active_workers = len(self._active_threads)
+            if max_workers > 0 and active_workers >= max_workers:
+                logger.info(
+                    "Routine skipped (event): %s (max workers reached: %s active=%s)",
+                    routine_id, max_workers, active_workers,
+                )
+                decision_log.record_skip_if_interesting(
+                    routine_id,
+                    f"max workers reached ({active_workers}/{max_workers}, event fire)",
+                )
+                return
 
             ok, reason = self._check_afk_guard(routine)
             if not ok:
@@ -1225,19 +1242,6 @@ class RoutineManager:
                 "[routine_manager] event handler crashed for routine=%s: %s",
                 routine_id, e, exc_info=True,
             )
-
-    def _resolve_current_routine(self, routine_id: str) -> Optional[RoutineConfig]:
-        """Re-load and return the named routine's current config, or None."""
-        try:
-            config = self._load_config()
-            for r in self._load_routines(config):
-                if r.routine_id == routine_id:
-                    return r
-        except Exception as e:
-            logger.warning(
-                "[routine_manager] failed to resolve routine %s: %s", routine_id, e,
-            )
-        return None
 
     # ---------------------------------------------------------------------
     # Execution

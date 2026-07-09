@@ -7,7 +7,6 @@ Runs periodic tasks independently of the browser/UI.
 These tasks do not require user interaction and should run even when no browser tab is open.
 
 Tasks managed (current defaults):
-- Database cleanup (24h): delete old AFK events
 - Watchdog (60s): restart any tasks that stop unexpectedly
 - Ticket maintenance (5 min): expire old tickets (>2h), wake snoozed tickets
 - Routine runner (60s): scheduled routines from routines.json
@@ -193,15 +192,6 @@ class BackgroundTaskManager:
         # Data fetch routines (email, calendar, weather, etc.) are now managed
         # by RoutineManager via configs/routines.json — see fetch_* entries.
 
-        # 5. Database cleanup (24 hours)
-        self.register_task(
-            name="db_cleanup",
-            func=self._run_db_cleanup,
-            interval_seconds=24 * 60 * 60,
-            run_immediately=False,
-            initial_delay_seconds=60,
-        )
-
         # 6. Watchdog (1 minute)
         self.register_task(
             name="watchdog",
@@ -334,18 +324,6 @@ class BackgroundTaskManager:
                 except Exception:
                     logger.error("Watchdog failed to restart task: %s", name)
                     logger.debug("watchdog failed to restart task:  %s exception details", name, exc_info=True)
-
-    def _run_db_cleanup(self) -> None:
-        try:
-            pass
-
-        except Exception as e:
-            log_critical_error(
-                message="Database cleanup failed",
-                exception=e,
-                context="BackgroundTaskManager._run_db_cleanup",
-                include_traceback=True,
-            )
 
     def _run_routine_cycle(self) -> None:
         """
