@@ -2,8 +2,6 @@
 
 import re
 
-from app.assistant.ServiceLocator.service_locator import DI
-
 from app.assistant.utils.logging_config import get_logger
 logger = get_logger(__name__)
 
@@ -78,8 +76,6 @@ class AgentLoader:
             return
 
         if agent_instance:
-            if isinstance(full_agent_config, dict):
-                self.register_agent_events(agent_instance, full_agent_config)
             self.agent_registry.register_agent_instance(agent_name, agent_instance)
         else:
             logger.error("Failed to instantiate agent '%s' (type=%s)", agent_name, agent_type)
@@ -158,14 +154,3 @@ class AgentLoader:
         """
         return self.agents
 
-    def register_agent_events(self, agent_instance, agent_config):
-        events = agent_config.get("events", [])
-        for event in events:
-            # Create a unique key if needed, e.g. using the agent name:
-            event_key = f"{agent_instance.name}:{event}"
-            handler = getattr(agent_instance, f"{event}_handler", None)
-            if callable(handler):
-                DI.event_hub.register_event(event_key, handler)
-                logger.info(f"Registered event '{event_key}' for agent {agent_instance.name}")
-            else:
-                logger.warning(f"Agent {agent_instance.name} config defines event '{event}', but no handler was found.")

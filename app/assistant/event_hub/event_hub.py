@@ -11,6 +11,11 @@ from app.assistant.runtime import MonitoredThreadPoolExecutor, start_monitored_t
 
 logger = get_logger(__name__)
 
+# Topics that are legitimately published with no subscriber (optional
+# side-channels) — the no-subscriber warning is suppressed for these so it
+# stays a reliable "you published into the void" signal for everything else.
+_NO_SUBSCRIBER_OK: frozenset[str] = frozenset({"settings_changed"})
+
 
 @dataclass(frozen=True)
 class _MailboxItem:
@@ -181,7 +186,7 @@ class EventHub:
             has_subscriber = bool(self.event_registry.get(message.event_topic or "", []))
         if not has_subscriber:
             # Some events are optional and don't require handlers
-            if message.event_topic in ["settings_changed"]:
+            if message.event_topic in _NO_SUBSCRIBER_OK:
                 logger.debug(f"ℹ️ Event '{message.event_topic}' published (no subscribers yet; normal)")
             else:
                 logger.warning(f"⚠️ Event '{message.event_topic}' was published but has NO registered subscribers yet.")
@@ -251,7 +256,13 @@ class EventHub:
             if msg is None:
                 continue
 
-            # Batch-drain quickly to reduce overhead under load, while preserving FIFO order.
+            # Batch-drain quickly to reduce overhead under load. This preserves
+            # the order messages are DISPATCHED (_deliver is called FIFO); it
+            # does NOT order HANDLER execution — _deliver submits each handler to
+            # the worker pool, so handlers (across messages and across one
+            # message's fan-out) run concurrently and finish in no guaranteed
+            # order. Subscribers that need ordering own their own queue (e.g.
+            # EmiEventRelay for socket_emit / TTS).
             batch: List[Message] = [msg]
             while True:
                 try:
