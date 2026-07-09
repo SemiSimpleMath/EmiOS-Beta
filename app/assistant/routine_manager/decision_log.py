@@ -44,6 +44,14 @@ _BORING_SKIP_REASONS = frozenset({
     "first run",  # this actually allows running, but defensive
 })
 
+# Boring reasons with a dynamic tail, matched by prefix. The weekly
+# policy emits "not the scheduled day (today=Wednesday)" every tick for
+# every weekly routine, six days a week — 7.7k rows/day, 57% of the
+# decision log (audit R6), which the frozenset above can't match.
+_BORING_SKIP_PREFIXES = (
+    "not the scheduled day",
+)
+
 
 def _is_interesting_skip(reason: str) -> bool:
     if not reason:
@@ -51,7 +59,9 @@ def _is_interesting_skip(reason: str) -> bool:
     reason_norm = reason.strip().lower()
     if reason_norm in _BORING_SKIP_REASONS:
         return False
-    # Backoff / day-of-week mismatch / etc — always log.
+    if reason_norm.startswith(_BORING_SKIP_PREFIXES):
+        return False
+    # Backoff / afk / capacity / etc — always log.
     return True
 
 

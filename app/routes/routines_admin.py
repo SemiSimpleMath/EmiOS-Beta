@@ -95,38 +95,34 @@ def _load_config() -> Dict[str, Any]:
     return config
 
 
-def _save_config(config: Dict[str, Any]) -> None:
-    """Persist routine entries to their per-routine files.
+def _save_routine_entry(entry: Dict[str, Any]) -> None:
+    """Persist ONE routine entry to its per-routine file.
 
-    Each routine carries its `_source_file` from _load_config; we write
-    back to that path. Routines without _source_file (e.g., new entries)
-    fall back to configs/routines/private/<id>.json so user-added
-    routines stay out of the public repo by default.
+    The entry carries `_source_file` from _load_config; entries without
+    one (new additions) go to configs/routines/private/<id>.json so
+    user-added routines stay out of the public repo by default. Writing
+    only the edited routine keeps a one-field patch from re-serializing
+    every tracked config file (the 36-modified-files git churn — the old
+    save loop rewrote the whole folder on any single patch).
 
-    Note: this only handles entries — top-level settings (enabled,
-    max_workers, state_resource_file) live in configs/routines.json
-    and are not modified by this admin path.
+    Top-level settings (enabled, max_workers, state_resource_file) live
+    in configs/routines.json and are not modified by this admin path.
     """
-    routines = config.get("routines") or []
+    rid = str(entry.get("id") or "").strip()
+    if not rid:
+        raise ValueError("routine entry has no id")
     private_dir = _config_path().parent / "routines" / "private"
-    private_dir.mkdir(parents=True, exist_ok=True)
-    for entry in routines:
-        if not isinstance(entry, dict):
-            continue
-        rid = str(entry.get("id") or "").strip()
-        if not rid:
-            continue
-        target = entry.get("_source_file") or str(private_dir / f"{rid}.json")
-        # Strip the synthetic _source_file before serializing.
-        to_write = {k: v for k, v in entry.items() if k != "_source_file"}
-        target_path = Path(target)
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = target_path.with_suffix(target_path.suffix + ".tmp")
-        with tmp.open("w", encoding="utf-8", newline="\n") as f:
-            json.dump(to_write, f, indent=2, ensure_ascii=False)
-            f.write("\n")
-            f.flush()
-        tmp.replace(target_path)
+    target = entry.get("_source_file") or str(private_dir / f"{rid}.json")
+    # Strip the synthetic _source_file before serializing.
+    to_write = {k: v for k, v in entry.items() if k != "_source_file"}
+    target_path = Path(target)
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target_path.with_suffix(target_path.suffix + ".tmp")
+    with tmp.open("w", encoding="utf-8", newline="\n") as f:
+        json.dump(to_write, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+        f.flush()
+    tmp.replace(target_path)
 
 
 def _load_state() -> Dict[str, Any]:
@@ -394,7 +390,7 @@ def routines_policy_patch(routine_id: str):
         if err:
             return jsonify({"ok": False, "error": err}), 400
         rp.update(patch)
-        _save_config(config)
+        _save_routine_entry(r)
     logger.info("[routines_admin] %s policy patched: %s", routine_id, patch)
     return jsonify({"ok": True, "id": routine_id, "run_policy": rp})
 
