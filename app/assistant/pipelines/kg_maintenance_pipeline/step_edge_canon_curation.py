@@ -45,7 +45,7 @@ BATCH_SIZE = 15  # predicates per LLM call
 
 def run(ctx: PipelineContext = None) -> dict:
     """Run one curation sweep. Returns stats dict."""
-    from app.assistant.manager_runtime.services.scope_adapter import ScopeAdapter
+    from app.assistant.scope.loader import load_scope_for_source
     from app.assistant.ServiceLocator.service_locator import DI
     from app.assistant.utils.pydantic_classes import Message
 
@@ -98,14 +98,11 @@ def run(ctx: PipelineContext = None) -> dict:
         logger.warning("[edge_canon_curation] curator agent unavailable")
         return {"candidates": len(candidates), "verdicts": 0, "alias_added": 0, "canon_added": 0, "edges_rewritten": 0}
 
-    scope = ScopeAdapter.for_system_routine(
-        routine_id="edge_canon_curation",
-        scope_id="scope::edge_canon_curation",
-        owner_id="jukka",
-        actor_id="edge_canon_curator_runner",
-        surface="ui",
-        room_id="me_lens",
-        authority_level=99,
+    # Same scope pattern as the sibling maintenance steps (duplicate_scan).
+    scope = load_scope_for_source(
+        kind="pipeline",
+        source_id=(ctx.pipeline_id if ctx is not None else "kg_maintenance_pipeline"),
+        actor_id="edge_canon_curation",
     )
 
     all_verdicts: List[Dict] = []
@@ -169,6 +166,42 @@ def _format_batch_for_agent(batch: List[Dict]) -> str:
     return "\n".join(lines)
 
 
+def _utc_now_iso() -> str:
+    from app.assistant.utils.time_utils import utc_now
+    return utc_now().isoformat()
+
+
+def _drop_conflicting_variant_edges(session, raw_predicate: str, canonical: str) -> int:
+    """Delete variant edges whose (source, target) already carries the
+    canonical predicate — capturing ids first so their kg_edge_evidence rows
+    go with them (no FK; deletion lifecycle, audit G1). Returns edges dropped."""
+    from sqlalchemy import text as sql_text
+
+    from app.assistant.kg_core.kg_utils.node_merge import cleanup_edge_evidence
+
+    ids = [str(r[0]) for r in session.execute(sql_text("""
+        SELECT id FROM kg_edge_metadata
+        WHERE relationship_type = :raw
+          AND EXISTS (
+            SELECT 1 FROM kg_edge_metadata e2
+            WHERE e2.source_id = kg_edge_metadata.source_id
+              AND e2.target_id = kg_edge_metadata.target_id
+              AND e2.relationship_type = :canon
+          )
+    """), {"raw": raw_predicate, "canon": canonical}).fetchall()]
+    if not ids:
+        return 0
+    cleanup_edge_evidence(session, ids)
+    for i in range(0, len(ids), 200):
+        chunk = ids[i:i + 200]
+        placeholders = ", ".join(f":e{j}" for j in range(len(chunk)))
+        session.execute(
+            sql_text(f"DELETE FROM kg_edge_metadata WHERE id IN ({placeholders})"),
+            {f"e{j}": eid for j, eid in enumerate(chunk)},
+        )
+    return len(ids)
+
+
 def _apply_verdicts(verdicts: List[Dict]) -> Dict[str, int]:
     """Apply curator verdicts to edge_canon, edge_alias, and kg_edge_metadata."""
     import uuid
@@ -210,26 +243,16 @@ def _apply_verdicts(verdicts: List[Dict]) -> Dict[str, int]:
                     continue
                 canon_id = canon_by_type[target]
                 session.execute(sql_text("""
-                    INSERT INTO edge_alias (id, canon_id, raw_text)
-                    VALUES (:id, :canon, :raw)
-                """), {"id": str(uuid.uuid4()), "canon": canon_id, "raw": predicate})
+                    INSERT INTO edge_alias (id, canon_id, raw_text, created_at)
+                    VALUES (:id, :canon, :raw, :now)
+                """), {"id": str(uuid.uuid4()), "canon": canon_id, "raw": predicate, "now": _utc_now_iso()})
                 alias_added += 1
                 # Drop variant edges that would collide with an existing canonical
                 # edge on the same (source, target) pair. The unique constraint
                 # (source_id, target_id, relationship_type) means we can't have
-                # both. Canonical wins; variant's evidence is already captured
-                # in claim_proposal_evidence + kg_edge_evidence, so the merge
-                # cascade preserves provenance.
-                conflict_delete = session.execute(sql_text("""
-                    DELETE FROM kg_edge_metadata
-                    WHERE relationship_type = :raw
-                      AND EXISTS (
-                        SELECT 1 FROM kg_edge_metadata e2
-                        WHERE e2.source_id = kg_edge_metadata.source_id
-                          AND e2.target_id = kg_edge_metadata.target_id
-                          AND e2.relationship_type = :canon
-                      )
-                """), {"raw": predicate, "canon": target})
+                # both. Canonical wins. Evidence rows go WITH the dropped edges
+                # (no FK — deletion lifecycle, audit G1).
+                dropped = _drop_conflicting_variant_edges(session, predicate, target)
                 # Rewrite the rest
                 result = session.execute(sql_text("""
                     UPDATE kg_edge_metadata SET relationship_type = :canon
@@ -238,7 +261,7 @@ def _apply_verdicts(verdicts: List[Dict]) -> Dict[str, int]:
                 edges_rewritten += result.rowcount or 0
                 logger.info(
                     "[edge_canon_curation] alias %r → %r (rewrote %d, dropped %d duplicates)",
-                    predicate, target, result.rowcount or 0, conflict_delete.rowcount or 0,
+                    predicate, target, result.rowcount or 0, dropped,
                 )
 
             elif verdict == "new_canon":
@@ -247,35 +270,27 @@ def _apply_verdicts(verdicts: List[Dict]) -> Dict[str, int]:
                     continue
                 new_canon_id = str(uuid.uuid4())
                 session.execute(sql_text("""
-                    INSERT INTO edge_canon (id, edge_type, domain_type, range_type, category, description)
-                    VALUES (:id, :et, 'Entity', 'State', 'promoted', :desc)
+                    INSERT INTO edge_canon (id, edge_type, domain_type, range_type, category, description, created_at)
+                    VALUES (:id, :et, 'Entity', 'State', 'promoted', :desc, :now)
                 """), {
                     "id": new_canon_id,
                     "et": canonical_name,
                     "desc": f"Promoted from raw predicate (reason: {v.get('reason', '')[:200]})",
+                    "now": _utc_now_iso(),
                 })
                 canon_by_type[canonical_name] = new_canon_id
                 canon_added += 1
                 # If the predicate string differs from the canonical, alias it
                 if predicate != canonical_name and predicate not in existing_aliases:
                     session.execute(sql_text("""
-                        INSERT INTO edge_alias (id, canon_id, raw_text)
-                        VALUES (:id, :canon, :raw)
-                    """), {"id": str(uuid.uuid4()), "canon": new_canon_id, "raw": predicate})
+                        INSERT INTO edge_alias (id, canon_id, raw_text, created_at)
+                        VALUES (:id, :canon, :raw, :now)
+                    """), {"id": str(uuid.uuid4()), "canon": new_canon_id, "raw": predicate, "now": _utc_now_iso()})
                     alias_added += 1
                 # Rewrite predicate string in the edges to canonical form if different.
-                # Same conflict-drop pattern as variant_of path.
+                # Same conflict-drop pattern as variant_of path (evidence goes too).
                 if predicate != canonical_name:
-                    session.execute(sql_text("""
-                        DELETE FROM kg_edge_metadata
-                        WHERE relationship_type = :raw
-                          AND EXISTS (
-                            SELECT 1 FROM kg_edge_metadata e2
-                            WHERE e2.source_id = kg_edge_metadata.source_id
-                              AND e2.target_id = kg_edge_metadata.target_id
-                              AND e2.relationship_type = :canon
-                          )
-                    """), {"raw": predicate, "canon": canonical_name})
+                    _drop_conflicting_variant_edges(session, predicate, canonical_name)
                     result = session.execute(sql_text("""
                         UPDATE kg_edge_metadata SET relationship_type = :canon
                         WHERE relationship_type = :raw

@@ -118,6 +118,14 @@ class KGMaintenancePipeline:
         _run_step("missing_dates_scan", lambda: (
             __import__("app.assistant.pipelines.kg_maintenance_pipeline.step_missing_dates_scan", fromlist=["run"]).run(ctx)
         ))
+        # Predicate vocabulary drain (built 2026-05-12, wired 2026-07-08 —
+        # it was archived unwired while 14% of edges accumulated raw
+        # predicates). Bounded: <=50 candidates/run, ~4 LLM calls; converges
+        # over weekly runs. Write-time normalize_predicate picks up new
+        # aliases via the cache reset inside the step.
+        _run_step("edge_canon_curation", lambda: (
+            __import__("app.assistant.pipelines.kg_maintenance_pipeline.step_edge_canon_curation", fromlist=["run"]).run(ctx)
+        ))
         # Diachronic disambiguation: judge role-reference entities for
         # referent changes BEFORE the disambiguation scan, whose temporal
         # drain re-points mentions parked at already-split labels.
