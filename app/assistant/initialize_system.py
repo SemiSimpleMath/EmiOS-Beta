@@ -72,6 +72,11 @@ def initialize_system():
     from app.assistant.afk_manager.music_afk_relay import MusicAfkRelay
     ServiceLocator.register("music_afk_relay", MusicAfkRelay())
 
+    # Surface bedroom_emergency_detected as a durable owner ticket (the sleep
+    # post-handler publishes it; this is the consumer — EventHub audit E1).
+    from app.assistant.ring_analysis.emergency_notifier import EmergencyNotifier
+    ServiceLocator.register("emergency_notifier", EmergencyNotifier())
+
     event_relay = EmiEventRelay()
     ServiceLocator.register('event_relay', event_relay)
 
