@@ -16,3 +16,9 @@ type: agent
 entity_scan_keys: [new_node_data]
 entity_detection_keys:
   - new_node_data
+
+# Judgment agent: blank input looks like conservative judgment to an
+# LLM, not an error — refuse loudly instead (2026-07-08 guard sweep).
+required_context_items:
+  - existing_node_data
+  - new_node_data

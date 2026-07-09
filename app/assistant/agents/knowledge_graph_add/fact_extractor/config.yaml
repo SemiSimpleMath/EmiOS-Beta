@@ -23,3 +23,8 @@ entity_detection_keys:
   - text
 
 enable_keyword_resource_injection: false
+
+# Judgment agent: blank input looks like conservative judgment to an
+# LLM, not an error — refuse loudly instead (2026-07-08 guard sweep).
+required_context_items:
+  - text

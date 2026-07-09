@@ -14,9 +14,21 @@ logger = get_logger(__name__)
 # Shared Jinja2 environment with loader rooted at the agents directory so
 # templates can {% import "shared/macros/dayflow_items.j2" %} etc.
 _AGENTS_DIR = get_app_root() / "assistant" / "agents"
+
+
+def _finalize_none_blank(value):
+    """A None context value renders as '' — Jinja's default prints the
+    literal string 'None', so any fall-through key that resolved to None
+    put 'None' into the prompt (137 templates bare-render optional keys;
+    context-injection audit C4). Undefined variables are unaffected:
+    non-strict already renders them blank, strict still raises."""
+    return "" if value is None else value
+
+
 _jinja_env = Environment(
     loader=FileSystemLoader(str(_AGENTS_DIR)),
     keep_trailing_newline=True,
+    finalize=_finalize_none_blank,
 )
 
 # Strict variant: undefined template variables RAISE instead of rendering
@@ -27,6 +39,7 @@ _strict_jinja_env = Environment(
     loader=FileSystemLoader(str(_AGENTS_DIR)),
     keep_trailing_newline=True,
     undefined=StrictUndefined,
+    finalize=_finalize_none_blank,
 )
 
 
