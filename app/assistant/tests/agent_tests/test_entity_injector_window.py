@@ -15,14 +15,24 @@ def test_entity_scan_blocks_collect_from_configured_context_keys():
     assert "ignored" not in blocks
 
 
-def test_entity_scan_blocks_recent_history_limited_to_last_five_messages():
+def test_entity_scan_blocks_recent_history_limited_to_last_three_messages():
+    # Entity detection over full history is noisy — only the latest 3
+    # message blocks are scanned (_limit_recent_history_scan guardrail).
     history = "\n\n".join([f"[12:0{i}] User: message {i}" for i in range(7)])
     blocks = EntityInjector()._collect_scan_blocks(
         user_context={"recent_history": history},
         scan_keys=["recent_history"],
     )
-    expected = "\n\n".join([f"[12:0{i}] User: message {i}" for i in range(2, 7)])
+    expected = "\n\n".join([f"[12:0{i}] User: message {i}" for i in range(4, 7)])
     assert blocks["recent_history"] == expected
+
+
+def test_recent_history_scan_skips_day_marker_blocks():
+    history = "CHAT FROM YESTERDAY\n\n[09:00] User: old note\n\nCHAT FROM TODAY\n\n[12:00] User: fresh note"
+    limited = EntityInjector._limit_recent_history_scan(history)
+    assert "CHAT FROM YESTERDAY" not in limited
+    assert "CHAT FROM TODAY" not in limited
+    assert "fresh note" in limited
 
 
 def test_entity_injector_filters_assistant_entity_name():
@@ -36,25 +46,23 @@ def test_entity_injector_filters_assistant_entity_name():
     assert "Katy" in filtered
 
 
-def test_entity_field_expands_for_contact_keywords():
-    injector = EntityInjector()
-    fields = injector._expand_entity_field_keys_for_keywords(
-        ["summary"],
-        "what is my brother phone number?",
-    )
-    assert "summary" in fields
-    assert "metadata" in fields
-    assert "key_facts" in fields
+# The keyword-driven field-expansion tests that lived here pinned
+# _expand_entity_field_keys_for_keywords — removed with the v1 granular
+# field-extraction path; per-key card LEVELS (entity_summary/entity_card
+# etc.) are the live semantics.
 
 
-def test_entity_field_expands_for_profile_keywords():
-    injector = EntityInjector()
-    fields = injector._expand_entity_field_keys_for_keywords(
-        ["summary"],
-        "tell me about my brother",
+def test_render_fields_derive_from_declared_entity_keys():
+    class _Agent:
+        name = "emi_agent"
+        config = {}
+
+    fields = EntityInjector._resolve_render_fields(
+        agent=_Agent(),
+        render_keys=["entity_summary", "entity_metadata", "entity_info"],
     )
-    assert "summary" in fields
-    assert "level_0" in fields
+    # "info" is excluded by design; the rest strip the entity_ prefix.
+    assert fields == ["summary", "metadata"]
 
 
 def test_entity_detection_ranks_by_scan_text_order():
@@ -67,15 +75,20 @@ def test_entity_detection_ranks_by_scan_text_order():
 
 
 def test_entity_scan_keys_default_when_not_configured():
-    class _Blackboard:
-        @staticmethod
-        def get_state_value(_key, default=None):
-            return default
+    class _Agent:
+        name = "emi_agent"
+        config = {}
+
+    scan_keys = EntityInjector._resolve_scan_keys(_Agent(), require_explicit=False)
+    assert scan_keys == ["incoming_message", "task", "information", "recent_history"]
+
+
+def test_entity_scan_keys_required_explicit_raises_without_config():
+    import pytest
 
     class _Agent:
         name = "emi_agent"
         config = {}
-        blackboard = _Blackboard()
 
-    scan_keys = EntityInjector()._resolve_scan_keys(_Agent())
-    assert scan_keys == ["incoming_message", "task", "information", "recent_history"]
+    with pytest.raises(ValueError, match="entity_scan_keys"):
+        EntityInjector._resolve_scan_keys(_Agent(), require_explicit=True)

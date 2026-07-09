@@ -1,13 +1,10 @@
 import os
 import tempfile
-from datetime import datetime, timezone
 
-from app.assistant.agent_runtime.services.context_injector import ContextInjector
 from app.assistant.agent_runtime.services.chat_request_normalizer import ChatRequestNormalizer
 from app.assistant.agent_runtime.services.chat_response_builder import ChatResponseBuilder
 from app.assistant.agent_runtime.services.chat_publisher import ChatPublisher
 from app.assistant.agent_runtime.services.llm_client import LLMClient
-from app.assistant.utils.pydantic_classes import Message
 from app.assistant.utils.pydantic_classes import UserMessage, UserMessageData
 
 
@@ -89,7 +86,7 @@ def test_llm_client_multimodal_routes_openai_and_cleans_up(monkeypatch):
     assert not os.path.exists(path)
 
 
-def test_chat_publisher_attaches_routing_metadata(monkeypatch):
+def test_chat_publisher_attaches_routing_metadata():
     class _EventHub:
         def __init__(self):
             self.sent = []
@@ -101,8 +98,9 @@ def test_chat_publisher_attaches_routing_metadata(monkeypatch):
         _active_request_id = "request-123"
         _active_reply_to = {"type": "socketio", "room_id": "room-1", "tts_requested": True}
 
+    # ChatPublisher takes its event hub by constructor injection (the old
+    # DI-lookup shape this test used to monkeypatch is gone).
     event_hub = _EventHub()
-    monkeypatch.setattr("app.assistant.agent_runtime.services.chat_publisher.DI.event_hub", event_hub)
 
     msg = UserMessage(
         data_type="user_msg",
@@ -110,7 +108,7 @@ def test_chat_publisher_attaches_routing_metadata(monkeypatch):
         role="assistant",
         user_message_data=UserMessageData(chat="hello"),
     )
-    ChatPublisher().publish_chat_to_user(agent=_Agent(), message=msg)
+    ChatPublisher(event_hub=event_hub).publish_chat_to_user(agent=_Agent(), message=msg)
 
     assert msg.event_topic == "socket_emit"
     assert msg.request_id == "request-123"
@@ -119,64 +117,7 @@ def test_chat_publisher_attaches_routing_metadata(monkeypatch):
     assert len(event_hub.sent) == 1
 
 
-def test_context_injector_history_includes_recent_chat_and_excludes_room_and_summarized(monkeypatch):
-    t0 = datetime(2026, 2, 16, 16, 0, tzinfo=timezone.utc)
-    t1 = datetime(2026, 2, 16, 16, 1, tzinfo=timezone.utc)
-    t2 = datetime(2026, 2, 16, 16, 2, tzinfo=timezone.utc)
-    t3 = datetime(2026, 2, 16, 16, 3, tzinfo=timezone.utc)
-
-    kept_1 = Message(
-        data_type="user_msg",
-        sender="User",
-        content="orange",
-        is_chat=True,
-        timestamp=t0,
-    )
-    kept_2 = Message(
-        data_type="user_msg",
-        sender="Emi",
-        content="Orange? Like the fruit?",
-        is_chat=True,
-        timestamp=t1,
-    )
-    room_chat = Message(
-        data_type="user_msg",
-        sender="User",
-        content="this is room traffic",
-        is_chat=True,
-        room_id="justin",
-        timestamp=t2,
-    )
-    summarized = Message(
-        data_type="user_msg",
-        sender="User",
-        content="old summarized item",
-        is_chat=True,
-        metadata={"summarized": True},
-        timestamp=t3,
-    )
-
-    class _GlobalBB:
-        @staticmethod
-        def get_messages():
-            return [kept_1, kept_2, room_chat, summarized]
-
-    class _LocalBB:
-        @staticmethod
-        def get_state_value(_key, default=None):
-            return default
-
-    class _Agent:
-        name = "emi_agent"
-        blackboard = _LocalBB()
-
-    monkeypatch.setattr("app.assistant.agent_runtime.services.context_injector.DI.global_blackboard", _GlobalBB())
-
-    context = ContextInjector().generate_injections_block(_Agent(), ["history"])
-    history = context.get("history", "")
-
-    assert "orange" in history
-    assert "Orange? Like the fruit?" in history
-    assert "this is room traffic" not in history
-    assert "old summarized item" not in history
+# The `history` context key (master-room chat continuity) was deleted
+# 2026-07-08 (context-injection audit C2) — the test that pinned it went
+# with it. Planner working history is the live `recent_history` key.
 
