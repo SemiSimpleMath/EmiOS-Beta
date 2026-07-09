@@ -8,7 +8,6 @@ llm_params:
 allowed_tools: []
 except_tools: []
 
-structured_output: AgentForm
 
 user_context_items:
   - resource_assistant_data

@@ -396,11 +396,12 @@ class LLMClient:
     def _revalidate_or_reask(self, *, agent, response, response_format, invoke, messages, engine):
         """R2: one bounded re-ask when a Pydantic-model structured output fails validation.
 
-        OpenAI returns an already-validated model instance, so it passes straight through. Gemini and
-        Anthropic return a raw dict; if it fails to validate against the agent's response_format, we
-        re-ask ONCE with the validation error fed back, then return whatever that produces. A still-bad
-        result is returned unchanged so the normal downstream validation fails loud — no new masking.
-        The return SHAPE is never changed (dict stays a dict); model_validate here is only a gate.
+        Every provider returns a dict here (OpenAI's parse strategy returns the validated model's
+        model_dump(), so its dicts re-validate trivially; Gemini and Anthropic return raw dicts that
+        this gate actually screens). On a validation failure we re-ask ONCE with the validation error
+        fed back, then return whatever that produces. A still-bad result is returned unchanged so the
+        normal downstream validation fails loud — no new masking. The return SHAPE is never changed
+        (dict stays a dict); model_validate here is only a gate.
         """
         from pydantic import BaseModel, ValidationError
 

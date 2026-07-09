@@ -8,7 +8,7 @@ These tasks do not require user interaction and should run even when no browser 
 
 Tasks managed (current defaults):
 - Watchdog (60s): restart any tasks that stop unexpectedly
-- Ticket maintenance (5 min): expire old tickets (>2h), wake snoozed tickets
+- Ticket maintenance (5 min): expire tickets past their valid_until, wake snoozed tickets
 - Routine runner (60s): scheduled routines from routines.json
 
 Data fetch routines (email, calendar, weather, news, tasks, scheduler) are
@@ -202,7 +202,7 @@ class BackgroundTaskManager:
         )
 
         # 7. Ticket maintenance (5 minutes)
-        # Expire tickets older than 2 hours
+        # Expire tickets whose per-ticket valid_until has passed
         self.register_task(
             name="ticket_maintenance",
             func=self._run_ticket_maintenance,
@@ -347,15 +347,16 @@ class BackgroundTaskManager:
 
     def _run_ticket_maintenance(self) -> None:
         """
-        Expire tickets older than 2 hours.
+        Expire tickets whose per-ticket valid_until has passed (each ticket
+        carries its own validity — safety-net tickets run a week).
         Also wakes up snoozed tickets whose snooze time has passed.
         """
         try:
             from app.assistant.ticket_manager import get_ticket_manager
-            
+
             ticket_manager = get_ticket_manager()
-            
-            # Expire old tickets (2 hour max age)
+
+            # Expire tickets past their valid_until
             expired = ticket_manager.expire_old_tickets()
             if expired > 0:
                 logger.info(f"Ticket maintenance: expired {expired} old tickets")

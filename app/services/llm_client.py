@@ -563,16 +563,14 @@ def _translate_anthropic_exception(e: Exception, anthropic_module: Any) -> Optio
 
 
 class BaseLLMProvider:
-    def send_query(self, messages, **send_request):
+    """Provider contract: structured output is the ONE live surface.
+    (The old send_query / build_messages / streaming methods had zero
+    callers anywhere — every consumer goes through structured output.)"""
+
+    def structured_output(self, messages, **send_params):
         raise NotImplementedError("This method should be implemented by subclasses.")
 
-    def send_function_query(self, messages, **send_request):
-        raise NotImplementedError("This method should be implemented by subclasses.")
-
-    def build_messages(self, **send_params):
-        raise NotImplementedError("This method should be implemented by subclasses.")
-
-    def stream_response_to_socket(self, messages, socket_id, user_id, audio_output, **kwargs):
+    def structured_output_json(self, messages, **send_params):
         raise NotImplementedError("This method should be implemented by subclasses.")
 
 class OpenAILLM(BaseLLMProvider):
@@ -876,11 +874,20 @@ def _gemini_clean_schema(obj, _inside_properties: bool = False) -> object:
 
 class GeminiLLM(BaseLLMProvider):
     _instance = None  # Singleton instance
+    _instance_lock = threading.Lock()
 
     def __new__(cls, *args, **kwargs):
+        # Thread-safe singleton init, same shape as OpenAILLM/AnthropicLLM —
+        # parallel managers can construct providers concurrently.
         if cls._instance is None:
-            cls._instance = super(GeminiLLM, cls).__new__(cls)
-            cls._instance._init_once(*args, **kwargs)
+            with cls._instance_lock:
+                if cls._instance is None:
+                    cls._instance = super(GeminiLLM, cls).__new__(cls)
+                    cls._instance._init_once(*args, **kwargs)
+        else:
+            if not hasattr(cls._instance, "client"):
+                with cls._instance_lock:
+                    cls._instance._init_once(*args, **kwargs)
         return cls._instance
 
     def _init_once(self, engine="gemini-1.5-flash", temperature=0.1, **kwargs):
@@ -914,24 +921,37 @@ class GeminiLLM(BaseLLMProvider):
             setattr(self, key, value)
 
     def _convert_messages_to_contents(self, messages: List[Dict]):
-        """Converts OpenAI-style messages to new Gemini contents format."""
-        from typing import Tuple, Optional
+        """Converts OpenAI-style messages to new Gemini contents format.
+
+        Handles the [system, user] pairs every agent prompt produces.
+        Assistant-role messages have no mapping here — a caller passing
+        real multi-turn history would silently lose those turns, so log
+        loudly if any arrive (none do today; agent history is rendered
+        as text inside the user prompt).
+        """
         system_instruction = None
         contents = []
-        
+        dropped_assistant = 0
+
         for msg in messages:
             role = msg.get("role")
             content = msg.get("content")
-            
+
             if role == "system":
                 system_instruction = content
             elif role == "user":
                 contents.append(content)
             elif role == "assistant":
-                # For multi-turn, we'd need to handle this differently
-                # For now, append as user context
-                pass
-                
+                dropped_assistant += 1
+
+        if dropped_assistant:
+            logger.error(
+                "[gemini] DROPPED %d assistant-role message(s) — this converter "
+                "flattens [system, user] prompts only; multi-turn history sent "
+                "to Gemini loses its assistant turns.",
+                dropped_assistant,
+            )
+
         # Join all user messages
         combined_content = "\n\n".join(contents) if contents else ""
         return system_instruction, combined_content
@@ -1359,18 +1379,6 @@ class AnthropicLLM(BaseLLMProvider):
     def structured_output_json(self, messages, **send_params):
         return self.structured_output(messages, **send_params)
 
-    def send_query(self, messages, **send_request):
-        raise NotImplementedError("AnthropicLLM.send_query not implemented.")
-
-    def send_function_query(self, messages, **send_request):
-        raise NotImplementedError("AnthropicLLM.send_function_query not implemented.")
-
-    def build_messages(self, **send_params):
-        raise NotImplementedError("AnthropicLLM.build_messages not implemented.")
-
-    def stream_response_to_socket(self, messages, socket_id, user_id, audio_output, **kwargs):
-        raise NotImplementedError("AnthropicLLM.stream_response_to_socket not implemented.")
-
 
 class QuotaExhaustedError(Exception):
     """Raised when an LLM provider returns a quota/billing error.
@@ -1505,9 +1513,6 @@ class LLMInterface:
 
 
 
-from pydantic import BaseModel
-import json
-
 def sanitize_schema(schema_part: dict):
     """
     Make a Pydantic/JSON schema compatible with OpenAI Structured Outputs.
@@ -1612,33 +1617,3 @@ def inline_refs(schema: dict, root_schema: dict = None) -> dict:
     else:
         return schema
 
-def pydantic_to_openai_schema(model: type[BaseModel], name: str | None = None, strict: bool = True) -> dict:
-    schema = model.model_json_schema()
-    # Sanitize the schema first to set additionalProperties and remove unwanted defaults.
-    sanitize_schema(schema)
-    # Inline any $ref references.
-    schema = inline_refs(schema)
-    # Inline can introduce object schemas in new positions; sanitize again to
-    # enforce OpenAI Structured Outputs requirements everywhere.
-    sanitize_schema(schema)
-    # Remove leftover definitions containers
-    schema.pop("$defs", None)
-    schema.pop("definitions", None)
-
-    return {
-        "format": {
-            "type": "json_schema",
-            "name": name or model.__name__,
-            "schema": schema,
-            "strict": strict
-        }
-    }
-
-if __name__ == "__main__":
-    class AgentForm(BaseModel):
-        final_answer_content: str
-        summary: str
-        important_links: List[Dict[str, str]]
-
-    schema_output = pydantic_to_openai_schema(AgentForm)
-    print(json.dumps(schema_output, indent=2))
