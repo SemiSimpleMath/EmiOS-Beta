@@ -6,14 +6,18 @@ import mimetypes
 from pathlib import Path
 import re
 
-from openai import OpenAI
+from openai import OpenAI, RateLimitError as OpenAIRateLimitError
 
 import os
 import threading
-import sys
 
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.performance.performance_monitor import performance_monitor
+from app.services.llm_resilience import (
+    BillingQuotaExhausted,
+    TransientRateLimit,
+    classify_quota,
+)
 logger = get_logger(__name__)
 
 
@@ -442,26 +446,120 @@ class OpenAIJsonSchemaStrategy(OpenAIStructuredOutputStrategy):
         return result
 
 
-class LLMQuotaExhaustedError(RuntimeError):
-    """Raised when the LLM API returns a quota/billing error."""
+# ---------------------------------------------------------------------------
+# Provider-boundary quota translation — SDK typed markers → canonical taxonomy
+# ---------------------------------------------------------------------------
+# Each provider's except-block translates its SDK error into
+# BillingQuotaExhausted (interface layer stops the world) or
+# TransientRateLimit (the retry ladder owns it), using the STRUCTURED
+# markers the SDKs expose — error.code / QuotaFailure.quotaId — with
+# classify_quota's message matching only for errors that arrive
+# unstructured. Returns None for non-quota errors (caller handles them).
 
 
-def _handle_fatal_quota_error(error_msg: str, context: str = ""):
-    """
-    Handle LLM quota errors by raising a loud, catchable exception.
+def _translate_openai_exception(e: Exception) -> Optional[Exception]:
+    """OpenAI marks the two 429 cases explicitly: error.code
+    "insufficient_quota" = billing exhaustion; "rate_limit_exceeded" (any
+    RateLimitError that isn't insufficient_quota) = transient window, with
+    the suggested wait in the Retry-After header."""
+    code = getattr(e, "code", None) or getattr(e, "type", None)
+    if code == "insufficient_quota":
+        return BillingQuotaExhausted(provider="openai", message=str(e))
+    if isinstance(e, OpenAIRateLimitError):
+        retry_after = None
+        headers = getattr(getattr(e, "response", None), "headers", None)
+        if headers is not None:
+            raw = headers.get("retry-after")
+            if raw:
+                try:
+                    retry_after = float(raw)
+                except (TypeError, ValueError):
+                    retry_after = None
+        return TransientRateLimit(str(e), retry_after=retry_after)
+    kind = classify_quota(e)
+    if kind == "billing":
+        return BillingQuotaExhausted(provider="openai", message=str(e))
+    if kind == "rate":
+        return TransientRateLimit(str(e))
+    return None
 
-    Previous behaviour was os._exit(1), which bypasses all exception handlers
-    and makes batch pipelines impossible to run — any transient rate-limit
-    error that contains "quota" would silently kill the process.
-    """
-    logger.critical("LLM Quota Exhausted — context: %s — error: %s", context, error_msg)
-    raise LLMQuotaExhaustedError(
-        f"LLM Quota Exhausted | context={context} | {error_msg}"
-    )
 
-# print("\nthe key is: ", os.environ.get('OPENAI_API_KEY'))  # Should return your API key
+def _gemini_quota_details(details: Any) -> tuple[list[str], Optional[float]]:
+    """Pull QuotaFailure violation quotaIds + RetryInfo.retryDelay seconds
+    out of a google-genai APIError.details payload. Tolerates the shapes the
+    SDK passes through (error-wrapped dict / bare dict)."""
+    quota_ids: list[str] = []
+    retry_after: Optional[float] = None
+    try:
+        node = details
+        if isinstance(node, dict) and isinstance(node.get("error"), dict):
+            node = node["error"]
+        detail_list = node.get("details") if isinstance(node, dict) else None
+        if not isinstance(detail_list, list):
+            return quota_ids, retry_after
+        for item in detail_list:
+            if not isinstance(item, dict):
+                continue
+            at_type = str(item.get("@type") or "")
+            if at_type.endswith("QuotaFailure"):
+                for violation in item.get("violations") or []:
+                    if isinstance(violation, dict):
+                        qid = str(violation.get("quotaId") or violation.get("quota_id") or "")
+                        if qid:
+                            quota_ids.append(qid)
+            elif at_type.endswith("RetryInfo"):
+                raw = str(item.get("retryDelay") or item.get("retry_delay") or "").strip().rstrip("s")
+                if raw:
+                    try:
+                        retry_after = float(raw)
+                    except ValueError:
+                        pass
+    except Exception:
+        logger.debug("gemini quota detail extraction failed", exc_info=True)
+    return quota_ids, retry_after
 
-# Removed: Time checking moved to maintenance manager for surgical control
+
+def _translate_gemini_exception(e: Exception) -> Optional[Exception]:
+    """Gemini reports BOTH billing/daily exhaustion and per-minute windows
+    as 429 RESOURCE_EXHAUSTED with near-identical messages; the structured
+    QuotaFailure.quotaId distinguishes them (…PerMinute… vs …PerDay…). A
+    429 whose violations name a per-minute window is transient; any other
+    429 stops the world — conservative by policy: misclassification must
+    mean "stopped unnecessarily", never "kept burning the batch"."""
+    code = getattr(e, "code", None)
+    status = str(getattr(e, "status", "") or "").upper()
+    if code == 429 or "RESOURCE_EXHAUSTED" in status:
+        quota_ids, retry_after = _gemini_quota_details(getattr(e, "details", None))
+        joined = " ".join(quota_ids).lower().replace("_", "").replace("-", "")
+        if "perminute" in joined:
+            return TransientRateLimit(str(e), retry_after=retry_after)
+        if not quota_ids and classify_quota(e) == "rate":
+            # No structured violations arrived, but the message itself names
+            # a per-minute window.
+            return TransientRateLimit(str(e), retry_after=retry_after)
+        return BillingQuotaExhausted(provider="gemini", message=str(e))
+    kind = classify_quota(e)
+    if kind == "billing":
+        return BillingQuotaExhausted(provider="gemini", message=str(e))
+    if kind == "rate":
+        return TransientRateLimit(str(e))
+    return None
+
+
+def _translate_anthropic_exception(e: Exception, anthropic_module: Any) -> Optional[Exception]:
+    """Anthropic types its 429 as RateLimitError; out-of-credit arrives as a
+    400 invalid_request_error ("credit balance is too low")."""
+    rate_limit_cls = getattr(anthropic_module, "RateLimitError", None)
+    if rate_limit_cls is not None and isinstance(e, rate_limit_cls):
+        return TransientRateLimit(str(e))
+    if "credit balance is too low" in str(e).lower():
+        return BillingQuotaExhausted(provider="anthropic", message=str(e))
+    kind = classify_quota(e)
+    if kind == "billing":
+        return BillingQuotaExhausted(provider="anthropic", message=str(e))
+    if kind == "rate":
+        return TransientRateLimit(str(e))
+    return None
 
 
 class BaseLLMProvider:
@@ -648,30 +746,38 @@ class OpenAILLM(BaseLLMProvider):
 
             logger.error(f"Error processing input function_query: {e}")
             logger.debug("OpenAI structured_output exception details", exc_info=True)
-            error_str = str(e).lower()
 
-            # Classify for the call log status field (kept simple — the
-            # exception type carries the detail; status is for fast group-by).
-            if "quota" in error_str or "insufficient_quota" in error_str:
-                log_status = "quota"
-            elif "timeout" in error_str or "timed out" in error_str:
+            # Already canonical (nested call translated it) — pass through.
+            if isinstance(e, (BillingQuotaExhausted, TransientRateLimit)):
+                log_status = "quota" if isinstance(e, BillingQuotaExhausted) else "rate_limit"
+                raise
+
+            # Quota taxonomy from the SDK's structured markers (error.code),
+            # message matching only for unstructured shapes.
+            canonical = _translate_openai_exception(e)
+            if canonical is not None:
+                if isinstance(canonical, BillingQuotaExhausted):
+                    log_status = "quota"
+                    logger.critical(
+                        "LLM billing quota exhausted — context: structured_output (model: %s) — %s",
+                        model, e,
+                    )
+                else:
+                    log_status = "rate_limit"
+                raise canonical from e
+
+            error_str = str(e).lower()
+            # Fail loudly: never convert provider errors into plain strings.
+            if "timeout" in error_str or "timed out" in error_str:
                 log_status = "timeout"
-            elif "rate limit" in error_str:
+                raise TimeoutError(f"LLM request timed out after {timeout} seconds") from e
+            if "rate limit" in error_str:
                 log_status = "rate_limit"
-            elif "invalid json" in error_str or "validation error" in error_str:
+                raise TransientRateLimit(str(e)) from e
+            if "invalid json" in error_str or "validation error" in error_str:
                 log_status = "parse_error"
             else:
                 log_status = "error"
-
-            # FATAL: Quota errors require immediate program exit
-            if "quota" in error_str or "insufficient_quota" in error_str:
-                _handle_fatal_quota_error(str(e), f"structured_output (model: {model})")
-
-            # Fail loudly: never convert provider errors into plain strings.
-            if "timeout" in error_str or "timed out" in error_str:
-                raise TimeoutError(f"LLM request timed out after {timeout} seconds") from e
-            if "rate limit" in error_str:
-                raise RuntimeError("LLM rate limit exceeded") from e
             raise RuntimeError(f"LLM structured_output failed: {e}") from e
         finally:
             # Persist one llm_call_log row regardless of outcome. Failure-
@@ -769,19 +875,26 @@ class OpenAILLM(BaseLLMProvider):
                 'timeout': timeout,
                 'error': str(e)
             })
-            
-            logger.error(f"Error processing input function_query: {e}")
-            error_str = str(e).lower()
-            
-            # FATAL: Quota errors require immediate program exit
-            if "quota" in error_str or "insufficient_quota" in error_str:
-                _handle_fatal_quota_error(str(e), f"structured_output_json (model: {model})")
 
+            logger.error(f"Error processing input function_query: {e}")
+
+            if isinstance(e, (BillingQuotaExhausted, TransientRateLimit)):
+                raise
+            canonical = _translate_openai_exception(e)
+            if canonical is not None:
+                if isinstance(canonical, BillingQuotaExhausted):
+                    logger.critical(
+                        "LLM billing quota exhausted — context: structured_output_json (model: %s) — %s",
+                        model, e,
+                    )
+                raise canonical from e
+
+            error_str = str(e).lower()
             # Fail loudly: never convert provider errors into plain strings.
             if "timeout" in error_str:
                 raise TimeoutError(f"LLM request timed out after {timeout} seconds") from e
             if "rate limit" in error_str:
-                raise RuntimeError("LLM rate limit exceeded") from e
+                raise TransientRateLimit(str(e)) from e
             raise RuntimeError(f"LLM structured_output_json failed: {e}") from e
 
 # ---------------------------------------------------------------------------
@@ -1130,12 +1243,27 @@ class GeminiLLM(BaseLLMProvider):
         except Exception as e:
             performance_monitor.end_timer(timer_id, {'status': 'error', 'model': model_name, 'error': str(e)})
             logger.error(f"Gemini LLM error: {e}", exc_info=True)
+            if isinstance(e, (BillingQuotaExhausted, TransientRateLimit)):
+                _telemetry_status = "quota" if isinstance(e, BillingQuotaExhausted) else "rate_limit"
+                raise
             err_str = str(e).lower()
-            if "quota" in err_str or "exceeded" in err_str:
-                _telemetry_status = "quota"
-            elif "timeout" in err_str or "timed out" in err_str:
+            # Timeouts FIRST: Gemini's timeout error says "Deadline Exceeded",
+            # which the old quota check (bare "exceeded") swallowed — 30 days
+            # of situation_auditor timeouts logged as status=quota (audit L4).
+            if "timeout" in err_str or "timed out" in err_str or "deadline exceeded" in err_str:
                 _telemetry_status = "timeout"
-            elif "rate" in err_str and "limit" in err_str:
+                raise
+            canonical = _translate_gemini_exception(e)
+            if canonical is not None:
+                if isinstance(canonical, BillingQuotaExhausted):
+                    _telemetry_status = "quota"
+                    logger.critical(
+                        "LLM billing quota exhausted — gemini model=%s — %s", model_name, e,
+                    )
+                else:
+                    _telemetry_status = "rate_limit"
+                raise canonical from e
+            if "rate" in err_str and "limit" in err_str:
                 _telemetry_status = "rate_limit"
             elif "json" in err_str or "validation" in err_str or "block_reason" in err_str:
                 _telemetry_status = "parse_error"
@@ -1281,14 +1409,24 @@ class AnthropicLLM(BaseLLMProvider):
         except Exception as e:
             performance_monitor.end_timer(timer_id, {'status': 'error', 'model': model_name, 'error': str(e)})
             logger.error(f"Anthropic LLM error: {e}", exc_info=True)
+            if isinstance(e, (BillingQuotaExhausted, TransientRateLimit)):
+                _telemetry_status = "quota" if isinstance(e, BillingQuotaExhausted) else "rate_limit"
+                raise
             err_str = str(e).lower()
-            if "quota" in err_str or "insufficient" in err_str or "credit" in err_str:
-                _telemetry_status = "quota"
-            elif "timeout" in err_str or "timed out" in err_str:
+            if "timeout" in err_str or "timed out" in err_str:
                 _telemetry_status = "timeout"
-            elif "rate" in err_str and "limit" in err_str:
-                _telemetry_status = "rate_limit"
-            elif "json" in err_str or "validation" in err_str:
+                raise
+            canonical = _translate_anthropic_exception(e, self._anthropic_module)
+            if canonical is not None:
+                if isinstance(canonical, BillingQuotaExhausted):
+                    _telemetry_status = "quota"
+                    logger.critical(
+                        "LLM billing quota exhausted — anthropic model=%s — %s", model_name, e,
+                    )
+                else:
+                    _telemetry_status = "rate_limit"
+                raise canonical from e
+            if "json" in err_str or "validation" in err_str:
                 _telemetry_status = "parse_error"
             else:
                 _telemetry_status = "error"
@@ -1340,20 +1478,22 @@ _quota_tripped_lock = threading.Lock()
 
 
 def _check_and_trip_quota(provider: str, exc: Exception) -> bool:
-    """If *exc* is a quota/billing error, notify the user and terminate the process.
+    """If *exc* is a confirmed BILLING quota exhaustion, notify the user and
+    terminate the process.
 
-    This is intentionally aggressive: a quota error means every subsequent LLM call
-    will also fail.  Continuing would let batch loops (KG pipeline, entity cards, etc.)
-    race through items, catch the exception, and mark work as done without results.
-    The only safe action is to stop immediately.
+    This is intentionally aggressive: billing exhaustion means every
+    subsequent LLM call will also fail. Continuing would let batch loops
+    (KG pipeline, entity cards, etc.) race through items, catch the
+    exception, and mark work as done without results. The only safe action
+    is to stop immediately.
+
+    The judgement rides classify_quota — provider boundaries translate the
+    SDKs' structured markers (OpenAI error.code, Gemini QuotaFailure.quotaId)
+    into the canonical types, so a per-minute rate window NEVER reaches this
+    kill (the retry ladder owns it), while an ambiguous unstructured quota
+    mention still stops the world (conservative by policy).
     """
-    exc_str = str(exc).lower()
-    is_quota = (
-        "insufficient_quota" in exc_str
-        or "exceeded your current quota" in exc_str
-        or ("429" in exc_str and "quota" in exc_str)
-    )
-    if not is_quota:
+    if classify_quota(exc) != "billing":
         return False
 
     with _quota_tripped_lock:
