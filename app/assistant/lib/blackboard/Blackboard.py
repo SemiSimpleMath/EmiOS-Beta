@@ -76,7 +76,16 @@ class Blackboard:
         self.call_stack = []
 
     def add_request_id(self, request_id):
+        # Write BOTH the instance attribute AND the global scope key. The two
+        # were a split source of truth: get_request_id() reads the attr (main
+        # tool_caller path, chat_task_router), while _tool_caller_util and
+        # approval_gateway._resolve_reply_to read get_state_value("request_id")
+        # — the scope key, which nothing else ever wrote, so those readers
+        # always saw None (the approval gateway's reply-route lookup was dead:
+        # None request_id → it never called reply_router). Seeding both makes
+        # every reader style converge on the same id (Blackboard audit B1).
         self.request_id = request_id
+        self.update_global_state_value("request_id", request_id)
 
     def get_request_id(self):
         return self.request_id
