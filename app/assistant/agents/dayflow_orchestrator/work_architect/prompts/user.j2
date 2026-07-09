@@ -1,4 +1,3 @@
-Current time: {{ date_time }}.{% if day_of_week %} Day: {{ day_of_week }}.{% endif %}
 {%- if resource_afk_statistics_output %}
 {%- if resource_afk_statistics_output.is_afk %}
 Computer: AWAY — idle {{ resource_afk_statistics_output.idle_minutes | default(0) | round | int }} min
@@ -58,3 +57,5 @@ CONTEXT:
 {{ information }}
 {% endif %}
 Design the work graph for this goal.
+
+Current time: {{ date_time }}.{% if day_of_week %} Day: {{ day_of_week }}.{% endif %}

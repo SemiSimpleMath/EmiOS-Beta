@@ -1,6 +1,4 @@
 ########## CURRENT STATE ##########
-**Current Time:** {{ date_time }}
-**Day:** {{ day_of_week }}
 {%- if presence_status %}
 
 **Computer Presence:**
@@ -131,3 +129,5 @@
 ########## ENTITY CONTEXT (read-only) ##########
 {{ entity_card }}
 {%- endif %}
+
+**Current Time:** {{ date_time }} ({{ day_of_week }})

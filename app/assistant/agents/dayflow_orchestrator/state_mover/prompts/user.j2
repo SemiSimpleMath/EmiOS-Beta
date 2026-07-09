@@ -1,8 +1,6 @@
 {%- from "shared/macros/dayflow_items.j2" import task_line, task_block %}
 
 ########## CURRENT STATE ##########
-**Current Time:** {{ date_time }}
-**Day:** {{ day_of_week }}
 {%- if resource_afk_statistics_output %}
 **Computer Presence:**
 {%- if resource_afk_statistics_output.is_afk %}
@@ -134,3 +132,5 @@ doubt, promote.*
 ##### Entity Context
 {{ entity_card }}
 {%- endif %}
+
+**Current Time:** {{ date_time }} ({{ day_of_week }})

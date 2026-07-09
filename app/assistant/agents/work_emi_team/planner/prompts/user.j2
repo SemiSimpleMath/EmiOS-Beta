@@ -1,5 +1,3 @@
-Today is {{ date_time }}.
-
 {{ work_projection }}
 
 {% if entity_card %}
@@ -11,6 +9,8 @@ Today is {{ date_time }}.
 {% if recent_history %}{{ recent_history }}{% else %}(this is your first turn on this node){% endif %}
 
 {% if action_count %}**Action count:** {{ action_count }}/20 (you have {{ 20 - action_count }} left){% endif %}
+
+Today is {{ date_time }}.
 
 Decide your next single action. Update `checklist` from YOUR CHECKLIST above — echo existing surfaces by
 their id+text, add new ones with an empty id, and mark exactly ONE `in_progress`. Then choose ONE action:
