@@ -1,9 +1,39 @@
+import threading
 from typing import List
 from app.assistant.utils.pydantic_classes import Message
 from app.assistant.utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 class Blackboard:
+    """Shared-state substrate for a manager loop: a stack of scope dicts + a
+    message log.
+
+    CONCURRENCY CONTRACT (this class is deliberately lock-free — read before
+    changing how an instance is shared):
+
+    - Scope stacks are MANAGER-LOCAL and SINGLE-THREADED. Each MultiAgentManager
+      owns its own Blackboard and runs on one thread, so push_call_context /
+      pop_call_context / update_state_value on a manager's blackboard never
+      race. NEVER call push_call_context / pop_call_context on a blackboard
+      shared across threads — the scope stack is not thread-safe and a
+      concurrent push/pop would corrupt it.
+
+    - DI.global_blackboard is a SHARED, LOCK-FREE FLAT CACHE. Pipeline threads,
+      tools, HTTP routes, and event handlers write resource snapshots and
+      messages to it concurrently. dict writes are GIL-atomic (no corruption),
+      but same-key update_state_value is last-writer-wins (a concurrent write
+      to the same key is silently lost) — fine for cache snapshots, not for
+      state that must accumulate. The global instance is NEVER scope-stacked,
+      which is what keeps it safe. add_msg's history-id assignment IS locked
+      (below) so concurrent add_msg on the shared instance can't collide ids.
+    """
+
+    # Serializes the history_id read-modify-write in add_msg so concurrent
+    # add_msg on the SHARED global blackboard can't hand two messages the same
+    # id or lose an increment (Blackboard audit B2). Class-level: manager-local
+    # blackboards are single-threaded so the lock is uncontended there.
+    _history_id_lock = threading.Lock()
+
     def __init__(self):
         """Initialize blackboard with a stack of scopes for state and a global message log."""
         # State is now a stack of dictionaries (scopes).
@@ -161,11 +191,15 @@ class Blackboard:
             meta = {}
         history_id = meta.get("history_id")
         if not isinstance(history_id, int) or history_id <= 0:
-            next_id = int(self.get_state_value("history_next_id", 1) or 1)
-            if next_id <= 0:
-                raise ValueError("history_next_id must be > 0")
-            meta["history_id"] = next_id
-            self.update_global_state_value("history_next_id", next_id + 1)
+            # Read-modify-write, serialized: two concurrent add_msg on the
+            # SHARED global blackboard must not hand out the same id or lose an
+            # increment (audit B2). Uncontended on a manager-local blackboard.
+            with self._history_id_lock:
+                next_id = int(self.get_state_value("history_next_id", 1) or 1)
+                if next_id <= 0:
+                    raise ValueError("history_next_id must be > 0")
+                meta["history_id"] = next_id
+                self.update_global_state_value("history_next_id", next_id + 1)
         # Canonical message lifecycle flags used by summary agent actions.
         if "history_deleted" not in meta:
             meta["history_deleted"] = False
