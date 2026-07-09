@@ -323,3 +323,52 @@ def get_ticket_service() -> TicketService:
     if _service is None:
         _service = TicketService()
     return _service
+
+
+def propose_notice_ticket(
+    *,
+    title: str,
+    message: str,
+    suggestion_type: str,
+    trigger_reason: str,
+    ticket_type: str = "dayflow_notify",
+    valid_hours: int = 24,
+    trigger_context: Optional[dict] = None,
+) -> Optional[str]:
+    """Mint + propose + publish a simple owner-notice ticket.
+
+    The durable notify channel: the ticket persists in DB and the UI popup /
+    pending-poll serve it whenever a client is (or becomes) live. Used by the
+    delivery layer for failed-send notices and undeliverable reminders
+    (2026-07-08 delivery audit D2/D3). Returns the ticket_id, or None when
+    ticket infrastructure is unavailable (logged ERROR — callers treat the
+    notice as best-effort and must not crash their host flow).
+    """
+    from app.assistant.ServiceLocator.service_locator import DI
+    from app.assistant.ticket_manager import get_ticket_manager
+
+    try:
+        ticket_manager = get_ticket_manager()
+        ticket = ticket_manager.create_ticket(
+            ticket_type=ticket_type,
+            suggestion_type=suggestion_type,
+            title=title,
+            message=message,
+            action_type="none",
+            trigger_context=trigger_context or {},
+            trigger_reason=trigger_reason,
+            valid_hours=valid_hours,
+        )
+        if ticket is None:
+            logger.error("[notice_ticket] create_ticket returned None (%s)", suggestion_type)
+            return None
+        if not ticket_manager.mark_proposed(ticket.ticket_id):
+            logger.error("[notice_ticket] mark_proposed failed for %s", ticket.ticket_id)
+            return None
+        DI.event_hub.publish(Message(
+            event_topic="proactive_suggestion", data=ticket.to_dict(),
+        ))
+        return str(ticket.ticket_id)
+    except Exception:
+        logger.error("[notice_ticket] failed to surface %s notice", suggestion_type, exc_info=True)
+        return None

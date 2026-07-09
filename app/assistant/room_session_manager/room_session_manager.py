@@ -580,15 +580,46 @@ class RoomSessionManager:
             adapter: InboundSurfaceAdapter,
             reply_text: str,
             should_send: bool,
-    ) -> Any:
+    ) -> tuple[Any, str]:
+        """Send the reply. Returns ``(outbound_result, delivery_status)`` with
+        status one of "sent" | "failed" | "skipped" — persistence stamps it on
+        the turn and a failed send raises an owner-visible notice (2026-07-08
+        delivery audit D2: a failed send used to persist indistinguishably
+        from a sent one, and nobody was told)."""
         if not should_send:
-            return None
+            return None, "skipped"
         try:
-            return adapter.send_outbound(reply_text)
+            return adapter.send_outbound(reply_text), "sent"
         except Exception as e:
             logger.error("Failed sending %s reply for room_id=%s: %s", envelope.surface, envelope.room_id, e)
             logger.debug("send reply exception details", exc_info=True)
-            return None
+            self._surface_delivery_failure(envelope=envelope, reply_text=reply_text, error=e)
+            return None, "failed"
+
+    @staticmethod
+    def _surface_delivery_failure(*, envelope: InboundEnvelope, reply_text: str, error: Exception) -> None:
+        """A reply exhausted the transport's retries — tell the owner via the
+        durable ticket channel (DB + popup/poll). No auto-resend: re-firing a
+        stale reply into a conversation is worse than saying it failed."""
+        from app.assistant.ticket_manager.ticket_service import propose_notice_ticket
+
+        preview = str(reply_text or "").strip()
+        if len(preview) > 160:
+            preview = preview[:157] + "..."
+        propose_notice_ticket(
+            title=f"Reply to {envelope.room_id} did not send",
+            message=(
+                f"My {envelope.surface} reply to {envelope.room_id} failed to send "
+                f"({type(error).__name__}). It was: \"{preview}\""
+            ),
+            suggestion_type="delivery_failure",
+            trigger_reason=f"{envelope.surface} send failed after transport retries",
+            trigger_context={
+                "room_id": envelope.room_id,
+                "surface": envelope.surface,
+                "request_id": envelope.request_id,
+            },
+        )
 
     def _persist_outbound_turn(
             self,
@@ -597,10 +628,18 @@ class RoomSessionManager:
             persist_unified_log: bool,
             reply_text: str,
             outbound_result: Any,
+            delivery_status: str = "sent",
     ) -> None:
         if not adapter.persist_to_history or not str(reply_text or "").strip():
             return
         outbound_msg = adapter.append_outbound(reply_text, outbound_result)
+        if outbound_msg is not None:
+            # Stamp what actually happened on the persisted row — the record
+            # of a FAILED send must be distinguishable from a sent one.
+            meta = outbound_msg.metadata if isinstance(outbound_msg.metadata, dict) else {}
+            meta = dict(meta)
+            meta["delivery_status"] = delivery_status
+            outbound_msg.metadata = meta
         if persist_unified_log and outbound_msg is not None:
             self._persist_message_to_unified_log(message=outbound_msg, source=adapter.outbound_source)
 
@@ -667,7 +706,7 @@ class RoomSessionManager:
             reply_to=envelope.reply_to if isinstance(envelope.reply_to, dict) else {},
             payload={"error": True, "error_type": type(error).__name__},
         )
-        outbound_result = self._deliver_outbound(
+        outbound_result, delivery_status = self._deliver_outbound(
             envelope=envelope,
             adapter=adapter,
             reply_text=intent.reply_text,
@@ -679,6 +718,7 @@ class RoomSessionManager:
                 persist_unified_log=persist_unified_log,
                 reply_text=intent.reply_text,
                 outbound_result=outbound_result,
+                delivery_status=delivery_status,
             )
         except Exception as persist_err:
             logger.error(
@@ -835,7 +875,7 @@ class RoomSessionManager:
                 manager_name=manager_name,
                 send_reply=send_reply,
             )
-            outbound_result = self._deliver_outbound(
+            outbound_result, delivery_status = self._deliver_outbound(
                 envelope=envelope,
                 adapter=adapter,
                 reply_text=outbound_intent.reply_text,
@@ -846,6 +886,7 @@ class RoomSessionManager:
                 persist_unified_log=persist_unified_log,
                 reply_text=outbound_intent.reply_text,
                 outbound_result=outbound_result,
+                delivery_status=delivery_status,
             )
             maybe_write_mode_exit_summary(
                 blackboard=self._blackboard,
