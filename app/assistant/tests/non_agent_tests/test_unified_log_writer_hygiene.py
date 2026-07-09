@@ -81,6 +81,37 @@ def test_same_source_upsert_still_updates_lifecycle_fields():
     assert row.metadata_json["state"] == "closed"    # lifecycle fields update
 
 
+def test_source_timestamp_index_exists_on_fresh_installs():
+    """Fresh installs get idx_unified_log_2026_source_ts via create_all
+    (__table_args__); existing DBs via the migration (audit P5). Uses a
+    brand-new temp DB — create_all skips tables that already exist, so
+    the long-lived shared test DB can't prove the fresh-install claim."""
+    import sqlite3
+    import tempfile
+
+    from sqlalchemy import create_engine
+
+    from app.assistant.database.db_handler import Base
+
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    try:
+        engine = create_engine(f"sqlite:///{path.replace(os.sep, '/')}")
+        Base.metadata.create_all(engine)
+        engine.dispose()
+        con = sqlite3.connect(path)
+        try:
+            names = [r[0] for r in con.execute(
+                "SELECT name FROM sqlite_master WHERE type='index' "
+                "AND tbl_name='unified_log_2026'"
+            ).fetchall()]
+        finally:
+            con.close()
+        assert "idx_unified_log_2026_source_ts" in names
+    finally:
+        os.remove(path)
+
+
 def test_save_proactive_rides_the_writer_queue(monkeypatch):
     initialize_database()
     ops = []

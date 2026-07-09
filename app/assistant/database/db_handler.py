@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import create_engine, Column, Integer, Text, JSON, TIMESTAMP, func, String, Boolean, Float
+from sqlalchemy import create_engine, Column, Index, Integer, Text, JSON, TIMESTAMP, func, String, Boolean, Float
 from datetime import datetime, timezone
 from sqlalchemy.types import TypeDecorator
 
@@ -53,6 +53,14 @@ class UTCDateTime(TypeDecorator):
 # Unified ingestion log model
 class UnifiedLog2026(Base):
     __tablename__ = "unified_log_2026"
+    __table_args__ = (
+        # Source-filtered, time-ordered reads are the hot shape (dayflow
+        # item scan, chat_memory summaries, history source filters) —
+        # this serves them without a temp-sort. Existing DBs get it via
+        # migrations/add_unified_log_source_ts_index.py; fresh installs
+        # via create_all.
+        Index("idx_unified_log_2026_source_ts", "source", "timestamp"),
+    )
 
     id = Column(Text, primary_key=True)
     timestamp = Column(UTCDateTime(), nullable=False)
