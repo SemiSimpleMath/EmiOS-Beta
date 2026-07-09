@@ -38,7 +38,7 @@
       "description": "Per-sender results: [{sender, trashed}]."
     }
   ],
-  "arguments_prompt": "",
+  "arguments_prompt": "Arguments for trash_emails:\n- senders (required): list of sender addresses (or address substrings) whose emails to move to trash.\n- extra_query (optional): additional Gmail search terms ANDed with each sender (e.g. 'older_than:30d').\n- max_per_sender (optional): cap per sender, default 1000.",
   "metadata": {
     "min_authority": 90,
     "approval_min_authority": 90,

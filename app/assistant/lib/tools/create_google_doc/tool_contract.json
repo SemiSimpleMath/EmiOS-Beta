@@ -42,7 +42,7 @@
       "description": "Whether initial_content was written into the document."
     }
   ],
-  "arguments_prompt": "",
+  "arguments_prompt": "Arguments for create_google_doc:\n- title (required): the document title as it will appear in Google Drive.\n- initial_content (optional): plain text to place in the document body at creation; omit for an empty doc.",
   "metadata": {
     "min_authority": 90,
     "approval_min_authority": 90,

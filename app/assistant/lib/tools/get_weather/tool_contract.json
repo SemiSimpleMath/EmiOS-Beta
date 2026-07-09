@@ -48,5 +48,6 @@
     "front_door": false,
     "room_visibility_default": "conditional",
     "approval_required": false
-  }
+  },
+  "arguments_prompt": "Arguments for get_weather:\n- city (required): city name (e.g. 'Aliso Viejo'). The user's current city comes from resource_current_location when not stated.\n- forecast_type (required): 'current' for present conditions, 'five_day' for the 5-day forecast."
 }

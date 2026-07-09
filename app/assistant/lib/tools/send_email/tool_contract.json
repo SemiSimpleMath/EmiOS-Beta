@@ -22,6 +22,12 @@
       "description": ""
     },
     {
+      "name": "from_account",
+      "type": "string",
+      "required": false,
+      "description": "Which account sends the email. Omit for the scope's actor (normally the user); 'self' sends from the assistant's own Gmail; 'user' forces the user's account."
+    },
+    {
       "name": "pod_ids",
       "type": "array",
       "required": false,
@@ -46,7 +52,7 @@
       "description": "Structured tool result payload."
     }
   ],
-  "arguments_prompt": "Arguments for sending an email:\nto: str\nsubject: Optional[str]\nbody: Optional[str]\npod_ids: Optional[List[str]]  # Pod URIs to ATTACH as files (file-backed pods → stored file; body-only pods → rendered .eml/.txt). Tool reads body, agent doesn't.\ninline_pod_ids: Optional[List[str]]  # Pod URIs to PASTE INLINE into the email body — email pods get a Gmail-style `----- Forwarded message -----` block; other kinds get a `---` separator. Tool reads body, agent doesn't. Pick pod_ids for attachments, inline_pod_ids for inline forwarding. Don't pod_fetch then handcraft `body` unless you actually need to edit/summarize the content.",
+  "arguments_prompt": "Arguments for sending an email:\nto: str\nsubject: Optional[str]\nbody: Optional[str]\npod_ids: Optional[List[str]]  # Pod URIs to ATTACH as files (file-backed pods → stored file; body-only pods → rendered .eml/.txt). Tool reads body, agent doesn't.\ninline_pod_ids: Optional[List[str]]  # Pod URIs to PASTE INLINE into the email body — email pods get a Gmail-style `----- Forwarded message -----` block; other kinds get a `---` separator. Tool reads body, agent doesn't. Pick pod_ids for attachments, inline_pod_ids for inline forwarding. Don't pod_fetch then handcraft `body` unless you actually need to edit/summarize the content.\n- from_account (optional): omit for the scope's actor (normally the user). 'self' = the assistant's own Gmail (email TO the user, or the assistant acting as herself); 'user' = the user's account (replies/forwards on his behalf). A specific account_id from configs/oauth_accounts.json is also accepted (advanced).",
   "metadata": {
     "min_authority": 90,
     "domain": "email",

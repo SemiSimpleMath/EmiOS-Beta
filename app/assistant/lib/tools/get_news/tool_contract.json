@@ -42,5 +42,6 @@
     "front_door": false,
     "room_visibility_default": "conditional",
     "approval_required": false
-  }
+  },
+  "arguments_prompt": "Arguments for get_news:\n- feed_urls (required): list of RSS/Atom feed URLs to pull headlines from. Pass the user's configured feeds when known; each URL is fetched and parsed independently."
 }

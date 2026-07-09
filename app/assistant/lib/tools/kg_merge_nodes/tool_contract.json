@@ -5,19 +5,19 @@
     {
       "name": "keep_id",
       "type": "string",
-      "required": false,
+      "required": true,
       "description": "Surviving node id (gains the alias + edges)."
     },
     {
       "name": "fold_id",
       "type": "string",
-      "required": false,
+      "required": true,
       "description": "Node to fold and delete."
     },
     {
       "name": "reason",
       "type": "string",
-      "required": false,
+      "required": true,
       "description": "Why this merge is correct. Goes into kg_revision_log."
     },
     {
@@ -25,12 +25,6 @@
       "type": "boolean",
       "required": false,
       "description": "Preview the diff; do not commit. Default false."
-    },
-    {
-      "name": "force",
-      "type": "boolean",
-      "required": false,
-      "description": "Override the wrong-survivor guard when fold legitimately outranks keep (e.g. the correct label lost the popularity contest). Default false."
     },
     {
       "name": "finding_id",
@@ -51,7 +45,7 @@
       "description": "{ok, revision_log_id, edges_rewritten, dependent_rebinds, section_tags_migrated, verdicts_superseded, filled_fields, new_aliases, chroma_cleaned, survivor_warning} on commit; {ok, dry_run, before, after, survivor_warning} on dry_run."
     }
   ],
-  "arguments_prompt": "Arguments for kg_merge_nodes:\n- keep_id (required): surviving node id\n- fold_id (required): node to fold + delete\n- reason (required): why this merge is correct\n- dry_run (optional): preview only\n- force (optional): override the wrong-survivor guard (refuses when fold outranks keep on edges/pagerank)\n- finding_id (optional): source finding row id",
+  "arguments_prompt": "Arguments for kg_merge_nodes:\n- keep_id (required): surviving node id\n- fold_id (required): node to fold + delete\n- reason (required): why this merge is correct\n- dry_run (optional): preview only\n- finding_id (optional): source finding row id",
   "metadata": {
     "min_authority": 95,
     "approval_min_authority": 95,
