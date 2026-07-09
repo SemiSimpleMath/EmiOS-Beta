@@ -338,33 +338,21 @@ class Edge(Base):
     
     @property
     def sentence_embedding(self):
-        """
-        Get sentence embedding from ChromaDB.
-        If not found, compute and store it.
+        """Read this edge's sentence embedding from ChromaDB, or None if absent.
+
+        Read-only, mirroring Node.label_embedding: a read thread must not
+        write chroma (this property used to compute-and-store on a miss,
+        opening its own session inside a getter — the same pattern the node
+        side was cured of). Population is owned by the write paths; the
+        context-embedding backfill and the lifecycle_gc ghost sweep keep the
+        edge collection converged. A miss returns None and the caller
+        handles it.
         """
         if not self.sentence:
             return None
-        
+
         from app.assistant.kg.chroma.chroma_embedding_manager import get_chroma_manager
-        from app.assistant.kg_core.kg_utils.knowledge_graph_utils import KnowledgeGraphUtils
-        from app.models.base import get_session
-        
-        chroma = get_chroma_manager()
-        
-        # Try to get from ChromaDB first
-        embedding = chroma.get_edge_embedding(str(self.id))
-        
-        # If not found, compute and store
-        if embedding is None:
-            session = get_session()
-            try:
-                kg_utils = KnowledgeGraphUtils(session)
-                embedding = kg_utils.create_embedding(self.sentence)
-                chroma.store_edge_embedding(str(self.id), self.sentence, embedding)
-            finally:
-                session.close()  # Always close the session!
-        
-        return embedding
+        return get_chroma_manager().get_edge_embedding(str(self.id))
     
     __table_args__ = (
         UniqueConstraint('source_id', 'target_id', 'relationship_type', name='uq_edge_unique'),
