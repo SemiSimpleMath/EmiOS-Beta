@@ -46,9 +46,37 @@ class TestManagerExitNodeRawCapture:
         assert isinstance(bb.get_state_value("final_answer"), dict)
         assert bb.get_state_value("exit") is True
 
-    def test_explicit_result_wins_over_terminal_capture(self):
+    def test_explicit_result_wins_when_writer_produced_the_last_output(self):
+        # Planner return_control straight to exit: the planner wrote `result`
+        # AND is the latest agent_result — its payload is the answer.
         bb = Blackboard()
-        bb.add_msg(Message(data_type="agent_result", sender="some_agent", data={"noise": True}))
+        bb.add_msg(Message(data_type="agent_result", sender="team::planner", data={"result": PLAN}))
+        bb.update_state_value("result", PLAN)
+        bb.update_state_value("result_writer", "team::planner")
+
+        _exit_node(bb).action_handler(Message())
+
+        assert bb.get_state_value("final_answer_raw") == PLAN
+
+    def test_terminal_agent_supersedes_an_earlier_return_control_payload(self):
+        # The weekly-meal shape: planner return_control (routing artifact in
+        # `result`) -> terminal form agent produces the REAL answer -> exit.
+        bb = Blackboard()
+        routing_payload = {"action": "return_control", "result": "ready to plan"}
+        bb.add_msg(Message(data_type="agent_result", sender="weekly_meal_planning::planner", data=routing_payload))
+        bb.update_state_value("result", "ready to plan")
+        bb.update_state_value("result_writer", "weekly_meal_planning::planner")
+        bb.add_msg(Message(data_type="agent_result", sender="weekly_meal_planner", data=PLAN))
+
+        _exit_node(bb).action_handler(Message())
+
+        assert bb.get_state_value("final_answer_raw") == PLAN
+
+    def test_tool_envelope_result_stays_without_writer_stamp(self):
+        # tool_result_handler writes `result` without a writer stamp — the
+        # envelope keeps winning (pre-existing tool-exit flows unchanged).
+        bb = Blackboard()
+        bb.add_msg(Message(data_type="agent_result", sender="team::planner", data={"action": "some_tool"}))
         bb.update_state_value("result", PLAN)
 
         _exit_node(bb).action_handler(Message())

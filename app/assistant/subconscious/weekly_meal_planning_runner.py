@@ -129,6 +129,16 @@ def run_weekly_meal_planning_chain(
             "weekly_meal_planning_chain: manager result carried no final_answer_raw "
             f"(result_type={getattr(result, 'result_type', None)!r})"
         )
+    weekly_plan = output.get("weekly_plan")
+    if not (isinstance(weekly_plan, dict) and weekly_plan.get("slots")):
+        # A payload without plan slots is not a plan — persisting it would
+        # mint an empty pod that LOOKS like success (the 2026-07-08 empty-plan
+        # regression: an upstream agent's routing payload rode the result
+        # channel instead of the weekly_meal_planner's output).
+        raise RuntimeError(
+            "weekly_meal_planning_chain: recovered output has no weekly_plan.slots "
+            f"(keys={sorted(output.keys())[:10]})"
+        )
 
     summary: Dict[str, Any] = {
         "week_start_date": week_iso,

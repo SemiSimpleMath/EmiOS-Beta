@@ -29,14 +29,26 @@ class ManagerExitNode(ControlNode):
                 # would discard the dispatched manager's `result` answer text.
                 has_state_final = any(v not in (None, "", [], {}) for v in final_fields.values())
                 source_payload = final_fields if has_state_final else self.blackboard.get_state_value("result")
-                if source_payload is None:
-                    # Terminal-agent capture: a flow whose LAST hop is a
-                    # form-driven agent routed straight here (no action, so
-                    # nothing wrote `result` or final_answer_*). The terminal
-                    # agent's structured output IS the manager's answer —
-                    # carry it instead of exiting empty (callers used to
-                    # scrape the dead manager's audit messages for this).
-                    source_payload = self._latest_agent_result_data()
+                if not has_state_final:
+                    # Terminal-agent capture: when the flow's LAST hop is a
+                    # form-driven agent (no action, so nothing routed its
+                    # output into `result`), that agent's structured output
+                    # IS the manager's answer. Two shapes reach here:
+                    #   - `result` is None (nothing wrote it at all), or
+                    #   - `result` holds an EARLIER agent's return_control
+                    #     payload — a routing artifact, not the answer — and
+                    #     the state_map ran another agent afterwards
+                    #     (planner -> weekly_meal_planner -> exit). The
+                    #     result_writer stamp tells the two apart: a latest
+                    #     agent_result from a DIFFERENT agent supersedes.
+                    latest = self._latest_agent_result()
+                    if source_payload is None:
+                        source_payload = latest.data if latest is not None else None
+                    elif latest is not None:
+                        writer = str(self.blackboard.get_state_value("result_writer") or "")
+                        sender = str(getattr(latest, "sender", "") or "")
+                        if writer and sender and sender != writer:
+                            source_payload = latest.data
                 source_payload = FinalAnswerNormalizer.attach_carry_through(source_payload, self.blackboard)
                 if source_payload is not None:
                     normalized = FinalAnswerNormalizer.normalize(source_payload)
@@ -53,13 +65,13 @@ class ManagerExitNode(ControlNode):
         self.blackboard.update_state_value('next_agent', None)
         self.blackboard.update_state_value('last_agent', self.name)
 
-    def _latest_agent_result_data(self):
-        """Most recent agent_result message data (a non-empty dict), newest
-        first — the terminal agent's structured output."""
+    def _latest_agent_result(self):
+        """Most recent agent_result message carrying a non-empty dict —
+        the terminal agent's structured output (and its sender)."""
         for msg in reversed(self.blackboard.get_messages() or []):
             if getattr(msg, "data_type", None) != "agent_result":
                 continue
             data = getattr(msg, "data", None)
             if isinstance(data, dict) and data:
-                return data
+                return msg
         return None

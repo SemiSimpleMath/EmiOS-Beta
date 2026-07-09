@@ -24,6 +24,12 @@ class FlowController:
                 agent.blackboard.update_state_value("result", result_dict.get("result"))
             else:
                 agent.blackboard.update_state_value("result", result_dict)
+            # Stamp the writer: manager_exit_node uses it to tell a routing
+            # artifact from the manager's answer — when the state_map runs
+            # ANOTHER agent after this return_control (planner -> terminal
+            # form agent -> exit), the terminal agent's output supersedes
+            # this payload.
+            agent.blackboard.update_state_value("result_writer", agent.name)
 
             if nested_call_scope:
                 # Called-agent return path:
@@ -43,6 +49,7 @@ class FlowController:
         if action == "done":
             if result_dict.get("result"):
                 agent.blackboard.update_state_value("result", result_dict.get("result"))
+                agent.blackboard.update_state_value("result_writer", agent.name)
             if self._is_nested_call_scope(agent):
                 logger.info(
                     "[%s] done in nested call scope; deferring next/last routing to ToolResultHandler.",
