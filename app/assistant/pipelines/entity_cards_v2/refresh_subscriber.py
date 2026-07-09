@@ -66,18 +66,23 @@ LIMIT 200
 
 def _critic_veto_if_noise(entity_node_id: str, label: str) -> bool:
     """Run the L0 critic on a freshly built card; veto -> deactivate. Returns
-    True when the card was vetoed. Critic errors keep the card (logged)."""
+    True when the card was vetoed. Critic errors keep the card (logged).
+
+    Read -> close -> LLM -> short write transaction: the session must not
+    ride the critic call (db_manager discipline, 2026-07-08 KG audit G6).
+    """
     from app.assistant.ServiceLocator.service_locator import DI
     from app.assistant.utils.pydantic_classes import Message
     from app.assistant.pipelines.entity_cards_v2.builder import _scope
+    from app.models.db_manager import get_db_manager
 
-    session = get_session()
     try:
-        rows = session.execute(sql_text(
-            "SELECT s.section_name, s.intro_text FROM entity_card_section s "
-            "JOIN entity_card_v2 c ON s.card_id = c.id "
-            "WHERE c.entity_node_id = :nid ORDER BY s.position"
-        ), {"nid": entity_node_id}).fetchall()
+        with get_db_manager().read_session() as session:
+            rows = session.execute(sql_text(
+                "SELECT s.section_name, s.intro_text FROM entity_card_section s "
+                "JOIN entity_card_v2 c ON s.card_id = c.id "
+                "WHERE c.entity_node_id = :nid ORDER BY s.position"
+            ), {"nid": entity_node_id}).fetchall()
         brief = [f"ENTITY: {label}", "", "CARD AS RENDERED:"]
         brief += [f"  [{r[0]}] {(r[1] or '')[:400]}" for r in rows if (r[1] or "").strip()]
         brief += ["", "EVIDENCE (highest-importance graph facts about this entity):",
@@ -89,10 +94,10 @@ def _critic_veto_if_noise(entity_node_id: str, label: str) -> bool:
             agent_input={"card_brief": "\n".join(brief)}, scope_context=_scope()))
         data = resp.data if (resp is not None and getattr(resp, "data", None)) else {}
         if data.get("verdict") == "veto":
-            session.execute(sql_text(
-                "UPDATE entity_card_v2 SET is_active = 0 WHERE entity_node_id = :nid"
-            ), {"nid": entity_node_id})
-            session.commit()
+            with get_db_manager().transaction(op="card_refresh.critic_veto") as session:
+                session.execute(sql_text(
+                    "UPDATE entity_card_v2 SET is_active = 0 WHERE entity_node_id = :nid"
+                ), {"nid": entity_node_id})
             logger.info("[card_refresh] critic vetoed new card %r: %s",
                         label, (data.get("reason") or "")[:140])
             return True
@@ -100,8 +105,6 @@ def _critic_veto_if_noise(entity_node_id: str, label: str) -> bool:
     except Exception as e:
         logger.error("[card_refresh] critic QA failed for %r (card kept): %s", label, e)
         return False
-    finally:
-        session.close()
 
 
 def run_card_refresh(*, cooldown_days: int = DEFAULT_COOLDOWN_DAYS,

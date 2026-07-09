@@ -323,7 +323,7 @@ def tag_nodes_by_id(
     """
     from app.assistant.ServiceLocator.service_locator import DI
     from app.assistant.utils.pydantic_classes import Message
-    from app.models.base import get_session
+    from app.models.db_manager import get_db_manager
 
     stats = {
         "tagged": 0,
@@ -340,8 +340,13 @@ def tag_nodes_by_id(
     if not node_ids:
         return stats
 
-    session = get_session()
-    try:
+    # PLAN under a read session, snapshot to plain objects, close — the LLM
+    # batches below must not ride a held session (db_manager discipline;
+    # 2026-07-08 KG audit G6). Writes happen in one short transaction per
+    # batch.
+    from types import SimpleNamespace
+
+    with get_db_manager().read_session() as session:
         rows: list[Node] = (
             session.query(Node).filter(Node.id.in_(node_ids)).all()
         )
@@ -352,7 +357,7 @@ def tag_nodes_by_id(
             for n in rows:
                 importance_by_node[n.id] = max_source_entity_importance(session, n.id)
 
-        taggable: list[Node] = []
+        taggable: list[SimpleNamespace] = []
         for n in rows:
             if (n.node_type or "") not in _TAGGABLE_NODE_TYPES:
                 stats["skipped_type"] += 1
@@ -360,42 +365,49 @@ def tag_nodes_by_id(
             if not (n.original_sentence or n.description or "").strip():
                 stats["skipped_empty"] += 1
                 continue
-            taggable.append(n)
+            taggable.append(SimpleNamespace(
+                id=n.id, label=n.label, node_type=n.node_type,
+                category=n.category, original_sentence=n.original_sentence,
+                description=n.description,
+            ))
 
-        if not taggable:
-            return stats
+    if not taggable:
+        return stats
 
-        factory = DI.agent_factory
-        agent = factory.create_agent(_TAGGER_AGENT_NAME)
-        if agent is None:
+    factory = DI.agent_factory
+    agent = factory.create_agent(_TAGGER_AGENT_NAME)
+    if agent is None:
+        stats["errors"] += 1
+        logger.warning("[section_tagging] agent %s not available", _TAGGER_AGENT_NAME)
+        return stats
+
+    namespaces_block = _format_namespaces_block()
+
+    total_batches = (len(taggable) + _TAG_BATCH_SIZE - 1) // _TAG_BATCH_SIZE
+    for batch_idx, batch_start in enumerate(
+        range(0, len(taggable), _TAG_BATCH_SIZE), start=1,
+    ):
+        batch = taggable[batch_start : batch_start + _TAG_BATCH_SIZE]
+        nodes_block = _format_nodes_block(batch)
+        try:
+            resp = agent.action_handler(Message(
+                agent_input={
+                    "nodes_block": nodes_block,
+                    "namespaces_block": namespaces_block,
+                },
+                scope_context=scope_context,
+            ))
+            data = resp.data if resp and hasattr(resp, "data") else {}
+        except Exception as exc:
             stats["errors"] += 1
-            logger.warning("[section_tagging] agent %s not available", _TAGGER_AGENT_NAME)
-            return stats
+            logger.exception("[section_tagging] tagger raised: %s", exc)
+            continue
 
-        namespaces_block = _format_namespaces_block()
-
-        total_batches = (len(taggable) + _TAG_BATCH_SIZE - 1) // _TAG_BATCH_SIZE
-        for batch_idx, batch_start in enumerate(
-            range(0, len(taggable), _TAG_BATCH_SIZE), start=1,
-        ):
-            batch = taggable[batch_start : batch_start + _TAG_BATCH_SIZE]
-            nodes_block = _format_nodes_block(batch)
-            try:
-                resp = agent.action_handler(Message(
-                    agent_input={
-                        "nodes_block": nodes_block,
-                        "namespaces_block": namespaces_block,
-                    },
-                    scope_context=scope_context,
-                ))
-                data = resp.data if resp and hasattr(resp, "data") else {}
-            except Exception as exc:
-                stats["errors"] += 1
-                logger.exception("[section_tagging] tagger raised: %s", exc)
-                continue
-
-            tagged_ids: set[str] = set()        # got >=1 real card/wiki tag this batch
-            gate_skipped_ids: set[str] = set()  # intentionally deferred by importance gate
+        # APPLY: one short write transaction per batch — the next batch's
+        # LLM call starts with no session held.
+        tagged_ids: set[str] = set()        # got >=1 real card/wiki tag this batch
+        gate_skipped_ids: set[str] = set()  # intentionally deferred by importance gate
+        with get_db_manager().transaction(op="section_tagging.apply") as session:
             for tn in (data.get("results") or []):
                 try:
                     idx = int(tn.get("number"))
@@ -457,14 +469,10 @@ def tag_nodes_by_id(
                     [PROCESSED_SENTINEL], tagger_version=tagger_version,
                 )
                 stats["marked_processed"] += 1
-            session.commit()
-            logger.info(
-                "[section_tagging] batch %d/%d done — tagged so far: %d",
-                batch_idx, total_batches, stats["tagged"],
-            )
-
-    finally:
-        session.close()
+        logger.info(
+            "[section_tagging] batch %d/%d done — tagged so far: %d",
+            batch_idx, total_batches, stats["tagged"],
+        )
 
     logger.info(
         "[section_tagging] tagged=%d marked_processed=%d skipped_type=%d skipped_empty=%d "

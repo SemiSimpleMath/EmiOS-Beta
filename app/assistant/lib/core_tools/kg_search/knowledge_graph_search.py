@@ -216,6 +216,19 @@ class KnowledgeGraphSearch(BaseTool):
         self.session = get_session()
         self.do_lazy_init = False
 
+    def _release_session(self) -> None:
+        """Close the handler session. Called before the RAG LLM step (a
+        session must not ride an LLM call — db_manager discipline, 2026-07-08
+        KG audit G6) and at the end of execute() (previously nothing closed
+        it at all outside the __main__ demo — one leaked session per call).
+        A later handler call re-opens via lazy_init."""
+        if self.session is not None:
+            try:
+                self.session.close()
+            finally:
+                self.session = None
+                self.do_lazy_init = True
+
     def execute(self, tool_message: ToolMessage) -> ToolResult:
         if self.do_lazy_init:
             self.lazy_init()
@@ -245,6 +258,8 @@ class KnowledgeGraphSearch(BaseTool):
                     retryable=False,
                 )
             )
+        finally:
+            self._release_session()
 
     def publish_result(self, result: ToolResult) -> ToolResult:
         return result
@@ -700,6 +715,9 @@ class KnowledgeGraphSearch(BaseTool):
         min_similarity: float,
     ) -> ToolResult:
         """Shared LLM step for both node-anchored and global ask_kg modes."""
+        # Evidence is fully gathered (plain strings) — release the handler
+        # session so it doesn't ride the RAG agent call.
+        self._release_session()
         if not top_edges:
             msg = (
                 f"No embedded edge evidence found for '{base_node_label}' "
