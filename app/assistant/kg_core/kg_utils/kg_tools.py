@@ -1038,76 +1038,14 @@ def semantic_find_node_by_text(text: str, session: Session, threshold: float = 0
 
 
 
-def validate_kg_integrity(session: Session) -> Dict[str, Any]:
-    """
-    Performs basic integrity checks on the knowledge graph.
-    Returns a summary of problems found.
-    """
-    results = {
-        "orphaned_edges": [],
-        "self_loops": [],
-        "missing_nodes": [],
-        "duplicate_nodes": []
-    }
-
-    # Orphaned edges (source or target is null)
-    orphaned = session.query(Edge).filter(
-        (Edge.source_id == None) | (Edge.target_id == None)
-    ).all()
-    results["orphaned_edges"] = [str(e.id) for e in orphaned]
-
-    # Self-loops
-    self_loops = session.query(Edge).filter(Edge.source_id == Edge.target_id).all()
-    results["self_loops"] = [str(e.id) for e in self_loops]
-
-    # Edges pointing to nonexistent nodes (optional, expensive)
-    all_node_ids = set(row[0] for row in session.query(Node.id).all())
-    broken_edges = []
-    for edge in session.query(Edge).all():
-        if edge.source_id not in all_node_ids or edge.target_id not in all_node_ids:
-            broken_edges.append(str(edge.id))
-    results["missing_nodes"] = broken_edges
-
-    # Duplicate nodes: same label + type
-    from sqlalchemy import func
-    dupes = session.query(Node.label, Node.node_type, func.count(Node.id)) \
-        .group_by(Node.label, Node.node_type) \
-        .having(func.count(Node.id) > 1).all()
-    results["duplicate_nodes"] = [{"label": d[0], "type": d[1], "count": d[2]} for d in dupes]
-
-    return results
 
 
-def count_edges_by_type(session: Session) -> Dict[str, int]:
-    """
-    Returns a dictionary of edge type → count.
-    """
-    from sqlalchemy import func
-    counts = session.query(Edge.relationship_type, func.count(Edge.id)).group_by(Edge.relationship_type).all()
-    return {type_name: count for type_name, count in counts}
 
 
-def count_nodes_by_type(session: Session) -> Dict[str, int]:
-    """
-    Returns a dictionary of node type → count.
-    """
-    from sqlalchemy import func
-    counts = session.query(Node.node_type, func.count(Node.id)).group_by(Node.node_type).all()
-    return {type_name: count for type_name, count in counts}
 
 
-def get_outgoing_edges(node_id: uuid.UUID, session: Session) -> List[Edge]:
-    """
-    Return all edges where the given node is the source.
-    """
-    return session.query(Edge).filter(Edge.source_id == node_id).all()
 
 
-def get_incoming_edges(node_id: uuid.UUID, session: Session) -> List[Edge]:
-    """
-    Return all edges where the given node is the target.
-    """
-    return session.query(Edge).filter(Edge.target_id == node_id).all()
 
 
 def get_connected_nodes(node_id: uuid.UUID, session: Session, direction: str = "any") -> List[Node]:
@@ -1215,76 +1153,12 @@ def create_edge(session: Session, source_id: uuid.UUID, target_id: uuid.UUID, re
 
 
 # You will also need a delete_edges function in kg_tools.py that does NOT commit:
-def delete_edges(session: Session, edge_ids: list[str]):
-    """
-    Deletes edges from the knowledge graph by their IDs.
-    NOTE: This function does NOT commit the session. The caller is responsible for committing.
-    """
-    if not edge_ids:
-        return
-    # Ensure IDs are UUIDs if your Edge.id is UUID, or convert if needed
-    uuid_edge_ids = [uuid.UUID(eid) for eid in edge_ids]
-    session.query(Edge).filter(Edge.id.in_(uuid_edge_ids)).delete(synchronize_session='fetch')
 
 
-def get_or_create_node(session: Session, label: str, node_type: str, **kwargs) -> Node:
-    """
-    Retrieve a node by its label and type, or create it if it doesn't exist.
-    This is an atomic "upsert" pattern useful for data ingestion.
-    """
-    node = session.query(Node).filter_by(label=label, node_type=node_type).first()
-    if node:
-        return node
-    else:
-        # Pass along any other provided attributes to the create function
-        return create_node(session, label, node_type, **kwargs)
 
 
-def update_edge_type(session: Session, edge_id: uuid.UUID, new_relationship_type: str) -> Optional[Edge]:
-    """
-    Update the relationship_type of an edge.
-    NOTE: This function does NOT commit the session. The caller is responsible for committing.
-    Edge type validation is handled by the edge standardization system.
-    """
-    edge = session.get(Edge, edge_id)
-    if not edge:
-        logger.warning(f"Edge {edge_id} not found")
-        return None
-
-    edge.relationship_type = new_relationship_type
-    return edge
 
 
-def find_shortest_path(session: Session, start_node_id: uuid.UUID, end_node_id: uuid.UUID) -> Optional[List[Dict]]:
-    """
-    Finds the shortest path between two nodes using Breadth-First Search (BFS).
-    Returns a list of path segments, where each segment is a dictionary
-    containing the node and the edge that led to it.
-    """
-    if start_node_id == end_node_id:
-        return []
-
-    queue = deque([(start_node_id, [])])  # (current_node_id, path_so_far)
-    visited = {start_node_id}
-
-    while queue:
-        current_id, path = queue.popleft()
-
-        # Get all outgoing edges from the current node
-        edges = session.query(Edge).filter(Edge.source_id == current_id).all()
-        for edge in edges:
-            neighbor_id = edge.target_id
-            if neighbor_id == end_node_id:
-                # Path found!
-                final_path = path + [{"edge": edge, "node": session.get(Node, neighbor_id)}]
-                return final_path
-
-            if neighbor_id not in visited:
-                visited.add(neighbor_id)
-                new_path = path + [{"edge": edge, "node": session.get(Node, neighbor_id)}]
-                queue.append((neighbor_id, new_path))
-
-    return None  # No path found
 
 
 def get_neighborhood(session: Session, node_id: uuid.UUID, depth: int = 1) -> Dict[str, Any]:
@@ -1325,204 +1199,18 @@ def get_neighborhood(session: Session, node_id: uuid.UUID, depth: int = 1) -> Di
     return neighborhood
 
 
-def get_node_degree(session: Session, node_id: uuid.UUID) -> Dict[str, int]:
-    """
-    Calculates the in-degree, out-degree, and total degree for a specific node.
-    """
-    in_degree = session.query(Edge).filter(Edge.target_id == node_id).count()
-    out_degree = session.query(Edge).filter(Edge.source_id == node_id).count()
-
-    return {
-        "in_degree": in_degree,
-        "out_degree": out_degree,
-        "total_degree": in_degree + out_degree
-    }
 
 
-def find_subgraph_by_nodes(session: Session, node_ids: List[uuid.UUID]) -> Dict[str, List]:
-    """
-    Given a list of node IDs, returns all nodes and the edges that exist *between* them.
-    """
-    nodes = session.query(Node).filter(Node.id.in_(node_ids)).all()
-    edges = session.query(Edge).filter(
-        Edge.source_id.in_(node_ids),
-        Edge.target_id.in_(node_ids)
-    ).all()
-
-    return {"nodes": nodes, "edges": edges}
 
 
-def filter_kg_by_temporal_range(session: Session, start_date: str = None, end_date: str = None) -> Dict[str, List]:
-    """
-    Filter the entire knowledge graph to a specific time interval.
-    
-    This function now uses the new TemporalGraphFilter class for better performance
-    and consistency.
-    
-    Args:
-        session: Database session
-        start_date: Start of time range (ISO format string)
-        end_date: End of time range (ISO format string)
-        
-    Returns:
-        Dictionary with 'nodes' and 'edges' lists containing the temporally-filtered graph
-    """
-    temporal_filter = TemporalGraphFilter(session, start_date, end_date)
-    
-    # Get valid node and edge IDs
-    valid_node_ids = temporal_filter._get_valid_node_ids()
-    valid_edge_ids = temporal_filter._get_valid_edge_ids()
-    
-    if not valid_node_ids:
-        return {"nodes": [], "edges": []}
-    
-    # Get the actual nodes and edges
-    valid_nodes = session.query(Node).filter(Node.id.in_(valid_node_ids)).all()
-    valid_edges = session.query(Edge).filter(Edge.id.in_(valid_edge_ids)).all()
-    
-    return {"nodes": valid_nodes, "edges": valid_edges}
 
 
-def build_connected_subgraph_from_filtered_graph(filtered_graph: Dict[str, List], base_node_id: uuid.UUID, max_hops: int = None) -> Dict[str, List]:
-    """
-    Build a connected subgraph from a pre-filtered graph, starting from a base node.
-    
-    This is the second level of filtering - it takes a temporally-filtered graph
-    and builds a connected subgraph around a specific node with optional hop limits.
-    
-    Args:
-        filtered_graph: Dictionary with 'nodes' and 'edges' from filter_kg_by_temporal_range
-        base_node_id: UUID of the base node to start from
-        max_hops: Maximum number of hops from base node (None for unlimited)
-        
-    Returns:
-        Dictionary with 'nodes' and 'edges' lists containing the connected subgraph
-    """
-    from collections import defaultdict
-    
-    # Check if base node exists in filtered graph
-    base_node_exists = any(node.id == base_node_id for node in filtered_graph["nodes"])
-    if not base_node_exists:
-        return {"nodes": [], "edges": []}
-    
-    # Build edge lookup maps for O(1) access
-    edges_by_source = defaultdict(list)
-    edges_by_target = defaultdict(list)
-    
-    for edge in filtered_graph["edges"]:
-        edges_by_source[edge.source_id].append(edge)
-        edges_by_target[edge.target_id].append(edge)
-    
-    # BFS to find all connected nodes and edges
-    visited_nodes = {base_node_id}
-    queue = [(base_node_id, 0)]  # (node_id, hop_distance)
-    connected_edges = []
-    
-    while queue:
-        current_node, hop_distance = queue.pop(0)
-        
-        # Check hop limit
-        if max_hops is not None and hop_distance >= max_hops:
-            continue
-        
-        # Find all edges connected to current node
-        for edge in edges_by_source[current_node]:
-            if edge not in connected_edges:
-                connected_edges.append(edge)
-                if edge.target_id not in visited_nodes:
-                    visited_nodes.add(edge.target_id)
-                    queue.append((edge.target_id, hop_distance + 1))
-        
-        for edge in edges_by_target[current_node]:
-            if edge not in connected_edges:
-                connected_edges.append(edge)
-                if edge.source_id not in visited_nodes:
-                    visited_nodes.add(edge.source_id)
-                    queue.append((edge.source_id, hop_distance + 1))
-    
-    # Get the actual node objects from filtered graph
-    connected_nodes = [node for node in filtered_graph["nodes"] if node.id in visited_nodes]
-    
-    return {"nodes": connected_nodes, "edges": connected_edges}
 
 
-def build_temporal_subgraph(session: Session, base_node_id: uuid.UUID, filters: Dict[str, Any] = None, max_hops: int = None) -> Dict[str, List]:
-    """
-    Build a connected subgraph starting from a base node, applying temporal and other filters.
-    
-    This uses the new two-level filtering approach:
-    1. First, filter the entire KG to the specified time range
-    2. Then, build a connected subgraph from that filtered graph
-    
-    Args:
-        session: Database session
-        base_node_id: UUID of the base node to start from
-        filters: Dictionary of filter parameters (start_date, end_date, etc.)
-        max_hops: Maximum number of hops from base node (None for unlimited)
-        
-    Returns:
-        Dictionary with 'nodes' and 'edges' lists containing the connected subgraph
-    """
-    # Extract temporal filters
-    start_date = filters.get("start_date") if filters else None
-    end_date = filters.get("end_date") if filters else None
-    
-    # Step 1: Filter the entire KG by temporal range
-    filtered_graph = filter_kg_by_temporal_range(session, start_date, end_date)
-    
-    # Step 2: Build connected subgraph from the filtered graph
-    subgraph = build_connected_subgraph_from_filtered_graph(filtered_graph, base_node_id, max_hops)
-    
-    return subgraph
 
 
-def find_connected_nodes_with_temporal_filter(session: Session, base_node_id: uuid.UUID, filters: Dict[str, Any] = None, max_hops: int = None) -> List[Node]:
-    """
-    Find all nodes connected to a base node, applying temporal and other filters.
-    
-    This is a simpler version of build_temporal_subgraph that only returns connected nodes,
-    useful for functions that need to find connected nodes but don't need the full subgraph.
-    
-    Args:
-        session: Database session
-        base_node_id: UUID of the base node to start from
-        filters: Dictionary of filter parameters (start_date, end_date, etc.)
-        max_hops: Maximum number of hops from base node (None for unlimited)
-        
-    Returns:
-        List of connected Node objects
-    """
-    subgraph = build_temporal_subgraph(session, base_node_id, filters, max_hops)
-    return subgraph["nodes"]
 
 
-def find_similar_nodes_by_neighbors(session: Session, node_id: uuid.UUID, limit: int = 5) -> List[Tuple[Node, float]]:
-    """
-    Finds nodes that are structurally similar by comparing their neighbors.
-    Uses Jaccard similarity: J(A, B) = |A ∩ B| / |A ∪ B|.
-    """
-    target_neighbors = set(n.id for n in get_connected_nodes(node_id, session))
-    if not target_neighbors:
-        return []
-
-    all_nodes = session.query(Node).filter(Node.id != node_id).all()
-    scores = []
-
-    for candidate_node in all_nodes:
-        candidate_neighbors = set(n.id for n in get_connected_nodes(candidate_node.id, session))
-
-        intersection_size = len(target_neighbors.intersection(candidate_neighbors))
-        union_size = len(target_neighbors.union(candidate_neighbors))
-
-        if union_size == 0:
-            continue
-
-        jaccard_score = intersection_size / union_size
-        if jaccard_score > 0:
-            scores.append((candidate_node, jaccard_score))
-
-    scores.sort(key=lambda x: x[1], reverse=True)
-    return scores[:limit]
 
 
 
@@ -1845,3 +1533,11 @@ class TemporalGraphFilter:
                 "edges": len(valid_edge_ids) / total_edges if total_edges > 0 else 0
             }
         }
+
+
+# NOTE (2026-07-08 KG audit G5): sixteen zero-caller graph-algorithm
+# functions were deleted here (shortest-path/subgraph/degree family,
+# integrity+count helpers, get_or_create_node, update_edge_type,
+# delete_edges, find_similar_nodes_by_neighbors, the temporal-range
+# builders). Reachability-checked against the live roots before removal;
+# git history has the bodies if a graph algorithm is ever wanted back.
