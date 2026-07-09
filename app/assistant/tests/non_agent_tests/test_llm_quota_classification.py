@@ -207,6 +207,48 @@ class TestKillSwitch:
         assert exits == [1]
 
 
+# ── talking about quotas is not a quota error (audit L2) ─────────
+
+
+def test_agent_output_discussing_quota_passes_through(monkeypatch):
+    """The old success-path scanner raised QuotaExhaustedError when a
+    perfectly good response CONTAINED phrases like "quota exceeded" —
+    an agent explaining an API error would crash its own turn. Real quota
+    failures arrive as typed exceptions, never as response content."""
+    from types import SimpleNamespace
+
+    from app.assistant.agent_runtime.services.llm_client import LLMClient
+
+    client = LLMClient()
+    response = {
+        "final_answer_content": "OpenAI returns 'quota exceeded' / 'insufficient quota' "
+        "when billing lapses; 'rate limit exceeded' means slow down.",
+    }
+    fake_interface = SimpleNamespace(
+        structured_output=lambda msgs, use_json=False, **p: response,
+    )
+    monkeypatch.setattr(
+        LLMClient, "get_llm_interface", lambda self, *, agent: fake_interface,
+    )
+
+    class _BB:
+        def get_state_value(self, key):
+            return None
+
+    agent = SimpleNamespace(
+        name="tester",
+        llm_params={"llm_provider": "openai", "engine": "gpt-5-mini"},
+        blackboard=_BB(),
+        config={},
+    )
+    out = client.call_structured_output(
+        agent=agent,
+        messages=[{"role": "user", "content": "what do these API errors mean?"}],
+        response_format=None,
+    )
+    assert out == response
+
+
 # ── retry ladder honors the provider-suggested wait ───────────────
 
 

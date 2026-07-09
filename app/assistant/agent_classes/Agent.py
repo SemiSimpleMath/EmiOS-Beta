@@ -80,12 +80,6 @@ class Agent:
     def _set_agent_idle(self):
         self.components.status_tracker.set_busy(self.name, False)
 
-    def _check_for_quota_error(self, response_text: Any) -> None:
-        self.components.llm_client.check_for_quota_error(
-            agent_name=self.name,
-            response_text=response_text,
-        )
-
     def _update_blackboard_state(self, message: Message):
         """Unpack inbound message onto blackboard via AgentInputApplier."""
         self._input_applier.apply(self, message)

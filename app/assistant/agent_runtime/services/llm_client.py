@@ -2,7 +2,6 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-from app.assistant.agent_runtime.exceptions import QuotaExhaustedError
 from app.services.llm_factory import LLMFactory
 from app.assistant.utils.logging_config import get_logger
 
@@ -222,27 +221,6 @@ class LLMClient:
     LLM orchestration service used by Agent runtime.
     """
 
-    def check_for_quota_error(self, *, agent_name: str, response_text: Any) -> None:
-        if not response_text:
-            return
-
-        response_str = str(response_text).lower()
-        quota_keywords = [
-            "quota exceeded",
-            "rate limit exceeded",
-            "insufficient quota",
-            "quota exhausted",
-        ]
-
-        for keyword in quota_keywords:
-            if keyword in response_str:
-                logger.critical("❌ LLM QUOTA ERROR DETECTED in agent: %s", agent_name)
-                logger.critical("   Response preview: %s", str(response_text))
-                logger.critical("   Keyword: '%s'", keyword)
-                raise QuotaExhaustedError(
-                    f"[{agent_name}] LLM quota exhausted (matched '{keyword}')."
-                )
-
     def call_structured_output(
         self,
         *,
@@ -384,12 +362,10 @@ class LLMClient:
                 )
             finally:
                 set_current_call_context(**_prev_ctx)
-            self.check_for_quota_error(agent_name=agent.name, response_text=response)
             return response
         except Exception as e:
             logger.error("[%s] LLM call failed: %s", agent.name, e)
             logger.debug("[%s] LLM call exception details", agent.name, exc_info=True)
-            self.check_for_quota_error(agent_name=agent.name, response_text=str(e))
             raise
         finally:
             # Auto-clean ephemeral image paths (legacy chat-upload temps,
