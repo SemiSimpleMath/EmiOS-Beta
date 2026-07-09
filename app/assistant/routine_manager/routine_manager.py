@@ -1425,7 +1425,14 @@ class RoutineManager:
                 routine.runner,
                 sorted((routine.spec or {}).keys()),
             )
-            self._dispatch_routine(routine, run_ctx)
+            run_result = self._dispatch_routine(routine, run_ctx)
+            status, error = _status_from_result(run_result)
+            if status != "success" and propagate_exceptions:
+                # Manual/chat runs surface the reported failure to the
+                # caller the same way a raised one would.
+                raise RuntimeError(
+                    error or f"Routine '{routine.routine_id}' reported failure"
+                )
         except Exception as e:
             status = "error"
             error = str(e)[:1000]
@@ -1649,6 +1656,22 @@ class RoutineManager:
     def get_runtime_concurrency_status(self) -> Dict[str, Any]:
         config = self._load_config()
         return self._build_runtime_status_payload(config=config)
+
+
+def _status_from_result(run_result: Any) -> Tuple[str, Optional[str]]:
+    """Map a runner's RoutineRunResult onto the run outcome.
+
+    A runner that REPORTS failure (RoutineRunResult.status='error' — a
+    pipeline whose steps failed without raising, a function returning an
+    error dict) counts exactly like one that raises: it reaches the same
+    backoff / auto-disable / ticket machinery. 'skipped' is a success for
+    run accounting — nothing went wrong, there was nothing to do.
+    """
+    raw = str(getattr(run_result, "status", "") or "success").strip().lower()
+    if raw in ("success", "skipped"):
+        return "success", None
+    message = str(getattr(run_result, "message", "") or "") or f"runner reported status={raw}"
+    return "error", message[:1000]
 
 
 def _set_running_state(

@@ -200,9 +200,15 @@ class DayFlowRunner:
             prune_pipeline_runs_dir(pipeline_runs_dir=ctx.pipeline_runs_dir, max_files=1500)
         except Exception:
             pass
+        overall_status = "success"
+        for r in results:
+            if isinstance(r, dict) and r.get("status") == "error":
+                overall_status = "error"
+                break
         return {
             "pipeline_id": ctx.pipeline_id,
             "run_id": ctx.run_id,
+            "status": overall_status,
             "boundary_date_local": ctx.boundary_date_local,
             "audit_path": str(ctx.audit_path()),
             "steps": results,

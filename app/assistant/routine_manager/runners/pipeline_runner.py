@@ -27,5 +27,29 @@ class PipelineRoutineRunner:
             run_id=run_ctx.run_id,
             force=run_ctx.force,
         )
-        pipeline_status = result.get("status", "error") if isinstance(result, dict) else "error"
-        return RoutineRunResult(status=pipeline_status, data={"pipeline_id": pipeline_id, "pipeline_result": result})
+        # The pipeline contract is a dict with an explicit top-level
+        # "status" (success|error, plus soft statuses like "skipped").
+        # Fail loud on a missing key rather than guess — this status now
+        # drives the routine failure machinery (backoff/auto-disable).
+        if not isinstance(result, dict):
+            raise RuntimeError(
+                f"Pipeline '{pipeline_id}' returned {type(result).__name__}; "
+                "the pipeline contract is a dict with a 'status' key"
+            )
+        pipeline_status = str(result.get("status") or "").strip().lower()
+        if not pipeline_status:
+            raise RuntimeError(
+                f"Pipeline '{pipeline_id}' returned no 'status' key; "
+                "return status='success'|'error' like the other pipelines"
+            )
+        message = ""
+        if pipeline_status not in ("success", "skipped"):
+            failed = result.get("failed_steps")
+            message = f"pipeline status={pipeline_status}" + (
+                f" failed_steps={failed}" if failed else ""
+            )
+        return RoutineRunResult(
+            status=pipeline_status,
+            message=message,
+            data={"pipeline_id": pipeline_id, "pipeline_result": result},
+        )

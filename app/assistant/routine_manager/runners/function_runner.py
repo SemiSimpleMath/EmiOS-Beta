@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import inspect
-from typing import Any, Callable
+from typing import Any, Callable, Optional
+
+from app.assistant.utils.logging_config import get_logger
 
 from .types import RoutineLike
 from app.assistant.routine_manager.run_types import RoutineRunContext, RoutineRunResult
+
+logger = get_logger(__name__)
 
 
 class FunctionRoutineRunner:
@@ -25,7 +29,14 @@ class FunctionRoutineRunner:
             raise ValueError("function runner requires spec.function_name")
         fn = self._registry.get(fn_name)
         if fn is None:
-            raise ValueError(f"Unknown routine function: {fn_name}")
+            fn = self._rediscover(fn_name)
+        if fn is None:
+            raise ValueError(
+                f"Unknown routine function: {fn_name}. The registry is built at "
+                "boot (routine_functions + routine_handlers discovery) and was "
+                "re-checked just now; check the boot log for '[routine_handlers]' "
+                "import failures."
+            )
 
         # Bind ONCE from the function's declared signature, call ONCE.
         # (The previous dispatch probed four call shapes catching TypeError
@@ -46,8 +57,37 @@ class FunctionRoutineRunner:
                 "was fired by an event trigger; add event_message=None to its "
                 "signature."
             )
-        fn(**kwargs)
+        result = fn(**kwargs)
+        # A function that REPORTS failure counts like one that raises.
+        # (sleep_camera_tick_local-style handlers return {"status": "error",
+        # …} dicts; before this, those were invisible to the failure
+        # machinery — the runner hardcoded success.)
+        if isinstance(result, dict) and str(result.get("status") or "").strip().lower() == "error":
+            return RoutineRunResult(
+                status="error",
+                message=str(
+                    result.get("error") or result.get("message")
+                    or "function reported status=error"
+                ),
+                data={"function_name": fn_name, "result": result},
+            )
         return RoutineRunResult(status="success", data={"function_name": fn_name})
+
+    def _rediscover(self, fn_name: str) -> Optional[Callable[..., Any]]:
+        """A handler file dropped after boot isn't in the import-frozen
+        registry even though its routine config hot-reloads every tick
+        (the pod_retention incident, routine audit R3). One fresh
+        discovery pass picks it up; boot-registered names keep priority.
+        """
+        try:
+            from app.assistant.routine_handlers import discover_handlers
+            for name, fn in discover_handlers().items():
+                self._registry.setdefault(name, fn)
+        except Exception:
+            logger.warning(
+                "[function_runner] handler re-discovery failed", exc_info=True,
+            )
+        return self._registry.get(fn_name)
 
 
 def _kwargs_for(fn: Callable[..., Any], available: dict[str, Any]) -> dict[str, Any]:

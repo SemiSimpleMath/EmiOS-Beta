@@ -94,6 +94,52 @@ def test_zero_arg_and_var_kwargs_functions():
     assert set(seen) == {"target_date", "routine", "event_message"}
 
 
+def test_error_dict_return_maps_to_error_result():
+    def fn(*, target_date=None, routine=None):
+        return {"status": "error", "error": "camera unreachable"}
+
+    result = FunctionRoutineRunner({"fn": fn}).run(_routine("fn"), _ctx())
+    assert result.status == "error"
+    assert result.message == "camera unreachable"
+
+
+def test_ok_dict_and_stats_dict_returns_map_to_success():
+    runner = FunctionRoutineRunner({
+        "ok": lambda **kw: {"status": "ok", "snapshot_path": "x"},
+        "stats": lambda **kw: {"edges_rated": 12},
+    })
+    assert runner.run(_routine("ok"), _ctx()).status == "success"
+    assert runner.run(_routine("stats"), _ctx()).status == "success"
+
+
+def test_registry_miss_triggers_rediscovery(monkeypatch):
+    """A handler file dropped after boot (config hot-reloads, registry is
+    import-frozen — the pod_retention incident) is found by a fresh
+    discovery pass instead of failing until restart."""
+    seen = {}
+
+    def late_fn(*, target_date=None, routine=None, event_message=None):
+        seen["ran"] = True
+
+    monkeypatch.setattr(
+        "app.assistant.routine_handlers.discover_handlers",
+        lambda: {"late_fn": late_fn},
+    )
+    registry = {}
+    result = FunctionRoutineRunner(registry).run(_routine("late_fn"), _ctx())
+    assert result.status == "success"
+    assert seen == {"ran": True}
+    assert registry["late_fn"] is late_fn  # merged for the next fire
+
+
+def test_registry_miss_after_rediscovery_raises_with_boot_hint(monkeypatch):
+    monkeypatch.setattr(
+        "app.assistant.routine_handlers.discover_handlers", lambda: {},
+    )
+    with pytest.raises(ValueError, match="check the boot log"):
+        FunctionRoutineRunner({}).run(_routine("ghost_fn"), _ctx())
+
+
 def test_registry_census_every_live_function_binds():
     """Every registered routine function (manual + auto-discovered) must
     accept the standard kwargs via signature binding."""
