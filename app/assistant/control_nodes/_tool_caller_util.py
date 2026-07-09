@@ -222,6 +222,34 @@ def _execute_tool(
     arguments: Dict[str, Any],
     scope_context: ScopeContext | None,
 ) -> Dict[str, Any] | str:
+    from app.assistant.lib.tool_execution.tool_access_control import (
+        check_tool_access,
+        resolve_tool_min_authority,
+    )
+    from app.assistant.lib.tool_execution.tool_approval import (
+        compute_approval_reasons,
+        finalize_approval_ticket,
+        request_approval,
+    )
+
+    # Dispatch-layer gates — the same wall ToolCaller runs (audit T2).
+    # Scope-build filtering and the agent-layer allowlist are the first
+    # lines; this is the belt, and the ONLY place
+    # scope.requires_approval_tools and the contract approval thresholds
+    # fire for room-dispatched calls.
+    scope_contract_enforced = bool(blackboard.get_state_value("scope_contract_enforced", False))
+    allowed, reason = check_tool_access(
+        tool_name=tool_name,
+        scope_contract_enforced=scope_contract_enforced,
+        scope_context=scope_context,
+        task_allowed_tools=blackboard.get_state_value("task_allowed_tools"),
+        task_except_tools=blackboard.get_state_value("task_except_tools"),
+        caller_name=name,
+        tool_min_authority=resolve_tool_min_authority(tool_name, tool_config),
+    )
+    if not allowed:
+        raise ValueError(f"[{name}] {reason}")
+
     tool_data: Dict[str, Any] = {
         "tool_name": tool_name,
         "arguments": dict(arguments),
@@ -253,21 +281,54 @@ def _execute_tool(
     )
 
     is_mcp = tool_config.get("backend") == "mcp"
-    if is_mcp:
-        tool_result = execute_mcp_tool_call(
-            tool_name=tool_name,
-            tool_config=tool_config,
-            arguments=arguments,
-            tool_registry=tool_registry,
-        )
-    else:
+    tool_instance = None
+    if not is_mcp:
         tool_class = tool_config.get("tool_class")
         if not tool_class:
             raise ValueError(
                 f"[{name}] Tool '{tool_name}' has no valid tool_class."
             )
         tool_instance = tool_class()
-        tool_result = tool_instance.execute(tool_message)
+
+    approval_reasons = compute_approval_reasons(
+        tool_name=tool_name,
+        tool_config=tool_config if isinstance(tool_config, dict) else {},
+        scope_context=scope_context if isinstance(scope_context, ScopeContext) else None,
+        tool_message=tool_message,
+    )
+    approval_ticket_id = None
+    tool_result = None
+    if tool_name != "ask_user" and approval_reasons:
+        approved, approval_ticket_id, blocked_result = request_approval(
+            tool_name=tool_name,
+            tool_message=tool_message,
+            calling_agent=str(blackboard.get_state_value("calling_agent") or name),
+            approval_reasons=approval_reasons,
+            tool_instance=tool_instance,
+            scope_context=scope_context if isinstance(scope_context, ScopeContext) else None,
+            blackboard=blackboard,
+        )
+        if not approved:
+            if blocked_result is None:
+                raise RuntimeError(
+                    f"[{name}] Approval flow returned non-approved without ToolResult for '{tool_name}'."
+                )
+            # The denial flows through the same payload conversion below —
+            # the planner/room sees the blocked error; nothing executed.
+            tool_result = blocked_result
+
+    if tool_result is None:
+        if is_mcp:
+            tool_result = execute_mcp_tool_call(
+                tool_name=tool_name,
+                tool_config=tool_config,
+                arguments=arguments,
+                tool_registry=tool_registry,
+            )
+        else:
+            tool_result = tool_instance.execute(tool_message)
+        if isinstance(approval_ticket_id, str) and approval_ticket_id.strip():
+            finalize_approval_ticket(ticket_id=approval_ticket_id, tool_result=tool_result)
 
     result_type = str(getattr(tool_result, "result_type", "") or "").strip()
     content = str(getattr(tool_result, "content", "") or "")
