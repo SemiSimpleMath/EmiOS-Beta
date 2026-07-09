@@ -797,105 +797,16 @@ class OpenAILLM(BaseLLMProvider):
                 logger.debug("llm_call_log write skipped: %s", _telemetry_err)
 
     def structured_output_json(self, messages, **send_params):
-        messages = _normalize_openai_responses_messages(messages)
-        json_schema = send_params.get('response_format')
-
-        model = send_params.get('engine') or send_params.get('model') or "gpt-4.1"
-        temperature = send_params.get('temperature')
-        timeout = send_params.get('timeout', 120)
-
-        # Allow passing a Pydantic model here too.
-        try:
-            from pydantic import BaseModel as _BaseModel  # type: ignore
-            if isinstance(json_schema, type) and issubclass(json_schema, _BaseModel):
-                json_schema = pydantic_to_openai_schema(json_schema)
-        except Exception:
-            logger.debug("Could not convert Pydantic schema to OpenAI schema", exc_info=True)
-
-        if json_schema is None:
-            logger.error("Response format is None. Please ensure a valid response format is provided.")
-            raise ValueError("Invalid response format: None")
-
-        # Log which model is being used with all parameters
-        logger.info(f"Using model: {model} for structured JSON output, with temperature {temperature}, timeout {timeout}s.")
-
-        # Start timing the LLM call
-        timer_id = performance_monitor.start_timer('llm_structured_output_json', f"{model}_{len(messages)}")
-
-        try:
-            if not isinstance(model, str) or not model.strip():
-                raise ValueError("model must be a non-empty string")
-            caps = OpenAIModelCapabilityNormalizer(model_name=model)
-            strategy = OpenAIJsonSchemaStrategy()
-            event = strategy.execute(
-                client=self.client,
-                caps=caps,
-                messages=messages,
-                timeout=timeout,
-                temperature=temperature,
-                response_format=json_schema if isinstance(json_schema, dict) else {"type": "object"},
-            )
-
-            # Extract detailed token usage information from responses API
-            usage = getattr(strategy, "last_usage", None)
-            if usage:
-                prompt_tokens = getattr(usage, 'prompt_tokens', 0)
-                completion_tokens = getattr(usage, 'completion_tokens', 0)
-                cached_tokens = getattr(usage, 'cached_tokens', 0)
-                total_tokens = getattr(usage, 'total_tokens', 0)
-                
-                # Log detailed token usage
-                logger.info(f"Token usage (JSON) - Input: {prompt_tokens}, Output: {completion_tokens}, Cached: {cached_tokens}, Total: {total_tokens}")
-            else:
-                prompt_tokens = completion_tokens = cached_tokens = total_tokens = None
-                logger.warning("No token usage information available in JSON response")
-
-            # End timing and record success
-            performance_monitor.end_timer(timer_id, {
-                'status': 'success',
-                'model': model,
-                'message_count': len(messages),
-                'temperature': temperature,
-                'timeout': timeout,
-                'total_tokens': total_tokens,
-                'prompt_tokens': prompt_tokens,
-                'completion_tokens': completion_tokens,
-                'cached_tokens': cached_tokens
-            })
-
-            return event
-
-        except Exception as e:
-            # End timing and record error
-            performance_monitor.end_timer(timer_id, {
-                'status': 'error',
-                'model': model,
-                'message_count': len(messages),
-                'temperature': temperature,
-                'timeout': timeout,
-                'error': str(e)
-            })
-
-            logger.error(f"Error processing input function_query: {e}")
-
-            if isinstance(e, (BillingQuotaExhausted, TransientRateLimit)):
-                raise
-            canonical = _translate_openai_exception(e)
-            if canonical is not None:
-                if isinstance(canonical, BillingQuotaExhausted):
-                    logger.critical(
-                        "LLM billing quota exhausted — context: structured_output_json (model: %s) — %s",
-                        model, e,
-                    )
-                raise canonical from e
-
-            error_str = str(e).lower()
-            # Fail loudly: never convert provider errors into plain strings.
-            if "timeout" in error_str:
-                raise TimeoutError(f"LLM request timed out after {timeout} seconds") from e
-            if "rate limit" in error_str:
-                raise TransientRateLimit(str(e)) from e
-            raise RuntimeError(f"LLM structured_output_json failed: {e}") from e
+        """Dict-schema structured output — same call path as
+        structured_output (which routes a dict response_format to the JSON
+        schema strategy natively), so the telemetry finally-hook, the quota
+        translation, and the timeout ladder all apply here too. This route
+        used to be a separate duplicated body with NO llm_call_log hook —
+        agents on dict schemas (fast_tool::final_answer,
+        orchestrator_evaluator) had zero telemetry rows ever (audit L3).
+        Gemini and Anthropic already alias the same way.
+        """
+        return self.structured_output(messages, **send_params)
 
 # ---------------------------------------------------------------------------
 # Gemini schema utilities — available for manually inlining $ref/$defs or

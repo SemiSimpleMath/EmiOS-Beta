@@ -18,6 +18,8 @@
   "claude-opus-4-7":     {"input_per_1m_usd": 5.0,  "output_per_1m_usd": 25.0},
   "claude-sonnet-4-6":   {"input_per_1m_usd": 3.0,  "output_per_1m_usd": 15.0},
   "claude-haiku-4-5-20251001": {"input_per_1m_usd": 1.0, "output_per_1m_usd": 5.0},
+  "claude-3-5-haiku-20241022":  {"input_per_1m_usd": 0.80, "output_per_1m_usd": 4.0},
+  "claude-3-5-sonnet-20241022": {"input_per_1m_usd": 3.0,  "output_per_1m_usd": 15.0},
 
   "gemini-3-flash-preview": {"input_per_1m_usd": 0.50, "output_per_1m_usd": 3.00},
   "gemini-3-pro-preview":   {"input_per_1m_usd": 1.25, "output_per_1m_usd": 5.00}

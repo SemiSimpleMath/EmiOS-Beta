@@ -102,6 +102,12 @@ def get_current_call_context() -> dict:
 
 _price_cache: Optional[dict] = None
 
+# Engines already warned about — one warning per engine per process, so a
+# missing price entry is loud without flooding (an unpriced engine can fire
+# thousands of calls a day, every one silently costed $0 otherwise; the
+# gpt-5.4/gpt-5.5 rows of 2026-05-27/28 shipped exactly that way).
+_unpriced_warned: set[str] = set()
+
 
 def _load_prices() -> dict:
     global _price_cache
@@ -143,6 +149,13 @@ def _cost_for(
     prices = _load_prices()
     entry = prices.get(engine)
     if not entry:
+        if engine not in _unpriced_warned:
+            _unpriced_warned.add(engine)
+            logger.warning(
+                "[llm_call_logger] no price entry for engine %r — cost recorded "
+                "as $0; add it to configs/llm_prices.json",
+                engine,
+            )
         return 0.0, 0.0
     in_rate = float(entry.get("input_per_1m_usd") or 0.0)
     out_rate = float(entry.get("output_per_1m_usd") or 0.0)
