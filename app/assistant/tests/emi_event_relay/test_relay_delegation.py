@@ -93,3 +93,40 @@ def test_empty_chat_on_transport_surface_not_published(monkeypatch):
     )
 
     assert publisher.calls == []
+
+
+def test_handler_resolves_reply_to_once_for_tts_and_queue():
+    """Delivery audit D4: socket_emit_handler resolves the destination ONCE
+    and hands the resolved dict to both the TTS job and the queued emit.
+    Each used to resolve independently — an unpinned message logged the
+    defaulted-to-master_room WARN twice and could race the reply_router
+    TTL to two different answers."""
+    import queue as queue_mod
+
+    relay = _relay()
+    relay.message_queue = queue_mod.Queue()
+    submitted = []
+    relay.tts_executor = SimpleNamespace(
+        submit=lambda fn, *args: submitted.append(args),
+    )
+    resolve_calls = []
+    real_resolve = relay._resolve_reply_to
+
+    def _counting_resolve(message, preferred_reply_to=None):
+        resolve_calls.append(preferred_reply_to)
+        return real_resolve(message, preferred_reply_to=preferred_reply_to)
+
+    relay._resolve_reply_to = _counting_resolve
+
+    msg = SimpleNamespace(sender="assistant", metadata={}, request_id=None, sub_data_type=[])
+    payload = SimpleNamespace(
+        chat="hi", feed="", widget_data=None, sound=None, tts=True, tts_text="hi",
+    )
+
+    relay.socket_emit_handler(SimpleNamespace(user_message_data=payload, **msg.__dict__))
+
+    assert len(resolve_calls) == 1              # one resolution per message
+    resolved = {"type": "socketio", "room_id": "master_room"}
+    assert submitted[0][2] == resolved          # TTS job got the resolved dict
+    _, _, queued_reply_to = relay.message_queue.get_nowait()
+    assert queued_reply_to == resolved          # queued emit got the same dict

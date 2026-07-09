@@ -23,10 +23,17 @@ class ReplyRouter:
     - future: Slack/Email/etc
     """
 
+    # Expired routes are swept opportunistically from set_route, at most
+    # this often. Without it the map only ever forgets a request_id when
+    # someone happens to get_route that exact id after its TTL — every
+    # other route lives forever (slow leak, one entry per inbound turn).
+    _PRUNE_INTERVAL_SECONDS: float = 3600.0
+
     def __init__(self, *, ttl_seconds: float = 24 * 3600):
         self._ttl_seconds = float(ttl_seconds)
         self._lock = threading.Lock()
         self._routes: Dict[str, ReplyRoute] = {}
+        self._last_prune_ts = time.time()
 
     def set_route(self, request_id: str, reply_to: Dict[str, Any]) -> None:
         if not request_id:
@@ -40,6 +47,9 @@ class ReplyRouter:
                 reply_to=dict(reply_to),
                 created_at_ts=now,
             )
+        if (now - self._last_prune_ts) >= self._PRUNE_INTERVAL_SECONDS:
+            self._last_prune_ts = now
+            self.prune()
 
     def get_route(self, request_id: Optional[str]) -> Optional[Dict[str, Any]]:
         if not request_id:

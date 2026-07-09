@@ -17,7 +17,6 @@ class EmiEventRelay:
 
     def __init__(self):
         self.blackboard = DI.global_blackboard
-        self.waiting_for_user_response = False
         self.message_queue = queue.Queue()
         tts_workers = int(os.environ.get("EMI_TTS_WORKER_THREADS", "24"))
         self.tts_executor = MonitoredThreadPoolExecutor(
@@ -52,22 +51,29 @@ class EmiEventRelay:
         except Exception:
             preferred_reply_to = None
 
+        # Resolve ONCE here and hand the resolved destination to both the
+        # TTS job and the queued emit. Each used to resolve independently,
+        # so a message with no pinned destination logged the defaulted-to-
+        # master_room WARN twice per message and could race the reply_router
+        # TTL to two different answers.
+        reply_to = self._resolve_reply_to(message, preferred_reply_to=preferred_reply_to)
+
         logger.info(
-            "[TTS:relay] socket_emit_handler sender=%s payload.tts=%s preferred_reply_to=%r",
+            "[TTS:relay] socket_emit_handler sender=%s payload.tts=%s reply_to=%r",
             getattr(message, "sender", "?"),
             getattr(payload, "tts", "?"),
-            preferred_reply_to,
+            reply_to,
         )
 
         if payload.tts:
             if payload.tts_text:
                 logger.info("[TTS:relay] Submitting TTS job. text_len=%d", len(payload.tts_text))
-                self.tts_executor.submit(self._process_tts, payload.tts_text, message, preferred_reply_to)
+                self.tts_executor.submit(self._process_tts, payload.tts_text, message, reply_to)
             else:
                 logger.warning("[TTS:relay] TTS flag set but 'tts_text' is missing.")
                 self._emit_error('audio_file_error', "Missing 'tts_text' in payload.")
 
-        self.message_queue.put((message, payload, preferred_reply_to))
+        self.message_queue.put((message, payload, reply_to))
 
     def notify_ui_of_repo_update(self, msg: Message):
         """Notifies the UI about repository updates via WebSocket."""
