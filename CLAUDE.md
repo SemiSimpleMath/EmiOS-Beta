@@ -111,7 +111,7 @@ Pipelines (`app/assistant/pipelines/`) are sequential step-based processing (dai
 
 ### Knowledge Graph
 
-SQLite + ChromaDB. Core in `app/assistant/kg_core/`. Entity cards, taxonomy hierarchy, sentence-level storage with embeddings. KG owner scoping via `ScopeContext.owner_id`.
+SQLite + ChromaDB. Data layer in `app/assistant/kg/` (store, promoter, chroma sync); utilities/taxonomy in `app/assistant/kg_core/`. Entity cards, taxonomy hierarchy, sentence-level storage with embeddings. The graph is single-owner: nodes/edges carry no owner column (`ScopeContext.owner_id` is identity metadata elsewhere in the system, not a KG partition key).
 
 ## Key Conventions
 
