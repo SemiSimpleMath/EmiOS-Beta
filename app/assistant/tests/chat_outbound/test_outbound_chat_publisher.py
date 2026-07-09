@@ -150,6 +150,48 @@ class TestTelegramRouting:
         assert ok is False
 
 
+class TestEmbedSenderOptOut:
+    """embed_sender=False sends the raw text — the EmiEventRelay delegation
+    path uses this because its messages are the assistant's own replies,
+    not narrator/worker lines that need a [sender] tag."""
+
+    def test_slack_embed_sender_false_sends_raw_text(self, publisher):
+        slack_transport = MagicMock()
+        with patch("app.assistant.chat_outbound.outbound_chat_publisher.DI") as mock_di:
+            mock_di.room_session_manager = MagicMock(slack_transport=slack_transport)
+            ok = publisher.publish(
+                sender="assistant", text="On it",
+                reply_to={"type": "slack", "channel_id": "C123", "thread_ts": "1.0"},
+                embed_sender=False,
+            )
+        assert ok is True
+        assert slack_transport.send_reply.call_args.kwargs["body"] == "On it"
+
+    def test_telegram_embed_sender_false_sends_raw_text(self, publisher):
+        telegram_transport = MagicMock()
+        with patch("app.assistant.chat_outbound.outbound_chat_publisher.DI") as mock_di:
+            mock_di.room_session_manager = MagicMock(telegram_transport=telegram_transport)
+            ok = publisher.publish(
+                sender="assistant", text="Done!",
+                reply_to={"type": "telegram", "chat_id": "42"},
+                embed_sender=False,
+            )
+        assert ok is True
+        assert telegram_transport.send_reply.call_args.kwargs["body"] == "Done!"
+
+    def test_sms_embed_sender_false_sends_raw_text(self, publisher):
+        sms_transport = MagicMock()
+        with patch("app.assistant.chat_outbound.outbound_chat_publisher.DI") as mock_di:
+            mock_di.room_session_manager = MagicMock(sms_transport=sms_transport)
+            ok = publisher.publish(
+                sender="assistant", text="Reminder!",
+                reply_to={"type": "twilio_sms", "to": "+1555", "from": "+1444"},
+                embed_sender=False,
+            )
+        assert ok is True
+        assert sms_transport.send_reply.call_args.kwargs["body"] == "Reminder!"
+
+
 class TestUnknownSurface:
 
     def test_unknown_surface_returns_false(self, publisher):

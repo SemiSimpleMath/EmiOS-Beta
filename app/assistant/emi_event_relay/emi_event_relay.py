@@ -200,86 +200,48 @@ class EmiEventRelay:
         with self.socket_lock:
             socket_io.emit(event, payload, room=socket_id)
 
-    def _emit_via_twilio_sms(self, *, body: str, to_number: str, from_number: str):
-        try:
-            from app.services.twilio_sms import TwilioSmsService
-            TwilioSmsService().send_sms(to_number=to_number, from_number=from_number, body=body)
-        except Exception as e:
-            logger.error("Failed to send Twilio SMS: %s", e, exc_info=True)
-
-    def _emit_via_slack(self, *, body: str, channel_id: str, thread_ts: str = ""):
-        try:
-            from app.services.slack import SlackService
-            SlackService().send_message(
-                channel_id=channel_id, text=body, thread_ts=thread_ts or None,
-            )
-        except Exception as e:
-            logger.error("Failed to deliver Slack message to channel=%s: %s", channel_id, e)
-            logger.debug("slack send exception details", exc_info=True)
-
-    def _emit_via_telegram(self, *, body: str, chat_id: str):
-        try:
-            from app.services.telegram_bot import TelegramBotService
-            TelegramBotService().send_message(chat_id=chat_id, text=body)
-        except Exception as e:
-            logger.error("Failed to send Telegram message: %s", e, exc_info=True)
-
     def _emit_message(self, message, payload, preferred_reply_to=None):
-        """Handles actual emission of messages based on reply_to transport."""
+        """Handles actual emission of messages based on reply_to transport.
+
+        Socketio is emitted here (the relay IS the socket terminal — routing
+        this through OutboundChatPublisher's socketio path would publish
+        socket_emit right back to this relay). Every other surface delegates
+        to OutboundChatPublisher, the single surface dispatcher: one set of
+        transport branches, and Slack rides SlackRoomTransport/SlackTool with
+        its allow_real_slack_send safety gate (the old inline branch called
+        SlackService directly, bypassing the gate). embed_sender=False —
+        these are the assistant's own replies, not narrator/worker lines.
+        """
         reply_to = self._resolve_reply_to(message, preferred_reply_to=preferred_reply_to)
         if not isinstance(reply_to, dict):
             logger.error("Cannot emit user_message_data: no reply_to resolved for message sender=%r", getattr(message, "sender", None))
             return
         rtype = (reply_to.get("type") or "").strip().lower()
 
-        data = {
-            "chat": payload.chat,
-            "feed": payload.feed,
-            "widget_data": payload.widget_data,
-            "sound": payload.sound,
-        }
-        # Forward sub_data_type so the frontend can style proactive messages differently.
-        sub_data_type = getattr(message, "sub_data_type", None)
-        if isinstance(sub_data_type, list) and sub_data_type:
-            data["sub_data_type"] = sub_data_type
-
-        if rtype == "twilio_sms":
-            text = (payload.chat or "").strip()
-            if not text:
-                return
-            to_number = (reply_to.get("to") or "").strip()
-            from_number = (reply_to.get("from") or "").strip()
-            if not to_number or not from_number:
-                logger.error("Twilio reply_to missing to/from; cannot send SMS.")
-                return
-            self._emit_via_twilio_sms(body=text, to_number=to_number, from_number=from_number)
-            return
-
-        if rtype == "telegram":
-            text = (payload.chat or "").strip()
-            if not text:
-                return
-            chat_id = str(reply_to.get("chat_id") or "").strip()
-            if not chat_id:
-                logger.error("Telegram reply_to missing chat_id; cannot send message.")
-                return
-            self._emit_via_telegram(body=text, chat_id=chat_id)
-            return
-
-        if rtype == "slack":
-            text = (payload.chat or "").strip()
-            if not text:
-                return
-            channel_id = str(reply_to.get("channel_id") or "").strip()
-            if not channel_id:
-                logger.error("Slack reply_to missing channel_id; cannot send message.")
-                return
-            thread_ts = str(reply_to.get("thread_ts") or "").strip()
-            self._emit_via_slack(body=text, channel_id=channel_id, thread_ts=thread_ts)
-            return
-
         if rtype == "socketio":
+            data = {
+                "chat": payload.chat,
+                "feed": payload.feed,
+                "widget_data": payload.widget_data,
+                "sound": payload.sound,
+            }
+            # Forward sub_data_type so the frontend can style proactive messages differently.
+            sub_data_type = getattr(message, "sub_data_type", None)
+            if isinstance(sub_data_type, list) and sub_data_type:
+                data["sub_data_type"] = sub_data_type
             self._emit_via_socketio(event="user_message_data", payload=data, reply_to=reply_to)
+            return
+
+        if rtype in ("twilio_sms", "telegram", "slack"):
+            text = (payload.chat or "").strip()
+            if not text:
+                return
+            DI.outbound_chat_publisher.publish(
+                sender=str(getattr(message, "sender", "") or ""),
+                text=text,
+                reply_to=reply_to,
+                embed_sender=False,
+            )
             return
 
         logger.error("Cannot emit user_message_data: unknown reply_to type=%r reply_to=%r", rtype, reply_to)

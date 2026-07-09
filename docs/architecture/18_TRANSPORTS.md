@@ -120,7 +120,7 @@ A dev-only simulator at `POST /twilio/sms/simulate` (line 260) accepts JSON or f
 
 `SmsRoomTransport.send_reply` calls `TwilioSmsService.send_sms` (`app/services/twilio_sms.py:51`) via the `twilio` Python SDK. Retries `429` / `5xx` with `[0.5, 1.5, 3.5]` second backoff, three attempts total. Returns the Twilio `sid` for persistence.
 
-Assistant-initiated SMS (e.g. dayflow alerts) goes through `EmiEventRelay._emit_via_twilio_sms` based on `metadata.reply_to = {"type": "twilio_sms", "to": ..., "from": ...}`.
+Assistant-initiated SMS (e.g. dayflow alerts) rides the relay: `EmiEventRelay._emit_message` sees `metadata.reply_to = {"type": "twilio_sms", "to": ..., "from": ...}` and delegates to `OutboundChatPublisher`, which calls `SmsRoomTransport.send_reply` — the same terminal as inbound replies.
 
 ## Slack via Events API
 
@@ -166,10 +166,12 @@ Room ids are auto-derived: `slack/<channel_id>` (e.g. `slack/C08AB0R54HM`) via `
 
 ### Outbound
 
-Slack has **two distinct outbound codepaths** — don't conflate them. Both end in `slack_sdk.WebClient.chat_postMessage` underneath, but they are separate code:
+All Slack sends end in ONE terminal: `SlackRoomTransport.send_reply(*, channel_id, body, thread_ts="")` (`room_transports/slack_transport.py`) → `SlackTool().handle_send_message({channel_id, text, thread_ts?})`. Two entry points reach it:
 
-1. **Synchronous inbound-reply** — `SlackRoomTransport.send_reply(*, channel_id, body, thread_ts="")` (`room_transports/slack_transport.py`) calls `SlackTool().handle_send_message({channel_id, text, thread_ts?})`. This is the in-thread reply on the inbound request. `SlackTool` enforces the `allow_real_slack_send` gate from `configs/slack_room.json` — when false, it returns a dry-run string and does NOT hit the Slack API. This is the "I forgot to flip the safety switch" guard for shipping.
-2. **Asynchronous relay** — when a background event publishes a `socket_emit` whose `reply_to.type == "slack"`, `EmiEventRelay._emit_via_slack` calls `app/services/slack.py::SlackService.send_message(channel_id=, text=, thread_ts=)`. `SlackService` is a minimal sender keyed off `SLACK_TOKEN` / `EMI_SLACK_TOKEN` / `SLACK_BOT_TOKEN` (first non-empty); it does **not** consult the `allow_real_slack_send` gate, so agent-initiated Slack sends go out for real.
+1. **Synchronous inbound-reply** — the manager loop's in-thread reply on the inbound request calls the transport directly.
+2. **Asynchronous relay** — when a background event publishes a `socket_emit` whose `reply_to.type == "slack"`, `EmiEventRelay._emit_message` delegates to `OutboundChatPublisher._publish_slack`, which calls the same transport.
+
+`SlackTool` enforces the `allow_real_slack_send` gate from `configs/slack_room.json` on both paths — when false, it returns a dry-run string and does NOT hit the Slack API. This is the "I forgot to flip the safety switch" guard for shipping. (Until 2026-07-08 the async relay had its own direct `SlackService` sender that skipped the gate; the delivery-audit consolidation deleted it.)
 
 Bot-vs-human distinction is enforced on inbound only (filter in `_extract_message_event`). On outbound, the assistant always posts as the bot user the OAuth token belongs to.
 
@@ -195,7 +197,7 @@ Room ids: `telegram/<chat_id>` (`make_telegram_room_id`, `room_bootstrap.py:30`)
 
 `TelegramRoomTransport.send_reply` calls `TelegramBotService.send_message` (`app/services/telegram_bot.py:49`). Direct HTTPS POST to `https://api.telegram.org/bot<TOKEN>/sendMessage` — no SDK dependency. Honors Telegram's `Retry-After` header on `429` (capped at 30s); retries up to `TELEGRAM_SEND_MAX_ATTEMPTS` (default 3, max 4). Returns the `message_id` for persistence.
 
-Assistant-initiated Telegram messages go through `EmiEventRelay._emit_via_telegram` based on `metadata.reply_to = {"type": "telegram", "chat_id": ...}`.
+Assistant-initiated Telegram messages ride the relay: `EmiEventRelay._emit_message` sees `metadata.reply_to = {"type": "telegram", "chat_id": ...}` and delegates to `OutboundChatPublisher`, which calls `TelegramRoomTransport.send_reply`.
 
 ### Setup (out-of-band)
 
@@ -285,10 +287,8 @@ Two parallel mechanisms move replies back to the originator:
 
 1. **Synchronous (manager-loop)** — `RoomSessionManager._deliver_outbound` calls the per-surface `adapter.send_outbound(reply_text)` in-thread on the inbound request, before the handler returns. This is the normal path. The reply text and delivery result are persisted as the outbound turn.
 2. **Asynchronous (relay)** — any agent/control-node that produces a `UserMessage` with `event_topic = "socket_emit"` is consumed by `EmiEventRelay.socket_emit_handler` (`app/assistant/emi_event_relay/emi_event_relay.py:46`). The relay's `_resolve_reply_to(message)` looks up `metadata.reply_to` on the message, falling back to `DI.reply_router.get_route(request_id)`. Then `_emit_message` dispatches based on `reply_to.type`:
-   - `socketio` → `_emit_via_socketio` (resolves `room_id` → `socket_id` via SocketManager, emits `user_message_data`).
-   - `twilio_sms` → `_emit_via_twilio_sms`.
-   - `telegram` → `_emit_via_telegram`.
-   - `slack` → `_emit_via_slack` (resolves `channel_id` and optional `thread_ts`, dispatches to `app/services/slack.py::SlackService.send_message`).
+   - `socketio` → `_emit_via_socketio` (resolves `room_id` → `socket_id` via SocketManager, emits `user_message_data`). The relay is the socket terminal, so this branch stays inline.
+   - `twilio_sms` / `telegram` / `slack` → delegated to `OutboundChatPublisher.publish(embed_sender=False)`, which calls the matching `room_transports` terminal (`SmsRoomTransport` / `TelegramRoomTransport` / `SlackRoomTransport`) — the same terminals the synchronous inbound-reply path uses.
 
 The `ReplyRouter` (`app/services/reply_router.py`) is a thread-safe `request_id → reply_to` map with a 24h TTL. It's the backbone for "an event happened later that should be replied to the original requester" — every transport's inbound path calls `DI.reply_router.set_route(request_id, reply_to)` so any later background agent can look up where to send the reply.
 
@@ -309,7 +309,7 @@ The `ReplyRouter` (`app/services/reply_router.py`) is a thread-safe `request_id 
 | `app/routes/slack_events.py` | Slack Events API inbound webhook (signed, async dispatch) |
 | `app/routes/slack_room.py` | Dev-only Slack inbound simulator (supports `use_latest`) |
 | `app/assistant/lib/core_tools/slack/slack.py` | `SlackTool` — Slack Web API client (synchronous inbound-reply path), dry-run safety gate |
-| `app/services/slack.py` | `SlackService.send_message` — minimal async-relay Slack sender (used by `EmiEventRelay._emit_via_slack`) |
+| `app/services/slack.py` | `resolve_slack_token` — Slack bot token env resolution (consumed by `SlackTool`) |
 | `app/routes/telegram_webhook.py` | Telegram webhook inbound |
 | `app/services/telegram_bot.py` | `TelegramBotService` — outbound `sendMessage` via raw HTTPS |
 | `app/routes/webhook_dedup.py` | `WebhookDedupCache` — in-memory idempotency for Twilio/Slack/Telegram retries |
@@ -321,7 +321,7 @@ The `ReplyRouter` (`app/services/reply_router.py`) is a thread-safe `request_id 
 | `app/assistant/room_session_manager/services/room_policy_service.py` | persistence-mode + manager-name + authority resolution |
 | `app/assistant/rooms/room_bootstrap.py` | `make_*_room_id`, `ensure_*_room` (template clone) |
 | `app/assistant/rooms/_templates/{slack,telegram}_standard/` | Template room files cloned on first contact |
-| `app/assistant/emi_event_relay/emi_event_relay.py` | Async outbound relay — `socket_emit` event consumer, fan-out to socketio/twilio/telegram |
+| `app/assistant/emi_event_relay/emi_event_relay.py` | Async outbound relay — `socket_emit` event consumer; socketio terminal + delegation to `OutboundChatPublisher` for slack/telegram/sms |
 | `app/services/reply_router.py` | `request_id → reply_to` map (24h TTL) |
 | `configs/slack_room.json` | Slack simulator/poller config + `allow_real_slack_send` safety gate |
 

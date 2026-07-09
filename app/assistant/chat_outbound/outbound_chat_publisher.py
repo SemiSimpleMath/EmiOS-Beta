@@ -42,6 +42,7 @@ class OutboundChatPublisher:
         reply_to: Optional[Dict[str, Any]],
         request_id: Optional[str] = None,
         sub_data_type: Optional[list[str]] = None,
+        embed_sender: bool = True,
     ) -> bool:
         """Publish ``text`` to the surface named in ``reply_to``.
 
@@ -52,6 +53,9 @@ class OutboundChatPublisher:
 
         ``request_id`` and ``sub_data_type`` are optional; included on
         the wire message for surfaces that thread/correlate by them.
+        ``embed_sender`` prefixes ``[sender]`` on surfaces that don't
+        render per-message senders — narrator/worker lines want it; the
+        assistant's own chat replies (EmiEventRelay delegation) don't.
         """
         if not text or not text.strip():
             return False
@@ -73,14 +77,17 @@ class OutboundChatPublisher:
             if surface_type == "slack":
                 return self._publish_slack(
                     sender=sender, text=text, reply_to=reply_to,
+                    embed_sender=embed_sender,
                 )
             if surface_type == "telegram":
                 return self._publish_telegram(
                     sender=sender, text=text, reply_to=reply_to,
+                    embed_sender=embed_sender,
                 )
             if surface_type == "twilio_sms":
                 return self._publish_sms(
                     sender=sender, text=text, reply_to=reply_to,
+                    embed_sender=embed_sender,
                 )
             logger.warning(
                 "[outbound] no handler for surface=%r — dropping (sender=%s)",
@@ -132,6 +139,7 @@ class OutboundChatPublisher:
 
     def _publish_slack(
         self, *, sender: str, text: str, reply_to: Dict[str, Any],
+        embed_sender: bool = True,
     ) -> bool:
         """Slack — call SlackRoomTransport.send_reply directly.
 
@@ -150,7 +158,7 @@ class OutboundChatPublisher:
         if slack_transport is None:
             logger.warning("[outbound] slack_transport not available; dropping")
             return False
-        body = self._embed_sender_in_body(sender, text)
+        body = self._embed_sender_in_body(sender, text) if embed_sender else text
         slack_transport.send_reply(
             channel_id=channel_id, body=body, thread_ts=thread_ts,
         )
@@ -162,6 +170,7 @@ class OutboundChatPublisher:
 
     def _publish_telegram(
         self, *, sender: str, text: str, reply_to: Dict[str, Any],
+        embed_sender: bool = True,
     ) -> bool:
         """Telegram — call TelegramRoomTransport.send_reply."""
         chat_id = str(reply_to.get("chat_id") or "").strip()
@@ -173,7 +182,7 @@ class OutboundChatPublisher:
         if telegram_transport is None:
             logger.warning("[outbound] telegram_transport not available; dropping")
             return False
-        body = self._embed_sender_in_body(sender, text)
+        body = self._embed_sender_in_body(sender, text) if embed_sender else text
         telegram_transport.send_reply(chat_id=chat_id, body=body)
         logger.info(
             "[outbound] telegram publish sender=%r chat=%s len=%d",
@@ -183,6 +192,7 @@ class OutboundChatPublisher:
 
     def _publish_sms(
         self, *, sender: str, text: str, reply_to: Dict[str, Any],
+        embed_sender: bool = True,
     ) -> bool:
         """SMS — call SmsRoomTransport.send_reply with the to/from numbers."""
         to_number = str(reply_to.get("to") or "").strip()
@@ -195,7 +205,7 @@ class OutboundChatPublisher:
         if sms_transport is None:
             logger.warning("[outbound] sms_transport not available; dropping")
             return False
-        body = self._embed_sender_in_body(sender, text)
+        body = self._embed_sender_in_body(sender, text) if embed_sender else text
         # SmsRoomTransport.send_reply takes keyword-only (to_number, from_number, body).
         sms_transport.send_reply(
             to_number=to_number,
