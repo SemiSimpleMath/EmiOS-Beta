@@ -21,5 +21,8 @@
     "type": "interval",
     "min_interval_seconds": 300
   },
-  "notes": "Periodic email fetch across all active Gmail OAuth accounts. Replaces BackgroundTaskManager round-robin data_fetch."
+  "notes": "Periodic email fetch across all active Gmail OAuth accounts. Replaces BackgroundTaskManager round-robin data_fetch.",
+  "on_error": {
+    "auto_retry_after_seconds": 1800
+  }
 }

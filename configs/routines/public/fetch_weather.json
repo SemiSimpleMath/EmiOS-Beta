@@ -18,5 +18,8 @@
     "type": "interval",
     "min_interval_seconds": 660
   },
-  "notes": "Periodic weather update. City defaults from resource_current_location.json."
+  "notes": "Periodic weather update. City defaults from resource_current_location.json.",
+  "on_error": {
+    "auto_retry_after_seconds": 1800
+  }
 }

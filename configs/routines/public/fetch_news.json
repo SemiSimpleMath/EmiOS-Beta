@@ -18,5 +18,8 @@
     "type": "interval",
     "min_interval_seconds": 1380
   },
-  "notes": "Periodic news fetch from configured RSS feeds. Empty feed_urls falls back to DEFAULT_FEEDS."
+  "notes": "Periodic news fetch from configured RSS feeds. Empty feed_urls falls back to DEFAULT_FEEDS.",
+  "on_error": {
+    "auto_retry_after_seconds": 1800
+  }
 }

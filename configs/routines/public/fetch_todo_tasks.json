@@ -20,5 +20,8 @@
     "type": "interval",
     "min_interval_seconds": 1860
   },
-  "notes": "Periodic Google Tasks sync."
+  "notes": "Periodic Google Tasks sync.",
+  "on_error": {
+    "auto_retry_after_seconds": 1800
+  }
 }

@@ -16,5 +16,8 @@
     "type": "interval",
     "min_interval_seconds": 180
   },
-  "notes": "Periodic internal scheduler event sync. Defaults to midnight \u00e2\u2020\u2019 +7 days."
+  "notes": "Periodic internal scheduler event sync. Defaults to midnight â†’ +7 days.",
+  "on_error": {
+    "auto_retry_after_seconds": 1800
+  }
 }

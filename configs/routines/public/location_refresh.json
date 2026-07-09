@@ -11,5 +11,8 @@
     "type": "interval",
     "min_interval_seconds": 900
   },
-  "notes": "Rebuilds user location timeline from calendar events and updates resource_current_location.json. Used by weather tool and location_summary context."
+  "notes": "Rebuilds user location timeline from calendar events and updates resource_current_location.json. Used by weather tool and location_summary context.",
+  "on_error": {
+    "auto_retry_after_seconds": 1800
+  }
 }

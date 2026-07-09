@@ -27,5 +27,8 @@
     "type": "interval",
     "min_interval_seconds": 1620
   },
-  "notes": "Periodic calendar sync. Defaults to local midnight \u00e2\u2020\u2019 +7 days when no dates provided."
+  "notes": "Periodic calendar sync. Defaults to local midnight â†’ +7 days when no dates provided.",
+  "on_error": {
+    "auto_retry_after_seconds": 1800
+  }
 }
