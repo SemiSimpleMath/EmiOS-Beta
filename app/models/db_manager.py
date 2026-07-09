@@ -46,10 +46,15 @@ the user wanted, simpler internals.
   finalizes or deletes the pending row. The provisional state lives in
   the data, not in the transaction.
 
-## Proof-of-concept scope (2026-04-25)
+## Adoption (updated 2026-07-09)
 
-Only the new kg_pipeline workers use this. The other ~700 commit sites
-still use plain ``get_session()``. Migration is incremental.
+Every hot writer rides this manager: unified_log persistence, dayflow
+item writes, KG pipeline workers, llm_call_log telemetry, routine and
+ticket flows. The 2026-07-09 persistence audit verified the
+session-held-across-LLM pattern extinct repo-wide; the remaining raw
+``get_session()`` writers are short transactions (one-off setup scripts
+and a shrinking set of small stores) converted opportunistically as
+their files are touched.
 """
 from __future__ import annotations
 

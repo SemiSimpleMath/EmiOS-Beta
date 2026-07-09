@@ -1,8 +1,6 @@
 import uuid
-from typing import Type, Iterable, List, Dict, Optional, Any
 from sqlalchemy import create_engine, Column, Integer, Text, JSON, TIMESTAMP, func, String, Boolean, Float
-from sqlalchemy.sql import select
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from sqlalchemy.types import TypeDecorator
 
 from app.models.base import Base  # Import Base from base.py
@@ -183,36 +181,6 @@ def initialize_database(force_test_db=False):
     
     Base.metadata.create_all(engine)
     session.close()
-
-def fetch_unprocessed_logs_by_date(
-        source_model: Type,
-        source_name: str,
-        batch_date: date,
-        filter_roles: Optional[Iterable[str]] = None,
-        batch_size: int = 100
-) -> List[Dict[str, Any]]:
-    db_session = get_session()
-    try:
-        query = select(source_model).where(
-            source_model.processed == False,
-            source_model.source == source_name,
-            func.date(source_model.timestamp) == batch_date
-        )
-        if filter_roles:
-            query = query.where(source_model.role.in_(filter_roles))
-        query = query.order_by(source_model.timestamp.asc()).limit(batch_size)
-        results = db_session.execute(query).scalars().all()
-        return [
-            {
-                "id": log.id,
-                "timestamp": log.timestamp,
-                "message": getattr(log, "message", None),
-                "role": getattr(log, "role", None)
-            }
-            for log in results
-        ]
-    finally:
-        db_session.close()
 
 if __name__ == "__main__":
     # Force use test database

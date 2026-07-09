@@ -222,20 +222,19 @@ def save_proactive_chat_message(*, content: str, sender: str, sub_data_type: lis
         "data_json": None,
     }
 
-    session = get_session()
+    # Same writer-queue discipline as save_to_unified_db's production path
+    # (this was the one raw-session write left in this module).
+    from app.models.db_manager import get_db_manager
     try:
-        stmt = insert(UnifiedLog2026).values([payload]).on_conflict_do_nothing(index_elements=["id"])
-        session.execute(stmt)
-        session.commit()
+        with get_db_manager().transaction(op="save_proactive_chat_message") as session:
+            stmt = insert(UnifiedLog2026).values([payload]).on_conflict_do_nothing(index_elements=["id"])
+            session.execute(stmt)
         logger.debug("save_proactive_chat_message: persisted id=%s sender=%s", msg_id, sender)
         return msg_id
     except Exception as e:
-        session.rollback()
         logger.error("save_proactive_chat_message: failed to persist: %s", e)
         logger.debug("save_proactive_chat_message exception details", exc_info=True)
         raise
-    finally:
-        session.close()
 
 
 def save_to_unified_db(messages, source: str, db_session=None, force_test_db=False):
@@ -291,8 +290,13 @@ def save_to_unified_db(messages, source: str, db_session=None, force_test_db=Fal
                     rec[json_key] = None
 
     def _persist(session) -> None:
-        # Detect cross-source ID collisions before upsert.
+        # Detect cross-source ID collisions before upsert — and SKIP the
+        # colliding rows. The upsert's update-set includes metadata_json /
+        # data_json, so letting a collision through would rewrite another
+        # source's row payload under the same id (audit P5: the old code
+        # logged "should never happen" and then overwrote anyway).
         rec_ids = [r["id"] for r in records_2026 if r.get("id")]
+        colliding: set = set()
         if rec_ids:
             from sqlalchemy.sql import select as _select
             existing_rows = session.execute(
@@ -306,13 +310,22 @@ def save_to_unified_db(messages, source: str, db_session=None, force_test_db=Fal
                     old_source = existing_source_by_id[rid]
                     new_source = rec.get("source") or source
                     if old_source and new_source and old_source != new_source:
+                        colliding.add(rid)
                         logger.error(
-                            "CROSS-SOURCE ID COLLISION: id='%s' exists with source='%s', "
-                            "would be overwritten by source='%s'. This should never happen.",
+                            "CROSS-SOURCE ID COLLISION: id='%s' exists with source='%s'; "
+                            "refusing the overwrite from source='%s' — row skipped.",
                             rid, old_source, new_source,
                         )
 
-        stmt = insert(UnifiedLog2026).values(records_2026)
+        to_write = [r for r in records_2026 if r.get("id") not in colliding]
+        if not to_write:
+            logger.error(
+                "[%s] Every record in this batch collided cross-source; nothing written.",
+                source,
+            )
+            return
+
+        stmt = insert(UnifiedLog2026).values(to_write)
 
         # On conflict, only mutate fields that legitimately change after a
         # row's original write (metadata flags, derived data state, processed
