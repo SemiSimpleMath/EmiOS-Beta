@@ -125,6 +125,47 @@ class EmiReminderHandler(Agent):
         # - Entity detection and injection
         return super().get_user_prompt(message)
 
+    def _persist_reminder_durably(self, reminder_text: str) -> None:
+        """Give the reminder the durable record its message class deserves:
+        always a unified_log row; plus a cron_reminder ticket when no
+        master_room client is live to receive the socket emission."""
+        try:
+            from app.assistant.message_manager.save_to_unified_db import save_to_unified_db
+            save_to_unified_db([{
+                "id": str(uuid.uuid4()),
+                "timestamp": datetime.now(timezone.utc),
+                "role": "assistant",
+                "message": f"⏰ Reminder: {reminder_text}",
+                "room_id": "master_room",
+                "room_surface": "ui",
+                "room_context_id": "main",
+                "direction": "outbound",
+                "metadata_json": {"reminder": True},
+                "sub_data_type": ["scheduler_reminder"],
+            }], source="scheduler_reminder")
+        except Exception:
+            logger.error("[%s] failed persisting reminder to unified_log", self.name, exc_info=True)
+
+        try:
+            from app.services.socket_manager import RoomNotBound
+            from app.assistant.ServiceLocator.service_locator import DI as _DI
+            _DI.socket_manager.resolve_socket("master_room")
+        except RoomNotBound:
+            from app.assistant.ticket_manager.ticket_service import propose_notice_ticket
+            logger.warning(
+                "[%s] no live master_room client — reminder rides the ticket channel",
+                self.name,
+            )
+            propose_notice_ticket(
+                title="Reminder",
+                message=reminder_text,
+                suggestion_type="scheduler_reminder",
+                trigger_reason="reminder fired with no live UI client",
+                ticket_type="cron_reminder",
+            )
+        except Exception:
+            logger.error("[%s] socket liveness check failed", self.name, exc_info=True)
+
 
     def process_llm_result(self, response):
         if not isinstance(response, dict):
@@ -141,6 +182,15 @@ class EmiReminderHandler(Agent):
         tts_str = tts_raw.strip()
         content = f"Reminder came from scheduler: {tts_str}"
 
+        # Durability (2026-07-08 delivery audit D3): a fired reminder used to
+        # exist ONLY as a socket emission + a write to this handler's private
+        # in-memory blackboard — browser closed at fire time meant the
+        # reminder was permanently lost. Now the reminder always persists to
+        # unified_log, and when no master_room client is live it ALSO rides
+        # the durable ticket channel (DB + popup/poll), matching the delivery
+        # guarantees tickets already have. Both are best-effort wrappers —
+        # a persistence hiccup must not stop the live delivery attempt.
+        self._persist_reminder_durably(tts_str)
 
         id_str = str(uuid.uuid4())
         user_msg_bb = Message(
