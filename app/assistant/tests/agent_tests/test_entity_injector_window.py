@@ -74,6 +74,65 @@ def test_entity_detection_ranks_by_scan_text_order():
     assert "Katy" in ranked
 
 
+class _ScopeBlackboard:
+    def __init__(self, scope):
+        self._scope = scope
+
+    def get_state_value(self, key, default=None):
+        if key == "scope_context":
+            return self._scope
+        return default
+
+
+def _scoped_agent(entities_policy):
+    class _Agent:
+        name = "emi_agent"
+        config = {}
+        blackboard = _ScopeBlackboard({"entities": entities_policy} if entities_policy is not None else None)
+
+    return _Agent()
+
+
+def test_scope_narrowing_disabled_policy_drops_all_entities():
+    agent = _scoped_agent({"enabled": False, "allowed_entity_cards": []})
+    out = EntityInjector()._narrow_entities_by_scope(
+        agent=agent, user_context={}, entities=["Mark", "Jamie"],
+    )
+    assert out == []
+
+
+def test_scope_narrowing_allowlist_filters_case_insensitively():
+    agent = _scoped_agent({"enabled": True, "allowed_entity_cards": ["mark"]})
+    out = EntityInjector()._narrow_entities_by_scope(
+        agent=agent, user_context={}, entities=["Mark", "Jamie"],
+    )
+    assert out == ["Mark"]
+
+
+def test_scope_narrowing_empty_allowlist_passes_through():
+    agent = _scoped_agent({"enabled": True, "allowed_entity_cards": []})
+    out = EntityInjector()._narrow_entities_by_scope(
+        agent=agent, user_context={}, entities=["Mark", "Jamie"],
+    )
+    assert out == ["Mark", "Jamie"]
+
+
+def test_scope_narrowing_all_marker_passes_through():
+    agent = _scoped_agent({"enabled": True, "allowed_entity_cards": ["all"]})
+    out = EntityInjector()._narrow_entities_by_scope(
+        agent=agent, user_context={}, entities=["Mark", "Jamie"],
+    )
+    assert out == ["Mark", "Jamie"]
+
+
+def test_scope_narrowing_without_scope_passes_through():
+    agent = _scoped_agent(None)
+    out = EntityInjector()._narrow_entities_by_scope(
+        agent=agent, user_context={}, entities=["Mark"],
+    )
+    assert out == ["Mark"]
+
+
 def test_entity_scan_keys_default_when_not_configured():
     class _Agent:
         name = "emi_agent"

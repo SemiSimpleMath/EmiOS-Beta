@@ -99,9 +99,11 @@ class ScopePodPolicy(ScopeBaseModel):
 
 
 class ScopeEntityPolicy(ScopeBaseModel):
-    # ENFORCED: allowed_entity_cards + pinned_entities (projected to runtime
-    # data; entity_injector reads them). NOT ENFORCED: enabled and the two
-    # lookback knobs — no consumers (2026-07-07 scope audit).
+    # ENFORCED: enabled + allowed_entity_cards bind at the injection point
+    # (EntityInjector._narrow_entities_by_scope, 2026-07-08): enabled=false
+    # -> no cards; a non-empty allowlist -> only those entities render.
+    # Entity SEEDING reads the room_* context keys from room_resource_loader.
+    # NOT ENFORCED: the two lookback knobs — no consumers.
     enabled: bool = True
     allowed_entity_cards: List[str] = Field(default_factory=list)
     pinned_entities: List[str] = Field(default_factory=list)

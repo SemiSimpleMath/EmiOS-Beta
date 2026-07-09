@@ -313,10 +313,64 @@ class EntityInjector:
         return out
 
     def _narrow_entities_by_scope(self, *, agent: Any, user_context: dict, entities: list[str]) -> list[str]:
-        # Placeholder hook: scope-based narrowing will be enforced here in a follow-up step.
-        _ = agent
+        """Bind the ScopeContext entities policy at the injection point.
+
+        - ``entities.enabled = false`` -> no cards at all.
+        - a non-empty ``entities.allowed_entity_cards`` (without the "all"
+          marker) -> allowlist by normalized name.
+        - an empty list means the scope does not curate entities (the common
+          case) -> pass through; room_blocked_entities (the per-room opt-out)
+          has already been applied upstream.
+
+        No scope on the blackboard -> pass through: production agents always
+        carry one (the agent boundary enforces it); bare harness contexts
+        keep working ungated.
+        """
         _ = user_context
-        return list(entities or [])
+        if not entities:
+            return []
+        scope = None
+        try:
+            bb = getattr(agent, "blackboard", None)
+            scope = bb.get_state_value("scope_context", None) if bb is not None else None
+        except Exception:
+            logger.debug("entity scope narrowing: could not read scope_context", exc_info=True)
+            scope = None
+        if scope is None:
+            return list(entities)
+
+        policy = scope.get("entities") if isinstance(scope, dict) else getattr(scope, "entities", None)
+        if policy is None:
+            return list(entities)
+
+        def _policy_get(field: str, default=None):
+            if isinstance(policy, dict):
+                return policy.get(field, default)
+            return getattr(policy, field, default)
+
+        if not bool(_policy_get("enabled", True)):
+            logger.debug(
+                "[%s] entity cards disabled by scope entities policy",
+                getattr(agent, "name", "agent"),
+            )
+            return []
+
+        allowed_raw = _policy_get("allowed_entity_cards") or []
+        allowed = {
+            self._normalize_entity_name(x)
+            for x in allowed_raw
+            if isinstance(x, str) and x.strip()
+        }
+        if not allowed or "all" in allowed:
+            return list(entities)
+
+        kept = [e for e in entities if self._normalize_entity_name(e) in allowed]
+        if len(kept) != len(entities):
+            logger.debug(
+                "[%s] scope entities allowlist kept %d/%d detected entities",
+                getattr(agent, "name", "agent"), len(kept), len(entities),
+            )
+        return kept
 
     @staticmethod
     def _load_room_blocked_entities(user_context: dict | None) -> set[str]:
