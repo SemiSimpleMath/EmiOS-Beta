@@ -58,11 +58,16 @@ def run_node(store, work_id: str, node_id: str,
     # stays `actionable` — the action_selector could re-dispatch it, and the close below (->done) is illegal.
     if cur.status in {"proposed", "waiting", "actionable"}:
         store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "dispatched"}, actor="manager")
+    # ONE post-claim snapshot serves the epoch capture and the prompt build —
+    # the claim above is ours, so nothing changes under us here. The
+    # post-manager reads further down stay fresh on purpose.
+    snapshot = store.load(work_id)
+    cur = snapshot.nodes[node_id]
     # Capture MY incarnation. The claim (mine above, or node_dispatch's before this thread started)
     # bumped dispatch_epoch; the fenced close at the tail rejects a stale epoch, so a zombie that
     # unsticks after the sweeper failed it and repair re-dispatched the node cannot complete the
     # successor's incarnation with its stale result (audit W2).
-    my_epoch = int(store.load(work_id).nodes[node_id].payload.get("dispatch_epoch") or 0)
+    my_epoch = int(cur.payload.get("dispatch_epoch") or 0)
 
     # The manager's `node_input` config decides how its node is handed to it (no manager-name check):
     #   "task"   -> feed the node content as the task (+ deps as information), web_manager-style; the
@@ -76,12 +81,10 @@ def run_node(store, work_id: str, node_id: str,
     token = set_work_context(store, work_id, node_id, actor=actor)
     try:
         if node_input == "task":
-            cur = store.load(work_id).nodes[node_id]
             msg = Message(scope_context=orchestrator_scope(work_id=work_id), task=(cur.content or cur.title),
-                          information=_render_dependencies(store.load(work_id), node_id),
+                          information=_render_dependencies(snapshot, node_id),
                           request_id=f"work::{uuid.uuid4()}")
         else:
-            cur = store.load(work_id).nodes[node_id]
             # Render mode hands the node's DETAIL via work_projection (the render node) and keeps the
             # message task generic. But if that side-channel comes back empty (missing work context /
             # a render failure), "advance the node you own" with no detail makes the worker INVENT a

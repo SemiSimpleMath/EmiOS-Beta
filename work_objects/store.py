@@ -106,7 +106,7 @@ def _iso(dt) -> Optional[str]:
 
 
 class WorkStore:
-    def __init__(self, path: str = "work_objects/work.db"):
+    def __init__(self, path: str = "work_objects/work.db", busy_timeout_ms: int = 10_000):
         self.path = path
         # Single-writer model: one connection shared across threads, with ALL access
         # serialized by a reentrant lock, so concurrent managers + a writing curator
@@ -116,6 +116,9 @@ class WorkStore:
         self._conn = sqlite3.connect(path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
+        # On a shared DB (dayflow's store lives in emi.db) a write must wait for
+        # the main application writer instead of failing "database is locked".
+        self._conn.execute(f"PRAGMA busy_timeout={int(busy_timeout_ms)}")
         self._conn.executescript(SCHEMA_SQL)
 
     def close(self) -> None:

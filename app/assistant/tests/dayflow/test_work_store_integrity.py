@@ -94,6 +94,43 @@ def test_architect_namespaces_slugs_per_wo():
         os.remove(path)
 
 
+def test_store_singleton_survives_a_thread_race(monkeypatch, tmp_path):
+    """get_dayflow_work_store used to be an unlocked check-then-set — two
+    threads at first touch built two WorkStore instances with two separate
+    RLocks, breaking the one-lock-serializes-all-writers guarantee
+    (audit W3)."""
+    import threading
+
+    from app.assistant.dayflow_orchestrator import work_store as ws
+
+    db = str(tmp_path / "race_work.db")
+    monkeypatch.setenv("DAYFLOW_WORK_DB", db)
+    ws._stores.pop(db, None)
+
+    results, barrier = [], threading.Barrier(8)
+
+    def _grab():
+        barrier.wait()
+        results.append(ws.get_dayflow_work_store())
+
+    threads = [threading.Thread(target=_grab) for _ in range(8)]
+    for t in threads: t.start()
+    for t in threads: t.join(timeout=10)
+
+    assert len(results) == 8
+    assert all(r is results[0] for r in results)  # one instance, one lock
+    ws._stores.pop(db, None)
+    results[0].close()
+
+
+def test_busy_timeout_set_in_the_constructor(tmp_path):
+    s = WorkStore(str(tmp_path / "bt.db"), busy_timeout_ms=4321)
+    try:
+        assert s._conn.execute("PRAGMA busy_timeout").fetchone()[0] == 4321
+    finally:
+        s.close()
+
+
 def test_architect_replan_is_idempotent_on_the_same_wo():
     from app.assistant.dayflow_orchestrator.work_architect_apply import apply_architect_dag
 

@@ -15,6 +15,7 @@ DAYFLOW_WORK_DB overrides the path (tests / a copy).
 from __future__ import annotations
 
 import os
+import threading
 
 from app.assistant.utils.logging_config import get_logger
 
@@ -22,6 +23,7 @@ logger = get_logger(__name__)
 
 _BUSY_TIMEOUT_MS = 10_000
 _stores: dict[str, object] = {}
+_stores_lock = threading.Lock()
 
 
 def _migrate_node_active_to_dispatched(conn) -> None:
@@ -49,20 +51,24 @@ def dayflow_work_db_path() -> str:
 
 def get_dayflow_work_store():
     """The (singleton, per-path) dayflow WorkStore. Creates the four work tables IF NOT EXISTS on the
-    target DB (additive — no collision with emi.db's schema) and sets a busy_timeout so it coexists with
-    the main writer."""
+    target DB (additive — no collision with emi.db's schema); the busy_timeout rides the WorkStore
+    constructor so it coexists with the main writer.
+
+    Locked double-checked creation: two threads racing the first touch used to
+    build two WorkStore instances with two separate RLocks — breaking the
+    "one lock serializes all writers" guarantee for the overlap window
+    (audit W3)."""
     path = dayflow_work_db_path()
     store = _stores.get(path)
-    if store is None:
-        from work_objects.store import WorkStore
-        store = WorkStore(path)
-        # Wait for the main writer instead of erroring; harmless if the attribute name ever changes.
-        try:
-            conn = getattr(store, "conn", None) or getattr(store, "_conn", None)
-            if conn is not None:
-                conn.execute(f"PRAGMA busy_timeout = {_BUSY_TIMEOUT_MS}")
-                _migrate_node_active_to_dispatched(conn)
-        except Exception:
-            pass
-        _stores[path] = store
+    if store is not None:
+        return store
+    with _stores_lock:
+        store = _stores.get(path)
+        if store is None:
+            from work_objects.store import WorkStore
+            store = WorkStore(path, busy_timeout_ms=_BUSY_TIMEOUT_MS)
+            # Same-package private access, on purpose: the migration runs on the
+            # store's own connection and logs its own failures loudly.
+            _migrate_node_active_to_dispatched(store._conn)
+            _stores[path] = store
     return store
