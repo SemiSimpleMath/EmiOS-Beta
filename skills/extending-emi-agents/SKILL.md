@@ -77,13 +77,21 @@ from the ResourceManager; bare keys come from the per-call context.
 You are {{ resource_assistant_data.name }}'s helper for X. ...
 
 {# user.j2 #}
-Today: {{ date_time }}
 Task: {{ task }}
 Info: {{ information }}
+Today: {{ date_time }}
 ```
 
 Don't hardcode the user's or assistant's name — template via
 `{{ resource_user_data.first_name }}` and `{{ resource_assistant_data.name }}`.
+
+Order the user template stable-first, volatile-last: instructions and
+section structure at the top, then the task/context blocks, with the
+current time (`{{ date_time }}`) at the end next to the question it
+informs. Provider prompt caches reward identical prompt heads across
+calls made minutes apart, and the timestamp is the one value that
+changes every minute — placing it last lets everything above it ride
+the cache on agents that get called in bursts.
 
 ## Structured output (optional)
 
