@@ -180,6 +180,98 @@ class TestBuildPlanSynopsisMessages:
         assert meta["synopsis"] == "S"
 
 
+# ── scan window (persistence audit P1) ───────────────────────────
+
+def _insert_raw_item(*, item_id: str, state: str, row_ts: datetime,
+                     last_reviewed_at: datetime | None = None) -> None:
+    """Write a row directly with a controlled ROW timestamp (the batch
+    writer always stamps now(), so old rows need a direct insert)."""
+    from app.models.base import get_session
+
+    reviewed = (last_reviewed_at or row_ts).isoformat()
+    session = get_session()
+    try:
+        from app.assistant.database.db_handler import UnifiedLog2026 as UL
+        session.add(UL(
+            id=item_id,
+            timestamp=row_ts,
+            role="system",
+            message=f"raw {item_id}",
+            source="dayflow_item",
+            room_id="dayflow_orchestrator",
+            metadata_json={
+                "item_id": item_id,
+                "source_type": "plan_task",
+                "state": state,
+                "summary": f"raw {item_id}",
+                "created_at": row_ts.isoformat(),
+                "last_reviewed_at": reviewed,
+                "data_type": "dayflow_input_item",
+            },
+        ))
+        session.commit()
+    finally:
+        session.close()
+
+
+class TestScanWindow:
+
+    def test_old_parked_rows_fall_out_live_rows_stay(self):
+        old = datetime.now(timezone.utc) - timedelta(days=30)
+        _insert_raw_item(item_id="task:old_artifact", state="artifact", row_ts=old)
+        _insert_raw_item(item_id="task:old_waiting", state="waiting", row_ts=old)
+
+        from app.assistant.dayflow_orchestrator.state_store import load_existing_dayflow_items
+        ids = [get_meta(i)["item_id"] for i in load_existing_dayflow_items(include_terminal=True)]
+        assert "task:old_waiting" in ids       # live state loads regardless of age
+        assert "task:old_artifact" not in ids  # parked + untouched → outside the window
+
+    def test_recently_reviewed_old_row_stays(self):
+        old = datetime.now(timezone.utc) - timedelta(days=30)
+        _insert_raw_item(
+            item_id="task:old_but_touched", state="closed",
+            row_ts=old, last_reviewed_at=datetime.now(timezone.utc),
+        )
+        from app.assistant.dayflow_orchestrator.state_store import load_existing_dayflow_items
+        ids = [get_meta(i)["item_id"] for i in load_existing_dayflow_items(include_terminal=True)]
+        assert "task:old_but_touched" in ids   # every writer stamps last_reviewed_at
+
+    def test_point_lookup_finds_old_artifact(self):
+        """A user directive can revive a months-old parked artifact — the
+        by-id lookup must skip the scan window entirely."""
+        old = datetime.now(timezone.utc) - timedelta(days=90)
+        _insert_raw_item(item_id="task:ancient_artifact", state="artifact", row_ts=old)
+
+        item = load_item_by_id("task:ancient_artifact")
+        assert item is not None
+        assert get_meta(item)["state"] == "artifact"
+
+    def test_point_lookup_respects_exclude_states(self):
+        _insert_raw_item(
+            item_id="task:suppressed_pt", state="suppressed",
+            row_ts=datetime.now(timezone.utc),
+        )
+        from app.assistant.dayflow_orchestrator.state_store import get_latest_dayflow_item_by_id
+        assert get_latest_dayflow_item_by_id("task:suppressed_pt", include_terminal=True) is not None
+        assert get_latest_dayflow_item_by_id("task:suppressed_pt", include_terminal=False) is None
+
+    def test_reload_runs_the_scan_once(self, monkeypatch):
+        seed_items([make_dayflow_message(item_id="task:once", state="actionable")])
+
+        import app.assistant.dayflow_orchestrator.state_store as ss
+        calls = []
+        real = ss._load_latest_dayflow_item_map
+
+        def _counting(**kwargs):
+            calls.append(kwargs)
+            return real(**kwargs)
+
+        monkeypatch.setattr(ss, "_load_latest_dayflow_item_map", _counting)
+        bb = FakeBlackboard()
+        ss.reload_active_items_onto_blackboard(bb, now_utc=datetime.now(timezone.utc), caller="test")
+        assert len(calls) == 1  # used to run the full scan twice per reload
+
+
 # ── reload_active_items_onto_blackboard ──────────────────────────
 
 class TestReloadActiveItemsOntoBlackboard:

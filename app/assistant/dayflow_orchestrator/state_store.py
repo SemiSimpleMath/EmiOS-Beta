@@ -5,9 +5,10 @@ State lives in metadata_json. Upsert keyed on Message.id (= metadata.item_id).
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
+from sqlalchemy import func, or_
 from sqlalchemy.sql import select
 
 from app.assistant.database.db_handler import UnifiedLog2026
@@ -24,6 +25,22 @@ from app.assistant.dayflow_orchestrator.dayflow_item_writer import (
     RESOLVED_STATES,
     TERMINAL_STATES,
 )
+
+# SQL-side bound on the item scan (persistence audit P1: 16,475 rows held
+# 45 live items — every load materialized and JSON-parsed 99.7% waste, ~6
+# times per tick, growing forever). The Python-side view filters operate at
+# 24h (active) / 2h (closed), so 7 days is generous margin. Rows OUTSIDE
+# the window still load when they are LIVE (state not parked/finished) or
+# were touched inside the window (every writer stamps last_reviewed_at) —
+# a weeks-old waiting item or long-lived plan synopsis is never lost to
+# the bound. Point lookups by item_id skip the window entirely.
+_SCAN_WINDOW_DAYS = 7
+
+# Parked/finished states ride the time window; anything else is live and
+# loads regardless of age. artifact is the re-openable parked state
+# (a user directive can revive it — via the unbounded point lookup);
+# closed/suppressed are the writer's finished vocabulary.
+_AGE_BOUNDED_STATES = frozenset(RESOLVED_STATES | {"artifact"})
 
 
 def _row_to_dict(row: UnifiedLog2026) -> Dict[str, Any]:
@@ -91,11 +108,23 @@ def _load_latest_dayflow_item_map(
     )
 
     try:
+        cutoff_dt = datetime.now(timezone.utc) - timedelta(days=_SCAN_WINDOW_DAYS)
+        state_expr = func.json_extract(UnifiedLog2026.metadata_json, "$.state")
+        reviewed_expr = func.json_extract(UnifiedLog2026.metadata_json, "$.last_reviewed_at")
         with get_db_manager().read_session() as session:
             stmt = (
                 select(UnifiedLog2026)
                 .where(UnifiedLog2026.source == DAYFLOW_ITEM_SOURCE)
                 .where(UnifiedLog2026.room_id == DAYFLOW_ROOM_ID)
+                .where(or_(
+                    # Created (or batch-rewritten) inside the window.
+                    UnifiedLog2026.timestamp >= cutoff_dt,
+                    # Live states load regardless of age.
+                    state_expr.notin_(sorted(_AGE_BOUNDED_STATES)),
+                    # Touched inside the window (ISO strings compare
+                    # lexicographically; every writer stamps this key).
+                    reviewed_expr >= cutoff_dt.isoformat(),
+                ))
                 .order_by(UnifiedLog2026.timestamp.asc())
             )
             rows = session.execute(stmt).scalars().all()
@@ -215,6 +244,52 @@ def load_existing_dayflow_items(
     return items
 
 
+def _load_dayflow_items_by_ids_unbounded(wanted: set[str]) -> Dict[str, Dict[str, Any]]:
+    """Point lookups skip the scan window entirely — a months-old parked
+    artifact must stay findable when a user directive references it. The
+    id equality rides the primary key; the metadata leg covers legacy rows
+    whose row id differs from metadata.item_id."""
+    ordered = sorted(wanted)
+    with get_db_manager().read_session() as session:
+        stmt = (
+            select(UnifiedLog2026)
+            .where(UnifiedLog2026.source == DAYFLOW_ITEM_SOURCE)
+            .where(UnifiedLog2026.room_id == DAYFLOW_ROOM_ID)
+            .where(or_(
+                UnifiedLog2026.id.in_(ordered),
+                func.json_extract(UnifiedLog2026.metadata_json, "$.item_id").in_(ordered),
+            ))
+            .order_by(UnifiedLog2026.timestamp.asc())
+        )
+        rows = session.execute(stmt).scalars().all()
+
+    out: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        item = _row_to_dict(row)
+        meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        logical_id = str(meta.get("item_id") or item.get("id") or "").strip()
+        if logical_id in wanted:
+            out[logical_id] = item
+    return out
+
+
+def _passes_state_filter(
+    item: Dict[str, Any],
+    *,
+    include_terminal: bool,
+    exclude_states: frozenset[str] | None,
+) -> bool:
+    effective_exclude = _effective_exclude_states(
+        include_terminal=include_terminal,
+        exclude_states=exclude_states,
+    )
+    if not effective_exclude:
+        return True
+    meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    state = str(meta.get("state") or "").strip().lower()
+    return state not in effective_exclude
+
+
 def get_latest_dayflow_item_by_id(
     item_id: str,
     *,
@@ -229,11 +304,15 @@ def get_latest_dayflow_item_by_id(
     logical_id = str(item_id or "").strip()
     if not logical_id:
         raise ValueError("get_latest_dayflow_item_by_id: item_id must be non-empty.")
-    latest_by_item_id = _load_latest_dayflow_item_map(
-        include_terminal=include_terminal,
-        exclude_states=exclude_states,
-    )
-    return latest_by_item_id.get(logical_id)
+    found = _load_dayflow_items_by_ids_unbounded({logical_id})
+    item = found.get(logical_id)
+    if item is None:
+        return None
+    if not _passes_state_filter(
+        item, include_terminal=include_terminal, exclude_states=exclude_states,
+    ):
+        return None
+    return item
 
 
 def get_latest_dayflow_items_by_ids(
@@ -251,14 +330,13 @@ def get_latest_dayflow_items_by_ids(
     wanted.discard("")
     if not wanted:
         return {}
-    latest_by_item_id = _load_latest_dayflow_item_map(
-        include_terminal=include_terminal,
-        exclude_states=exclude_states,
-    )
+    found = _load_dayflow_items_by_ids_unbounded(wanted)
     return {
         logical_id: item
-        for logical_id, item in latest_by_item_id.items()
-        if logical_id in wanted
+        for logical_id, item in found.items()
+        if _passes_state_filter(
+            item, include_terminal=include_terminal, exclude_states=exclude_states,
+        )
     }
 
 
@@ -423,15 +501,18 @@ def reload_active_items_onto_blackboard(blackboard, *, now_utc: datetime, caller
     from app.assistant.dayflow_orchestrator.contracts import get_meta
     from app.assistant.dayflow_orchestrator.blackboard_builder import enrich_items_with_local_times
 
-    active_items = load_existing_dayflow_items(include_terminal=True)
+    # One load serves both views (this used to run the full item scan
+    # twice per call, three callers per tick). The two lists share item
+    # dicts, so enrichment's presentation keys show on both — harmless.
+    all_items = load_existing_dayflow_items(include_terminal=True)
     active_items = [
-        item for item in active_items
+        item for item in all_items
         if str(get_meta(item).get("source_type") or "").strip().lower() != "chat"
     ]
     enrich_items_with_local_times(active_items, now_utc)
 
     blackboard.update_state_value("active_dayflow_items", active_items)
-    blackboard.update_state_value("existing_dayflow_items", load_existing_dayflow_items(include_terminal=True))
+    blackboard.update_state_value("existing_dayflow_items", all_items)
     logger.info(
         "reload_active_items_onto_blackboard: %d active item(s) [caller=%s].",
         len(active_items),
