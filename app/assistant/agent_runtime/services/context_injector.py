@@ -564,6 +564,20 @@ class ContextInjector:
                 continue
 
             if key == "chat_memory":
+                # RAG recall is ROOM-SCOPED — chat_memory is only meaningful
+                # for room-bound agents (the chat gates). An agent declaring
+                # it without a room on the blackboard is a config error:
+                # silently defaulting here used to inject the user's
+                # master-room memory into whatever context happened to lack
+                # a room_id. This check sits OUTSIDE the degrade-to-empty
+                # try so the misconfiguration is loud.
+                rag_room_id = str(agent.blackboard.get_state_value("room_id", "") or "").strip()
+                if not rag_room_id:
+                    raise ValueError(
+                        f"[{agent.name}] chat_memory context item requires a room_id on the "
+                        "blackboard (RAG recall is room-scoped). Declare it only on room-bound "
+                        "agents, or seed room_id in the request data."
+                    )
                 try:
                     from app.assistant.agent_runtime.services.chat_memory_rag import recall, format_recall_for_prompt
                     # Use the user's current message as the query.
@@ -573,12 +587,6 @@ class ContextInjector:
                     if not query:
                         query = str(agent.blackboard.get_state_value("agent_input", "") or "").strip()
                     if query:
-                        # Scope RAG to the calling room. Without this, recall()
-                        # falls back to its default "master_room" and leaks
-                        # master_room history into every other room's prompts.
-                        rag_room_id = str(
-                            agent.blackboard.get_state_value("room_id", "") or ""
-                        ).strip() or "master_room"
                         matches = recall(query, top_k=6, room_id=rag_room_id)
                         context[key] = format_recall_for_prompt(matches, max_chars=1200)
                     else:
