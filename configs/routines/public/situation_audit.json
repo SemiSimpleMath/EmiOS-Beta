@@ -9,7 +9,7 @@
   },
   "run_policy": {
     "type": "interval",
-    "min_interval_seconds": 1800
+    "min_interval_seconds": 3600
   },
-  "notes": "Periodic background audit of all active context. Checks for contradictions, conflicts, and anomalies across data sources. Notifies user of findings via chat. Passive observer only — does not modify plans or tasks."
+  "notes": "Periodic background audit of all active context. Checks for contradictions, conflicts, and anomalies across data sources. Notifies user of findings via chat. Passive observer only — does not modify plans or tasks. Hourly since 2026-07-09 (was 30m): a background awareness pass at half the LLM cost (~$2.9/day -> ~$1.4), and it was burning a full 240s Gemini timeout about once daily."
 }
