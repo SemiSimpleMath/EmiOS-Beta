@@ -64,21 +64,42 @@ def _pod_to_header(pod) -> PodHeader:
     )
 
 
-def hydrate_headers_from_text(text: str, *, store: PodStore | None = None) -> List[PodHeader]:
+def hydrate_headers_from_text(text: str, *, store: PodStore | None = None, scope=None) -> List[PodHeader]:
     """Scan text for pod URIs and return a PodHeader for each live pod.
 
     Missing pod_ids (agent hallucinations or deleted rows) are logged
     and skipped — they do not raise.
+
+    ``scope`` applies the same authority floor pod_search puts on
+    headers: a pod whose min_authority the caller doesn't clear is
+    skipped — its one_liner is part of what the floor protects. A None
+    scope is a trusted system-internal caller — unfiltered, matching
+    pod_fetch/pod_search.
     """
     ids = extract_pod_ids(text)
     if not ids:
         return []
     store = store or PodStore()
+
+    authority = None
+    if scope is not None:
+        from app.assistant.pod_store import pod_utils
+        from app.assistant.pod_store.authority import caller_authority
+        authority = caller_authority(pod_utils.as_scope_object(scope))
+
     headers: List[PodHeader] = []
     for pid in ids:
         pod = store.get(pid)
         if pod is None:
             logger.warning("hydrate_headers_from_text: pod %s not found in store — skipping.", pid)
             continue
+        if authority is not None:
+            from app.assistant.pod_store import pod_utils
+            if pod_utils.pod_min_authority(pod) > authority:
+                logger.info(
+                    "hydrate_headers_from_text: pod %s above caller authority floor — header withheld.",
+                    pid,
+                )
+                continue
         headers.append(_pod_to_header(pod))
     return headers

@@ -359,3 +359,48 @@ def test_mint_pod_stamps_room_id_only():
     result2 = MintPodTool().execute(tm2)
     assert result2.data["ok"], result2.content
     assert PodStore().get(result2.data["pod_id"]).scope_id is None
+
+
+def test_hydrate_headers_respects_authority_floor():
+    """Header hydration applies the pod_search floor: a pod above the
+    caller's authority yields NO header (its one_liner is protected);
+    a None scope is trusted and unfiltered (2026-07-08 audit C9)."""
+    from app.assistant.pod_store import pod_utils
+    from app.assistant.pod_store.pod_store import PodStore
+    from app.assistant.pod_store.pod_uri import hydrate_headers_from_text
+    from app.assistant.utils.pydantic_classes import (
+        ScopeApprovalPolicy,
+        ScopeContext,
+    )
+
+    store = PodStore()
+    pid = pod_utils.mint_pod(
+        kind="note",
+        one_liner="gated note header",
+        created_by="floor_test",
+        body="body text",
+        min_authority=70,
+        store=store,
+    )
+    text = f"see {pid} for details"
+
+    low_scope = ScopeContext(
+        scope_id="scope::floor::low",
+        owner_id="test_owner",
+        actor_id="tester",
+        surface="test",
+        approval=ScopeApprovalPolicy(authority_level=50),
+    )
+    high_scope = ScopeContext(
+        scope_id="scope::floor::high",
+        owner_id="test_owner",
+        actor_id="tester",
+        surface="test",
+        approval=ScopeApprovalPolicy(authority_level=99),
+    )
+
+    assert hydrate_headers_from_text(text, store=store, scope=low_scope) == []
+    high = hydrate_headers_from_text(text, store=store, scope=high_scope)
+    assert [h.pod_id for h in high] == [pid]
+    trusted = hydrate_headers_from_text(text, store=store, scope=None)
+    assert [h.pod_id for h in trusted] == [pid]

@@ -58,7 +58,11 @@ class PodInjector:
             return []
 
         combined = "\n".join(parts)
-        headers = hydrate_headers_from_text(combined)
+        # The caller's scope applies the same authority floor pod_search
+        # puts on headers — a header the agent couldn't list via search
+        # shouldn't ride into its prompt via a pasted URI either.
+        scope = getattr(message, "scope_context", None) if message is not None else None
+        headers = hydrate_headers_from_text(combined, scope=scope)
 
         if message is not None and headers:
             message.referenced_pods = headers
