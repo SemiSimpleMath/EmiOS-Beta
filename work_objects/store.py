@@ -252,13 +252,30 @@ class WorkStore:
         if node is None:
             raise KeyError(f"set_status: node {data['node_id']!r} not found")
         target = data["status"]
+        # Incarnation fence (audit W2): every claim (-> dispatched) bumps the
+        # node's dispatch_epoch; a writer that captured an older epoch is a
+        # ZOMBIE — the sweeper failed its incarnation and repair re-dispatched
+        # the node to a successor — and must not write its stale outcome over
+        # the live incarnation. Checked only when the caller supplies
+        # expected_dispatch_epoch (completion paths); plain status writes
+        # (finalizer, sweeper, repair) are unaffected.
+        expected = data.get("expected_dispatch_epoch")
+        if expected is not None:
+            current = int(node.payload.get("dispatch_epoch") or 0)
+            if int(expected) != current:
+                raise ValueError(
+                    f"set_status: stale dispatch epoch {expected} (current {current}) "
+                    f"for node {node.id!r} — a newer incarnation owns this node")
         if target != node.status:
             family = FAMILY_BY_TYPE.get(node.type, "spine")
             allowed = TRANSITIONS.get(family, {}).get(node.status, set())
             if target not in allowed:
                 raise ValueError(
                     f"illegal transition {node.status!r}->{target!r} for {node.type} ({family})")
+        prev = node.status
         node.status = target
+        if target == "dispatched" and prev != "dispatched":
+            node.payload["dispatch_epoch"] = int(node.payload.get("dispatch_epoch") or 0) + 1
         if data.get("content") is not None:   # optional closing note / evidence written on transition
             node.content = data["content"]
         node.updated_at = now

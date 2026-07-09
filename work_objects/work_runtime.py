@@ -15,7 +15,10 @@ from __future__ import annotations
 import uuid
 
 from app.assistant.ServiceLocator.service_locator import DI
+from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import Message, ToolResult
+
+logger = get_logger(__name__)
 
 from work_objects.runtime import reset_work_context, set_work_context
 from work_objects.runtime_setup import ensure_manager_services
@@ -55,6 +58,11 @@ def run_node(store, work_id: str, node_id: str,
     # stays `actionable` — the action_selector could re-dispatch it, and the close below (->done) is illegal.
     if cur.status in {"proposed", "waiting", "actionable"}:
         store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "dispatched"}, actor="manager")
+    # Capture MY incarnation. The claim (mine above, or node_dispatch's before this thread started)
+    # bumped dispatch_epoch; the fenced close at the tail rejects a stale epoch, so a zombie that
+    # unsticks after the sweeper failed it and repair re-dispatched the node cannot complete the
+    # successor's incarnation with its stale result (audit W2).
+    my_epoch = int(store.load(work_id).nodes[node_id].payload.get("dispatch_epoch") or 0)
 
     # The manager's `node_input` config decides how its node is handed to it (no manager-name check):
     #   "task"   -> feed the node content as the task (+ deps as information), web_manager-style; the
@@ -123,8 +131,19 @@ def run_node(store, work_id: str, node_id: str,
     final = store.load(work_id).nodes[node_id]
     if final.status not in {"done", "failed", "abandoned", "verified", "passed"}:
         failed = bool(data.get("aborted")) or data.get("exit_state") == "error_exit"
-        store.apply("set_status", {"work_id": work_id, "node_id": node_id,
-                                   "status": "failed" if failed else "done"}, actor=actor)
+        try:
+            store.apply("set_status", {"work_id": work_id, "node_id": node_id,
+                                       "status": "failed" if failed else "done",
+                                       "expected_dispatch_epoch": my_epoch}, actor=actor)
+        except ValueError as e:
+            # Stale incarnation: the sweeper failed THIS run and repair re-dispatched
+            # the node to a successor while we were still working. The successor owns
+            # the node now — discard this result rather than overwrite theirs.
+            logger.error(
+                "[work_runtime] stale incarnation for %s::%s — result DISCARDED (%s)",
+                work_id, node_id, e,
+            )
+            return result
         if answer:
             from work_objects.model import new_id
             store.apply("add_node",
