@@ -738,6 +738,9 @@ class KGMutatorTool(BaseTool):
                     data={"ok": True, "dry_run": True, "before": before, "after": "DELETED"},
                 ))
 
+            # Edge evidence has no FK — delete it with the edge (audit G1).
+            from app.assistant.kg_core.kg_utils.node_merge import cleanup_edge_evidence
+            cleanup_edge_evidence(session, [edge_id])
             session.delete(edge)
 
             rid = _write_revision_log(
@@ -1088,9 +1091,19 @@ class KGMutatorTool(BaseTool):
                     data={"ok": True, "dry_run": True, "before": before, "after": "DELETED"},
                 ))
 
+            # Evidence + verdict lifecycle (2026-07-08 KG audit G1): the
+            # evidence tables have no FKs and verdicts only superseded at
+            # merge — without these, every delete left orphaned evidence and
+            # dead-active verdicts behind.
+            from app.assistant.kg_core.kg_utils.node_merge import (
+                cleanup_edge_evidence,
+                cleanup_node_dependents_on_delete,
+            )
+            cleanup_edge_evidence(session, [str(e.id) for e in edges])
             for e in edges:
                 session.delete(e)
             session.flush()
+            cleanup_node_dependents_on_delete(session, node_id)
             session.delete(node)
 
             rid = _write_revision_log(

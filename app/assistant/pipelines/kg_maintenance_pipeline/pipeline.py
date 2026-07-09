@@ -2,6 +2,9 @@
 KGMaintenancePipeline — periodic graph quality scan.
 
 Steps (run in order, each self-manages its own sessions):
+  0. lifecycle_gc               — deletion residue sweep: orphaned evidence,
+                                  dead-active verdicts, edge-vector ghosts
+                                  (cheap, structural; steady-state ~0)
   1. orphan_scan                — zero-edge nodes                    (cheap, structural)
   2. context_embedding_backfill — backfill context embeddings        (embedding API, no LLM)
   3. duplicate_scan             — three-tier candidates + LLM confirm (most expensive)
@@ -82,6 +85,13 @@ class KGMaintenancePipeline:
                 logger.debug("[KGMaintenancePipeline] %s failed", name, exc_info=True)
                 summary["steps"][name] = {"error": "step failed — see logs"}
 
+        # Lifecycle GC first: clear deletion residue (orphaned evidence,
+        # dead-active verdicts, edge-vector ghosts) so the scans below read
+        # clean state. Steady-state finds ~0; persistent counts here mean a
+        # delete path regressed (2026-07-08 KG audit G1).
+        _run_step("lifecycle_gc", lambda: (
+            __import__("app.assistant.pipelines.kg_maintenance_pipeline.step_lifecycle_gc", fromlist=["run"]).run(ctx)
+        ))
         _run_step("orphan_scan", lambda: (
             __import__("app.assistant.pipelines.kg_maintenance_pipeline.step_orphan_scan", fromlist=["run"]).run(ctx)
         ))

@@ -46,14 +46,49 @@ def _endpoint_label_and_type(node, endpoint_id: str) -> Tuple[Optional[str], Opt
 
 def delete_node(node_id, session: Session):
     """
-    Delete a node and all its edges (edges are deleted via ON DELETE CASCADE).
-    NOTE: This function does NOT commit the session. The caller is responsible for committing.
+    Delete a node with its FULL dependent lifecycle: its edges (the DB-level
+    ON DELETE CASCADE was dropped 2026-05-10 — nothing cascades), those
+    edges' kg_edge_evidence rows, the node's kg_node_evidence rows, and
+    supersede active duplicate-scan verdicts naming it. Section tags cascade
+    via their surviving FK; Chroma vectors are removed by the ORM
+    after_delete chokepoint post-commit.
+
+    Does NOT commit — the caller owns the transaction boundary.
     """
-    # Convert UUID to string for SQLite compatibility
+    from sqlalchemy import text as _sql_text
+
+    from app.assistant.kg_core.kg_utils.node_merge import (
+        cleanup_edge_evidence,
+        cleanup_node_dependents_on_delete,
+    )
+
     node_id = str(node_id)
     node = session.query(Node).filter_by(id=node_id).first()
     if not node:
         raise ValueError("Node not found.")
+
+    edge_ids = [
+        str(r[0]) for r in session.execute(
+            _sql_text(
+                "SELECT id FROM kg_edge_metadata "
+                "WHERE source_id = :nid OR target_id = :nid"
+            ),
+            {"nid": node_id},
+        ).fetchall()
+    ]
+    cleanup_edge_evidence(session, edge_ids)
+    if edge_ids:
+        session.execute(
+            _sql_text(
+                "DELETE FROM kg_edge_metadata "
+                "WHERE source_id = :nid OR target_id = :nid"
+            ),
+            {"nid": node_id},
+        )
+    cleanup_node_dependents_on_delete(session, node_id)
+    # ORM delete (not raw SQL) so the embedding-sync chokepoint queues the
+    # node's Chroma vector removal for after_commit. passive_deletes=True
+    # keeps the ORM from touching the already-deleted edge rows.
     session.delete(node)
 
 
@@ -320,13 +355,17 @@ def _state_or_event_is_active(node, now=None) -> bool:
 
 def delete_edge(edge_id: uuid.UUID, session: Session) -> bool:
     """
-    Marks an edge for deletion by its ID. Does not commit the session.
+    Delete an edge and its kg_edge_evidence rows (no FK — evidence never
+    cascades). Does not commit the session.
     """
+    from app.assistant.kg_core.kg_utils.node_merge import cleanup_edge_evidence
+
     edge = session.get(Edge, edge_id)
     if not edge:
         logger.warning(f"Edge {edge_id} not found")
         return False
 
+    cleanup_edge_evidence(session, [str(edge_id)])
     session.delete(edge)
     return True
 

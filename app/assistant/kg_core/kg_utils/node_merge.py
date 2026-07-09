@@ -188,6 +188,7 @@ def reroute_edges(
 
     rerouted: List[str] = []
     dropped_snapshots: List[Dict[str, Any]] = []
+    dropped_edge_ids: List[str] = []
 
     for row in loser_edge_rows:
         edge_id = str(row["id"])
@@ -215,6 +216,7 @@ def reroute_edges(
                 text("DELETE FROM kg_edge_metadata WHERE id = :eid"),
                 {"eid": edge_id},
             )
+            dropped_edge_ids.append(edge_id)
             continue
 
         session.execute(
@@ -227,6 +229,10 @@ def reroute_edges(
         )
         existing_keys.add((new_src, new_tgt, rel))
         rerouted.append(edge_id)
+
+    # Dropped duplicates are deleted edge rows — their evidence must go with
+    # them (snapshots above keep the undo story intact).
+    cleanup_edge_evidence(session, dropped_edge_ids)
 
     session.flush()
     return rerouted, dropped_snapshots
@@ -353,6 +359,56 @@ def _table_exists(session: Session, table_name: str) -> bool:
         text("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = :t"),
         {"t": table_name},
     ).fetchone() is not None
+
+
+def cleanup_edge_evidence(session: Session, edge_ids: List[str]) -> int:
+    """DELETE kg_edge_evidence rows for these edges. The evidence tables have
+    no FKs (verified 2026-07-08), so nothing cascades — every path that
+    deletes an edge row must call this or the evidence orphans. Returns rows
+    deleted."""
+    ids = [str(e) for e in (edge_ids or []) if e]
+    if not ids or not _table_exists(session, "kg_edge_evidence"):
+        return 0
+    total = 0
+    # Chunked IN-lists keep the statement well under SQLite's variable cap.
+    for i in range(0, len(ids), 200):
+        chunk = ids[i:i + 200]
+        placeholders = ", ".join(f":e{j}" for j in range(len(chunk)))
+        result = session.execute(
+            text(f"DELETE FROM kg_edge_evidence WHERE edge_id IN ({placeholders})"),
+            {f"e{j}": eid for j, eid in enumerate(chunk)},
+        )
+        total += result.rowcount or 0
+    if total:
+        logger.info("[node_merge] deleted %d edge-evidence row(s) for %d edge(s)", total, len(ids))
+    return total
+
+
+def cleanup_node_dependents_on_delete(session: Session, node_id: str) -> Dict[str, int]:
+    """Evidence + verdict lifecycle for a node about to be DELETED (not
+    merged — the merge path rebinds evidence to the winner instead).
+
+    - kg_node_evidence rows for the node are deleted (no FK, never cascades).
+    - Active kg_node_verdict rows naming the node are superseded — a verdict
+      about a dead node is noise the duplicate scan's memory should not read.
+
+    Does NOT touch the node's edges: callers own edge deletion (lock policy
+    and snapshotting differ per path) — pair edge deletion with
+    ``cleanup_edge_evidence``. Chroma vectors are handled by the ORM
+    after_delete chokepoint (ORM deletes) or the caller's explicit cleanup.
+    """
+    node_id = str(node_id)
+    counts = {"node_evidence_deleted": 0, "verdicts_superseded": 0}
+    if _table_exists(session, "kg_node_evidence"):
+        result = session.execute(
+            text("DELETE FROM kg_node_evidence WHERE node_id = :nid"),
+            {"nid": node_id},
+        )
+        counts["node_evidence_deleted"] = result.rowcount or 0
+    counts["verdicts_superseded"] = supersede_verdicts_for_node(
+        session, node_id, reason="node deleted"
+    )
+    return counts
 
 
 def migrate_section_tags(
