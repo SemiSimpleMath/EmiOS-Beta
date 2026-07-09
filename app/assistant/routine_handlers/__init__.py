@@ -6,7 +6,7 @@ Drop a new handler file in this directory:
     from app.assistant.routine_handlers import routine_handler
 
     @routine_handler()
-    def my_handler(*, target_date=None, routine=None):
+    def my_handler(*, target_date=None, routine=None, event_message=None):
         ...
 
 The handler is auto-registered at startup as a routine function with
