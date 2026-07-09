@@ -284,17 +284,34 @@ def _derive_claim_type(
 
 
 def _parse_ts(value) -> Optional[datetime]:
+    parsed, _ = _parse_ts_or_prose(value)
+    return parsed
+
+
+def _parse_ts_or_prose(value) -> tuple[Optional[datetime], Optional[str]]:
+    """Parse an ISO timestamp; an unparseable NON-EMPTY string comes back as
+    PROSE instead of vanishing. The extractor legitimately emits partial
+    dates ("2024-08", "spring 2023") that fromisoformat rejects — these
+    used to be swallowed to None with no trace (audit G3), losing the
+    node's temporal anchor. The prose pipeline (valid_*_prose ->
+    Node.start/end_date_prose -> the promoter's year-mismatch filter)
+    already exists downstream; this routes into it.
+    """
     if value is None:
-        return None
+        return None, None
     if isinstance(value, datetime):
-        return value
+        return value, None
     s = str(value).strip()
     if not s:
-        return None
+        return None, None
     try:
-        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+        return datetime.fromisoformat(s.replace("Z", "+00:00")), None
     except Exception:
-        return None
+        logger.warning(
+            "[proposal_writer] unparseable date %r — keeping it as date prose",
+            s,
+        )
+        return None, s
 
 
 def write_one_proposal_group(
@@ -393,6 +410,9 @@ def write_one_proposal_group(
         category = (n.get("category") or "")
         category = category[:128] if category else None
 
+        vf_parsed, vf_leftover = _parse_ts_or_prose(n.get("valid_from") or n.get("start_date"))
+        vt_parsed, vt_leftover = _parse_ts_or_prose(n.get("valid_to") or n.get("end_date"))
+
         row = ClaimProposalNode(
             proposal_id=proposal.id,
             extractor_temp_id=extractor_tid or None,
@@ -402,10 +422,10 @@ def write_one_proposal_group(
             sentence=n.get("sentence") or n.get("original_sentence") or None,
             description_draft=n.get("description") or n.get("description_draft"),
             attributes_json=merged_attrs or None,
-            valid_from=_parse_ts(n.get("valid_from") or n.get("start_date")),
-            valid_to=_parse_ts(n.get("valid_to") or n.get("end_date")),
-            valid_from_prose=n.get("valid_from_prose") or n.get("start_date_prose"),
-            valid_to_prose=n.get("valid_to_prose") or n.get("end_date_prose"),
+            valid_from=vf_parsed,
+            valid_to=vt_parsed,
+            valid_from_prose=n.get("valid_from_prose") or n.get("start_date_prose") or vf_leftover,
+            valid_to_prose=n.get("valid_to_prose") or n.get("end_date_prose") or vt_leftover,
             start_date_confidence=n.get("start_date_confidence"),
             end_date_confidence=n.get("end_date_confidence"),
             valid_currently=n.get("valid_currently"),

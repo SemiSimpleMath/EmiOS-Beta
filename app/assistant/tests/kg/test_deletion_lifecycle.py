@@ -160,3 +160,22 @@ def test_lifecycle_gc_sweeps_residue():
     assert again["node_evidence_orphans_deleted"] == 0
     assert again["edge_evidence_orphans_deleted"] == 0
     assert again["dead_verdicts_superseded"] == 0
+
+
+def test_unparseable_dates_route_to_prose_not_none():
+    """Audit G3: partial dates the extractor emits ("2024-08") must survive
+    as prose, not vanish; real ISO stamps still parse; explicit prose from
+    the extractor wins over the leftover."""
+    from app.assistant.kg.proposal_writer import _parse_ts_or_prose
+
+    parsed, leftover = _parse_ts_or_prose("2026-07-08T12:00:00+00:00")
+    assert parsed is not None and leftover is None
+
+    parsed, leftover = _parse_ts_or_prose("spring 2023")
+    assert parsed is None and leftover == "spring 2023"
+
+    parsed, leftover = _parse_ts_or_prose(None)
+    assert parsed is None and leftover is None
+
+    parsed, leftover = _parse_ts_or_prose("   ")
+    assert parsed is None and leftover is None
