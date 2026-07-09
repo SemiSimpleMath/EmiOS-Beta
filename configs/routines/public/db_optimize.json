@@ -1,0 +1,15 @@
+{
+  "id": "db_optimize",
+  "enabled": true,
+  "name": "SQLite planner maintenance (PRAGMA optimize)",
+  "runner": "function",
+  "spec": {
+    "function_name": "db_optimize"
+  },
+  "run_policy": {
+    "type": "daily",
+    "time_local": "03:40"
+  },
+  "max_run_seconds": 300,
+  "notes": "Keeps the query planner's statistics fresh (sqlite_stat1). PRAGMA optimize re-ANALYZEs only tables whose stats look stale, with analysis_limit bounding the sampling — a no-op most nights. Added 2026-07-09 (persistence audit P2: ANALYZE had never run across 103 tables / 351 indexes)."
+}
