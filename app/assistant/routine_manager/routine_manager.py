@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import threading
 import time as _time_mod
 import uuid
@@ -953,36 +952,65 @@ class RoutineManager:
                 routine.routine_id, e, exc_info=True,
             )
 
+    def _mutate_status_file(self, mutate_routines) -> None:
+        """The ONE write discipline for resource_routine_status.json
+        overrides: hold the state lock, read fresh from disk, mutate the
+        routines map, write atomically. Every writer in the process routes
+        through here or _mutate_state_entry_atomic — two read-modify-write
+        writers under different locks is how toggles get lost (audit R4).
+        """
+        path = _resources_dir() / "resource_routine_status.json"
+        with self._state_lock:
+            data = read_json_file(path) or {}
+            if not isinstance(data, dict):
+                data = {}
+            routines = data.setdefault("routines", {})
+            if not isinstance(routines, dict):
+                routines = {}
+                data["routines"] = routines
+            mutate_routines(routines)
+            write_json_atomic(path, data)
+
+    def set_routine_enabled(self, routine_id: str, enabled: bool) -> None:
+        """User/admin toggle — writes the status-file `enabled` override.
+
+        Re-enabling clears the auto-disable residue: a stale
+        auto_disabled_reason makes the next run finalize as a recovery
+        PROBE, whose failure path silently bumps a timestamp instead of
+        counting toward auto-disable and ticketing (audit R4). A fresh
+        user enable means a fresh failure budget.
+        """
+        def _mutate(routines: Dict[str, Any]) -> None:
+            entry = routines.get(routine_id) if isinstance(routines.get(routine_id), dict) else {}
+            entry["enabled"] = bool(enabled)
+            if enabled:
+                entry["auto_disabled_reason"] = None
+                entry["auto_disabled_at_utc"] = None
+                entry["consecutive_failures"] = 0
+                entry["next_attempt_after_utc"] = None
+            routines[routine_id] = entry
+        self._mutate_status_file(_mutate)
+        logger.info(
+            "[routine_manager] routine %s enabled=%s (status override)",
+            routine_id, bool(enabled),
+        )
+        decision_log.record(
+            routine_id=routine_id, event="toggled",
+            reason=f"enabled={bool(enabled)} (user toggle)",
+        )
+
     def _disable_routine_in_status(self, routine_id: str, *, reason: str) -> None:
         """Flip enabled=false in resource_routine_status.json. Same file
         the admin UI writes, so re-enabling later via /routines clears
         this just like any user toggle would.
         """
-        from app.assistant.utils.path_utils import get_resources_dir
-        path = Path(get_resources_dir()) / "resource_routine_status.json"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with self._state_lock:
-            data: Dict[str, Any] = {}
-            if path.exists():
-                try:
-                    data = json.loads(path.read_text(encoding="utf-8"))
-                except Exception:
-                    data = {}
-            routines = data.setdefault("routines", {})
-            if not isinstance(routines, dict):
-                routines = {}
-                data["routines"] = routines
+        def _mutate(routines: Dict[str, Any]) -> None:
             entry = routines.get(routine_id) if isinstance(routines.get(routine_id), dict) else {}
             entry["enabled"] = False
             entry["auto_disabled_reason"] = reason
             entry["auto_disabled_at_utc"] = utc_now().isoformat()
             routines[routine_id] = entry
-            tmp = path.with_suffix(path.suffix + ".tmp")
-            with tmp.open("w", encoding="utf-8", newline="\n") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-                f.write("\n")
-                f.flush()
-            tmp.replace(path)
+        self._mutate_status_file(_mutate)
         logger.warning(
             "[routine_manager] AUTO-DISABLED routine %s in status file. reason=%s",
             routine_id, reason,
@@ -1023,31 +1051,14 @@ class RoutineManager:
 
     def _clear_auto_disable_in_status(self, routine_id: str, run_id: str) -> None:
         """Probe succeeded — flip enabled=true and clear auto_disabled fields."""
-        from app.assistant.utils.path_utils import get_resources_dir
-        path = Path(get_resources_dir()) / "resource_routine_status.json"
-        with self._state_lock:
-            data: Dict[str, Any] = {}
-            if path.exists():
-                try:
-                    data = json.loads(path.read_text(encoding="utf-8"))
-                except Exception:
-                    data = {}
-            routines = data.setdefault("routines", {})
-            if not isinstance(routines, dict):
-                routines = {}
-                data["routines"] = routines
+        def _mutate(routines: Dict[str, Any]) -> None:
             entry = routines.get(routine_id) if isinstance(routines.get(routine_id), dict) else {}
             entry["enabled"] = True
             entry["auto_disabled_reason"] = None
             entry["auto_disabled_at_utc"] = None
             entry["consecutive_failures"] = 0
             routines[routine_id] = entry
-            tmp = path.with_suffix(path.suffix + ".tmp")
-            with tmp.open("w", encoding="utf-8", newline="\n") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-                f.write("\n")
-                f.flush()
-            tmp.replace(path)
+        self._mutate_status_file(_mutate)
         logger.warning(
             "[routine_manager] AUTO-RECOVERED routine %s after successful probe (run_id=%s)",
             routine_id, run_id,
@@ -1063,28 +1074,11 @@ class RoutineManager:
         """Probe failed — push auto_disabled_at_utc forward so the next probe
         waits another auto_retry_after_seconds. Keeps the routine disabled,
         no new ticket fired."""
-        from app.assistant.utils.path_utils import get_resources_dir
-        path = Path(get_resources_dir()) / "resource_routine_status.json"
-        with self._state_lock:
-            data: Dict[str, Any] = {}
-            if path.exists():
-                try:
-                    data = json.loads(path.read_text(encoding="utf-8"))
-                except Exception:
-                    data = {}
-            routines = data.setdefault("routines", {})
-            if not isinstance(routines, dict):
-                routines = {}
-                data["routines"] = routines
+        def _mutate(routines: Dict[str, Any]) -> None:
             entry = routines.get(routine_id) if isinstance(routines.get(routine_id), dict) else {}
             entry["auto_disabled_at_utc"] = now_utc.isoformat()
             routines[routine_id] = entry
-            tmp = path.with_suffix(path.suffix + ".tmp")
-            with tmp.open("w", encoding="utf-8", newline="\n") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-                f.write("\n")
-                f.flush()
-            tmp.replace(path)
+        self._mutate_status_file(_mutate)
         logger.info(
             "[routine_manager] probe failed for %s; next probe in auto_retry_after_seconds",
             routine_id,

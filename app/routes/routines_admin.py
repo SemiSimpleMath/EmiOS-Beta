@@ -141,21 +141,6 @@ def _load_state() -> Dict[str, Any]:
         return {"routines": {}}
 
 
-def _save_state(state: Dict[str, Any]) -> None:
-    """Atomic write of the runtime status file. Per-routine `enabled`
-    lives here (the K8s-shape "status" half of the spec/status split):
-    toggles are per-machine state, not declarative schema, so they
-    must not commit-flip configs/routines.json."""
-    p = _state_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(p.suffix + ".tmp")
-    with tmp.open("w", encoding="utf-8", newline="\n") as f:
-        json.dump(state, f, indent=2, ensure_ascii=False)
-        f.write("\n")
-        f.flush()
-    tmp.replace(p)
-
-
 def _find_routine(config: Dict[str, Any], routine_id: str) -> Optional[Dict[str, Any]]:
     for r in config.get("routines", []):
         if r.get("id") == routine_id:
@@ -284,6 +269,11 @@ def routines_toggle(routine_id: str):
     pull schema updates from upstream without losing their toggle state,
     and lets them commit schema improvements without pushing personal
     on/off flags into the public repo.
+
+    The write goes through RoutineManager.set_routine_enabled — the ONE
+    status-file writer (under the manager's state lock, so a concurrent
+    routine finishing can't lose the toggle), which also clears the
+    auto-disable residue on re-enable.
     """
     payload = request.get_json(silent=True) or {}
     desired = payload.get("enabled")
@@ -294,9 +284,7 @@ def routines_toggle(routine_id: str):
             return jsonify({"ok": False, "error": f"routine not found: {routine_id}"}), 404
 
         state = _load_state()
-        if not isinstance(state.get("routines"), dict):
-            state["routines"] = {}
-        existing = state["routines"].get(routine_id) or {}
+        existing = (state.get("routines") or {}).get(routine_id) or {}
         if not isinstance(existing, dict):
             existing = {}
         # Current effective enabled = status override if set, else spec default.
@@ -306,9 +294,7 @@ def routines_toggle(routine_id: str):
             else bool(r.get("enabled", False))
         )
         new_enabled = (not current_enabled) if desired is None else bool(desired)
-        existing["enabled"] = new_enabled
-        state["routines"][routine_id] = existing
-        _save_state(state)
+        get_routine_manager().set_routine_enabled(routine_id, new_enabled)
     logger.info("[routines_admin] %s enabled=%s (status override)", routine_id, new_enabled)
     return jsonify({"ok": True, "id": routine_id, "enabled": new_enabled})
 
