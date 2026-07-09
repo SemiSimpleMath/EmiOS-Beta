@@ -355,11 +355,14 @@ class EntityInjector:
     def _seed_entities_from_context(self, user_context: dict | None, *, blocked_entities: set[str] | None = None) -> List[str]:
         if not isinstance(user_context, dict):
             return []
+        # The room_* keys are populated by room_resource_loader from the room's
+        # access config — the live seeding channel. (Bare pinned_entities /
+        # allowed_entity_cards context keys had no declaring agent and were
+        # removed 2026-07-08; scope-level entity policy binds in
+        # _narrow_entities_by_scope, not here.)
         ordered_keys = [
             "room_pinned_entities",
-            "pinned_entities",
             "room_allowed_entity_cards",
-            "allowed_entity_cards",
         ]
         seeds: list[str] = []
         for key in ordered_keys:

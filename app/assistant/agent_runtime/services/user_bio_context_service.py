@@ -42,25 +42,12 @@ class UserBioContextService:
         "personal": ("style_persona", "preferences", "background", "health_logistics", "entertainment_hobbies"),
         "worldview": ("style_persona", "values"),
     }
-    _MAX_FACTS_BY_BUCKET = {
-        "admin": 2,
-        "technical": 4,
-        "research": 4,
-        "personal": 4,
-        "worldview": 3,
-    }
-    _WORLDVIEW_MIN_SCORE = 2
     _MAX_OUTPUT_CHARS = 900
     _BUCKET_MIN_SIMILARITY = 0.315
     _BUCKET_MIN_MARGIN = 0.04
     _BUCKET_HIGH_CONFIDENCE = 0.30
     _BUCKET_ROUTE_TOP_K = 2
-    _FACT_MIN_SIMILARITY = 0.15
-    _FACT_RELATIVE_MAX_DROP = 0.08
-    _MAX_FACTS_PER_SECTION = 2
     _SECTION_MIN_SIMILARITY = 0.25
-    _SECTION_MARGIN = 0.05
-    _WORLDVIEW_VALUE_MIN_SIMILARITY = 0.24
     _USER_BIO_RESOURCE_ID = "user_bio"
     _BUCKET_TO_SECTIONS = {
         "admin": ("preferences", "style_persona"),
@@ -395,49 +382,3 @@ class UserBioContextService:
             return ""
         return UserBioContextService._SECTION_NAME_ALIASES.get(raw, raw.replace(" ", "_"))
 
-    @classmethod
-    def _rank_facts(
-        cls,
-        *,
-        facts: List[_BioFact],
-        query_text: str,
-        bucket: str,
-        allowed_sections: set[str],
-    ) -> List[_BioFact]:
-        query_vec = cls._embed_text(str(query_text or "").strip())
-        fact_texts = [f.text for f in facts]
-        fact_vecs = cls._embed_texts(fact_texts)
-        scored: List[tuple[float, _BioFact]] = []
-        for fact, fact_vec in zip(facts, fact_vecs):
-            if fact.section not in allowed_sections:
-                continue
-            score = cls._cosine_similarity(query_vec, fact_vec)
-            if fact.section == "style_persona":
-                score += 0.02  # Keep style prefs slightly sticky.
-            if bucket == "worldview" and fact.section == "values":
-                score += 0.03
-            if score < cls._FACT_MIN_SIMILARITY:
-                continue
-            if bucket == "worldview" and fact.section == "values" and score < cls._WORLDVIEW_VALUE_MIN_SIMILARITY:
-                continue
-            scored.append((score, fact))
-        scored.sort(key=lambda x: x[0], reverse=True)
-        if not scored:
-            return []
-        top_score = float(scored[0][0])
-        # Deduplicate by text while preserving score order.
-        out: List[_BioFact] = []
-        seen_text = set()
-        per_section_count: Dict[str, int] = {}
-        for score, fact in scored:
-            if score < (top_score - cls._FACT_RELATIVE_MAX_DROP):
-                continue
-            if fact.text in seen_text:
-                continue
-            section_count = int(per_section_count.get(fact.section, 0))
-            if section_count >= cls._MAX_FACTS_PER_SECTION:
-                continue
-            seen_text.add(fact.text)
-            per_section_count[fact.section] = section_count + 1
-            out.append(fact)
-        return out

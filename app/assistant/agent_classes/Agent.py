@@ -279,13 +279,6 @@ class Agent:
     def build_recent_history(self, agent_messages):
         return self.components.history_formatter.format_recent_history(agent_messages or [])
 
-    def build_history(self) -> str:
-        """
-        Default history policy for non-chat agents.
-        Most agent calls are one-shot, so return empty unless overridden.
-        """
-        return ""
-
     def _resolve_resource(self, resource_id: str) -> Any:
         return self.components.context_injector.resolve_resource(self, resource_id)
 

@@ -393,60 +393,11 @@ def test_manager_factory_supports_list_all_sentinel_for_manager_tools(monkeypatc
     assert tool_registry.filtered_arg == {"find_tool", "install_tool"}
 
 
-def test_context_injector_uses_custom_agent_history_builder():
-    from app.assistant.agent_runtime.services.context_injector import ContextInjector
-
-    class _Blackboard:
-        @staticmethod
-        def get_state_value(_key, default=None):
-            return default
-
-    class _Agent:
-        name = "emi_agent"
-        config = {}  # context_injector reads agent.config
-        blackboard = _Blackboard()
-
-        @staticmethod
-        def build_history():
-            return "CUSTOM CHAT HISTORY"
-
-    injector = ContextInjector()
-    ctx = injector.generate_injections_block(_Agent(), ["history"])
-    assert ctx.get("history") == "CUSTOM CHAT HISTORY"
-
-
-def test_agent_default_build_history_is_empty():
-    from app.assistant.agent_classes.Agent import Agent
-
-    agent = Agent.__new__(Agent)
-    assert agent.build_history() == ""
-
-
-
-
-def test_context_injector_prefers_injected_history_over_builder():
-    from app.assistant.agent_runtime.services.context_injector import ContextInjector
-
-    class _Blackboard:
-        @staticmethod
-        def get_state_value(key, default=None):
-            if key == "history":
-                return "INJECTED HISTORY SNAPSHOT"
-            return default
-
-    class _Agent:
-        name = "emi_agent"
-        config = {}  # context_injector reads agent.config
-        blackboard = _Blackboard()
-
-        @staticmethod
-        def build_history():
-            return "BUILDER HISTORY"
-
-    ctx = ContextInjector().generate_injections_block(_Agent(), ["history"])
-    assert ctx.get("history") == "INJECTED HISTORY SNAPSHOT"
-
-
+# The `history` context key and its master-room chat builder were deleted
+# 2026-07-08 (context-injection audit C2): zero agent configs declared it,
+# zero templates rendered it, nothing wrote an injected value. The three
+# tests that pinned it went with it. Planner working history is the
+# separate, live `recent_history` key (history_formatter).
 
 
 
