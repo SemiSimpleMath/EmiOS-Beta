@@ -25,14 +25,17 @@ agents that include the tool in their `allowed_tools` can call it.
 
 ```
 app/assistant/lib/tools/<name>/
-├── __init__.py          # required (can be empty)
-├── tool_contract.json   # required — schema, metadata, prompt copy
-├── <name>.py            # required — the execute() function
+├── <name>.py                          # required — exposes get_tool_class()
+├── tool_contract.json                 # required — schema, metadata, planner copy
 ├── prompts/
-│   └── <name>_args.j2   # optional — extra arg-formulation guidance
+│   └── <name>_description.j2          # required — planner-facing description
 └── tool_forms/
-    └── <name>_form.py   # optional — Pydantic args model
+    └── tool_forms.py                  # required — `<name>_args` + `<name>_arguments` Pydantic models
 ```
+
+The registry loads all four pieces by these exact names. Argument-fill
+guidance lives in the contract's `arguments_prompt` string (the args
+agent reads it when filling a call).
 
 ## tool_contract.json shape
 
@@ -52,11 +55,13 @@ app/assistant/lib/tools/<name>/
   ],
   "arguments_prompt": "Detailed guidance for how to fill in the args. Examples are gold here.",
   "metadata": {
+    "min_authority": 90,
+    "approval_min_authority": 95,
     "domain": "email | calendar | smart_home | web | kg | …",
     "actions": ["send", "read", "delete", …],
     "selectors": ["recipient", "thread", …],
-    "risk_level": "low | medium | high",
-    "side_effects": "none | read | write",
+    "risk_level": "low | medium | high | critical",
+    "side_effects": "read_only | write | external_action | destructive",
     "requires_auth": ["google" | "ring" | …],
     "requires_network": true,
     "cost_level": "low | medium | high",
@@ -65,30 +70,59 @@ app/assistant/lib/tools/<name>/
 }
 ```
 
-The `metadata` block drives tool gating and approval-prompt selection
-in managers. `risk_level: high` + `side_effects: write` triggers the
-approval modal automatically.
+Two metadata fields are ENFORCED at dispatch — set them deliberately:
 
-## execute() function
+- `min_authority` (0-100, declare it on every first-party tool): the
+  see+use floor. Scopes below it never see the tool in their allowlists
+  (tool_scope_service drops it at scope-build) and dispatch refuses it.
+  A contract that omits the field fails closed at 99.
+- `approval_min_authority` (0-100): scopes below it get an approval
+  ticket before the tool executes; at or above, it runs directly.
+  `approval_required: true` is the blunt always-ask variant. Per-room
+  `scope.requires_approval_tools` lists add approval on top regardless.
 
-`<name>.py` exposes the entry point:
+The remaining fields (domain, actions, selectors, risk_level,
+side_effects, requires_auth, requires_network, cost_level,
+latency_class) are INFORMATIONAL today — they document the tool for
+humans and audits; no runtime gate reads them. Fill them honestly, and
+express any gating intent through the two enforced fields above.
+
+## The tool class
+
+`<name>.py` exposes `get_tool_class()` returning a `BaseTool` subclass
+whose `execute` takes a `ToolMessage` and returns a `ToolResult`:
 
 ```python
-from app.assistant.utils.pydantic_classes import Message
+from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
+from app.assistant.utils.pydantic_classes import ToolMessage, ToolResult
 
-def execute(args: dict, *, message: Message, scope_context=None) -> dict:
-    """
-    Args:
-      args         : validated tool arguments (already conforms to schema)
-      message      : the Message that triggered this call
-      scope_context: ScopeContext for entity / room / pod resolution
-    Returns:
-      dict with at minimum 'content' (str). May include 'data' (dict)
-      for structured outputs that downstream agents read.
-    """
-    ...
-    return {"content": "did the thing", "data": {"thing": "result"}}
+
+class MyTool(BaseTool):
+    def __init__(self):
+        super().__init__("my_tool")
+
+    def execute(self, tool_message: ToolMessage) -> ToolResult:
+        args = (tool_message.tool_data or {}).get("arguments", {})
+        scope = tool_message.scope_context   # entity / room / pod resolution
+        ...
+        return ToolResult(result_type="success", content="did the thing",
+                          data={"thing": "result"})
+
+
+def get_tool_class():
+    return MyTool
 ```
+
+Errors return through the typed protocol so the planner can react:
+`make_tool_error(error_code=..., message=..., abort_policy="abort_tool",
+retryable=...)` from `tool_error_protocol` — `abort_tool` lets the
+planner recover; `abort_task` aborts the whole manager run (reserved
+for fail-closed policy blocks).
+
+`tool_forms/tool_forms.py` declares the matching Pydantic pair —
+`<name>_args` (the fields) and `<name>_arguments` (`tool_name` +
+`arguments: <name>_args`) — which the args agent fills and the
+dispatcher validates.
 
 If the tool needs DB access, use `get_db_manager().read_session()` /
 `.transaction()`. If it needs an LLM, route through the agent system
@@ -111,9 +145,12 @@ If the tool needs DB access, use `get_db_manager().read_session()` /
 
 ## Notes
 
-- `risk_level: high` requires explicit user approval each call by
-  default. Override at the agent level by listing the tool in
-  `auto_approve_tools` (rarely the right answer).
+- Approval is driven by the contract's `approval_min_authority` /
+  `approval_required` plus per-room `scope.requires_approval_tools`
+  (see the metadata section above). For argument-aware softening —
+  "this specific invocation is safer than the default" — override
+  `BaseTool.compute_approval_reduction` (send_email's recipient
+  allowlist is the canonical example).
 - Use `scope_context.owner_id` for any KG access — the scope is the
   source of truth for which user/room owns a query.
 - Tools should fail loud (raise) on unrecoverable errors. The agent
