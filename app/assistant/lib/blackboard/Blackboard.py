@@ -34,17 +34,39 @@ class Blackboard:
     # blackboards are single-threaded so the lock is uncontended there.
     _history_id_lock = threading.Lock()
 
-    def __init__(self):
-        """Initialize blackboard with a stack of scopes for state and a global message log."""
-        # State is now a stack of dictionaries (scopes).
-        # The first scope (index 0) is the global scope.
-        self.scopes: List[dict] = [{
+    @staticmethod
+    def _initial_global_scope() -> dict:
+        """The global (index-0) scope's starting state — the ONE definition
+        shared by __init__ and reset_blackboard. They used to seed different
+        key sets (audit B4), so a fresh blackboard returned None for
+        exit/checklist/etc. where a reset one returned False/[]; a consumer
+        iterating get_state_value("checklist") without a default worked after
+        a reset but raised on a fresh instance."""
+        return {
             "task": "",
             "information": "",
+            "discovered_info": [],
+            "summary": [],
+            "links": {},
+            "visited_links": {},
+            "final_answer_content": [],
+            "checklist": [],
+            "progress": [],
             "request_id": None,
+            "last_agent": None,
             "num_cycles": 0,
+            "final_result": None,
+            "exit": False,
+            "error": False,
+            "current_agent": None,
             "history_next_id": 1,
-        }]
+        }
+
+    def __init__(self):
+        """Initialize blackboard with a stack of scopes for state and a global message log."""
+        # State is a stack of dictionaries (scopes). The first scope (index 0)
+        # is the global scope; child scopes are pushed for sub-agent calls.
+        self.scopes: List[dict] = [self._initial_global_scope()]
 
         # The call stack is a top-level attribute for managing scopes.
         # Each entry is a tuple: (calling_agent, called_agent, scope_id)
@@ -52,9 +74,6 @@ class Blackboard:
 
         # Messages are a single, global log for the entire task.
         self.messages: List[Message] = []
-        self.results = []
-        self.tool_results = []
-        self.history = []
         self.request_id = None
 
     def get_messages_for_scope(self, scope_id: str) -> List[Message]:
@@ -72,36 +91,17 @@ class Blackboard:
 
     def reset_blackboard(self):
         """Resets the blackboard to its initial state, including scopes and call stack."""
-        # Clear message logs
+        # Clear message log
         self.messages = []
-        self.results = []
-        self.tool_results = []
-        self.history = []
         self.request_id = None
         self.last_agent = None
         self.next_agent = None
-        
-        # Reset the NEW scope-based system (critical for manager reuse!)
-        self.scopes = [{
-            "task": "",
-            "information": "",
-            "discovered_info": [],
-            "summary": [],
-            "links": {},
-            "visited_links": {},
-            "final_answer_content": [],
-            "checklist": [],
-            "progress": [],
-            "request_id": None,
-            "last_agent": None,
-            "num_cycles": 0,
-            "final_result": None,
-            "exit": False,  # Explicitly clear exit flag for reused manager instances
-            "error": False,  # Explicitly clear error flag
-            "current_agent": None,
-            "history_next_id": 1,
-        }]
-        
+
+        # Reset the scope-based system to the SAME initial state a fresh
+        # blackboard gets (one definition — see _initial_global_scope).
+        # Critical for manager reuse.
+        self.scopes = [self._initial_global_scope()]
+
         # Reset the call stack (critical for manager reuse!)
         self.call_stack = []
 
