@@ -95,7 +95,7 @@ class UserBioContextService:
             return ""
 
         matched_sections = cls._route_matching_sections(
-            query_text=query, facts=facts, allowed_sections=set(sections),
+            query_text=query, facts=facts, allowed_sections=set(sections), payload=payload,
         )
 
         if matched_sections:
@@ -124,8 +124,18 @@ class UserBioContextService:
                 continue
             parts.append(cls._section_display_name(sec) + ":")
             parts.extend(grouped[sec])
-        out = "\n".join(parts)
-        final = out[: cls._MAX_OUTPUT_CHARS].strip()
+
+        # Budget on LINE boundaries — a hard character slice cut facts
+        # mid-word, leaving a dangling half-sentence in the prompt.
+        out_lines: list[str] = []
+        total = 0
+        for line in parts:
+            added = len(line) + (1 if out_lines else 0)
+            if total + added > cls._MAX_OUTPUT_CHARS:
+                break
+            out_lines.append(line)
+            total += added
+        final = "\n".join(out_lines).strip()
         logger.debug(
             "[%s] user_bio_context injected: bucket=%s facts_selected=%d chars=%d.",
             agent_name, bucket, len(selected), len(final),
@@ -159,8 +169,14 @@ class UserBioContextService:
         query_text: str,
         facts: List[_BioFact],
         allowed_sections: set[str],
+        payload: dict,
     ) -> set[str]:
         """Score each section by average similarity of its top facts to the query.
+
+        Fact vectors come from the payload-hash chunk cache (the same texts
+        the bucket router embedded) — this used to re-embed every section's
+        facts on every prompt render. Only texts absent from the cache (a
+        duplicate fact appearing under a second section) embed on demand.
 
         Returns the set of section names that pass the similarity threshold.
         """
@@ -171,11 +187,28 @@ class UserBioContextService:
         if not section_facts:
             return set()
 
+        chunks, chunk_vecs = cls._build_chunk_index(payload=payload)
+        vec_by_text: Dict[str, list[float]] = {
+            " ".join(c.text.strip().lower().split()): v
+            for c, v in zip(chunks, chunk_vecs)
+        }
+
         query_vec = cls._embed_text(query_text)
         section_scores: Dict[str, float] = {}
         for section, sf in section_facts.items():
-            vecs = cls._embed_texts([f.text for f in sf])
-            sims = [cls._cosine_similarity(query_vec, v) for v in vecs]
+            sims: list[float] = []
+            uncached: list[str] = []
+            for f in sf:
+                v = vec_by_text.get(" ".join(f.text.strip().lower().split()))
+                if v is None:
+                    uncached.append(f.text)
+                else:
+                    sims.append(cls._cosine_similarity(query_vec, v))
+            if uncached:
+                for v in cls._embed_texts(uncached):
+                    sims.append(cls._cosine_similarity(query_vec, v))
+            if not sims:
+                continue
             sims.sort(reverse=True)
             top = sims[:3]
             section_scores[section] = sum(top) / len(top)

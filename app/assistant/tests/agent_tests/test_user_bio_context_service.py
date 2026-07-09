@@ -107,6 +107,83 @@ def test_user_bio_context_routing_technical_includes_background_or_projects(monk
     assert ("Data Scientist" in out) or ("assistant architecture" in out) or ("PhD in Math" in out)
 
 
+def test_section_matching_reuses_chunk_cache_no_reembedding(monkeypatch):
+    """Section matching reads fact vectors from the payload-hash chunk cache;
+    a second build_context over the same payload embeds NO texts at all."""
+    _install_fake_semantic(monkeypatch)
+    calls = {"texts": 0}
+    orig = UserBioContextService._embed_texts.__func__
+
+    def _counting_embed_texts(cls, texts):
+        calls["texts"] += 1
+        return orig(cls, texts)
+
+    monkeypatch.setattr(UserBioContextService, "_embed_texts", classmethod(_counting_embed_texts))
+    # Fresh cache for this payload.
+    monkeypatch.setattr(UserBioContextService, "_chunk_cache_key", None)
+
+    payload = {
+        "style_persona": ["Prefers direct concise responses."],
+        "background": ["Data Scientist."],
+        "projects": [],
+        "preferences": ["Prefers morning scheduling."],
+        "values": [],
+        "health_logistics": [],
+        "entertainment_hobbies": [],
+    }
+    monkeypatch.setattr(
+        ResourceResolver,
+        "get_global_resource",
+        staticmethod(lambda resource_id, required=False, scope_context=None: payload),
+    )
+
+    class _Agent:
+        name = "emi_agent"
+        blackboard = _ScopedBlackboard()
+
+    out1 = UserBioContextService.build_context(agent=_Agent(), incoming_text="schedule a cleaner")
+    first_pass_calls = calls["texts"]
+    out2 = UserBioContextService.build_context(agent=_Agent(), incoming_text="schedule a cleaner")
+
+    assert "Prefers morning scheduling." in out1 and out1 == out2
+    assert first_pass_calls == 1  # the chunk-index build — nothing else
+    assert calls["texts"] == first_pass_calls  # second render embeds no texts
+
+
+def test_output_truncates_on_line_boundary(monkeypatch):
+    _install_fake_semantic(monkeypatch)
+    monkeypatch.setattr(UserBioContextService, "_chunk_cache_key", None)
+    monkeypatch.setattr(UserBioContextService, "_MAX_OUTPUT_CHARS", 80)
+
+    long_fact = "Prefers morning scheduling for appointments and cleaner visits every single week without exception."
+    payload = {
+        "style_persona": [],
+        "background": [],
+        "projects": [],
+        "preferences": [long_fact, "Prefers morning scheduling."],
+        "values": [],
+        "health_logistics": [],
+        "entertainment_hobbies": [],
+    }
+    monkeypatch.setattr(
+        ResourceResolver,
+        "get_global_resource",
+        staticmethod(lambda resource_id, required=False, scope_context=None: payload),
+    )
+
+    class _Agent:
+        name = "emi_agent"
+        blackboard = _ScopedBlackboard()
+
+    out = UserBioContextService.build_context(agent=_Agent(), incoming_text="schedule a cleaner")
+    assert len(out) <= 80
+    # No mid-line slice: every line is complete (header, section name, or a whole "- fact").
+    for line in out.splitlines():
+        assert line == "Relevant user bio context:" or line.endswith(":") or (
+            line.startswith("- ") and line[2:] in payload["preferences"]
+        ), line
+
+
 def test_route_bucket_uses_bucket_content_embeddings_not_bucket_name(monkeypatch):
     def _vec(text: str):
         t = str(text or "").lower()
