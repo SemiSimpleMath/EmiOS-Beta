@@ -8,7 +8,6 @@ from jinja2 import ChainableUndefined, Environment, FileSystemLoader, StrictUnde
 from app.assistant.agent_runtime.exceptions import PromptRenderError
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import get_app_root
-from app.assistant.utils.utils import normalize_to_ascii
 
 logger = get_logger(__name__)
 
@@ -164,10 +163,11 @@ class PromptBuilder:
             logger.error("[%s] Error parsing legacy image markers: %s", agent.name, e)
             legacy_image_paths = []
 
-        provider = (agent.llm_params or {}).get("llm_provider", "")
-        if provider != "gemini":
-            system_prompt = normalize_to_ascii(system_prompt)
-            user_prompt = normalize_to_ascii(user_prompt)
+        # Prompts go to the provider VERBATIM — UTF-8 end to end. An earlier
+        # normalize_to_ascii pass here flattened diacritics ("mökki"→"mokki")
+        # and silently deleted emoji/untranslatable characters from every
+        # non-Gemini prompt, so the model never saw the user's actual words
+        # (removed 2026-07-08, context-injection audit C1).
 
         # Pod-URI images are interleaved RIGHT AFTER each URI mention so
         # the LLM has unambiguous text↔image binding ("Katy in this pic
