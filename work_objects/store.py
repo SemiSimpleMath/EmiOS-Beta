@@ -212,6 +212,22 @@ class WorkStore:
         return wo
 
     def _op_add_node(self, wo, data, now) -> None:
+        # nodes.id is the table's GLOBAL primary key. A caller-supplied id that
+        # already lives in ANOTHER work object would INSERT OR REPLACE at persist
+        # and silently re-home the row — stealing it from the earlier graph and
+        # leaving that graph's children/edges dangling. Refuse loudly instead;
+        # callers minting meaningful ids must namespace them per work object.
+        explicit_id = data.get("id")
+        if explicit_id:
+            row = self._conn.execute(
+                "SELECT work_id FROM nodes WHERE id=?", (str(explicit_id),)
+            ).fetchone()
+            if row is not None and row["work_id"] != wo.id:
+                raise ValueError(
+                    f"add_node: id {explicit_id!r} already belongs to work object "
+                    f"{row['work_id']!r} — node ids are global; namespace "
+                    f"caller-supplied ids per work object"
+                )
         parent_id = data.get("parent_id")
         if parent_id is not None and parent_id not in wo.nodes:
             raise ValueError(f"add_node: parent {parent_id!r} not found")

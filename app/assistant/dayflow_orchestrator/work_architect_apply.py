@@ -36,6 +36,11 @@ def _to_dt(s):
 _ABANDON_SKIP = {"done", "closed", "abandoned", "superseded"}  # finished/finalized — left as a record
 
 
+def _work_ns(work_id: str) -> str:
+    """Short per-work-object suffix for namespacing architect slugs."""
+    return work_id.split("_")[-1][:6]
+
+
 def apply_architect_dag(store, work_id: str, nodes: List[Dict[str, Any]],
                         abandon_node_ids: List[str] | None = None) -> Dict[str, Any]:
     """Apply an architect DELTA onto a work object's graph. On a fresh decompose it just adds nodes; on a
@@ -45,6 +50,7 @@ def apply_architect_dag(store, work_id: str, nodes: List[Dict[str, Any]],
     Returns {added, edges, waits, abandoned}."""
     wo = store.load(work_id)
     goal_id = wo.goal_node_id
+    ns = _work_ns(work_id)
 
     # 0) PRUNE pass (re-plan) — abandon the named moot nodes + their un-finished subtrees.
     abandoned: List[str] = []
@@ -68,13 +74,28 @@ def apply_architect_dag(store, work_id: str, nodes: List[Dict[str, Any]],
     existing = set(wo.nodes.keys())
     specs = [n for n in (nodes or []) if isinstance(n, dict)]
 
-    # 1) nodes (id = the architect's slug, so depends_on can reference them directly)
+    # Node ids are GLOBALLY unique in the store (nodes.id is the table PK), but the
+    # architect's slugs are meaningful and RECUR across work objects — every nightly
+    # plan mints "book_ac_service" again. An un-namespaced re-mint INSERT OR REPLACEs
+    # the row and steals it from the earlier graph (audit W1: 10 slugs re-minted
+    # across 2-7 WOs, 53 dangling-parent nodes, and a still-active victim becomes
+    # unwritable). Namespace each NEW slug with this WO's suffix; the remap is
+    # batch-wide so intra-plan depends_on references keep working, and a reference
+    # to an id the graph already carries (re-plan against the projection's real
+    # ids) passes through untouched.
+    def _real(slug: str) -> str:
+        return slug if slug in existing else f"{slug}--{ns}"
+
+    # 1) nodes (id = the architect's slug, namespaced per work object)
     added: List[str] = []
     for spec in specs:
-        nid = str(spec.get("node_id") or "").strip()
+        raw_nid = str(spec.get("node_id") or "").strip()
         title = str(spec.get("title") or "").strip()
         detail = str(spec.get("detail") or "").strip()
-        if not nid or nid in existing or not (title or detail):
+        if not raw_nid or not (title or detail):
+            continue
+        nid = _real(raw_nid)
+        if nid in existing:
             continue
         store.apply("add_node", {
             "work_id": work_id, "id": nid, "type": "subtask", "parent_id": goal_id,
@@ -86,11 +107,14 @@ def apply_architect_dag(store, work_id: str, nodes: List[Dict[str, Any]],
     # 2) dependency edges (both endpoints must exist now)
     edges = 0
     for spec in specs:
-        nid = str(spec.get("node_id") or "").strip()
+        raw_nid = str(spec.get("node_id") or "").strip()
+        if not raw_nid:
+            continue
+        nid = _real(raw_nid)
         if nid not in existing:
             continue
         for dep in spec.get("depends_on", []) or []:
-            dep = str(dep).strip()
+            dep = _real(str(dep).strip()) if str(dep).strip() else ""
             if dep and dep in existing and dep != nid:
                 store.apply("add_edge", {
                     "work_id": work_id, "src": dep, "dst": nid, "relation": "depends_on",
@@ -103,7 +127,10 @@ def apply_architect_dag(store, work_id: str, nodes: List[Dict[str, Any]],
     #    the user_reply ask (wake_ref carries the question).
     waits = 0
     for spec in specs:
-        nid = str(spec.get("node_id") or "").strip()
+        raw_nid = str(spec.get("node_id") or "").strip()
+        if not raw_nid:
+            continue
+        nid = _real(raw_nid)
         if nid not in existing:
             continue
         wake_at = _to_dt(spec.get("wake_at"))
