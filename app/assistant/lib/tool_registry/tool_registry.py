@@ -394,7 +394,15 @@ class ToolRegistry:
     def load_tool_contract(self, tool_dir: Path, tool_name: str):
         """
         Load an optional per-tool contract from tool_contract.json.
-        Missing/invalid contracts are non-fatal.
+
+        A MISSING file is tolerated — core/dynamic tools without contracts
+        are ceiling-gated by design. A PRESENT-but-broken contract RAISES:
+        swallowing it would load the tool with contract=None, which
+        resolve_tool_min_authority treats as "no floor" (the MCP
+        exemption), so one bad edit would silently strip the tool's
+        authority gate, approval threshold, and planner card (audit T1).
+        load_tools collects the raise into its fail-loud boot failure
+        list, exactly as its comment promises.
         """
         contract_file = tool_dir / "tool_contract.json"
         if not contract_file.exists():
@@ -402,22 +410,16 @@ class ToolRegistry:
         try:
             with open(contract_file, "r", encoding="utf-8") as f:
                 raw = json.load(f)
-            if not isinstance(raw, dict):
-                logger.warning(
-                    "Ignoring non-object tool contract for '%s' at %s",
-                    tool_name,
-                    str(contract_file),
-                )
-                return None
-            return self._normalize_tool_contract(raw, tool_name)
-        except Exception as e:
-            logger.warning(
-                "Failed to load tool contract for '%s' at %s: %s",
-                tool_name,
-                str(contract_file),
-                e,
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"tool_contract.json for '{tool_name}' is not valid JSON: {e}"
+            ) from e
+        if not isinstance(raw, dict):
+            raise ValueError(
+                f"tool_contract.json for '{tool_name}' must be a JSON object, "
+                f"got {type(raw).__name__}"
             )
-            return None
+        return self._normalize_tool_contract(raw, tool_name)
 
     def _normalize_tool_contract(self, raw: dict[str, Any], tool_name: str) -> dict[str, Any] | None:
         name = raw.get("name")
