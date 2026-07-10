@@ -17,6 +17,29 @@ from app.assistant.utils.pydantic_classes import Message
 logger = get_logger(__name__)
 
 
+# Runtime control / scope keys owned by the manager loop, control nodes, and the
+# scope machinery — never part of an agent's answer. Left unguarded, an agent's
+# LLM output (a free-form agent, or a prompt-injected one summarizing untrusted
+# email/web/chat) could write these into the blackboard: a forged scope_context
+# then defeats check_tool_access — which reads the scope FROM the blackboard, with
+# nothing re-stamping it before the tool call — and task_allowed_tools / next_agent
+# would hijack tool policy and routing. The ONE legitimate case is a key an agent
+# DECLARES in its own output schema (a delegator declares next_agent); those pass,
+# every other reserved key from LLM output is skipped loudly.
+_RESERVED_RUNTIME_KEYS: frozenset = frozenset({
+    # scope / authority — the confirmed prompt-injection -> tool-escalation vector
+    "scope_context", "scope_contract", "scope_contract_enforced",
+    # tool policy
+    "task_allowed_tools", "task_except_tools",
+    "dynamic_allowed_tools", "dynamic_denied_tools", "visible_tools",
+    # routing / flow control
+    "next_agent", "last_agent", "result_writer", "pending_tool",
+    "calling_agent", "manager_agent_steps",
+    # misc runtime overrides
+    "task_llm_params", "request_id",
+})
+
+
 class AgentResultApplier:
     """Applies LLM structured output to the agent's blackboard."""
 
@@ -37,8 +60,22 @@ class AgentResultApplier:
 
         global_keys = self._config.get("global_output_keys", [])
         append_fields = self._config.get("append_fields", [])
+        declared = self._declared_output_fields()
 
         for key, value in result_dict.items():
+            if key in _RESERVED_RUNTIME_KEYS and key not in declared:
+                # An agent's answer must not write runtime control/scope state.
+                # This is the prompt-injection guard: a forged scope_context here
+                # would defeat the tool authority wall (check_tool_access reads the
+                # scope from the blackboard). A key the agent declares in its own
+                # output schema (a delegator's next_agent) is exempt above.
+                logger.error(
+                    "[%s] LLM output tried to write reserved runtime/scope key %r "
+                    "(not declared in its output schema) — skipped.",
+                    self._name, key,
+                )
+                continue
+
             is_global = key in global_keys
 
             if key in append_fields:
@@ -51,6 +88,24 @@ class AgentResultApplier:
                     self._blackboard.update_global_state_value(key, value)
                 else:
                     self._blackboard.update_state_value(key, value)
+
+    def _declared_output_fields(self) -> set:
+        """Field names the agent's own output schema declares — the only reserved
+        keys it may legitimately write (e.g. a delegator declares next_agent). A
+        Pydantic model exposes them via model_fields; a raw JSON schema via its
+        properties; a schema-less agent declares nothing, so it may write no
+        reserved key at all."""
+        so = self._config.get("structured_output") if isinstance(self._config, dict) else None
+        if so is None:
+            return set()
+        model_fields = getattr(so, "model_fields", None)
+        if isinstance(model_fields, dict):
+            return set(model_fields.keys())
+        if isinstance(so, dict):
+            props = so.get("properties")
+            if isinstance(props, dict):
+                return set(props.keys())
+        return set()
 
     def create_audit_message(self, result_dict: dict) -> None:
         """Create and persist a Message recording the agent's output."""
