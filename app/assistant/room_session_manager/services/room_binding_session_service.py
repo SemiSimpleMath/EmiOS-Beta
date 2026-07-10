@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict
 
 from app.assistant.global_blackboard.global_blackboard import GlobalBlackBoard
+from app.assistant.room_session_manager.services._session_state_lock import with_session_state_lock
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -109,6 +110,7 @@ class RoomBindingSessionService:
     # Lifecycle
     # ------------------------------------------------------------------
 
+    @with_session_state_lock
     def activate_room_binding(
         self,
         *,
@@ -153,6 +155,7 @@ class RoomBindingSessionService:
         self._on_activated(payload)
         return dict(payload)
 
+    @with_session_state_lock
     def get_active_room_binding(
         self,
         *,
@@ -169,6 +172,7 @@ class RoomBindingSessionService:
             return None
         return dict(payload)
 
+    @with_session_state_lock
     def deactivate_room_binding(
         self,
         *,

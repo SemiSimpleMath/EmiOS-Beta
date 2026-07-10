@@ -5,6 +5,7 @@ from typing import Any, Dict
 from app.assistant.room_session_manager.services.room_binding_session_service import (
     RoomBindingSessionService,
 )
+from app.assistant.room_session_manager.services._session_state_lock import with_session_state_lock
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -88,6 +89,7 @@ class DocCreationSessionService(RoomBindingSessionService):
             logger.error("Failed seeding doc_store for session %s: %s", session_id, e)
             logger.debug("doc_store seed exception", exc_info=True)
 
+    @with_session_state_lock
     def update_doc_markdown(self, *, session_id: str, doc_markdown: str) -> None:
         sessions = self._load_sessions()
         payload = sessions.get(session_id)
@@ -98,6 +100,7 @@ class DocCreationSessionService(RoomBindingSessionService):
         sessions[session_id] = payload
         self._save_sessions(sessions)
 
+    @with_session_state_lock
     def set_doc_id(self, *, session_id: str, doc_id: str) -> None:
         sessions = self._load_sessions()
         payload = sessions.get(session_id)

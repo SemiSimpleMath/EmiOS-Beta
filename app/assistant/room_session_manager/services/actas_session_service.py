@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from app.assistant.global_blackboard.global_blackboard import GlobalBlackBoard
+from app.assistant.room_session_manager.services._session_state_lock import with_session_state_lock
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -67,6 +68,7 @@ class ActAsSessionService:
         mapping = self._load()
         return mapping.get(key, "user")
 
+    @with_session_state_lock
     def set_principal(
         self,
         *,
@@ -86,6 +88,7 @@ class ActAsSessionService:
         self._save(mapping)
         logger.debug("actas binding for %s -> %s", key, normalized)
 
+    @with_session_state_lock
     def clear_principal(
         self,
         *,

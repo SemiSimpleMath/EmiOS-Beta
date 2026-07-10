@@ -5,6 +5,7 @@ from typing import Any, Dict
 from app.assistant.room_session_manager.services.room_binding_session_service import (
     RoomBindingSessionService,
 )
+from app.assistant.room_session_manager.services._session_state_lock import with_session_state_lock
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -45,6 +46,7 @@ class TaskCreationSessionService(RoomBindingSessionService):
             },
         )
 
+    @with_session_state_lock
     def update_draft_spec(self, *, session_id: str, draft_spec: str) -> None:
         sessions = self._load_sessions()
         payload = sessions.get(session_id)
@@ -55,6 +57,7 @@ class TaskCreationSessionService(RoomBindingSessionService):
         sessions[session_id] = payload
         self._save_sessions(sessions)
 
+    @with_session_state_lock
     def update_task_spec_object(self, *, session_id: str, spec_dict: dict) -> None:
         """Persist the structured TaskSpec dict across turns."""
         sessions = self._load_sessions()
@@ -74,6 +77,7 @@ class TaskCreationSessionService(RoomBindingSessionService):
             return None
         return payload.get("task_spec_object")
 
+    @with_session_state_lock
     def update_task_id(self, *, session_id: str, task_id: str) -> None:
         """Set or update the task_id (folder name) for this session."""
         sessions = self._load_sessions()
@@ -93,6 +97,7 @@ class TaskCreationSessionService(RoomBindingSessionService):
             return ""
         return str(payload.get("task_id") or "").strip()
 
+    @with_session_state_lock
     def set_compiled_task_id(self, *, session_id: str, compiled_task_id: str) -> None:
         sessions = self._load_sessions()
         payload = sessions.get(session_id)

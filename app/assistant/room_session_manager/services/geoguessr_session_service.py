@@ -5,6 +5,7 @@ from typing import Any, Dict, List
 from app.assistant.room_session_manager.services.room_binding_session_service import (
     RoomBindingSessionService,
 )
+from app.assistant.room_session_manager.services._session_state_lock import with_session_state_lock
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -44,6 +45,7 @@ class GeoguessrSessionService(RoomBindingSessionService):
         payload = sessions.get(session_id)
         return dict(payload) if isinstance(payload, dict) else None
 
+    @with_session_state_lock
     def add_screenshot(self, *, session_id: str, screenshot_path: str) -> None:
         sessions = self._load_sessions()
         payload = sessions.get(session_id)
@@ -56,6 +58,7 @@ class GeoguessrSessionService(RoomBindingSessionService):
         sessions[session_id] = payload
         self._save_sessions(sessions)
 
+    @with_session_state_lock
     def update_analysis(
         self,
         *,
@@ -78,6 +81,7 @@ class GeoguessrSessionService(RoomBindingSessionService):
         sessions[session_id] = payload
         self._save_sessions(sessions)
 
+    @with_session_state_lock
     def mark_revealed(self, *, session_id: str) -> None:
         sessions = self._load_sessions()
         payload = sessions.get(session_id)
@@ -88,6 +92,7 @@ class GeoguessrSessionService(RoomBindingSessionService):
         sessions[session_id] = payload
         self._save_sessions(sessions)
 
+    @with_session_state_lock
     def set_tts_requested(self, *, session_id: str, tts_requested: bool) -> None:
         sessions = self._load_sessions()
         payload = sessions.get(session_id)
@@ -97,6 +102,7 @@ class GeoguessrSessionService(RoomBindingSessionService):
         sessions[session_id] = payload
         self._save_sessions(sessions)
 
+    @with_session_state_lock
     def reset_round(self, *, session_id: str) -> None:
         """Clear game state for a new round while keeping the session active."""
         sessions = self._load_sessions()

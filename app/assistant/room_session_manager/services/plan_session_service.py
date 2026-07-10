@@ -5,6 +5,7 @@ from typing import Any, Dict
 from app.assistant.room_session_manager.services.room_binding_session_service import (
     RoomBindingSessionService,
 )
+from app.assistant.room_session_manager.services._session_state_lock import with_session_state_lock
 from app.assistant.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -49,6 +50,7 @@ class PlanSessionService(RoomBindingSessionService):
         ticket_index.pop(ticket_id, None)
         self._save_ticket_index(ticket_index)
 
+    @with_session_state_lock
     def get_active_ticket_session_for_ticket(self, ticket_id: str) -> Dict[str, Any] | None:
         ticket_key = str(ticket_id or "").strip()
         if not ticket_key:
@@ -63,6 +65,7 @@ class PlanSessionService(RoomBindingSessionService):
             return None
         return {"session_id": sid, **session}
 
+    @with_session_state_lock
     def list_active_ticket_ids(self) -> set[str]:
         active_ticket_ids: set[str] = set()
         index = self._load_ticket_index()
@@ -73,6 +76,7 @@ class PlanSessionService(RoomBindingSessionService):
                 active_ticket_ids.add(ticket_id)
         return active_ticket_ids
 
+    @with_session_state_lock
     def start_or_resume_ticket_session(
         self,
         *,
@@ -128,6 +132,7 @@ class PlanSessionService(RoomBindingSessionService):
             return None
         return dict(payload)
 
+    @with_session_state_lock
     def touch_ticket_session(self, plan_session_id: str) -> None:
         sessions = self._load_sessions()
         payload = sessions.get(plan_session_id)
@@ -137,6 +142,7 @@ class PlanSessionService(RoomBindingSessionService):
         sessions[plan_session_id] = payload
         self._save_sessions(sessions)
 
+    @with_session_state_lock
     def set_ticket_session_status(
         self,
         *,
