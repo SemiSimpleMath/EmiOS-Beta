@@ -84,9 +84,14 @@ class SlackInboundService:
                         thread_ts=thread_ts or message_ts or "",
                     )
                 except Exception as e:
-                    logger.error("Failed sending early plan-mode Slack reply for room_id=%s: %s", room_id, e)
+                    # Log and swallow (match the Telegram early path): the reply is
+                    # what failed, the inbound already returned 200, and the async
+                    # worker that called us catches exceptions — re-raising only re-logs.
+                    logger.error(
+                        "Failed sending early plan-mode Slack reply for room_id=%s (logged, not re-raised): %s",
+                        room_id, e,
+                    )
                     logger.debug("early plan-mode Slack reply exception details", exc_info=True)
-                    raise
             return manager._build_short_circuit_response(
                 request_id=resolved_request_id,
                 room_id=room_id,

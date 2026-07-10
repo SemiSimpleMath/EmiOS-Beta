@@ -58,13 +58,16 @@ class TelegramInboundService:
                 try:
                     outbound_message_id = manager.telegram_transport.send_reply(chat_id=chat_id, body=reply_text)
                 except Exception as e:
-                    # Don't re-raise: doing so leaves the webhook in an error
-                    # state, Telegram retries, and the inbound gets processed
-                    # twice. The message is already persisted to unified_log
-                    # via the short-circuit response below, so the reply can
-                    # be recovered / retried later without duplicate ingest.
+                    # Log and swallow: the reply is what failed and the early-return
+                    # path has nothing left to do. The inbound webhook already
+                    # returned 200 on its own thread, and the async worker that
+                    # called us catches exceptions anyway — re-raising would only
+                    # re-log. NOTE: this early path does NOT persist to unified_log
+                    # (the short-circuit response reports
+                    # unified_log_persistence_enabled=False); a slash/plan-mode
+                    # control reply is not recorded as chat history.
                     logger.error(
-                        "Failed sending early plan-mode Telegram reply for room_id=%s (swallowed to prevent webhook retry): %s",
+                        "Failed sending early plan-mode Telegram reply for room_id=%s (logged, not re-raised): %s",
                         room_id, e,
                     )
                     logger.debug("early plan-mode telegram reply exception details", exc_info=True)

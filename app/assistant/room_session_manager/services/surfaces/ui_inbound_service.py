@@ -71,9 +71,14 @@ class UiInboundService:
                         widget_data=widget_data if isinstance(widget_data, list) else None,
                     )
                 except Exception as e:
-                    logger.error("Failed sending early plan-mode UI reply for room_id=%s: %s", room_id, e)
+                    # Log and swallow (match the Telegram/Slack early paths): the
+                    # reply is what failed and the caller (_run_room_inbound) only
+                    # logs a re-raise anyway.
+                    logger.error(
+                        "Failed sending early plan-mode UI reply for room_id=%s (logged, not re-raised): %s",
+                        room_id, e,
+                    )
                     logger.debug("early plan-mode UI reply exception details", exc_info=True)
-                    raise
             return manager._build_short_circuit_response(
                 request_id=resolved_request_id,
                 room_id=room_id,
