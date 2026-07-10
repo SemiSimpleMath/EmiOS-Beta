@@ -84,13 +84,6 @@ class ToolPolicyResolver:
             if denyset:
                 valid_tools = [t for t in valid_tools if t not in denyset]
 
-        # Dynamic deny list can tighten policy at runtime.
-        dyn_denied = self._bb_get("dynamic_denied_tools")
-        if isinstance(dyn_denied, list) and dyn_denied:
-            denyset = {str(x).strip() for x in dyn_denied if isinstance(x, str) and x.strip()}
-            if denyset:
-                valid_tools = [t for t in valid_tools if t not in denyset]
-
         # If task-level allowset was not provided, include dynamic allowed tools.
         if not isinstance(task_allowed, list):
             dyn_allowed = self._bb_get("dynamic_allowed_tools")
@@ -100,6 +93,16 @@ class ToolPolicyResolver:
                         continue
                     if t in all_available_tools and t not in valid_tools:
                         valid_tools.append(t)
+
+        # Dynamic deny is the FINAL filter, so deny ALWAYS wins — including over a
+        # tool that also appears in dynamic_allowed_tools. Previously this ran
+        # BEFORE the re-add above, so with no task allowset a tool present in both
+        # the dynamic allow and deny lists was removed and then resurrected.
+        dyn_denied = self._bb_get("dynamic_denied_tools")
+        if isinstance(dyn_denied, list) and dyn_denied:
+            denyset = {str(x).strip() for x in dyn_denied if isinstance(x, str) and x.strip()}
+            if denyset:
+                valid_tools = [t for t in valid_tools if t not in denyset]
 
         logger.debug("[%s] Final allowed tools: %s", self._name, valid_tools)
         return valid_tools
