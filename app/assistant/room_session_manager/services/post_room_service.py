@@ -3,6 +3,9 @@ from __future__ import annotations
 from typing import Any, Dict, Tuple
 
 from app.assistant.room_session_manager.contracts import OutboundIntent
+from app.assistant.utils.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class PostRoomService:
@@ -17,17 +20,22 @@ class PostRoomService:
             final = data.get("final_answer_answer")
             if isinstance(final, str) and final.strip():
                 return final.strip(), data
-            # If final-answer schema is present but answer is empty, treat as no reply.
-            # This prevents accidental fallback serialization to chat/slack.
+            # Final-answer schema present but the answer is empty → no reply.
             if "final_answer_answer" in data:
                 return "", data
-            joined = "\n".join(str(v) for v in data.values() if v is not None).strip()
-            if joined:
-                return joined, data
 
+        # Text reaches a user ONLY via final_answer_answer (above) or the manager's
+        # own `content` — never by serializing arbitrary `data` values, which would
+        # leak internal manager fields into chat/slack. A data dict with neither
+        # channel yields no reply.
         content = getattr(manager_result, "content", None)
         if isinstance(content, str) and content.strip():
             return content.strip(), data if isinstance(data, dict) else {}
+        if isinstance(data, dict) and data:
+            logger.debug(
+                "PostRoomService: manager result had data but no final_answer/content reply "
+                "channel; no reply emitted (keys=%s)", sorted(data.keys()),
+            )
         return "", data if isinstance(data, dict) else {}
 
     def build_outbound_intent(
