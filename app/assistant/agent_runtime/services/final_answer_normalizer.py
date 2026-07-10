@@ -108,11 +108,15 @@ class FinalAnswerNormalizer:
         if "final_answer_answer" in result_dict:
             answer = result_dict.get("final_answer_answer")
         else:
+            # Only a recognized answer field becomes the answer. A dict with none
+            # of them yields an empty answer (its other keys still surface via
+            # data_list) instead of serializing the whole payload as the reply —
+            # arbitrary internal fields must not reach the user (cf. RSM2).
             answer = (
                 result_dict.get("answer")
                 or result_dict.get("summary")
                 or result_dict.get("narrative")
-                or cls.to_string(result)
+                or ""
             )
         task = result_dict.get("final_answer_task") or result_dict.get("task") or ""
         no_op = bool(result_dict.get("final_answer_no_op", False) or result_dict.get("no_op_tf", False))

@@ -83,8 +83,15 @@ class ActionContractService:
         result_dict: dict,
         list_action_validator: Optional[Callable] = None,
     ) -> None:
-        """Normalize + validate in one call. Skips if action contract not required."""
-        if not self.is_required():
+        """Normalize + validate the action contract. Runs when the agent requires
+        an action OR whenever the LLM emitted one anyway: an emitted action is
+        routed by FlowController regardless of action_required, so it must be
+        checked against the agent's allowed actions (a non-required agent's action
+        previously reached routing unvalidated). An agent that emits no action and
+        doesn't require one is left alone — no false 'missing action' raise."""
+        action = result_dict.get("action") if isinstance(result_dict, dict) else None
+        has_action = (isinstance(action, str) and action.strip()) or isinstance(action, list)
+        if not self.is_required() and not has_action:
             return
         self.normalize_action_payload(result_dict)
         self.validate_action_payload(result_dict, list_action_validator)
