@@ -317,6 +317,7 @@ class DayflowScheduler:
             earliest: Optional[datetime] = None
             earliest_item_id: Optional[str] = None
             ancient_skipped = 0
+            malformed_skipped = 0
 
             items = load_existing_dayflow_items()
             for item in items:
@@ -333,14 +334,22 @@ class DayflowScheduler:
                         parsed = parsed.replace(tzinfo=timezone.utc)
                     parsed = parsed.astimezone(timezone.utc)
                 except Exception as e:
+                    # A single malformed timestamp must NOT halt the scan. This method is the
+                    # sole place the next tick is armed (it runs in the tick's finally), so a
+                    # raise here would skip the ceiling-tick re-arm below and leave the heartbeat
+                    # dark until an external poke — which re-hits this same item and re-halts.
+                    # Skip the bad item and keep scanning, the same treatment the ancient-stale
+                    # branch gives a broken item. It stays waiting/watching, so it keeps logging
+                    # loudly every tick until a dispatcher resolves it.
+                    malformed_skipped += 1
                     logger.error(
-                        "[DayflowScheduler] Invalid reactivate_at_utc for item_id=%s: %r (%s)",
+                        "[DayflowScheduler] Skipping item with invalid reactivate_at_utc item_id=%s: %r (%s)",
                         meta.get("item_id", "?"),
                         raw,
                         e,
                     )
                     logger.debug("[DayflowScheduler] reactivate_at_utc parse exception details", exc_info=True)
-                    raise
+                    continue
                 item_id = str(meta.get("item_id") or item.get("id") or "").strip()
                 if parsed <= now_utc:
                     overdue_seconds = (now_utc - parsed).total_seconds()
@@ -371,6 +380,12 @@ class DayflowScheduler:
                     "they are stuck in waiting/watching and need dispatcher attention.",
                     ancient_skipped,
                 )
+            if malformed_skipped:
+                logger.warning(
+                    "[DayflowScheduler] Skipped %d item(s) with an unparseable reactivate_at_utc "
+                    "when scheduling — they are stuck in waiting/watching and need dispatcher attention.",
+                    malformed_skipped,
+                )
 
             if earliest is not None:
                 delay = max(MIN_GAP_SECONDS, (earliest - now_utc).total_seconds())
@@ -391,9 +406,23 @@ class DayflowScheduler:
                     MAX_CEILING_SECONDS,
                 )
         except Exception as e:
+            # This is the sole next-tick re-arm and it runs in the tick's finally. Re-raising
+            # would leave NO tick scheduled AND skip the work-node re-arm that follows the call
+            # site — silently ending autonomy until an external poke. So on any unexpected scan
+            # failure, guarantee the heartbeat: arm a ceiling tick (guarded) and return, logging
+            # loudly. The scan runs again next tick, so a transient failure self-heals.
             logger.error("[DayflowScheduler] Failed scanning items for next wake: %s", e)
             logger.debug("[DayflowScheduler] item scan exception details", exc_info=True)
-            raise
+            try:
+                self._schedule_tick(delay_seconds=MAX_CEILING_SECONDS, reason="ceiling_after_scan_error")
+                logger.warning(
+                    "[DayflowScheduler] Item scan failed — armed a ceiling tick in %ds to keep the "
+                    "heartbeat alive.", MAX_CEILING_SECONDS,
+                )
+            except Exception as arm_err:
+                logger.error(
+                    "[DayflowScheduler] Failed to arm ceiling tick after scan error: %s", arm_err,
+                )
 
     def _arm_work_node_wakes(self) -> None:
         """Arm a precise one-shot per time-gated work-object node, keyed to its wake_at. When it fires,
