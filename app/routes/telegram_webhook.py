@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import os
 from typing import Any
 
@@ -122,7 +123,10 @@ def telegram_webhook():
     try:
         expected = _required_secret_token()
         header_token = str(request.headers.get("X-Telegram-Bot-Api-Secret-Token") or "").strip()
-        if header_token != expected:
+        # Constant-time compare — a plain != short-circuits on the first
+        # differing byte and leaks length, a timing side-channel on the secret
+        # token (audit W2; Slack's signature path already does this).
+        if not hmac.compare_digest(header_token, expected):
             return jsonify({"ok": False, "error": "unauthorized"}), 401
 
         update = request.get_json(silent=True)
