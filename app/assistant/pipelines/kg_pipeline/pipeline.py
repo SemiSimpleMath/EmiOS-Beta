@@ -77,11 +77,25 @@ class KGPipeline:
             max_idle_rounds=max_idle_rounds,
             monitor_interval=monitor_interval,
         )
+        # Map the runner's internal terminal status onto the pipeline contract
+        # vocabulary (success|skipped|error) that the routine machinery keys on.
+        # completed_idle (drained cleanly, nothing left to do) and stopped
+        # (externally cancelled) are NOT failures; halted (a worker halted) is.
+        # Leaking the raw completed_idle read as an "error" in the routine runner
+        # and auto-disabled the routine after 3 clean drains (anything but
+        # success/skipped counts as a failed run).
+        runner_status = str(result.status or "").strip().lower()
+        if runner_status in ("completed_idle", "stopped"):
+            contract_status = "success"
+        else:
+            # halted, or any unexpected terminal status → surface as a real failure.
+            contract_status = "error"
         return {
             "pipeline_id": result.pipeline_id,
             "run_id": result.run_id,
             "date": result.date,
-            "status": result.status,
+            "status": contract_status,
+            "runner_status": runner_status,
             "workers": result.workers,
             "halt_reason": result.halt_reason,
             "halt_step": result.halt_step,
