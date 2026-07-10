@@ -22,9 +22,19 @@ class WebhookDedupCache:
 
     Not safe across process restarts — but webhook retries typically happen
     within seconds of the original, so a single-process memory cache covers
-    the real failure mode. If you restart Flask between original delivery
-    and retry, a duplicate may slip through; that's rare and the downstream
-    message_persistence layer usually idempotency-checks on its own.
+    the real failure mode.
+
+    Scope of the guarantee (be precise — an earlier version of this note
+    over-promised): this cache is the ONLY idempotency guard. Downstream
+    persistence does NOT back it up — the inbound row's id is a fresh uuid,
+    not the transport message id, and unified_log upserts on that id, so a
+    retried webhook produces a new row, not a conflict. If Flask restarts in
+    the window between processing a message and its retry arriving, the retry
+    is re-processed in full: a second manager run and a second reply. That
+    window is narrow for a single-user deployment. Closing it properly means
+    a persistent pre-process check keyed on transport_message_id (the
+    idx_unified_log_2026_transport_msg index already exists) — a deliberate
+    follow-up, not something to assume is already happening.
     """
 
     def __init__(self, *, max_size: int = 2048, ttl_seconds: float = 600.0) -> None:
