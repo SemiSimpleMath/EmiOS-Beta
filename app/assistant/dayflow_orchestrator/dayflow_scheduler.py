@@ -428,12 +428,15 @@ class DayflowScheduler:
         """Arm a precise one-shot per time-gated work-object node, keyed to its wake_at. When it fires,
         _fire_work_node runs THAT node via work_emi_team — independent of the planning tick. Idempotent
         (replace_existing) and re-run after every tick, so newly-planned nodes are picked up and a
-        restart re-arms from the durable store. Stale jobs self-no-op (is_ready gate at fire time)."""
+        restart re-arms from the durable store. Stale jobs self-no-op (is_ready gate at fire time).
+        Candidates are armed soonest-wake_at first, so if there are more than _MAX_WORK_WAKES the
+        most-imminent wakes win the cap and the rest are armed on the next tick's scan."""
         try:
             from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
             store = get_dayflow_work_store()
             now_utc = datetime.now(timezone.utc)
-            armed = 0
+
+            candidates = []  # (wake_at, wo_id, node_id)
             for summary in store.list_work_objects():
                 if str(summary.get("status") or "").lower() in ("done", "abandoned"):
                     continue
@@ -446,22 +449,29 @@ class DayflowScheduler:
                         continue
                     if node.wake_at is None:
                         continue
-                    if armed >= _MAX_WORK_WAKES:
-                        logger.warning(
-                            "[DayflowScheduler] work-wake cap %d hit — remaining time nodes will be "
-                            "armed on the next tick's scan instead.", _MAX_WORK_WAKES)
-                        return
-                    run_date = node.wake_at if node.wake_at > now_utc else now_utc + timedelta(seconds=2)
-                    job_id = f"{_WORK_WAKE_JOB_PREFIX}{wo.id}::{node.id}"
-                    try:
-                        self._scheduler.add_job(
-                            func=self._fire_work_node, trigger="date", run_date=run_date,
-                            args=[wo.id, node.id], id=job_id, replace_existing=True,
-                            misfire_grace_time=600,
-                        )
-                        armed += 1
-                    except Exception as e:
-                        logger.error("[DayflowScheduler] failed to arm work-wake %s: %s", job_id, e)
+                    candidates.append((node.wake_at, wo.id, node.id))
+
+            candidates.sort(key=lambda c: c[0])
+            if len(candidates) > _MAX_WORK_WAKES:
+                logger.warning(
+                    "[DayflowScheduler] %d time-gated nodes exceed the work-wake cap %d — arming the "
+                    "%d soonest; the rest are armed on the next tick's scan.",
+                    len(candidates), _MAX_WORK_WAKES, _MAX_WORK_WAKES)
+                candidates = candidates[:_MAX_WORK_WAKES]
+
+            armed = 0
+            for wake_at, wo_id, node_id in candidates:
+                run_date = wake_at if wake_at > now_utc else now_utc + timedelta(seconds=2)
+                job_id = f"{_WORK_WAKE_JOB_PREFIX}{wo_id}::{node_id}"
+                try:
+                    self._scheduler.add_job(
+                        func=self._fire_work_node, trigger="date", run_date=run_date,
+                        args=[wo_id, node_id], id=job_id, replace_existing=True,
+                        misfire_grace_time=600,
+                    )
+                    armed += 1
+                except Exception as e:
+                    logger.error("[DayflowScheduler] failed to arm work-wake %s: %s", job_id, e)
             if armed:
                 logger.info("[DayflowScheduler] armed %d work-object time-wake(s).", armed)
         except Exception as e:
