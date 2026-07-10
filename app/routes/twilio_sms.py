@@ -8,7 +8,7 @@ from typing import Any, Dict
 from flask import Blueprint, Response, current_app, jsonify, request
 
 from app.assistant.utils.logging_config import get_logger
-from app.routes._security import dev_tools_enabled
+from app.routes._security import dev_tools_enabled, is_local_request
 
 logger = get_logger(__name__)
 
@@ -176,10 +176,18 @@ def twilio_inbound_sms():
     - MessageSid: Twilio message id
 
     Signature verification is enforced via X-Twilio-Signature unless the
-    request is from localhost with dev tools enabled.
+    request is genuinely local (loopback, no proxy/tunnel headers) and the
+    localhost skip is explicitly opted in.
     """
     try:
-        if not (dev_tools_enabled() and str(os.environ.get("EMI_TWILIO_SKIP_SIG_LOCALHOST", "")).strip().lower() in {"1", "true", "yes"}):
+        # The bypass must require a GENUINELY local request — is_local_request()
+        # enforces loopback AND the absence of proxy/tunnel headers. The old gate
+        # used dev_tools_enabled(), which returns True for ANY request whenever
+        # EMI_DEV_TOOLS is set (no origin check — its own docstring calls it "not
+        # a security boundary"), so EMI_DEV_TOOLS=1 + the skip flag disabled
+        # signature verification for every request, not just localhost (audit W1).
+        skip_localhost = str(os.environ.get("EMI_TWILIO_SKIP_SIG_LOCALHOST", "")).strip().lower() in {"1", "true", "yes"}
+        if not (skip_localhost and is_local_request()):
             if not _verify_twilio_signature(request):
                 logger.warning(
                     "Twilio inbound rejected: invalid or missing X-Twilio-Signature. remote=%s",
