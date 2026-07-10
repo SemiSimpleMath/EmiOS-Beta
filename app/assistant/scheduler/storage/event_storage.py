@@ -13,6 +13,27 @@ from app.assistant.utils.time_utils import AwareUtcDateTime
 logger = get_logger(__name__)
 
 
+# How late a one-time event may still fire. A one-time reminder whose time passes while the
+# process is DOWN (a deploy/restart/crash) is re-armed on boot with a now-past run_date; within
+# this window it's kept and fired late (stamped 'overdue' by the timing engine so it isn't
+# presented as on-time). Past it, the reminder can no longer usefully fire, so its row is deleted
+# on load instead of lingering forever. Tune this to how stale a missed reminder is still worth
+# surfacing — deploys are seconds-to-minutes; a longer window also covers a brief crash.
+ONE_TIME_CATCHUP_GRACE_SECONDS = 15 * 60  # 15 minutes
+
+
+def one_time_expired_beyond_grace(event_type, start_date, now, grace_seconds=ONE_TIME_CATCHUP_GRACE_SECONDS):
+    """True when a one-time event is so far past its scheduled time that it can no longer usefully
+    fire and its durable row should be deleted. Within the grace it's kept (caught up and fired
+    late); a future event or a non-one-time event is never expired here. Pure — start_date and now
+    must be tz-aware (or start_date None)."""
+    if event_type != "one_time_event" or start_date is None:
+        return False
+    if start_date >= now:
+        return False
+    return (now - start_date).total_seconds() > grace_seconds
+
+
 class TimeEvent(db.Model):
     __tablename__ = 'time_events'
 
@@ -85,6 +106,7 @@ class EventStorage:
         try:
             now = datetime.now(timezone.utc)
             records = session.query(TimeEvent).all()
+            expired_ids = []
 
             for record in records:
                 if record.start_date and record.start_date.tzinfo is None:
@@ -92,17 +114,39 @@ class EventStorage:
                 if record.end_date and record.end_date.tzinfo is None:
                     record.end_date = record.end_date.replace(tzinfo=timezone.utc)
 
-                if record.event_type == "one_time_event" and record.start_date < now:
-                    logger.debug(f"Skipping expired one-time event: {record.event_id}")
+                if one_time_expired_beyond_grace(record.event_type, record.start_date, now):
+                    # Past the catch-up window: it can no longer usefully fire, so drop it AND
+                    # delete the row. (These were previously skipped but left in the table forever
+                    # — a slow leak and a boot scan that grew without bound.)
+                    expired_ids.append(record.event_id)
                     continue
+
+                if record.event_type == "one_time_event" and record.start_date and record.start_date < now:
+                    # Within the catch-up window (missed during a deploy/restart): keep it so
+                    # _load_jobs re-arms it and it fires late. schedule_event gives one-time events
+                    # a misfire grace covering this window, and _handle_trigger stamps it 'overdue'.
+                    logger.info(
+                        "Catching up one-time event %s (overdue %.0fs, within grace).",
+                        record.event_id, (now - record.start_date).total_seconds(),
+                    )
 
                 # Convert once while session is open
                 pyd_event = record.to_pydantic()
                 self.time_events[pyd_event.event_id] = pyd_event
 
+            if expired_ids:
+                session.query(TimeEvent).filter(TimeEvent.event_id.in_(expired_ids)).delete(
+                    synchronize_session=False
+                )
+                session.commit()
+                logger.info(
+                    "Deleted %d expired one-time event(s) past the catch-up window.", len(expired_ids),
+                )
+
             logger.info(f"Loaded {len(self.time_events)} events into memory.")
 
         except Exception as e:
+            session.rollback()
             logger.error("Failed to load events: %s", e)
             logger.debug("failed to load events exception details", exc_info=True)
         finally:

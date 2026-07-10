@@ -1,6 +1,7 @@
 from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime, timezone
 
+from app.assistant.scheduler.storage.event_storage import ONE_TIME_CATCHUP_GRACE_SECONDS
 from app.assistant.utils.logging_config import get_logger
 logger = get_logger(__name__)
 
@@ -44,9 +45,19 @@ class TimingEngine:
             except Exception as e:
                 self.logger.error(f"Failed to schedule event {event.event_id}: {e}")
 
+    # A one-time event firing more than this after its scheduled time is "late" — it was caught
+    # up on boot after a downtime that spanned it, not fired on schedule. Stamp it so the handler
+    # doesn't present it as on-time. A comfortable margin over normal fire jitter.
+    _OVERDUE_MARK_THRESHOLD_SECONDS = 60
+
     def _handle_trigger(self, event_id: str):
         """
         Called by APScheduler when a job fires. Loads the full event and executes it.
+
+        A one-time event is stamped 'overdue' when it fires meaningfully later than its scheduled
+        time (i.e. it was caught up after a downtime), and its durable row is deleted after it
+        fires — without that, one-time events accumulate in time_events forever (load_events only
+        skips past ones, never deletes them, so the table and the boot scan grow without bound).
         """
         try:
             self.logger.debug(f"Handling trigger for event_id: {event_id}")
@@ -55,12 +66,46 @@ class TimingEngine:
                 self.logger.error(f"No event found for ID: {event_id}")
                 return
 
+            is_one_time = getattr(event, "event_type", None) == "one_time_event"
+            if is_one_time:
+                self._mark_overdue_if_late(event)
+
             with self.app.app_context():
                 self.executor.execute(event)
+
+            if is_one_time:
+                # Delete-on-fire: a one-time event has done its job. Interval events recur, so
+                # they are never deleted here.
+                self.event_storage.remove_event(event_id)
 
         except Exception as e:
             self.logger.error("Error handling trigger for event_id {event_id}: %s", e)
             self.logger.debug("error handling trigger for event_id exception details", exc_info=True)
+
+    def _mark_overdue_if_late(self, event) -> None:
+        """Stamp a one-time event 'overdue' if it's firing well after its scheduled time (caught
+        up after a downtime). No-op for an on-time fire, so the marker means exactly 'delayed'."""
+        start = event.start_date
+        if isinstance(start, str):
+            try:
+                start = datetime.fromisoformat(start)
+            except Exception:
+                return
+        if not start:
+            return
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        overdue = (datetime.now(timezone.utc) - start).total_seconds()
+        if overdue <= self._OVERDUE_MARK_THRESHOLD_SECONDS:
+            return
+        payload = dict(event.event_payload or {})
+        payload["overdue"] = True
+        payload["overdue_seconds"] = int(overdue)
+        payload["scheduled_for"] = start.isoformat()
+        event.event_payload = payload
+        self.logger.info(
+            "One-time event %s fired %.0fs late — marked overdue.", event.event_id, overdue,
+        )
 
     def schedule_event(self, event):
         """
@@ -82,7 +127,10 @@ class TimingEngine:
                     run_date=start_date,
                     args=[event.event_id],
                     id=event.event_id,
-                    misfire_grace_time=300,
+                    # Grace covers the catch-up window so an event missed during a short downtime
+                    # still fires when re-armed on boot (its run_date is then in the past).
+                    # _handle_trigger stamps it 'overdue'; load_events drops anything older.
+                    misfire_grace_time=ONE_TIME_CATCHUP_GRACE_SECONDS + 60,
                 )
                 self.logger.info(f"Scheduled one-time event {event.event_id} at {start_date}")
 
