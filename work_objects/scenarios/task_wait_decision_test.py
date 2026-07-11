@@ -8,6 +8,7 @@ decision branching BACK to an earlier step (a loop) is refused (loop-collapse is
 
 Run:  .venv\\Scripts\\python.exe work_objects\\scenarios\\task_wait_decision_test.py
 """
+import json
 import os
 import sys
 import tempfile
@@ -80,25 +81,53 @@ def test_wait_and_forward_decision():
     print("  test_wait_and_forward_decision: PASS")
 
 
-def test_loop_decision_raises():
+def test_katy_loop_collapses():
+    """The REAL auto_reply_katy compiled task: action_1 -> wait_gate -> decision(cutoff? end : loop->action_1)
+    collapses to a single re-arming loop node keyed by the loop start, with the wait_gate + decision folded in."""
+    katy = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                        "tasks", "auto_reply_katy", "auto_reply_katy.json")
+    from app.assistant.task_runtime.wo_builder import build_template as _bt
+    template = _bt(json.loads(open(katy, encoding="utf-8").read()))
+    by_id = {n["id"]: n for n in template["nodes"]}
+
+    loop = by_id.get("step_action_1")
+    assert loop is not None and loop["payload"].get("is_loop"), "action_1 should be the collapsed loop node"
+    assert "22_00" in str(loop["payload"].get("done_when")), loop["payload"].get("done_when")
+    assert any(t.get("tool") == "invoke_agent" for t in (loop["payload"].get("tools") or [])), "action -> invoke_agent"
+    assert loop["payload"].get("release_condition"), "loop carries the wait's release condition"
+    # the wait_gate and decision are folded in — no standalone nodes
+    assert "step_wait_gate_1" not in by_id and "step_decision_1" not in by_id
+    # the end node remains and is reached from the loop node
+    assert "step_end_1" in by_id
+    end_deps = [e["src"] for e in template["edges"] if e["dst"] == "step_end_1" and e["relation"] == "depends_on"]
+    assert "step_action_1" in end_deps, f"end should depend on the loop node; deps={end_deps}"
+    # preloaded facts/artifacts carried through
+    assert {"fact_1", "fact_2", "artifact_1", "artifact_2"} <= {f["data_id"] for f in template["preloaded_facts"]}
+    print(f"  nodes={[n['id'] for n in template['nodes']]}")
+    print("  test_katy_loop_collapses: PASS")
+
+
+def test_uncollapsible_loop_raises():
+    # a decision back-edge whose loop body has NO wait can't collapse to a re-arming node -> fail loud
     looped = {"task_id": "loop", "source_task": "loop", "entry_step_id": "s1",
               "steps": [
                   {"id": "s1", "kind": "tool_sequence", "title": "s1",
                    "tools": [{"tool": "fake_g", "args": {}}], "next_step": "s_dec"},
                   {"id": "s_dec", "kind": "decision", "title": "d", "condition": '"C" in task_state.facts.events_observed',
-                   "on_true": "s_end", "on_false": "s1"},   # on_false -> s1 (earlier) = LOOP
+                   "on_true": "s_end", "on_false": "s1"},   # on_false -> s1 (earlier) = LOOP, but no wait in the body
                   {"id": "s_end", "kind": "end", "title": "end"},
               ], "data_bindings": [], "preloaded_task_state": {"facts": {}, "artifacts": {}, "flags": {}}}
     try:
         build_template(looped)
     except NotImplementedError:
-        print("  test_loop_decision_raises: PASS")
+        print("  test_uncollapsible_loop_raises: PASS")
         return
-    raise AssertionError("expected NotImplementedError for a decision back-edge (loop)")
+    raise AssertionError("expected NotImplementedError for a loop body with no wait")
 
 
 if __name__ == "__main__":
     _install()
     test_wait_and_forward_decision()
-    test_loop_decision_raises()
-    print("PHASE 4 WAIT+DECISION: ALL PASS")
+    test_katy_loop_collapses()
+    test_uncollapsible_loop_raises()
+    print("PHASE 4 WAIT+DECISION+LOOP: ALL PASS")

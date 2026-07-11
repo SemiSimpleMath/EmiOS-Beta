@@ -54,11 +54,65 @@ def _wait_guard(step: dict) -> str:
     return f'"{ev}" in events_observed'
 
 
+def _collapse_loops(steps: list, step_order: dict) -> tuple:
+    """Detect decision back-edges (loops) and collapse each loop body — a run of action/tool steps ending
+    in a wait — into ONE re-arming loop node (a tool node with the body's actions as invoke_agent tools,
+    the wait's subscriptions/release_condition, and done_when = the exit branch's condition). Returns
+    (loop_nodes, consumed_step_ids, exit_edges). Only the simple katy-shape loop is supported: a single
+    back-edge decision whose body is action/tool steps + exactly one wait; anything richer raises."""
+    loop_nodes: list[dict[str, Any]] = []
+    consumed: set[str] = set()
+    exit_edges: list[dict[str, str]] = []
+    for d in steps:
+        if str(d.get("kind") or "").strip() != "decision":
+            continue
+        did = str(d.get("id") or "").strip()
+        od = step_order[did]
+        cond = _flatten(str(d.get("condition") or "").strip())
+        ot = str(d.get("on_true") or "").strip()
+        of = str(d.get("on_false") or "").strip()
+        if ot and step_order.get(ot, 10 ** 9) <= od:
+            start, exit_target, done_when = ot, of, f"not ({cond})"
+        elif of and step_order.get(of, 10 ** 9) <= od:
+            start, exit_target, done_when = of, ot, cond
+        else:
+            continue   # forward decision — absorbed into guards elsewhere
+        body = [s for s in steps if step_order[start] <= step_order.get(str(s.get("id") or "").strip(), -1) < od]
+        tools: list = []
+        subs: list = []
+        release_condition = None
+        for bs in body:
+            k = str(bs.get("kind") or "").strip()
+            if k == "action":
+                tools.append({"tool": "invoke_agent",
+                              "args": {"agent_name": str(bs.get("executor") or "").strip(),
+                                       "agent_input": {"task": str(bs.get("instruction") or "")}}})
+            elif k == "tool_sequence":
+                tools.extend(bs.get("tools") or [])
+            elif k in ("wait_for_event", "wait_gate"):
+                if release_condition is not None:
+                    raise NotImplementedError(f"loop starting at {start!r} has more than one wait — not supported")
+                subs, release_condition = _subscriptions(bs), _wait_guard(bs)
+            else:
+                raise NotImplementedError(f"loop body step {bs.get('id')!r} of kind {k!r} not supported")
+        if release_condition is None:
+            raise NotImplementedError(f"loop starting at {start!r} has no wait — not supported")
+        loop_nodes.append({"id": start, "type": "tool", "title": f"loop {start}",
+                           "payload": {"tools": tools, "is_loop": True, "done_when": _flatten(done_when),
+                                       "subscriptions": subs, "release_condition": release_condition},
+                           "wake_kind": "event"})
+        consumed.update(str(bs.get("id") or "").strip() for bs in body)
+        consumed.add(did)
+        if exit_target:
+            exit_edges.append({"src": start, "dst": exit_target, "relation": "depends_on"})
+    return loop_nodes, consumed, exit_edges
+
+
 def build_template(compiled_task: dict) -> dict:
     """Deterministically map a compiled task (normalized steps + data_bindings + preloaded_task_state)
-    to a work-object template dict. A `decision` is absorbed into mutually-exclusive guards on its branch
-    targets; wait_for_event/wait_gate become event-gated wait nodes. A decision that branches BACK to an
-    earlier step is a LOOP — raised (the loop-collapse is the remaining Phase-4 piece)."""
+    to a work-object template dict. A forward `decision` is absorbed into mutually-exclusive guards on its
+    branch targets; wait_for_event/wait_gate become event-gated wait nodes; a decision that branches BACK
+    to an earlier step is a LOOP, collapsed into one re-arming loop node (see _collapse_loops)."""
     task_id = str(compiled_task.get("task_id") or "").strip() or "task"
     steps = compiled_task.get("steps")
     if not isinstance(steps, list) or not steps:
@@ -73,8 +127,10 @@ def build_template(compiled_task: dict) -> dict:
         if nxt:
             pred_of.setdefault(nxt, str(s.get("id") or "").strip())
 
-    nodes: list[dict[str, Any]] = []
-    node_by_id: dict[str, dict[str, Any]] = {}
+    loop_nodes, consumed, loop_exit_edges = _collapse_loops(steps, step_order)
+
+    nodes: list[dict[str, Any]] = list(loop_nodes)
+    node_by_id: dict[str, dict[str, Any]] = {n["id"]: n for n in loop_nodes}
     end_ids: list[str] = []
     wait_ids: list[str] = []
     decisions: list[dict[str, Any]] = []
@@ -83,6 +139,8 @@ def build_template(compiled_task: dict) -> dict:
         sid = str(step.get("id") or "").strip()
         if not sid:
             raise ValueError("compiled step missing id")
+        if sid in consumed:
+            continue   # folded into a loop node by _collapse_loops
         if kind not in _SUPPORTED_KINDS:
             raise NotImplementedError(f"step kind {kind!r} (step {sid!r}) not supported")
         title = str(step.get("title") or sid)
@@ -112,7 +170,7 @@ def build_template(compiled_task: dict) -> dict:
         node_by_id[sid] = node
 
     # data_bindings -> depends_on edges (consumer depends_on producer); track producers with consumers.
-    edges: list[dict[str, str]] = []
+    edges: list[dict[str, str]] = list(loop_exit_edges)   # loop node -> its exit target
     producers_with_consumers: set[str] = set()
     for b in data_bindings:
         producer = str(b.get("producer_step_id") or "").strip()
@@ -129,7 +187,7 @@ def build_template(compiled_task: dict) -> dict:
             edges.append({"src": pred, "dst": wid, "relation": "depends_on"})
 
     # decisions: mutually-exclusive guards on the branch targets + depend on the decision's predecessor.
-    targets_with_edge: set[str] = set()
+    targets_with_edge: set[str] = {e["dst"] for e in loop_exit_edges}   # loop exits already have an edge
     for d in decisions:
         did = str(d.get("id") or "").strip()
         cond = _flatten(str(d.get("condition") or "").strip())
@@ -154,7 +212,8 @@ def build_template(compiled_task: dict) -> dict:
 
     # end nodes not already reached via a decision branch depend on the graph SINKS (reach-end).
     real_ids = [str(s.get("id") or "").strip() for s in steps
-                if str(s.get("kind") or "").strip() not in ("end", "decision")]
+                if str(s.get("kind") or "").strip() not in ("end", "decision")
+                and str(s.get("id") or "").strip() not in consumed]
     sinks = [sid for sid in real_ids if sid and sid not in producers_with_consumers]
     for end_id in end_ids:
         if end_id in targets_with_edge:
