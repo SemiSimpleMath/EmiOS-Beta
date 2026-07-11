@@ -46,8 +46,15 @@ class TaskCompilePostNode(ControlNode):
         merged_draft = self._materialize_data_bindings(merged_draft)
         merged_draft = self._normalize_wait_gate_release_conditions(merged_draft)
         finalized_task = self._materialize_compiled_task(draft=merged_draft)
-        self.blackboard.update_state_value("compiled_task", finalized_task)
-        compiled_file_path = self._persist_compiled_task(merged_task=finalized_task, cfg=cfg)
+        # Option B: emit a work-object TEMPLATE directly — task_ir_v1 is NEVER persisted. The
+        # normalization above produced a clean, validated step graph in memory; build_template maps it to
+        # work-object nodes/edges/contracts. A kind/pattern the runner can't yet run (an unknown kind, a
+        # richer loop) makes build_template raise here — the compile fails loud, never emitting unrunnable
+        # output. Consumers (run_task, the taskrunner routine) detect driver=task_runner and drive it.
+        from app.assistant.task_runtime.wo_builder import build_template
+        work_object_template = build_template(finalized_task)
+        self.blackboard.update_state_value("compiled_task", work_object_template)
+        compiled_file_path = self._persist_compiled_task(merged_task=work_object_template, cfg=cfg)
         self.blackboard.update_state_value("compiled_task_file", compiled_file_path)
         self.blackboard.update_state_value("last_agent", self.name)
         self.blackboard.update_state_value("next_agent", next_agent)

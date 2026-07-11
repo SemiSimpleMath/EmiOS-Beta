@@ -40,6 +40,17 @@ class TaskRoutineRunner:
         compiled_file = self._resolve_compiled_file(spec=spec, task_spec=task_spec)
         compiled_task = read_compiled_task(compiled_file)
 
+        # A work-object template (Option-B compiler output) drives on the task runner, not task-IR.
+        # Detected by driver=task_runner + a nodes list; task_ir_v1 files fall through below (coexistence
+        # until the archive cutover).
+        if isinstance(compiled_task, dict) and compiled_task.get("driver") == "task_runner" \
+                and isinstance(compiled_task.get("nodes"), list):
+            from app.assistant.task_runtime.entry import start_task_run
+            result = start_task_run(compiled_task)
+            return RoutineRunResult(status="success", data={
+                "task_file": task_file, "execution_mode": "work_object", "compiled_file": compiled_file,
+                "work_id": str(result.get("work_id") or ""), "run_status": str(result.get("status") or "")})
+
         runner = getattr(DI, "task_ir_runner", None)
         if runner is None:
             raise RuntimeError("task_ir_runner service is not registered.")
