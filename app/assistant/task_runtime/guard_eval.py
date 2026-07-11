@@ -106,12 +106,19 @@ def facts_context(wo) -> dict[str, Any]:
     #3 out_fact convention — a producer node writes an evidence child keyed by its produced
     data_id, and guards / ${data_id} substitution read from here."""
     ctx: dict[str, Any] = {}
+    events: list[Any] = []
     for n in wo.nodes.values():
         if n.type != "evidence":
             continue
         did = n.payload.get("data_id")
-        if did:
-            ctx[str(did)] = n.payload.get("value", n.content)
+        if not did:
+            continue
+        if str(did) == "event_observed":   # each fired event is one evidence; aggregate to a list
+            events.append(n.payload.get("value", n.content))
+            continue
+        ctx[str(did)] = n.payload.get("value", n.content)
+    if events:
+        ctx["events_observed"] = events
     return ctx
 
 

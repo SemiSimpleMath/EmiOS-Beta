@@ -17,16 +17,48 @@ Waits / gates / decisions / loops are Phase 4 (raise NotImplementedError here so
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from work_objects.model import new_id
 
-_STRAIGHT_THROUGH_KINDS = {"action", "tool_sequence", "end"}
+_SUPPORTED_KINDS = {"action", "tool_sequence", "end", "wait_for_event", "wait_gate", "decision"}
+
+
+def _flatten(expr: str) -> str:
+    """Rewrite task-IR condition paths (task_state.facts.X / task_state.artifacts.X) to the flat fact
+    keys the work-object facts_context uses (events_observed, fact_1, artifact_1, ...)."""
+    e = re.sub(r"task_state\.facts\.", "", str(expr or ""))
+    return re.sub(r"task_state\.artifacts\.", "", e)
+
+
+def _subscriptions(step: dict) -> list:
+    subs = step.get("subscriptions")
+    if isinstance(subs, list) and subs:
+        return [str(s) for s in subs]
+    ev = str(step.get("event_name") or "").strip()
+    return [ev] if ev else []
+
+
+def _wait_guard(step: dict) -> str:
+    """The release condition for a wait node, flattened. wait_gate -> its release_condition;
+    wait_for_event -> the single event being observed."""
+    if str(step.get("kind") or "").strip() == "wait_gate":
+        rc = str(step.get("release_condition") or "").strip()
+        if rc:
+            return _flatten(rc)
+    subs = _subscriptions(step)
+    ev = str(step.get("event_name") or "").strip() or (subs[0] if subs else "")
+    if not ev:
+        raise ValueError(f"wait step {step.get('id')!r} has no event to wait on")
+    return f'"{ev}" in events_observed'
 
 
 def build_template(compiled_task: dict) -> dict:
     """Deterministically map a compiled task (normalized steps + data_bindings + preloaded_task_state)
-    to a work-object template dict. Raises NotImplementedError on step kinds not yet supported."""
+    to a work-object template dict. A `decision` is absorbed into mutually-exclusive guards on its branch
+    targets; wait_for_event/wait_gate become event-gated wait nodes. A decision that branches BACK to an
+    earlier step is a LOOP — raised (the loop-collapse is the remaining Phase-4 piece)."""
     task_id = str(compiled_task.get("task_id") or "").strip() or "task"
     steps = compiled_task.get("steps")
     if not isinstance(steps, list) or not steps:
@@ -34,30 +66,50 @@ def build_template(compiled_task: dict) -> dict:
     data_bindings = compiled_task.get("data_bindings") or []
     preloaded = compiled_task.get("preloaded_task_state") or {}
 
+    step_order = {str(s.get("id") or "").strip(): i for i, s in enumerate(steps)}
+    pred_of: dict[str, str] = {}
+    for s in steps:
+        nxt = str(s.get("next_step") or "").strip()
+        if nxt:
+            pred_of.setdefault(nxt, str(s.get("id") or "").strip())
+
     nodes: list[dict[str, Any]] = []
+    node_by_id: dict[str, dict[str, Any]] = {}
     end_ids: list[str] = []
+    wait_ids: list[str] = []
+    decisions: list[dict[str, Any]] = []
     for step in steps:
         kind = str(step.get("kind") or "").strip()
         sid = str(step.get("id") or "").strip()
         if not sid:
             raise ValueError("compiled step missing id")
-        if kind not in _STRAIGHT_THROUGH_KINDS:
-            raise NotImplementedError(
-                f"step kind {kind!r} (step {sid!r}) is Phase 4 (wait/gate/decision/loop) — not yet supported")
+        if kind not in _SUPPORTED_KINDS:
+            raise NotImplementedError(f"step kind {kind!r} (step {sid!r}) not supported")
         title = str(step.get("title") or sid)
         produces = [str(p) for p in (step.get("produces_data_ids") or [])]
         if kind == "action":
-            nodes.append({"id": sid, "type": "action", "title": title,
-                          "content": str(step.get("instruction") or ""),
-                          "payload": {"executor": str(step.get("executor") or "").strip(),
-                                      "instruction": str(step.get("instruction") or ""),
-                                      "produces": produces}})
+            node = {"id": sid, "type": "action", "title": title, "content": str(step.get("instruction") or ""),
+                    "payload": {"executor": str(step.get("executor") or "").strip(),
+                                "instruction": str(step.get("instruction") or ""), "produces": produces}}
         elif kind == "tool_sequence":
-            nodes.append({"id": sid, "type": "tool", "title": title,
-                          "payload": {"tools": step.get("tools") or [], "produces": produces}})
-        else:  # end
+            node = {"id": sid, "type": "tool", "title": title,
+                    "payload": {"tools": step.get("tools") or [], "produces": produces}}
+        elif kind in ("wait_for_event", "wait_gate"):
+            payload = {"is_wait": True, "guard": _wait_guard(step), "subscriptions": _subscriptions(step)}
+            if step.get("watch_registration"):
+                payload["watch_registration"] = step["watch_registration"]
+            if step.get("watch_registrations"):
+                payload["watch_registrations"] = step["watch_registrations"]
+            node = {"id": sid, "type": "tool", "title": title, "payload": payload, "wake_kind": "event"}
+            wait_ids.append(sid)
+        elif kind == "end":
             end_ids.append(sid)
-            nodes.append({"id": sid, "type": "tool", "title": title, "payload": {"is_end": True}})
+            node = {"id": sid, "type": "tool", "title": title, "payload": {"is_end": True}}
+        else:  # decision -> absorbed into guards on its targets (below)
+            decisions.append(step)
+            continue
+        nodes.append(node)
+        node_by_id[sid] = node
 
     # data_bindings -> depends_on edges (consumer depends_on producer); track producers with consumers.
     edges: list[dict[str, str]] = []
@@ -70,10 +122,43 @@ def build_template(compiled_task: dict) -> dict:
                 edges.append({"src": producer, "dst": c, "relation": "depends_on"})
                 producers_with_consumers.add(producer)
 
-    # the end node(s) depend on all SINKS (non-end steps nothing consumes) so they run last.
-    real_ids = [str(s.get("id") or "").strip() for s in steps if str(s.get("kind") or "").strip() != "end"]
+    # a wait node runs AFTER its sequential predecessor (handle, THEN wait).
+    for wid in wait_ids:
+        pred = pred_of.get(wid)
+        if pred and pred in node_by_id and pred != wid:
+            edges.append({"src": pred, "dst": wid, "relation": "depends_on"})
+
+    # decisions: mutually-exclusive guards on the branch targets + depend on the decision's predecessor.
+    targets_with_edge: set[str] = set()
+    for d in decisions:
+        did = str(d.get("id") or "").strip()
+        cond = _flatten(str(d.get("condition") or "").strip())
+        if not cond:
+            raise ValueError(f"decision {did!r} missing condition")
+        pred = pred_of.get(did)
+        for target, guard in ((str(d.get("on_true") or "").strip(), cond),
+                              (str(d.get("on_false") or "").strip(), f"not ({cond})")):
+            if not target:
+                continue
+            if step_order.get(target, 10 ** 9) <= step_order.get(did, -1):
+                raise NotImplementedError(
+                    f"decision {did!r} branches back to earlier step {target!r} — that's a LOOP "
+                    "(the Phase-4 loop-collapse is not built yet)")
+            tnode = node_by_id.get(target)
+            if tnode is None:
+                raise ValueError(f"decision {did!r} target {target!r} is not a node")
+            tnode.setdefault("payload", {})["guard"] = guard
+            if pred and pred in node_by_id:
+                edges.append({"src": pred, "dst": target, "relation": "depends_on"})
+                targets_with_edge.add(target)
+
+    # end nodes not already reached via a decision branch depend on the graph SINKS (reach-end).
+    real_ids = [str(s.get("id") or "").strip() for s in steps
+                if str(s.get("kind") or "").strip() not in ("end", "decision")]
     sinks = [sid for sid in real_ids if sid and sid not in producers_with_consumers]
     for end_id in end_ids:
+        if end_id in targets_with_edge:
+            continue
         for sink in sinks:
             edges.append({"src": sink, "dst": end_id, "relation": "depends_on"})
 

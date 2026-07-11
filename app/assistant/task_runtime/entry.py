@@ -65,10 +65,25 @@ def start_task_run(template: dict, *, store=None, scope=None, scope_contract_enf
     return {"work_id": work_id, "status": status}
 
 
-def resume_task_run(work_id: str, *, store=None, scope=None, scope_contract_enforced: bool = True) -> dict:
-    """Resume a parked task run (a wake fired, or boot re-derivation) — re-drive from the durable store."""
+def _record_event(store, work_id: str, event_name: str) -> None:
+    """Record a fired event as an evidence node (data_id=event_observed); facts_context aggregates these
+    into the `events_observed` list that wait-node guards and decision conditions read."""
+    from work_objects.model import new_id
+    goal = store.load(work_id).goal_node_id
+    store.apply("add_node", {"work_id": work_id, "id": new_id("ev"), "type": "evidence", "parent_id": goal,
+                             "status": "assumed", "title": "event", "content": str(event_name),
+                             "payload": {"data_id": "event_observed", "value": str(event_name)}},
+                actor="task_runner")
+
+
+def resume_task_run(work_id: str, *, store=None, scope=None, observed_event: str | None = None,
+                    scope_contract_enforced: bool = True) -> dict:
+    """Resume a parked task run (a wake fired, or boot re-derivation) — re-drive from the durable store.
+    `observed_event` (from signal_router or a clock fire) is recorded so the wait node's guard releases."""
     store, scope = _resolve_store_scope(store, scope, "task")
     _require_scope(scope)
+    if observed_event:
+        _record_event(store, work_id, observed_event)
     status = drive(store, work_id, scope=scope, scope_contract_enforced=scope_contract_enforced)
     _after_drive(store, work_id, status)
     return {"work_id": work_id, "status": status}

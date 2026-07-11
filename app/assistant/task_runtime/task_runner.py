@@ -95,6 +95,13 @@ def _has_future_wake(wo, now) -> bool:
                for n in wo.nodes.values())
 
 
+def _has_event_wait(wo) -> bool:
+    """A claimable node waiting on an event/signal/user_reply (no time wake) — the run is parked on an
+    external event (resumed when it fires + is recorded), not out of work."""
+    return any(n.status in _CLAIMABLE and n.wake_kind in ("event", "signal", "user_reply")
+               for n in wo.nodes.values())
+
+
 def _nonterminal_work_remains(wo) -> list:
     from work_objects.model import _TERMINAL_STATUSES
     return [n.id for n in wo.nodes.values() if n.type in _WORK_TYPES and n.status not in _TERMINAL_STATUSES]
@@ -115,8 +122,8 @@ def drive(store, work_id: str, *, scope, scope_contract_enforced: bool = True) -
         ready = _ready_frontier(wo, facts, now)
 
         if not ready:
-            if _has_future_wake(wo, now):
-                return "parked"         # durable wake on the node — resumed when the wake fires
+            if _has_future_wake(wo, now) or _has_event_wait(wo):
+                return "parked"         # durable wait on the node — resumed when the time/event fires
             failed = [n.id for n in wo.nodes.values() if n.type in _WORK_TYPES and n.status == "failed"]
             if failed:                  # a node failed and nothing can advance — work_repair territory (Phase 4)
                 logger.error("[task_runner] %s cannot complete — failed node(s): %s", work_id, failed)

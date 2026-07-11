@@ -59,14 +59,15 @@ def test_morning_briefing_transform():
 
 
 def test_unsupported_kind_raises():
-    # a wait step is Phase 4 — the transform must fail loud, never silently drop it
-    compiled = {"task_id": "x", "steps": [{"id": "s1", "kind": "wait_for_event", "event_name": "e"}]}
+    # an unknown step kind must fail loud, never silently drop (wait/gate/decision are now supported;
+    # a decision back-edge loop is covered in task_wait_decision_test)
+    compiled = {"task_id": "x", "steps": [{"id": "s1", "kind": "quantum_gate"}]}
     try:
         build_template(compiled)
     except NotImplementedError:
         print("  test_unsupported_kind_raises: PASS")
         return
-    raise AssertionError("expected NotImplementedError for a wait_for_event step")
+    raise AssertionError("expected NotImplementedError for an unknown step kind")
 
 
 if __name__ == "__main__":
