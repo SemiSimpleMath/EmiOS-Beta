@@ -151,29 +151,26 @@ def test_task_compile_manager_compiles_to_final_answer(monkeypatch):
         print("COMPILED_TASK_PARSED:")
         parsed_compiled = json.loads(compiled["value"])
         print(json.dumps(parsed_compiled, indent=2, ensure_ascii=False))
-        steps = parsed_compiled.get("steps", [])
-        assert isinstance(steps, list)
-        compose_send_steps = [
-            step
-            for step in steps
-            if isinstance(step, dict)
-            and step.get("kind") == "action"
-            and step.get("executor") == "personal_admin_manager"
+        assert parsed_compiled.get("driver") == "task_runner"
+        nodes = [node for node in parsed_compiled.get("nodes", []) if isinstance(node, dict)]
+        # the two adjacent same-executor actions (compose + send) coalesce into one node.
+        compose_send_nodes = [
+            node
+            for node in nodes
+            if node.get("type") == "action"
+            and (node.get("payload") or {}).get("executor") == "personal_admin_manager"
         ]
-        assert len(compose_send_steps) == 1
-        merged_step = compose_send_steps[0]
-        assert "Compose email draft" in str(merged_step.get("title", ""))
-        assert "Send email" in str(merged_step.get("title", ""))
-        assert "Then:" in str(merged_step.get("instruction", ""))
+        assert len(compose_send_nodes) == 1
+        merged_node = compose_send_nodes[0]
+        assert "Compose email draft" in str(merged_node.get("title", ""))
+        assert "Send email" in str(merged_node.get("title", ""))
+        assert "Then:" in str((merged_node.get("payload") or {}).get("instruction", ""))
 
-        print("COMPILED_TASK_STEPS:")
-        for index, step in enumerate(parsed_compiled.get("steps", []), start=1):
-            title = step.get("title", "")
-            kind = step.get("kind", "")
-            instruction = step.get("instruction", "")
-            event_name = step.get("event_name", "")
-            detail = instruction or event_name
-            print(f"  {index}) {title} [{kind}] - {detail}")
+        print("COMPILED_TASK_NODES:")
+        for index, node in enumerate(nodes, start=1):
+            payload = node.get("payload") or {}
+            detail = payload.get("instruction", "") or ",".join(payload.get("subscriptions") or [])
+            print(f"  {index}) {node.get('title', '')} [{node.get('type', '')}] - {detail}")
 
 
 def test_task_compile_manager_injects_compile_seed_and_routes(monkeypatch):
@@ -223,10 +220,12 @@ class _TwoPhaseQualityStub:
             if isinstance(msg, dict) and isinstance(msg.get("content"), str)
         )
 
-        if "Phase I objective" in prompt_blob:
+        if "Populate phase_i_atoms" in prompt_blob:
             self.phase_i_seen = True
-            assert "Do not build full control flow yet." in prompt_blob
             assert "Do not encode branching logic in action instructions." in prompt_blob
+            # the compiler is manager-aware: the manager catalog is injected into the phase prompt.
+            for manager_name in ("playwright_manager", "personal_admin_manager", "web_manager"):
+                assert manager_name in prompt_blob, f"manager catalog missing '{manager_name}' in compile prompt"
             return {
                 "what_i_am_thinking": "Decomposing task into atomic units.",
                 "summary": "Extracted atomic events and action blocks.",
@@ -270,7 +269,7 @@ class _TwoPhaseQualityStub:
                 "final_answer_answer": "Phase I decomposition complete.",
             }
 
-        if "Phase II objective" in prompt_blob:
+        if "Populate compiled_task" in prompt_blob:
             self.phase_ii_seen = True
             assert "Phase I atomic decomposition (authoritative input):" in prompt_blob
             assert "event_1" in prompt_blob
@@ -335,7 +334,8 @@ class _TwoPhaseQualityStub:
                     ],
                     "bindings": [
                         {"step_id": "s1", "atomic_type": "event", "atomic_id": "event_1"},
-                        {"step_id": "s3", "atomic_type": "action", "atomic_id": "action_1"},
+                        {"step_id": "s2", "atomic_type": "action", "atomic_id": "action_1"},
+                        {"step_id": "s3", "atomic_type": "event", "atomic_id": "event_2"},
                     ],
                 },
                 "final_answer_data_list": [
@@ -371,7 +371,13 @@ def test_task_compile_two_phase_quality_contract(monkeypatch):
     assert result.result_type == "final_answer"
     assert isinstance(result.data, dict)
 
-    atoms = manager.blackboard.get_state_value("phase_i_atoms")
+    data_list = result.data.get("final_answer_data_list", [])
+    assert isinstance(data_list, list)
+
+    # phase_i_atoms is a first-class exported output (final_output_node), not internal working state.
+    atoms_item = next((x for x in data_list if isinstance(x, dict) and x.get("key") == "phase_i_atoms"), None)
+    assert isinstance(atoms_item, dict)
+    atoms = json.loads(str(atoms_item.get("value") or "{}"))
     assert isinstance(atoms, dict)
     events = atoms.get("events", [])
     actions = atoms.get("actions", [])
@@ -383,19 +389,17 @@ def test_task_compile_two_phase_quality_contract(monkeypatch):
     executors = {str(a.get("executor")) for a in actions if isinstance(a, dict)}
     assert executors == {"personal_admin_manager"}
 
-    data_list = result.data.get("final_answer_data_list", [])
-    assert isinstance(data_list, list)
     compiled_item = next((x for x in data_list if isinstance(x, dict) and x.get("key") == "compiled_task"), None)
     assert isinstance(compiled_item, dict)
     compiled_json = compiled_item.get("value")
     assert isinstance(compiled_json, str)
     compiled_task = json.loads(compiled_json)
-    steps = compiled_task.get("steps", [])
-    assert isinstance(steps, list)
-    wait_events = [
-        str(step.get("event_name"))
-        for step in steps
-        if isinstance(step, dict) and step.get("kind") == "wait_for_event"
+    nodes = [node for node in compiled_task.get("nodes", []) if isinstance(node, dict)]
+    wait_subscriptions = [
+        str(sub)
+        for node in nodes
+        if (node.get("payload") or {}).get("is_wait")
+        for sub in ((node.get("payload") or {}).get("subscriptions") or [])
     ]
-    assert "signal_router.watch.katy_mention" in wait_events
-    assert "clock.local.18_00" in wait_events
+    assert "signal_router.watch.katy_mention" in wait_subscriptions
+    assert "clock.local.18_00" in wait_subscriptions

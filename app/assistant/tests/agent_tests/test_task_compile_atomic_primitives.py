@@ -496,7 +496,7 @@ class _AtomicCompileStub:
             if isinstance(msg, dict) and isinstance(msg.get("content"), str)
         )
         scenario = self._scenario_from_prompt(prompt_blob)
-        if "Phase I objective" in prompt_blob:
+        if "Populate phase_i_atoms" in prompt_blob:
             return {
                 "what_i_am_thinking": "Extracting atomic units.",
                 "summary": "Phase I complete.",
@@ -508,7 +508,7 @@ class _AtomicCompileStub:
                 "phase_i_atoms": scenario.phase_i_atoms,
                 "final_answer_answer": "phase i done",
             }
-        if "Phase II objective" in prompt_blob:
+        if "Populate compiled_task" in prompt_blob:
             return {
                 "what_i_am_thinking": "Composing flow graph.",
                 "summary": "Phase II complete.",
@@ -564,80 +564,113 @@ def _compile_atomic(monkeypatch, marker: str) -> dict[str, Any]:
     return json.loads(compiled_json)
 
 
+# ---- work-object shape helpers (Option-B compiler output) --------------------
+
+
+def _nodes(wo: dict[str, Any]) -> list[dict[str, Any]]:
+    return [n for n in wo.get("nodes", []) if isinstance(n, dict)]
+
+
+def _preloaded_ids(wo: dict[str, Any]) -> list[str]:
+    return [str(f.get("data_id") or "") for f in wo.get("preloaded_facts", []) if isinstance(f, dict)]
+
+
+def _payload(node: dict[str, Any]) -> dict[str, Any]:
+    payload = node.get("payload")
+    return payload if isinstance(payload, dict) else {}
+
+
+def _is_action(node: dict[str, Any]) -> bool:
+    return node.get("type") == "action"
+
+
+def _is_wait(node: dict[str, Any]) -> bool:
+    return bool(_payload(node).get("is_wait"))
+
+
+def _is_end(node: dict[str, Any]) -> bool:
+    return bool(_payload(node).get("is_end"))
+
+
+def _is_loop(node: dict[str, Any]) -> bool:
+    return bool(_payload(node).get("is_loop"))
+
+
+def _guard(node: dict[str, Any]) -> str:
+    return str(_payload(node).get("guard") or "")
+
+
+def _subs(node: dict[str, Any]) -> list[str]:
+    return [str(s) for s in (_payload(node).get("subscriptions") or [])]
+
+
 def test_atomic_1_action_only(monkeypatch):
-    compiled = _compile_atomic(monkeypatch, "AT1")
-    kinds = [str(step.get("kind") or "") for step in compiled.get("steps", []) if isinstance(step, dict)]
-    assert kinds.count("action") == 1
-    assert kinds.count("end") >= 1
+    wo = _compile_atomic(monkeypatch, "AT1")
+    assert wo.get("driver") == "task_runner"
+    assert sum(1 for n in _nodes(wo) if _is_action(n)) == 1
+    assert any(_is_end(n) for n in _nodes(wo))
 
 
 def test_atomic_2_action_consumes_input(monkeypatch):
-    compiled = _compile_atomic(monkeypatch, "AT2")
-    action = next(step for step in compiled["steps"] if isinstance(step, dict) and step.get("kind") == "action")
-    assert "fact_1" in list(action.get("consumes_data_ids") or [])
+    # a consumed input fact is supplied at instantiation -> it rides preloaded_facts.
+    wo = _compile_atomic(monkeypatch, "AT2")
+    assert "fact_1" in _preloaded_ids(wo)
 
 
 def test_atomic_3_wait_gate(monkeypatch):
-    compiled = _compile_atomic(monkeypatch, "AT3")
-    wait_step = next(step for step in compiled["steps"] if isinstance(step, dict) and step.get("kind") == "wait_gate")
-    subs = list(wait_step.get("subscriptions") or [])
+    wo = _compile_atomic(monkeypatch, "AT3")
+    wait = next(n for n in _nodes(wo) if _is_wait(n))
+    subs = _subs(wait)
     assert "signal_router.watch.reply_arrived" in subs
     assert "clock.local.22_00" in subs
 
 
 def test_atomic_4_wait_gate_with_time_bound(monkeypatch):
-    compiled = _compile_atomic(monkeypatch, "AT4")
-    wait_step = next(step for step in compiled["steps"] if isinstance(step, dict) and step.get("kind") == "wait_gate")
-    release_condition = str(wait_step.get("release_condition") or "")
-    assert "time_local_hhmm" in release_condition
-    assert "< \"23:00\"" in release_condition
+    wo = _compile_atomic(monkeypatch, "AT4")
+    wait = next(n for n in _nodes(wo) if _is_wait(n))
+    guard = _guard(wait)
+    assert "time_local_hhmm" in guard
+    assert '< "23:00"' in guard
 
 
 def test_atomic_5_if_statement(monkeypatch):
-    compiled = _compile_atomic(monkeypatch, "AT5")
-    decision = next(step for step in compiled["steps"] if isinstance(step, dict) and step.get("kind") == "decision")
-    assert str(decision.get("on_true") or "").strip()
-    assert str(decision.get("on_false") or "").strip()
+    # a forward decision is realized as complementary guards on its branch nodes.
+    wo = _compile_atomic(monkeypatch, "AT5")
+    guards = [_guard(n) for n in _nodes(wo) if _guard(n)]
+    assert "fact_1 == True" in guards
+    assert any("not" in g and "fact_1 == True" in g for g in guards)
 
 
 def test_atomic_6_loop(monkeypatch):
-    compiled = _compile_atomic(monkeypatch, "AT6")
-    steps = [step for step in compiled.get("steps", []) if isinstance(step, dict)]
-    step_ids = [str(step.get("id") or "") for step in steps]
-    index_by_id = {step_id: idx for idx, step_id in enumerate(step_ids)}
-    has_back_edge = False
-    for step in steps:
-        src = str(step.get("id") or "")
-        for edge_key in ("next_step", "on_true", "on_false"):
-            dst = str(step.get(edge_key) or "").strip()
-            if dst and dst in index_by_id and index_by_id[dst] <= index_by_id[src]:
-                has_back_edge = True
-    assert has_back_edge
+    # a state-predicate loop collapses to a re-arm node (is_loop + done_when).
+    wo = _compile_atomic(monkeypatch, "AT6")
+    loop = next(n for n in _nodes(wo) if _is_loop(n))
+    assert str(_payload(loop).get("done_when") or "").strip()
 
 
 def test_atomic_7_wait_for_event(monkeypatch):
-    compiled = _compile_atomic(monkeypatch, "AT7")
-    wait_step = next(
-        step for step in compiled["steps"] if isinstance(step, dict) and step.get("kind") == "wait_for_event"
-    )
-    assert str(wait_step.get("event_name") or "").startswith("signal_router.watch.")
+    wo = _compile_atomic(monkeypatch, "AT7")
+    wait = next(n for n in _nodes(wo) if _is_wait(n))
+    assert any(s.startswith("signal_router.watch.") for s in _subs(wait))
 
 
 def test_atomic_8_relative_timer_wait(monkeypatch):
-    compiled = _compile_atomic(monkeypatch, "AT8")
-    wait_step = next(
-        step for step in compiled["steps"] if isinstance(step, dict) and step.get("kind") == "wait_for_event"
-    )
-    assert str(wait_step.get("event_name") or "") == "clock.timer.15m"
+    wo = _compile_atomic(monkeypatch, "AT8")
+    wait = next(n for n in _nodes(wo) if _is_wait(n))
+    assert "clock.timer.15m" in _subs(wait)
 
 
 def test_atomic_9_if_else_actions(monkeypatch):
-    compiled = _compile_atomic(monkeypatch, "AT9")
-    actions = [step for step in compiled["steps"] if isinstance(step, dict) and step.get("kind") == "action"]
+    # if/else over two actions -> two action nodes carrying complementary guards.
+    wo = _compile_atomic(monkeypatch, "AT9")
+    actions = [n for n in _nodes(wo) if _is_action(n)]
     assert len(actions) == 2
+    guards = [_guard(n) for n in actions]
+    assert "fact_1 == True" in guards
+    assert any("not" in g and "fact_1 == True" in g for g in guards)
 
 
 def test_atomic_10_action_wait_action(monkeypatch):
-    compiled = _compile_atomic(monkeypatch, "AT10")
-    kinds = [str(step.get("kind") or "") for step in compiled.get("steps", []) if isinstance(step, dict)]
-    assert kinds[:3] == ["action", "wait_gate", "action"]
+    wo = _compile_atomic(monkeypatch, "AT10")
+    assert sum(1 for n in _nodes(wo) if _is_action(n)) == 2
+    assert sum(1 for n in _nodes(wo) if _is_wait(n)) == 1

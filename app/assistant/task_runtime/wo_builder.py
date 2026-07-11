@@ -95,12 +95,15 @@ def _collapse_loops(steps: list, step_order: dict) -> tuple:
                 subs, release_condition = _subscriptions(bs), _wait_guard(bs)
             else:
                 raise NotImplementedError(f"loop body step {bs.get('id')!r} of kind {k!r} not supported")
-        if release_condition is None:
-            raise NotImplementedError(f"loop starting at {start!r} has no wait — not supported")
-        loop_nodes.append({"id": start, "type": "tool", "title": f"loop {start}",
-                           "payload": {"tools": tools, "is_loop": True, "done_when": _flatten(done_when),
-                                       "subscriptions": subs, "release_condition": release_condition},
-                           "wake_kind": "event"})
+        node: dict[str, Any] = {"id": start, "type": "tool", "title": f"loop {start}",
+                                "payload": {"tools": tools, "is_loop": True, "done_when": _flatten(done_when)}}
+        if release_condition is not None:
+            # a loop with a wait -> park on its events between iterations (wake-promotion re-arm)
+            node["payload"]["subscriptions"] = subs
+            node["payload"]["release_condition"] = release_condition
+            node["wake_kind"] = "event"
+        # else: a state-predicate loop (no wait) -> a tight re-arm node (done_when, immediate re-run)
+        loop_nodes.append(node)
         consumed.update(str(bs.get("id") or "").strip() for bs in body)
         consumed.add(did)
         if exit_target:

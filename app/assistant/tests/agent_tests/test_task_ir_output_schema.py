@@ -83,7 +83,7 @@ def test_preloaded_artifact_repo_file_reference_loads_at_runtime():
                 "artifact_1": {
                     "__resource_ref__": {
                         "kind": "repo_file",
-                        "path": "tasks/email_mark/Katy.bio.md",
+                        "path": "tasks/TASK_SPEC_TEMPLATE.md",
                     }
                 }
             },
@@ -93,4 +93,4 @@ def test_preloaded_artifact_repo_file_reference_loads_at_runtime():
     runner._apply_preloaded_task_state(task=task, context=context)
     artifact_1 = context["task_state"]["artifacts"].get("artifact_1")
     assert isinstance(artifact_1, str)
-    assert "Mark Bio" in artifact_1
+    assert "Resources and includes" in artifact_1

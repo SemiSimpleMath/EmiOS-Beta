@@ -107,27 +107,54 @@ def test_katy_loop_collapses():
     print("  test_katy_loop_collapses: PASS")
 
 
-def test_uncollapsible_loop_raises():
-    # a decision back-edge whose loop body has NO wait can't collapse to a re-arming node -> fail loud
+def test_state_predicate_loop_collapses():
+    # a decision back-edge whose loop body has NO wait is a state-predicate loop:
+    # it collapses to a tight re-arm node (is_loop + done_when, no wait / no subscriptions).
     looped = {"task_id": "loop", "source_task": "loop", "entry_step_id": "s1",
               "steps": [
                   {"id": "s1", "kind": "tool_sequence", "title": "s1",
                    "tools": [{"tool": "fake_g", "args": {}}], "next_step": "s_dec"},
                   {"id": "s_dec", "kind": "decision", "title": "d", "condition": '"C" in task_state.facts.events_observed',
-                   "on_true": "s_end", "on_false": "s1"},   # on_false -> s1 (earlier) = LOOP, but no wait in the body
+                   "on_true": "s_end", "on_false": "s1"},   # on_false -> s1 (earlier) = LOOP, no wait in the body
+                  {"id": "s_end", "kind": "end", "title": "end"},
+              ], "data_bindings": [], "preloaded_task_state": {"facts": {}, "artifacts": {}, "flags": {}}}
+    template = build_template(looped)
+    by_id = {n["id"]: n for n in template["nodes"]}
+    loop = by_id.get("s1")
+    assert loop is not None and loop["payload"].get("is_loop"), "s1 should be the collapsed loop node"
+    assert str(loop["payload"].get("done_when") or "").strip(), "state-predicate loop carries a done_when"
+    assert loop.get("wake_kind") is None, "a no-wait loop does not park on events"
+    assert not loop["payload"].get("subscriptions"), "a no-wait loop has no subscriptions"
+    assert "s_dec" not in by_id, "the decision folds into the loop node"
+    print("  test_state_predicate_loop_collapses: PASS")
+
+
+def test_multiwait_loop_raises():
+    # a loop body with more than one wait can't collapse to a single re-arming node -> fail loud
+    looped = {"task_id": "loop", "source_task": "loop", "entry_step_id": "s1",
+              "steps": [
+                  {"id": "s1", "kind": "tool_sequence", "title": "s1",
+                   "tools": [{"tool": "fake_g", "args": {}}], "next_step": "s_w1"},
+                  {"id": "s_w1", "kind": "wait_for_event", "title": "w1",
+                   "event_name": "signal_router.watch.a", "next_step": "s_w2"},
+                  {"id": "s_w2", "kind": "wait_for_event", "title": "w2",
+                   "event_name": "signal_router.watch.b", "next_step": "s_dec"},
+                  {"id": "s_dec", "kind": "decision", "title": "d", "condition": '"C" in task_state.facts.events_observed',
+                   "on_true": "s_end", "on_false": "s1"},   # on_false -> s1 = LOOP with two waits in the body
                   {"id": "s_end", "kind": "end", "title": "end"},
               ], "data_bindings": [], "preloaded_task_state": {"facts": {}, "artifacts": {}, "flags": {}}}
     try:
         build_template(looped)
     except NotImplementedError:
-        print("  test_uncollapsible_loop_raises: PASS")
+        print("  test_multiwait_loop_raises: PASS")
         return
-    raise AssertionError("expected NotImplementedError for a loop body with no wait")
+    raise AssertionError("expected NotImplementedError for a loop body with more than one wait")
 
 
 if __name__ == "__main__":
     _install()
     test_wait_and_forward_decision()
     test_katy_loop_collapses()
-    test_uncollapsible_loop_raises()
+    test_state_predicate_loop_collapses()
+    test_multiwait_loop_raises()
     print("PHASE 4 WAIT+DECISION+LOOP: ALL PASS")
