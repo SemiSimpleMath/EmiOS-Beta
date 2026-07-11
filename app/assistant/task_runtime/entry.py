@@ -5,10 +5,12 @@
 time-wake, an event, or a completion signal) or after a restart — the state lives entirely in the
 work store, so resume is just "drive again."
 
-In production the scheduler / run_task tool supply the store (`get_dayflow_work_store()`) and the
-run scope (a task-execution scope). They're passed in here so the runner has no hidden globals and
+In production the run_task tool supplies a TASK-owned work store (a work_objects WorkStore over the
+task store's db — NOT dayflow's store; tasks are a separate consumer of the substrate) and the run
+scope (a task-execution scope). They're passed in here so the runner has no hidden globals and
 stays unit-testable (the Phase-1 scenario drives + parks + resumes + simulates restart with these
-directly, before the live scheduler wiring lands in Phase 3).
+directly). Wake/resume rides the base timing engine on a task-owned wake, independent of dayflow's
+scheduler (Phase 3).
 """
 from __future__ import annotations
 
