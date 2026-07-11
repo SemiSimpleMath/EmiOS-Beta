@@ -44,6 +44,11 @@ def _ready_frontier(wo, facts, now) -> list:
     for n in wo.nodes.values():
         if n.type not in _WORK_TYPES or n.status not in _CLAIMABLE:
             continue
+        # an event-parked node (status `waiting` on an event/signal/user_reply wake) runs only when a
+        # delivered wake promotes it to `actionable` (wake-promotion) — never via a static guard over
+        # ACCUMULATED events (else a re-arming loop would re-fire on the same event forever).
+        if n.status == "waiting" and n.wake_kind in ("event", "signal", "user_reply"):
+            continue
         if n.wake_at is not None and n.wake_at > now:
             continue
         if not _deps_resolved(wo, n):

@@ -76,14 +76,29 @@ def _record_event(store, work_id: str, event_name: str) -> None:
                 actor="task_runner")
 
 
+def _promote_event_waiters(store, work_id: str, event_name: str) -> None:
+    """Wake-promotion: a delivered event moves each event-parked node subscribed to it from `waiting`
+    to `actionable`, so it runs ONCE for this wake (and re-parks after, if it's a re-arming loop)."""
+    wo = store.load(work_id)
+    for n in list(wo.nodes.values()):
+        if n.status != "waiting" or n.wake_kind not in ("event", "signal", "user_reply"):
+            continue
+        subs = [str(s) for s in (n.payload.get("subscriptions") or [])]
+        if not subs or str(event_name) in subs:
+            store.apply("set_status", {"work_id": work_id, "node_id": n.id, "status": "actionable"},
+                        actor="task_runner")
+
+
 def resume_task_run(work_id: str, *, store=None, scope=None, observed_event: str | None = None,
                     scope_contract_enforced: bool = True) -> dict:
     """Resume a parked task run (a wake fired, or boot re-derivation) — re-drive from the durable store.
-    `observed_event` (from signal_router or a clock fire) is recorded so the wait node's guard releases."""
+    `observed_event` (from signal_router or a clock fire) is recorded and promotes the subscribed
+    event-parked node(s) so they run for this wake."""
     store, scope = _resolve_store_scope(store, scope, "task")
     _require_scope(scope)
     if observed_event:
         _record_event(store, work_id, observed_event)
+        _promote_event_waiters(store, work_id, observed_event)
     status = drive(store, work_id, scope=scope, scope_contract_enforced=scope_contract_enforced)
     _after_drive(store, work_id, status)
     return {"work_id": work_id, "status": status}
