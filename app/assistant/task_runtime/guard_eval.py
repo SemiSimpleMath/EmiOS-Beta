@@ -115,15 +115,19 @@ def facts_context(wo) -> dict[str, Any]:
     return ctx
 
 
-def guard_value(node, facts: dict[str, Any]):
-    """Evaluate a node's `payload.guard` against `facts`.
+def eval_expr(expr, facts: dict[str, Any]):
+    """Evaluate a raw condition expression against `facts`.
 
-    Returns None (no guard) | True | False | 'indeterminate' (the guard references a fact not yet
-    recorded — the caller treats it as neither ready nor dead until the producing dep resolves)."""
-    g = node.payload.get("guard")
-    if not g:
+    Returns None (no expr) | True | False | 'indeterminate' (the expr references a fact not yet
+    recorded). Shared by guards (payload.guard) and loop done-conditions (payload.done_when)."""
+    if not expr:
         return None
     try:
-        return bool(_EVAL.evaluate_condition(condition=str(g), context=facts))
+        return bool(_EVAL.evaluate_condition(condition=str(expr), context=facts))
     except ValueError:
         return "indeterminate"
+
+
+def guard_value(node, facts: dict[str, Any]):
+    """A node's readiness guard (payload.guard): None (no guard) | True | False | 'indeterminate'."""
+    return eval_expr(node.payload.get("guard"), facts)

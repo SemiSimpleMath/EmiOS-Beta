@@ -66,6 +66,8 @@ def execute_claimed_tool_node(store, work_id: str, node_id: str, scope,
             last = result
 
         _write_output(store, work_id, node, last)
+        if _rearm_if_incomplete(store, work_id, node_id):
+            return   # loop: the node's done-condition isn't met yet -> re-armed (waiting), runs again
         store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "done"}, actor="task_runner")
         store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "closed"}, actor="task_runner")
         if node.payload.get("is_end"):     # reach-end completion (not all-children-done)
@@ -74,6 +76,23 @@ def execute_claimed_tool_node(store, work_id: str, node_id: str, scope,
         logger.error("[task_runner] tool node %s::%s failed: %s", work_id, node_id, e)
         store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "failed",
                                    "content": str(e)[:500]}, actor="task_runner")
+
+
+def _rearm_if_incomplete(store, work_id: str, node_id: str) -> bool:
+    """Loop = re-arm: a node with `payload.done_when` re-runs until that condition holds over the recorded
+    facts. If it's not yet satisfied, set the node back to `waiting` (claimable) and return True so the
+    caller skips closing — the drive loop picks it up again. A cyclic template becomes a linear trace of
+    runs (each recorded as an event); the node only terminalizes when done_when is met."""
+    from app.assistant.task_runtime.guard_eval import eval_expr
+    node = store.load(work_id).nodes[node_id]
+    done_when = node.payload.get("done_when")
+    if not done_when:
+        return False
+    facts = facts_context(store.load(work_id))
+    if eval_expr(done_when, facts) is True:
+        return False   # done -> caller closes
+    store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "waiting"}, actor="task_runner")
+    return True
 
 
 def _gate(tool_name: str, scope, scope_contract_enforced: bool) -> None:
