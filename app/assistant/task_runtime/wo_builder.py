@@ -109,8 +109,10 @@ def instantiate_template(store, template: dict, *, created_by: str = "task_runne
     for n in template.get("nodes", []):
         node = {"work_id": wid, "id": n["id"], "type": n["type"], "parent_id": goal,
                 "title": n.get("title", n["id"]), "payload": n.get("payload", {})}
-        if n.get("content"):
-            node["content"] = n["content"]
+        for field in ("content", "wake_kind", "wake_at", "wake_ref", "satisfied_when_kind",
+                      "satisfied_when_ref", "side_effect", "requires_approval", "authority", "status"):
+            if n.get(field) is not None:
+                node[field] = n[field]
         store.apply("add_node", node, actor=created_by)
     for e in template.get("edges", []):
         store.apply("add_edge", {"work_id": wid, "src": e["src"], "dst": e["dst"],

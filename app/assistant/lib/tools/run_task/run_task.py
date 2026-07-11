@@ -80,6 +80,15 @@ class RunTaskTool(BaseTool):
 
         try:
             compiled_task = read_compiled_task(compiled_file)
+            # A work-object template (the Option-B compiler output) drives on the task runner, not
+            # task-IR. Detected by driver=task_runner + a nodes list. task_ir_v1 files fall through to
+            # the task-IR runner below (coexistence until the archive cutover).
+            if isinstance(compiled_task, dict) and compiled_task.get("driver") == "task_runner" \
+                    and isinstance(compiled_task.get("nodes"), list):
+                return self._start_work_object_run(
+                    compiled_task=compiled_task, tool_message=tool_message,
+                    resolved_entry=resolved_entry, compiled_file=compiled_file,
+                )
             runner = get_task_ir_runner()
             runner.ensure_event_subscription()
             run_state = runner.start_run(
@@ -125,6 +134,36 @@ class RunTaskTool(BaseTool):
                 retryable=False,
                 details={"compiled_file": compiled_file, "error": str(e)},
             )
+
+    def _start_work_object_run(self, *, compiled_task: dict, tool_message: ToolMessage,
+                               resolved_entry: "TaskRegistryEntry | None", compiled_file: str) -> ToolResult:
+        """Drive a work-object template on the task runner (a task-owned store + the base timing engine —
+        nothing from dayflow). Parks arm a wake and resume later."""
+        from app.assistant.task_runtime.entry import start_task_run
+        task_id = (resolved_entry.task_id if resolved_entry
+                   else str(compiled_task.get("task_id") or "").strip() or None)
+        result = start_task_run(compiled_task)
+        status = str(result.get("status") or "")
+        work_id = str(result.get("work_id") or "")
+        label = (task_id or "task").replace("_", " ").strip()
+        if status == "done":
+            human = f"Task '{label}' completed."
+        elif status == "parked":
+            human = f"Task '{label}' started; waiting."
+        elif status in ("failed", "stalled"):
+            human = f"Task '{label}' {status}."
+        else:
+            human = f"Task '{label}' {status or 'running'}."
+        self._emit_task_running_notice(
+            tool_message=tool_message, task_id=task_id, run_id=work_id,
+            status=("completed" if status == "done" else "waiting" if status == "parked" else status),
+            waiting_event_name="",
+        )
+        return ToolResult(
+            result_type="success", content=human,
+            data={"work_id": work_id, "status": status, "task_id": task_id,
+                  "driver": "task_runner", "compiled_file": compiled_file},
+        )
 
     def _resume_run(self, *, args: dict[str, Any], run_id: str) -> ToolResult:
         event_name = str(args.get("event_name") or "").strip() or None
