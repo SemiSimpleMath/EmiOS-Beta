@@ -1,10 +1,9 @@
 """Guard evaluation for the task runner.
 
 `ConditionEvaluator` is a pure, safe AST evaluator (names / constants / attribute+subscript /
-and·or·not / comparisons / in — NO calls). It is the task runtime's OWN copy of the condition
-evaluator (seeded from task_ir_runtime, which is retired at the Phase-5 cutover; re-deriving a
-safe-eval subset from scratch invites subtle bugs, so we copy proven code and own it — the
-original is never imported: nothing shared lives between old and new).
+and·or·not / comparisons / in — NO calls). It is the task runtime's OWN condition evaluator
+(seeded from the now-removed task-IR evaluator; re-deriving a safe-eval subset from scratch
+invites subtle bugs, so we copied proven code and own it — nothing is shared between them).
 
 A node's *guard* (in `payload.guard`) is a crisp predicate over recorded facts; `facts_context`
 builds `{data_id: value}` from the work object's evidence nodes. A genuinely SEMANTIC decision is

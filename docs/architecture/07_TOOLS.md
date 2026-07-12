@@ -483,4 +483,4 @@ fronts it as a manager-as-tool.
 | `manager_runtime/services/tool_scope_service.py` | Ranking, narrowing, pinned tools |
 | `pod_store/materializers/` | Authority-banded secret projections (courier) |
 | `pod_store/authority.py` | Pod authority bands + `check_authority` |
-| `task_ir_runtime/task_ir_tool_sequence.py` | Deterministic tool sequence executor |
+| `task_runtime/tool_executor.py` | Deterministic tool-node executor (gated by `check_tool_access`) |

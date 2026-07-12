@@ -3,8 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from app.assistant.ServiceLocator.service_locator import DI
-from app.assistant.scope.loader import load_scope_for_source
 from app.assistant.routine_manager.run_types import RoutineRunContext, RoutineRunResult
 from app.assistant.routine_manager.runners.types import RoutineLike
 from app.assistant.utils.path_utils import get_repo_root
@@ -15,9 +13,9 @@ class TaskRoutineRunner:
     """
     v2 task runner.
 
-    Executes a compiled workflow JSON via the Task IR runner service. The task
-    inherits a standard task-execution scope (it is a scope consumer, not a
-    source), so it never falls back to the IR executor's system scope.
+    Executes a compiled task by driving its WORK OBJECT on the task runner
+    (start_task_run). The compiler emits work objects directly; a legacy
+    task_ir_v1 compiled file is refused (recompile via the task compiler).
     """
 
     def run(self, routine: RoutineLike, run_ctx: RoutineRunContext) -> RoutineRunResult:
@@ -37,59 +35,29 @@ class TaskRoutineRunner:
         return self._run_compiled_task_mode(spec=spec, task_file=task_file, task_spec=task_spec)
 
     def _run_compiled_task_mode(self, *, spec: dict[str, Any], task_file: str, task_spec: TaskSpec) -> RoutineRunResult:
+        _ = spec
         compiled_file = self._resolve_compiled_file(spec=spec, task_spec=task_spec)
         compiled_task = read_compiled_task(compiled_file)
 
-        # A work-object template (Option-B compiler output) drives on the task runner, not task-IR.
-        # Detected by driver=task_runner + a nodes list; task_ir_v1 files fall through below (coexistence
-        # until the archive cutover).
-        if isinstance(compiled_task, dict) and compiled_task.get("driver") == "task_runner" \
-                and isinstance(compiled_task.get("nodes"), list):
-            from app.assistant.task_runtime.entry import start_task_run
-            result = start_task_run(compiled_task)
-            return RoutineRunResult(status="success", data={
-                "task_file": task_file, "execution_mode": "work_object", "compiled_file": compiled_file,
-                "work_id": str(result.get("work_id") or ""), "run_status": str(result.get("status") or "")})
+        # The compiler emits a work object directly (driver=task_runner + a nodes list). The task-IR
+        # runtime was retired; a legacy compiled file must be recompiled via the task compiler.
+        if not (isinstance(compiled_task, dict) and compiled_task.get("driver") == "task_runner"
+                and isinstance(compiled_task.get("nodes"), list)):
+            raise RuntimeError(
+                f"Compiled file '{compiled_file}' is not a work object (legacy task_ir_v1). "
+                "Recompile the task via the task compiler."
+            )
 
-        runner = getattr(DI, "task_ir_runner", None)
-        if runner is None:
-            raise RuntimeError("task_ir_runner service is not registered.")
-
-        # A task is a scope CONSUMER, not a source: it inherits the standard
-        # task-execution scope (authority 98) built at the execution entry — the
-        # same scope the run_task tool threads from its caller. Without this the
-        # IR executor falls to its fail-closed system scope (authority 95,
-        # resources zeroed). owner_id/surface carry the routine identity.
-        scope_contract = load_scope_for_source(
-            kind="subsystem",
-            source_id="task",
-            actor_id="routine_task_runner_v2",
-            identity_overrides={
-                "owner_id": "routine_manager",
-                "surface": "routine",
-                "scope_id": f"scope::routine::{task_spec.task_id}",
-            },
-        )
-        initial_context = (
-            dict(spec.get("initial_context")) if isinstance(spec.get("initial_context"), dict) else {}
-        )
-        initial_context.setdefault("_task_ir_inherited_scope_context", scope_contract.model_dump())
-
-        runner.ensure_event_subscription()
-        run_state = runner.start_run(
-            compiled_task=compiled_task,
-            initial_context=initial_context,
-        )
-
+        from app.assistant.task_runtime.entry import start_task_run
+        result = start_task_run(compiled_task)
         return RoutineRunResult(
             status="success",
             data={
                 "task_file": task_file,
-                "execution_mode": "compiled_task",
+                "execution_mode": "work_object",
                 "compiled_file": compiled_file,
-                "run_id": str(run_state.get("run_id") or ""),
-                "run_status": str(run_state.get("status") or ""),
-                "waiting_event_name": str(run_state.get("waiting_event_name") or "") or None,
+                "work_id": str(result.get("work_id") or ""),
+                "run_status": str(result.get("status") or ""),
             },
         )
 

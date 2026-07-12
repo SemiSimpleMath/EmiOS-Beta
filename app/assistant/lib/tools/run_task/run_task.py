@@ -4,7 +4,6 @@ from typing import Any, Optional
 
 from app.assistant.lib.core_tools.base_tool.base_tool import BaseTool
 from app.assistant.lib.core_tools.tool_error_protocol import make_tool_error
-from app.assistant.task_ir_runtime import get_task_ir_runner
 from app.assistant.utils.identity_names import get_required_assistant_name
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.path_utils import resolve_repo_path
@@ -30,20 +29,6 @@ class RunTaskTool(BaseTool):
         compiled_file = str(args.get("compiled_file") or "").strip()
         task_file = str(args.get("task_file") or "").strip()
         task_query = str(args.get("task_query") or args.get("task_name") or args.get("task") or "").strip()
-        initial_context = args.get("initial_context") if isinstance(args.get("initial_context"), dict) else {}
-        if not isinstance(initial_context, dict):
-            raise ValueError("initial_context must be an object when provided.")
-        initial_context = dict(initial_context)
-        inherited_scope = getattr(tool_message, "scope_context", None)
-        if inherited_scope is not None:
-            if hasattr(inherited_scope, "model_dump"):
-                initial_context["_task_ir_inherited_scope_context"] = inherited_scope.model_dump()
-            elif isinstance(inherited_scope, dict):
-                initial_context["_task_ir_inherited_scope_context"] = dict(inherited_scope)
-            else:
-                raise TypeError(
-                    f"scope_context must be ScopeContext or dict, got {type(inherited_scope).__name__}."
-                )
 
         resolved_entry: TaskRegistryEntry | None = None
         if not compiled_file:
@@ -80,49 +65,22 @@ class RunTaskTool(BaseTool):
 
         try:
             compiled_task = read_compiled_task(compiled_file)
-            # A work-object template (the Option-B compiler output) drives on the task runner, not
-            # task-IR. Detected by driver=task_runner + a nodes list. task_ir_v1 files fall through to
-            # the task-IR runner below (coexistence until the archive cutover).
-            if isinstance(compiled_task, dict) and compiled_task.get("driver") == "task_runner" \
-                    and isinstance(compiled_task.get("nodes"), list):
-                return self._start_work_object_run(
-                    compiled_task=compiled_task, tool_message=tool_message,
-                    resolved_entry=resolved_entry, compiled_file=compiled_file,
+            # The compiler emits a work object directly (driver=task_runner + a nodes list). The
+            # task-IR runtime was retired; a legacy compiled file must be recompiled via the task
+            # compiler — the runner refuses it loudly rather than running a legacy shape.
+            if not (isinstance(compiled_task, dict) and compiled_task.get("driver") == "task_runner"
+                    and isinstance(compiled_task.get("nodes"), list)):
+                return make_tool_error(
+                    error_code="compiled_task_not_a_work_object",
+                    message=(f"Compiled file '{compiled_file}' is not a work object (legacy task_ir_v1). "
+                             "Recompile the task via the task compiler."),
+                    abort_policy="abort_tool",
+                    retryable=False,
+                    details={"compiled_file": compiled_file},
                 )
-            runner = get_task_ir_runner()
-            runner.ensure_event_subscription()
-            run_state = runner.start_run(
-                compiled_task=compiled_task,
-                initial_context=initial_context,
-            )
-            status = str(run_state.get("status") or "")
-            run_id = str(run_state.get("run_id") or "")
-            waiting_event_name = str(run_state.get("waiting_event_name") or "")
-            task_id = resolved_entry.task_id if resolved_entry else str(compiled_task.get("task_id") or "").strip() or None
-            self._emit_task_running_notice(
-                tool_message=tool_message,
-                task_id=task_id,
-                run_id=run_id,
-                status=status,
-                waiting_event_name=waiting_event_name,
-            )
-            label = (task_id or "task").replace("_", " ").strip()
-            if status == "completed":
-                human = f"Task '{label}' completed."
-            elif waiting_event_name:
-                human = f"Task '{label}' started; waiting on '{waiting_event_name}'."
-            else:
-                human = f"Task '{label}' {status or 'running'}."
-            return ToolResult(
-                result_type="success",
-                content=human,
-                data={
-                    "run_id": run_id,
-                    "status": status,
-                    "waiting_event_name": waiting_event_name or None,
-                    "compiled_file": compiled_file,
-                    "task_id": task_id,
-                },
+            return self._start_work_object_run(
+                compiled_task=compiled_task, tool_message=tool_message,
+                resolved_entry=resolved_entry, compiled_file=compiled_file,
             )
         except Exception as e:
             logger.error("run_task failed to start run: %s", e)
@@ -166,32 +124,22 @@ class RunTaskTool(BaseTool):
         )
 
     def _resume_run(self, *, args: dict[str, Any], run_id: str) -> ToolResult:
+        # run_id is the work object's work_id; a fired event promotes the subscribed parked node(s).
         event_name = str(args.get("event_name") or "").strip() or None
-        event_payload = args.get("event_payload") if isinstance(args.get("event_payload"), dict) else {}
         try:
-            runner = get_task_ir_runner()
-            runner.ensure_event_subscription()
-            run_state = runner.resume_run(
-                run_id=run_id,
-                event_name=event_name,
-                event_payload=event_payload,
-            )
-            status = str(run_state.get("status") or "")
-            waiting_event_name = str(run_state.get("waiting_event_name") or "")
-            if status == "completed":
+            from app.assistant.task_runtime.entry import resume_task_run
+            result = resume_task_run(run_id, observed_event=event_name)
+            status = str(result.get("status") or "")
+            if status == "done":
                 human = "Task completed."
-            elif waiting_event_name:
-                human = f"Task resumed; waiting on '{waiting_event_name}'."
+            elif status == "parked":
+                human = "Task resumed; waiting."
             else:
                 human = f"Task {status or 'running'}."
             return ToolResult(
                 result_type="success",
                 content=human,
-                data={
-                    "run_id": run_id,
-                    "status": status,
-                    "waiting_event_name": waiting_event_name or None,
-                },
+                data={"work_id": run_id, "status": status},
             )
         except Exception as e:
             logger.error("run_task resume failed run_id=%s: %s", run_id, e)

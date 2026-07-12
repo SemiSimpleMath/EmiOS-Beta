@@ -62,34 +62,6 @@ class SignalRouterService:
         self._watches: Dict[str, WatchRegistration] = {}
         self._seen_dedupe_keys: "_BoundedSet" = _BoundedSet(max_size=10_000)
         self._load_persisted_watches()
-        self._cancel_orphaned_task_ir_watches()
-
-    def _cancel_orphaned_task_ir_watches(self) -> None:
-        """
-        On startup: cancel any persisted task_ir:: watches whose run no longer
-        exists in the (in-memory) task IR runner. Since the runner's state store
-        is in-memory only, every task_ir:: watch from a previous process is orphaned.
-        """
-        try:
-            cancelled = self._state_store.cancel_watches_by_key_prefix(prefix="task_ir::")
-            if cancelled:
-                # Also remove them from the in-memory dict
-                with self._lock:
-                    orphaned = [
-                        rid for rid, w in self._watches.items()
-                        if str(w.watch_key or "").startswith("task_ir::")
-                    ]
-                    for rid in orphaned:
-                        del self._watches[rid]
-                logger.info(
-                    "SignalRouter startup: cancelled %d orphaned task_ir watches from previous process",
-                    cancelled,
-                )
-            else:
-                logger.debug("SignalRouter startup: no orphaned task_ir watches found")
-        except Exception as e:
-            logger.error("SignalRouter startup: failed to cancel orphaned task_ir watches: %s", e)
-            logger.debug("SignalRouter orphan cleanup exception details", exc_info=True)
 
     def register_keyword_watch(
         self,

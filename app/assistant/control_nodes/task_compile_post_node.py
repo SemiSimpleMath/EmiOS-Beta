@@ -351,7 +351,7 @@ class TaskCompilePostNode(ControlNode):
                     if sender:
                         email_predicate["sender_equals"] = sender
                 step["watch_registration"] = {
-                    "watch_key": f"task_ir::{task_id}::{step_id}",
+                    "watch_key": f"task::{task_id}::{step_id}",
                     "event_name": event_name,
                     "watch_type": watch_type,
                     "predicate": email_predicate,
@@ -397,7 +397,7 @@ class TaskCompilePostNode(ControlNode):
                             atom_predicate["sender_equals"] = sender
                     regs.append(
                         {
-                            "watch_key": f"task_ir::{task_id}::{step_id}::{event_atom_id}",
+                            "watch_key": f"task::{task_id}::{step_id}::{event_atom_id}",
                             "event_name": atom_event_name,
                             "watch_type": watch_type,
                             "predicate": atom_predicate,

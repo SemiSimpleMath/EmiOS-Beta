@@ -1,4 +1,4 @@
-name: task_ir::tool_planner
+name: task_compile::tool_planner
 class_name: Agent
 action_required: false
 llm_params:

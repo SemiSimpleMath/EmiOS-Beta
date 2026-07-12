@@ -1,15 +1,15 @@
 """Deterministic tool-node executor for the task runner.
 
 Executes an already-claimed (`dispatched`) `tool` node's `payload.tools` in order, directly through
-the tool registry — but, unlike task_ir's tool-sequence executor, EACH call is GATED by
-`check_tool_access` (the authority floor + task/scope restriction that task_ir's tool_sequence
+the tool registry — but, unlike the former task-IR tool-sequence executor, EACH call is GATED by
+`check_tool_access` (the authority floor + task/scope restriction the former tool_sequence executor
 bypassed) and carries the run's `scope_context`. The final result is recorded as an `evidence` node
 keyed by the node's produced `data_id`(s); then the node is closed. Any error fails the node so
 work_repair can adjudicate.
 
 Arg substitution (`${data_id}` from recorded facts, `${now}`/`${today}`/`${hours_ago_N}`/
-`${days_from_now_N}` system vars) is copied from task_ir's tool-sequence executor (retired at the
-Phase-5 cutover) — morning_briefing depends on it — and owned here.
+`${days_from_now_N}` system vars) was copied from the former task-IR tool-sequence executor (since
+removed) — morning_briefing depends on it — and owned here.
 """
 from __future__ import annotations
 
@@ -136,7 +136,7 @@ def _coerce_args(spec: dict) -> dict:
     return dict(args) if isinstance(args, dict) else {}
 
 
-# --- arg substitution (copied from the archived task_ir tool-sequence executor; owned here) ---
+# --- arg substitution (copied from the former task-IR tool-sequence executor; owned here) ---
 
 def _substitute_args(args: dict[str, Any], facts: dict[str, Any], last: ToolResult | None) -> dict[str, Any]:
     values = dict(facts)

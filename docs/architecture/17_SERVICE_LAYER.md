@@ -67,7 +67,6 @@ Registration phase is noted (Phase 1 = `bootstrap.py:initialize_services`, Phase
 | `signal_router`                   | Reactive intake watcher (subscriber to the gut).                        | 2 (subsystem-gated)            |
 | `ingest_service`                  | "The gut" — unified inbound intake.                                     | 2 (subsystem-gated)            |
 | `pod_classifier_service`          | Declarative pod-minting from intake envelopes.                          | 2 (subsystem-gated)            |
-| `task_ir_runner`                  | Compiled task-IR execution engine.                                      | 2                              |
 | `dayflow_scheduler`               | Event-driven dayflow tick coordinator.                                  | 2 (subsystem-gated)            |
 
 There are no lazy entries. The proxy will fail loudly if an unregistered key is accessed before its bootstrap step has run, which is also why initialization order matters.
@@ -132,8 +131,7 @@ This phase is for things that need the registry from Phase 1 already present:
 9. **Native singleton pre-warm** (on the boot thread, *before* routine fan-out): self-heal corrupt chroma collections, then build the ChromaDB client + KG collections (`get_chroma_manager()`), the embedder (`embed_text("warmup")`), and the belief chroma collection. First-time init of these native libs is not thread-safe — warming serially here prevents the concurrent-first-init crash. Then **LLM SDK pre-warm**: import the Gemini / Anthropic SDKs for whichever providers have a real (non-placeholder) key, so the first agent call isn't cold.
 10. `get_routine_manager().refresh()` (if `routine_manager` enabled) — wires event-triggered routine subscriptions immediately so the first event in the post-boot window isn't dropped.
 11. Subsystem-gated services: `signal_router`, `ingest_service` (the gut) with its subscribers (`signal_router.handle_envelope`, `pod_classifier_service`), `dayflow_scheduler`.
-12. `task_ir_runner` — `ensure_event_subscription()` wires it onto the bus.
-13. `register_ticket_answer_listener()` — routes ticket responses for ticket-mode pending questions back into the subconscious answer loop.
+12. `register_ticket_answer_listener()` — routes ticket responses for ticket-mode pending questions back into the subconscious answer loop.
 
 The legacy `SlackInterface` polling adapter is gone — Slack inbound is handled
 exclusively by the `/slack/events` webhook (`app/routes/slack_events.py`); the

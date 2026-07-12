@@ -175,26 +175,16 @@ class RequestPreprocessor:
         resolved_task = user_message.task
         resolved_info = user_message.information
         resolved_data: Dict[str, Any] = user_message.data if isinstance(user_message.data, dict) else {}
-        is_task_ir_step = isinstance(resolved_data.get("task_ir_step_id"), str) and bool(
-            str(resolved_data.get("task_ir_step_id") or "").strip()
-        )
 
         task_file = resolved_data.get("task_file")
-        if is_task_ir_step and isinstance(task_file, str) and task_file.strip():
-            raise ValueError(
-                f"[{manager_name}] task_file is not allowed for TaskIR step requests. "
-                f"step_id={resolved_data.get('task_ir_step_id')!r}"
-            )
         if isinstance(task_file, str) and task_file.strip():
             spec = load_task_spec(task_file.strip())
             inbound_task = str(resolved_task or "").strip()
             # task_file is metadata/resource context only.
             # Never backfill task text from spec body; callers must provide explicit task text.
             if not inbound_task:
-                step_id = resolved_data.get("task_ir_step_id")
                 raise ValueError(
-                    f"[{manager_name}] Missing non-empty task text for task_file request. "
-                    f"step_id={step_id!r}"
+                    f"[{manager_name}] Missing non-empty task text for task_file request."
                 )
             resolved_task = inbound_task
             resolved_data = dict(resolved_data)

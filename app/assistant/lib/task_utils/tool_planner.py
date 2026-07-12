@@ -373,7 +373,7 @@ Return your recommendation as structured output."""
         from app.assistant.ServiceLocator.service_locator import DI
         from app.assistant.utils.pydantic_classes import Message
 
-        agent = DI.agent_factory.create_agent("task_ir::tool_planner")
+        agent = DI.agent_factory.create_agent("task_compile::tool_planner")
         agent.blackboard.update_state_value("step_intent", step_intent)
         agent.blackboard.update_state_value("tool_catalog", tool_catalog_text)
 

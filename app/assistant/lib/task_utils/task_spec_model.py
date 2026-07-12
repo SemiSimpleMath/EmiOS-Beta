@@ -9,7 +9,7 @@ reads it.
 A task spec goes through stages:
 1. Draft: title + goal + plain English steps
 2. Planned: steps enriched with executors, tools, and data flow
-3. Compiled: converted to IR (separate model in task_ir_runtime)
+3. Compiled: converted to a work object (see task_runtime.wo_builder)
 """
 from __future__ import annotations
 

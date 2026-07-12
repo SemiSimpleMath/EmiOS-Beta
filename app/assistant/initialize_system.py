@@ -10,7 +10,6 @@ from app.assistant.agent_runtime.services.question_service import QuestionServic
 from app.assistant.progress_curator import ProgressCurator
 from app.assistant.chat_narrator import ChatNarrator
 from app.assistant.signal_router import SignalRouterService
-from app.assistant.task_ir_runtime import get_task_ir_runner
 from app.services.socket_manager import SocketManager
 from app.assistant.validation.agent_validator import validate_all
 
@@ -256,11 +255,6 @@ def initialize_system():
         logger.info("✅ Ingest service initialized")
     else:
         logger.info("⏸️ Ingest service DISABLED via subsystems.yaml")
-
-    task_ir_runner = get_task_ir_runner()
-    ServiceLocator.register("task_ir_runner", task_ir_runner)
-    task_ir_runner.ensure_event_subscription()
-    logger.info("✅ Initialized task_ir_runner")
 
     # Route ticket responses for ticket-mode pending questions back into
     # the subconscious answer loop (mark answered → annotate concern →
