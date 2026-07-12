@@ -256,12 +256,16 @@ def initialize_system():
     else:
         logger.info("⏸️ Ingest service DISABLED via subsystems.yaml")
 
-    # Re-arm parked task runs from the durable task store (re-derivation: the store survives
-    # restart; wakes live in the in-memory APScheduler and must be re-derived at boot — a
-    # downtime-crossed wake fires at now+2s via arm_task_wake's past-due handling).
+    # Task event lane: a signal-router watch match on a task:: watch resumes its run (the
+    # watches themselves are DB-persisted in the router — registered at run start, no boot
+    # re-register needed). Then re-arm parked task runs from the durable task store
+    # (re-derivation: wakes live in the in-memory APScheduler; a downtime-crossed wake fires
+    # at now+2s via arm_task_wake's past-due handling).
+    from app.assistant.task_runtime.task_events import register_task_event_bridge
     from app.assistant.task_runtime.task_scheduler import re_arm_parked_task_runs
+    register_task_event_bridge()
     re_arm_parked_task_runs()
-    logger.info("✅ Task-run wakes re-armed from the durable task store")
+    logger.info("✅ Task event bridge registered; task-run wakes re-armed from the durable store")
 
     # Route ticket responses for ticket-mode pending questions back into
     # the subconscious answer loop (mark answered → annotate concern →

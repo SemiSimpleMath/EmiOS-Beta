@@ -143,6 +143,24 @@ class SignalRouterService:
         )
         return registration
 
+    def cancel_watches_by_prefix(self, *, prefix: str) -> int:
+        """Cancel every active watch whose watch_key starts with `prefix` (persisted + in-memory).
+        Used by the task runtime to drop a terminal run's `task::<work_id>::` watches so a dead
+        run stops consuming matches."""
+        if not str(prefix or "").strip():
+            raise ValueError("prefix must be non-empty")
+        cancelled = self._state_store.cancel_watches_by_key_prefix(prefix=prefix)
+        if cancelled:
+            with self._lock:
+                orphaned = [
+                    rid for rid, w in self._watches.items()
+                    if str(w.watch_key or "").startswith(prefix)
+                ]
+                for rid in orphaned:
+                    del self._watches[rid]
+            logger.info("SignalRouter cancelled %d watch(es) by prefix %s", cancelled, prefix)
+        return cancelled
+
     def cancel_watch(self, *, registration_id: str) -> bool:
         registration_id = str(registration_id or "").strip()
         if not registration_id:

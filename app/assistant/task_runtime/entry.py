@@ -65,6 +65,10 @@ def _after_drive(store, work_id: str, status: str) -> None:
     if status == "parked":
         from app.assistant.task_runtime.task_scheduler import arm_task_wake
         arm_task_wake(store, work_id)   # base timing engine, not dayflow
+    elif status in ("done", "failed", "stalled"):
+        # terminal: this run's signal-router watches must stop consuming matches
+        from app.assistant.task_runtime.task_events import cancel_task_watches
+        cancel_task_watches(work_id)
 
 
 def start_task_run(template: dict, *, store=None, scope=None, scope_contract_enforced: bool = True) -> dict:
@@ -74,6 +78,11 @@ def start_task_run(template: dict, *, store=None, scope=None, scope_contract_enf
     store, scope = _resolve_store_scope(store, scope, str((template or {}).get("task_id") or "task"))
     _require_scope(scope)
     work_id = instantiate_template(store, template)
+    # Register the run's event watches BEFORE the first drive — an early park must not race a
+    # fast match. Raises if the template needs watches and the router is unavailable (a run
+    # whose waits could never fire must not start).
+    from app.assistant.task_runtime.task_events import register_task_watches
+    register_task_watches(store, work_id)
     with _run_lock(work_id):
         status = drive(store, work_id, scope=scope, scope_contract_enforced=scope_contract_enforced)
         _after_drive(store, work_id, status)
