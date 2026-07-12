@@ -71,6 +71,8 @@ class TelegramInboundService:
                         room_id, e,
                     )
                     logger.debug("early plan-mode telegram reply exception details", exc_info=True)
+                    manager.surface_early_reply_failure(
+                        room_id=room_id, surface="telegram", reply_text=reply_text, error=e)
             return manager._build_short_circuit_response(
                 request_id=request_id,
                 room_id=room_id,

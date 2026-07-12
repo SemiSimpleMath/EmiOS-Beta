@@ -51,9 +51,14 @@ class SmsInboundService:
                         body=reply_text,
                     )
                 except Exception as e:
+                    # Log-and-continue like the other three surfaces (RSM3): the webhook
+                    # catch-alls and returns 200 regardless, so the re-raise only produced a
+                    # redundant second log — the RSM3 alignment sweep missed this fourth surface
+                    # (verification finding).
                     logger.error("Failed sending early plan-mode SMS reply for room_id=%s: %s", room_id, e)
                     logger.debug("early plan-mode SMS reply exception details", exc_info=True)
-                    raise
+                    manager.surface_early_reply_failure(
+                        room_id=room_id, surface="sms", reply_text=reply_text, error=e)
             return manager._build_short_circuit_response(
                 request_id=request_id,
                 room_id=room_id,

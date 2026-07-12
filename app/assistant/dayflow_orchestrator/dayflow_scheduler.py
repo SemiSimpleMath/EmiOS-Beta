@@ -219,7 +219,16 @@ class DayflowScheduler:
                 logger.info("[DayflowScheduler] No chat history yet; skipping tick.")
                 return
         except Exception as e:
-            logger.debug("[DayflowScheduler] History check failed (skipping tick): %s", e, exc_info=True)
+            # A transient DB failure is NOT a quiet state: this tick's date-job is consumed, so
+            # returning without re-arming left the heartbeat dark until an external poke, with
+            # only a DEBUG log (verification finding — same halt class S1 fixed in the item scan).
+            logger.error("[DayflowScheduler] History check failed — skipping this tick but arming "
+                         "a ceiling tick to keep the heartbeat: %s", e)
+            logger.debug("[DayflowScheduler] history check exception details", exc_info=True)
+            try:
+                self._schedule_tick(delay_seconds=MAX_CEILING_SECONDS, reason="ceiling_after_history_error")
+            except Exception as arm_err:
+                logger.error("[DayflowScheduler] could not arm the post-error ceiling tick: %s", arm_err)
             return
 
         with self._lock:
@@ -442,7 +451,11 @@ class DayflowScheduler:
                     continue
                 try:
                     wo = store.load(summary["id"])
-                except Exception:
+                except Exception as e:
+                    # a whole work object silently vanishing from wake-arming is invisible —
+                    # log it (its nodes' time-wakes simply don't arm this scan)
+                    logger.error("[DayflowScheduler] wake scan cannot load work object %s — "
+                                 "skipping it this scan: %s", summary.get("id"), e)
                     continue
                 for node in wo.nodes.values():
                     if node.wake_kind != "time" or node.status not in ("proposed", "waiting"):

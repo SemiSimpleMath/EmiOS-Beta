@@ -8,7 +8,7 @@ is_ready compares it to now).
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 from app.assistant.utils.logging_config import get_logger
@@ -20,17 +20,24 @@ def _to_dt(s):
     if s is None:
         return None
     if isinstance(s, datetime):
-        return s
+        return s if s.tzinfo is not None else s.replace(tzinfo=timezone.utc)
     txt = str(s).strip()
     if not txt:
         return None
     if txt.endswith("Z"):
         txt = txt[:-1] + "+00:00"
     try:
-        return datetime.fromisoformat(txt)
+        dt = datetime.fromisoformat(txt)
     except Exception:
         logger.warning("apply_architect_dag: unparseable wake_at %r — node will not be time-gated", s)
         return None
+    if dt.tzinfo is None:
+        # The architect's prompt asks for an offset, but the LLM can omit one. A NAIVE datetime
+        # in the store poisons every aware comparison downstream — the soonest-first wake sort
+        # raised TypeError and armed ZERO wakes that tick (verification finding). Naive -> UTC.
+        logger.warning("apply_architect_dag: wake_at %r has no offset — assuming UTC", s)
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 _ABANDON_SKIP = {"done", "closed", "abandoned", "superseded"}  # finished/finalized — left as a record

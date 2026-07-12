@@ -110,7 +110,6 @@ class RoomBindingSessionService:
     # Lifecycle
     # ------------------------------------------------------------------
 
-    @with_session_state_lock
     def activate_room_binding(
         self,
         *,
@@ -120,6 +119,28 @@ class RoomBindingSessionService:
         initiated_by: str,
         extra_fields: Dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        payload, newly_created = self._activate_room_binding_locked(
+            room_id=room_id, surface=surface, context_id=context_id,
+            initiated_by=initiated_by, extra_fields=extra_fields,
+        )
+        if newly_created:
+            # The hook runs OUTSIDE the process-wide session-state lock: the doc-mode hook does
+            # SQLAlchemy writes, and holding the lock across DB I/O blocked mode resolution for
+            # EVERY inbound message on every surface during DB contention (verification finding
+            # R1-1). A hook that needs session state must use the locked public methods.
+            self._on_activated(payload)
+        return dict(payload)
+
+    @with_session_state_lock
+    def _activate_room_binding_locked(
+        self,
+        *,
+        room_id: str,
+        surface: str,
+        context_id: str,
+        initiated_by: str,
+        extra_fields: Dict[str, Any] | None = None,
+    ) -> tuple[Dict[str, Any], bool]:
         room_key = self.room_binding_key(room_id=room_id, surface=surface, context_id=context_id)
         now_iso = self._utc_now_iso()
         sessions = self._load_sessions()
@@ -130,7 +151,7 @@ class RoomBindingSessionService:
             existing["updated_at_utc"] = now_iso
             sessions[str(existing.get(self.SESSION_ID_FIELD) or session_id)] = existing
             self._save_sessions(sessions)
-            return dict(existing)
+            return dict(existing), False
         session_id = f"{self.SESSION_ID_PREFIX}_{uuid.uuid4().hex[:12]}"
         payload: Dict[str, Any] = {
             self.SESSION_ID_FIELD: session_id,
@@ -152,8 +173,7 @@ class RoomBindingSessionService:
         self._save_sessions(sessions)
         self._save_room_index(room_index)
         logger.debug("%s session activated: %s room_key=%s", self.LABEL, session_id, room_key)
-        self._on_activated(payload)
-        return dict(payload)
+        return payload, True
 
     @with_session_state_lock
     def get_active_room_binding(

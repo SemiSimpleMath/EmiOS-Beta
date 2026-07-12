@@ -89,7 +89,11 @@ class TimingEngine:
         if isinstance(start, str):
             try:
                 start = datetime.fromisoformat(start)
-            except Exception:
+            except Exception as e:
+                # non-fatal (the fire proceeds; only the overdue stamp is lost) but never silent
+                self.logger.error(
+                    "overdue check: unparseable start_date %r on event %s — skipping the stamp: %s",
+                    start, getattr(event, "event_id", "?"), e)
                 return
         if not start:
             return

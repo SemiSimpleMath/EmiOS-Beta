@@ -92,6 +92,8 @@ class SlackInboundService:
                         room_id, e,
                     )
                     logger.debug("early plan-mode Slack reply exception details", exc_info=True)
+                    manager.surface_early_reply_failure(
+                        room_id=room_id, surface="slack", reply_text=reply_text, error=e)
             return manager._build_short_circuit_response(
                 request_id=resolved_request_id,
                 room_id=room_id,

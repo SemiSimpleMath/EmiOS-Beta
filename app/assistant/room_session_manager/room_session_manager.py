@@ -597,6 +597,32 @@ class RoomSessionManager:
             return None, "failed"
 
     @staticmethod
+    def surface_early_reply_failure(*, room_id: str, surface: str, reply_text: str, error: Exception) -> None:
+        """An early-path (slash/plan-mode control) reply failed to send. The early path has NO
+        durable record and no main-path retry — the log-and-swallow was its only delivery
+        (verification finding R3-2). Tell the owner via the durable ticket channel, exactly like
+        the main path's D2 failed-send notice. Never raises: a notice failure must not take the
+        webhook path down with it (it logs ERROR instead)."""
+        from app.assistant.ticket_manager.ticket_service import propose_notice_ticket
+
+        preview = str(reply_text or "").strip()
+        if len(preview) > 160:
+            preview = preview[:157] + "..."
+        try:
+            propose_notice_ticket(
+                title=f"Mode reply to {room_id} did not send",
+                message=(
+                    f"My {surface} mode-control reply to {room_id} failed to send "
+                    f"({type(error).__name__}). It was: \"{preview}\""
+                ),
+                suggestion_type="delivery_failure",
+                trigger_reason=f"{surface} early mode reply send failed",
+                trigger_context={"room_id": room_id, "surface": surface, "path": "early_mode_reply"},
+            )
+        except Exception as ticket_err:
+            logger.error("Could not raise the early-reply failure notice for %s: %s", room_id, ticket_err)
+
+    @staticmethod
     def _surface_delivery_failure(*, envelope: InboundEnvelope, reply_text: str, error: Exception) -> None:
         """A reply exhausted the transport's retries — tell the owner via the
         durable ticket channel (DB + popup/poll). No auto-resend: re-firing a
