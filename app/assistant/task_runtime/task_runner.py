@@ -19,7 +19,7 @@ import concurrent.futures
 
 from work_objects.model import utcnow
 from app.assistant.utils.logging_config import get_logger
-from app.assistant.task_runtime.guard_eval import facts_context, guard_value
+from app.assistant.task_runtime.guard_eval import UnsupportedGuard, facts_context, guard_value
 from app.assistant.task_runtime.tool_executor import execute_claimed_tool_node
 
 logger = get_logger(__name__)
@@ -39,7 +39,27 @@ def _deps_resolved(wo, node) -> bool:
                for d in wo.deps_of(node.id))
 
 
-def _ready_frontier(wo, facts, now) -> list:
+def _is_wait_like(n) -> bool:
+    """A wait or loop node's condition is a RELEASE condition ("not yet"), never a branch
+    guard ("not taken") — it must not be branch-closed when it evaluates False, and a False
+    release simply keeps the node waiting for its next promotion."""
+    return bool(n.payload.get("is_wait") or n.payload.get("is_loop"))
+
+
+def _guard_or_fail(store, wo, n, facts):
+    """Evaluate a node's guard; a malformed/unsupported expression fails the NODE loudly
+    (work_repair territory) instead of crashing the whole drive on every attempt."""
+    try:
+        return guard_value(n, facts)
+    except UnsupportedGuard as e:
+        logger.error("[task_runner] %s::%s has an unrunnable guard — failing the node: %s",
+                     wo.id, n.id, e)
+        store.apply("set_status", {"work_id": wo.id, "node_id": n.id, "status": "failed",
+                                   "content": f"unrunnable guard: {e}"[:500]}, actor="task_runner")
+        return "failed"
+
+
+def _ready_frontier(store, wo, facts, now) -> list:
     out = []
     for n in wo.nodes.values():
         if n.type not in _WORK_TYPES or n.status not in _CLAIMABLE:
@@ -53,7 +73,7 @@ def _ready_frontier(wo, facts, now) -> list:
             continue
         if not _deps_resolved(wo, n):
             continue
-        if guard_value(n, facts) in (None, True):
+        if _guard_or_fail(store, wo, n, facts) in (None, True):
             out.append(n)
     return out
 
@@ -62,12 +82,20 @@ def _close_dead_branches(store, wo, facts) -> None:
     """A claimable node whose deps are resolved and whose guard is provably FALSE can never fire →
     abandon it (branch close). Its `abandoned` status is neutral for any downstream join.
 
+    EXEMPT: wait/loop nodes (`is_wait`/`is_loop`). Their condition is a RELEASE condition —
+    False means "not released yet", not "branch not taken". Without the exemption, the first
+    delivered event made every OTHER pending wait's `"<ev>" in events_observed` evaluate
+    provably False → abandoned → downstream joins unblocked → the task completed without doing
+    the skipped waits (verification finding, probe-confirmed 2026-07-11).
+
     Phase 1 closes only the guarded node itself; a MULTI-node not-taken branch (a guardless node
     that depends only on an abandoned one) is not yet cascaded — Phase 4 adds branch-subtree
     abandonment + AND/OR-join semantics when it lands real branching (auto_reply_katy)."""
     for n in list(wo.nodes.values()):
         if n.type in _WORK_TYPES and n.status in _CLAIMABLE and _deps_resolved(wo, n):
-            if guard_value(n, facts) is False:
+            if _is_wait_like(n):
+                continue
+            if _guard_or_fail(store, wo, n, facts) is False:
                 store.apply("set_status", {"work_id": wo.id, "node_id": n.id, "status": "abandoned"},
                             actor="task_runner")
 
@@ -124,7 +152,7 @@ def drive(store, work_id: str, *, scope, scope_contract_enforced: bool = True) -
         _close_dead_branches(store, wo, facts)
         wo = store.load(work_id)
         facts = facts_context(wo)
-        ready = _ready_frontier(wo, facts, now)
+        ready = _ready_frontier(store, wo, facts, now)
 
         if not ready:
             if _has_future_wake(wo, now) or _has_event_wait(wo):

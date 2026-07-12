@@ -75,8 +75,10 @@ def test_park_and_resume():
     print(f"  [park]   {r}")
     assert r["status"] == "parked", r
     wid = r["work_id"]
+    # ids are namespaced per instance (tid--<wid6>)
+    wait_id = next(n.id for n in store.load(wid).nodes.values() if n.id.split("--")[0] == "wait")
     # simulate the base-timing-engine wake firing: advance the wait to due, then resume
-    store.apply("defer_node", {"work_id": wid, "node_id": "wait", "wake_kind": "time",
+    store.apply("defer_node", {"work_id": wid, "node_id": wait_id, "wake_kind": "time",
                                "wake_at": utcnow() - timedelta(seconds=1)}, actor="test")
     r2 = resume_task_run(wid, store=store, scope=scope)
     print(f"  [resume] {r2}")

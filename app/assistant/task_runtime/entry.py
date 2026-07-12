@@ -14,8 +14,22 @@ scheduler (Phase 3).
 """
 from __future__ import annotations
 
+import threading
+
 from app.assistant.utils.pydantic_classes import ScopeContext
 from app.assistant.task_runtime.task_runner import drive
+
+# One drive at a time per work object: a wake-fired resume racing a manual run_task resume
+# would otherwise both claim the same node (a same-status `dispatched` write passes the store's
+# transition check silently) and execute its tools twice. In-process is the right scope — the
+# store is single-process by design (verification finding R6/F8).
+_RUN_LOCKS: dict[str, threading.Lock] = {}
+_RUN_LOCKS_GUARD = threading.Lock()
+
+
+def _run_lock(work_id: str) -> threading.Lock:
+    with _RUN_LOCKS_GUARD:
+        return _RUN_LOCKS.setdefault(str(work_id), threading.Lock())
 
 
 def _require_scope(scope) -> None:
@@ -60,8 +74,9 @@ def start_task_run(template: dict, *, store=None, scope=None, scope_contract_enf
     store, scope = _resolve_store_scope(store, scope, str((template or {}).get("task_id") or "task"))
     _require_scope(scope)
     work_id = instantiate_template(store, template)
-    status = drive(store, work_id, scope=scope, scope_contract_enforced=scope_contract_enforced)
-    _after_drive(store, work_id, status)
+    with _run_lock(work_id):
+        status = drive(store, work_id, scope=scope, scope_contract_enforced=scope_contract_enforced)
+        _after_drive(store, work_id, status)
     return {"work_id": work_id, "status": status}
 
 
@@ -96,9 +111,10 @@ def resume_task_run(work_id: str, *, store=None, scope=None, observed_event: str
     event-parked node(s) so they run for this wake."""
     store, scope = _resolve_store_scope(store, scope, "task")
     _require_scope(scope)
-    if observed_event:
-        _record_event(store, work_id, observed_event)
-        _promote_event_waiters(store, work_id, observed_event)
-    status = drive(store, work_id, scope=scope, scope_contract_enforced=scope_contract_enforced)
-    _after_drive(store, work_id, status)
+    with _run_lock(work_id):
+        if observed_event:
+            _record_event(store, work_id, observed_event)
+            _promote_event_waiters(store, work_id, observed_event)
+        status = drive(store, work_id, scope=scope, scope_contract_enforced=scope_contract_enforced)
+        _after_drive(store, work_id, status)
     return {"work_id": work_id, "status": status}

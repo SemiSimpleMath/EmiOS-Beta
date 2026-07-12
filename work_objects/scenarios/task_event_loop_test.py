@@ -72,7 +72,8 @@ def test_event_loop_runtime():
     print(f"  [cutoff]       {r3}  runs={_Handler.runs}")
     assert r3["status"] == "done" and _Handler.runs == 3, (r3, _Handler.runs)
     wo = store.load(wid)
-    assert wo.nodes["loop"].status == "closed" and wo.nodes["end"].status == "closed"
+    _iid = lambda tid: next(n.id for n in wo.nodes.values() if n.id.split("--")[0] == tid)
+    assert wo.nodes[_iid("loop")].status == "closed" and wo.nodes[_iid("end")].status == "closed"
     print("  test_event_loop_runtime: PASS")
 
 

@@ -44,14 +44,24 @@ def test_morning_briefing_transform():
     wo = store.load(wid)
     assert wo.constraints.get("driver") == "task_runner"
 
-    deps = lambda sid: set(wo.deps_of(sid))
+    # node ids are namespaced PER INSTANCE (tid--<wid6>) so a template can run more than once
+    def _iid(tid):
+        ms = [n.id for n in wo.nodes.values() if n.id.split("--")[0] == tid]
+        assert len(ms) == 1, (tid, ms)
+        return ms[0]
+
+    deps = lambda sid: set(wo.deps_of(_iid(sid)))
     # the four gather steps are INDEPENDENT -> no deps -> parallel first wave
     for sid in ("step_1", "step_2", "step_3", "step_calendar"):
         assert deps(sid) == set(), f"{sid} should have no deps (parallel), got {deps(sid)}"
     # synthesis depends on all four gather outputs; save on synthesis; end on the sink (save)
-    assert deps("step_4") == {"step_1", "step_2", "step_3", "step_calendar"}, deps("step_4")
-    assert deps("step_5") == {"step_4"}, deps("step_5")
-    assert deps("step_6") == {"step_5"}, deps("step_6")
+    assert deps("step_4") == {_iid(s) for s in ("step_1", "step_2", "step_3", "step_calendar")}, deps("step_4")
+    assert deps("step_5") == {_iid("step_4")}, deps("step_5")
+    assert deps("step_6") == {_iid("step_5")}, deps("step_6")
+
+    # re-run: the SAME template instantiates again (ids namespaced per instance — run-once was a bug)
+    wid2 = instantiate_template(store, template)
+    assert wid2 != wid and store.load(wid2).constraints.get("driver") == "task_runner"
 
     print(f"  nodes={len(wo.nodes)} edges={len(wo.edges)} "
           f"first-wave(parallel)={sorted(n.id for n in wo.nodes.values() if n.type in ('tool','action') and not wo.deps_of(n.id))}")

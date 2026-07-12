@@ -66,7 +66,9 @@ def test_wait_and_forward_decision():
     print(f"  [start]  {r}")
     assert r["status"] == "parked", f"should park on the event gate, got {r}"
     wid = r["work_id"]
-    assert store.load(wid).nodes["s_wait"].status in ("proposed", "waiting"), "wait node should be parked"
+    _iid = lambda wo, tid: next(n.id for n in wo.nodes.values() if n.id.split("--")[0] == tid)
+    wo0 = store.load(wid)
+    assert wo0.nodes[_iid(wo0, "s_wait")].status in ("proposed", "waiting"), "wait node should be parked"
 
     # event 'E' fires -> release the gate; decision condition is 'C in events' -> False -> the on_false
     # branch (s_e) runs, and the on_true branch (s_c) is abandoned.
@@ -74,9 +76,9 @@ def test_wait_and_forward_decision():
     print(f"  [resume] {r2}")
     assert r2["status"] == "done", r2
     wo = store.load(wid)
-    assert wo.nodes["s_wait"].status == "closed"
-    assert wo.nodes["s_e"].status == "closed", f"E branch should run, got {wo.nodes['s_e'].status}"
-    assert wo.nodes["s_c"].status == "abandoned", f"C branch should be abandoned, got {wo.nodes['s_c'].status}"
+    assert wo.nodes[_iid(wo, "s_wait")].status == "closed"
+    assert wo.nodes[_iid(wo, "s_e")].status == "closed", "E branch should run"
+    assert wo.nodes[_iid(wo, "s_c")].status == "abandoned", "C branch should be abandoned"
     assert wo.status == "done"
     print("  test_wait_and_forward_decision: PASS")
 

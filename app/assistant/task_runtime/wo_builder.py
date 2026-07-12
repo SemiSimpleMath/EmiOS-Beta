@@ -244,7 +244,13 @@ def build_template(compiled_task: dict) -> dict:
 
 def instantiate_template(store, template: dict, *, created_by: str = "task_runner") -> str:
     """Write a template into `store` as a fresh work-object INSTANCE (constraints.driver='task_runner').
-    Returns the new work_id. `store` is a TASK-owned work store (a work_objects WorkStore), never dayflow's."""
+    Returns the new work_id. `store` is a TASK-owned work store (a work_objects WorkStore), never dayflow's.
+
+    Node ids are namespaced per instance (`<template_id>--<wid6>`): node ids are GLOBAL in the store
+    (the cross-WO guard refuses reuse), so writing template ids verbatim made every task runnable
+    exactly once — the second run collided on `step_1` (verification finding, probe-confirmed).
+    Edges are mapped through the same namespace. A failed instantiation abandons the partial work
+    object before re-raising, so no goal-only `active` husk is left for boot re-arm to chew on."""
     wo = store.apply("create_work_object", {
         "title": template.get("title", ""),
         "goal_content": template.get("goal_content", ""),
@@ -252,22 +258,30 @@ def instantiate_template(store, template: dict, *, created_by: str = "task_runne
         "constraints": {"driver": template.get("driver", "task_runner"), "task_id": template.get("task_id")},
     }, actor=created_by)
     wid, goal = wo.id, wo.goal_node_id
+    suffix = wid[-6:]
+    id_map = {str(n["id"]): f'{n["id"]}--{suffix}' for n in template.get("nodes", [])}
 
-    for n in template.get("nodes", []):
-        node = {"work_id": wid, "id": n["id"], "type": n["type"], "parent_id": goal,
-                "title": n.get("title", n["id"]), "payload": n.get("payload", {})}
-        for field in ("content", "wake_kind", "wake_at", "wake_ref", "satisfied_when_kind",
-                      "satisfied_when_ref", "side_effect", "requires_approval", "authority", "status"):
-            if n.get(field) is not None:
-                node[field] = n[field]
-        store.apply("add_node", node, actor=created_by)
-    for e in template.get("edges", []):
-        store.apply("add_edge", {"work_id": wid, "src": e["src"], "dst": e["dst"],
-                                 "relation": e.get("relation", "depends_on")}, actor=created_by)
-    for f in template.get("preloaded_facts", []):
-        store.apply("add_node", {"work_id": wid, "id": new_id("ev"), "type": "evidence", "parent_id": goal,
-                                 "status": "assumed", "title": str(f["data_id"]),
-                                 "content": str(f.get("value", "")),
-                                 "payload": {"data_id": str(f["data_id"]), "value": f.get("value")}},
-                    actor=created_by)
+    try:
+        for n in template.get("nodes", []):
+            node = {"work_id": wid, "id": id_map[str(n["id"])], "type": n["type"], "parent_id": goal,
+                    "title": n.get("title", n["id"]), "payload": n.get("payload", {})}
+            for field in ("content", "wake_kind", "wake_at", "wake_ref", "satisfied_when_kind",
+                          "satisfied_when_ref", "side_effect", "requires_approval", "authority", "status"):
+                if n.get(field) is not None:
+                    node[field] = n[field]
+            store.apply("add_node", node, actor=created_by)
+        for e in template.get("edges", []):
+            src, dst = str(e["src"]), str(e["dst"])
+            store.apply("add_edge", {"work_id": wid, "src": id_map.get(src, src),
+                                     "dst": id_map.get(dst, dst),
+                                     "relation": e.get("relation", "depends_on")}, actor=created_by)
+        for f in template.get("preloaded_facts", []):
+            store.apply("add_node", {"work_id": wid, "id": new_id("ev"), "type": "evidence", "parent_id": goal,
+                                     "status": "assumed", "title": str(f["data_id"]),
+                                     "content": str(f.get("value", "")),
+                                     "payload": {"data_id": str(f["data_id"]), "value": f.get("value")}},
+                        actor=created_by)
+    except Exception:
+        store.apply("set_work_status", {"work_id": wid, "status": "abandoned"}, actor=created_by)
+        raise
     return wid

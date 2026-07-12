@@ -31,6 +31,10 @@ from app.assistant.task_runtime.guard_eval import facts_context
 logger = get_logger(__name__)
 
 _ERROR_RESULT_TYPES = {"error", "tool_error", "manager_aborted"}
+# Per-loop-node iteration backstop (overridable via payload.max_iterations). Bounds a loop whose
+# done_when can never become true to N real executions failing LOUDLY — not _MAX_WAVES=500 silent
+# re-runs of side-effecting tools (verification finding, probe: 500 executions before stall).
+_LOOP_MAX_ITERATIONS = 50
 
 
 def execute_claimed_tool_node(store, work_id: str, node_id: str, scope,
@@ -66,8 +70,10 @@ def execute_claimed_tool_node(store, work_id: str, node_id: str, scope,
             last = result
 
         _write_output(store, work_id, node, last)
+        if node.payload.get("is_loop"):
+            _record_loop_iteration(store, work_id, node_id)
         if _rearm_if_incomplete(store, work_id, node_id):
-            return   # loop: the node's done-condition isn't met yet -> re-armed (waiting), runs again
+            return   # loop: the node's done-condition isn't met yet -> re-armed, runs again
         store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "done"}, actor="task_runner")
         store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "closed"}, actor="task_runner")
         if node.payload.get("is_end"):     # reach-end completion (not all-children-done)
@@ -78,19 +84,64 @@ def execute_claimed_tool_node(store, work_id: str, node_id: str, scope,
                                    "content": str(e)[:500]}, actor="task_runner")
 
 
+def _loop_marker(node_id: str) -> str:
+    return f"__loop_runs::{node_id}"
+
+
+def _record_loop_iteration(store, work_id: str, node_id: str) -> None:
+    """One evidence marker per completed loop execution — the iteration count backing both the
+    per-loop cap and the missed-delivery check at re-arm."""
+    store.apply("add_node", {
+        "work_id": work_id, "id": new_id("ev"), "type": "evidence", "parent_id": node_id,
+        "status": "assumed", "title": "loop iteration",
+        "payload": {"data_id": _loop_marker(node_id), "value": 1},
+    }, actor="task_runner")
+
+
+def _loop_iterations(wo, node_id: str) -> int:
+    marker = _loop_marker(node_id)
+    return sum(1 for n in wo.nodes.values()
+               if n.type == "evidence" and n.payload.get("data_id") == marker)
+
+
 def _rearm_if_incomplete(store, work_id: str, node_id: str) -> bool:
     """Loop = re-arm: a node with `payload.done_when` re-runs until that condition holds over the recorded
-    facts. If it's not yet satisfied, set the node back to `waiting` (claimable) and return True so the
-    caller skips closing — the drive loop picks it up again. A cyclic template becomes a linear trace of
-    runs (each recorded as an event); the node only terminalizes when done_when is met."""
+    facts. If it's not yet satisfied, re-arm the node and return True so the caller skips closing — the
+    drive loop picks it up again. A cyclic template becomes a linear trace of runs; the node only
+    terminalizes when done_when is met.
+
+    Two verification fixes live here:
+    - iteration CAP: a loop that hits max_iterations raises (node fails LOUDLY via the caller's
+      except) instead of burning _MAX_WAVES side-effecting executions toward a silent stall.
+    - missed delivery (lost wakeup): an event that arrived WHILE this iteration was dispatched was
+      recorded but couldn't promote (promotion targets `waiting` only). If subscribed deliveries
+      outnumber completed iterations, re-arm to `actionable` — one owed iteration — instead of
+      parking on a promotion that already happened."""
     from app.assistant.task_runtime.guard_eval import eval_expr
     node = store.load(work_id).nodes[node_id]
     done_when = node.payload.get("done_when")
     if not done_when:
         return False
-    facts = facts_context(store.load(work_id))
-    if eval_expr(done_when, facts) is True:
+    wo = store.load(work_id)
+    facts = facts_context(wo)
+    if eval_expr(done_when, facts) is True:   # UnsupportedGuard propagates -> node failed, loud
         return False   # done -> caller closes
+
+    if node.payload.get("is_loop"):
+        iterations = _loop_iterations(wo, node_id)
+        cap = int(node.payload.get("max_iterations") or _LOOP_MAX_ITERATIONS)
+        if iterations >= cap:
+            raise RuntimeError(
+                f"loop node {node_id} hit its iteration cap ({iterations}/{cap}) with done_when "
+                f"still unmet ({str(done_when)[:120]!r}) — failing loudly instead of spinning")
+        subs = [str(s) for s in (node.payload.get("subscriptions") or [])]
+        if subs and node.wake_kind in ("event", "signal", "user_reply"):
+            delivered = sum(1 for ev in (facts.get("events_observed") or []) if str(ev) in subs)
+            if delivered > iterations:
+                store.apply("set_status", {"work_id": work_id, "node_id": node_id,
+                                           "status": "actionable"}, actor="task_runner")
+                return True
+
     store.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "waiting"}, actor="task_runner")
     return True
 
@@ -131,9 +182,13 @@ def _coerce_args(spec: dict) -> dict:
         raw = str(spec.get("args_json") or "{}").strip()
         try:
             args = json.loads(raw) if raw else {}
-        except json.JSONDecodeError:
-            args = {}
-    return dict(args) if isinstance(args, dict) else {}
+        except json.JSONDecodeError as e:
+            # A compiler-emitted broken args_json must fail the node loudly — running the
+            # tool with silently-emptied args is exactly the swallow CLAUDE.md bans.
+            raise ValueError(f"tool spec has unparseable args_json {raw[:200]!r}: {e}") from e
+    if not isinstance(args, dict):
+        raise ValueError(f"tool spec args must be an object, got {type(args).__name__}")
+    return dict(args)
 
 
 # --- arg substitution (copied from the former task-IR tool-sequence executor; owned here) ---

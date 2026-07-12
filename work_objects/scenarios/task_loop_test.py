@@ -56,8 +56,9 @@ def test_rearm_loop():
     assert r["status"] == "done", r
     assert _Counter.n == 3, f"loop node should have run exactly 3 times, ran {_Counter.n}"
     wo = store.load(r["work_id"])
-    assert wo.nodes["loop"].status == "closed"
-    assert wo.nodes["end"].status == "closed"
+    _iid = lambda tid: next(n.id for n in wo.nodes.values() if n.id.split("--")[0] == tid)
+    assert wo.nodes[_iid("loop")].status == "closed"
+    assert wo.nodes[_iid("end")].status == "closed"
     print("  test_rearm_loop: PASS")
 
 

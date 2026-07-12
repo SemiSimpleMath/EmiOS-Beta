@@ -9,6 +9,7 @@ from __future__ import annotations
 import threading
 
 from work_objects.store import WorkStore
+from app.assistant.utils.identity_names import PRINCIPAL_USER
 from app.assistant.utils.path_utils import get_data_dir
 from app.assistant.utils.pydantic_classes import ScopeApprovalPolicy, ScopeContext
 
@@ -30,6 +31,6 @@ def build_task_scope(task_id: str = "task", *, authority: int = 98) -> ScopeCont
     """A task-execution scope — authority 98 (as the taskrunner uses), tools default to allowed_tools=['all'];
     the per-tool authority floor (min_authority) is the real gate the tool executor enforces."""
     return ScopeContext(
-        scope_id=f"scope::task::{task_id}", owner_id="PRINCIPAL_USER", actor_id="task_runner",
+        scope_id=f"scope::task::{task_id}", owner_id=PRINCIPAL_USER, actor_id="task_runner",
         surface="routine", approval=ScopeApprovalPolicy(authority_level=authority),
     )
