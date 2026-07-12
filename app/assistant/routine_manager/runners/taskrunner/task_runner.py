@@ -51,16 +51,26 @@ class TaskRoutineRunner:
         from app.assistant.task_runtime.entry import start_task_run
         result = start_task_run(compiled_task)
         run_status = str(result.get("status") or "")
+        work_id = str(result.get("work_id") or "")
         # A failed/stalled drive must COUNT as a routine failure — burying the real outcome in
         # data while reporting success kept a nightly-failing task green in routine health
-        # (verification finding). done/parked are the healthy outcomes.
+        # (verification finding). done/parked are the healthy outcomes. The failure REASON rides
+        # `message` so last_error and the auto-disable ticket say WHY (2026-07-12 incident: three
+        # full-re-execution retries with last_error carrying nothing).
+        failed = run_status in ("failed", "stalled")
+        message = ""
+        if failed:
+            from app.assistant.task_runtime.task_runner import failure_reason
+            from app.assistant.task_runtime.task_store import get_task_work_store
+            message = f"task run {run_status}: {failure_reason(get_task_work_store(), work_id)}"
         return RoutineRunResult(
-            status="error" if run_status in ("failed", "stalled") else "success",
+            status="error" if failed else "success",
+            message=message,
             data={
                 "task_file": task_file,
                 "execution_mode": "work_object",
                 "compiled_file": compiled_file,
-                "work_id": str(result.get("work_id") or ""),
+                "work_id": work_id,
                 "run_status": run_status,
             },
         )

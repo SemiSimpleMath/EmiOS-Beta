@@ -141,6 +141,22 @@ def _nonterminal_work_remains(wo) -> list:
     return [n.id for n in wo.nodes.values() if n.type in _WORK_TYPES and n.status not in _TERMINAL_STATUSES]
 
 
+def failure_reason(store, work_id: str) -> str:
+    """A short human-readable reason for a failed/stalled run — the failed node(s) and their
+    recorded errors. This is what reaches the routine's last_error and the auto-disable ticket;
+    without it a failed briefing showed status=error with no WHY (2026-07-12 incident)."""
+    try:
+        wo = store.load(work_id)
+    except Exception as e:
+        return f"(could not load {work_id}: {e})"
+    parts = []
+    for n in wo.nodes.values():
+        if n.type in _WORK_TYPES and n.status == "failed":
+            detail = str(n.content or "").strip().splitlines()[0][:160] if n.content else ""
+            parts.append(f"{n.id}: {detail}" if detail else n.id)
+    return "; ".join(parts[:3]) or "no failed node recorded (stalled graph)"
+
+
 def drive(store, work_id: str, *, scope, scope_contract_enforced: bool = True) -> str:
     """Run the active phase. Returns 'done' | 'parked' | 'failed' | 'stalled' | 'abandoned'."""
     for _ in range(_MAX_WAVES):

@@ -69,6 +69,12 @@ def _after_drive(store, work_id: str, status: str) -> None:
         # terminal: this run's signal-router watches must stop consuming matches
         from app.assistant.task_runtime.task_events import cancel_task_watches
         cancel_task_watches(work_id)
+        if status in ("failed", "stalled"):
+            # A dead run is TERMINAL — a retry is a fresh instance. Leaving it `active`
+            # accumulated permanent residue the boot re-arm rescanned forever
+            # (2026-07-12 incident: three stuck-active morning_briefing husks).
+            store.apply("set_work_status", {"work_id": work_id, "status": "abandoned"},
+                        actor="task_runner")
 
 
 def start_task_run(template: dict, *, store=None, scope=None, scope_contract_enforced: bool = True) -> dict:

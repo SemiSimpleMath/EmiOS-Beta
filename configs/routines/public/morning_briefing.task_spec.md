@@ -18,7 +18,7 @@ Then toggle the routine on via the `/routines` admin UI.
    - produces: artifact_1 (Combined web-scrape artifact with screenshots and top headlines for CNN and BBC (structured: {cnn: {screenshot, headlines}, bbc: {screenshot, headlines}}).)
 2. **Get predicted weather for today.** `deterministic`
    - tools:
-     - `get_weather(forecast_type="forecast")`
+     - `get_weather(forecast_type="five_day")`
    - produces: artifact_2 (Predicted weather for today (forecast data: temperatures, precipitation chance, summary).)
 3. **Retrieve important emails from the last 10 hours.** `deterministic`
    - tools:

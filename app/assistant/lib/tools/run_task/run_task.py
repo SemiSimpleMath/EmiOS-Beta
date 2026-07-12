@@ -120,14 +120,18 @@ class RunTaskTool(BaseTool):
         if status in ("failed", "stalled"):
             # A failed/stalled drive is a FAILURE — result_type must say so. Wrapping it as
             # success with the outcome buried in data made every machine consumer (including
-            # this runtime's own error taxonomy) see green (verification finding).
+            # this runtime's own error taxonomy) see green (verification finding). The failed
+            # node's recorded error rides along so the caller sees WHY.
+            from app.assistant.task_runtime.task_runner import failure_reason
+            from app.assistant.task_runtime.task_store import get_task_work_store
+            reason = failure_reason(get_task_work_store(), work_id)
             return make_tool_error(
                 error_code=f"task_run_{status}",
-                message=human,
+                message=f"{human} {reason}",
                 abort_policy="abort_tool",
                 retryable=False,
                 details={"work_id": work_id, "status": status, "task_id": task_id,
-                         "compiled_file": compiled_file},
+                         "compiled_file": compiled_file, "reason": reason},
             )
         return ToolResult(
             result_type="success", content=human,

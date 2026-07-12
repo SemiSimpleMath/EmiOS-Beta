@@ -132,14 +132,17 @@ class GetWeather(BaseTool):
                 weather_data = openmeteo.get_current_weather(latitude, longitude, location_name, country_code)
                 data_list.append(weather_data)
             elif forecast_type == "five_day":
-                query = city if city else f"{location_name},{country_code}"
-                forecast_data = openmeteo.get_five_day_forecast(query)
-                for entry in forecast_data:
-                    if not isinstance(entry, (list, tuple)) or len(entry) < 2:
-                        logger.error("Unexpected forecast entry shape: %s", entry)
-                        continue
-                    date, forecast = entry[0], entry[1]
-                    data_list.append({"data_type": "forecast", "date": date, "weather": forecast, "wind": {}})
+                # get_five_day_forecast takes the resolved coordinates and returns entries already
+                # shaped for data_list. The old call passed a single query string (TypeError) and
+                # unpacked tuples that never existed — the branch had no caller until the
+                # morning_briefing recompile hit it (2026-07-12 incident).
+                data_list.extend(
+                    openmeteo.get_five_day_forecast(latitude, longitude, location_name, country_code)
+                )
+            else:
+                raise ValueError(
+                    f"Unknown forecast_type {forecast_type!r} — valid values: 'current', 'five_day'."
+                )
 
             if not data_list:
                 raise RuntimeError(f"Weather fetch returned no data (forecast_type={forecast_type}).")

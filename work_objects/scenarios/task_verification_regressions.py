@@ -165,6 +165,9 @@ def test_unrunnable_guard_fails_the_node_not_the_drive():
     wo = store.load(r["work_id"])
     assert wo.nodes[_iid(wo, "bad")].status == "failed", wo.nodes[_iid(wo, "bad")].status
     assert r["status"] == "failed", r
+    # a dead run is TERMINAL (abandoned) — it must not stay active for boot re-arm to
+    # rescan forever (2026-07-12 incident: three stuck-active morning_briefing husks)
+    assert wo.status == "abandoned", wo.status
     print("  test_unrunnable_guard_fails_the_node_not_the_drive: PASS")
 
 
