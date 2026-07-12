@@ -50,14 +50,18 @@ class TaskRoutineRunner:
 
         from app.assistant.task_runtime.entry import start_task_run
         result = start_task_run(compiled_task)
+        run_status = str(result.get("status") or "")
+        # A failed/stalled drive must COUNT as a routine failure — burying the real outcome in
+        # data while reporting success kept a nightly-failing task green in routine health
+        # (verification finding). done/parked are the healthy outcomes.
         return RoutineRunResult(
-            status="success",
+            status="error" if run_status in ("failed", "stalled") else "success",
             data={
                 "task_file": task_file,
                 "execution_mode": "work_object",
                 "compiled_file": compiled_file,
                 "work_id": str(result.get("work_id") or ""),
-                "run_status": str(result.get("status") or ""),
+                "run_status": run_status,
             },
         )
 

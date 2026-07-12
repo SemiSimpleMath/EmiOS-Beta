@@ -256,6 +256,13 @@ def initialize_system():
     else:
         logger.info("⏸️ Ingest service DISABLED via subsystems.yaml")
 
+    # Re-arm parked task runs from the durable task store (re-derivation: the store survives
+    # restart; wakes live in the in-memory APScheduler and must be re-derived at boot — a
+    # downtime-crossed wake fires at now+2s via arm_task_wake's past-due handling).
+    from app.assistant.task_runtime.task_scheduler import re_arm_parked_task_runs
+    re_arm_parked_task_runs()
+    logger.info("✅ Task-run wakes re-armed from the durable task store")
+
     # Route ticket responses for ticket-mode pending questions back into
     # the subconscious answer loop (mark answered → annotate concern →
     # trigger a noticer tick).

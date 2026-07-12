@@ -21,9 +21,14 @@ def _base_scheduler():
 
 
 def arm_task_wake(store, work_id: str) -> None:
-    """Arm a one-shot at this task run's soonest future time-wake, on the base timing engine.
+    """Arm a one-shot at this task run's soonest time-wake, on the base timing engine.
     Best-effort: if the engine isn't up (e.g. a headless/test context) the boot re-arm + backstop
-    catch it — a task's wait state is durable on the node, not held by a live timer."""
+    catch it — a task's wait state is durable on the node, not held by a live timer.
+
+    A PAST-DUE wake (it came due during downtime, or between park and arm) fires at now+2s
+    instead of being filtered out — filtering silently left the run permanently parked
+    (verification finding: the boot re-arm's whole point is exactly this crossing)."""
+    from datetime import timedelta
     from work_objects.model import utcnow
     try:
         wo = store.load(work_id)
@@ -31,26 +36,33 @@ def arm_task_wake(store, work_id: str) -> None:
         logger.error("[task_scheduler] arm: cannot load %s: %s", work_id, e)
         return
     now = utcnow()
-    futures = [n.wake_at for n in wo.nodes.values()
-               if n.wake_kind == "time" and n.wake_at is not None and n.wake_at > now
-               and n.status in ("proposed", "waiting", "actionable")]
-    if not futures:
+    wakes = [n.wake_at for n in wo.nodes.values()
+             if n.wake_kind == "time" and n.wake_at is not None
+             and n.status in ("proposed", "waiting", "actionable")]
+    if not wakes:
         return
     scheduler = _base_scheduler()
     if scheduler is None:
         logger.warning("[task_scheduler] base timing engine unavailable — wake for %s not armed now.", work_id)
         return
-    run_date = min(futures)
+    soonest = min(wakes)
+    run_date = soonest if soonest > now else now + timedelta(seconds=2)
     try:
         scheduler.add_job(func=_fire_task_wake, trigger="date", run_date=run_date, args=[work_id],
                           id=f"{_TASK_WAKE_PREFIX}{work_id}", replace_existing=True, misfire_grace_time=600)
-        logger.info("[task_scheduler] armed task wake %s at %s", work_id, run_date.isoformat())
+        logger.info("[task_scheduler] armed task wake %s at %s%s", work_id, run_date.isoformat(),
+                    " (past-due — firing now)" if soonest <= now else "")
     except Exception as e:
         logger.error("[task_scheduler] failed to arm wake for %s: %s", work_id, e)
 
 
-def _fire_task_wake(work_id: str) -> None:
-    """A task run's time-wake fired: resume it, in the app context (like dayflow's fire handler runs in one)."""
+def _fire_task_wake(work_id: str, is_retry: bool = False) -> None:
+    """A task run's time-wake fired: resume it, in the app context (like dayflow's fire handler runs
+    in one). The wake is a consumed one-shot, so a resume failure re-arms ONE delayed retry (+300s);
+    if that also fails, the durable node state remains and the next boot re-arm is the backstop —
+    the run is never lost, only late (verification finding: fire-failure consumed the wake forever)."""
+    from datetime import timedelta
+    from work_objects.model import utcnow
     from app.assistant.task_runtime.entry import resume_task_run
     app = getattr(getattr(DI, "scheduler", None), "app", None)
     try:
@@ -60,7 +72,23 @@ def _fire_task_wake(work_id: str) -> None:
         else:
             resume_task_run(work_id)
     except Exception as e:
-        logger.error("[task_scheduler] fire/resume %s failed: %s", work_id, e)
+        logger.error("[task_scheduler] fire/resume %s failed%s: %s",
+                     work_id, " (retry)" if is_retry else "", e)
+        if is_retry:
+            logger.error("[task_scheduler] %s retry also failed — the run stays parked until the "
+                         "next boot re-arm.", work_id)
+            return
+        scheduler = _base_scheduler()
+        if scheduler is None:
+            return
+        try:
+            scheduler.add_job(func=_fire_task_wake, trigger="date",
+                              run_date=utcnow() + timedelta(seconds=300), args=[work_id, True],
+                              id=f"{_TASK_WAKE_PREFIX}{work_id}", replace_existing=True,
+                              misfire_grace_time=600)
+            logger.info("[task_scheduler] re-armed one retry for %s at +300s", work_id)
+        except Exception as arm_err:
+            logger.error("[task_scheduler] could not re-arm retry for %s: %s", work_id, arm_err)
 
 
 def re_arm_parked_task_runs() -> None:

@@ -117,6 +117,18 @@ class RunTaskTool(BaseTool):
             status=("completed" if status == "done" else "waiting" if status == "parked" else status),
             waiting_event_name="",
         )
+        if status in ("failed", "stalled"):
+            # A failed/stalled drive is a FAILURE — result_type must say so. Wrapping it as
+            # success with the outcome buried in data made every machine consumer (including
+            # this runtime's own error taxonomy) see green (verification finding).
+            return make_tool_error(
+                error_code=f"task_run_{status}",
+                message=human,
+                abort_policy="abort_tool",
+                retryable=False,
+                details={"work_id": work_id, "status": status, "task_id": task_id,
+                         "compiled_file": compiled_file},
+            )
         return ToolResult(
             result_type="success", content=human,
             data={"work_id": work_id, "status": status, "task_id": task_id,
@@ -136,6 +148,14 @@ class RunTaskTool(BaseTool):
                 human = "Task resumed; waiting."
             else:
                 human = f"Task {status or 'running'}."
+            if status in ("failed", "stalled"):
+                return make_tool_error(
+                    error_code=f"task_run_{status}",
+                    message=f"Task {status} after resume.",
+                    abort_policy="abort_tool",
+                    retryable=False,
+                    details={"work_id": run_id, "status": status, "event_name": event_name},
+                )
             return ToolResult(
                 result_type="success",
                 content=human,
@@ -178,10 +198,14 @@ class RunTaskTool(BaseTool):
             task_label = str(task_id or "").replace("_", " ").strip() or "task"
             if status == "waiting" and waiting_event_name:
                 body = f"Task **{task_label}** started and waiting for: `{waiting_event_name}`"
+            elif status == "waiting":
+                body = f"Task **{task_label}** started; waiting."
             elif status == "completed":
                 body = f"Task **{task_label}** completed."
             elif status == "failed":
-                body = f"Task **{task_label}** failed to start."
+                body = f"Task **{task_label}** failed."
+            elif status == "stalled":
+                body = f"Task **{task_label}** stalled — non-terminal work with nothing runnable."
             else:
                 body = f"Task **{task_label}** is running. (run_id: `{run_id}`)"
 
