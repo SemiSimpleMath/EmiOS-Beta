@@ -2,7 +2,7 @@
 
 What every tracked routine in `configs/routines/public/` actually does. Assembled from the `notes` field of each routine file — the canonical description lives in the JSON, this doc is just the categorized view. Trigger types, policies, active windows, and on_error backoff are documented in `skills/extending-emi-routines/SKILL.md`; the manager mechanics live in `docs/architecture/06_PIPELINES_AND_ROUTINES.md`.
 
-**Total: 56 public routines** — 51 enabled, 5 disabled (`belief_engine_export`, `example_camera_motion_poll`, `morning_briefing`, `sample_morning_routine`, `timesheet_routine`). The v2-store `belief_tag_new` was deleted 2026-07-07. The `morning_briefing.compiled.json` sibling is compiled task IR, not a routine.
+**Total: 56 public routines** — 51 enabled, 5 disabled (`belief_engine_export`, `example_camera_motion_poll`, `morning_briefing`, `sample_morning_routine`, `timesheet_routine`). The v2-store `belief_tag_new` was deleted 2026-07-07. The `morning_briefing.compiled.json` sibling is the compiled work object the task runner executes, not a routine.
 
 Personal routines live in `configs/routines/private/` (gitignored) and override matching public ids on collision — see `skills/extending-emi-routines/SKILL.md` for the layout.
 

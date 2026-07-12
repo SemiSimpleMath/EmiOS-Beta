@@ -1,171 +1,161 @@
 {
-  "schema_version": "task_ir_v1",
   "task_id": "morning_briefing",
-  "created_at_utc": "2026-04-15T18:30:00+00:00",
-  "compiler_name": "task_compile_manager",
-  "compiler_version": "v1",
-  "source_task": "Morning briefing: gather headlines, emails, todos, week-ahead calendar; compile daily summary.",
-  "source_information": "{\"task_id\": \"morning_briefing\"}",
-  "source_hash": "reference_v1",
-  "entry_step_id": "step_1",
-  "steps": [
+  "title": "morning briefing",
+  "goal_content": "---\ntask_id: morning_briefing\nmanager: emi_team_manager\ndescription: Morning briefing - headlines, weather, emails, todos into an HTML report.\ninputs: []\noutputs: []\nidempotency: overwrite_outputs\nlimits:\n  timeout_seconds: 600\n  max_cycles: 30\n---\n## Title\nMorning briefing\n\n## Description\n[TBD]\n\n## Steps\n1. **Go to cnn.com, take a screenshot, and extract the top headlines. + Go to bbc.com, take a screenshot, and extract the top headlines.** → `playwright_manager`\n   - instruction: Visit https://www.cnn.com and https://www.bbc.com. For each site: navigate to the home page, dismiss any cookie/consent banner per the site skill, take a full-page screenshot, and extract the top N headlines. Pass an explicit filename to browser_take_screenshot — `cnn-${today}.png` for CNN and `bbc-${today}.png` for BBC — so the file lands at a stable, dated path under data/playwright_screenshots/. Produce a single combined artifact that contains: site name, the screenshot filename used, and a list of extracted top headlines for that site. Return a structured result with both sites included.\n   - pinned_tools: playwright_browse, mcp::npm/playwright-mcp::browser_take_screenshot, mcp::npm/playwright-mcp::browser_navigate\n   - produces: artifact_1 (Combined web-scrape artifact with screenshots and top headlines for CNN and BBC (structured: {cnn: {screenshot, headlines}, bbc: {screenshot, headlines}}).)\n2. **Get predicted weather for today.** `deterministic`\n   - tools:\n     - `get_weather(forecast_type=\"forecast\")`\n   - produces: artifact_2 (Predicted weather for today (forecast data: temperatures, precipitation chance, summary).)\n3. **Retrieve important emails from the last 10 hours.** `deterministic`\n   - tools:\n     - `get_important_emails(start_date=\"${hours_ago_10}\", end_date=\"${now}\", unseen=False)`\n   - produces: artifact_3 (List of important emails from the last 10 hours (subject, sender, snippet, timestamp, importance score).)\n4. **Retrieve current todo tasks.** `deterministic`\n   - tools:\n     - `get_todo_tasks(include_completed=False)`\n   - produces: artifact_4 (Current active todo tasks (titles, due dates, lists, priorities).)\n5. **Retrieve calendar events for the next 7 days.** `deterministic`\n   - tools:\n     - `get_calendar_events(start_date=\"${now}\", end_date=\"${days_from_now_7}\", single_events=True)`\n   - produces: artifact_calendar (Calendar events for the next 7 days — drives the `upcoming_events` field in the daily summary.)\n6. **Use the daily_summary::daily_summary agent to compile all gathered items into a daily briefing summary.** `deterministic`\n   - tools:\n     - `invoke_agent(agent_name=\"daily_summary::daily_summary\", agent_input={'task': \"Compile a concise daily briefing in structured JSON. Include top headlines (by site), today's weather summary, important emails, current todos, and upcoming_events drawn from the week-ahead calendar.\", 'site_scrapes': '${artifact_1}', 'weather': '${artifact_2}', 'emails': '${artifact_3}', 'todos': '${artifact_4}', 'week_calendar': '${artifact_calendar}'})`\n   - produces: artifact_5 (Daily briefing compiled by the agent (structured JSON containing headlines, weather, emails, todos, week-ahead events, and metadata).)\n   - consumes: artifact_1, artifact_2, artifact_3, artifact_4, artifact_calendar\n7. **Save the daily briefing as JSON to app/daily_summaries/daily_summary_${today}.json.** `deterministic`\n   - tools:\n     - `write_text_file(file_path=\"app/daily_summaries/daily_summary_${today}.json\", content=\"${artifact_5}\", ensure_newline=True)`\n   - produces: artifact_6 (Metadata about the saved file (path and confirmation) or the saved JSON content reference.)\n   - consumes: artifact_5\n\n## Completion\nThe task completes when the briefing file is saved.\n\n# Pre-compile hints (machine-generated)\n\n## Web headlines and screenshots (CNN & BBC)\n- kind: action\n- executor: playwright_manager\n- produces: artifact_1 (Combined web-scrape artifact with screenshots and top headlines for CNN and BBC (structured: {cnn: {screenshot: 'data/playwright_screenshots/cnn-${today}.png', headlines: [...]}, bbc: {screenshot: 'data/playwright_screenshots/bbc-${today}.png', headlines: [...]}}).)\n\n## Get predicted weather for today\n- kind: tool_sequence\n- tool: get_weather({\"forecast_type\": \"five_day\"})\n- produces: artifact_2 (Predicted weather for today (forecast data: temperatures, precipitation chance, summary).)\n\n## Retrieve important emails (last 10 hours)\n- kind: tool_sequence\n- tool: get_important_emails({\"start_date\": \"${hours_ago_10}\", \"end_date\": \"${now}\", \"unseen\": false})\n- produces: artifact_3 (List of important emails from the last 10 hours (subject, sender, snippet, timestamp, importance score).)\n\n## Retrieve current todo tasks\n- kind: action\n- executor: personal_admin_manager\n- produces: artifact_4 (Current active todo tasks (titles, due dates, lists/projects, priorities/labels).)\n\n## Retrieve calendar events for the next 7 days\n- kind: action\n- executor: personal_admin_manager\n- produces: artifact_calendar (Calendar events for the next 7 days (structured list for upcoming_events: start/end, title, location, organizer, attendees, notes).)\n\n## Compile daily briefing via daily_summary agent\n- kind: tool_sequence\n- tool: invoke_agent({\"agent_name\": \"daily_summary::daily_summary\", \"agent_input\": {\"task\": \"Compile a concise daily briefing in structured JSON. Include top headlines (grouped by site), today's weather summary, important emails, current todos, and upcoming_events drawn from the week-ahead calendar.\", \"site_scrapes\": \"${artifact_1}\", \"weather\": \"${artifact_2}\", \"emails\": \"${artifact_3}\", \"todos\": \"${artifact_4}\", \"week_calendar\": \"${artifact_calendar}\"}})\n- produces: artifact_5 (Daily briefing compiled by the agent (structured JSON containing headlines, weather, emails, todos, week-ahead events, and metadata).)\n- consumes: artifact_1, artifact_2, artifact_3, artifact_4, artifact_calendar\n\n## Save the daily briefing\n- kind: tool_sequence\n- tool: save_daily_summary({\"summary_data\": ${artifact_5}, \"date_str\": \"${today}\"})\n- produces: artifact_6 (Metadata about the saved daily briefing (confirming file path and save success) or a reference to the saved JSON content.)\n- consumes: artifact_5",
+  "driver": "task_runner",
+  "nodes": [
     {
       "id": "step_1",
-      "kind": "action",
-      "title": "Scrape CNN and BBC headlines with screenshots",
-      "executor": "playwright_manager",
-      "instruction": "Visit https://www.cnn.com and https://www.bbc.com. For each site: navigate to the home page, dismiss any cookie/consent banner per the site skill, take a screenshot, and use web_get_content to extract the top headlines. When calling browser_take_screenshot, pass an explicit filename so the file persists at a known path: use filename='cnn-${today}.png' for CNN and filename='bbc-${today}.png' for BBC (the playwright server writes these into data/playwright_screenshots/). Write all extracted headlines in your note. Return a combined result with site names, the screenshot filenames you used, and headline lists.",
-      "tools": [],
-      "next_step": "step_2",
-      "consumes_data_ids": [],
-      "produces_data_ids": [
-        "artifact_1"
-      ]
+      "type": "action",
+      "title": "Scrape CNN & BBC headlines and take screenshots",
+      "content": "Visit https://www.cnn.com and https://www.bbc.com. For each site: navigate to the home page, dismiss any cookie/consent banner per the site skill, take a full-page screenshot, and extract the top N headlines. Pass an explicit filename to browser_take_screenshot — `cnn-${today}.png` for CNN and `bbc-${today}.png` for BBC — so the file lands at a stable, dated path under data/playwright_screenshots/. Produce a single combined artifact that contains: site name, the screenshot filename used, and a list of extracted top headlines for that site. Return a structured result with both sites included.",
+      "payload": {
+        "executor": "playwright_manager",
+        "instruction": "Visit https://www.cnn.com and https://www.bbc.com. For each site: navigate to the home page, dismiss any cookie/consent banner per the site skill, take a full-page screenshot, and extract the top N headlines. Pass an explicit filename to browser_take_screenshot — `cnn-${today}.png` for CNN and `bbc-${today}.png` for BBC — so the file lands at a stable, dated path under data/playwright_screenshots/. Produce a single combined artifact that contains: site name, the screenshot filename used, and a list of extracted top headlines for that site. Return a structured result with both sites included.",
+        "produces": [
+          "artifact_1"
+        ]
+      }
     },
     {
       "id": "step_2",
-      "kind": "tool_sequence",
-      "title": "Retrieve important emails from the last 10 hours",
-      "tools": [
-        {
-          "tool": "get_important_emails",
-          "args_json": "{\"start_date\":\"${hours_ago_10}\",\"end_date\":\"${now}\",\"unseen\":false}"
-        }
-      ],
-      "next_step": "step_3",
-      "consumes_data_ids": [],
-      "produces_data_ids": [
-        "artifact_2"
-      ]
+      "type": "tool",
+      "title": "Get predicted weather for today",
+      "payload": {
+        "tools": [
+          {
+            "tool": "get_weather",
+            "args_json": "{\"forecast_type\":\"forecast\"}"
+          }
+        ],
+        "produces": [
+          "artifact_2"
+        ]
+      }
     },
     {
       "id": "step_3",
-      "kind": "tool_sequence",
-      "title": "Retrieve current todo tasks",
-      "tools": [
-        {
-          "tool": "get_todo_tasks",
-          "args_json": "{\"include_completed\":false}"
-        }
-      ],
-      "next_step": "step_calendar",
-      "consumes_data_ids": [],
-      "produces_data_ids": [
-        "artifact_3"
-      ]
-    },
-    {
-      "id": "step_calendar",
-      "kind": "tool_sequence",
-      "title": "Retrieve calendar events for the next 7 days",
-      "tools": [
-        {
-          "tool": "get_calendar_events",
-          "args_json": "{\"start_date\":\"${now}\",\"end_date\":\"${days_from_now_7}\",\"single_events\":true}"
-        }
-      ],
-      "next_step": "step_4",
-      "consumes_data_ids": [],
-      "produces_data_ids": [
-        "artifact_calendar"
-      ]
+      "type": "tool",
+      "title": "Retrieve important emails from the last 10 hours",
+      "payload": {
+        "tools": [
+          {
+            "tool": "get_important_emails",
+            "args_json": "{\"start_date\":\"${hours_ago_10}\",\"end_date\":\"${now}\",\"unseen\":false}"
+          }
+        ],
+        "produces": [
+          "artifact_3"
+        ]
+      }
     },
     {
       "id": "step_4",
-      "kind": "tool_sequence",
-      "title": "Compile daily briefing via daily_summary agent",
-      "tools": [
-        {
-          "tool": "invoke_agent",
-          "args_json": "{\"agent_name\":\"daily_summary::daily_summary\",\"agent_input\":{\"task\":\"Compile the full daily briefing. Today's expected schedule is in your injected resource_expected_calendar. Use the week-ahead calendar, headlines, emails, and todos below.\",\"information\":\"Headlines and screenshots:\\n${artifact_1}\\n\\nImportant emails:\\n${artifact_2}\\n\\nTodo tasks:\\n${artifact_3}\\n\\nWeek-ahead calendar (next 7 days, all events):\\n${artifact_calendar}\"}}"
-        }
-      ],
-      "next_step": "step_5",
-      "consumes_data_ids": [
-        "artifact_1",
-        "artifact_2",
-        "artifact_3",
-        "artifact_calendar"
-      ],
-      "produces_data_ids": [
-        "artifact_4"
-      ]
+      "type": "tool",
+      "title": "Retrieve current todo tasks",
+      "payload": {
+        "tools": [
+          {
+            "tool": "get_todo_tasks",
+            "args_json": "{\"include_completed\":false}"
+          }
+        ],
+        "produces": [
+          "artifact_4"
+        ]
+      }
     },
     {
       "id": "step_5",
-      "kind": "tool_sequence",
-      "title": "Save daily briefing to storage",
-      "tools": [
-        {
-          "tool": "save_daily_summary",
-          "args_json": "{\"summary_data\":\"${artifact_4}\"}"
-        }
-      ],
-      "next_step": "step_6",
-      "consumes_data_ids": [
-        "artifact_4"
-      ],
-      "produces_data_ids": []
+      "type": "tool",
+      "title": "Retrieve calendar events for the next 7 days",
+      "payload": {
+        "tools": [
+          {
+            "tool": "get_calendar_events",
+            "args_json": "{\"start_date\":\"${now}\",\"end_date\":\"${days_from_now_7}\",\"single_events\":true}"
+          }
+        ],
+        "produces": [
+          "artifact_calendar"
+        ]
+      }
     },
     {
       "id": "step_6",
-      "kind": "end",
-      "title": "Done",
-      "tools": [],
-      "consumes_data_ids": [],
-      "produces_data_ids": []
+      "type": "tool",
+      "title": "Compile daily briefing via daily_summary agent",
+      "payload": {
+        "tools": [
+          {
+            "tool": "invoke_agent",
+            "args_json": "{\"agent_name\":\"daily_summary::daily_summary\",\"agent_input\":{\"task\":\"Compile a concise daily briefing in structured JSON. Include top headlines (by site), today's weather summary, important emails, current todos, and upcoming_events drawn from the week-ahead calendar.\",\"site_scrapes\":\"${artifact_1}\",\"weather\":\"${artifact_2}\",\"emails\":\"${artifact_3}\",\"todos\":\"${artifact_4}\",\"week_calendar\":\"${artifact_calendar}\"}}"
+          }
+        ],
+        "produces": [
+          "artifact_5"
+        ]
+      }
+    },
+    {
+      "id": "step_7",
+      "type": "tool",
+      "title": "Save daily briefing JSON file",
+      "payload": {
+        "tools": [
+          {
+            "tool": "write_text_file",
+            "args_json": "{\"file_path\":\"app/daily_summaries/daily_summary_${today}.json\",\"content\":\"${artifact_5}\",\"ensure_newline\":true}"
+          }
+        ],
+        "produces": []
+      }
+    },
+    {
+      "id": "step_end",
+      "type": "tool",
+      "title": "End",
+      "payload": {
+        "is_end": true
+      }
     }
   ],
-  "data_bindings": [
+  "edges": [
     {
-      "data_id": "artifact_1",
-      "data_kind": "artifact",
-      "state_path": "task_state.artifacts.artifact_1",
-      "producer_step_id": "step_1",
-      "consumer_step_ids": [
-        "step_4"
-      ]
+      "src": "step_1",
+      "dst": "step_6",
+      "relation": "depends_on"
     },
     {
-      "data_id": "artifact_2",
-      "data_kind": "artifact",
-      "state_path": "task_state.artifacts.artifact_2",
-      "producer_step_id": "step_2",
-      "consumer_step_ids": [
-        "step_4"
-      ]
+      "src": "step_2",
+      "dst": "step_6",
+      "relation": "depends_on"
     },
     {
-      "data_id": "artifact_3",
-      "data_kind": "artifact",
-      "state_path": "task_state.artifacts.artifact_3",
-      "producer_step_id": "step_3",
-      "consumer_step_ids": [
-        "step_4"
-      ]
+      "src": "step_3",
+      "dst": "step_6",
+      "relation": "depends_on"
     },
     {
-      "data_id": "artifact_calendar",
-      "data_kind": "artifact",
-      "state_path": "task_state.artifacts.artifact_calendar",
-      "producer_step_id": "step_calendar",
-      "consumer_step_ids": [
-        "step_4"
-      ]
+      "src": "step_4",
+      "dst": "step_6",
+      "relation": "depends_on"
     },
     {
-      "data_id": "artifact_4",
-      "data_kind": "artifact",
-      "state_path": "task_state.artifacts.artifact_4",
-      "producer_step_id": "step_4",
-      "consumer_step_ids": [
-        "step_5"
-      ]
+      "src": "step_5",
+      "dst": "step_6",
+      "relation": "depends_on"
+    },
+    {
+      "src": "step_6",
+      "dst": "step_7",
+      "relation": "depends_on"
+    },
+    {
+      "src": "step_7",
+      "dst": "step_end",
+      "relation": "depends_on"
     }
   ],
-  "preloaded_task_state": {
-    "facts": {},
-    "artifacts": {},
-    "flags": {}
-  }
+  "preloaded_facts": []
 }
