@@ -315,7 +315,7 @@ class TaskCompileMetadataNode(ControlNode):
             "event_wait_guidance": [
                 {
                     "event_type": "email_received",
-                    "example_event_name": "signal_router.watch.email_from_katy",
+                    "example_event_name": "signal_router.watch.email_from_sender",
                     "when_to_use": "Wait for a specific sender/content email trigger.",
                 },
                 {

@@ -90,7 +90,7 @@ def _close_dead_branches(store, wo, facts) -> None:
 
     Phase 1 closes only the guarded node itself; a MULTI-node not-taken branch (a guardless node
     that depends only on an abandoned one) is not yet cascaded — Phase 4 adds branch-subtree
-    abandonment + AND/OR-join semantics when it lands real branching (auto_reply_katy)."""
+    abandonment + AND/OR-join semantics when it lands real multi-node branching."""
     for n in list(wo.nodes.values()):
         if n.type in _WORK_TYPES and n.status in _CLAIMABLE and _deps_resolved(wo, n):
             if _is_wait_like(n):

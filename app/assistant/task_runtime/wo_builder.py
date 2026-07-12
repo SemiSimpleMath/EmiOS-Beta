@@ -58,8 +58,9 @@ def _collapse_loops(steps: list, step_order: dict) -> tuple:
     """Detect decision back-edges (loops) and collapse each loop body — a run of action/tool steps ending
     in a wait — into ONE re-arming loop node (a tool node with the body's actions as invoke_agent tools,
     the wait's subscriptions/release_condition, and done_when = the exit branch's condition). Returns
-    (loop_nodes, consumed_step_ids, exit_edges, consumed_to_loop). Only the simple katy-shape loop is
-    supported: a single back-edge decision whose body is action/tool steps + at most one wait.
+    (loop_nodes, consumed_step_ids, exit_edges, consumed_to_loop). Only the simple single-back-edge
+    loop is supported: one back-edge decision whose body is action/tool steps + at most one wait
+    (the auto-reply shape: handle -> wait for the next email or the cutoff -> loop).
 
     Body selection is STRUCTURAL: the branch whose `next_step` chain actually reaches the decision is
     the loop body. The old positional range [order(start), order(decision)) proved nothing about the

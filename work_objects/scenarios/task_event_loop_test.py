@@ -1,6 +1,6 @@
 """Phase 4 — web-free validation of the LOOP-NODE RUNTIME (wake-promotion).
 
-A re-arming loop node (like katy's collapsed handler): run the action, then park on its events; each
+A re-arming loop node (the auto-reply loop's collapsed handler): run the action, then park on its events; each
 delivered event promotes it to run ONCE more (wake-promotion, NOT guard-over-accumulated-events, so it
 can't re-fire on a stale event); it closes when done_when holds (the cutoff event arrives).
 

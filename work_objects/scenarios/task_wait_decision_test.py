@@ -83,13 +83,45 @@ def test_wait_and_forward_decision():
     print("  test_wait_and_forward_decision: PASS")
 
 
-def test_katy_loop_collapses():
-    """The REAL auto_reply_katy compiled task: action_1 -> wait_gate -> decision(cutoff? end : loop->action_1)
-    collapses to a single re-arming loop node keyed by the loop start, with the wait_gate + decision folded in."""
-    katy = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-                        "tasks", "auto_reply_katy", "auto_reply_katy.json")
+_SENDER_EV = "signal_router.watch.email_from_sender"
+_CUTOFF_EV = "clock.local.22_00"
+
+# The auto-reply loop shape (the refactor's hardest control shape, from one of the earliest real
+# tasks): handle -> wait for the next email OR the cutoff -> decision(cutoff? end : loop back).
+# SYNTHETIC fixture: the old version loaded the real compiled task from tasks/ — a gitignored
+# PRIVATE file — so the committed test failed on any clean checkout and leaked a task name.
+_AUTO_REPLY_COMPILED = {
+    "task_id": "auto_reply_loop", "source_task": "auto-reply until the cutoff", "entry_step_id": "step_action_1",
+    "steps": [
+        {"id": "step_action_1", "kind": "action", "title": "Handle the email",
+         "executor": "emi_team_manager", "instruction": "Read the new email and send the reply.",
+         "next_step": "step_wait_gate_1", "produces_data_ids": []},
+        {"id": "step_wait_gate_1", "kind": "wait_gate", "title": "Wait for the next email or the cutoff",
+         "subscriptions": [_SENDER_EV, _CUTOFF_EV],
+         "release_condition": f'"{_SENDER_EV}" in task_state.facts.events_observed or '
+                              f'"{_CUTOFF_EV}" in task_state.facts.events_observed',
+         "watch_registrations": [{
+             "watch_key": "task::auto_reply_loop::step_wait_gate_1",
+             "event_name": _SENDER_EV, "watch_type": "email_semantic_match",
+             "predicate": {"semantic_query": "email from the sender", "sender_equals": "sender@example.com"},
+         }],
+         "next_step": "step_decision_1"},
+        {"id": "step_decision_1", "kind": "decision", "title": "Cutoff reached?",
+         "condition": f'"{_CUTOFF_EV}" in task_state.facts.events_observed',
+         "on_true": "step_end_1", "on_false": "step_action_1"},
+        {"id": "step_end_1", "kind": "end", "title": "Done"},
+    ],
+    "data_bindings": [],
+    "preloaded_task_state": {"facts": {"fact_1": "the sender", "fact_2": "reply style"},
+                             "artifacts": {"artifact_1": "bio", "artifact_2": "guidelines"}, "flags": {}},
+}
+
+
+def test_auto_reply_loop_collapses():
+    """action -> wait_gate -> decision(cutoff? end : loop back) collapses to a single re-arming
+    loop node keyed by the loop start, with the wait_gate + decision folded in."""
     from app.assistant.task_runtime.wo_builder import build_template as _bt
-    template = _bt(json.loads(open(katy, encoding="utf-8").read()))
+    template = _bt(_AUTO_REPLY_COMPILED)
     by_id = {n["id"]: n for n in template["nodes"]}
 
     loop = by_id.get("step_action_1")
@@ -97,6 +129,11 @@ def test_katy_loop_collapses():
     assert "22_00" in str(loop["payload"].get("done_when")), loop["payload"].get("done_when")
     assert any(t.get("tool") == "invoke_agent" for t in (loop["payload"].get("tools") or [])), "action -> invoke_agent"
     assert loop["payload"].get("release_condition"), "loop carries the wait's release condition"
+    assert loop.get("wake_kind") == "event" and set(loop["payload"].get("subscriptions") or []) == {_SENDER_EV, _CUTOFF_EV}
+    # the wait's watch registration rides the collapsed node (it was dropped before — the event
+    # lane would have found nothing to register for a loop)
+    regs = loop["payload"].get("watch_registrations") or []
+    assert regs and regs[0].get("watch_type") == "email_semantic_match", regs
     # the wait_gate and decision are folded in — no standalone nodes
     assert "step_wait_gate_1" not in by_id and "step_decision_1" not in by_id
     # the end node remains and is reached from the loop node
@@ -106,7 +143,7 @@ def test_katy_loop_collapses():
     # preloaded facts/artifacts carried through
     assert {"fact_1", "fact_2", "artifact_1", "artifact_2"} <= {f["data_id"] for f in template["preloaded_facts"]}
     print(f"  nodes={[n['id'] for n in template['nodes']]}")
-    print("  test_katy_loop_collapses: PASS")
+    print("  test_auto_reply_loop_collapses: PASS")
 
 
 def test_state_predicate_loop_collapses():
@@ -249,7 +286,7 @@ def test_multiwait_loop_raises():
 if __name__ == "__main__":
     _install()
     test_wait_and_forward_decision()
-    test_katy_loop_collapses()
+    test_auto_reply_loop_collapses()
     test_state_predicate_loop_collapses()
     test_unterminable_no_wait_loop_refused()
     test_unrelated_step_not_folded_into_loop()
