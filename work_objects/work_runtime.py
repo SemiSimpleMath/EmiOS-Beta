@@ -43,7 +43,7 @@ def _ensure_registered() -> None:
 
 
 def run_node(store, work_id: str, node_id: str,
-             manager_name: str = "work_emi_team_manager") -> "ToolResult | None":
+             manager_name: str = "work_emi_team_manager", scope_context=None) -> "ToolResult | None":
     """Drive ONE node to a yield/finish through the standard manager loop. Returns the manager's
     ToolResult — EXACTLY what a normal manager-as-tool call returns — so a node handoff can surface the
     SAME agent-facing answer as any manager call (None only if the manager produced no result). The
@@ -79,9 +79,14 @@ def run_node(store, work_id: str, node_id: str,
     manager = DI.multi_agent_manager_factory.create_manager(
         manager_name, name=f"{manager_name}_{uuid.uuid4().hex[:8]}")
     token = set_work_context(store, work_id, node_id, actor=actor)
+    # The caller's scope, when given, gates this node's manager run (the task runner threads its
+    # run scope so an action node executes at the run's authority, not the substrate's 99 — a
+    # tool floored above the run scope was denied on a tool node but reachable inside an action
+    # node's manager: verification finding R8). Default = the orchestrator scope (dayflow path).
+    run_scope = scope_context if scope_context is not None else orchestrator_scope(work_id=work_id)
     try:
         if node_input == "task":
-            msg = Message(scope_context=orchestrator_scope(work_id=work_id), task=(cur.content or cur.title),
+            msg = Message(scope_context=run_scope, task=(cur.content or cur.title),
                           information=_render_dependencies(snapshot, node_id),
                           request_id=f"work::{uuid.uuid4()}")
         else:
@@ -93,7 +98,7 @@ def run_node(store, work_id: str, node_id: str,
             # grounded even when the projection is degraded.
             goal_txt = (cur.content or cur.title or "").strip()
             task = f"Advance the node you own: {goal_txt}" if goal_txt else "Advance the node you own."
-            msg = Message(scope_context=orchestrator_scope(work_id=work_id), task=task,
+            msg = Message(scope_context=run_scope, task=task,
                           request_id=f"work::{uuid.uuid4()}")
         result = DI.manager_invoker.invoke(manager, msg)
     finally:
@@ -162,7 +167,8 @@ def run_node(store, work_id: str, node_id: str,
 
 
 def work_on(store, work_id: str, node_id: str | None = None,
-            manager_name: str = "work_emi_team_manager", now=None, max_passes: int = 200) -> str:
+            manager_name: str = "work_emi_team_manager", now=None, max_passes: int = 200,
+            scope_context=None) -> str:
     """Standalone execution arm — advance a WorkObject (or one node of it) WITHOUT the
     parallel orchestrator. The light, single-manager driver (tier 2):
 
@@ -179,7 +185,7 @@ def work_on(store, work_id: str, node_id: str | None = None,
     _ensure_registered()
 
     if node_id is not None:
-        run_node(store, work_id, node_id, manager_name=manager_name)
+        run_node(store, work_id, node_id, manager_name=manager_name, scope_context=scope_context)
         n = store.load(work_id).nodes.get(node_id)
         return n.status if n else "missing"
 

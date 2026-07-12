@@ -24,7 +24,7 @@
       "name": "run_id",
       "type": "string",
       "required": false,
-      "description": "Existing run id to resume."
+      "description": "Existing run's work_id to resume (returned as data.work_id at start)."
     },
     {
       "name": "event_name",
@@ -52,9 +52,9 @@
       "description": "Human-readable tool result text."
     },
     {
-      "path": "data.run_id",
+      "path": "data.work_id",
       "type": "string",
-      "description": "Task IR run id."
+      "description": "The run's work object id (use as run_id to resume)."
     },
     {
       "path": "data.status",

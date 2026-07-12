@@ -3,6 +3,8 @@ import { useState, useCallback } from "react";
 
 export const KIND_CONFIG = {
   action:        { color: "#2d6a9f", border: "#4a9fd4", icon: "⚡", label: "Action" },
+  tool_sequence: { color: "#2d4a6a", border: "#4a7fb4", icon: "🔧", label: "Tools" },
+  loop:          { color: "#6a4a2d", border: "#cf9b6e", icon: "🔁", label: "Loop" },
   wait_for_event:{ color: "#5a3d7a", border: "#9b6ecf", icon: "⏳", label: "Wait Event" },
   wait_gate:     { color: "#3d5a7a", border: "#6e9bcf", icon: "🔒", label: "Wait Gate" },
   decision:      { color: "#7a5a2d", border: "#cfaa6e", icon: "⟐", label: "Decision" },

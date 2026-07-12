@@ -139,7 +139,10 @@ class WorkStore:
             constraints=json.loads(row["constraints"] or "{}"),
             created_at=row["created_at"], updated_at=row["updated_at"],
         )
-        for nrow in self._conn.execute("SELECT * FROM nodes WHERE work_id=?", (work_id,)):
+        # ORDER BY rowid: node iteration order is load-bearing for the task runtime's
+        # facts_context (last-writer-wins on a repeated data_id) — make it insertion order
+        # by contract, not by rowid accident (verification finding F10).
+        for nrow in self._conn.execute("SELECT * FROM nodes WHERE work_id=? ORDER BY rowid", (work_id,)):
             wo.nodes[nrow["id"]] = self._row_to_node(nrow)
         for erow in self._conn.execute("SELECT * FROM edges WHERE work_id=?", (work_id,)):
             wo.edges.append(Edge(

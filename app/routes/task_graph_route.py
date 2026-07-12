@@ -345,9 +345,11 @@ def compile_spec():
     import threading
     from app.assistant.lib.task_utils.task_create_compile_runner import TaskCreateCompileRunner
 
+    # TaskCreateCompileRunner.run takes room_id, not socket_id — the old kwargs raised a
+    # TypeError in the background thread on every call (verification finding, pre-existing).
     t = threading.Thread(
         target=TaskCreateCompileRunner.run,
-        kwargs=dict(session_id=session_id, spec_markdown=markdown, socket_id=socket_id),
+        kwargs=dict(session_id=session_id, spec_markdown=markdown, room_id=""),
         daemon=True,
         name=f"task-compile-{session_id}",
     )
@@ -362,10 +364,10 @@ def put_task_ir(task_id: str):
     """
     Save an edited task IR back to disk.
 
-    Accepts: JSON body — the full IR object.
+    Accepts: JSON body — the full IR object (legacy steps shape or a work object).
     Returns: the saved IR with updated `updated_at_utc`.
-    Also enqueues a background post-processing pass to re-materialize
-    watch_registrations and data_bindings.
+    For the legacy steps shape it also enqueues a background post-processing pass
+    that re-materializes data_bindings (work objects carry their edges inline).
     """
     safe_id = "".join(c for c in task_id if c.isalnum() or c in "-_")
     if not safe_id:
@@ -375,9 +377,10 @@ def put_task_ir(task_id: str):
     if not isinstance(payload, dict):
         abort(400, "Request body must be a JSON object")
 
-    # Basic sanity — must have steps
-    if not isinstance(payload.get("steps"), list):
-        abort(400, "IR must contain a 'steps' array")
+    # Basic sanity — either the legacy steps shape or a work object (driver + nodes)
+    is_work_object = payload.get("driver") == "task_runner" and isinstance(payload.get("nodes"), list)
+    if not is_work_object and not isinstance(payload.get("steps"), list):
+        abort(400, "IR must contain a 'steps' array or be a work object (driver + nodes)")
 
     # Stamp updated time
     from datetime import datetime, timezone
@@ -404,8 +407,10 @@ def put_task_ir(task_id: str):
         logger.debug("task IR write exception", exc_info=True)
         abort(500, "Failed to write task IR")
 
-    # Fire post-processing asynchronously (re-materializes watch registrations + data bindings)
-    _fire_post_process(ir=payload, ir_path=write_path)
+    # Fire post-processing asynchronously (steps-shape only: it re-materializes data bindings
+    # on the legacy IR; a work object carries its edges/watches inline and needs none)
+    if not is_work_object:
+        _fire_post_process(ir=payload, ir_path=write_path)
 
     response = jsonify(payload)
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"

@@ -100,17 +100,18 @@ def _close_dead_branches(store, wo, facts) -> None:
                             actor="task_runner")
 
 
-def _run_action_node(store, work_id: str, node_id: str) -> None:
+def _run_action_node(store, work_id: str, node_id: str, scope=None) -> None:
     """Run an already-claimed action node via the work-object SUBSTRATE — work_runtime.work_on drives
     the node's manager (its `payload.executor`, default work_emi_team_manager) and records the result;
-    we then close done -> closed (a task has no separate finalizer). NOTHING from dayflow. (Tagging the
-    manager result with the node's produced data_id lands in Phase 2, when a real action node produces
-    a consumed artifact.)"""
+    we then close done -> closed (a task has no separate finalizer). NOTHING from dayflow. The RUN
+    scope is threaded through so the action's manager executes at the run's authority (98), not the
+    substrate's orchestrator scope (99) — a tool floored above the run scope was denied on a tool
+    node but reachable inside an action node's manager (verification finding R8)."""
     from work_objects.work_runtime import work_on
     node = store.load(work_id).nodes[node_id]
     executor = str(node.payload.get("executor") or "").strip() or "work_emi_team_manager"
     try:
-        work_on(store, work_id, node_id=node_id, manager_name=executor)
+        work_on(store, work_id, node_id=node_id, manager_name=executor, scope_context=scope)
     except Exception as e:
         logger.error("[task_runner] action node %s::%s failed: %s", work_id, node_id, e)
         cur = store.load(work_id).nodes.get(node_id)
@@ -141,7 +142,7 @@ def _nonterminal_work_remains(wo) -> list:
 
 
 def drive(store, work_id: str, *, scope, scope_contract_enforced: bool = True) -> str:
-    """Run the active phase. Returns 'done' | 'parked' | 'running' | 'stalled'."""
+    """Run the active phase. Returns 'done' | 'parked' | 'failed' | 'stalled' | 'abandoned'."""
     for _ in range(_MAX_WAVES):
         now = utcnow()
         wo = store.load(work_id)
@@ -183,8 +184,8 @@ def drive(store, work_id: str, *, scope, scope_contract_enforced: bool = True) -
                 if n.type == "tool":
                     futures.append(ex.submit(execute_claimed_tool_node, store, work_id, n.id, scope,
                                              scope_contract_enforced))
-                else:  # action -> the substrate manager driver
-                    futures.append(ex.submit(_run_action_node, store, work_id, n.id))
+                else:  # action -> the substrate manager driver, under the RUN scope
+                    futures.append(ex.submit(_run_action_node, store, work_id, n.id, scope))
             for f in futures:
                 f.result()   # join; the executors fail their own node on error
 

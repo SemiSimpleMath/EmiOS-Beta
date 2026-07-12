@@ -1,6 +1,6 @@
 {
   "name": "task_compile_manager",
-  "description": "Compile a natural-language task request into workflow IR (`task_ir_v1`). Use this when the user explicitly asks to compile/convert/create a task workflow or spec output, NOT when they want to execute a task immediately.",
+  "description": "Compile a natural-language task request into a runnable WORK OBJECT (the task runner's format). Use this when the user explicitly asks to compile/convert/create a task workflow or spec output, NOT when they want to execute a task immediately.",
   "inputs": [
     {
       "name": "task",
