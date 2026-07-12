@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
+from app.assistant.agent_runtime.services.agent_result_applier import _RESERVED_RUNTIME_KEYS
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.pydantic_classes import Message, ScopeContext
 
@@ -78,6 +79,16 @@ class AgentInputApplier:
         if isinstance(ai, dict):
             logger.debug("[%s] Unpacking agent_input dict with keys: %s", self._name, list(ai.keys()))
             for k, v in ai.items():
+                if k in _RESERVED_RUNTIME_KEYS:
+                    # Same guard as apply_result_to_state, sibling path: agent_input is
+                    # INPUT (scope legitimately travels on message.scope_context, which
+                    # apply_scope_context validated BEFORE this runs) — a reserved key
+                    # here would overwrite the validated runtime/scope state.
+                    logger.error(
+                        "[%s] agent_input tried to write reserved runtime/scope key %r — skipped.",
+                        self._name, k,
+                    )
+                    continue
                 logger.debug("[%s] Setting blackboard['%s'] = %s...", self._name, k, str(v)[:100] if v else "None")
                 self._blackboard.update_state_value(k, v)
         elif isinstance(ai, str):

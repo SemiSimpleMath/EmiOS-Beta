@@ -35,6 +35,10 @@ _RESERVED_RUNTIME_KEYS: frozenset = frozenset({
     # routing / flow control
     "next_agent", "last_agent", "result_writer", "pending_tool",
     "calling_agent", "manager_agent_steps",
+    # file-capability sandbox — task-scoped restrictions ToolCaller hands to the
+    # file tools; a forged null here would REMOVE the write/read sandbox entirely
+    # (write_text_file only enforces when the value is a list)
+    "allowed_write_files", "allowed_read_files", "task_spec",
     # misc runtime overrides
     "task_llm_params", "request_id",
 })

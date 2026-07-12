@@ -100,6 +100,14 @@ class ActionValidator:
         action = self._resolve_namespaced_mcp_action(action, allowed_actions)
         result_dict["action"] = action
 
+        # Planner control sentinels (see Planner._skip_actions): flow signals consumed
+        # by the agent class itself — never tools/nodes, never in the tool policy's
+        # allowed set. Since enforce() validates every EMITTED action, these must pass
+        # here or a planner's step completion raises on the valid sentinel it was
+        # instructed to emit ("step_complete" routes to the spec step feeder).
+        if action in {"step_complete", "none"}:
+            return
+
         if action not in allowed_actions:
             logger.error(
                 "[%s] Invalid action '%s'. Allowed actions count=%s",

@@ -51,6 +51,21 @@ class TestA3aActionValidation:
         with pytest.raises(ValueError):
             _svc(True, {"read_file"}).enforce({"action": "send_email", "action_input": {"to": "x"}})
 
+    def test_planner_step_complete_sentinel_passes(self):
+        # Regression (verification 2026-07-11): A3 made every EMITTED action validate,
+        # which broke the Planner's control sentinels — spec_step_feeder instructs the
+        # planner to emit action="step_complete", which is not a tool/node and not in
+        # the policy's allowed set, so every step completion raised. Sentinels pass
+        # (they carry no action_input and are consumed by the agent class itself).
+        _svc(False, {"read_file"}).enforce({"action": "step_complete"})   # no raise
+        _svc(False, {"read_file"}).enforce({"action": "none"})            # no raise
+        _svc(True, {"read_file"}).enforce({"action": "step_complete"})    # required agent too
+
+    def test_sentinel_exemption_is_a_closed_set(self):
+        # A disallowed real tool still raises — the sentinel pass opens nothing else.
+        with pytest.raises(ValueError):
+            _svc(False, {"read_file"}).enforce({"action": "step_completely_bogus", "action_input": "{}"})
+
 
 class TestA3bFinalAnswerNormalize:
 
