@@ -229,7 +229,10 @@ def _scenario_map() -> dict[str, AtomicScenario]:
                         "instruction": "Perform one loop unit.",
                         "next_step": "s2",
                         "consumes_data_ids": [],
-                        "produces_data_ids": [],
+                        # the loop's own work must produce the fact its exit condition reads —
+                        # a no-wait loop whose done_when reads an unproducible fact is refused
+                        # at build (it could never terminate).
+                        "produces_data_ids": ["fact_1"],
                     },
                     {
                         "id": "s2",

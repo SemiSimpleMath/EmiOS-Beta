@@ -112,12 +112,14 @@ def test_katy_loop_collapses():
 def test_state_predicate_loop_collapses():
     # a decision back-edge whose loop body has NO wait is a state-predicate loop:
     # it collapses to a tight re-arm node (is_loop + done_when, no wait / no subscriptions).
+    # The body's produces ride the loop node — its exit fact must be its own output.
     looped = {"task_id": "loop", "source_task": "loop", "entry_step_id": "s1",
               "steps": [
                   {"id": "s1", "kind": "tool_sequence", "title": "s1",
-                   "tools": [{"tool": "fake_g", "args": {}}], "next_step": "s_dec"},
-                  {"id": "s_dec", "kind": "decision", "title": "d", "condition": '"C" in task_state.facts.events_observed',
-                   "on_true": "s_end", "on_false": "s1"},   # on_false -> s1 (earlier) = LOOP, no wait in the body
+                   "tools": [{"tool": "fake_g", "args": {}}], "next_step": "s_dec",
+                   "produces_data_ids": ["flag_1"]},
+                  {"id": "s_dec", "kind": "decision", "title": "d", "condition": "task_state.facts.flag_1 == True",
+                   "on_true": "s_end", "on_false": "s1"},   # on_false -> s1 (chains back) = LOOP, no wait in the body
                   {"id": "s_end", "kind": "end", "title": "end"},
               ], "data_bindings": [], "preloaded_task_state": {"facts": {}, "artifacts": {}, "flags": {}}}
     template = build_template(looped)
@@ -127,8 +129,99 @@ def test_state_predicate_loop_collapses():
     assert str(loop["payload"].get("done_when") or "").strip(), "state-predicate loop carries a done_when"
     assert loop.get("wake_kind") is None, "a no-wait loop does not park on events"
     assert not loop["payload"].get("subscriptions"), "a no-wait loop has no subscriptions"
+    assert loop["payload"].get("produces") == ["flag_1"], "the body's produces ride the loop node"
     assert "s_dec" not in by_id, "the decision folds into the loop node"
     print("  test_state_predicate_loop_collapses: PASS")
+
+
+def test_unterminable_no_wait_loop_refused():
+    # a no-wait loop whose done_when reads a fact NOTHING in the loop produces would hot-spin
+    # to the iteration cap — build refuses it (verification finding: 500 real executions).
+    looped = {"task_id": "loop", "source_task": "loop", "entry_step_id": "s1",
+              "steps": [
+                  {"id": "s1", "kind": "tool_sequence", "title": "s1",
+                   "tools": [{"tool": "fake_g", "args": {}}], "next_step": "s_dec"},
+                  {"id": "s_dec", "kind": "decision", "title": "d", "condition": "task_state.facts.never_produced == True",
+                   "on_true": "s_end", "on_false": "s1"},
+                  {"id": "s_end", "kind": "end", "title": "end"},
+              ], "data_bindings": [], "preloaded_task_state": {"facts": {}, "artifacts": {}, "flags": {}}}
+    try:
+        build_template(looped)
+    except ValueError as e:
+        assert "could never terminate" in str(e), e
+        print("  test_unterminable_no_wait_loop_refused: PASS")
+        return
+    raise AssertionError("expected ValueError for an unterminable no-wait loop")
+
+
+def test_unrelated_step_not_folded_into_loop():
+    # verification probe P2a: with POSITIONAL body selection, an unrelated one-shot step listed
+    # between the loop start and the decision was silently folded into the loop (ran every
+    # iteration). Structural (next_step chain) selection keeps it a standalone node.
+    looped = {"task_id": "loop", "source_task": "loop", "entry_step_id": "s1",
+              "steps": [
+                  {"id": "s1", "kind": "tool_sequence", "title": "s1",
+                   "tools": [{"tool": "fake_g", "args": {"emit": "body"}}], "next_step": "s_dec",
+                   "produces_data_ids": ["flag_1"]},
+                  {"id": "s_notify", "kind": "tool_sequence", "title": "one-shot notify",
+                   "tools": [{"tool": "fake_g", "args": {"emit": "NOTIFY-ONCE"}}]},   # positioned INSIDE the range, NOT on the chain
+                  {"id": "s_dec", "kind": "decision", "title": "d", "condition": "task_state.facts.flag_1 == True",
+                   "on_true": "s_end", "on_false": "s1"},
+                  {"id": "s_end", "kind": "end", "title": "end"},
+              ], "data_bindings": [], "preloaded_task_state": {"facts": {}, "artifacts": {}, "flags": {}}}
+    template = build_template(looped)
+    by_id = {n["id"]: n for n in template["nodes"]}
+    assert "s_notify" in by_id, "REGRESSION: the unrelated step was folded into the loop"
+    loop = by_id["s1"]
+    emitted = [t.get("args", {}).get("emit") for t in loop["payload"].get("tools", [])]
+    assert "NOTIFY-ONCE" not in emitted, "REGRESSION: the loop node swallowed the unrelated step's tools"
+    print("  test_unrelated_step_not_folded_into_loop: PASS")
+
+
+def test_exit_handler_at_earlier_position_not_misread_as_backedge():
+    # verification probe P2b: an exit handler at an EARLIER list position was misread as the
+    # back-edge, inverting done_when. Structural detection: only the branch that actually chains
+    # back to the decision is the loop.
+    looped = {"task_id": "loop", "source_task": "loop", "entry_step_id": "s_body",
+              "steps": [
+                  {"id": "s_exit", "kind": "tool_sequence", "title": "exit handler (earlier position)",
+                   "tools": [{"tool": "fake_g", "args": {"emit": "exit"}}]},   # earlier position, NOT a back-edge
+                  {"id": "s_body", "kind": "tool_sequence", "title": "body",
+                   "tools": [{"tool": "fake_g", "args": {"emit": "body"}}], "next_step": "s_dec",
+                   "produces_data_ids": ["flag_1"]},
+                  {"id": "s_dec", "kind": "decision", "title": "d", "condition": "task_state.facts.flag_1 == True",
+                   "on_true": "s_exit", "on_false": "s_body"},   # on_false chains back; on_true = exit
+                  {"id": "s_end", "kind": "end", "title": "end"},
+              ], "data_bindings": [], "preloaded_task_state": {"facts": {}, "artifacts": {}, "flags": {}}}
+    template = build_template(looped)
+    by_id = {n["id"]: n for n in template["nodes"]}
+    loop = by_id.get("s_body")
+    assert loop is not None and loop["payload"].get("is_loop"), "s_body (the chaining branch) is the loop"
+    # exit condition must be the DECISION's condition un-inverted (loop exits when flag_1 == True)
+    assert loop["payload"]["done_when"] == "flag_1 == True", loop["payload"]["done_when"]
+    assert "s_exit" in by_id, "the exit handler stays a standalone node"
+    print("  test_exit_handler_at_earlier_position_not_misread_as_backedge: PASS")
+
+
+def test_one_armed_loop_decision_refused():
+    # verification probe P3: a back-edge decision with NO exit branch left the end node with
+    # zero deps -> premature work-done while the loop was stranded. Build refuses it.
+    looped = {"task_id": "loop", "source_task": "loop", "entry_step_id": "s1",
+              "steps": [
+                  {"id": "s1", "kind": "tool_sequence", "title": "s1",
+                   "tools": [{"tool": "fake_g", "args": {}}], "next_step": "s_dec",
+                   "produces_data_ids": ["flag_1"]},
+                  {"id": "s_dec", "kind": "decision", "title": "d", "condition": "task_state.facts.flag_1 == True",
+                   "on_true": "", "on_false": "s1"},   # no exit branch
+                  {"id": "s_end", "kind": "end", "title": "end"},
+              ], "data_bindings": [], "preloaded_task_state": {"facts": {}, "artifacts": {}, "flags": {}}}
+    try:
+        build_template(looped)
+    except ValueError as e:
+        assert "no exit branch" in str(e), e
+        print("  test_one_armed_loop_decision_refused: PASS")
+        return
+    raise AssertionError("expected ValueError for a loop decision with no exit branch")
 
 
 def test_multiwait_loop_raises():
@@ -158,5 +251,9 @@ if __name__ == "__main__":
     test_wait_and_forward_decision()
     test_katy_loop_collapses()
     test_state_predicate_loop_collapses()
+    test_unterminable_no_wait_loop_refused()
+    test_unrelated_step_not_folded_into_loop()
+    test_exit_handler_at_earlier_position_not_misread_as_backedge()
+    test_one_armed_loop_decision_refused()
     test_multiwait_loop_raises()
     print("PHASE 4 WAIT+DECISION+LOOP: ALL PASS")

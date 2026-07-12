@@ -183,6 +183,16 @@ def validate_expression(expr: str) -> None:
                 f"Condition uses unsupported syntax ({node.__class__.__name__}): {expr!r}")
 
 
+def expression_names(expr: str) -> set[str]:
+    """The bare fact names an expression reads — used by build-time termination checks
+    (a no-wait loop's done_when must reference a fact the loop itself produces)."""
+    try:
+        tree = ast.parse(str(expr), mode="eval")
+    except SyntaxError as e:
+        raise UnsupportedGuard(f"Condition does not parse: {expr!r}: {e}") from e
+    return {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+
+
 def guard_value(node, facts: dict[str, Any]):
     """A node's readiness guard (payload.guard): None (no guard) | True | False | 'indeterminate'."""
     return eval_expr(node.payload.get("guard"), facts)

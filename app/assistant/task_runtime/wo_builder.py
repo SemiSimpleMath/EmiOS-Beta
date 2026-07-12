@@ -58,28 +58,63 @@ def _collapse_loops(steps: list, step_order: dict) -> tuple:
     """Detect decision back-edges (loops) and collapse each loop body — a run of action/tool steps ending
     in a wait — into ONE re-arming loop node (a tool node with the body's actions as invoke_agent tools,
     the wait's subscriptions/release_condition, and done_when = the exit branch's condition). Returns
-    (loop_nodes, consumed_step_ids, exit_edges). Only the simple katy-shape loop is supported: a single
-    back-edge decision whose body is action/tool steps + exactly one wait; anything richer raises."""
+    (loop_nodes, consumed_step_ids, exit_edges, consumed_to_loop). Only the simple katy-shape loop is
+    supported: a single back-edge decision whose body is action/tool steps + at most one wait.
+
+    Body selection is STRUCTURAL: the branch whose `next_step` chain actually reaches the decision is
+    the loop body. The old positional range [order(start), order(decision)) proved nothing about the
+    graph — verification probes showed an unrelated step listed inside the range was silently folded
+    into the loop (ran every iteration), and an exit handler at an earlier list position was misread
+    as the back-edge, INVERTING the loop's meaning."""
+    _ = step_order
+    step_by_id = {str(s.get("id") or "").strip(): s for s in steps}
+
+    def _chain_to(start_id: str, decision_id: str):
+        """Follow next_step links from start_id; the chain (list of steps) if it reaches decision_id,
+        else None. Bounded by the visited set — a cycle that never reaches the decision returns None."""
+        chain, cur, seen = [], start_id, set()
+        while cur and cur in step_by_id and cur not in seen:
+            if cur == decision_id:
+                return chain
+            seen.add(cur)
+            chain.append(step_by_id[cur])
+            cur = str(step_by_id[cur].get("next_step") or "").strip()
+        return None
+
     loop_nodes: list[dict[str, Any]] = []
     consumed: set[str] = set()
+    consumed_to_loop: dict[str, str] = {}
     exit_edges: list[dict[str, str]] = []
     for d in steps:
         if str(d.get("kind") or "").strip() != "decision":
             continue
         did = str(d.get("id") or "").strip()
-        od = step_order[did]
         cond = _flatten(str(d.get("condition") or "").strip())
         ot = str(d.get("on_true") or "").strip()
         of = str(d.get("on_false") or "").strip()
-        if ot and step_order.get(ot, 10 ** 9) <= od:
-            start, exit_target, done_when = ot, of, f"not ({cond})"
-        elif of and step_order.get(of, 10 ** 9) <= od:
-            start, exit_target, done_when = of, ot, cond
+        chain_true = _chain_to(ot, did) if ot else None
+        chain_false = _chain_to(of, did) if of else None
+        if chain_true is not None and chain_false is not None:
+            raise NotImplementedError(f"decision {did!r}: both branches chain back to it — not supported")
+        if chain_true is not None:
+            start, exit_target, done_when, body = ot, of, f"not ({cond})", chain_true
+        elif chain_false is not None:
+            start, exit_target, done_when, body = of, ot, cond, chain_false
         else:
             continue   # forward decision — absorbed into guards elsewhere
-        body = [s for s in steps if step_order[start] <= step_order.get(str(s.get("id") or "").strip(), -1) < od]
+        if not exit_target:
+            # end gets zero deps -> ready in wave 1 -> premature work-done while the loop is
+            # stranded (verification probe P3). A loop must have an exit branch.
+            raise ValueError(f"loop decision {did!r} has no exit branch — the loop could never "
+                             "release the graph")
+        body_ids = {str(bs.get("id") or "").strip() for bs in body}
+        if body_ids & consumed:
+            raise NotImplementedError(f"loop at {start!r} shares body steps with another loop — not supported")
+
         tools: list = []
         subs: list = []
+        produces: list[str] = []
+        watch_regs: list = []
         release_condition = None
         for bs in body:
             k = str(bs.get("kind") or "").strip()
@@ -93,22 +128,44 @@ def _collapse_loops(steps: list, step_order: dict) -> tuple:
                 if release_condition is not None:
                     raise NotImplementedError(f"loop starting at {start!r} has more than one wait — not supported")
                 subs, release_condition = _subscriptions(bs), _wait_guard(bs)
+                if bs.get("watch_registration"):
+                    watch_regs.append(bs["watch_registration"])
+                if bs.get("watch_registrations"):
+                    watch_regs.extend(bs["watch_registrations"])
             else:
                 raise NotImplementedError(f"loop body step {bs.get('id')!r} of kind {k!r} not supported")
+            # the loop node inherits the body's produced facts so its evidence is recorded and a
+            # fact-based done_when is satisfiable (they were dropped before — a compiled loop could
+            # never meet its own done condition)
+            produces.extend(str(p) for p in (bs.get("produces_data_ids") or []))
+
         node: dict[str, Any] = {"id": start, "type": "tool", "title": f"loop {start}",
                                 "payload": {"tools": tools, "is_loop": True, "done_when": _flatten(done_when)}}
+        if produces:
+            node["payload"]["produces"] = produces
+        if watch_regs:
+            node["payload"]["watch_registrations"] = watch_regs
         if release_condition is not None:
             # a loop with a wait -> park on its events between iterations (wake-promotion re-arm)
             node["payload"]["subscriptions"] = subs
             node["payload"]["release_condition"] = release_condition
             node["wake_kind"] = "event"
-        # else: a state-predicate loop (no wait) -> a tight re-arm node (done_when, immediate re-run)
+        else:
+            # a state-predicate loop (no wait) re-runs IMMEDIATELY — its done_when must be satisfiable
+            # by the loop's own recorded output, or it hot-spins to the iteration cap and fails.
+            from app.assistant.task_runtime.guard_eval import expression_names
+            names = expression_names(node["payload"]["done_when"])
+            if not (names & set(produces)):
+                raise ValueError(
+                    f"no-wait loop at {start!r}: done_when ({done_when!r}) references none of the "
+                    f"loop's produced facts {sorted(set(produces))} — it could never terminate")
         loop_nodes.append(node)
-        consumed.update(str(bs.get("id") or "").strip() for bs in body)
+        consumed.update(body_ids)
         consumed.add(did)
-        if exit_target:
-            exit_edges.append({"src": start, "dst": exit_target, "relation": "depends_on"})
-    return loop_nodes, consumed, exit_edges
+        for cid in body_ids | {did}:
+            consumed_to_loop[cid] = start
+        exit_edges.append({"src": start, "dst": exit_target, "relation": "depends_on"})
+    return loop_nodes, consumed, exit_edges, consumed_to_loop
 
 
 def build_template(compiled_task: dict) -> dict:
@@ -130,7 +187,7 @@ def build_template(compiled_task: dict) -> dict:
         if nxt:
             pred_of.setdefault(nxt, str(s.get("id") or "").strip())
 
-    loop_nodes, consumed, loop_exit_edges = _collapse_loops(steps, step_order)
+    loop_nodes, consumed, loop_exit_edges, consumed_to_loop = _collapse_loops(steps, step_order)
 
     nodes: list[dict[str, Any]] = list(loop_nodes)
     node_by_id: dict[str, dict[str, Any]] = {n["id"]: n for n in loop_nodes}
@@ -142,6 +199,15 @@ def build_template(compiled_task: dict) -> dict:
         sid = str(step.get("id") or "").strip()
         if not sid:
             raise ValueError("compiled step missing id")
+        # Contract features the runtime does not implement are REFUSED, never silently dropped
+        # (verification finding: output_schema/gate_type/task_state_update/event_fact_bindings
+        # vanished from the emitted work object with no error — a task compiled with a typed-output
+        # contract lost it invisibly). Checked before the consumed-skip so loop bodies count too.
+        for field in ("output_schema", "gate_type", "task_state_update", "event_fact_bindings"):
+            if step.get(field):
+                raise NotImplementedError(
+                    f"step {sid!r} uses {field!r}, which the work-object runtime does not implement "
+                    "— refusing to emit a task that would silently lose that contract")
         if sid in consumed:
             continue   # folded into a loop node by _collapse_loops
         if kind not in _SUPPORTED_KINDS:
@@ -183,9 +249,10 @@ def build_template(compiled_task: dict) -> dict:
                 edges.append({"src": producer, "dst": c, "relation": "depends_on"})
                 producers_with_consumers.add(producer)
 
-    # a wait node runs AFTER its sequential predecessor (handle, THEN wait).
+    # a wait node runs AFTER its sequential predecessor (handle, THEN wait). A predecessor that
+    # was folded into a loop maps to its loop node (was: the edge silently vanished).
     for wid in wait_ids:
-        pred = pred_of.get(wid)
+        pred = consumed_to_loop.get(pred_of.get(wid), pred_of.get(wid))
         if pred and pred in node_by_id and pred != wid:
             edges.append({"src": pred, "dst": wid, "relation": "depends_on"})
 
@@ -196,7 +263,7 @@ def build_template(compiled_task: dict) -> dict:
         cond = _flatten(str(d.get("condition") or "").strip())
         if not cond:
             raise ValueError(f"decision {did!r} missing condition")
-        pred = pred_of.get(did)
+        pred = consumed_to_loop.get(pred_of.get(did), pred_of.get(did))
         for target, guard in ((str(d.get("on_true") or "").strip(), cond),
                               (str(d.get("on_false") or "").strip(), f"not ({cond})")):
             if not target:
@@ -230,6 +297,16 @@ def build_template(compiled_task: dict) -> dict:
         if isinstance(values, dict):
             for data_id, value in values.items():
                 preloaded_facts.append({"data_id": str(data_id), "value": value})
+
+    # Build-time expression check: every guard/done_when/release_condition must parse and stay
+    # inside the safe-eval subset — an unrunnable condition fails the COMPILE loudly, not a live
+    # run later (at runtime the same defect fails only the node).
+    from app.assistant.task_runtime.guard_eval import validate_expression
+    for n in nodes:
+        p = n.get("payload") or {}
+        for key in ("guard", "done_when", "release_condition"):
+            if p.get(key):
+                validate_expression(p[key])
 
     return {
         "task_id": task_id,
