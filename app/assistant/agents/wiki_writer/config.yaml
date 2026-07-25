@@ -14,6 +14,9 @@ user_context_items:
   - window_excerpts
   - section_slug
   - themes_already_covered
+  - current_section_text
+  - added_facts
+  - removed_facts
 
 system_context_items:
   - resource_kg_node_reading

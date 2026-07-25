@@ -87,7 +87,7 @@ A vault is a flat folder of Markdown files plus sidecar subdirectories. Its loca
   section_outputs/
     <Entity>.json                    section_key -> prose markdown cache
   bullet_index/
-    <entity>.json                    bullet keys at last rewrite (dirty detection)
+    <entity>.json                    {bullet_key: bullet_text} at last rewrite (dirty detection + naming removed facts)
   empty/
     <stem>.json                      growth give-up markers (edge_count_at_marker)
 ```
@@ -108,7 +108,7 @@ The rough `.md` and the prose `prose/<Entity>.md` are both well-formed Markdown 
 | `event_count` | outbound + inbound | counts for index display |
 | `kg_gap_count` | `len(neighborhood.kg_gaps)` | hint that the source is incomplete |
 
-The per-entity sidecar at `<vault>/section_outputs/<Entity>.json` is the cache that makes incremental refresh possible: it stores the LLM-written prose for each section keyed by section slug. `regenerate_affected_sections` reuses everything in this map and only re-calls `wiki_writer` for sections whose bullets reference a changed KG node. Loaded by `_load_section_outputs` and written by `_save_section_outputs` (`page_writer.py:482`).
+The per-entity sidecar at `<vault>/section_outputs/<Entity>.json` is the cache that makes incremental refresh possible: it stores the LLM-written prose for each section keyed by section slug. `regenerate_affected_sections` reuses everything in this map and only re-calls `wiki_writer` for sections whose bullet set actually changed — and when the change is small, the cached prose itself becomes the writer's input (revision mode) rather than being discarded. Loaded by `_load_section_outputs` and written by `_save_section_outputs`.
 
 ## Page generation pipeline
 
@@ -146,10 +146,10 @@ Defined in `page_writer.py:502`. This is the path the nightly routine and the `/
 Defined in `page_writer.py`. Used by the nightly refresh whenever a baseline `section_outputs` sidecar exists. Steps:
 
 1. Load the cached sidecar; fall back to full `generate_prose_page_tagged` if absent.
-2. Re-fetch the neighborhood, re-render structured bullets, re-tag (cache hits avoid LLM calls for unchanged bullets).
-3. **Dirty detection via bullet-text diff**: a `bullet_index` sidecar (`<vault>/bullet_index/<entity>.json`) records the bullet keys (`sha256(text)[:16]`) present at the LAST successful rewrite. Compare against currently-rendered keys to compute `added` and `removed` sets. A section is dirty iff it contains an added or removed bullet. Unchanged keys imply identical bullet text — even when the underlying node was touched for unrelated reasons (importance recalc, description refresh, new edges that don't touch this neighborhood). The `changed_node_ids` argument survives only as the cheap pre-filter at the caller level (`refresh_one_page`) that decides whether to even open the page's neighborhood.
-4. **Critic gate**: addition-driven dirty sections go through `wiki_inclusion_critic` per added bullet. Removal-driven sections always rewrite (no bullet to evaluate, and the existing prose mentions a fact that's gone).
-5. Re-call `wiki_writer` for approved-dirty sections only; leave the cached prose for everything else.
+2. Use the caller-provided neighborhood (both refresh paths load it once and thread it through the rough renderer and this function), re-render structured bullets, re-tag (cache hits avoid LLM calls for unchanged bullets).
+3. **Dirty detection via bullet-text diff**: a `bullet_index` sidecar (`<vault>/bullet_index/<entity>.json`) records `{bullet_key: bullet_text}` (`sha256(text)[:16]`) for the bullets present at the LAST successful rewrite. Compare key sets to compute `added` and `removed`. A section is dirty iff it contains an added or removed bullet. Unchanged keys imply identical bullet text — even when the underlying node was touched for unrelated reasons (importance recalc, description refresh, new edges that don't touch this neighborhood). The `changed_node_ids` argument survives only as the cheap pre-filter at the caller level (`refresh_one_page` / `build_one_page`) that decides whether to even open the page's neighborhood. (Sidecars written before 2026-07-25 are bare key lists; they still diff, but removed-bullet text loads as unknown until the next save rewrites the mapping form.)
+4. **Critic gate**: addition-driven dirty sections go through `wiki_inclusion_critic` per added bullet. Removal-driven sections skip the gate (no bullet to evaluate, and the existing prose mentions a fact that's gone).
+5. **Revise or rewrite** (`choose_section_refresh_mode`): a dirty section with cached prose, known removed-bullet texts, and a delta ≤ `SECTION_REVISION_MAX_DELTA_RATIO` (0.3) of its slice is REVISED — `wiki_writer` gets the cached prose plus only the added/removed bullet texts and makes a minimal edit (`(no changes needed)` keeps the cached prose). Otherwise the section is rewritten from its full bullet slice. Either way, window excerpts are built from the ADDED bullets' own `source_window_ids` — the conversations that produced the new facts — not an entity-wide sample. Untouched sections keep their cached prose without any LLM call.
 6. Persist new section_outputs, restitch in taxonomy order, re-run the lead writer (because the body it summarizes may have changed), write the new prose page, then save the updated `bullet_index` (after section_outputs so a crash mid-rewrite leaves the old index in place — next run re-detects and self-heals).
 
 ## Section taxonomy
@@ -224,7 +224,7 @@ Refresh maintains *existing* pages; growth *adds* new ones. `growth.run_wiki_gro
 
 - **Target selection** (`pick_growth_targets`): a cheap SQL pre-filter ranks Entity nodes by incident-edge count, keeping only `deg >= min_degree` (default 4); a Python pass then confirms each survivor through `importance.consumers.is_wiki_growth_candidate` (degree + importance floor). Entities whose sanitized stem already has a `prose/` file are skipped.
 - **Give-up markers**: when an entity's prose generation returns empty (the writer LLM produced nothing for any section — tools, generic nouns, abstract concepts), `mark_entity_empty` drops `<vault>/empty/<stem>.json` recording `edge_count_at_marker`. Subsequent ticks skip the entity *unless its edge count has grown past that number*, so dead-ends don't re-burn LLM cost nightly but new KG content auto-retries.
-- **Per-page build** (`build_one_page`) is the end-to-end unit (rough → `generate_prose_page_tagged` → optional `run_consistency_critic`), returning status `ok` / `empty` / `error`. It is independent and idempotent — interruptions don't corrupt anything; the next run resumes (existing pages skipped). The `refresh_wiki_page` agent tool (`lib/tools/refresh_wiki_page/`) wraps this same function so a manager can rebuild one page on demand after KG mutations.
+- **Per-page build** (`build_one_page`) is the end-to-end unit, returning status `ok` / `unchanged` / `empty` / `error`. When the entity already has a prose page with a refresh baseline (frontmatter `kg_node_id` + `generated_at`, section_outputs sidecar), it takes the **incremental path** (`_refresh_existing_page`): diff the neighborhood since `generated_at` and run `regenerate_affected_sections` (status `ok` with `mode: "incremental"`, or `unchanged` when nothing affects the prose). Unlike the nightly refresh, no cooldown and no importance floor apply — this path serves deliberate refreshes right after KG mutations. Full generation (rough → `generate_prose_page_tagged` → optional critic) runs only when there is no baseline. It is independent and idempotent — interruptions don't corrupt anything; the next run resumes (existing pages skipped). The `refresh_wiki_page` agent tool (`lib/tools/refresh_wiki_page/`) wraps this same function so a manager can rebuild one page on demand after KG mutations.
 
 ## Synthetic-fact drain (learning loop)
 

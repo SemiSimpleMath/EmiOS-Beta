@@ -107,10 +107,29 @@ class RefreshWikiPageTool(BaseTool):
                 },
             )
 
+        if status == "unchanged":
+            return ToolResult(
+                result_type="success",
+                content=(
+                    f"Wiki page for {entity_label!r} is already up to date — "
+                    f"no KG change affects its prose."
+                ),
+                data={
+                    "ok": True,
+                    "entity_label": entity_label,
+                    "prose_path": None,
+                    "status": "unchanged",
+                    "critic_ran": False,
+                    "critic_findings_count": 0,
+                },
+            )
+
+        mode = result.get("mode") if isinstance(result, dict) else None
         return ToolResult(
             result_type="success",
             content=(
                 f"Refreshed wiki page for {entity_label!r}"
+                + (" (incremental — only affected sections rewritten)" if mode == "incremental" else "")
                 + (f" — {crit_count} consistency-critic findings" if run_critic else "")
                 + (f". Reason: {reason}" if reason else "")
             ),
@@ -119,6 +138,7 @@ class RefreshWikiPageTool(BaseTool):
                 "entity_label": entity_label,
                 "prose_path": str(prose_path) if prose_path else None,
                 "status": status,
+                "mode": mode,
                 "critic_ran": bool(run_critic),
                 "critic_findings_count": crit_count,
             },

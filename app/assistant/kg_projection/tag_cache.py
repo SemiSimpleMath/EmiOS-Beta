@@ -18,7 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from app.assistant.utils.filename_safety import safe_filename
 from app.assistant.utils.logging_config import get_logger
@@ -53,10 +53,12 @@ def save_tags(root: Path, entity_label: str, tags: Dict[str, List[str]]) -> None
     path.write_text(json.dumps(tags, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-def load_bullet_index(root: Path, entity_label: str) -> List[str]:
-    """Read the bullet-index sidecar — the set of bullet keys present at the
-    last successful rewrite. Used by incremental refresh to detect which
-    bullets were added/removed since the prose was last written.
+def load_bullet_index(root: Path, entity_label: str) -> Dict[str, Optional[str]]:
+    """Read the bullet-index sidecar — ``{bullet_key: bullet_text}`` for the
+    bullets present at the last successful rewrite. Used by incremental
+    refresh to detect which bullets were added/removed since the prose was
+    last written; the stored text is what lets a removal be named in the
+    section-revision prompt ("delete the claim that X").
 
     Distinct from the tags sidecar (which is the tagger cache, written
     immediately after tagging): bullet_index is the rewrite checkpoint,
@@ -64,26 +66,36 @@ def load_bullet_index(root: Path, entity_label: str) -> List[str]:
     the old index in place so the next run re-detects everything as dirty
     and self-heals.
 
-    Missing file → empty list (first-run; everything will appear "added").
+    Legacy sidecars (a bare list of keys, written before 2026-07-25) load as
+    ``{key: None}`` — the key set still diffs correctly, but removed-bullet
+    text is unknown until the next save rewrites the file in mapping form.
+
+    Missing file → empty dict (first-run; everything will appear "added").
     """
     path = root / "bullet_index" / f"{safe_filename(entity_label)}.json"
     if not path.exists():
-        return []
+        return {}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(data, list):
-            return [str(k) for k in data if isinstance(k, str)]
+            return {str(k): None for k in data if isinstance(k, str)}
+        if isinstance(data, dict):
+            return {
+                str(k): (v if isinstance(v, str) else None)
+                for k, v in data.items()
+            }
     except Exception as e:
         logger.warning("Failed reading bullet_index sidecar %s: %s", path, e)
-    return []
+    return {}
 
 
-def save_bullet_index(root: Path, entity_label: str, keys: List[str]) -> None:
-    """Write the bullet-index sidecar (sorted for diffability)."""
+def save_bullet_index(root: Path, entity_label: str, bullets: Dict[str, str]) -> None:
+    """Write the bullet-index sidecar as ``{bullet_key: bullet_text}``
+    (key-sorted for diffability)."""
     out_dir = root / "bullet_index"
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{safe_filename(entity_label)}.json"
     path.write_text(
-        json.dumps(sorted(set(keys)), indent=2, ensure_ascii=False),
+        json.dumps(dict(sorted(bullets.items())), indent=2, ensure_ascii=False),
         encoding="utf-8",
     )

@@ -22,6 +22,7 @@ from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.kg.db.knowledge_graph_db import Node, Edge, get_session
 from app.assistant.kg_projection import (
     Bullet,
+    EntityNeighborhood,
     SECTIONS_RESOURCE as WIKI_SECTIONS_RESOURCE,
     bullet_key as _bullet_key,
     get_entity_neighborhood,
@@ -299,6 +300,7 @@ def generate_prose_page_tagged(
     entity_label: Optional[str] = None,
     entity_node_id: Optional[str] = None,
     vault_path: Path,
+    neighborhood: Optional[EntityNeighborhood] = None,
 ) -> Optional[Path]:
     """Tag-based sectioned generation. Each rough bullet is classified into
     zero-or-more biographical sections (cached in ``<vault>/tags/<entity>.json``),
@@ -307,16 +309,21 @@ def generate_prose_page_tagged(
     overlap and no section gets rewritten twice.
 
     Pass ``entity_node_id`` when known — survives renames + filename
-    sanitization edge cases. The canonical label is taken from the loaded
+    sanitization edge cases. Pass ``neighborhood`` when the caller already
+    loaded it (refresh paths load once and thread it through the rough
+    renderer and this function). The canonical label is taken from the loaded
     neighborhood, so downstream filenames, prompts, and sidecars all track
     the live KG label.
     """
-    if not entity_node_id and not entity_label:
-        raise ValueError("generate_prose_page_tagged requires entity_node_id or entity_label.")
+    if neighborhood is None and not entity_node_id and not entity_label:
+        raise ValueError(
+            "generate_prose_page_tagged requires entity_node_id, entity_label, or neighborhood."
+        )
 
     # Load bullets directly from the KG neighborhood — structured, with
     # provenance. No more regex round-trip through the rough markdown.
-    neighborhood = get_entity_neighborhood(entity_label, node_id=entity_node_id)
+    if neighborhood is None:
+        neighborhood = get_entity_neighborhood(entity_label, node_id=entity_node_id)
     entity_label = neighborhood.entity.label
 
     rough = read_rough_page(vault_path, entity_label)
@@ -386,6 +393,10 @@ def generate_prose_page_tagged(
                 "section_slug": key,
                 # No themes_already_covered — tag-based slices don't overlap at source.
                 "themes_already_covered": "",
+                # Revision-mode inputs — always empty on full generation.
+                "current_section_text": "",
+                "added_facts": "",
+                "removed_facts": "",
             },
             scope_context=_SCOPE_SECTION_WRITER,
         )
@@ -416,11 +427,12 @@ def generate_prose_page_tagged(
         {k: v for k, v in section_outputs},
     )
 
-    # Snapshot the bullet keys we just wrote prose from. The next refresh will
-    # diff against this to detect added/removed bullets — the dirty signal that
-    # decides which sections actually need rewriting.
+    # Snapshot the bullets we just wrote prose from ({key: text}). The next
+    # refresh diffs keys against this to detect added/removed bullets — the
+    # dirty signal that decides which sections actually need rewriting — and
+    # uses the stored text to name removed facts in revision prompts.
     _save_bullet_index_sidecar(
-        vault_path, entity_label, [b.key for b in structured_bullets],
+        vault_path, entity_label, {b.key: b.text for b in structured_bullets},
     )
 
     see_also_rough = parsed.get("see_also", "").strip()
@@ -495,6 +507,37 @@ def _sync_lead_to_node_description(
 # Incremental regeneration — only re-write sections affected by node edits.
 # ----------------------------------------------------------------------
 
+# A dirty section is REVISED in place (cached prose + delta facts) when the
+# change is a small fraction of its slice; otherwise it is rewritten from the
+# full bullet slice. Revision keeps prose stable and pays only for the delta;
+# the ratio guard re-grounds heavily-churned sections in the full slice so
+# edit-on-edit drift can't accumulate through a big reshuffle.
+SECTION_REVISION_MAX_DELTA_RATIO = 0.3
+
+
+def choose_section_refresh_mode(
+    *,
+    cached_prose: str,
+    slice_size: int,
+    added_count: int,
+    removed_texts: List[Optional[str]],
+) -> str:
+    """Return ``'revise'`` or ``'rewrite'`` for one dirty section.
+
+    Revision requires cached prose to edit, a known text for every removed
+    bullet (legacy key-only sidecars load removals as None — nothing to tell
+    the writer to delete), and a delta that is a small fraction of the
+    section's current slice (``SECTION_REVISION_MAX_DELTA_RATIO``).
+    """
+    if not (cached_prose or "").strip():
+        return "rewrite"
+    if any(t is None for t in removed_texts):
+        return "rewrite"
+    delta = added_count + len(removed_texts)
+    if delta > max(1, slice_size) * SECTION_REVISION_MAX_DELTA_RATIO:
+        return "rewrite"
+    return "revise"
+
 
 def regenerate_affected_sections(
     *,
@@ -502,20 +545,27 @@ def regenerate_affected_sections(
     entity_node_id: Optional[str] = None,
     vault_path: Path,
     changed_node_ids: list[str],
+    neighborhood: Optional[EntityNeighborhood] = None,
 ) -> Optional[Path]:
     """Re-write only the sections affected by the given node edits.
 
     Reuses cached per-section outputs from ``<vault>/section_outputs/<Entity>.json``
-    for sections NOT touched by the changes. For sections that contain a
-    bullet referencing any of ``changed_node_ids``, calls ``wiki_writer``
-    again with the fresh bullet slice. Saves a new sidecar, restitches, and
+    for sections NOT touched by the changes. A dirty section is either
+    REVISED (the cached prose plus only the added/removed bullet texts —
+    the cheap, stable path) or REWRITTEN from its fresh bullet slice when
+    revision isn't possible or the delta is too large — see
+    ``choose_section_refresh_mode``. Saves a new sidecar, restitches, and
     writes the new prose page.
+
+    Pass ``neighborhood`` when the caller already loaded it.
 
     Falls back to full ``generate_prose_page_tagged`` if the section_outputs
     sidecar is missing or empty (can't do incremental without a baseline).
     """
-    if not entity_node_id and not entity_label:
-        raise ValueError("regenerate_affected_sections requires entity_node_id or entity_label.")
+    if neighborhood is None and not entity_node_id and not entity_label:
+        raise ValueError(
+            "regenerate_affected_sections requires entity_node_id, entity_label, or neighborhood."
+        )
 
     changed_set = {str(x).strip() for x in changed_node_ids if str(x).strip()}
     if not changed_set:
@@ -523,7 +573,8 @@ def regenerate_affected_sections(
         return None
 
     # Load bullets from the current KG (structured, with explicit provenance).
-    neighborhood = get_entity_neighborhood(entity_label, node_id=entity_node_id)
+    if neighborhood is None:
+        neighborhood = get_entity_neighborhood(entity_label, node_id=entity_node_id)
     entity_label = neighborhood.entity.label
 
     cached_outputs = _load_section_outputs(vault_path, entity_label)
@@ -536,6 +587,7 @@ def regenerate_affected_sections(
             entity_label=entity_label,
             entity_node_id=neighborhood.entity.id,
             vault_path=vault_path,
+            neighborhood=neighborhood,
         )
 
     rough = read_rough_page(vault_path, entity_label)
@@ -559,6 +611,7 @@ def regenerate_affected_sections(
             entity_label=entity_label,
             entity_node_id=neighborhood.entity.id,
             vault_path=vault_path,
+            neighborhood=neighborhood,
         )
 
     bullet_texts = [b.text for b in structured_bullets]
@@ -586,32 +639,47 @@ def regenerate_affected_sections(
 
     # ---------- structural dirty detection via bullet-key diff ----------
     # A bullet's key is hash(bullet.text), so identical text → identical key.
-    # The bullet_index sidecar records the keys present at the LAST successful
-    # rewrite. Comparing against current keys gives us:
+    # The bullet_index sidecar records ``{key: text}`` for the bullets present
+    # at the LAST successful rewrite. Comparing key sets gives us:
     #   added   = current - prev → section gained a bullet (dirty, gate)
     #   removed = prev - current → section lost a bullet (dirty, no gate —
-    #                              section text mentions a fact that's gone)
+    #                              section text mentions a fact that's gone;
+    #                              the stored text names it for the reviser)
     #   unchanged keys imply unchanged TEXT, even if the underlying nodes
     #   were touched for unrelated reasons (importance recalc, description
     #   refresh, new edges that don't touch this neighborhood). Those changes
     #   leave bullet text identical → no rewrite needed.
     #
     # changed_node_ids is no longer the dirty trigger — it survives only as
-    # the cheap pre-filter at the caller level (refresh_one_page) that
-    # decides whether to even open this page's neighborhood.
-    prev_index = set(_load_bullet_index_sidecar(vault_path, entity_label))
+    # the cheap pre-filter at the caller level (refresh_one_page /
+    # build_one_page) that decides whether to even open this page's
+    # neighborhood.
+    prev_index = _load_bullet_index_sidecar(vault_path, entity_label)
     curr_keys = {b.key for b in structured_bullets}
-    added_keys = curr_keys - prev_index
-    removed_keys = prev_index - curr_keys
+    added_keys = curr_keys - set(prev_index)
+    removed_keys = set(prev_index) - curr_keys
 
-    addition_sections: set[str] = set()
-    for k in added_keys:
-        for sec in tags.get(k, []):
-            addition_sections.add(sec)
-    removal_sections: set[str] = set()
+    # Per-section deltas: which added bullets landed in each section, and the
+    # last-known text of each removed bullet that was tagged into it. These
+    # drive the critic gate, the revise-vs-rewrite decision, and the
+    # revision prompt itself.
+    added_by_section: dict[str, List[Bullet]] = {}
+    _seen_added: set[tuple[str, str]] = set()
+    for b in structured_bullets:
+        if b.key not in added_keys:
+            continue
+        for sec_key in tags.get(b.key, []):
+            if (sec_key, b.key) in _seen_added:
+                continue
+            _seen_added.add((sec_key, b.key))
+            added_by_section.setdefault(sec_key, []).append(b)
+    removed_texts_by_section: dict[str, List[Optional[str]]] = {}
     for k in removed_keys:
-        for sec in cached_tags.get(k, []):
-            removal_sections.add(sec)
+        for sec_key in cached_tags.get(k, []):
+            removed_texts_by_section.setdefault(sec_key, []).append(prev_index.get(k))
+
+    addition_sections: set[str] = set(added_by_section)
+    removal_sections: set[str] = set(removed_texts_by_section)
     dirty_sections: set[str] = addition_sections | removal_sections
 
     if not dirty_sections:
@@ -630,7 +698,6 @@ def regenerate_affected_sections(
     # Most chat-extracted ephemera fails this gate, dropping the section
     # back to clean before we pay for the expensive prose writer.
     sec_meta_by_key_for_gate = {s.key: s for s in sections_meta}
-    added_bullet_texts = {b.text for b in structured_bullets if b.key in added_keys}
     critic = DI.agent_factory.create_agent("wiki_inclusion_critic")
     if critic is None:
         logger.warning(
@@ -644,10 +711,7 @@ def regenerate_affected_sections(
             if sec is None:
                 continue
             current_text = (cached_outputs.get(sec_key) or "").strip()
-            triggering_bullets = [
-                b.text for b in structured_bullets
-                if b.key in added_keys and sec_key in tags.get(b.key, [])
-            ]
+            triggering_bullets = [b.text for b in added_by_section.get(sec_key, [])]
             if not triggering_bullets:
                 continue
             for b_text in triggering_bullets:
@@ -698,9 +762,6 @@ def regenerate_affected_sections(
     if writer is None:
         raise RuntimeError(f"agent_factory returned None for {WRITER_AGENT!r}")
 
-    window_ids = collect_entity_window_ids(entity_label)
-    excerpts = build_window_excerpts(window_ids)
-
     new_outputs: Dict[str, str] = dict(cached_outputs)  # start with cached
 
     sec_meta_by_key = {s.key: s for s in sections_meta}
@@ -716,24 +777,69 @@ def regenerate_affected_sections(
             # Section emptied by the edit — drop it.
             new_outputs.pop(key, None)
             continue
-        mini_rough = f"## {sec.title}\n\n" + "\n".join(bullets_for_section)
-        msg = Message(
-            agent_input={
+
+        added_bullets = added_by_section.get(key, [])
+        removed_texts = removed_texts_by_section.get(key, [])
+        mode = choose_section_refresh_mode(
+            cached_prose=cached_outputs.get(key) or "",
+            slice_size=len(bullets_for_section),
+            added_count=len(added_bullets),
+            removed_texts=removed_texts,
+        )
+        logger.info(
+            "Section %s of %s: %s (%d added / %d removed, slice=%d)",
+            key, entity_label, mode,
+            len(added_bullets), len(removed_texts), len(bullets_for_section),
+        )
+
+        # Grounding excerpts come from the ADDED bullets' own source windows —
+        # the conversations that actually produced the new facts — not an
+        # entity-wide sample.
+        window_ids: List[str] = []
+        for b in added_bullets:
+            for wid in b.source_window_ids:
+                if wid and wid not in window_ids:
+                    window_ids.append(wid)
+        excerpts = build_window_excerpts(window_ids[:MAX_WINDOWS_FOR_EXCERPTS])
+
+        if mode == "revise":
+            agent_input = {
+                "entity_name": entity_label,
+                "rough_page": "",
+                "window_excerpts": excerpts,
+                "section_slug": key,
+                "themes_already_covered": "",
+                "current_section_text": cached_outputs.get(key) or "",
+                "added_facts": "\n".join(b.text for b in added_bullets),
+                "removed_facts": "\n".join(t for t in removed_texts if t),
+            }
+        else:
+            mini_rough = f"## {sec.title}\n\n" + "\n".join(bullets_for_section)
+            agent_input = {
                 "entity_name": entity_label,
                 "rough_page": mini_rough,
                 "window_excerpts": excerpts,
                 "section_slug": key,
                 "themes_already_covered": "",
-            },
-            scope_context=_SCOPE_SECTION_WRITER,
-        )
+                "current_section_text": "",
+                "added_facts": "",
+                "removed_facts": "",
+            }
+        msg = Message(agent_input=agent_input, scope_context=_SCOPE_SECTION_WRITER)
         try:
             result = writer.action_handler(msg)
             data = getattr(result, "data", None) or {}
             prose = data.get("page_markdown")
             if isinstance(prose, str) and prose.strip():
                 cleaned = strip_debug_scaffolding(prose.strip()).strip()
-                if cleaned.lower().startswith("(nothing new to add)"):
+                low = cleaned.lower()
+                if low.startswith("(no changes needed)"):
+                    # Reviser judged the cached prose still correct — keep it.
+                    continue
+                if low.startswith("(nothing new to add)"):
+                    if mode == "revise":
+                        # Additions not wiki-worthy — keep the cached prose.
+                        continue
                     new_outputs.pop(key, None)
                     continue
                 new_outputs[key] = cleaned
@@ -746,10 +852,12 @@ def regenerate_affected_sections(
 
     _save_section_outputs(vault_path, entity_label, new_outputs)
 
-    # Checkpoint the bullet keys we just successfully wrote prose from.
-    # Saved AFTER section_outputs so a crash here at worst leaves the next
-    # run re-detecting everything as dirty — self-healing.
-    _save_bullet_index_sidecar(vault_path, entity_label, list(curr_keys))
+    # Checkpoint the bullets ({key: text}) we just successfully wrote prose
+    # from. Saved AFTER section_outputs so a crash here at worst leaves the
+    # next run re-detecting everything as dirty — self-healing.
+    _save_bullet_index_sidecar(
+        vault_path, entity_label, {b.key: b.text for b in structured_bullets},
+    )
 
     # Restitch in the taxonomy's preferred order.
     see_also_rough = parsed.get("see_also", "").strip()

@@ -205,12 +205,104 @@ def _entity_edge_count(label: str) -> int:
         session.close()
 
 
+def _refresh_existing_page(
+    label: str, vault_path: Path, run_critic: bool,
+) -> Optional[Dict[str, Any]]:
+    """Incremental path for an entity whose prose page already exists.
+
+    Returns None when there is no usable baseline (no prose page, no
+    ``kg_node_id``/``generated_at`` frontmatter, or no section_outputs
+    sidecar) — the caller falls back to full generation. Otherwise diffs
+    the KG neighborhood against ``generated_at`` and rewrites only the
+    sections the changes actually touched.
+
+    Unlike the nightly refresh, no cooldown and no importance floor apply:
+    this path serves deliberate refreshes (the ``refresh_wiki_page`` tool)
+    invoked right after specific KG mutations, so every change counts.
+    """
+    import frontmatter
+
+    from app.assistant.kg_projection import (
+        find_changed_neighborhood_nodes,
+        get_entity_neighborhood,
+    )
+    from app.assistant.wiki_generator.consistency_critic import run_consistency_critic
+    from app.assistant.wiki_generator.nightly_refresh import _parse_iso
+    from app.assistant.wiki_generator.page_writer import (
+        _load_section_outputs,
+        regenerate_affected_sections,
+    )
+    from app.assistant.wiki_generator.wiki_writer import regenerate_entity_page
+
+    prose_path = vault_path / "prose" / f"{safe_filename(label)}.md"
+    if not prose_path.exists():
+        return None
+    try:
+        meta = frontmatter.load(prose_path).metadata or {}
+    except Exception as e:
+        logger.warning(
+            "Frontmatter parse failed for %s: %s — falling back to full regen.",
+            prose_path, e,
+        )
+        return None
+    kg_node_id = meta.get("kg_node_id")
+    generated_at = _parse_iso(meta.get("generated_at"))
+    if not kg_node_id or generated_at is None:
+        return None
+    if not _load_section_outputs(vault_path, label):
+        return None
+
+    changed = find_changed_neighborhood_nodes(
+        entity_node_id=str(kg_node_id), since_ts=generated_at,
+    )
+    if not changed:
+        return {"label": label, "status": "unchanged", "changed": 0}
+
+    neighborhood = get_entity_neighborhood(node_id=str(kg_node_id))
+    rough_path = regenerate_entity_page(
+        node_id=str(kg_node_id), vault_path=vault_path, neighborhood=neighborhood,
+    )
+    result = regenerate_affected_sections(
+        entity_node_id=str(kg_node_id),
+        vault_path=vault_path,
+        changed_node_ids=list(changed),
+        neighborhood=neighborhood,
+    )
+    if result is None:
+        # Bullet-text diff came back clean, or the inclusion critic gated
+        # every dirty section out — the prose is already up to date.
+        return {"label": label, "status": "unchanged", "changed": len(changed)}
+    crit_summary = (
+        run_consistency_critic(entity_label=neighborhood.entity.label, vault_path=vault_path)
+        if run_critic else None
+    )
+    return {
+        "label": neighborhood.entity.label,
+        "status": "ok",
+        "mode": "incremental",
+        "changed": len(changed),
+        "rough": str(rough_path),
+        "prose": str(result),
+        "critic_findings": (crit_summary or {}).get("findings_count"),
+    }
+
+
 def build_one_page(label: str, vault_path: Path, run_critic: bool = True) -> Dict[str, Any]:
     """Render one entity's prose page end-to-end. Independent — failures
     don't affect other pages.
 
+    An entity with an existing prose page and refresh baseline (frontmatter
+    ``kg_node_id`` + ``generated_at``, section_outputs sidecar) takes the
+    incremental path: only sections affected by KG changes since the page
+    was written are rewritten. Full generation runs only when there is no
+    baseline.
+
     Status values:
-      - ``ok``: prose page was written
+      - ``ok``: prose page was written. ``mode: "incremental"`` marks a
+        sections-only refresh of an existing page; absent for a full
+        generation.
+      - ``unchanged``: the page exists and no KG change affects it —
+        nothing was rewritten.
       - ``empty``: not enough biographical content to write a page
         (render_bullets returned nothing, or the writer LLM produced
         empty output for every section). Not an error — this entity
@@ -218,14 +310,25 @@ def build_one_page(label: str, vault_path: Path, run_critic: bool = True) -> Dic
         nouns, abstract concepts.
       - ``error``: an unhandled exception was raised
     """
+    from app.assistant.kg_projection import get_entity_neighborhood
     from app.assistant.wiki_generator.consistency_critic import run_consistency_critic
     from app.assistant.wiki_generator.page_writer import generate_prose_page_tagged
     from app.assistant.wiki_generator.wiki_writer import regenerate_entity_page
 
     started = time.time()
     try:
-        rough_path = regenerate_entity_page(label=label, vault_path=vault_path)
-        prose_path = generate_prose_page_tagged(entity_label=label, vault_path=vault_path)
+        refreshed = _refresh_existing_page(label, vault_path, run_critic)
+        if refreshed is not None:
+            refreshed["elapsed_sec"] = round(time.time() - started, 1)
+            return refreshed
+
+        neighborhood = get_entity_neighborhood(label)
+        rough_path = regenerate_entity_page(
+            label=label, vault_path=vault_path, neighborhood=neighborhood,
+        )
+        prose_path = generate_prose_page_tagged(
+            entity_label=label, vault_path=vault_path, neighborhood=neighborhood,
+        )
         if prose_path is None:
             try:
                 deg = _entity_edge_count(label)

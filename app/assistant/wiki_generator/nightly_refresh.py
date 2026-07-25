@@ -31,7 +31,10 @@ from typing import Any, Dict, List, Optional, Set
 import frontmatter
 
 from app.assistant.database.kg_revision_log import KGRevisionLog
-from app.assistant.kg_projection import find_changed_neighborhood_nodes
+from app.assistant.kg_projection import (
+    find_changed_neighborhood_nodes,
+    get_entity_neighborhood,
+)
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.wiki_generator.consistency_critic import run_consistency_critic
 from app.assistant.wiki_generator.page_writer import (
@@ -284,9 +287,15 @@ def refresh_one_page(
         return {"label": label, "status": "no_kg_node_id", "changed": 0}
     if generated_at is None:
         # Never been generated under tracking — regenerate fully.
-        regenerate_entity_page(node_id=kg_node_id, vault_path=vault_path)
+        # One neighborhood load feeds both the rough renderer and the prose
+        # generator.
+        neighborhood = get_entity_neighborhood(node_id=kg_node_id)
+        regenerate_entity_page(
+            node_id=kg_node_id, vault_path=vault_path, neighborhood=neighborhood,
+        )
         generate_prose_page_tagged(
             entity_node_id=kg_node_id, vault_path=vault_path,
+            neighborhood=neighborhood,
         )
         crit = (
             run_consistency_critic(entity_label=label, vault_path=vault_path)
@@ -331,12 +340,18 @@ def refresh_one_page(
         }
 
     # Rough needs to be up-to-date with current KG before we diff bullets.
-    regenerate_entity_page(node_id=kg_node_id, vault_path=vault_path)
+    # One neighborhood load feeds both the rough renderer and the section
+    # refresher (loaded only now — unchanged pages never pay for it).
+    neighborhood = get_entity_neighborhood(node_id=kg_node_id)
+    regenerate_entity_page(
+        node_id=kg_node_id, vault_path=vault_path, neighborhood=neighborhood,
+    )
 
     result = regenerate_affected_sections(
         entity_node_id=kg_node_id,
         vault_path=vault_path,
         changed_node_ids=changed,
+        neighborhood=neighborhood,
     )
     crit = (
         run_consistency_critic(entity_label=label, vault_path=vault_path)

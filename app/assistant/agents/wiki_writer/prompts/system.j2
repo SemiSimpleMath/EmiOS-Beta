@@ -108,6 +108,10 @@ Separate multiple node ids with a single space. Put them on the SAME line as the
 
 These markers are machine-parsed downstream and will render as small clickable badges linking to the source KG node. They must be valid — the ids must match exactly. They are NOT part of the prose a human reader focuses on; keep prose clean and place the markers at paragraph ends so they read as a subtle footer.
 
+## Revision mode
+
+Some invocations are revisions: instead of full rough notes, the user prompt supplies a slice's existing prose plus only the newly added and/or removed facts. In that mode you are an editor making a minimal, faithful update — every rule above (voice, inclusion bar, dates, tense, faithfulness, markers) still applies, but preserve the existing prose wherever the changes don't touch it.
+
 ## Output
 
 Return only the final markdown page as `page_markdown`. Begin with the YAML frontmatter from the rough notes (preserved verbatim), then the `# Title` heading, then the prose, then `## See also`. Do not include section markers like `<!-- WIKI:DET ... -->`, HTML comments, or any debugging artifacts. The reader should see a clean wiki page.

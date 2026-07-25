@@ -1,4 +1,52 @@
 {% if section_slug %}
+{% if current_section_text %}
+Entity: {{ entity_name }}
+
+You are REVISING one existing slice (`{{ section_slug }}`) of this person's biography. Below is the slice's current prose, then the newly learned facts to incorporate and/or the removed facts to excise. Do NOT rewrite the slice from scratch — make the smallest edit that integrates the changes, keeping the existing structure, wording, and `{node:uuid}` markers wherever the changes don't touch them.
+
+Current slice prose:
+
+---
+
+{{ current_section_text }}
+
+---
+
+{% if added_facts %}
+Newly learned facts (rough knowledge-graph notes, same format as the notes the slice was originally written from; their `{node:uuid}` markers become citations):
+
+{{ added_facts }}
+
+---
+{% endif %}
+
+{% if removed_facts %}
+Facts that were REMOVED from the knowledge graph. Delete any claim in the current prose that only these supported (reword instead if a claim is partially supported by something still in the prose):
+
+{{ removed_facts }}
+
+---
+{% endif %}
+
+{% if window_excerpts %}
+A few user-side conversation excerpts for voice and texture only. Do not treat these as new facts to include — they are for how the person sounds or what the user feels about them.
+
+{{ window_excerpts }}
+
+---
+{% endif %}
+
+Guidelines for this revision:
+- Return the FULL revised slice — starting with its `## Heading` — not a diff and not only the changed sentences.
+- Keep the existing heading unless the new material clearly changes the slice's theme.
+- EXCEPTION: if `{{ section_slug }}` is `summary`, the slice has no heading — keep it that way.
+- Weave a new fact into the paragraph where it belongs; add a new paragraph only when nothing fits.
+- New facts face the same inclusion bar as always — mundane or ephemeral material may not merit the wiki. If NOTHING merits inclusion and nothing needs removal, return just the single line "(no changes needed)" and the current prose will be kept as-is.
+- Preserve the `{node:uuid}` markers of retained prose; add markers for newly used facts at paragraph ends; drop the markers of deleted claims.
+- Do NOT produce frontmatter, the `# {{ entity_name }}` title, or a `## See also` section. Those are added by the stitcher.
+
+Revise the slice now.
+{% else %}
 Entity: {{ entity_name }}
 
 You are writing ONE slice of this person's biography from the `{{ section_slug }}` slice of the rough knowledge-graph notes below. Do NOT write the whole article — only the prose for this slice.
@@ -30,6 +78,7 @@ Guidelines for this slice:
 - If a slice has nothing new to say (everything is already covered by an earlier theme), return just the single line "(nothing new to add)" — the stitcher will drop it.
 
 Write the slice now.
+{% endif %}
 {% else %}
 Entity: {{ entity_name }}
 
