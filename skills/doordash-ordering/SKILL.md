@@ -11,6 +11,9 @@ metadata:
 
 # DoorDash Browser Automation Guidelines
 
+## Getting to DoorDash
+- Confirm the current page first (the "Current page" status line). A fresh browser session starts on a blank tab — your first action there is `web_navigate_snapshot` to `https://www.doordash.com/`. Everything below applies once DoorDash is loaded.
+
 ## Modals and overlays
 - DoorDash frequently shows a modal overlay after landing.
 - Look for signs of a modal and dismiss them, do not sign up for promotional materials or deals and do not concent to anyone emailing or texting you.

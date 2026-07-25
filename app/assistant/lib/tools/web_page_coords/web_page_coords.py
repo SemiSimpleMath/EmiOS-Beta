@@ -94,6 +94,32 @@ class WebPageCoords(BaseTool):
         preview = (text or "")[:1200]
         raise RuntimeError(f"browser_evaluate marks parse failed — expected list. preview={preview!r}")
 
+    def _page_identity(self, *, server_entry: dict) -> dict[str, str]:
+        """Current page href/title via a lightweight browser_evaluate.
+
+        Best-effort: returns {} when the probe fails. The identity rides on
+        every result so the planner always knows WHERE the browser is —
+        "zero marks" on about:blank means "navigate first", not "retry".
+        """
+        js = '() => ({ href: String(location.href || ""), title: String(document.title || "") })'
+        try:
+            text, is_error, _atts = mcp_call(
+                server_entry=server_entry,
+                tool_name=self.MCP_EVALUATE,
+                arguments={"function": js},
+            )
+            if is_error:
+                return {}
+            parsed = parse_jsonish(text)
+            if isinstance(parsed, dict):
+                return {
+                    "href": str(parsed.get("href") or "").strip(),
+                    "title": str(parsed.get("title") or "").strip(),
+                }
+        except Exception as e:
+            logger.debug("[web_page_coords] page identity probe failed: %s", e)
+        return {}
+
     def _remove_marks_overlay(self, *, server_entry: dict) -> None:
         js = """
 () => {
@@ -167,21 +193,45 @@ class WebPageCoords(BaseTool):
             marks_count = 0
             marked = False
 
-        if not marked and strict:
+        if not marked:
+            # Zero marks is a SOFT result on both strict paths. The strict=False
+            # path used to fall through to the marks pipeline and die on a fatal
+            # "No targets produced" — so the tool suggested a retry and the retry
+            # aborted the whole run (the 2026-07-25 DoorDash blank-tab incident).
+            ident = self._page_identity(server_entry=server_entry)
+            href = ident.get("href") or ""
+            if not ident:
+                content = (
+                    "No interactive elements found, and the current page could not be "
+                    "identified. Verify where the browser is — navigate to the target "
+                    "site (web_navigate_snapshot) if needed — then retry."
+                )
+            elif not href or href == "about:blank":
+                content = (
+                    "The browser is on a blank tab (about:blank) — nothing is loaded yet. "
+                    "Navigate to the target site first (web_navigate_snapshot), then retry."
+                )
+            else:
+                content = (
+                    f"No interactive elements found on {href}. The page may still be "
+                    "loading — wait briefly (browser_wait_for) and retry; if this is not "
+                    "the site you expect, navigate there first (web_navigate_snapshot)."
+                )
             logger.warning(
-                "[web_page_coords] PAGE NOT READY — zero marks found. "
-                "Page may still be loading or the browser navigated away. question=%r",
-                question,
+                "[web_page_coords] PAGE NOT READY — zero marks found. url=%r question=%r",
+                href or "about:blank", question,
             )
             return ToolResult(
                 result_type="web_page_coords",
-                content="Page was not ready; try again now.",
+                content=content,
                 data={
                     "question": question or None,
                     "strict": bool(strict),
                     "marked": False,
                     "marks_count": 0,
                     "requested_target_found": False,
+                    "page_url": href or None,
+                    "page_title": ident.get("title") or None,
                     "image_path": None,
                     "attachments": [],
                     "vision": {},
@@ -382,10 +432,13 @@ class WebPageCoords(BaseTool):
                 f" (mark {t.get('mark_id')}: {t.get('label')}) — click with web_click_xy_snapshot"
                 for t in out_targets
             )
+            ident = self._page_identity(server_entry=server_entry)
+            _url_part = f" url={ident['href']}" if ident.get("href") else ""
             return ToolResult(
                 result_type="web_page_coords",
                 content=(
                     "web_page_coords: screenshot captured and analyzed."
+                    f"{_url_part}"
                     f" marked={bool(marked)} marks={int(marks_count)} targets={n_targets}"
                     f" requested_target_found={bool(requested_target_found)}"
                     + _coord_lines
@@ -396,6 +449,8 @@ class WebPageCoords(BaseTool):
                     "marked": bool(marked),
                     "marks_count": int(marks_count),
                     "requested_target_found": bool(requested_target_found),
+                    "page_url": ident.get("href") or None,
+                    "page_title": ident.get("title") or None,
                     "image_path": image_path,
                     "attachments": attachments,
                     "vision": vision_payload,

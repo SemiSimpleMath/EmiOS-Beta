@@ -1,10 +1,13 @@
 web_page_coords:
 
 Take a screenshot of the current page, analyze it visually, and return:
+- the current page URL (so you always know where the browser actually is)
 - a short visual description of what’s on screen
 - any blockers/modals/overlays that may be intercepting clicks
 - suggested next steps
 - optional coordinate targets (x,y) for obvious clickable controls (accept cookies, close modal, primary CTA)
+
+If it reports a blank tab (about:blank) or an unexpected URL, navigate to the right site (web_navigate_snapshot) before looking again.
 
 This should be your DEFAULT page-understanding tool for Playwright MCP browsing (JS-heavy sites).
 Use it before most clicks and any time a modal/overlay might exist.

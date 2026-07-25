@@ -53,6 +53,17 @@ class PlaywrightPageStateNode(ControlNode):
         # click fails because something is blocking, the planner handles it.
         self.blackboard.update_state_value(status_key, "")
 
+        # Page identity — the planner must always know WHERE the browser is.
+        # A blank tab is the silent failure mode: every look/click tool returns
+        # "nothing found" until someone navigates (2026-07-25 DoorDash incident).
+        try:
+            ident = self._probe_ready_state(server_entry=server_entry)
+        except Exception:
+            logger.debug("[%s] page identity probe failed", self.name, exc_info=True)
+            ident = {}
+        self.blackboard.update_state_value("playwright_page_identity_data", ident)
+        self.blackboard.update_state_value("playwright_page_identity", self._format_page_identity(ident))
+
         # Page scroll state (lightweight, no modal detection needed).
         try:
             page_scroll = self._get_page_scroll_state(server_entry)
@@ -636,6 +647,22 @@ class PlaywrightPageStateNode(ControlNode):
         except Exception:
             logger.debug("[%s] _get_page_scroll_state failed", self.name, exc_info=True)
             return {}
+
+    @staticmethod
+    def _format_page_identity(ident: dict[str, Any]) -> str:
+        if not isinstance(ident, dict) or not ident:
+            return "Current page: unknown (identity probe failed)."
+        href = str(ident.get("href") or "").strip()
+        title = str(ident.get("title") or "").strip()
+        if not href or href == "about:blank":
+            return (
+                "Current page: about:blank — the browser is on a BLANK TAB with "
+                "nothing loaded. Navigate to the target site first (web_navigate_snapshot)."
+            )
+        line = f"Current page: {href}"
+        if title:
+            line += f" ({title})"
+        return line
 
     @staticmethod
     def _extract_scroll_state(modal_state: dict[str, Any]) -> dict[str, Any]:

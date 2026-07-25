@@ -18,6 +18,9 @@ metadata:
 
 Default behavior for driving any live site with the browser tools. Site-specific skills (e.g. `doordash-ordering`) and `form-filling` extend this; the planner's own rules already cover click-confidence and the scroll → ref → vision recovery ladder — this skill is the behavior *around* them.
 
+## Know where the browser is
+- A fresh browser session opens on a **blank tab** (`about:blank`) — on a new task, your first action is `web_navigate_snapshot` to the target site's URL. The "Current page" line in your status and each tool result's `url` tell you where the browser is; page tools find elements once the site you expect is loaded.
+
 ## Look before you act
 - Get the page's actionable structure first: `web_modal_scan` (accessibility refs — buttons, links, inputs) is the cheap, deterministic default. Reach for `web_page_coords` (vision: screenshot → reasoned coordinates) only when the snapshot is missing or ambiguous (custom/canvas controls, unlabeled `[element]`s).
 - Act by **ref**, never by guessed coordinates. Typing round-number x/y and hoping is how clicks miss and find → guess → re-find loops start.

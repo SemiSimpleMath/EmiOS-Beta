@@ -22,6 +22,7 @@ user_context_items:
   - date_time
   - task
   - information
+  - playwright_page_identity
   - playwright_scroll_state
   - playwright_latest_snapshot_summary
   - playwright_latest_snapshot_id

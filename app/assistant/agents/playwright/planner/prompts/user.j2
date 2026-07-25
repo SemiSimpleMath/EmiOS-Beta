@@ -8,6 +8,10 @@ Additional information:
 {{ information }}
 {% endif %}
 
+{% if playwright_page_identity %}
+{{ playwright_page_identity }}
+{% endif %}
+
 {% if playwright_status %}
 Playwright status:
 {{ playwright_status }}
