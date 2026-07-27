@@ -821,8 +821,10 @@ def _format_ticket_for_context(ticket) -> Dict[str, Any]:
         "message": ticket.message or "",
         "suggestion_type": ticket.suggestion_type or "",
         "responded_at_local": responded_local.strftime("%I:%M %p") if responded_local else "",
+        "responded_at_iso": responded_at.isoformat() if responded_at else "",
         "snooze_until_local": snooze_until_local.strftime("%I:%M %p") if snooze_until_local else "",
         "user_comment": ticket.user_text or "",
+        "user_action": (getattr(ticket, "user_action", "") or "").lower(),
         "acted_on_item_ids": acted_on_item_ids,
         "execution_result": getattr(ticket, "execution_result", "") or "",
     }
@@ -888,4 +890,25 @@ def get_responded_tickets_categorized(since_utc: datetime, ticket_type: Optional
         logger.warning("Could not get responded tickets: %s", e)
         logger.debug("Could not get responded tickets exception details", exc_info=True)
         return {"accepted": [], "acknowledged": [], "declined": [], "snoozed": []}
+
+
+def flatten_responded_tickets(categorized: Dict[str, List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    """Newest-first flat list across all response categories.
+
+    The category survives only as a per-row ``action_label`` — the user's
+    verbatim comment is the primary signal for consumers. Bucketing responses
+    by button hid supersession: the user's 12:19 "monthlies are done on the
+    1st, always" (an acknowledge) never outranked — or even reached — agents
+    that keyed on the 11:01 accept (the 2026-07-27 timesheet double-reminder).
+    """
+    rows: List[Dict[str, Any]] = []
+    for category, items in (categorized or {}).items():
+        for t in items or []:
+            if not isinstance(t, dict):
+                continue
+            row = dict(t)
+            row["action_label"] = str(category).upper()
+            rows.append(row)
+    rows.sort(key=lambda r: str(r.get("responded_at_iso") or ""), reverse=True)
+    return rows
 

@@ -53,18 +53,13 @@ Health: {{ health_status_summary }}
 ## ROUTINE (today's cadence — judge timing and appropriateness against this)
 {{ resource_dayflow_routine }}
 {%- endif %}
-{%- if recent_responded_tickets %}
-{%- set _has_resp = recent_responded_tickets.get("accepted") or recent_responded_tickets.get("declined") or recent_responded_tickets.get("snoozed") %}
-{%- if _has_resp %}
+{%- if recent_ticket_replies %}
 
-## TICKET RESPONSES (user directives — act on these)
-*A DECLINE means ABANDON the related work object; an ACCEPT confirms its direction; a comment overrides defaults.*
-{%- for category, label in [("accepted", "ACCEPTED"), ("declined", "DECLINED"), ("snoozed", "SNOOZED")] %}
-{%- for t in (recent_responded_tickets.get(category) or []) %}
-- [{{ t.get("responded_at_local","") }}] {{ label }}: {{ t.get("title","") }}{% if t.get("user_comment") %} — user: "{{ t.get("user_comment") }}"{% endif %}
+## TICKET REPLIES (user directives — newest first; a later reply supersedes an earlier one about the same topic)
+*The user's written words are the authoritative signal wherever present. The label is just the button they clicked: ACCEPTED = agrees with the direction; ACKNOWLEDGED = received it — the written line carries the actual verdict (it may confirm, correct, defer, or decline); DECLINED = ABANDON the related work object; SNOOZED = revisit at the stated time.*
+{%- for t in recent_ticket_replies %}
+- [{{ t.get("responded_at_local","") }}] {{ t.get("action_label","") }}: {{ t.get("title","") }}{% if t.get("user_comment") %} — user: "{{ t.get("user_comment") }}"{% endif %}{% if t.get("snooze_until_local") %} (eligible again {{ t.get("snooze_until_local") }}){% endif %}
 {%- endfor %}
-{%- endfor %}
-{%- endif %}
 {%- endif %}
 {%- if active_tickets %}
 
@@ -111,7 +106,7 @@ Health: {{ health_status_summary }}
 {%- if recent_abandoned_work %}
 
 ## RECENTLY DROPPED — abandoned, NOT finished
-*These goals were DROPPED, not completed. Do NOT recreate one the user DECLINED (see ticket responses). Otherwise an abandonment is NOT proof the goal is handled — if it is still genuinely needed, create it fresh.*
+*Dropped, not completed — each entry records when it was dropped and why (the user's own words where they settled it). That recorded reason stands: recreate a dropped goal only when something NEW outweighs it — a fresh user request, a changed deadline, new intake. A goal dropped without a recorded reason that is still genuinely needed may be created fresh.*
 {{ recent_abandoned_work }}
 {%- endif %}
 

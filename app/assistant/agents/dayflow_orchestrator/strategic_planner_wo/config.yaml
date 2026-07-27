@@ -22,7 +22,7 @@ user_context_items:
   - resource_daily_context_generator_output
   - resource_dayflow_routine
   - active_tickets
-  - recent_responded_tickets
+  - recent_ticket_replies
   - recent_action_selector_actions
   - admitted_artifacts
   - work_portfolio

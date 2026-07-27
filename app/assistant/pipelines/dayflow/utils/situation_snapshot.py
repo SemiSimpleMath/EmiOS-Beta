@@ -304,7 +304,10 @@ def _build_ticket_responses(now_utc: datetime) -> str:
         from app.assistant.pipelines.dayflow.utils.context_sources import get_responded_tickets_categorized
 
         responses = get_responded_tickets_categorized(since_utc=now_utc - timedelta(hours=4))
-        lines = ["### Recent Ticket Responses (last 4 hours)"]
+        lines = [
+            "### Recent Ticket Responses (last 4 hours)",
+            "*The user's quoted words are the authoritative signal; the category is just the button they clicked.*",
+        ]
         has_any = False
 
         for category in ("accepted", "acknowledged", "declined", "snoozed"):

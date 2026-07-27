@@ -53,7 +53,7 @@
 {% endfor %}
 {% endif %}
 {% if recent_responded_tickets.acknowledged %}
-**ACKNOWLEDGED:**
+**ACKNOWLEDGED** (the user's comment carries their actual response):
 {% for t in recent_responded_tickets.acknowledged %}
 - {{ t.message or t.title }} [{{ t.responded_at_local }}]{% if t.user_comment %} - {{ t.user_comment }}{% endif %}
 {% endfor %}

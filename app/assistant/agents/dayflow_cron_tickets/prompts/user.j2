@@ -97,20 +97,20 @@
 
 **Ticket Responses:**
 {%- if recent_responded_tickets.accepted %}
-*ACCEPTED (User accepted the ticket action. User comments are supplementary context, not action commitments.):*
+*ACCEPTED (User agreed with the suggestion. Their written comment, when present, is the authoritative detail.):*
 {%- for t in recent_responded_tickets.accepted %}
 - {{ t.message or t.title }} [Accepted at {{ t.responded_at_local }}]
 {%- if t.user_comment %}
-  User comment: {{ t.user_comment }}
+  User said: {{ t.user_comment }}
 {%- endif %}
 {%- endfor %}
 {%- endif %}
 {%- if recent_responded_tickets.acknowledged %}
-*ACKNOWLEDGED (Can nudge again after reasonable time.):*
+*ACKNOWLEDGED (User received the message. Their written comment carries the actual verdict — honor a correction, deferral, or decline in it before considering any new ticket on the topic.):*
 {%- for t in recent_responded_tickets.acknowledged %}
 - {{ t.message or t.title }} [Acknowledged at {{ t.responded_at_local }}]
 {%- if t.user_comment %}
-  User comment: {{ t.user_comment }}
+  User said: {{ t.user_comment }}
 {%- endif %}
 {%- endfor %}
 {%- endif %}

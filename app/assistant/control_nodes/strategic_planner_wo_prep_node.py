@@ -51,6 +51,42 @@ def _load_responded_tickets(since_utc):
     return get_responded_tickets_categorized(since_utc=since_utc, ticket_type="dayflow_orchestrator")
 
 
+def _abandoned_line(summary, wo) -> str:
+    """One RECENTLY DROPPED entry: title + when + WHY.
+
+    The reason is the load-bearing part — the last user reply recorded in the
+    graph and the goal node's final content. Without it the evaluator re-mints
+    a goal the user just settled (the 2026-07-27 July-timesheets double
+    reminder: the WO was dropped on "those are done first of next month
+    always", the DROPPED section showed only the bare title, and an identical
+    WO was created 11 minutes later)."""
+    from app.assistant.utils.time_utils import parse_iso_utc, utc_to_local
+
+    title = str(summary.get("title") or "").strip()
+    when = parse_iso_utc(str(summary.get("updated_at") or ""))
+    when_s = utc_to_local(when).strftime("%a %I:%M %p") if when else ""
+    line = f"- {title}" + (f"  (dropped {when_s})" if when_s else "")
+    if wo is None:
+        return line
+    nodes = getattr(wo, "nodes", {}) or {}
+    replies = [
+        n for n in nodes.values()
+        if getattr(n, "type", "") == "evidence"
+        and getattr(n, "created_by", "") == "reply"
+        and (getattr(n, "content", "") or "").strip()
+    ]
+    if replies:
+        # Nodes rebuild in event order — the last reply is the newest, the
+        # user's final word on this goal.
+        text = (replies[-1].content or "").strip().replace("\n", " ")
+        line += f"\n  the user's last word on it: \"{text}\""
+    goal = nodes.get(getattr(wo, "goal_node_id", "") or "")
+    goal_content = (getattr(goal, "content", "") or "").strip().replace("\n", " ") if goal else ""
+    if goal_content and goal_content.lower() != title.lower():
+        line += f"\n  final note on the goal: {goal_content}"
+    return line
+
+
 def _build_recent_dispatch_results(all_items, now_utc, *, max_age_hours=6, limit=10):
     """Recently-completed dispatches with their full manager result text, so the evaluator can act on what
     came back instead of treating it as ambient context. Newest first, capped at `limit`."""
@@ -114,7 +150,7 @@ class StrategicPlannerWoPrepNode(ControlNode):
                       if str(s.get("status") or "").lower() not in _TERMINAL_WO_STATES]
             n_active = len(active)
             portfolio = render_portfolio(active)
-            recent_completed, recent_abandoned = self._render_recent_completed(summaries)
+            recent_completed, recent_abandoned = self._render_recent_completed(summaries, store)
         except Exception as e:
             logger.error("[%s] portfolio build failed: %s", self.name, e)
             logger.debug("[%s] portfolio build exception", self.name, exc_info=True)
@@ -132,10 +168,12 @@ class StrategicPlannerWoPrepNode(ControlNode):
         logger.info("[%s] prepared: %d active work object(s)", self.name, n_active)
         self.blackboard.update_state_value("last_agent", self.name)
 
-    def _render_recent_completed(self, summaries, window_hours=18):
+    def _render_recent_completed(self, summaries, store, window_hours=18):
         """Two SEPARATE logs of recent terminal work objects — they mean different things to the steward:
         DONE = finished (do not recreate, esp. recurring routine automations); ABANDONED = DROPPED, not
-        finished (recreate only if the goal is still genuinely needed and the user didn't decline it).
+        finished. Each abandoned entry is annotated with when it was dropped and why (the user's last
+        recorded reply + the goal node's final content) via ``_abandoned_line`` — the reason is what
+        stops the evaluator from re-minting a goal the user just settled.
         Returns (done_str, abandoned_str). The WO title IS the objective (work_persist sets
         title=objective[:80]); summaries are newest-updated first."""
         from datetime import datetime, timedelta, timezone
@@ -155,7 +193,13 @@ class StrategicPlannerWoPrepNode(ControlNode):
             if status == "done":
                 done.append(f"- {title}")
             elif status == "abandoned":
-                abandoned.append(f"- {title}")
+                wo = None
+                try:
+                    wo = store.load(s["id"])
+                except Exception as e:
+                    logger.debug("[%s] could not load abandoned WO %r for annotation: %s",
+                                 self.name, s.get("id"), e)
+                abandoned.append(_abandoned_line(s, wo))
         done_str = "\n".join(done) if done else f"(nothing completed in the last {window_hours}h)"
         abandoned_str = "\n".join(abandoned) if abandoned else ""
         return done_str, abandoned_str
@@ -187,8 +231,14 @@ class StrategicPlannerWoPrepNode(ControlNode):
                 })
 
         self.blackboard.update_state_value("active_tickets", _load_active_tickets())
-        self.blackboard.update_state_value("recent_responded_tickets",
-                                           _load_responded_tickets(now_utc - timedelta(hours=12)))
+        responded = _load_responded_tickets(now_utc - timedelta(hours=12))
+        # Categorized dict stays for the architect's context builder; the
+        # evaluator prompt renders the FLAT newest-first list so every reply —
+        # acknowledged ones included — is visible with the user's words primary.
+        from app.assistant.pipelines.dayflow.utils.context_sources import flatten_responded_tickets
+        self.blackboard.update_state_value("recent_responded_tickets", responded)
+        self.blackboard.update_state_value("recent_ticket_replies",
+                                           flatten_responded_tickets(responded))
         self.blackboard.update_state_value("recent_dispatch_results",
                                            _build_recent_dispatch_results(all_items, now_utc))
         self.blackboard.update_state_value("recent_action_selector_actions", action_log)
