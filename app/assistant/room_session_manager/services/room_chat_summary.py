@@ -33,7 +33,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from app.assistant.ServiceLocator.service_locator import DI
-from app.assistant.message_manager.save_to_unified_db import save_to_unified_db
+from app.assistant.message_manager.save_to_unified_db import save_to_unified_db, update_unified_log_metadata
 from app.assistant.room_session_manager.services.room_history_builder import RoomHistoryBuilder
 from app.assistant.utils.logging_config import get_logger
 from app.assistant.utils.message_visibility_policy import _NON_NORMAL_ROOM_MODES
@@ -57,11 +57,15 @@ _PROCESSED_AT_BY_ROOM_KEY = "room_summary_processed_at_by_room"
 
 def _persist_message_to_unified_log(message: Message, *, source: str = "room_summary") -> None:
     """
-    Persist a Message to UnifiedLog2026.
+    Persist a NEW Message (a summary row with its own id) to UnifiedLog2026.
 
     Message is the internal runtime model.
     UnifiedLog2026 is the persisted storage model.
     This function performs the explicit translation between the two.
+
+    Only for rows this service MINTS. Metadata marks on EXISTING rows go
+    through ``update_unified_log_metadata`` — re-saving another source's row
+    under ``room_summary::*`` is a cross-source collision and is refused.
     """
     metadata_json = message.metadata if isinstance(message.metadata, dict) else {}
     data_json = message.data if isinstance(message.data, dict) else {}
@@ -184,10 +188,13 @@ def _set_meta_and_persist(
         now_utc: datetime,
         *,
         room_id: str,
-        source: str,
         suppressed: Optional[bool] = None,
         pinned: Optional[bool] = None,
 ) -> None:
+    """Stamp the room-scoped marks on the in-memory message AND persist them
+    to the existing unified_log row as a metadata-only UPDATE. The row keeps
+    its original identity (source/role/message/...) — this service does not
+    own it, it only annotates it."""
     _set_meta(
         m,
         now_utc,
@@ -195,7 +202,7 @@ def _set_meta_and_persist(
         suppressed=suppressed,
         pinned=pinned,
     )
-    _persist_message_to_unified_log(m, source=source)
+    update_unified_log_metadata(str(getattr(m, "id", "") or ""), _get_meta(m))
 
 
 def _text(m: Message) -> str:
@@ -441,7 +448,6 @@ class RoomChatSummaryRunner:
                     m,
                     now_utc,
                     room_id=self.room_id,
-                    source=persist_source,
                 )
             logger.info("│  no actions taken, eligible window marked processed")
             logger.info("└─ room_chat_summary done ─────────────────────────────────")
@@ -465,7 +471,6 @@ class RoomChatSummaryRunner:
                 m,
                 now_utc,
                 room_id=self.room_id,
-                source=persist_source,
                 suppressed=True,
                 pinned=False,
             )
@@ -491,7 +496,6 @@ class RoomChatSummaryRunner:
                 m,
                 now_utc,
                 room_id=self.room_id,
-                source=persist_source,
                 pinned=True,
             )
             preview = _text(m)[:60].replace("\n", " ")
@@ -601,7 +605,6 @@ class RoomChatSummaryRunner:
                     gm,
                     now_utc,
                     room_id=self.room_id,
-                    source=persist_source,
                     suppressed=True,
                 )
 
@@ -613,7 +616,6 @@ class RoomChatSummaryRunner:
                     m,
                     now_utc,
                     room_id=self.room_id,
-                    source=persist_source,
                 )
 
         logger.info(

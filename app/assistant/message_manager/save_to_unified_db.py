@@ -237,6 +237,46 @@ def save_proactive_chat_message(*, content: str, sender: str, sub_data_type: lis
         raise
 
 
+def update_unified_log_metadata(message_id: str, metadata_json: dict) -> bool:
+    """Update ONLY ``metadata_json`` on an existing unified_log row, by id.
+
+    The write-back for room-scoped metadata marks (suppressed / pinned /
+    processed maps). A plain UPDATE — never an upsert — so the row's identity
+    fields (source, role, message, timestamp, speaker_*, transport_*) cannot
+    change and no new row can appear. The old path re-saved the whole row
+    under a ``room_summary::*`` source, which the cross-source collision
+    guard refused — marks never persisted, every compaction pass re-ran, and
+    duplicate summaries piled into room history (the 2026-07-25 storm).
+
+    Returns True when the row was found and updated; logs ERROR and returns
+    False otherwise.
+    """
+    mid = str(message_id or "").strip()
+    if not mid:
+        logger.error("update_unified_log_metadata: empty message_id — nothing updated.")
+        return False
+    meta = metadata_json if isinstance(metadata_json, dict) else None
+
+    from sqlalchemy import update as _update
+    from app.models.db_manager import get_db_manager
+
+    with get_db_manager().transaction(op="update_unified_log_metadata") as session:
+        result = session.execute(
+            _update(UnifiedLog2026)
+            .where(UnifiedLog2026.id == mid)
+            .values(metadata_json=meta)
+        )
+        rowcount = result.rowcount
+
+    if rowcount == 0:
+        logger.error(
+            "update_unified_log_metadata: no unified_log row with id='%s' — metadata mark not persisted.",
+            mid,
+        )
+        return False
+    return True
+
+
 def save_to_unified_db(messages, source: str, db_session=None, force_test_db=False):
     """
     Save messages to UnifiedLog2026.
