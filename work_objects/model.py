@@ -81,6 +81,11 @@ WAKE_KINDS = {"time", "event", "user_reply", "signal"}
 _SATISFIED_STATUSES = {"closed", "verified", "passed", "answered"}
 # statuses past which a node will never become ready again
 _TERMINAL_STATUSES = {"done", "closed", "failed", "abandoned", "superseded", "verified", "passed", "answered", "unanswerable"}
+# statuses from which the engine can still START work — is_ready promotes proposed/waiting/
+# actionable (wake arming reads the same set) and work_repair re-issues failed. A terminal
+# WorkObject must contain none: closing cascades them to abandoned (store._op_set_work_status /
+# _rollup) and validate() enforces the invariant, so a closed object can never fire again.
+_STARTABLE_STATUSES = {"proposed", "actionable", "waiting", "failed"}
 
 
 def new_id(prefix: str = "node") -> str:
@@ -239,8 +244,11 @@ class WorkObject(BaseModel):
         return out
 
     def validate(self) -> None:
-        """Enforce structural invariants (the writer calls this after each patch):
-        every parent_id / edge endpoint resolves, and the ownership tree is acyclic.
+        """Enforce invariants (the writer calls this after each patch):
+        every parent_id / edge endpoint resolves, the ownership tree is acyclic, and a
+        terminal WorkObject contains no startable node (closure must have cascaded them —
+        the 2026-07-30 zombie-wake incident: a `waiting` node inside a `done` object kept
+        an armed timer and fired a ghost ticket a day after the object closed).
         Single-parent is guaranteed structurally — parent_id is one field."""
         for n in self.nodes.values():
             if n.parent_id is not None and n.parent_id not in self.nodes:
@@ -255,6 +263,12 @@ class WorkObject(BaseModel):
         for e in self.edges:
             if e.src not in self.nodes or e.dst not in self.nodes:
                 raise ValueError(f"edge {e.id}: endpoints {e.src!r}->{e.dst!r} not found")
+        if self.status in ("done", "abandoned"):
+            startable = sorted(n.id for n in self.nodes.values() if n.status in _STARTABLE_STATUSES)
+            if startable:
+                raise ValueError(
+                    f"terminal work object {self.id!r} ({self.status}) contains startable "
+                    f"node(s) {startable} — closing a work object must cascade-abandon them")
 
 
 # --------------------------------------------------------------------------- #

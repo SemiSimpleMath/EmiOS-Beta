@@ -21,13 +21,36 @@ through here — and each apply() is one short atomic transaction.
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import threading
 from typing import Any, Callable, Optional
 
 from work_objects.model import (
-    WAKE_KINDS, Edge, SCHEMA_SQL, WorkNode, WorkObject, _TERMINAL_STATUSES, utcnow,
+    WAKE_KINDS, Edge, SCHEMA_SQL, WorkNode, WorkObject, _STARTABLE_STATUSES,
+    _TERMINAL_STATUSES, utcnow,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _cascade_abandon_startable(wo: WorkObject, now: str, reason: str) -> int:
+    """Closure obligation: a terminal WorkObject may contain nothing the engine could ever
+    start again. Abandon every startable node and clear its wake so no timer or promotion
+    path can resurrect it (validate() enforces the invariant). In-flight ``dispatched``
+    nodes are left to land their result — inert in a terminal object, and the sweep skips
+    terminal work objects. Idempotent; returns the number of nodes cascaded."""
+    count = 0
+    for node in wo.nodes.values():
+        if node.status in _STARTABLE_STATUSES:
+            node.status = "abandoned"
+            node.wake_kind = None
+            node.wake_at = None
+            node.wake_ref = None
+            node.payload["abandoned_reason"] = reason
+            node.updated_at = now
+            count += 1
+    return count
 
 # --------------------------------------------------------------------------- #
 # Status state machine, keyed by node FAMILY (inferred from type). A new node
@@ -160,6 +183,40 @@ class WorkStore:
         return [{"seq": r["seq"], "ts": r["ts"], "actor": r["actor"], "op": r["op"],
                  "data": json.loads(r["data"] or "{}")} for r in rows]
 
+    def repair_terminal_zombies(self) -> int:
+        """One-time data repair (2026-07-30 zombie-wake incident): cascade-abandon startable
+        nodes left inside already-terminal work objects by the pre-cascade closure code —
+        exactly what _op_set_work_status now does at closure. Must run before normal writes:
+        any apply() touching a zombie object would otherwise fail validate() on the old rows.
+        Idempotent; returns the number of nodes repaired (0 once clean — a nonzero return
+        after the first run means some writer bypassed the invariant and should be found)."""
+        placeholders = ",".join("?" * len(_STARTABLE_STATUSES))
+        with self._lock, self._conn:
+            rows = self._conn.execute(
+                f"SELECT DISTINCT w.id, w.status FROM work_objects w "
+                f"JOIN nodes n ON n.work_id = w.id "
+                f"WHERE w.status IN ('done','abandoned') AND n.status IN ({placeholders})",
+                tuple(_STARTABLE_STATUSES),
+            ).fetchall()
+            if not rows:
+                return 0
+            now = utcnow().isoformat()
+            repaired = 0
+            for r in rows:
+                wo = self._load(r["id"])
+                count = _cascade_abandon_startable(wo, now, reason=f"work_object_{r['status']}")
+                repaired += count
+                self._conn.execute(
+                    "INSERT INTO events(work_id, ts, actor, op, data) VALUES(?,?,?,?,?)",
+                    (wo.id, now, "store_repair", "cascade_closure_repair",
+                     json.dumps({"cascaded": count})),
+                )
+                self._persist(wo, now)
+        logger.warning(
+            "[WorkStore] closure-cascade repair: abandoned %d startable node(s) inside %d "
+            "terminal work object(s)", repaired, len(rows))
+        return repaired
+
     def list_work_objects(self) -> list[dict[str, Any]]:
         """Summaries of every WorkObject, newest-updated first — for a dashboard / list view."""
         with self._lock:
@@ -193,8 +250,8 @@ class WorkStore:
                     raise ValueError(f"op {op!r} requires work_id")
                 wo = self._load(wid)
                 handler(self, wo, data, now)
-            wo.validate()                       # structural invariants
-            self._rollup(wo, now)               # derived WorkObject.status
+            self._rollup(wo, now)               # derived WorkObject.status (auto-close cascades)
+            wo.validate()                       # invariants — after rollup so they see the final state
             self._conn.execute(
                 "INSERT INTO events(work_id, ts, actor, op, data) VALUES(?,?,?,?,?)",
                 (wo.id, now, actor, op, json.dumps(data, default=str)),
@@ -322,15 +379,19 @@ class WorkStore:
     def _op_set_work_status(self, wo, data, now) -> None:
         """Force the WorkObject's overall status — the steward's authoritative complete/abandon, distinct
         from the rollup's automatic 'all children done' completion. The forward-only rollup will not reset
-        it; the goal node is mirrored to a matching terminal state for consistency."""
+        it. Entering a terminal status is a transition with obligations, not a label write: the goal node
+        is mirrored terminal and every still-startable node is cascade-abandoned with its wake cleared,
+        so a closed object can never fire again (validate() enforces)."""
         target = data["status"]
         if target not in ("active", "done", "abandoned", "blocked"):
             raise ValueError(f"set_work_status: bad status {target!r}")
         wo.status = target
-        goal = wo.nodes.get(wo.goal_node_id or "")
-        if goal is not None and target in ("done", "abandoned") and goal.status not in _TERMINAL_STATUSES:
-            goal.status = target
-            goal.updated_at = now
+        if target in ("done", "abandoned"):
+            goal = wo.nodes.get(wo.goal_node_id or "")
+            if goal is not None and goal.status not in _TERMINAL_STATUSES:
+                goal.status = target
+                goal.updated_at = now
+            _cascade_abandon_startable(wo, now, reason=f"work_object_{target}")
 
     # ----------------------------- persistence ----------------------------- #
     def _persist(self, wo: WorkObject, now: str) -> None:
@@ -368,7 +429,10 @@ class WorkStore:
     def _rollup(self, wo: WorkObject, now: str) -> None:
         """Derived rollup — when the goal is satisfied, close it and the WorkObject.
         Forward-only in v1: reopening a done WorkObject after a regression is an
-        explicit curator action (deferred), not an automatic flip-flop here."""
+        explicit curator action (deferred), not an automatic flip-flop here.
+        Auto-completion carries the same closure obligation as set_work_status:
+        startable stragglers (nodes outside the satisfied goal subtree) are
+        cascade-abandoned so the done object can never fire again."""
         if wo.status == "abandoned":      # a force-abandoned WorkObject is terminal — never auto-complete it
             wo.updated_at = now
             return
@@ -378,6 +442,7 @@ class WorkStore:
             if goal.status == "dispatched":      # close the goal node (dispatched->done is legal)
                 goal.status = "done"
                 goal.updated_at = now
+            _cascade_abandon_startable(wo, now, reason="work_object_done")
         wo.updated_at = now
 
     _HANDLERS: dict[str, Callable] = {}

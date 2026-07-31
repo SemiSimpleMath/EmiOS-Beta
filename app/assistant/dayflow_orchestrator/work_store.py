@@ -70,5 +70,10 @@ def get_dayflow_work_store():
             # Same-package private access, on purpose: the migration runs on the
             # store's own connection and logs its own failures loudly.
             _migrate_node_active_to_dispatched(store._conn)
+            # Closure-cascade repair (2026-07-30 zombie-wake incident): terminal work
+            # objects created before closure cascaded may still hold startable nodes
+            # with armed wakes. Must run before any apply() touches those rows — the
+            # closure invariant in WorkObject.validate() rejects them otherwise.
+            store.repair_terminal_zombies()
             _stores[path] = store
     return store

@@ -71,7 +71,10 @@ def test_resolve_close_completes_wo_with_open_sibling(store):
     wo = store.load(wid)
     assert wo.status == "done"
     assert wo.nodes[gid].status == "done"                  # goal mirrored
-    assert wo.nodes[b].status == "proposed"                # open sibling untouched
+    # closure cascades: the open sibling is abandoned with the closure recorded — a
+    # terminal work object may contain nothing startable (2026-07-30 zombie-wake fix)
+    assert wo.nodes[b].status == "abandoned"
+    assert wo.nodes[b].payload["abandoned_reason"] == "work_object_done"
 
 
 def test_resolve_abandon(store):
