@@ -29,9 +29,10 @@ metadata:
 Omitting both selectors targets *every* light. Do **not** pass `"all"` as a room. Do **not** issue
 per-light or repeated commands to cover the house.
 
-**One room:** add `room` (a substring of the device alias, e.g. `"Bedroom"`, `"Living Room"`).
-**One light:** add `light_id`.
-**Dim / color:** `set_light_brightness` (0–100) / `set_light_color` (e.g. `"warm white"`).
+**One room (rare):** add `room` (a substring of the device alias, e.g. `"Bedroom"`, `"Living Room"`).
+**One light (rare):** add `light_id`.
+
+Lights are binary: `on` is full brightness, `off` is off.
 
 ## Do not
 

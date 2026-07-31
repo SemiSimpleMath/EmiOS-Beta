@@ -7,14 +7,10 @@ class lights_control_args(BaseModel):
     command: Literal[
         "list_lights",
         "set_light_power",
-        "set_light_brightness",
-        "set_light_color",
     ]
     light_id: str | None = None
     room: str | None = None
     state: str | None = None
-    brightness_pct: int | None = None
-    color: str | None = None
 
 
 class lights_control_arguments(BaseModel):

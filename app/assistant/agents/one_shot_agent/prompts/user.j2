@@ -141,18 +141,16 @@ One-shot tool playbook:
   - eco_enabled: bool
 
 14) lights_control
-- Use for: light power and brightness commands.
+- Use for: turning lights on or off. Lights are binary — on is full brightness.
 - Required:
   - command: str MUST be exactly one of:
     - set_light_power
-    - set_light_brightness
     - list_lights
 - Conditional fields:
   - state: str (required for set_light_power; "on" | "off")
-  - brightness_pct: int (required for set_light_brightness; 0-100)
 - Targeting (use the configured device alias when the user names a room):
   - room: str — one of the configured device aliases listed in the lights_control
-    tool description. Omit room/light_id to target ALL lights.
+    tool description. Omit room/light_id to target ALL lights (the common case).
 
 15) ring_camera_control
 - Use for: Ring camera snapshot/events/siren/light.

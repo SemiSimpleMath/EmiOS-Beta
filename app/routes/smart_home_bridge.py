@@ -813,6 +813,10 @@ async def _kasa_set_light_power(
     for device in selected:
         if state_norm == "on":
             await device.turn_on()
+            # HS220 dimmers restore their last dim level on power-on; the house
+            # convention is binary — ON means full brightness (owner decision, 2026-07-31).
+            if hasattr(device, "set_brightness"):
+                await device.set_brightness(100)
         else:
             await device.turn_off()
         await device.update()
@@ -913,10 +917,6 @@ def _lights_dispatch(command: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
                 room=room,
                 host_alias_map=host_alias_map,
             )
-        )
-    if command_norm == "set_light_color":
-        raise RuntimeError(
-            "set_light_color is not supported for Kasa HS220 dimmer switches."
         )
     raise ValueError(f"Unsupported lights command '{command_norm}'.")
 

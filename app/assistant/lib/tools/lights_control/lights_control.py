@@ -13,8 +13,6 @@ logger = get_logger(__name__)
 _ALLOWED_COMMANDS = {
     "list_lights",
     "set_light_power",
-    "set_light_brightness",
-    "set_light_color",
 }
 
 
@@ -39,19 +37,6 @@ def _validate_command_arguments(command: str, arguments: Dict[str, Any]) -> None
         state = str(arguments.get("state") or "").strip().lower()
         if state not in {"on", "off"}:
             raise ValueError("lights_control.set_light_power requires state in: on|off.")
-    elif command == "set_light_brightness":
-        if "brightness_pct" not in arguments:
-            raise ValueError("lights_control.set_light_brightness requires brightness_pct.")
-        try:
-            value = int(arguments.get("brightness_pct"))
-        except Exception:
-            raise ValueError("brightness_pct must be an integer.")
-        if value < 0 or value > 100:
-            raise ValueError("brightness_pct must be between 0 and 100.")
-    elif command == "set_light_color":
-        color = str(arguments.get("color") or "").strip()
-        if not color:
-            raise ValueError("lights_control.set_light_color requires non-empty color.")
 
 
 class LightsControlTool(BaseTool):
