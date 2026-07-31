@@ -74,6 +74,13 @@ def get_dayflow_work_store():
             # objects created before closure cascaded may still hold startable nodes
             # with armed wakes. Must run before any apply() touches those rows — the
             # closure invariant in WorkObject.validate() rejects them otherwise.
-            store.repair_terminal_zombies()
+            # Logged HERE: work_objects/ is app-independent and its stdlib logger
+            # does not reach the app's log files.
+            repaired = store.repair_terminal_zombies()
+            if repaired:
+                logger.warning(
+                    "[work_store] closure-cascade repair: abandoned %d startable node(s) "
+                    "inside terminal work objects (a nonzero count after the first run "
+                    "means a writer bypassed the closure invariant)", repaired)
             _stores[path] = store
     return store
