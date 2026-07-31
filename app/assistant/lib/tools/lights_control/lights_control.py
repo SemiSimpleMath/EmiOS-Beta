@@ -15,7 +15,6 @@ _ALLOWED_COMMANDS = {
     "set_light_power",
     "set_light_brightness",
     "set_light_color",
-    "set_scene",
 }
 
 
@@ -53,10 +52,6 @@ def _validate_command_arguments(command: str, arguments: Dict[str, Any]) -> None
         color = str(arguments.get("color") or "").strip()
         if not color:
             raise ValueError("lights_control.set_light_color requires non-empty color.")
-    elif command == "set_scene":
-        scene_name = str(arguments.get("scene_name") or "").strip()
-        if not scene_name:
-            raise ValueError("lights_control.set_scene requires non-empty scene_name.")
 
 
 class LightsControlTool(BaseTool):

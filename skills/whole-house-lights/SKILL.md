@@ -1,6 +1,6 @@
 ---
 name: whole-house-lights
-description: How to turn the whole-house lights (or one room / one light) on or off reliably via the lights_control tool — ONE set_light_power call with no selector targets every light; never guess scene names. Use whenever a task is about turning lights on/off across the house.
+description: How to turn the whole-house lights (or one room / one light) on or off reliably via the lights_control tool — ONE set_light_power call with no selector targets every light. Use whenever a task is about turning lights on/off across the house.
 license: Apache-2.0
 metadata:
   author: jukka
@@ -35,9 +35,6 @@ per-light or repeated commands to cover the house.
 
 ## Do not
 
-- Do **not** use `set_scene` for whole-house on/off. Scene names like `"All Lights"` or
-  `"whole-house lights"` are usually **not configured** and the call fails. `set_scene` is only for a
-  scene you KNOW exists.
 - Do **not** keep trying alternate strategies. One successful `set_light_power` IS the whole job — if it
   reports the lights are already on/off, you are **done**. Stop.
 - If you genuinely don't know what lights/rooms exist, call `list_lights` **once** first, then act.

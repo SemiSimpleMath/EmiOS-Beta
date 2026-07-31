@@ -6,7 +6,7 @@
       "name": "command",
       "type": "string",
       "required": true,
-      "description": "MUST be exactly one of: list_lights, set_light_power, set_light_brightness, set_light_color, set_scene."
+      "description": "MUST be exactly one of: list_lights, set_light_power, set_light_brightness, set_light_color."
     },
     {
       "name": "light_id",
@@ -37,12 +37,6 @@
       "type": "string",
       "required": false,
       "description": "Required for set_light_color."
-    },
-    {
-      "name": "scene_name",
-      "type": "string",
-      "required": false,
-      "description": "Required for set_scene."
     }
   ],
   "outputs": [
@@ -57,7 +51,7 @@
       "description": "Smart-home gateway response payload."
     }
   ],
-  "arguments_prompt": "Use this tool for light controls exposed through your lights bridge endpoint (Kasa supported).\n\nRequired:\n- `command`: MUST be exactly one of `list_lights`, `set_light_power`, `set_light_brightness`, `set_light_color`, `set_scene`\n\nSelectors (both optional):\n- `light_id` — target a specific light by its ID\n- `room` — target lights in a specific room (substring match on device alias, e.g. \"Living Room\", \"Bedroom\")\n- **OMIT both `room` and `light_id` to target ALL lights.** Do NOT pass \"all\" as a room name — just leave the field out.\n- **WHOLE-HOUSE on/off: ONE `set_light_power` call with `state` and NO `room`/`light_id` switches every light.** Do NOT use `set_scene` for the whole house — scene names like \"All Lights\" / \"whole-house lights\" are usually not configured and the call fails. Use `set_scene` ONLY for a scene you KNOW exists.\n\nConditional fields:\n- `state` for `set_light_power` (`on` or `off`)\n- `brightness_pct` for `set_light_brightness` (0-100)\n- `color` for `set_light_color` (e.g., \"warm white\", \"#ff0000\")\n- `scene_name` for `set_scene`\n\nNotes:\n- Kasa HS220 dimmer supports `list_lights`, `set_light_power`, and `set_light_brightness`.\n- `set_light_color` and `set_scene` may not be available for dimmer switches.\n- One successful `set_light_power` is the whole job. If it reports the lights are already on/off, you are DONE — do not retry other strategies or re-issue the command.",
+  "arguments_prompt": "Use this tool for light controls exposed through your lights bridge endpoint (Kasa supported).\n\nRequired:\n- `command`: MUST be exactly one of `list_lights`, `set_light_power`, `set_light_brightness`, `set_light_color`\n\nSelectors (both optional):\n- `light_id` — target a specific light by its ID\n- `room` — target lights in a specific room (substring match on device alias, e.g. \"Living Room\", \"Bedroom\")\n- **OMIT both `room` and `light_id` to target ALL lights.** Do NOT pass \"all\" as a room name — just leave the field out.\n- **WHOLE-HOUSE on/off: ONE `set_light_power` call with `state` and NO `room`/`light_id` switches every light.**\n\nConditional fields:\n- `state` for `set_light_power` (`on` or `off`)\n- `brightness_pct` for `set_light_brightness` (0-100)\n- `color` for `set_light_color` (e.g., \"warm white\", \"#ff0000\")\n\nNotes:\n- Kasa HS220 dimmer supports `list_lights`, `set_light_power`, and `set_light_brightness`.\n- One successful `set_light_power` is the whole job. If it reports the lights are already on/off, you are DONE — do not retry other strategies or re-issue the command.",
   "metadata": {
     "min_authority": 95,
     "domain": "smart_home",
@@ -70,8 +64,7 @@
       "light_id",
       "room",
       "brightness",
-      "color",
-      "scene"
+      "color"
     ],
     "risk_level": "medium",
     "side_effects": "external_action",

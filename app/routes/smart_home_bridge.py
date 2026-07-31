@@ -918,10 +918,6 @@ def _lights_dispatch(command: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         raise RuntimeError(
             "set_light_color is not supported for Kasa HS220 dimmer switches."
         )
-    if command_norm == "set_scene":
-        raise RuntimeError(
-            "set_scene is not implemented for Kasa local control yet."
-        )
     raise ValueError(f"Unsupported lights command '{command_norm}'.")
 
 
