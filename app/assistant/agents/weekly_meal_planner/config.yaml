@@ -3,7 +3,7 @@ class_name: Agent
 action_required: false
 llm_params:
   llm_provider: "openai"
-  engine: "gpt-5.4-mini"
+  engine: "gpt-5.6-luna"
   model_tier: "smart"
 
 # Single-shot strategic planner. Pre-fetched context (inventory + Ralphs +

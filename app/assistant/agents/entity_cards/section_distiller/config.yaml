@@ -2,7 +2,7 @@ name: entity_cards::section_distiller
 class_name: Agent
 llm_params:
   llm_provider: "openai"
-  engine: "gpt-5.4-mini"
+  engine: "gpt-5.6-luna"
   model_tier: "smart"
 allowed_tools: []
 except_tools: []

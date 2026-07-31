@@ -2,7 +2,7 @@ name: sleep_analyzer
 class_name: Agent
 llm_params:
   llm_provider: "openai"
-  # Vision-capable, cheapest OpenAI vision tier. gpt-5.4-mini was ~6x pricier on
+  # Vision-capable, cheapest OpenAI vision tier. gpt-5.6-luna was ~6x pricier on
   # output for the same asleep/awake scene classification. Snapshot is downscaled
   # to 768px upstream to keep image input tokens low.
   engine: "gpt-5.4-nano"

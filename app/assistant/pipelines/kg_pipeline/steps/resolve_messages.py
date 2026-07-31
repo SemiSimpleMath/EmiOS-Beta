@@ -9,7 +9,7 @@ Walks day-bounded chronologically. For each day, processes unresolved
 messages in batches of 10 with up to 10 already-resolved prior-same-day
 messages as context. Each message is resolved exactly once.
 
-Agent: knowledge_graph_add::entity_resolver (gpt-5.4-mini).
+Agent: knowledge_graph_add::entity_resolver (gpt-5.6-luna).
 
 Chat-eligibility filter (matches the legacy FilterMessagesStep):
     source ∈ {chat, room_slack, room_sms, room_ui}

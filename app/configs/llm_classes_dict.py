@@ -9,7 +9,7 @@ LLM_CLASSES = {
     "openai": {
         "class": OpenAILLM,
         "params": {
-            "engine": os.getenv("DEFAULT_LLM_MODEL", "gpt-5.4-mini"),
+            "engine": os.getenv("DEFAULT_LLM_MODEL", "gpt-5.6-luna"),
             "temperature": 0.1,
         }
     },
@@ -39,7 +39,7 @@ _PROVIDER_KEY_ENV = {
 # Default models per provider (used when remapping to default provider).
 # Keep in sync with the "mini" tier in configs/model_tiers.yaml.
 _PROVIDER_DEFAULT_MODEL = {
-    "openai": "gpt-5.4-mini",
+    "openai": "gpt-5.6-luna",
     "gemini": "gemini-3-flash-preview",
     "anthropic": "claude-3-5-haiku-20241022",
 }

@@ -1,7 +1,9 @@
 {
   "_comment": "Per-engine LLM prices in USD per 1M tokens. Manually maintained. Update when providers change pricing. Missing engines log a warning at record time and store cost as 0 (under-counts; not fatal). cached_input_per_1m_usd is read by _cost_for in app/services/llm_call_logger.py — cached portion of input tokens is billed at the cached rate, the rest at input_per_1m_usd. When cached_input_per_1m_usd is absent, full input rate applies to cached tokens too (conservative fallback for engines whose cached rate we don't have).",
-  "_last_updated": "2026-07-09",
-  "_source": "provider pricing pages; gpt-5 family cached rates on OpenAI's uniform 10%-of-input basis (matches the published 5.4-family entries)",
+  "_last_updated": "2026-07-31",
+  "_source": "provider pricing pages; gpt-5 family cached rates on OpenAI's uniform 10%-of-input basis (matches the published 5.4-family entries). gpt-5.6-luna at the 2026-07-30 price cut ($0.20/$1.20).",
+
+  "gpt-5.6-luna":    {"input_per_1m_usd": 0.20, "cached_input_per_1m_usd": 0.02,  "output_per_1m_usd": 1.20},
 
   "gpt-5.1":         {"input_per_1m_usd": 1.25, "cached_input_per_1m_usd": 0.125, "output_per_1m_usd": 10.0},
   "gpt-5.2":         {"input_per_1m_usd": 5.0,  "cached_input_per_1m_usd": 0.50,  "output_per_1m_usd": 25.0},

@@ -65,7 +65,7 @@ def _resolve_provider_fallback(
         fallback_engine = str(tier_cfg.get(fallback_provider) or "").strip()
         if not fallback_engine:
             # Last resort hardcoded defaults.
-            _defaults = {"openai": "gpt-5.4-mini", "gemini": "gemini-3-flash-preview", "anthropic": "claude-3-5-haiku-20241022"}
+            _defaults = {"openai": "gpt-5.6-luna", "gemini": "gemini-3-flash-preview", "anthropic": "claude-3-5-haiku-20241022"}
             fallback_engine = _defaults.get(fallback_provider, "gpt-5-mini")
 
         logger.warning(

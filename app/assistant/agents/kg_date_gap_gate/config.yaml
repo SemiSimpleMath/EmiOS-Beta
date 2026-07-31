@@ -3,7 +3,7 @@ class_name: Agent
 action_required: false
 llm_params:
   llm_provider: "openai"
-  engine: "gpt-5.4-mini"
+  engine: "gpt-5.6-luna"
   model_tier: "fast"
 
 # Pure judgment: one undated KG state in, ask/skip verdict + a natural

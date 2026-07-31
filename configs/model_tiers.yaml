@@ -23,7 +23,7 @@ tiers:
 
   mini:
     description: "Standard agent work - most delegation, extraction, summarisation"
-    openai: "gpt-5.4-mini"
+    openai: "gpt-5.6-luna"
     gemini: "gemini-3-flash-preview"
     anthropic: "claude-3-5-haiku-20241022"
 
@@ -55,6 +55,7 @@ engine_to_tier:
   gpt-5-nano: nano
   gpt-4.1-nano: nano
   gpt-4o-mini: nano
+  gpt-5.6-luna: mini
   gpt-5.4-mini: mini
   gpt-5-mini: mini
   gpt-4.1-mini: mini

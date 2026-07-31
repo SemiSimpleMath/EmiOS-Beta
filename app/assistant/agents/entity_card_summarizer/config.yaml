@@ -1,7 +1,7 @@
 name: entity_card_summarizer
 class_name: Agent
 llm_params:
-  engine: gpt-5.4-mini
+  engine: gpt-5.6-luna
   model_tier: "mini"
   timeout: 180
   llm_provider: "openai"

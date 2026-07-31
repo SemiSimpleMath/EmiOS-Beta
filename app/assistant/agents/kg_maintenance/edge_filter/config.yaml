@@ -1,7 +1,7 @@
 name: kg_maintenance::edge_filter
 class_name: Agent
 llm_params:
-  engine: gpt-5.4-mini
+  engine: gpt-5.6-luna
   model_tier: "mini"
   llm_provider: "openai"
 allowed_tools: []
