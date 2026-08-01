@@ -15,6 +15,10 @@ policy:
   default_visibility: owner_only
   default_context_id: main
   authority_level: 99
+  # Rooms whose active workers this room may @-address in addition to its
+  # own (the owner steers dayflow-spawned teams from the primary UI).
+  mention_addressable_rooms:
+  - dayflow_orchestrator
   retention:
     write_unified_log: true
     write_kg: true

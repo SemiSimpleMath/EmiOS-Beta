@@ -141,11 +141,13 @@ class RoomMentionRouter:
             else:
                 # Two or more — refuse to guess. Tell the user the
                 # explicit names so they can address one.
+                from app.assistant.chat_narrator.display_names import mention_key
                 display = self._canonical_display(name)
-                names = ", ".join(sorted(m["display_name"] for m in base_matches))
+                sorted_names = sorted(m["display_name"] for m in base_matches)
+                names = ", ".join(sorted_names)
                 text = (
-                    f"Multiple {display}s active in this room: {names}. "
-                    f"Address one specifically (e.g. @{names.split(', ')[1].lower()})."
+                    f"Multiple {display}s active: {names}. "
+                    f"Address one specifically (e.g. @{mention_key(sorted_names[1])})."
                 )
                 return MentionResult(
                     early_result=self._build_reply(text=text, meta=meta),
@@ -154,14 +156,14 @@ class RoomMentionRouter:
                 )
 
         if worker is None:
-            # Known name (Quimby/Em/...) but nobody's running in this room.
+            # Known name (Quimby/Em/...) but nobody addressable is running.
             display = self._canonical_display(name)
             others = [
                 n for n in (self._list_display_names(room_id=room_id) or [])
                 if n.lower() != display.lower()
             ]
-            hint = f" (active in this room: {', '.join(others)})" if others else ""
-            text = f"No active {display} in this room — nothing to steer.{hint}"
+            hint = f" (active now: {', '.join(others)})" if others else ""
+            text = f"No active {display} right now — nothing to steer.{hint}"
             return MentionResult(
                 early_result=self._build_reply(text=text, meta=meta),
                 continue_pipeline=False,
@@ -223,17 +225,19 @@ class RoomMentionRouter:
         let the caller's reply text handle it. To avoid hijacking truly
         unrelated @text messages from chat though, callers should use a
         registry-aware resolver.
+
+        Matching accepts the literal display name, its mention key
+        (``waffle_graph``), or its mention head (``waffle``) — display names
+        with spaces/punctuation are otherwise untypeable in @ syntax.
         """
-        from app.assistant.chat_narrator.display_names import (
-            manager_for_display_name,
-        )
-        return manager_for_display_name(name) is not None
+        from app.assistant.chat_narrator.display_names import manager_for_mention
+        return manager_for_mention(name) is not None
 
     def _canonical_display(self, name: str) -> str:
         from app.assistant.chat_narrator.display_names import (
-            display_name_for, manager_for_display_name,
+            display_name_for, manager_for_mention,
         )
-        manager = manager_for_display_name(name)
+        manager = manager_for_mention(name)
         return display_name_for(manager) if manager else name
 
     @staticmethod

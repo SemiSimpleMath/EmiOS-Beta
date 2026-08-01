@@ -14,6 +14,7 @@ tools should stay anonymous (they finish before the user can address them).
 """
 from __future__ import annotations
 
+import re
 from typing import Dict, Optional
 
 
@@ -22,6 +23,47 @@ from typing import Dict, Optional
 # time. Tests can populate manually.
 _FORWARD: Dict[str, str] = {}
 _REVERSE: Dict[str, str] = {}
+
+_MENTION_KEY_RE = re.compile(r"[^a-z0-9]+")
+
+
+def mention_key(display_name: str) -> str:
+    """The typeable @-handle for a display name: lowercase, non-alphanumeric
+    runs collapsed to ``_``. ``"Waffle (graph)"`` → ``"waffle_graph"`` — the
+    @mention regex only accepts ``[A-Za-z0-9_]``, so display names with spaces
+    or punctuation are addressed by this key.
+    """
+    return _MENTION_KEY_RE.sub("_", str(display_name or "").strip().lower()).strip("_")
+
+
+def mention_head(display_name: str) -> str:
+    """The first word of the mention key — ``"Waffle (graph)"`` → ``"waffle"``.
+    Used by BASE-name matching so a bare ``@waffle`` reaches the graph-mode
+    Waffle when it's the only one active (ambiguity handling reports the
+    explicit keys otherwise).
+    """
+    key = mention_key(display_name)
+    return key.split("_", 1)[0] if key else ""
+
+
+def manager_for_mention(name: str) -> Optional[str]:
+    """Resolve a typed @-name to a manager: exact display match first, then
+    mention-key match, then mention-head match over the registry. Returns the
+    first manager whose display name the query can address, or None.
+    """
+    if not name:
+        return None
+    exact = manager_for_display_name(name)
+    if exact is not None:
+        return exact
+    query = name.strip().lower()
+    for manager_name, display in _FORWARD.items():
+        if mention_key(display) == query:
+            return manager_name
+    for manager_name, display in _FORWARD.items():
+        if mention_head(display) == query:
+            return manager_name
+    return None
 
 
 def initialize_display_name_registry(name_to_display: Dict[str, str]) -> None:

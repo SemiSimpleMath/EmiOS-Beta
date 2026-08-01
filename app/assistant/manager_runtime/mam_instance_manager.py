@@ -184,16 +184,19 @@ class MAMInstanceManager:
     def find_by_display_name(
         self, display_name: str, *, room_id: Optional[str] = None,
     ) -> Optional[ManagerInstanceRecord]:
-        """Exact display_name match within the room scope.
+        """Exact display_name match within the room scope — the literal name
+        or its typeable mention key (``waffle_graph`` → ``Waffle (graph)``;
+        the @mention syntax cannot carry spaces/punctuation).
 
         ``Webby`` and ``Webby_2`` are distinct names; this method does
         not do "any Webby" matching. For that use ``find_by_base_display_name``.
         """
+        from app.assistant.chat_narrator.display_names import mention_key
         if not display_name:
             return None
         target = display_name.strip().lower()
         for r in self.list_active(room_id=room_id):
-            if r.display_name.lower() == target:
+            if r.display_name.lower() == target or mention_key(r.display_name) == target:
                 return r
         return None
 
@@ -201,15 +204,20 @@ class MAMInstanceManager:
         self, base_display_name: str, *, room_id: Optional[str] = None,
     ) -> List[ManagerInstanceRecord]:
         """All active records whose base_display_name matches (e.g. all
-        Webbys: ``Webby``, ``Webby_2``, ``Webby_3``). Used by the @mention
-        router to detect ambiguity when the user types a bare name.
+        Webbys: ``Webby``, ``Webby_2``, ``Webby_3``) — by literal name,
+        mention key, or mention head (bare ``@waffle`` collects
+        ``Waffle (graph)`` too; the router's ambiguity handling sorts out
+        multiples). Used by the @mention router when the user types a bare name.
         """
+        from app.assistant.chat_narrator.display_names import mention_head, mention_key
         if not base_display_name:
             return []
         target = base_display_name.strip().lower()
         return [
             r for r in self.list_active(room_id=room_id)
             if r.base_display_name.lower() == target
+            or mention_key(r.base_display_name) == target
+            or mention_head(r.base_display_name) == target
         ]
 
     # ------------------------------------------------------------------

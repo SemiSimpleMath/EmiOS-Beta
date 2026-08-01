@@ -28,6 +28,40 @@ def canonical_manager_name(raw: str) -> str:
     return _INVOCATION_SUFFIX_RE.sub("", str(raw or ""))
 
 
+def addressable_room_ids(room_id: Optional[str]) -> List[str]:
+    """The rooms whose active workers ``room_id`` may @-address: itself first,
+    then any rooms its policy grants via ``mention_addressable_rooms`` (ROOM.md
+    frontmatter). Own room comes first — exact-name resolution prefers it when
+    the same display name is active in more than one addressable room.
+
+    ``None`` (no room context) stays ``[None]`` — the caller's no-filter
+    semantics are preserved.
+    """
+    if not isinstance(room_id, str) or not room_id.strip():
+        return [room_id]
+    rooms: List[str] = [room_id]
+    from app.assistant.rooms.room_resource_loader import load_room_policy
+    try:
+        policy = load_room_policy(room_id)
+    except (FileNotFoundError, ValueError) as e:
+        # A missing/blockless ROOM.md means the room simply declares no grants —
+        # it can still address its own workers. Anything else raises.
+        import logging
+        logging.getLogger(__name__).warning(
+            "addressable_room_ids: no readable policy for room %r (%s) — "
+            "own-room addressing only", room_id, e)
+        return rooms
+    extra = policy.get("mention_addressable_rooms") or []
+    if not isinstance(extra, list):
+        raise ValueError(
+            f"room {room_id!r} policy.mention_addressable_rooms must be a list, "
+            f"got {type(extra).__name__}")
+    for rid in extra:
+        if isinstance(rid, str) and rid.strip() and rid.strip() not in rooms:
+            rooms.append(rid.strip())
+    return rooms
+
+
 def list_active_workers(*, room_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """Return active manager records as JSON-shaped dicts.
 
@@ -35,8 +69,9 @@ def list_active_workers(*, room_id: Optional[str] = None) -> List[Dict[str, Any]
     base_display_name, room_id, request_id, started_at_utc, running_for_s}``.
     Sorted oldest first.
 
-    ``room_id`` filter scopes to a single room — used by the @mention
-    router so callers only see invocations they can actually address.
+    ``room_id`` scopes to the rooms that room may address (itself plus its
+    policy's ``mention_addressable_rooms``) — used by the @mention router so
+    callers only see invocations they can actually address.
     """
     mam = getattr(DI, "mam_instance_manager", None)
     if mam is None:
@@ -44,7 +79,8 @@ def list_active_workers(*, room_id: Optional[str] = None) -> List[Dict[str, Any]
     payload = mam.get_status_payload()
     rows = payload.get("active_invocations") or []
     if room_id is not None:
-        rows = [r for r in rows if r.get("room_id") == room_id]
+        allowed = set(addressable_room_ids(room_id))
+        rows = [r for r in rows if r.get("room_id") in allowed]
     return rows
 
 
@@ -52,7 +88,10 @@ def find_active_invocation_by_display_name(
     name: str, *, room_id: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Resolve an exact display_name (e.g. ``Webby_2``) to an active
-    invocation, optionally scoped to a room.
+    invocation, optionally scoped to the rooms ``room_id`` may address.
+
+    Rooms are searched in ``addressable_room_ids`` order, so a worker in the
+    sender's own room wins over a same-named worker in a granted room.
 
     For bare-name lookup with ambiguity reporting (multiple Webbys), use
     ``find_active_invocations_by_base_display_name``.
@@ -60,7 +99,11 @@ def find_active_invocation_by_display_name(
     mam = getattr(DI, "mam_instance_manager", None)
     if mam is None or not name:
         return None
-    record = mam.find_by_display_name(name, room_id=room_id)
+    record = None
+    for rid in (addressable_room_ids(room_id) if room_id is not None else [None]):
+        record = mam.find_by_display_name(name, room_id=rid)
+        if record is not None:
+            break
     if record is None:
         return None
     return {
@@ -78,13 +121,21 @@ def find_active_invocations_by_base_display_name(
     base_display_name: str, *, room_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """All active invocations sharing a base display name (``Webby``,
-    ``Webby_2``, ``Webby_3`` all match base ``Webby``). Used by the
-    @mention router to detect ambiguity when the user types bare ``@webby``.
+    ``Webby_2``, ``Webby_3`` all match base ``Webby``) across every room
+    ``room_id`` may address. Used by the @mention router to detect ambiguity
+    when the user types bare ``@webby``.
     """
     mam = getattr(DI, "mam_instance_manager", None)
     if mam is None or not base_display_name:
         return []
-    records = mam.find_by_base_display_name(base_display_name, room_id=room_id)
+    records: list = []
+    seen_ids: set = set()
+    for rid in (addressable_room_ids(room_id) if room_id is not None else [None]):
+        for r in mam.find_by_base_display_name(base_display_name, room_id=rid):
+            if r.invocation_id in seen_ids:
+                continue
+            seen_ids.add(r.invocation_id)
+            records.append(r)
     return [
         {
             "invocation_id": r.invocation_id,

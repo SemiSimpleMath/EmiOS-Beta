@@ -143,7 +143,7 @@ class TestRouteKnownNameButInactive:
                    "manager_name": "personal_admin_manager"}]
         router, mb = _make_router(active_workers=active)
         result = router.route(body="@quimby check", room_id="master_room", meta={})
-        assert "active in this room: Phyllis" in result.early_result["reply_text"]
+        assert "active now: Phyllis" in result.early_result["reply_text"]
 
 
 # ── route: active worker + body → posts to mailbox + acks ─────────
