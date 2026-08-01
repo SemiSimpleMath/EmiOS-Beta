@@ -23,11 +23,14 @@ class ScheduleItem(BaseModel):
         default="google_calendar",
         description=(
             "Short label for where this item came from / what last asserted it. "
-            "Free-form, but use compact tags so downstream readers can compare. "
+            "Use compact tags so downstream readers can compare. "
             "Examples: 'google_calendar' (recurring or one-off Google event), "
             "'user_chat' (user reported it), 'concern:<concern_title_or_id>' "
-            "(subconscious concern), 'ticket:<id>' (ticket response), 'inferred' "
-            "(derived from telemetry). When a newer signal overrides an older one, "
+            "(subconscious concern), 'inferred' (derived from telemetry). "
+            "For an item asserted by a ticket response, use 'ticket:<ticket_id>' with "
+            "the ticket_id copied VERBATIM from the Ticket Responses section — "
+            "downstream readers resolve it to the originating work, exactly like "
+            "calendar_item_id. When a newer signal overrides an older one, "
             "update source to the newer source."
         ),
     )

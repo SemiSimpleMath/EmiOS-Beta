@@ -18,7 +18,7 @@ user_context_items:
   - location_summary
   - resource_weather
   - health_status_summary
-  - resource_expected_calendar
+  - expected_schedule_view
   - resource_daily_context_generator_output
   - resource_dayflow_routine
   - active_tickets

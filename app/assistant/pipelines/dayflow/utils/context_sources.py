@@ -817,6 +817,8 @@ def _format_ticket_for_context(ticket) -> Dict[str, Any]:
         acted_on_item_ids = []
 
     return {
+        "ticket_id": str(getattr(ticket, "ticket_id", "") or ""),
+        "work_node": str(trigger_context.get("work_node") or ""),
         "title": ticket.title or "",
         "message": ticket.message or "",
         "suggestion_type": ticket.suggestion_type or "",

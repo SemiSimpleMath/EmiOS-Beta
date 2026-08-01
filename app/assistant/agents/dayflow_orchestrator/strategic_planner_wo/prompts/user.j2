@@ -14,11 +14,11 @@ Weather: {{ resource_weather.location.city }}: {{ resource_weather.current.tempe
 {%- if health_status_summary %}
 Health: {{ health_status_summary }}
 {%- endif %}
-{%- if resource_expected_calendar and resource_expected_calendar.expected_schedule %}
+{%- if expected_schedule_view %}
 
 ## TODAY'S SCHEDULE
-{%- for entry in resource_expected_calendar.expected_schedule %}
-- {{ entry.title }} {{ entry.start_local }}{% if entry.end_local %} - {{ entry.end_local }}{% endif %} ({{ entry.status }})
+{%- for entry in expected_schedule_view %}
+- {{ entry.title }} {{ entry.start_local }}{% if entry.end_local %} - {{ entry.end_local }}{% endif %} ({{ entry.status }}){% if entry.provenance %} — {{ entry.provenance }}{% endif %}
 {%- endfor %}
 {%- endif %}
 {%- if resource_daily_context_generator_output and resource_daily_context_generator_output.day_theme %}
@@ -58,7 +58,7 @@ Health: {{ health_status_summary }}
 ## TICKET REPLIES (user directives — newest first; a later reply supersedes an earlier one about the same topic)
 *The user's written words are the authoritative signal wherever present. The label is just the button they clicked: ACCEPTED = agrees with the direction; ACKNOWLEDGED = received it — the written line carries the actual verdict (it may confirm, correct, defer, or decline); DECLINED = ABANDON the related work object; SNOOZED = revisit at the stated time.*
 {%- for t in recent_ticket_replies %}
-- [{{ t.get("responded_at_local","") }}] {{ t.get("action_label","") }}: {{ t.get("title","") }}{% if t.get("user_comment") %} — user: "{{ t.get("user_comment") }}"{% endif %}{% if t.get("snooze_until_local") %} (eligible again {{ t.get("snooze_until_local") }}){% endif %}
+- [{{ t.get("responded_at_local","") }}] {{ t.get("action_label","") }}: {{ t.get("title","") }}{% if t.get("work_ref") %} [{{ t.get("work_ref") }}]{% endif %}{% if t.get("user_comment") %} — user: "{{ t.get("user_comment") }}"{% endif %}{% if t.get("snooze_until_local") %} (eligible again {{ t.get("snooze_until_local") }}){% endif %}
 {%- endfor %}
 {%- endif %}
 {%- if active_tickets %}

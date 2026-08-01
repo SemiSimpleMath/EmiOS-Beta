@@ -51,6 +51,49 @@ def _load_responded_tickets(since_utc):
     return get_responded_tickets_categorized(since_utc=since_utc, ticket_type="dayflow_orchestrator")
 
 
+def _work_status_by_id() -> dict:
+    """WorkObject id -> status, one summaries fetch. The id-chain resolvers below join
+    against this instead of asking the evaluator to reconstruct links from wording."""
+    from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
+    return {s["id"]: str(s.get("status") or "unknown")
+            for s in get_dayflow_work_store().list_work_objects()}
+
+
+def _annotate_work_refs(rows, status_by_id) -> None:
+    """Resolve each ticket-reply row's recorded work edge (ticket.trigger_context.work_node,
+    written at ticket creation) to its work object and current status. Rows without the
+    edge stay unannotated; an id that no longer resolves renders as unresolved — sink,
+    not drop."""
+    for row in rows:
+        ref = str(row.get("work_node") or "")
+        if "::" not in ref:
+            continue
+        work_id = ref.split("::", 1)[0]
+        row["work_ref"] = f"{work_id} — {status_by_id.get(work_id, 'unresolved')}"
+
+
+def _resolve_ticket_provenance(ticket_id: str, ticket_manager, status_by_id) -> str:
+    """Chase a schedule entry's verbatim ticket id to the originating work object:
+    ticket -> trigger_context.work_node -> work object -> current status, plus the
+    user's recorded response. Pure lookups on edges recorded at write time."""
+    if not ticket_id:
+        return "source ticket id empty — unresolved"
+    ticket = ticket_manager.get_ticket_by_id(ticket_id)
+    if ticket is None:
+        return f"source ticket:{ticket_id} unresolved"
+    trigger_context = getattr(ticket, "trigger_context", None)
+    ref = str(trigger_context.get("work_node") or "") if isinstance(trigger_context, dict) else ""
+    if "::" in ref:
+        work_id = ref.split("::", 1)[0]
+        out = f"outcome of {work_id} — {status_by_id.get(work_id, 'unresolved')}"
+    else:
+        out = f"from ticket {ticket_id}"
+    action = str(getattr(ticket, "user_action", "") or "").strip()
+    if action:
+        out += f"; user {action}"
+    return out
+
+
 def _abandoned_line(summary, wo) -> str:
     """One RECENTLY DROPPED entry: title + when + WHY.
 
@@ -237,8 +280,44 @@ class StrategicPlannerWoPrepNode(ControlNode):
         # acknowledged ones included — is visible with the user's words primary.
         from app.assistant.pipelines.dayflow.utils.context_sources import flatten_responded_tickets
         self.blackboard.update_state_value("recent_responded_tickets", responded)
-        self.blackboard.update_state_value("recent_ticket_replies",
-                                           flatten_responded_tickets(responded))
+        status_by_id = _work_status_by_id()
+        reply_rows = flatten_responded_tickets(responded)
+        _annotate_work_refs(reply_rows, status_by_id)
+        self.blackboard.update_state_value("recent_ticket_replies", reply_rows)
         self.blackboard.update_state_value("recent_dispatch_results",
                                            _build_recent_dispatch_results(all_items, now_utc))
         self.blackboard.update_state_value("recent_action_selector_actions", action_log)
+        self._build_expected_schedule_view(status_by_id)
+
+    def _build_expected_schedule_view(self, status_by_id) -> None:
+        """TODAY'S SCHEDULE for the evaluator with provenance resolved: an entry whose
+        `source` carries a verbatim ticket id (written by the daily_context_tracker) is
+        chased ticket -> work node -> work object -> status, and the resolved facts are
+        rendered on the entry. Deterministic lookups only — the evaluator judges what to
+        do; it is never asked whether two phrasings are the same task (the 2026-07-29
+        trash re-mint: the tracker's echo of an accepted ticket read as a bare unowned
+        ongoing activity and was re-minted as new work)."""
+        from app.assistant.ServiceLocator.service_locator import DI
+        from app.assistant.ticket_manager import get_ticket_manager
+
+        resource = DI.resource_manager.get_resource(
+            scope_context=self.blackboard.get_state_value("scope_context"),
+            resource_id="resource_expected_calendar",
+        )
+        entries = (resource or {}).get("expected_schedule") or []
+        ticket_manager = get_ticket_manager()
+        view = []
+        for entry in entries:
+            row = {
+                "title": str(entry.get("title") or ""),
+                "start_local": str(entry.get("start_local") or ""),
+                "end_local": str(entry.get("end_local") or ""),
+                "status": str(entry.get("status") or ""),
+                "provenance": "",
+            }
+            source = str(entry.get("source") or "")
+            if source.startswith("ticket:"):
+                row["provenance"] = _resolve_ticket_provenance(
+                    source[len("ticket:"):].strip(), ticket_manager, status_by_id)
+            view.append(row)
+        self.blackboard.update_state_value("expected_schedule_view", view)

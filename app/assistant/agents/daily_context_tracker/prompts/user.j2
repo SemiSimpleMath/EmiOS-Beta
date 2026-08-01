@@ -76,7 +76,7 @@
 {%- if recent_responded_tickets.accepted %}
 **ACCEPTED** (User agreed with the suggestion. Their written comment, when present, is the authoritative detail.)
 {%- for t in recent_responded_tickets.accepted %}
-- Accepted action: {{ t.message or t.title }} [at {{ t.responded_at_local }}]
+- Accepted action: {{ t.message or t.title }} [at {{ t.responded_at_local }}]{% if t.ticket_id %} [ticket_id: {{ t.ticket_id }}]{% endif %}
 {%- if t.user_comment %}
   User said: {{ t.user_comment }}
 {%- endif %}
@@ -85,7 +85,7 @@
 {%- if recent_responded_tickets.acknowledged %}
 **ACKNOWLEDGED** (User received the message. Their written comment carries the actual verdict — it may confirm, correct, defer, or decline.)
 {%- for t in recent_responded_tickets.acknowledged %}
-- {{ t.message or t.title }} [at {{ t.responded_at_local }}]
+- {{ t.message or t.title }} [at {{ t.responded_at_local }}]{% if t.ticket_id %} [ticket_id: {{ t.ticket_id }}]{% endif %}
 {%- if t.user_comment %}
   User said: {{ t.user_comment }}
 {%- endif %}
@@ -94,7 +94,7 @@
 {%- if recent_responded_tickets.declined %}
 **DECLINED** (Do not resuggest unless urgent.)
 {%- for t in recent_responded_tickets.declined %}
-- {{ t.message or t.title }} [at {{ t.responded_at_local }}]
+- {{ t.message or t.title }} [at {{ t.responded_at_local }}]{% if t.ticket_id %} [ticket_id: {{ t.ticket_id }}]{% endif %}
 {%- if t.user_comment %}
   User comment: {{ t.user_comment }}
 {%- endif %}
@@ -103,7 +103,7 @@
 {%- if recent_responded_tickets.snoozed %}
 **SNOOZED** (Wait until eligible time.)
 {%- for t in recent_responded_tickets.snoozed %}
-- {{ t.message or t.title }} [Snoozed at {{ t.responded_at_local }}{% if t.snooze_until_local %}, Eligible again at {{ t.snooze_until_local }}{% endif %}]
+- {{ t.message or t.title }} [Snoozed at {{ t.responded_at_local }}{% if t.snooze_until_local %}, Eligible again at {{ t.snooze_until_local }}{% endif %}]{% if t.ticket_id %} [ticket_id: {{ t.ticket_id }}]{% endif %}
 {%- if t.user_comment %}
   User comment: {{ t.user_comment }}
 {%- endif %}
