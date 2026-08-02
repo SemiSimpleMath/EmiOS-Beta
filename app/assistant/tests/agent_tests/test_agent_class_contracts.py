@@ -1,3 +1,5 @@
+import app.assistant.tests.test_setup  # noqa: F401  — Agent.__init__ needs DI wired; without this the file only passed when a co-collected module bootstrapped DI first
+
 from app.assistant.agent_registry.agent_registry import AgentRegistry
 from app.assistant.agent_runtime.factories.agent_components_factory import AgentComponentsFactory
 from app.assistant.agent_runtime.types import AgentComponents
