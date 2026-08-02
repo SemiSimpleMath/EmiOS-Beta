@@ -29,10 +29,15 @@ def persist_steward_output(store, output: Dict[str, Any]) -> Dict[str, Any]:
             continue
         if not work_id:
             # CREATE a new work object — just the goal; the worker decomposes it when advanced.
+            # Concern provenance rides constraints so closure can back-propagate the
+            # outcome to the register (concern_feedback.propagate_work_outcome).
+            concern_refs = [str(b).strip() for b in (spec.get("based_on") or [])
+                            if str(b).strip().startswith("concern:")]
             wo = store.apply("create_work_object", {
                 "title": objective[:80],
                 "goal_content": objective,
                 "satisfied_when_kind": "all_owned_children_done",
+                "constraints": {"concern_refs": concern_refs} if concern_refs else {},
             }, actor="steward")
             store.apply("set_status", {
                 "work_id": wo.id, "node_id": wo.goal_node_id, "status": "dispatched",
@@ -51,12 +56,15 @@ def persist_steward_output(store, output: Dict[str, Any]) -> Dict[str, Any]:
             except Exception as e:
                 logger.warning("persist: could not change work object %s: %s", work_id, e)
 
+    from app.assistant.subconscious.concern_feedback import propagate_work_outcome
+
     completed: List[str] = []
     for work_id in output.get("complete_work_ids", []) or []:
         work_id = str(work_id).strip()
         try:
             store.apply("set_work_status", {"work_id": work_id, "status": "done"}, actor="steward")
             completed.append(work_id)
+            propagate_work_outcome(store, work_id, "done")
         except Exception as e:
             logger.warning("persist: could not complete work object %s: %s", work_id, e)
 
@@ -66,6 +74,7 @@ def persist_steward_output(store, output: Dict[str, Any]) -> Dict[str, Any]:
         try:
             store.apply("set_work_status", {"work_id": work_id, "status": "abandoned"}, actor="steward")
             abandoned.append(work_id)
+            propagate_work_outcome(store, work_id, "abandoned")
         except Exception as e:
             logger.warning("persist: could not abandon work object %s: %s", work_id, e)
 

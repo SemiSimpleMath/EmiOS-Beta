@@ -35,17 +35,17 @@ Health: {{ health_status_summary }}
 {%- if _subc.active_concerns_this_week %}
 
 ## SUBCONSCIOUS — ACTIVE CONCERNS (this week)
-*A concern routed to the dayflow orchestrator may deserve a work object — judge whether it is worth acting on (a one-step nudge or multi-step work).*
+*A concern routed to the dayflow orchestrator may deserve a work object — judge whether it is worth acting on (a one-step nudge or multi-step work). When you turn one into a work object, cite its [concern:...] id in based_on — that is how the outcome reaches the subconscious.*
 {%- for c in _subc.active_concerns_this_week %}
-- [{{ c.severity }}/{{ c.horizon }}] {{ c.title }} ({{ c.subject }}){% if c.notes %} — {{ c.notes }}{% endif %}
+- [{{ c.severity }}/{{ c.horizon }}] {{ c.title }} ({{ c.subject }}) [concern:{{ c.concern_id[:8] }}]{% if c.notes %} — {{ c.notes }}{% endif %}
 {%- endfor %}
 {%- endif %}
 {%- if _subc.active_concerns_longer_horizon %}
 
 ## SUBCONSCIOUS — LONGER-HORIZON CONCERNS
-*Background awareness; usually not today's work — only create a work object if the horizon is collapsing.*
+*Background awareness; usually not today's work — only create a work object if the horizon is collapsing. Cite the [concern:...] id in based_on when you do.*
 {%- for c in _subc.active_concerns_longer_horizon %}
-- [{{ c.severity }}/{{ c.horizon }}] {{ c.title }} ({{ c.subject }})
+- [{{ c.severity }}/{{ c.horizon }}] {{ c.title }} ({{ c.subject }}) [concern:{{ c.concern_id[:8] }}]
 {%- endfor %}
 {%- endif %}
 {%- if resource_dayflow_routine %}

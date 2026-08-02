@@ -529,6 +529,89 @@ def annotate_concern_answer(concern_id: str, *, question_text: str, answer_text:
     return False
 
 
+def apply_work_outcome(
+    concern_ref: str,
+    *,
+    work_id: str,
+    outcome: str,
+    user_words: str = "",
+    register_path: Optional[Path] = None,
+) -> str:
+    """Deterministic back-propagation of a work-object outcome onto its concern
+    (2026-08-01 audit: outcomes never reached the register — 19 AC-service
+    re-mints, 4 after an explicit user decline).
+
+    ``concern_ref`` is the full concern_id or the rendered short form
+    ``concern:<prefix>`` — resolved by unique prefix against the register.
+    Applied by outcome:
+      done                      -> move active->addressing, journal "ADDRESSED by <work_id>"
+      abandoned + user words    -> journal the words verbatim, park DORMANT with
+                                   user_declined_at_utc (projection stops pushing it)
+      abandoned, no user words  -> journal only (a system drop must not silence a
+                                   real concern)
+    Returns what happened: 'addressing' | 'user_declined' | 'journaled' |
+    'unresolved'. Lives with the other register writers: one lock, one atomic save.
+    """
+    path = register_path or (get_repo_root() / _REGISTER_REL)
+    ref = str(concern_ref or "").strip()
+    if ref.startswith("concern:"):
+        ref = ref[len("concern:"):].strip()
+    if not ref:
+        return "unresolved"
+
+    with _REGISTER_LOCK:
+        if not path.is_file():
+            logger.warning("[persist.work_outcome] no register at %s — %s unresolved", path, concern_ref)
+            return "unresolved"
+        register = _load_register(path)
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        matches = []  # (bucket, index, concern)
+        for bucket in ("active", "addressing", "dormant", "resolved"):
+            for i, c in enumerate(register.get(bucket) or []):
+                cid = str(c.get("concern_id") or "")
+                if cid == ref or (len(ref) >= 8 and cid.startswith(ref)):
+                    matches.append((bucket, i, c))
+        if len(matches) != 1:
+            logger.warning(
+                "[persist.work_outcome] concern ref %r resolved to %d concern(s) — unresolved",
+                concern_ref, len(matches))
+            return "unresolved"
+        bucket, index, concern = matches[0]
+
+        def _journal(line: str) -> None:
+            concern["reinforcement_notes"] = (
+                (concern.get("reinforcement_notes") or "") + f"\n[{now_iso}] {line}")
+            _trim_journal(concern)
+
+        if outcome == "abandoned" and user_words.strip():
+            words = user_words.strip().replace("\n", " ")[:300]
+            _journal(f'USER DECLINED via {work_id}: "{words}"')
+            concern["user_declined_at_utc"] = now_iso
+            concern["last_disposition_at_count"] = int(concern.get("reinforcement_count") or 0)
+            if bucket in ("active", "addressing"):
+                register[bucket].pop(index)
+                register.setdefault("dormant", []).append(concern)
+            result = "user_declined"
+        elif outcome == "done":
+            _journal(f"ADDRESSED by {work_id} (done)")
+            concern["last_disposition_at_count"] = int(concern.get("reinforcement_count") or 0)
+            if bucket == "active":
+                register["active"].pop(index)
+                concern["addressing_since_utc"] = now_iso
+                register.setdefault("addressing", []).append(concern)
+            result = "addressing"
+        else:
+            _journal(f"dayflow {outcome} {work_id} (no user words recorded)")
+            result = "journaled"
+
+        register["last_updated_utc"] = now_iso
+        _save_register(path, register)
+        logger.info("[persist.work_outcome] %s -> %s (%s, outcome=%s)",
+                    work_id, concern.get("concern_id"), result, outcome)
+        return result
+
+
 _SEVERITY_LADDER = ["low", "medium", "high"]
 
 

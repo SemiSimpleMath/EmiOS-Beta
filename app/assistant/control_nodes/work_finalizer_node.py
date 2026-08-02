@@ -102,13 +102,16 @@ class WorkFinalizerNode(ControlNode):
 
     def _apply(self, store, wo, node, data, verdict) -> dict:
         """Carry out the verdict on the graph. done->closed is the only path to the satisfied terminal."""
+        from app.assistant.subconscious.concern_feedback import propagate_work_outcome
         if verdict == "resolve":
             disp = str(data.get("resolve_disposition") or "close").strip().lower()
             if disp == "abandon":
                 store.apply("set_work_status", {"work_id": wo.id, "status": "abandoned"}, actor="finalizer")
+                propagate_work_outcome(store, wo.id, "abandoned")
                 return {"note": "resolve -> WO abandoned"}
             store.apply("set_status", {"work_id": wo.id, "node_id": node.id, "status": "closed"}, actor="finalizer")
             store.apply("set_work_status", {"work_id": wo.id, "status": "done"}, actor="finalizer")
+            propagate_work_outcome(store, wo.id, "done")
             return {"note": "resolve -> WO done"}
         # proceed AND amend both close the node (its result is consumed); amend additionally re-plans.
         store.apply("set_status", {"work_id": wo.id, "node_id": node.id, "status": "closed"}, actor="finalizer")

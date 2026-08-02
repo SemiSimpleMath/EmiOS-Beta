@@ -32,7 +32,9 @@ def apply_adjudication(store, work_id, disposition, ask="", actor="work_repair")
         raise ValueError(f"unknown disposition {disposition!r}")
 
     if disposition == "abandon_goal":
+        from app.assistant.subconscious.concern_feedback import propagate_work_outcome
         store.apply("set_work_status", {"work_id": work_id, "status": "abandoned"}, actor=actor)
+        propagate_work_outcome(store, work_id, "abandoned")
         logger.info("work_repair[%s]: abandon_goal", work_id)
         return {"work_id": work_id, "disposition": disposition, "targets": []}
 
