@@ -155,37 +155,125 @@ def _port_is_already_serving(port: int) -> bool:
             pass
 
 
-def _refuse_duplicate_start(port: int) -> None:
-    if not _port_is_already_serving(port):
+def _find_incumbents(port: int) -> dict:
+    """Live EmiOS processes other than ourselves: any python running this
+    project's run_flask.py / start.py (by cmdline or cwd), plus whatever is
+    LISTENING on our port. Excludes this process and its ancestors (start.py
+    launches run_flask.py as a child — the parent is not an incumbent).
+
+    This exists because orphaned instances are invisible: 2026-08-02 found a
+    run_flask pair alive since 07-31 and start.py launchers alive since 07-15,
+    silently holding the port while every user restart no-op'd against them.
+    """
+    import psutil
+
+    self_and_ancestors = {os.getpid()}
+    try:
+        for ancestor in psutil.Process().parents():
+            self_and_ancestors.add(ancestor.pid)
+    except psutil.Error:
+        pass
+
+    project = str(Path(__file__).resolve().parent).lower()
+    incumbents: dict = {}
+    for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+        try:
+            if proc.pid in self_and_ancestors:
+                continue
+            if "python" not in (proc.info.get("name") or "").lower():
+                continue
+            cmdline = " ".join(proc.info.get("cmdline") or [])
+            low = cmdline.lower().replace("/", "\\")
+            if "run_flask.py" not in low and "start.py" not in low:
+                continue
+            in_project = project in low
+            if not in_project:
+                try:
+                    in_project = str(proc.cwd()).lower() == project
+                except psutil.Error:
+                    in_project = False
+            if in_project:
+                incumbents[proc.pid] = cmdline
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+
+    try:
+        for conn in psutil.net_connections(kind="tcp"):
+            if (conn.laddr and conn.laddr.port == port
+                    and conn.status == psutil.CONN_LISTEN and conn.pid
+                    and conn.pid not in self_and_ancestors
+                    and conn.pid not in incumbents):
+                try:
+                    incumbents[conn.pid] = " ".join(psutil.Process(conn.pid).cmdline())
+                except psutil.Error:
+                    incumbents[conn.pid] = f"(pid {conn.pid} listening on :{port})"
+    except psutil.Error:
+        pass
+    return incumbents
+
+
+def _handle_duplicate_start(port: int, *, replace: bool) -> None:
+    """Single-instance guard. Default: refuse loudly, naming the live PIDs.
+    ``--replace``: terminate the incumbents, verify the port is free, take over
+    — so a restart is one gesture instead of taskkill archaeology."""
+    incumbents = _find_incumbents(port)
+    serving = _port_is_already_serving(port)
+    if not incumbents and not serving:
         return
-    is_windows = sys.platform == "win32"
-    find_pid_cmd = (
-        f'netstat -ano | findstr :{port}' if is_windows
-        else f'lsof -i :{port}'
-    )
-    kill_cmd = (
-        'taskkill /PID <pid> /F' if is_windows
-        else 'kill <pid>'
-    )
-    print(
-        f"\n❌ Port {port} is already in use — another EmiOS instance is likely\n"
-        f"   running. Refusing to start a second one (would double up routines,\n"
-        f"   race the Ring watermark file, and contend on the SQLite DB).\n\n"
-        f"   To find and stop the existing process:\n"
-        f"     {find_pid_cmd}\n"
-        f"     {kill_cmd}\n\n"
-        f"   Or run on a different port:\n"
-        f"     set EMI_PORT=8001    (Windows)\n"
-        f"     export EMI_PORT=8001 (Mac/Linux)\n",
-        file=sys.stderr,
-    )
-    sys.exit(1)
+
+    if not replace:
+        listing = "\n".join(
+            f"     PID {pid}: {cmd[:110]}" for pid, cmd in sorted(incumbents.items())
+        ) or f"     (port {port} is served but the owner could not be identified)"
+        print(
+            f"\n❌ EmiOS is already running — refusing to start a second instance\n"
+            f"   (would double up routines and contend on the SQLite DB).\n"
+            f"   Live EmiOS processes:\n{listing}\n\n"
+            f"   To restart (stops the old instance first):\n"
+            f"     restart.bat                          (Windows)\n"
+            f"     python run_flask.py --replace\n",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    import time
+    import psutil
+
+    print(f"--replace: stopping {len(incumbents)} existing EmiOS process(es): "
+          f"{sorted(incumbents)}")
+    procs = []
+    for pid in incumbents:
+        try:
+            procs.append(psutil.Process(pid))
+        except psutil.Error:
+            pass
+    for proc in procs:
+        try:
+            proc.terminate()
+        except psutil.Error:
+            pass
+    _gone, alive = psutil.wait_procs(procs, timeout=10)
+    for proc in alive:
+        try:
+            proc.kill()
+        except psutil.Error:
+            pass
+    psutil.wait_procs(alive, timeout=5)
+
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and _port_is_already_serving(port):
+        time.sleep(0.3)
+    if _port_is_already_serving(port):
+        print(f"\n❌ --replace could not free port {port} — something still "
+              f"serves it. Not starting a duplicate.\n", file=sys.stderr)
+        sys.exit(1)
+    print("--replace: old instance stopped; taking over.")
 
 
 if __name__ == '__main__':
     _port = _resolve_port()
     _host = _resolve_host()
-    _refuse_duplicate_start(_port)
+    _handle_duplicate_start(_port, replace="--replace" in sys.argv[1:])
 
     from app.create_app import create_app
 
