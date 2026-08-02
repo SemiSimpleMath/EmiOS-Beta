@@ -673,8 +673,10 @@ def _run_async(coro):
         raise
 
 
-async def _kasa_load_devices(hosts: List[str], timeout_seconds: int) -> List[Any]:
+async def _kasa_load_devices(hosts: List[str], timeout_seconds: int) -> tuple:
     """Load Kasa devices from an EXPLICIT host list. Never scans the LAN.
+    Returns ``(devices, unreachable)`` — unreachable entries are
+    ``{"host", "error"}`` dicts reported in every caller's response.
 
     Architectural rule: Kasa lights are only ever the devices the user
     explicitly configured AS Kasa lights (via the lights settings UI).
@@ -686,12 +688,12 @@ async def _kasa_load_devices(hosts: List[str], timeout_seconds: int) -> List[Any
     `_kasa_scan_lan` for the settings page; it does NOT participate
     in the runtime data path.
 
-    Empty hosts → returns []. The caller decides whether that's an
+    Empty hosts → returns ([], []). The caller decides whether that's an
     error (e.g. set_light_power with nothing configured) or a clean
     "no lights" response (list_lights with nothing configured).
     """
     if not hosts:
-        return []
+        return [], []
 
     try:
         from kasa import Discover
@@ -703,18 +705,26 @@ async def _kasa_load_devices(hosts: List[str], timeout_seconds: int) -> List[Any
         )
 
     devices: List[Any] = []
+    unreachable: List[Dict[str, str]] = []
     for host in hosts:
+        # One dead switch must not brick the whole house (2026-08-01: a
+        # discovery timeout on one dimmer made even broadcast lights-off fail
+        # with HTTP 400). Unreachable hosts are collected and REPORTED in every
+        # response — degraded loudly, never silently. Callers decide whether
+        # zero reachable devices is fatal.
         try:
             device = await Discover.discover_single(host, timeout=timeout_seconds)
         except Exception as e:
             logger.error("Kasa discover_single failed for host '%s': %s", host, e)
             logger.debug("Kasa discover_single exception details", exc_info=True)
-            raise
+            unreachable.append({"host": host, "error": str(e)})
+            continue
         if device is None:
-            raise RuntimeError(f"Kasa device not found at host '{host}'.")
+            unreachable.append({"host": host, "error": "no device at host"})
+            continue
         await device.update()
         devices.append(device)
-    return devices
+    return devices, unreachable
 
 
 async def _kasa_scan_lan(timeout_seconds: int) -> List[Any]:
@@ -759,6 +769,19 @@ async def _kasa_scan_lan(timeout_seconds: int) -> List[Any]:
     return devices
 
 
+def _annotate_unreachable(
+    unreachable: List[Dict[str, str]],
+    host_alias_map: Optional[Dict[str, str]],
+) -> List[Dict[str, str]]:
+    """Attach the user-configured alias to each unreachable host so reports
+    say 'Living room light (192.168.4.21)' instead of a bare IP."""
+    alias_map = host_alias_map or {}
+    return [
+        {**entry, "alias": alias_map.get(entry.get("host", ""), "")}
+        for entry in unreachable
+    ]
+
+
 async def _kasa_list_lights(
     *,
     hosts: List[str],
@@ -766,10 +789,11 @@ async def _kasa_list_lights(
     host_alias_map: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """List configured Kasa lights. Returns empty list when nothing's
-    configured — that's a clean 'no lights' state, not an error."""
-    devices = await _kasa_load_devices(hosts, timeout_seconds)
+    configured — that's a clean 'no lights' state, not an error.
+    Unreachable hosts are listed alongside, never hidden."""
+    devices, unreachable = await _kasa_load_devices(hosts, timeout_seconds)
     lights = [_kasa_identity(device, host_alias_map=host_alias_map) for device in devices]
-    return {"lights": lights}
+    return {"lights": lights, "unreachable": _annotate_unreachable(unreachable, host_alias_map)}
 
 
 async def _kasa_discover_hosts(*, timeout_seconds: int) -> Dict[str, Any]:
@@ -801,13 +825,22 @@ async def _kasa_set_light_power(
             "No Kasa lights are configured. Add light IPs in "
             "Settings → Smart home → Lights before issuing power commands."
         )
-    devices = await _kasa_load_devices(hosts, timeout_seconds)
+    devices, unreachable = await _kasa_load_devices(hosts, timeout_seconds)
+    unreachable = _annotate_unreachable(unreachable, host_alias_map)
+    if not devices:
+        detail = "; ".join(
+            f"{u.get('alias') or u.get('host')}: {u.get('error')}" for u in unreachable)
+        raise RuntimeError(f"No Kasa lights reachable — nothing was changed. Unreachable: {detail}")
     selected = [
         d for d in devices
         if _kasa_target_match(d, light_id=light_id, room=room, host_alias_map=host_alias_map)
     ]
     if not selected:
-        raise RuntimeError("No lights matched the requested selectors (light_id/room).")
+        hint = ""
+        if unreachable:
+            hint = " Unreachable (the target may be among these): " + ", ".join(
+                f"{u.get('alias') or u.get('host')}" for u in unreachable)
+        raise RuntimeError(f"No reachable lights matched the requested selectors (light_id/room).{hint}")
 
     changed = []
     for device in selected:
@@ -821,7 +854,7 @@ async def _kasa_set_light_power(
             await device.turn_off()
         await device.update()
         changed.append(_kasa_identity(device, host_alias_map=host_alias_map))
-    return {"changed": changed, "state": state_norm}
+    return {"changed": changed, "state": state_norm, "unreachable": unreachable}
 
 
 async def _kasa_set_light_brightness(
@@ -840,13 +873,18 @@ async def _kasa_set_light_brightness(
             "No Kasa lights are configured. Add light IPs in "
             "Settings → Smart home → Lights before issuing brightness commands."
         )
-    devices = await _kasa_load_devices(hosts, timeout_seconds)
+    devices, unreachable = await _kasa_load_devices(hosts, timeout_seconds)
+    unreachable = _annotate_unreachable(unreachable, host_alias_map)
+    if not devices:
+        detail = "; ".join(
+            f"{u.get('alias') or u.get('host')}: {u.get('error')}" for u in unreachable)
+        raise RuntimeError(f"No Kasa lights reachable — nothing was changed. Unreachable: {detail}")
     selected = [
         d for d in devices
         if _kasa_target_match(d, light_id=light_id, room=room, host_alias_map=host_alias_map)
     ]
     if not selected:
-        raise RuntimeError("No lights matched the requested selectors (light_id/room).")
+        raise RuntimeError("No reachable lights matched the requested selectors (light_id/room).")
 
     changed = []
     for device in selected:
@@ -858,7 +896,7 @@ async def _kasa_set_light_brightness(
         await device.set_brightness(brightness_pct)
         await device.update()
         changed.append(_kasa_identity(device, host_alias_map=host_alias_map))
-    return {"changed": changed, "brightness_pct": brightness_pct}
+    return {"changed": changed, "brightness_pct": brightness_pct, "unreachable": unreachable}
 
 
 def _lights_dispatch(command: str, arguments: Dict[str, Any]) -> Dict[str, Any]:

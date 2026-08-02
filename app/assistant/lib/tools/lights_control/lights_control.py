@@ -62,9 +62,19 @@ class LightsControlTool(BaseTool):
                 arguments=arguments,
                 request_id=tool_message.request_id,
             )
+            content = f"Lights command '{command}' executed successfully."
+            unreachable = (response_data or {}).get("unreachable") if isinstance(response_data, dict) else None
+            if unreachable:
+                names = ", ".join(
+                    str(u.get("alias") or u.get("host") or "unknown") for u in unreachable)
+                changed = (response_data or {}).get("changed")
+                done = f" on {len(changed)} device(s)" if isinstance(changed, list) else ""
+                content = (f"Lights command '{command}' executed{done}. "
+                           f"Unreachable (skipped): {names}. The job is done for every "
+                           f"reachable light — report the unreachable device, do not retry.")
             return ToolResult(
                 result_type="smart_home",
-                content=f"Lights command '{command}' executed successfully.",
+                content=content,
                 data=response_data,
             )
         except Exception as e:
