@@ -145,7 +145,7 @@ Display names are resolved via `SlackTool.resolve_speaker_name` against a proces
 
 ### Channel ↔ room mapping
 
-Room ids are auto-derived: `slack/<channel_id>` (e.g. `slack/C08AB0R54HM`) via `make_slack_room_id` (`app/assistant/rooms/room_bootstrap.py:43`). On first contact, `ensure_slack_room` clones template files from `app/assistant/rooms/_templates/slack_standard/` into `app/assistant/rooms/slack/<channel_id>/` (identity, conversation, safety, policy, permissions, access). Templates substitute `{{ROOM_ID}}`, `{{CHANNEL_ID}}`, `{{DISPLAY_NAME}}`, `{{PRIMARY_USER_NAME}}`.
+Room ids are auto-derived: `slack/<channel_id>` (e.g. `slack/C08AB0R54HM`) via `make_slack_room_id` (`app/assistant/rooms/room_bootstrap.py:43`). On first contact, `ensure_slack_room` clones the template files from `app/assistant/rooms/_templates/slack_standard/` into `app/assistant/rooms/slack/<channel_id>/` — just `ROOM.md` + `scope.yaml`; the ROOM.md frontmatter carries the identity/policy/permissions/access blocks that used to be separate JSON files. Templates substitute `{{ROOM_ID}}`, `{{CHANNEL_ID}}`, `{{DISPLAY_NAME}}`, `{{PRIMARY_USER_NAME}}`.
 
 `configs/slack_room.json` is the simulator/poller-side config (not used by the events webhook — the webhook is config-driven through env vars). Keys:
 
@@ -245,13 +245,13 @@ Each delegates to `surface_handler_factory.get(<surface>).handle(self, ...)`. Th
 | `global_blackboard_only`             | Turn messages live in in-memory blackboard history only. Lost on restart. |
 | `global_blackboard_and_unified_log`  | Turn messages also `save_to_unified_db` (the SQLite `unified_log_2026` table). |
 
-The room's `policy.json` can further block unified-log persistence even when the call asks for it (`room_policy_allows_unified_log` checks `policy.write_unified_log` / `retention.write_unified_log` / `persistence.write_unified_log` / `ingestion.write_unified_log`). Result returned to the caller as `(persist_unified_log, persist_reason)` where reason is `mode_blackboard_only` / `room_policy_blocked` / `allowed`.
+The room's `policy:` block (ROOM.md frontmatter) can further block unified-log persistence even when the call asks for it (`room_policy_allows_unified_log` checks `policy.write_unified_log` / `retention.write_unified_log` / `persistence.write_unified_log` / `ingestion.write_unified_log`). Result returned to the caller as `(persist_unified_log, persist_reason)` where reason is `mode_blackboard_only` / `room_policy_blocked` / `allowed`.
 
 ### Cross-room sharing rules
 
-`access.json` per room can declare `shared_chat_room_ids: ["master_room", ...]`. `RoomHistoryBuilder.build_messages` honors this when seeding the room manager's history — messages from listed rooms are pulled in alongside the room's own messages, and tagged with `metadata.cross_room_tf = true` and `metadata.origin_room_id = <other_room>` so the agent prompt formatter can render them differently. `room_resource_loader.py:181` reads the access file and exposes the list as `room_shared_chat_room_ids` on the room context dict.
+A room's `access:` block (ROOM.md frontmatter) can declare `shared_chat_room_ids: ["master_room", ...]`. `RoomHistoryBuilder.build_messages` honors this when seeding the room manager's history — messages from listed rooms are pulled in alongside the room's own messages, and tagged with `metadata.cross_room_tf = true` and `metadata.origin_room_id = <other_room>` so the agent prompt formatter can render them differently. `app/assistant/rooms/room_resource_loader.py` reads the access block and exposes the list as `room_shared_chat_room_ids` on the room context dict.
 
-> Note: master_room's `access.json` does NOT itself declare `shared_chat_room_ids`. The cross-pollination is one-way — child rooms can pull master_room context, but master_room reads only its own history. (master_room access uses `"allowed_global_resources": ["all"]` and `"rag_scopes": ["chat", "memory"]` instead.)
+> Note: master_room's access block does NOT itself declare `shared_chat_room_ids`. The cross-pollination is one-way — child rooms can pull master_room context, but master_room reads only its own history. (master_room access uses `"allowed_global_resources": ["all"]` and `"rag_scopes": ["chat", "memory"]` instead.)
 
 ## Special inbound modes
 
