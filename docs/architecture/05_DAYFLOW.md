@@ -56,7 +56,13 @@ concurrency comes from job threads overlapping ACROSS ticks, with every pass see
 **Creation.** The evaluator judges the portfolio + new intake each tick and emits only WHAT changed:
 new/changed objectives (with a prose `rationale` brief for the architect and `based_on` provenance),
 `replan_work_ids`, `complete_work_ids`, `abandon_work_ids`. Consumed intake items are closed
-(`converted_to_work_object:<id>`) and their summaries folded into the goal content.
+(`converted_to_work_object:<id>`) and their summaries folded into the goal content. Its context is
+id-chain annotated (2026-08-01): ticket replies render with their resolved work object and status
+(`[work_x — done]` via `trigger_context.work_node`), and TODAY'S SCHEDULE renders as
+`expected_schedule_view` with provenance chased ticket → node → work object ("outcome of work_x —
+done; user willdo") — the tracker copies verbatim ticket ids into schedule-item `source`, and the
+prep node does the joins deterministically; the model judges, it never does record linkage.
+Subconscious concerns render with `[concern:<prefix>]` ids for citation in `based_on`.
 
 **Decomposition.** The architect turns one goal into 1-5 subtask nodes under the goal node, with
 `depends_on` edges and at most one wake primitive per node:
@@ -66,8 +72,8 @@ A node whose goal is to reach the user is written plainly ("Tell/Ask the user X"
 decides delivery, the architect never picks channels. On re-plan the architect emits a DELTA: new nodes
 plus `abandon_node_ids` for moot branches (pruned recursively, finished nodes kept as a record).
 
-**Readiness and promotion.** `is_ready` (substrate, deterministic) = status in proposed/waiting +
-`wake_at` passed + all `depends_on` satisfied. The state_mover persist node promotes every ready node to
+**Readiness and promotion.** `is_ready` (substrate, deterministic) = status in
+proposed/waiting/actionable + `wake_at` passed + all `depends_on` satisfied. The state_mover persist node promotes every ready node to
 `actionable`; the state_mover LLM may HOLD a few (`held_work_nodes` with `reactivate_at`) for quiet
 hours / meetings / user-away — the worst LLM failure is "acted when it could have waited", never a stuck
 node. External-event (`wake_ref`) nodes are never promoted; the state_mover wakes them via `node_wakes`
@@ -99,6 +105,17 @@ AMEND re-plans same-tick) reads the node's full result against the whole work ob
 verdict: PROCEED (close it — only `closed` counts toward the goal), AMEND (close + re-plan with a
 revised intent), or RESOLVE (the goal itself is settled: complete or abandon the work object). When all
 of the goal's children are closed, the store's rollup completes the work object.
+
+**Closure is a transition with obligations (2026-07-31).** Entering `done`/`abandoned` — via the
+steward, finalizer, or repair — cascade-abandons every still-startable node
+(proposed/actionable/waiting/failed) and clears its wakes, so a closed object can never fire again;
+`WorkObject.validate()` enforces the invariant (a terminal object holding a startable node is a
+write-time error), and `repair_terminal_zombies()` healed pre-cascade rows at boot. Motivation: a
+`done` object's leftover `waiting` node kept an armed timer and ghost-ticketed the user a day later.
+If the closed work object carries `concern:` provenance (`constraints.concern_refs`, forwarded from
+the evaluator's `based_on`), the outcome — with the user's recorded words — back-propagates to the
+subconscious concerns register and triggers a cooldown-guarded noticer rerun
+(`subconscious/concern_feedback.py`, 2026-08-01).
 
 **Failure.** A failed node blocks its goal until work_repair adjudicates: ESCALATE (re-issue as an ask —
 the user does/provides what the assistant cannot), RETRY (transient, or the needed info arrived), or
