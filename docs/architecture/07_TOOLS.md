@@ -21,7 +21,7 @@ lib/core_tools/weather_tool/
 ```
 
 `ToolRegistry.load_prompts` loads **only** `<tool>_description.j2` as a Jinja
-template — there are 130 of them and zero `<tool>_args.j2` / `<tool>_select.j2`
+template — there are ~134 of them and zero `<tool>_args.j2` / `<tool>_select.j2`
 in the tree. Argument-fill guidance that used to live in `<tool>_args.j2` now
 lives in the contract's `arguments_prompt` string, served verbatim by
 `get_tool_arguments_prompt()`.
@@ -86,6 +86,7 @@ Examples currently shipped under `lib/tools/`:
 | `personal_admin_manager` | `personal_admin_manager` | Email / contacts / personal-data ops |
 | `playwright_manager` | `playwright_manager` | Browser automation (Playwright MCP) |
 | `web_manager` | `web_manager` | Web research + the `web_*` snapshot-driven automation family |
+| `work_web_manager` | `work_web_manager` | Graph-mode web worker (work-object nodes; display name "Webby (graph)") |
 | `http_manager` | `http_manager` | REST/JSON API work via `http_request` |
 | `bash_manager` | `bash_manager` | Shell command execution |
 | `sandbox_manager` | `sandbox_manager` | Sandboxed code execution |
