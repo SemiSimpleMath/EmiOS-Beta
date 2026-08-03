@@ -33,8 +33,7 @@ Route based on blackboard state:
   - Manages scope creation, approval flows, MCP tool execution
   - Creates `blackboard.push_call_context()` for agent-to-agent calls
   - Surface-specific subclasses route a single room's dispatch: `chat_tool_caller.py`,
-    `dayflow_tool_caller.py`, `master_room_tool_caller.py` (shared helpers in
-    `_tool_caller_util.py`).
+    `master_room_tool_caller.py` (shared helpers in `_tool_caller_util.py`).
 
 - **`tool_result_handler.py`** — Processes tool results and pops call context
 - **`tool_approve_node.py`** (`ToolApproveNode`) — Resolves a tool's approval gate
@@ -42,7 +41,6 @@ Route based on blackboard state:
 
 ### Data Transform Nodes
 
-- **`action_result_normalizer_node.py`** — Converts tool outputs to standard format
 - **`view_materializer_node.py`** — Builds views from state
 - **`task_compile_metadata_node.py`** — Builds task metadata
 - **`task_compile_final_output_node.py`** — Compiles final task output
@@ -61,12 +59,34 @@ Route based on blackboard state:
 - **`graceful_exit_control_node.py`** — Handles clean exits
 - **`manager_exit_node.py`** — Multi-manager exit coordination
 
-### Dayflow-Specific Nodes
+### Dayflow / Work-Object Nodes
 
-- **`dayflow_switchboard_arguments_node.py`** — Validates action, persists dispatch records (`action_dispatch:UUID` items), stamps every acted-on item to `state="dispatched"` with `dispatched_at`, injects `trigger_context.acted_on_item_ids` into the outgoing tool arguments, then routes to tool
-- **`post_room_finalize_node.py`** — Closes acted_on items with `state="closed"`, persists state mutations, writes action log entries, materializes plan synopses
-- **`fast_tick_promoter_node.py`** — Fast-tick deterministic promoter (advances items without a full agent pass)
-- **`dag_executor_node.py` / `dag_manager_control_node.py`** (`DagExecutorNode` / `DagManagerControlNode`) — Drive DAG-shaped multi-step execution
+The work-object cutover (2026-06) replaced the item-dispatch lane
+(`dayflow_switchboard_arguments_node`, `dayflow_tool_caller`,
+`action_result_normalizer_node` — all deleted) with the work-object tick
+pipeline. Its control nodes:
+
+- **`strategic_planner_wo_prep_node.py` / `_persist_node.py`** — build the
+  evaluator's context (portfolio, ticket replies with resolved work refs,
+  `expected_schedule_view` with id-chain provenance) / persist its verdicts
+  (mint/change/complete/abandon via `work_persist`, consume cited intake items,
+  forward `concern:` refs onto the work object)
+- **`work_finalizer_node.py`** — judges each completed node's result; sole
+  producer of the `closed` terminal; closure propagates concern outcomes
+- **`work_architect_node.py`** — per-goal DAG decomposition + re-plan
+- **`work_repair_node.py`** — adjudicates failed nodes (retry / escalate / abandon)
+- **`work_node_dispatch_node.py` / `work_node_materializer_node.py`** — dispatch a
+  ready node (job thread or ticket) / record results and ticket replies on the graph
+- **`workobject_render_node.py`** — renders work-object views
+- **`state_mover_prep_node.py` / `_persist_node.py`** — is_ready promotion + HOLD
+- **`intake_triage_prep_node.py` / `triage_persist_node.py`**,
+  **`context_enricher_prep_node.py` / `_persist_node.py`** — intake triage and
+  enrichment prep/persist pairs
+- **`post_room_finalize_node.py`** — closes acted_on items, persists state
+  mutations, writes action log entries
+- **`fast_tick_promoter_node.py`** — fast-tick deterministic promoter
+- **`dag_executor_node.py` / `dag_manager_control_node.py`** — DAG-shaped
+  multi-step execution
 
 ### Node families
 
@@ -131,13 +151,14 @@ ChatTaskRouterNode
 
 switchboard agent
   -> outputs: delegate_to="one_shot_tool_runner", action="get_weather"
-  -> sets next_agent = "chat_switchboard_arguments_node" (or master_room_/dayflow_ variant)
+  -> sets next_agent = "chat_switchboard_arguments_node" (or master_room_ variant)
 
-ChatSwitchboardArgumentsNode / MasterRoomSwitchboardArgumentsNode / DayflowSwitchboardArgumentsNode
+ChatSwitchboardArgumentsNode / MasterRoomSwitchboardArgumentsNode
   -> normalizes tool_arguments dict (shared helper in _switchboard_arguments_util.py)
-  -> domain-specific extras (master_room writes a dispatch marker; dayflow writes
-     its own action_dispatch provenance; chat does neither)
+  -> domain-specific extras (master_room writes a dispatch marker; chat does not)
   -> sets next_agent = "tool_caller"
+(The dayflow orchestrator's switchboard routes work-object NODES instead —
+ create_dayflow_ticket / run_work_node via node_dispatch, not this path.)
 
 ToolCaller
   -> resolves "get_weather" from tool registry
@@ -167,5 +188,5 @@ ToolResultHandler
 | `control_nodes/tool_result_handler.py` | Result processing and context pop |
 | `control_nodes/chat_task_router_node.py` | Chat handoff routing |
 | `control_nodes/final_answer_node.py` | Output normalization and exit |
-| `control_nodes/dayflow_switchboard_arguments_node.py` | Dayflow dispatch records |
+| `control_nodes/work_finalizer_node.py` | done→closed judgment (sole `closed` producer) |
 | `lib/blackboard/Blackboard.py` | Scoped state stack |
