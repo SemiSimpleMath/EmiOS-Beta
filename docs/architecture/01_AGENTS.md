@@ -35,11 +35,14 @@ Per-agent service objects constructed in `__init__`:
 | `AgentInputApplier` (`self._input_applier`) | `services/agent_input_applier.py` | unpack inbound message onto blackboard |
 | `AgentResultApplier` (`self._result_applier`) | `services/agent_result_applier.py` | write LLM output to blackboard, build audit message |
 
-Shared services reached via `self.components`: `PromptBuilder`,
-`LLMClient`, `ContextInjector`, `EntityInjector`, `PodInjector`,
-`ResourceResolver`, `KeywordResourceIndex`, `ChatMemoryRag` (recall),
+Shared services reached via `self.components` (built per agent by
+`AgentComponentsFactory.build_for_agent`): `StatusTracker`, `LLMClient`,
+`ChatRequestNormalizer`, `ChatResponseBuilder`, `ChatPublisher`,
 `HistoryFormatter`, `ActionValidator`, `FlowController`,
-`StatusTracker`, `ProgressEmitter`.
+`ProgressEmitter`, `PromptBuilder`, `ContextInjector`, `EntityInjector`,
+`PodInjector`, `ResourceResolver`. (`ChatMemoryRag` and
+`KeywordResourceIndex` are module-level singletons used inside
+`ContextInjector`, not components.)
 
 ## Directory Structure
 
@@ -110,12 +113,11 @@ global_output_keys: [field1]        # Output keys written to global (vs local) s
 # --- Prompt / context ---
 system_context_items: [...]         # Keys injected into system.j2
 user_context_items: [...]           # Keys injected into user.j2
-required_context_items: [history]   # Refuse to run if any resolves empty (hard guard)
+required_context_items: [task]      # Refuse to run if any resolves empty (hard guard)
 strict_template: false              # true => StrictUndefined (undefined var raises)
-history_lookback_hours: 36          # Fallback recency window for the `history` key
 
 # --- Entity card injection (EntityInjector) ---
-entity_scan_keys: [incoming_message, task, recent_history]   # text scanned for entities
+entity_scan_keys: [incoming_message, task, recent_history]   # currently INERT — detection scans the whole rendered prompt
 entity_card_level: 1                # View level (0..4) for entity_card key
 entity_card_sections: [level_0, contact]   # Overrides level for `entity_card` only
 entity_render_fields: [...]         # Override which entity_* fields render
@@ -180,9 +182,11 @@ as conservative judgment, not an error):
 
 `PromptBuilder.construct_prompt` also: appends out-of-band mailbox
 `@`-messages as an authoritative-newest block (`_append_runtime_injections`),
-ASCII-normalizes non-Gemini prompts, and interleaves
-`datapod:image:` pod URIs and `[emi_image:...]` markers as inline image
-blocks in the content array.
+and interleaves `datapod:image:` pod URIs (capped to the 4 most recent)
+plus legacy `[emi_image:...]` / `[mcp_image_path:...]` markers as inline
+image blocks in the content array. Prompts reach the provider **verbatim
+UTF-8** — an earlier ASCII-normalization pass was removed 2026-07-08
+(context-injection audit C1: it flattened diacritics and deleted emoji).
 
 ### Context Injection
 
@@ -200,10 +204,10 @@ Keys in `system_context_items` / `user_context_items` are resolved by
   `task`, `information`.
 - **`tool_descriptions`** → `get_tool_descriptions()` (visible tools only).
 - **`allowed_nodes`** → list of `{name, description}` (description.j2 rendered).
-- **Special keys** with bespoke resolvers (~15): `recent_history`,
+- **Special keys** with bespoke resolvers (~14): `recent_history`,
   `latest_exchange`, `prior_history` (scope-local message logs);
-  `history` (durable master-room chat via `_build_history_for_prompt`);
-  `chat_memory` (RAG recall via `chat_memory_rag.recall`, room-scoped);
+  `chat_memory` (RAG recall via `chat_memory_rag.recall`, room-scoped —
+  raises loudly if declared without a `room_id`);
   `chat_nudges` (`pending_questions.pick_question_for_nudge`);
   `user_bio_context`; `health_status_summary`;
   `referenced_pods` / `referenced_pods_block` (via `pod_injector`);
@@ -223,10 +227,15 @@ Keys in `system_context_items` / `user_context_items` are resolved by
   startup) inject matched resources by scanning `keyword_scan_context_keys`.
 - **Entity injection** (`EntityInjector`,
   `services/entity_injector.py`): a two-pass render detects entities in
-  the *rendered* prompt (scoped to `entity_scan_keys`), then fills the
-  `entity_*` keys with leveled cards from entity_card_v2
-  (`get_entity_card_for_prompt_injection_level`, honoring
-  `entity_card_level` / `entity_card_sections`).
+  the **whole rendered user prompt** (pass 1 with blank `entity_*` keys),
+  merges room-seeded entities (`room_pinned_entities` /
+  `room_allowed_entity_cards`), applies room-blocked and scope-policy
+  narrowing, then re-renders with the `entity_*` keys filled from
+  entity_card_v2 (`get_entity_card_for_prompt_injection_level`, honoring
+  `entity_card_level` / `entity_card_sections`). Note: `entity_scan_keys`
+  in config is currently **inert** for this path — detection is not
+  scoped to it (the scan-key helpers exist but have no production
+  caller).
 
 ## Tool Access Control
 
