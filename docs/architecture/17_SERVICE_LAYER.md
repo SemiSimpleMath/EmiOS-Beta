@@ -55,6 +55,7 @@ Registration phase is noted (Phase 1 = `bootstrap.py:initialize_services`, Phase
 | `dj_manager`                      | Music automation manager.                                               | 1 (subsystem-gated)            |
 | `socket_manager`                  | WebSocket session registry; emits to clients.                           | 2                              |
 | `music_afk_relay`                 | Bridges AFK state changes to music client.                              | 2                              |
+| `emergency_notifier`              | `EmergencyNotifier` — consumes `bedroom_emergency_detected` into a durable owner ticket (EventHub audit E1). | 2 |
 | `event_relay`                     | `EmiEventRelay` — event-hub → SocketIO bridge.                          | 2                              |
 | `ticket_dispatcher`               | `TicketDispatcherRegistry` — fans `proactive_suggestion` to surface adapters. | 2                        |
 | `progress_curator`                | Curates agent progress facts for the progress UI.                       | 2                              |
@@ -124,7 +125,7 @@ This phase is for things that need the registry from Phase 1 already present:
 2. `validate_all(agent_registry)` — validates every agent definition (raises on bad config).
 3. `register_kg_embedding_sync()` — installs the KG embedding chokepoint (production process only; skipped under `USE_TEST_DB`).
 4. `socket_manager` — registered here, *not* in Phase 1, because socket emits can't happen until SocketIO is bound to the Flask app.
-5. `music_afk_relay`, `event_relay`.
+5. `music_afk_relay`, `emergency_notifier`, `event_relay`.
 6. `ticket_dispatcher` — `TicketDispatcherRegistry` with the socketio / telegram / slack / sms `TicketSurfaceAdapter`s registered, then `subscribe_to_event_hub()`.
 7. `progress_curator`, `chat_narrator`, `mailbox`, `mam_instance_manager`, `outbound_chat_publisher`, `question_service`.
 8. One pre-instantiated agent (`emi_reminder_handler`) — stateful and shared, constructed once via `agent_factory.create_agent(...)` and registered as a service rather than rebuilt per call. (Its sibling `emi_result_handler` was deleted 2026-07-08 — nothing invoked it.)

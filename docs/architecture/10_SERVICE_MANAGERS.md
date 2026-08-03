@@ -47,10 +47,12 @@ Thread-per-task daemon management. Default tasks:
 
 | Task | Responsibility |
 |------|----------------|
-| `db_cleanup` | Periodic compaction / vacuum on `emi.db` |
-| `watchdog` | Liveness checks for long-running daemons |
-| `ticket_maintenance` | TicketManager state-machine sweeps (expire stale tickets, etc.) |
-| `routine_runner` | Wakes `RoutineManager` on a clock |
+| `watchdog` | Liveness checks + restart for the other daemons (every 60s) |
+| `ticket_maintenance` | TicketManager sweeps — expire tickets past `valid_until` (every 5 min) |
+| `routine_runner` | Wakes `RoutineManager` on a clock (every 60s) |
+
+(Data-fetch tasks moved to RoutineManager long ago; there is no `db_cleanup`
+task — the three above are the only defaults.)
 
 Lifecycle:
 - `start_all()` at bootstrap spawns one daemon per registered task.
