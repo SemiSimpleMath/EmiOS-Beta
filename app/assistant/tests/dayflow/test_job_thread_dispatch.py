@@ -151,6 +151,71 @@ class TestSupervision:
         sweep_stuck_work_nodes()
         assert store.load(wid).nodes[gid].status == "dispatched"
 
+    def test_subtree_nodes_under_live_worker_are_not_orphaned(self):
+        # 2026-07-31 regression: a worker grows sub-steps inside its own thread and marks
+        # them dispatched; only the dispatch root has a registered job. The sweeper
+        # orphan-failed the live run's subtree, repair re-issued a sub-step, and a
+        # duplicate emi_team raced the first. Liveness must inherit up the parent_id spine.
+        store = _store()
+        wid, gid = _mk_wo(store)
+        _sub(store, wid, gid, "n1", status="dispatched")
+        store.apply("add_node", {"work_id": wid, "id": "n1a", "type": "subtask",
+                                 "parent_id": "n1", "title": "worker sub-step"})
+        store.apply("set_status", {"work_id": wid, "node_id": "n1a", "status": "dispatched"})
+        store.apply("add_node", {"work_id": wid, "id": "n1a1", "type": "subtask",
+                                 "parent_id": "n1a", "title": "worker sub-sub-step"})
+        store.apply("set_status", {"work_id": wid, "node_id": "n1a1", "status": "dispatched"})
+        ref = f"{wid}::n1"
+        with nd._inflight_lock:
+            nd._inflight[ref] = {"thread": SimpleNamespace(is_alive=lambda: True),
+                                 "started_at": datetime.now(timezone.utc)}
+        try:
+            sweep_stuck_work_nodes()
+            wo = store.load(wid)
+            assert wo.nodes["n1"].status == "dispatched"
+            assert wo.nodes["n1a"].status == "dispatched"
+            assert wo.nodes["n1a1"].status == "dispatched"
+        finally:
+            with nd._inflight_lock:
+                nd._inflight.pop(ref, None)
+
+    def test_subtree_nodes_with_dead_root_job_are_failed(self):
+        # No registered job anywhere on the spine (restart/crash) -> the root AND its
+        # dispatched sub-steps all orphan-fail for work_repair.
+        store = _store()
+        wid, gid = _mk_wo(store)
+        _sub(store, wid, gid, "n1", status="dispatched")
+        store.apply("add_node", {"work_id": wid, "id": "n1a", "type": "subtask",
+                                 "parent_id": "n1", "title": "worker sub-step"})
+        store.apply("set_status", {"work_id": wid, "node_id": "n1a", "status": "dispatched"})
+
+        sweep_stuck_work_nodes()
+        wo = store.load(wid)
+        assert wo.nodes["n1"].status == "failed"
+        assert wo.nodes["n1a"].status == "failed"
+
+    def test_zombie_thread_does_not_shield_subtree_after_root_failed(self):
+        # A frozen root was already failed by an earlier pass but its hung thread is
+        # still alive. Coverage requires the ancestor to still be dispatched — the
+        # zombie must not shield the abandoned subtree forever.
+        store = _store()
+        wid, gid = _mk_wo(store)
+        _sub(store, wid, gid, "n1", status="dispatched")
+        store.apply("add_node", {"work_id": wid, "id": "n1a", "type": "subtask",
+                                 "parent_id": "n1", "title": "worker sub-step"})
+        store.apply("set_status", {"work_id": wid, "node_id": "n1a", "status": "dispatched"})
+        store.apply("set_status", {"work_id": wid, "node_id": "n1", "status": "failed"})
+        ref = f"{wid}::n1"
+        with nd._inflight_lock:
+            nd._inflight[ref] = {"thread": SimpleNamespace(is_alive=lambda: True),
+                                 "started_at": datetime.now(timezone.utc)}
+        try:
+            sweep_stuck_work_nodes()
+            assert store.load(wid).nodes["n1a"].status == "failed"
+        finally:
+            with nd._inflight_lock:
+                nd._inflight.pop(ref, None)
+
 
 class TestOneDispatchPerTick:
 
