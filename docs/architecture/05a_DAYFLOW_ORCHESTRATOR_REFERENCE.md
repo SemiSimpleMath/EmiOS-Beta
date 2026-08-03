@@ -396,7 +396,7 @@ plan_mode_final_router_node → final_answer_node` — an interactive chat turn 
 until the user signals done; no work is dispatched. The path is still wired in the live `state_map`
 (agent + router present) but is slated for removal, not maintenance.
 
-**P10 — Graceful-exit path.** [WHY WE HAVE NO ACTUAL PLANNER THE ROOM IS NOT A MANAGER DEPRICATE] `graceful_exit → graceful_exit_control_node → final_answer_node` — a clean
+**P10 — Graceful-exit path.** `graceful_exit → graceful_exit_control_node → final_answer_node` — a clean
 early termination of the manager loop.
 
 **P11 — Relevance-cleaner cadence (items lane, ≤ every 30 min).** `relevance_cleaner_gate_node` (when its
