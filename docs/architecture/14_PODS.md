@@ -71,7 +71,7 @@ The full principle plus per-kind metadata conventions live in the `project_pod_b
 
 `configs/pod_kinds.json` is the single source of truth for every pod `kind`. Each entry carries a `description`, a `body_extraction` hint, `default_for_agents`, and — load-bearing — a `kg_admissible` flag (see next section). `pod_store/pod_kind_registry.py` loads it once and exposes `known_kinds()`, `is_kg_admissible(kind)`, and `description(kind)`. **Missing kinds fail closed** (`is_kg_admissible` → False; missing file → empty registry). Adding a pod kind is a config edit, not a code change (`skills/extending-emi-pod-kinds/SKILL.md`).
 
-Live kinds today: `image`, `email`, `chat_cluster`, `note` (mint_pod), `service_loop` (pipeline keep-alive). Plus kinds minted by code paths the registry doesn't gate: `research_finding` (web planner), the MIME-derived `video` / `audio` / `document` / `file` (`file_ingest.py`), and the secret-pod kinds `identity.*` / `auth.*`. The `PodKind` `Literal` in `contracts.py` is a non-authoritative subset — the DB column is a free string and the registry is the gate.
+Registered kinds today (17): `image`, `email`, `chat_cluster`, `note` (mint_pod), `file`, `tool_result`, `service_loop` (pipeline keep-alive), `research_finding` (web planner), `feedback`, `intention`, `plan`, `delivery.email`, `health.private`, and the secret-pod kinds `auth.session` / `auth.bearer` / `auth.oauth` / `identity.ssn`. The MIME-derived `video` / `audio` / `document` (`file_ingest.py`) are still minted without registry entries. The `PodKind` `Literal` in `contracts.py` is a non-authoritative subset — the DB column is a free string and the registry is the gate.
 
 ## Pods ↔ KG: reference-by-URI + `is_kg_admissible` gate
 
@@ -79,7 +79,7 @@ Live kinds today: `image`, `email`, `chat_cluster`, `note` (mint_pod), `service_
 
 The replacement gate lives in the promoter. `kg/proposal_promoter.py` (the `_resolve_endpoint` / `_pod_uri_is_admissible` region) accepts a `datapod:*` edge endpoint iff **(1)** it exists in `pod_store` AND **(2)** its kind is `kg_admissible: true` in `pod_kinds.json`. Otherwise the proposal abandons that edge with reason `"pod not admissible"`. Pod URIs bypass proposal-node resolution entirely (they're already resolved ids); the admission check is what replaces the dropped FK.
 
-Today only `image` is `kg_admissible` — user-shared photos are referenced by entities/events:
+Today `image` and `file` are `kg_admissible` — user-shared media are referenced by entities/events:
 
 ```
 the user --depicted_in--> datapod:image:abc...        (the user is in this photo)
@@ -184,7 +184,7 @@ Flush logic (`_process_burst`, `:210`) is three LLM passes:
 
 Both critic and resolver get a "pre-context" block — up to 20 messages from the last 24h of the same room, loaded via the same `RoomHistoryBuilder` `master_room` chat_gate uses (`_fetch_chat_history`, `:448`). The burst's own envelopes are filtered out so they do not appear twice in the resolver prompt.
 
-> Model choice: `gpt-5.6-luna`, not nano. Per the `pod_classifier_model` memory note, nano hangs on large bursts with rule-heavy prompts. All three pod agents (`pod_classifier`, `pod_critic`, `pod_entity_resolver`) use mini.
+> Model choice: mini tier, not nano. Per the `pod_classifier_model` memory note, nano hangs on large bursts with rule-heavy prompts. All three pod agents (`pod_classifier`, `pod_critic`, `pod_entity_resolver`) run `gpt-5.6-luna` on the mini tier.
 
 ## PodStore
 
@@ -314,7 +314,7 @@ The first email-pod consumer is the `personal_admin` planner — its prompt teac
 User-attached images flow through the chat upload path (`POST /process_request`) into `image_ingest.ingest_image_file`, which:
 
 1. Hashes the bytes (sha256) and copies into `data/images/<hash[:2]>/<hash>.<ext>` (content-addressed, dedup-by-content).
-2. Mints a `kind="image"` pod via `PodStore.put` (`image` is the one `kg_admissible` kind, so KG edges may later target it by URI).
+2. Mints a `kind="image"` pod via `PodStore.put` (`image` is `kg_admissible`, so KG edges may later target it by URI).
 3. Writes a sidecar JSON stamp (`<file>.emipod.json`) next to the stored copy with `{pod_id, sha256, stamped_at_utc}` so the reconciler can identify the file later regardless of filename.
 4. The pod's `metadata` carries `sha256`, `stored_path` (repo-relative), `width`, `height`, `format`, `file_size_bytes`, `source_kind` (`chat_attachment` / `email_attachment` / `manual_upload`).
 5. The `body` starts empty with `vision_extraction_status: "pending"` and a structural `one_liner` placeholder (`[image: jpeg, 320kb, 1920x1080]`).
