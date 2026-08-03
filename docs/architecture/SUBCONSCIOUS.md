@@ -28,9 +28,13 @@ The Subconscious is EmiOS's autonomous background "mind." It runs while the user
        │                       (in-chat nudge, conversation_starter fast-path)
        └─► answer_capture ──► subconscious::answer_matcher ──► mark_answered
                               ──► annotate_concern ──► trigger_noticer (cooldown)
+
+   dayflow work-object closure (concern-linked) ──► concern_feedback.propagate_work_outcome
+       ──► persist.apply_work_outcome (done→addressing; user-declined→DORMANT with the
+           user's verbatim words; system-abandon→journal only) ──► trigger_noticer (cooldown)
 ```
 
-The register is the **spine**: every other component either feeds it (noticer, answer-capture) or reads it (proposers, digest, dashboard). The noticer is the only LLM that mutates concern lifecycle.
+The register is the **spine**: every other component either feeds it (noticer, answer-capture, work-outcome propagation) or reads it (proposers, digest, dashboard). The noticer is the only LLM that mutates concern lifecycle — the propagation writers are deterministic id-joins (2026-08-01: the evaluator cites `[concern:<prefix>]` ids in `based_on`, work objects carry `constraints.concern_refs`, and every dayflow closure path back-propagates; before this, 19 duplicate AC-service work objects were minted because outcomes never reached the register).
 
 ### Dispatch & scope
 
@@ -72,7 +76,7 @@ Every tick appends one JSONL line `{tick_utc, output}` to `resources/subconsciou
 
 ## 3. The Noticer Loop
 
-The single LLM that runs the "thinking." Agent `subconscious::noticer` (`app/assistant/agents/subconscious/noticer/`): `gpt-5.4-mini`, **`allowed_tools: []`** (no tools — context is fully pre-injected; tool access is a planned v0.5 step).
+The single LLM that runs the "thinking." Agent `subconscious::noticer` (`app/assistant/agents/subconscious/noticer/`): `gpt-5.6-luna`, **`allowed_tools: []`** (no tools — context is fully pre-injected; tool access is a planned v0.5 step).
 
 **Context** — `context_builder.build_noticer_context(trigger_mode=...)` returns a flat dict, one string per `user_context_items` key. Every section builder **fails soft**, returning `"(no <kind> data available)"` rather than raising, because the prompt is written to handle partial context. Notable sources:
 
@@ -81,7 +85,7 @@ The single LLM that runs the "thinking." Agent `subconscious::noticer` (`app/ass
 | `recent_friction_signals` | `chat_cluster` pods' `metadata.friction_signal`, grouped by `(subject, kind)` over 14d; self-aliases (`self`/`me`/first-name) collapse to one bucket so the 3+ pattern threshold fires. |
 | `concerns_register_active` | The register's active+addressing, plus the injected pressure block. |
 | `question_mailbox` | `pending_questions.get_for_noticer_processing()` — captured answers + stale-asked questions awaiting an outcome. |
-| `dayflow_recent` | Recent `dayflow_item` rows from `unified_log_2026`, filtered to signal (keeps `Result:` outcome lines so the noticer can move handled concerns to `addressing`). |
+| `dayflow_recent` | Recent `dayflow_item` rows from `unified_log_2026`, filtered to signal. CAVEAT (2026-08-01 audit): post-WO-cutover the item lane carries intake only — no `Result:` outcome lines exist anymore, so the ADDRESSED disposition cannot fire from this input; work outcomes now reach the register via closure propagation instead (§work-outcome path). Repointing this builder at work-store terminals is an open repair. |
 | `recent_chat_clusters`, `recent_passing_mentions` | 48h chat clusters; 60–220-char un-clustered user utterances. |
 | `calendar_today_tomorrow` / `_week_summary` / `_30_90d` | Three calendar windows via the `get_calendar_events` tool (Pass B reads 8–90d). |
 | `watchlist_summary`, `recurring_obligations`, `family_graph_digest` | User-curated `resource_subconscious_watchlist.md` / `resource_recurring_obligations.md`; KG cards + ≤90d birthdays for non-household important_people. |
@@ -93,7 +97,7 @@ The single LLM that runs the "thinking." Agent `subconscious::noticer` (`app/ass
 
 **Persist** — `persist.apply_noticer_output(output)` applies each list to the register in order (new→active, reinforce in-place, active→addressing, resolve, escalate, dispositions, question outcomes), trims caps, appends the tick-log line, then enqueues `pending_questions` into the queue. `belief_updates` are recorded in the tick log only (not yet written to the belief store).
 
-**Triggers** — routine `subconscious_noticer` → `noticer_run` (interval 86400, window 04:00–22:00 so it can't skip a day), plus an ad-hoc tick fired by answer-capture (cooldown-guarded; see §5).
+**Triggers** — routine `subconscious_noticer` → `noticer_run` (interval 86400 in a 04:00–22:00 window — note: interval semantics make the run time DRIFT a few minutes later each day rather than anchoring at 04:00; observed ~10:45 local after a week), plus an ad-hoc tick fired by answer-capture (cooldown-guarded; see §5).
 
 ## 4. Pending-Questions Store + Two Delivery Bridges
 
@@ -137,7 +141,7 @@ The Dayflow conversation_starter stage (§6) also calls `pick_question_for_nudge
 
 `check_open_questions` is **free in the common case**: no asked-unanswered questions → pure SQL, no LLM. For each open question it pulls candidate user messages in the asked room since `asked_at` (cap 12), and judges them with one `subconscious::answer_matcher` call (`gpt-5.4-mini`, no tools). The matcher returns `verdict` ∈ `{answered, partial, no_answer}` + `answer_text` / `answer_message_id` / `confidence` / `notes`; it biases to `partial`+low-confidence when unsure because a wrong captured answer corrupts the concern it routes back to.
 
-On `answered`: `mark_answered` → if `related_concern_id`, `annotate_concern_answer` journals the answer onto the concern immediately (atomic write) → after the loop, `trigger_noticer(...)` fires one background noticer tick, guarded by a **600s monotonic cooldown** (the tick reads all captured answers anyway), so the register reacts within minutes instead of at the next 04:00.
+On `answered`: `mark_answered` → if `related_concern_id`, `annotate_concern_answer` journals the answer onto the concern immediately (atomic write) → after the loop, `trigger_noticer(...)` fires one background noticer tick, guarded by a **600s monotonic cooldown** (the tick reads all captured answers anyway), so the register reacts within minutes instead of at the next daily tick. Work-outcome propagation (2026-08-01) fires the same trigger when a concern-linked work object closes.
 
 ## 6. Proactive Outreach
 
