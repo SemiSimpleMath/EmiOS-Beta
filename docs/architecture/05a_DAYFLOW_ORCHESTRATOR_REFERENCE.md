@@ -47,7 +47,8 @@ of the planning tick** — but only if `is_ready` still holds.
 ### The tick body — `dayflow_orchestrator/dayflow_tick.py :: dayflow_orchestrator_cadence_tick`
 Ordered: (1) **block check** — if `blocked_until_utc` is in the future (master-room chat is active),
 skip the whole tick; (2) **ingestion** — `run_dayflow_ingestion`; (3) **sweeps** —
-`sweep_stale_dispatches` → `sweep_orphaned_dispatched_tasks` → `sweep_zombie_waiting_items`; (4) minimal
+`sweep_stale_dispatches` → `sweep_orphaned_dispatched_tasks` → `sweep_zombie_waiting_items` →
+`sweep_stuck_work_nodes`; (4) minimal
 blackboard extras (`day_of_week` only — per-agent prep nodes load their own context); (5) **manager
 invocation** — build a `Message(event_topic="dayflow_tick", data={trigger, fast_tick, triggered_item_id…})`
 with a system scope, create `dayflow_orchestrator_manager`, and `DI.manager_invoker.invoke`; (6) persist
@@ -58,13 +59,20 @@ Dedups against existing item IDs, then pulls new items from four sources — `_i
 `_ingest_emails`, `_ingest_delegation_requests`, `_ingest_pods` (chat + pods carry persistent watermarks).
 Assigns `short_id`s and persists via `write_dayflow_items_batch`.
 
-### The three sweeps — `dayflow_orchestrator/dispatch_sweeper.py`
+### The four sweeps — `dayflow_orchestrator/dispatch_sweeper.py`
 `sweep_stale_dispatches` closes in-flight `action_dispatch` items (soft 10 min when no live invocation,
 hard 2 h) and revives the source item to `actionable` only if still `dispatched`.
 `sweep_orphaned_dispatched_tasks` closes tasks stuck `dispatched` > 2 h with no live dispatch row (→
 `closed`, so the planner re-mints fresh). `sweep_zombie_waiting_items` closes `waiting` items overdue > 36 h
-(aged out of the 24 h freshness window, invisible to the cleaner). `list_active_dispatches` (read-only) is
-used by `view_materializer_node` to hide actionable items already covered by an in-flight dispatch.
+(aged out of the 24 h freshness window, invisible to the cleaner). `sweep_stuck_work_nodes` supervises
+in-flight work-node jobs: ORPHANED (`dispatched` with no live job thread on the node **or any `parent_id`
+ancestor still `dispatched`** — a worker registers ONE job at its dispatch root and grows sub-steps inside
+that same thread, so subtree liveness is inherited up the ownership spine; fixed 2026-08-04 after false
+orphans spawned duplicate worker teams) and FROZEN (job alive but no subtree/job activity for 20+ min;
+checked only at the dispatch root, whose idle walk spans the subtree) both → `failed` for work_repair.
+A failed root's zombie thread does not shield its subtree — coverage lapses with the root's `dispatched`
+status. `list_active_dispatches` (read-only) is used by `view_materializer_node` to hide actionable items
+already covered by an in-flight dispatch.
 
 ---
 
@@ -105,6 +113,10 @@ A **WorkObject** (`status = active | done | abandoned | blocked`) is a graph con
 > has only produced a RESULT and does NOT count toward its goal until the **work_finalizer** judges it and
 > sets it `closed`. The finalizer is the SOLE producer of `closed`, so the blind auto-completion (a `done`
 > node silently satisfying the goal) is gone; `_rollup` is kept but now fires only on all-children-`closed`.
+> **Closure-as-transition (431be3a7):** moving a WorkObject to a terminal status cascade-abandons every
+> still-startable node (`proposed/actionable/waiting/failed`) in the same apply, `validate()` enforces the
+> invariant "a terminal WO holds nothing startable", and a boot-time `repair_terminal_zombies` healed the
+> backlog — so a closed goal can never re-wake through a leftover timer.
 > Still future: renaming the WorkObject container `active/done → open/closed`.
 
 ### How the lanes relate
@@ -136,7 +148,11 @@ is eligible.
 intake to action**. Driven by `strategic_planner_wo_prep_node` (builds `work_portfolio` from non-terminal
 work objects, plus two separate 18 h done-logs: `recent_completed_work` = DONE/don't-recreate vs
 `recent_abandoned_work` = dropped/may-recreate, and the situational context — tickets, dispatch results,
-action log). Each tick it judges the portfolio + new intake and decides only **what changes** — create /
+action log). **Id-chain context (25cf2b5b):** every ticket reply is annotated with its resolved work ref
+(`_annotate_work_refs` — ticket → `trigger_context.work_node` → WO → live status, joined deterministically,
+never by wording), and `expected_schedule_view` renders today's expected schedule with per-row provenance
+(`_resolve_ticket_provenance`) so the evaluator can SEE that a reminder already exists / was answered /
+was dropped (drop reasons included) instead of re-minting it. The model judges; it never links. Each tick it judges the portfolio + new intake and decides only **what changes** — create /
 change-objective / flag-for-replan / complete / abandon — never decomposing or executing. Output
 (`new_or_changed`, `replan_work_ids`, `complete_work_ids`, `abandon_work_ids`) is applied by
 `strategic_planner_wo_persist_node` via `work_persist.persist_steward_output`: an empty `work_id` →
@@ -249,7 +265,10 @@ dependents unblock and the rollup completes the WO once all children are closed)
 + append the WO to `replan_work_ids` and stash the revised intent in `finalizer_amend_intents` for the
 architect (next node) to re-plan the same tick; **resolve** → close the node + set the WO `done`, or
 (`abandon`) set it `abandoned`. It is the SOLE producer of `closed` — nothing auto-completes a goal until the
-finalizer has judged its results (commit `cb498a40`). Bounded 5/tick; never raises.
+finalizer has judged its results (commit `cb498a40`). Bounded 5/tick; never raises. When a WO carrying
+`constraints.concern_refs` reaches a terminal status here (or via work_repair), the outcome is
+back-propagated to the subconscious concerns register (`concern_feedback.propagate_work_outcome`,
+ad887863) — resolved/declined/failed each update the concern, and a user decline parks it dormant.
 
 ### Surface, comms & finalization
 
@@ -361,15 +380,21 @@ there are no item-lane dispatch records for finalize to reconcile.)
 `work_on` — but only if `is_ready` still holds. This is how a nightly setpoint or a precise reminder fires
 on time without waiting for the next cadence tick.
 
-**P8 — Fast-tick path.** When the scheduler woke for one specific due *item* timer [HOW IS P7 and P8 DIFFERENT?](`fast_tick` +
+**P8 — Fast-tick path.** When the scheduler woke for one specific due *item* timer (`fast_tick` +
 `triggered_item_id`), `tick_router_node` routes `→ fast_tick_promoter_node` (atomically promotes that one
 item `waiting/watching → actionable`) `→ view_materializer_node → action_selector → action_selector_router
 → switchboard → work_node_dispatch → (loop) → post_room_finalize → final_answer → manager_exit`. Note it
 uses the *item-lane* `view_materializer` but dispatches via the work-object `work_node_dispatch_node`.
+**P7 vs P8:** P7 is the work-object lane's wake — a per-NODE APScheduler job that runs that single node
+directly through `work_on`, no manager tick at all. P8 is the item lane's wake — an ITEM's
+`reactivate_at_utc` timer that runs a full (abbreviated) manager tick through the item-lane view path.
+As the item dispatch lane retires, P8 shrinks toward legacy; P7 is the live precision-wake mechanism.
 
-**P9 — Planning-mode path.[THIS IS DEPRACATED] ** When the room is in planning mode, `intake_triage_prep` (or the manager flow)
-routes to `dayflow_orchestrator::plan_mode → plan_mode_final_router_node → final_answer_node` — an
-interactive chat turn that stays in planning mode until the user signals done; no work is dispatched.
+**P9 — Planning-mode path (DEPRECATED — owner decision 2026-08).** When the room is in planning mode,
+`intake_triage_prep` (or the manager flow) routes to `dayflow_orchestrator::plan_mode →
+plan_mode_final_router_node → final_answer_node` — an interactive chat turn that stays in planning mode
+until the user signals done; no work is dispatched. The path is still wired in the live `state_map`
+(agent + router present) but is slated for removal, not maintenance.
 
 **P10 — Graceful-exit path.** [WHY WE HAVE NO ACTUAL PLANNER THE ROOM IS NOT A MANAGER DEPRICATE] `graceful_exit → graceful_exit_control_node → final_answer_node` — a clean
 early termination of the manager loop.
