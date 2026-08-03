@@ -82,7 +82,7 @@ kg_node_metadata + kg_edge_metadata  ← live KG (+ Chroma embed-at-write)
    - `role` ∈ {`user`, `assistant`}, non-empty message
    - `room_id` ∈ {`master_room`} or null
 
-2. **Entity resolution.** For each eligible message, the `entity_resolver` LLM agent (gpt-5.4-mini) rewrites pronouns and references against the day's already-resolved context. "I" → "(the user)", "she" → "(the user's partner)", "the kids" → "(a family member, a family member)". Original message stays unchanged in `unified_log_2026.message`; the resolved version is a separate row in `kg_resolved_message`.
+2. **Entity resolution.** For each eligible message, the `entity_resolver` LLM agent (gpt-5.6-luna) rewrites pronouns and references against the day's already-resolved context. "I" → "(the user)", "she" → "(the user's partner)", "the kids" → "(a family member, a family member)". Original message stays unchanged in `unified_log_2026.message`; the resolved version is a separate row in `kg_resolved_message`.
 
 3. **Per-day chronological batching.** Each batch is up to 10 unresolved messages plus up to 10 already-resolved messages from the same day for context.
 
@@ -90,7 +90,7 @@ kg_node_metadata + kg_edge_metadata  ← live KG (+ Chroma embed-at-write)
 
 **Code.**
 - Step: `app/assistant/pipelines/kg_pipeline/steps/resolve_messages.py` (`ResolveMessagesStep`)
-- Agent: `app/assistant/agents/entity_resolver/`
+- Agent: `app/assistant/agents/knowledge_graph_add/entity_resolver/`
 
 **Observability.** Queue depth: `SELECT COUNT(*) FROM unified_log_2026 u LEFT JOIN kg_resolved_message rm ON rm.unified_log_id = u.id WHERE rm.id IS NULL AND <eligibility>;`
 
@@ -105,7 +105,7 @@ kg_node_metadata + kg_edge_metadata  ← live KG (+ Chroma embed-at-write)
 **What it does.**
 
 1. Reads up to one day's worth of new resolved messages.
-2. Calls the `conversation_boundary` agent (gpt-5.4-mini) with the full span.
+2. Calls the `conversation_boundary` agent (gpt-5.6-luna) with the full span.
 3. Agent emits windows — each one spanning N consecutive messages — with a summary and a reason for each boundary.
 4. **Gating rule** prevents fragmenting live conversations: a day's tail won't be segmented until either (a) at least 6 contiguous resolved-but-unsegmented messages have accumulated, OR (b) the resolver has caught up to the most recent eligible message for the day.
 5. **Cross-window links.** When a new window continues a topic from an older window (the A-B-A pattern), the agent emits `related_previous_window_ids` so downstream consumers can rejoin them on demand. The worker never modifies older windows.
@@ -152,7 +152,7 @@ The critic is calibrated by a single resource file (`resources/user/resource_kg_
 **What it does.**
 
 1. Split the extraction's nodes/edges into **connected components** (deterministic — disjoint subgraphs become separate proposals).
-2. For each component, call `meta_data_add` (gpt-5.4-mini) to fill in: aliases, hash_tags, `start_date` / `end_date` (ISO + confidence + prose anchor), `valid_during`, `category`, `semantic_label`, `goal_status`, `confidence`, `importance`.
+2. For each component, call `meta_data_add` (gpt-5.6-luna) to fill in: aliases, hash_tags, `start_date` / `end_date` (ISO + confidence + prose anchor), `valid_during`, `category`, `semantic_label`, `goal_status`, `confidence`, `importance`.
 3. Write one `kg_window_enrichment` row per component, carrying the enriched nodes + edges.
 
 After this block, each enrichment row maps **1:1 to a future claim_proposal**.
@@ -251,7 +251,7 @@ The promoter writes only `promoted` and `contradicted`, and otherwise leaves the
 
 ### Section tagging is no longer here
 
-The promoter does **not** tag nodes. Per the deferred-dependency chain `promote (NULL importance) → rate → tag → card/wiki dirty-sweep`, section tagging moved into the importance-rater routine: `_lazy_kg_importance_rater` (`app/assistant/routine_manager/routine_functions.py`, registered as `kg_importance_rater`) calls `section_tagging.backfill_untagged_nodes` **after** rating, so the tagger sees real importance values. `kg_node_section_tagger` (gpt-5.4-mini) classifies each untagged State/Event/Goal/Property into the `card` and `wiki` namespaces in one call; tags persist in `kg_node_section_tag` and the projection builders read them rather than re-tagging. Section vocabularies live in `app/assistant/kg/section_tagging.py` (`CARD_SECTION_VOCAB`, `WIKI_SECTION_VOCAB`).
+The promoter does **not** tag nodes. Per the deferred-dependency chain `promote (NULL importance) → rate → tag → card/wiki dirty-sweep`, section tagging moved into the importance-rater routine: `_lazy_kg_importance_rater` (`app/assistant/routine_manager/routine_functions.py`, registered as `kg_importance_rater`) calls `section_tagging.backfill_untagged_nodes` **after** rating, so the tagger sees real importance values. `kg_node_section_tagger` (gpt-5.6-luna) classifies each untagged State/Event/Goal/Property into the `card` and `wiki` namespaces in one call; tags persist in `kg_node_section_tag` and the projection builders read them rather than re-tagging. Section vocabularies live in `app/assistant/kg/section_tagging.py` (`CARD_SECTION_VOCAB`, `WIKI_SECTION_VOCAB`).
 
 **Code.**
 - Promoter: `app/assistant/kg/proposal_promoter.py` (`run_promoter`, `_prepare_proposal_plan`, `_evaluate_and_apply`, `_classify_durable_conflict`)

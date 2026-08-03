@@ -130,7 +130,7 @@ Defined in `page_writer.py:502`. This is the path the nightly routine and the `/
 1. Load the rough page (frontmatter + title + parsed `WIKI:DET` sections, used for the `see_also` slice).
 2. Load the section taxonomy via `kg_projection.load_taxonomy` (resource: `resource_wiki_sections`).
 3. Re-fetch the neighborhood and call `kg_projection.render_bullets` to get structured `Bullet` objects (text + provenance + window ids).
-4. Run **`wiki_section_tagger`** (gpt-5.4-mini, `agents/wiki_section_tagger/`) over the bullets in batches. Cached by content hash via `tag_cache.bullet_key`. Sidecar: `<vault>/tags/<Entity>.json`.
+4. Run **`wiki_section_tagger`** (gpt-5.6-luna, `agents/wiki_section_tagger/`) over the bullets in batches. Cached by content hash via `tag_cache.bullet_key`. Sidecar: `<vault>/tags/<Entity>.json`.
 5. `group_bullets_by_section` inverts to `{section_key: [bullets]}`. A bullet may land in multiple sections.
 6. For each section in the taxonomy that has bullets, build a mini rough (`## <Title>\n\n` + bullets) and call **`wiki_writer`** (gpt-5.4, `agents/wiki_writer/`) once. Returns `page_markdown` per section. The sentinel `(nothing new to add)` causes the section to be dropped.
 7. Persist the per-section outputs to `<vault>/section_outputs/<Entity>.json`.
@@ -179,7 +179,7 @@ The lead pass is error-safe by design: any exception or empty output yields `""`
 
 ## Consistency critic
 
-`consistency_critic.run_consistency_critic` (`consistency_critic.py:275`) calls the **`wiki_consistency_critic`** agent (`agents/wiki_consistency_critic/`, gpt-5.4-mini) on the rendered prose page. The critic reads only the prose — it cannot see the graph. That is intentional: the wiki is a QA surface, and internal contradictions there often reveal real KG issues (tense errors, duplicate nodes, classifier mistakes) that were invisible at the graph level.
+`consistency_critic.run_consistency_critic` (`consistency_critic.py:275`) calls the **`wiki_consistency_critic`** agent (`agents/wiki_consistency_critic/`, gpt-5.6-luna) on the rendered prose page. The critic reads only the prose — it cannot see the graph. That is intentional: the wiki is a QA surface, and internal contradictions there often reveal real KG issues (tense errors, duplicate nodes, classifier mistakes) that were invisible at the graph level.
 
 It checks four issue types: `contradiction`, `tense_mismatch`, `duplicate_entity`, `impossible_sequence`, plus catch-all `other`. A `ground_truth_block` is assembled from the entity card (summary + key_facts) and, when the page subject is the primary user, from `resource_user_data` (home city / state / country, current job, birthdate, important_people). Prose claims that disagree with that block are flagged as `contradiction` with `source_kind` set to one of `entity_card_summary`, `entity_card_key_fact`, `user_profile`. Internal-only findings get `source_kind: "internal"`.
 
@@ -314,8 +314,8 @@ To trace a bad wiki sentence back to its origin, walk the canonical provenance c
 | `app/assistant/kg_projection/change_detection.py` | `find_changed_neighborhood_nodes` — neighborhood-aware `updated_at` diff |
 | `app/assistant/agents/wiki_writer/` | gpt-5.4 section prose writer; enforces the canonical-sentence reading contract |
 | `app/assistant/agents/wiki_lead_writer/` | gpt-5.4 lead writer; reads the assembled body, emits 1-2 paragraphs |
-| `app/assistant/agents/wiki_section_tagger/` | gpt-5.4-mini batched bullet → section classifier |
-| `app/assistant/agents/wiki_consistency_critic/` | gpt-5.4-mini post-render fact checker |
+| `app/assistant/agents/wiki_section_tagger/` | gpt-5.6-luna batched bullet → section classifier |
+| `app/assistant/agents/wiki_consistency_critic/` | gpt-5.6-luna post-render fact checker |
 | `app/assistant/agents/wiki_connection_investigator/` | infers facts the prose implies but the KG lacks → `synthetic_fact_proposal` findings |
 | `app/assistant/agents/wiki_fact_question_writer/`, `wiki_fact_answer_judge/` | drain agents (`wiki::fact_question_writer` / `wiki::fact_answer_judge`): worthiness gate → confirmation question, then judge the user's answer |
 | `app/assistant/agents/kg_node_section_tagger/` | promotion-time card+wiki section tagger feeding `NodeSectionTag` |

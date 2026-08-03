@@ -174,17 +174,17 @@ Pod-side and signal-side run independently on the same envelope stream. They do 
 
 Flush logic (`_process_burst`, `:210`) is three LLM passes:
 
-1. **Pass 1 — `pod_classifier`** (`app/assistant/agents/pod_classifier/`, `gpt-5.4-mini`). Inputs: rendered burst + tag vocabulary. Outputs `tags`, terse `one_liner`, and `sections` — the burst regrouped by topic with each line reproduced verbatim including its `- [time] Speaker:` prefix. Empty tags ⇒ no pod. The system prompt explicitly enumerates churn signatures (task-runner bookkeeping, tool output, ack-only replies, bare greetings) that should mint nothing.
+1. **Pass 1 — `pod_classifier`** (`app/assistant/agents/pod_classifier/`, `gpt-5.6-luna`). Inputs: rendered burst + tag vocabulary. Outputs `tags`, terse `one_liner`, and `sections` — the burst regrouped by topic with each line reproduced verbatim including its `- [time] Speaker:` prefix. Empty tags ⇒ no pod. The system prompt explicitly enumerates churn signatures (task-runner bookkeeping, tool output, ack-only replies, bare greetings) that should mint nothing.
 
-2. **Pass 1.5 — `pod_critic`** (`app/assistant/agents/pod_critic/`, `gpt-5.4-mini`). Rejection gate. Reads `one_liner + tags + sections + pre_context`. Accept iff the pod contains **knowledge, preference, memory, or actionable** content (`AgentForm.content_type`). Rejects: no substance, ack-only, not about the user, derivative recap, KG-shaped entity facts, broad-trend material the nightly belief job will catch. **Fails open** — any exception in the critic call defaults to `accept=True` so a critic outage does not silently suppress pods (`:396`).
+2. **Pass 1.5 — `pod_critic`** (`app/assistant/agents/pod_critic/`, `gpt-5.6-luna`). Rejection gate. Reads `one_liner + tags + sections + pre_context`. Accept iff the pod contains **knowledge, preference, memory, or actionable** content (`AgentForm.content_type`). Rejects: no substance, ack-only, not about the user, derivative recap, KG-shaped entity facts, broad-trend material the nightly belief job will catch. **Fails open** — any exception in the critic call defaults to `accept=True` so a critic outage does not silently suppress pods (`:396`).
 
-3. **Pass 2 — `pod_entity_resolver`** (`app/assistant/agents/pod_entity_resolver/`, `gpt-5.4-mini`). Annotates kept sections with inline entity parentheticals after pronouns and vague references — `"i (Alex) just got rdr2 / the game (RDR2) is amazing"`. Original words preserved exactly; only parens added. Entity cards are loaded via `entity_scan_keys: [sections_text, pre_context]` in the agent config. If the resolver returns a mismatched section count, falls back to raw sections (`:429`).
+3. **Pass 2 — `pod_entity_resolver`** (`app/assistant/agents/pod_entity_resolver/`, `gpt-5.6-luna`). Annotates kept sections with inline entity parentheticals after pronouns and vague references — `"i (Alex) just got rdr2 / the game (RDR2) is amazing"`. Original words preserved exactly; only parens added. Entity cards are loaded via `entity_scan_keys: [sections_text, pre_context]` in the agent config. If the resolver returns a mismatched section count, falls back to raw sections (`:429`).
 
 `pod_id` is deterministic from the sorted `signal_id`s in the burst (`_make_cluster_pod_id`, `:521`): `datapod:chat_cluster:<sha256[:24]>`. Same envelope set ⇒ same id ⇒ idempotent `put()`. `for_agents` is computed at mint time as the union of agents whose `pod_interest.tags` intersect the pod's tags (`_compute_for_agents`, `:510`; subscription map built once at startup by scanning the agent registry, `:543`).
 
 Both critic and resolver get a "pre-context" block — up to 20 messages from the last 24h of the same room, loaded via the same `RoomHistoryBuilder` `master_room` chat_gate uses (`_fetch_chat_history`, `:448`). The burst's own envelopes are filtered out so they do not appear twice in the resolver prompt.
 
-> Model choice: `gpt-5.4-mini`, not nano. Per the `pod_classifier_model` memory note, nano hangs on large bursts with rule-heavy prompts. All three pod agents (`pod_classifier`, `pod_critic`, `pod_entity_resolver`) use mini.
+> Model choice: `gpt-5.6-luna`, not nano. Per the `pod_classifier_model` memory note, nano hangs on large bursts with rule-heavy prompts. All three pod agents (`pod_classifier`, `pod_critic`, `pod_entity_resolver`) use mini.
 
 ## PodStore
 
@@ -417,9 +417,9 @@ What is planned but not built:
 | `app/assistant/pod_store/file_stamp.py` | Sidecar JSON stamp for content-addressed files |
 | `app/assistant/pod_store/image_reconcile.py` | Walk a directory, sync pods with disk, handle moves |
 | `app/assistant/pod_store/materializers/` | Per-type secret-pod projection builders (see SECRETS_ACCOUNTS.md) |
-| `app/assistant/agents/pod_classifier/` | Pass 1 agent (gpt-5.4-mini) |
-| `app/assistant/agents/pod_critic/` | Pass 1.5 rejection gate (gpt-5.4-mini) |
-| `app/assistant/agents/pod_entity_resolver/` | Pass 2 entity parentheticals (gpt-5.4-mini) |
+| `app/assistant/agents/pod_classifier/` | Pass 1 agent (gpt-5.6-luna) |
+| `app/assistant/agents/pod_critic/` | Pass 1.5 rejection gate (gpt-5.6-luna) |
+| `app/assistant/agents/pod_entity_resolver/` | Pass 2 entity parentheticals (gpt-5.6-luna) |
 | `configs/pod_tags.yaml` | Tag vocabulary (food, entertainment, health, schedule, work) |
 | `app/assistant/ingest/ingest_service.py` | The gut — poll + fan-out |
 | `app/assistant/ingest/contracts.py` | `IngestEnvelope`, `IngestSource`, `IngestSubscriber` |

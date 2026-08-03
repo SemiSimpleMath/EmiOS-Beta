@@ -114,7 +114,7 @@ Flips long-silent Goal nodes from active -> dormant. Reversible — any re-obser
 
 **Cadence:** daily 04:00
 
-Folds the oldest evidence rows of the heaviest-evidenced nodes (>=40 live rows) into ONE consolidated digest row each, keeping the newest 15 verbatim. NOTHING DELETED: originals stamped digested_at and kept for provenance. Max 80 rows/node/night, 5 nodes/night, one gpt-5.4-mini call/node. Runs after identity refresh (03:45).
+Folds the oldest evidence rows of the heaviest-evidenced nodes (>=40 live rows) into ONE consolidated digest row each, keeping the newest 15 verbatim. NOTHING DELETED: originals stamped digested_at and kept for provenance. Max 80 rows/node/night, 5 nodes/night, one gpt-5.6-luna call/node. Runs after identity refresh (03:45).
 
 ### `kg_embedding_diff_sync`
 

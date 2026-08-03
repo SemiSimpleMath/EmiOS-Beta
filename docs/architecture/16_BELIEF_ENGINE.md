@@ -261,7 +261,7 @@ Routine functions are registered as `@routine_handler`-decorated handlers in `ap
 | `belief_engine::belief_updater` | strong (`gpt-5.2`) | Step 2 — `create/update/deprecate/no_change` per belief |
 | `belief_engine::belief_reevaluator` | strong (`gpt-5.2`) | Step 4 — authoritative rewrite of contested beliefs from full trail |
 | `belief_engine::merge_verifier` | strong (`gpt-5.2`) | Step 5 — per-pair same/not-same decision + reconciled `canonical_statement` |
-| `belief_engine::belief_tagger` | mini (`gpt-5.4-mini`) | §7 — cross-cutting tags from the standardized vocab |
+| `belief_engine::belief_tagger` | mini (`gpt-5.6-luna`) | §7 — cross-cutting tags from the standardized vocab |
 | `belief_engine::belief_canonicalizer` | mini | **DEAD** (§11 trap 3) — old chunk-based canonicalizer |
 
 ## 14. Why the beliefs DB is "fragile / handle with extreme care"

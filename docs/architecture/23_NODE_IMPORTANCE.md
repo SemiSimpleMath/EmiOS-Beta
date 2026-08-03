@@ -62,7 +62,7 @@ several runs instead of becoming one graph-wide LLM grind.
 
 ## Edge importance — the only LLM rating
 
-`me::edge_importance_rater` (`gpt-5.4-mini`, `agents/me/edge_importance_rater/`)
+`me::edge_importance_rater` (`gpt-5.6-luna`, `agents/me/edge_importance_rater/`)
 rates each edge **from the source node's perspective** on 0–10:
 "how important is this relationship to the source?" `the user --addressee--> the assistant`
 is rated by how much it matters to *the user*, not to the assistant, not in the

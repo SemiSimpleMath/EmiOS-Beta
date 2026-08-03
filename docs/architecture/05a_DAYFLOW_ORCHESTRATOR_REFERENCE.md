@@ -132,7 +132,7 @@ For each eligible artifact the agent emits `ADMIT` vs `REJECT_DUPLICATE / REJECT
 short-circuits to `plan_mode` when `room_mode=='planning_mode'`, and skips the LLM entirely when nothing
 is eligible.
 
-**strategic_planner_wo** (the work-object **EVALUATOR** / "steward", `gpt-5.4-mini`) — the **sole path from
+**strategic_planner_wo** (the work-object **EVALUATOR** / "steward", `gpt-5.6-luna`) — the **sole path from
 intake to action**. Driven by `strategic_planner_wo_prep_node` (builds `work_portfolio` from non-terminal
 work objects, plus two separate 18 h done-logs: `recent_completed_work` = DONE/don't-recreate vs
 `recent_abandoned_work` = dropped/may-recreate, and the situational context — tickets, dispatch results,
@@ -147,7 +147,7 @@ change; complete/abandon → `set_work_status`. It then **consumes intake** — 
 objective (check the portfolio before creating), the ROUTINE section is authoritative for timing, ticket
 responses are authoritative, and an already-DONE recurring automation is never re-minted.
 
-**strategic_planner** (LEGACY items-lane planner, `gpt-5.4-mini`) — the older evaluator that emitted
+**strategic_planner** (LEGACY items-lane planner, `gpt-5.6-luna`) — the older evaluator that emitted
 **plans (DAGs of task nodes) + standalone tasks** instead of work objects, with per-task
 wait/dependency/reactivate fields and plan-synopsis bookkeeping it managed itself. **Retired:** its driving
 control nodes (`StrategicPlannerPrepNode`, `PlannerPersistNode`) were deleted and it was removed from the
@@ -164,7 +164,7 @@ consistent with it being the legacy lane's cleaner.
 
 ### Planning structure
 
-**work_architect** (`gpt-5.4-mini`, no tools) — the structure designer ("Part 2" of the split planner).
+**work_architect** (`gpt-5.6-luna`, no tools) — the structure designer ("Part 2" of the split planner).
 Driven by `work_architect_node`, which fires only when the evaluator created objects this tick or flagged
 some for re-plan — `replan_work_ids`, set by the evaluator from intake OR by the **work_finalizer's AMEND**
 verdict, ≤ 3/tick. It is handed one goal + a shared situational `information` block (ticket replies, active
@@ -231,7 +231,7 @@ abort/error, else **`done`** with the answer written as the node's `content` (it
 `node_id=None` it drives ready top-level nodes until the goal is satisfied or only future-wake nodes remain
 (`"parked"`); it never fast-forwards time.
 
-**work_repair** (`gpt-5.4-mini`) — adjudicates work objects stuck on a **`failed`** node. Driven by
+**work_repair** (`gpt-5.6-luna`) — adjudicates work objects stuck on a **`failed`** node. Driven by
 `work_repair_node` (runs once per tick, before the state_mover lane; ≤ 3 WOs/tick). For each it builds the
 projection (`STATUS_LEGEND + render_work_portfolio`) plus an **un-truncated** `_extract_user_replies` string
 so an authoritative decline past the 400-char cutoff is seen. The agent returns
@@ -240,7 +240,7 @@ so an authoritative decline past the 400-char cutoff is seen. The agent returns
 `[Re-issued as an ask…]` + `defer_node(user_reply)`. Surgical/in-place (no new nodes); biases toward
 `escalate` when the goal is still wanted but treats a user decline as authoritative → `abandon_goal`.
 
-**work_finalizer** (`gpt-5.4-mini`, no tools) — adjudicates each **completed** node — the success sibling to
+**work_finalizer** (`gpt-5.6-luna`, no tools) — adjudicates each **completed** node — the success sibling to
 `work_repair`. Driven by `work_finalizer_node`, which runs once per tick **before the architect**; for each
 non-terminal WO it judges every TOP-LEVEL `done` node (a direct child of the goal — the worker's nested
 checklist never counts toward the goal) on its FULL, un-truncated result + the WO projection, and returns
@@ -266,7 +266,7 @@ on reply it returns the action (done/willdo/acknowledge/skip/dismiss/later) + `u
 `valid_hours` (default 4) is the ticket's DB validity window. (Note: `EXPIRED` is terminal in the ticket
 state machine, so a reply after the wait-timeout cannot be accepted — a known sharp edge.)
 
-**result_formatter** (`gpt-5.4-mini`, no tools) — condenses a dispatched manager's full result into a
+**result_formatter** (`gpt-5.6-luna`, no tools) — condenses a dispatched manager's full result into a
 compact 1–3 line task-update (verdict-first, specifics verbatim, no "I" voice). Invoked synchronously
 inside `post_room_finalize_node` — **so reachable only on the legacy item lane** (see flag below).
 

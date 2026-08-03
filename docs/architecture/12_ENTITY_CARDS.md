@@ -158,10 +158,10 @@ summarizer — a 5-agent pipeline plus structural walks:
 
 | Agent | Job | Model |
 |---|---|---|
-| `entity_cards::section_tagger` | classify each fact into a card section or `reject` | gpt-5.4-mini |
-| `entity_cards::bullet_renderer` | fuse a section's facts into terse present-tense bullets + source map | gpt-5.4-mini |
-| `entity_cards::section_distiller` | salience cut when a section exceeds its cap | gpt-5.4-mini |
-| `entity_cards::summary_writer` | top-of-card narrative summary from the bullets | gpt-5.4-mini |
+| `entity_cards::section_tagger` | classify each fact into a card section or `reject` | gpt-5.6-luna |
+| `entity_cards::bullet_renderer` | fuse a section's facts into terse present-tense bullets + source map | gpt-5.6-luna |
+| `entity_cards::section_distiller` | salience cut when a section exceeds its cap | gpt-5.6-luna |
+| `entity_cards::summary_writer` | top-of-card narrative summary from the bullets | gpt-5.6-luna |
 | `entity_cards::card_critic` | 3-verdict QA judge: `pass` / `rewrite` / `veto` | gpt-5-mini |
 
 `card_critic` asks "would an agent act differently because this card was in its
