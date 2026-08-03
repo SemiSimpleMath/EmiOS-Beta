@@ -290,11 +290,14 @@ Helper module `app/assistant/kg_maintenance/verdict_store.py` exposes:
 ### Producers (write findings)
 
 Maintenance-pipeline step order (`kg_maintenance_pipeline/pipeline.py`,
-run Mon 02:00): `orphan_scan` → `context_embedding_backfill` →
-`duplicate_scan` → `pagerank` → `missing_dates_scan` →
-`role_succession_scan` → `date_lint_scan` → `disambiguation_scan` →
-`investigate_findings` (final pass, caps at 20 investigations/run). The
-old `description_fill`/`missing_description` step was deleted 2026-06-10
+run Mon 02:00): `lifecycle_gc` → `orphan_scan` →
+`context_embedding_backfill` → `duplicate_scan` → `pagerank` →
+`missing_dates_scan` → `edge_canon_curation` → `role_succession_scan` →
+`date_lint_scan` → `disambiguation_scan` → `investigate_findings`
+(final pass, caps at 20 investigations/run). `lifecycle_gc` and
+`edge_canon_curation` landed in the 2026-07-08 KG-core audit (deletion
+lifecycle + predicate canon curation). The old
+`description_fill`/`missing_description` step was deleted 2026-06-10
 (wiki page leads are the authoritative source of `node.description`).
 
 | Producer | Type | finding_type | Notes |
