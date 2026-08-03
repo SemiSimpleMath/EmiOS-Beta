@@ -30,7 +30,9 @@ Three required top-level mappings — `policy`, `permissions`, `access`:
   `authority_level`, `history` (`scope`, `max_hours`), `retention`
   (`write_unified_log`, `write_kg`, `allow_fact_extraction`), `delivery`
   (`auto_send`, `allow_initiation`), `privacy`, `participant_identity`. Optional:
-  `chat_compaction`, `mode_manager_overrides`, `default_room_mode`.
+  `chat_compaction`, `mode_manager_overrides`, `default_room_mode`,
+  `mention_addressable_rooms` (rooms whose active workers this room may
+  @-address in addition to its own).
 - **`permissions`** — `tool_classes` (informational / transformational /
   external_action / sensitive), `allow_images`, `pod_scopes`, and optional
   `per_manager` rules. (When a `scope.yaml` is present it is authoritative for
@@ -123,8 +125,11 @@ through those managers).
 | Dayflow delegation  | No                        | Yes                                 |
 | LLM (tier)          | openai / `powerful`       | gemini / `mini` (`gemini-3-flash-preview`, faster) |
 
-(`config.yaml` declares a provider + `model_tier`; tiers resolve via
-`app/configs/llm_classes_dict.py` — `mini`+`gemini` → `gemini-3-flash-preview`.)
+(`config.yaml` declares a provider + `model_tier`; the tier→model map is
+`configs/model_tiers.yaml` (`resolve_engine` in `app/services/llm_factory.py`).
+Note: in the primary call path the config's explicit `engine` is what
+reaches the API — the tier map governs interface selection and
+provider-fallback equivalence.)
 
 ## Room Session Manager
 
@@ -142,7 +147,15 @@ full lifecycle of room-scoped communication. The work is decomposed across the
   Returns a `SlashCommandResult` (early-return reply or normalized body to
   continue the pipeline).
 - **`room_mention_router.py`** — intercepts `@<worker> <body>` and delivers to an
-  active worker's mailbox, short-circuiting the manager pipeline.
+  active worker's mailbox, short-circuiting the manager pipeline. Resolution is
+  scoped to the rooms the sender may address: its own room plus any rooms granted
+  via `policy.mention_addressable_rooms` in ROOM.md (master_room grants
+  `dayflow_orchestrator`, so the owner can steer dayflow-spawned teams); a
+  same-named worker in the sender's own room wins. Display names with
+  spaces/punctuation are addressed by their *mention key* (`"Waffle (graph)"` →
+  `@waffle_graph`, bare `@waffle` when unambiguous) —
+  `chat_narrator/display_names.mention_key` / `manager_for_mention`, matched in
+  `MAMInstanceManager.find_by_display_name` / `find_by_base_display_name`.
 - **`pod_command.py`** — deterministic `/pod expand <prefix>` (recent-room match
   + `pod_utils.read_pod_gated`, no LLM).
 - **`question_answer_ingress_service.py`** — parses `ANSWER <qid> ...` channel
