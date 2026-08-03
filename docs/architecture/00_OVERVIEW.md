@@ -43,7 +43,7 @@ Deterministic (non-LLM) nodes in the agent loop — routing, tool dispatch, prep
 See: [04_CONTROL_NODES.md](04_CONTROL_NODES.md)
 
 ### Dayflow Orchestrator
-An autonomous daily workflow engine that ingests chat, email, delegations, and pods, maintains persistent lifecycle state per item, and runs a multi-agent pipeline to triage, plan, and dispatch. Tickets are tools (`create_dayflow_ticket`), not items.
+An autonomous daily workflow engine. Everything actionable is a **work object** (a goal plus a small DAG of nodes in the event-sourced work store); intake items (chat, email, delegations, pods) are triaged and converted to work objects by the evaluator. Each tick dispatches one ready node — to a worker team on a job thread, or to the user as a ticket (`create_dayflow_ticket`).
 
 See: [05_DAYFLOW.md](05_DAYFLOW.md)
 
@@ -114,13 +114,14 @@ User message via WebSocket
 
 ```
 belief_engine/             # Belief inference engine (top-level package; tables live in emi.db)
+work_objects/              # Work-object substrate (goal + node DAG; four tables in emi.db)
 
 app/assistant/
   agent_classes/           # Base agent classes (Agent, Planner, OneShotAgent, Delegator, ...)
   agent_registry/          # Agent loading + factory
   agent_runtime/services/  # Per-agent runtime services (context injector, prompt builder, tool policy, ...)
   agents/                  # Agent definitions (config.yaml + prompts/ + agent_form.py)
-  background_task_manager/ # Daemon threads (db cleanup, watchdog, routine runner, ticket maintenance)
+  background_task_manager/ # Daemon threads (watchdog, routine runner, ticket maintenance)
   control_nodes/           # Deterministic routing/dispatch (incl. ToolCaller)
   dayflow_orchestrator/    # Autonomous daily workflow engine
   entity_management/       # Entity cards v2 (sections/bullets)
@@ -142,7 +143,6 @@ app/assistant/
   scope/                   # Scope loader + contracts
   subconscious/            # Autonomous "mind": concerns, proposers, digest, noticer
   ticket_manager/          # Ticket state machine
-  transports/              # SMS / Slack / Telegram adapters
   wiki_generator/          # KG -> per-entity wiki + synthetic-fact drain + growth
   ServiceLocator/          # Dependency injection registry
   utils/                   # Shared utilities (scope_gate, path_utils, ...)
