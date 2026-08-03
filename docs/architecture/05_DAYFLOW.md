@@ -9,6 +9,8 @@ reminders, and questions for the user.
 **Everything actionable is a WORK OBJECT** — a goal plus a small DAG of typed nodes in a durable,
 event-sourced graph store. Even a one-shot action is a one-node work object. Items (the older Message
 substrate) are intake and context only; the evaluator is the sole path from intake to action.
+The substrate itself — model, store, invariants, wake primitives, runtime, and every graph writer —
+has its own reference: [08_WORK_OBJECTS.md](08_WORK_OBJECTS.md).
 
 Every graph mutation goes through a validated writer (allowed transitions per node family, authority
 ceilings, atomic event + projection). Nothing silently disappears: results are recorded as evidence,

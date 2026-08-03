@@ -45,7 +45,7 @@ See: [04_CONTROL_NODES.md](04_CONTROL_NODES.md)
 ### Dayflow Orchestrator
 An autonomous daily workflow engine. Everything actionable is a **work object** (a goal plus a small DAG of nodes in the event-sourced work store); intake items (chat, email, delegations, pods) are triaged and converted to work objects by the evaluator. Each tick dispatches one ready node — to a worker team on a job thread, or to the user as a ticket (`create_dayflow_ticket`).
 
-See: [05_DAYFLOW.md](05_DAYFLOW.md)
+See: [05_DAYFLOW.md](05_DAYFLOW.md), [08_WORK_OBJECTS.md](08_WORK_OBJECTS.md)
 
 ### Pipelines & Routines
 Step-based pipelines (sequential, idempotent) for background processing, and a routine scheduler (one file per routine under `configs/routines/public/`, time- or event-triggered, with on_error/backoff/auto-disable).
