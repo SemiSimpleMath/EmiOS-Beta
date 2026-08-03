@@ -288,7 +288,7 @@ DEFAULT_AUTHORITY_BY_SURFACE: dict[str, int] = {
 }
 ```
 
-Other surfaces default to `0`. Rooms can override via `room_policy.authority_level`; `master_room` sets `99` (`app/assistant/rooms/master_room/policy.json:17`), reflecting that the local UI is the owner's primary control surface.
+Other surfaces default to `0`. Rooms can override via `room_policy.authority_level`; `master_room` sets `99` (`app/assistant/rooms/master_room/ROOM.md` frontmatter — the loose `policy.json` beside it is legacy and unread), reflecting that the local UI is the owner's primary control surface.
 
 System-initiated background work (pipelines, routines, the finding executor) typically uses `100` because it represents the user's own automation. The narrowing rule still applies — a manager cannot *raise* the level above what the inbound scope grants.
 
