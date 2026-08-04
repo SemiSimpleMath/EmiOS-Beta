@@ -50,7 +50,7 @@ skip the whole tick; (2) **ingestion** — `run_dayflow_ingestion`; (3) **sweeps
 `sweep_stuck_work_nodes`; (4) minimal
 blackboard extras (`day_of_week` only — per-agent prep nodes load their own context); (5) **manager
 invocation** — build a `Message(event_topic="dayflow_tick", data={trigger, fast_tick, triggered_item_id…})`
-with a system scope, create `dayflow_orchestrator_manager`, and `DI.manager_invoker.invoke`; (6) persist
+with the ROOM-DERIVED scope (load_scope_for_source kind="room"), create `dayflow_orchestrator_manager`, and `DI.manager_invoker.invoke`; (6) persist
 status. `fast_tick` is set when the scheduler woke for one specific due item timer.
 
 ### run_dayflow_ingestion — `dayflow_orchestrator/ingestion.py`
