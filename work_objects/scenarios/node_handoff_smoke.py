@@ -30,7 +30,7 @@ import app.assistant.tests.test_setup  # noqa: F401 - bootstrap DI
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.utils.logging_config import add_file_sink
 from app.assistant.utils.pydantic_classes import ToolResult
-from work_objects import work_runtime
+from work_objects import discharge, scope as work_scope
 from work_objects.store import WorkStore
 
 CAPTURED = []
@@ -59,7 +59,7 @@ GOAL = ("Find Leonardo DiCaprio's current girlfriend â€” her name and her age â€
 def main():
     log = add_file_sink("node_handoff_smoke")
     print(f"full logs -> {log}\n", flush=True)
-    work_runtime._ensure_registered()
+    discharge._ensure_registered()
     DI.manager_registry.preload_all()
     _stub_send_email()
 
@@ -73,7 +73,7 @@ def main():
     gid = wo.goal_node_id
 
     print("=== run_node(work_emi_team_manager) on the goal ===\n", flush=True)
-    work_runtime.run_node(store, wo.id, gid, manager_name="work_emi_team_manager")
+    discharge.discharge_node(store, wo.id, gid, manager_name="work_emi_team_manager", scope_context=work_scope.orchestrator_scope(work_id=wo.id))
 
     final = store.load(wo.id)
     g = final.nodes[gid]

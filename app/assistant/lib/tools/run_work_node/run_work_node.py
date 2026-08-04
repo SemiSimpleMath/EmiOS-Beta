@@ -27,9 +27,12 @@ class RunWorkNodeTool(BaseTool):
             if not work_id or not node_id:
                 raise ValueError("work_id and node_id are required")
             from app.assistant.dayflow_orchestrator.work_store import get_dayflow_work_store
-            from work_objects.work_runtime import work_on
+            from work_objects.discharge import discharge_node
             store = get_dayflow_work_store()
-            status = work_on(store, work_id, node_id=node_id)   # sets work context, runs worker, records result
+            # Scope = the calling invocation's (ScopeAdapter-narrowed) scope — the tool never mints one.
+            discharge_node(store, work_id, node_id, scope_context=tool_message.scope_context)
+            n = store.load(work_id).nodes.get(node_id)
+            status = n.status if n else "missing"
             node = store.load(work_id).nodes.get(node_id)
             result = (getattr(node, "content", "") or "").strip() if node else ""
             return ToolResult(result_type="success",

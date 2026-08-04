@@ -5,7 +5,7 @@ orchestrator. This IS the dayflow execution path: dayflow schedules a ready node
 work_on discharges it through the work_manager; results land on the graph.
 
 A 2-step goal (two independent top-level task nodes, both pure-knowledge so the run
-needs no web/tools). work_on(store, work_id) drives the ready set sequentially. We
+needs no web/tools). drive_work(store, work_id, scope_context=orchestrator_scope(work_id=work_id)) drives the ready set sequentially. We
 verify the EXECUTION ARM:
   - both top-level nodes reach a terminal status (the generic close path works),
   - the WorkObject rolls up to done (goal = all_owned_children_done),
@@ -33,7 +33,8 @@ import app.assistant.tests.test_setup  # noqa: F401 - bootstrap DI
 
 from app.assistant.utils.logging_config import add_file_sink
 from work_objects.store import WorkStore
-from work_objects.work_runtime import work_on
+from work_objects.discharge import drive_work
+from work_objects.scope import orchestrator_scope
 
 
 def main() -> None:
@@ -62,7 +63,7 @@ def main() -> None:
                              "parent_id": goal_id}, actor="planner")
 
     print("=== work_on: drive the WorkObject via the generic work_manager (no orchestrator) ===\n", flush=True)
-    final_status = work_on(store, wo.id)   # node_id=None -> drive the ready top-level nodes
+    final_status = drive_work(store, wo.id, scope_context=orchestrator_scope(work_id=wo.id))   # node_id=None -> drive the ready top-level nodes
 
     final = store.load(wo.id)
     tops = [n for n in final.nodes.values() if n.parent_id == goal_id and n.type == "subtask"]

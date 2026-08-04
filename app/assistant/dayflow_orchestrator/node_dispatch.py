@@ -146,9 +146,14 @@ def _run_job(store, work_id: str, node_id: str) -> None:
         node = store.load(work_id).nodes.get(node_id)
         if node is not None:
             my_epoch = int(node.payload.get("dispatch_epoch") or 0)
-        from work_objects.work_runtime import work_on
-        status = work_on(store, work_id, node_id=node_id)   # context + worker + result, all on the graph
-        logger.info("[node_dispatch] work %s -> %s", ref, status)
+        from work_objects.discharge import discharge_node
+        from work_objects.scope import orchestrator_scope
+        # INTERIM (dies with the WorkSession step): scope made explicit at the call site;
+        # the session layer will pass the dayflow ROOM's derived scope instead.
+        discharge_node(store, work_id, node_id,
+                       scope_context=orchestrator_scope(work_id=work_id))
+        n = store.load(work_id).nodes.get(node_id)
+        logger.info("[node_dispatch] work %s -> %s", ref, n.status if n else "missing")
     except Exception as e:
         logger.error("[node_dispatch] job thread for %s crashed: %s", ref, e, exc_info=True)
         try:

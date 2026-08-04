@@ -25,7 +25,7 @@ import app.assistant.tests.test_setup  # noqa: F401 - bootstrap DI
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.utils.logging_config import add_file_sink
 from app.assistant.utils.pydantic_classes import Message, ToolResult
-from work_objects import work_runtime
+from work_objects import discharge, scope as work_scope
 from work_objects.store import WorkStore
 from work_objects.scope import orchestrator_scope
 
@@ -141,7 +141,7 @@ def _run_work(task: str):
                                             "satisfied_when_kind": "tool_success"}, actor="test")
     gid = wo.goal_node_id
     t0 = time.time()
-    work_runtime.run_node(store, wo.id, gid, manager_name="work_emi_team_manager")
+    discharge.discharge_node(store, wo.id, gid, manager_name="work_emi_team_manager", scope_context=work_scope.orchestrator_scope(work_id=wo.id))
     dt = time.time() - t0
     f = store.load(wo.id)
     g = f.nodes[gid]
@@ -161,7 +161,7 @@ def _run_work(task: str):
 def main() -> None:
     log = add_file_sink("emi_team_vs_work")
     print(f"full logs -> {log}\n", flush=True)
-    work_runtime._ensure_registered()
+    discharge._ensure_registered()
     DI.manager_registry.preload_all()
     _install_stubs()
     _probe_kg()

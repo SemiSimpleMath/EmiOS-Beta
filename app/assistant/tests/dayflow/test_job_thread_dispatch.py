@@ -64,8 +64,8 @@ class TestJobThread:
             s.apply("set_status", {"work_id": work_id, "node_id": node_id, "status": "done"})
             return "done"
 
-        import work_objects.work_runtime as wr
-        monkeypatch.setattr(wr, "work_on", slow_work_on)
+        import work_objects.discharge as wr
+        monkeypatch.setattr(wr, "discharge_node", slow_work_on)
 
         nd._do_work(store, wid, "n1")
         # Returned immediately: node claimed, job registered and alive, worker still running.
@@ -82,10 +82,10 @@ class TestJobThread:
         wid, gid = _mk_wo(store)
         _sub(store, wid, gid, "n1")
 
-        import work_objects.work_runtime as wr
+        import work_objects.discharge as wr
         def boom(*a, **kw):
             raise RuntimeError("worker exploded")
-        monkeypatch.setattr(wr, "work_on", boom)
+        monkeypatch.setattr(wr, "discharge_node", boom)
 
         nd._do_work(store, wid, "n1")
         assert _wait_for(lambda: store.load(wid).nodes["n1"].status == "failed")

@@ -339,6 +339,10 @@ class WorkStore:
         node.status = target
         if target == "dispatched" and prev != "dispatched":
             node.payload["dispatch_epoch"] = int(node.payload.get("dispatch_epoch") or 0) + 1
+        if data.get("session_id") is not None:
+            # Ownership is a graph fact (work-session rewrite): the discharging session
+            # stamps itself on the node; the supervisor reads this, not a registry.
+            node.payload["session_id"] = str(data["session_id"])
         if data.get("content") is not None:   # optional closing note / evidence written on transition
             node.content = data["content"]
         node.updated_at = now

@@ -29,7 +29,7 @@ import app.assistant.tests.test_setup  # noqa: F401 - bootstrap DI
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.utils.logging_config import add_file_sink
 from app.assistant.utils.pydantic_classes import ToolResult
-from work_objects import work_runtime
+from work_objects import discharge, scope as work_scope
 from work_objects.store import WorkStore
 
 CAPTURED = []
@@ -72,7 +72,7 @@ def main():
         if os.path.exists(src + ext):
             shutil.copy(src + ext, db + ext)
 
-    work_runtime._ensure_registered()
+    discharge._ensure_registered()
     DI.manager_registry.preload_all()
     _stub_send_email()
 
@@ -120,7 +120,7 @@ def main():
     web_before = sum(1 for n in before.nodes.values() if (n.owner_agent or "").lower() == "work_web_manager")
 
     print("=== RESUME: hand the partial goal to work_emi_team_manager ===\n", flush=True)
-    work_runtime.run_node(store, wid, goal, manager_name="work_emi_team_manager")
+    discharge.discharge_node(store, wid, goal, manager_name="work_emi_team_manager", scope_context=work_scope.orchestrator_scope(work_id=wid))
 
     after = store.load(wid)
     email_after = after.nodes[email["id"]].status

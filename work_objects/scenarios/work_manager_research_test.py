@@ -33,7 +33,8 @@ if str(REPO_ROOT) not in sys.path:
 import app.assistant.tests.test_setup  # noqa: F401 - bootstrap DI
 
 from work_objects.store import WorkStore
-from work_objects.work_runtime import run_node
+from work_objects.discharge import discharge_node
+from work_objects.scope import orchestrator_scope
 
 NODE = ("Research the Gaggia Classic Pro espresso machine for a prospective buyer: (1) its current "
         "US price, (2) key specs (boiler type, portafilter size, whether it has a PID), and (3) its "
@@ -49,7 +50,7 @@ def main() -> None:
     wid, node_id = wo.id, wo.goal_node_id
 
     print("=== work-manager research test (single node, no orchestrator) ===\n")
-    run_node(store, wid, node_id, manager_name="work_web_manager")
+    discharge_node(store, wid, node_id, manager_name="work_web_manager", scope_context=orchestrator_scope(work_id=wid))
     status = store.load(wid).nodes[node_id].status
 
     final = store.load(wid)

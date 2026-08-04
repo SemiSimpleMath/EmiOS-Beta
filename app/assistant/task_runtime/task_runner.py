@@ -3,7 +3,7 @@
 Evaluates the work object's ready-set and drives it wave-by-wave with NO scheduler round-trip
 between nodes: each pass fans the whole ready frontier out — in ONE parallel thread pool —
 `tool` nodes via the deterministic tool executor and `action` nodes via the work-object SUBSTRATE
-driver (`work_objects.work_runtime.work_on` → the node's manager), then re-evaluates. Tasks depend
+driver (`work_objects.discharge.discharge_node` → the node's manager), then re-evaluates. Tasks depend
 on the substrate (work_objects/) and nothing in dayflow: dayflow is a separate consumer of the same
 substrate, not a dependency. The runner parks when only future-wake nodes remain ("parked", resumed
 when the wake fires) and completes on reach-end or when it runs out of runnable work.
@@ -101,17 +101,17 @@ def _close_dead_branches(store, wo, facts) -> None:
 
 
 def _run_action_node(store, work_id: str, node_id: str, scope=None) -> None:
-    """Run an already-claimed action node via the work-object SUBSTRATE — work_runtime.work_on drives
+    """Run an already-claimed action node via the work-object SUBSTRATE — discharge_node drives
     the node's manager (its `payload.executor`, default work_emi_team_manager) and records the result;
     we then close done -> closed (a task has no separate finalizer). NOTHING from dayflow. The RUN
     scope is threaded through so the action's manager executes at the run's authority (98), not the
     substrate's orchestrator scope (99) — a tool floored above the run scope was denied on a tool
     node but reachable inside an action node's manager (verification finding R8)."""
-    from work_objects.work_runtime import work_on
+    from work_objects.discharge import discharge_node
     node = store.load(work_id).nodes[node_id]
     executor = str(node.payload.get("executor") or "").strip() or "work_emi_team_manager"
     try:
-        work_on(store, work_id, node_id=node_id, manager_name=executor, scope_context=scope)
+        discharge_node(store, work_id, node_id, manager_name=executor, scope_context=scope)
     except Exception as e:
         logger.error("[task_runner] action node %s::%s failed: %s", work_id, node_id, e)
         cur = store.load(work_id).nodes.get(node_id)
@@ -188,7 +188,7 @@ def drive(store, work_id: str, *, scope, scope_contract_enforced: bool = True) -
 
         # Claim the whole ready frontier synchronously (no double-dispatch), then run it in ONE
         # parallel wave — both kinds on the work-object SUBSTRATE, nothing from dayflow: `tool` nodes
-        # via the deterministic tool executor, `action` nodes via work_runtime.work_on (the node's
+        # via the deterministic tool executor, `action` nodes via discharge.discharge_on (the node's
         # manager). The wave joins before re-evaluating.
         for n in ready:
             store.apply("set_status", {"work_id": work_id, "node_id": n.id, "status": "dispatched"},

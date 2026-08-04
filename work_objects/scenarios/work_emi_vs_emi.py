@@ -24,7 +24,7 @@ import app.assistant.tests.test_setup  # noqa: F401
 from app.assistant.ServiceLocator.service_locator import DI
 from app.assistant.utils.logging_config import add_file_sink
 from app.assistant.utils.pydantic_classes import Message
-from work_objects import work_runtime
+from work_objects import discharge, scope as work_scope
 from work_objects.store import WorkStore
 from work_objects.scope import orchestrator_scope
 
@@ -54,7 +54,7 @@ def _answer(result) -> str:
 def main():
     log = add_file_sink("work_emi_vs_emi")
     print(f"log -> {log}\n", flush=True)
-    work_runtime._ensure_registered()
+    discharge._ensure_registered()
     DI.manager_registry.preload_all()
 
     print("=" * 80 + "\n=== work_emi_team_manager (graph) ===", flush=True)
@@ -65,7 +65,7 @@ def main():
     gid = wo.goal_node_id
     t0 = time.time()
     try:
-        work_runtime.run_node(store, wo.id, gid, manager_name="work_emi_team_manager")
+        discharge.discharge_node(store, wo.id, gid, manager_name="work_emi_team_manager", scope_context=work_scope.orchestrator_scope(work_id=wo.id))
     except Exception as e:
         print(f"  ERROR: {type(e).__name__}: {e}", flush=True)
         traceback.print_exc()

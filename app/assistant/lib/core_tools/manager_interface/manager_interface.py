@@ -50,7 +50,7 @@ class ManagerInterface:
         is one-way, work_objects -> app). Outside a work run this is dead weight that returns None."""
         try:
             from work_objects.runtime import get_work_context
-            from work_objects.work_runtime import run_node
+            from work_objects.discharge import discharge_node
             from work_objects.model import new_id
         except Exception:
             return None
@@ -74,12 +74,16 @@ class ManagerInterface:
             "title": task_text[:80], "content": task_text, "owner_agent": self.manager_name,
             "satisfied_when_kind": "tool_success",
         }, actor=ctx.actor)
-        # run_node sets the work context to the child, invokes the manager, persists its result onto the
-        # node, closes it, restores the caller's context, and RETURNS the manager's ToolResult. We hand
-        # that ToolResult back VERBATIM — so calling a node-manager is identical to calling any manager
-        # (same agent-facing answer, same shape). The graph node + its persisted result are the
-        # side-effect; the return is just the manager's answer.
-        result = run_node(ctx.store, ctx.work_id, child_id, manager_name=self.manager_name)
+        # discharge_node sets the work context to the child, invokes the manager, persists its result
+        # onto the node, closes it, restores the caller's context, and RETURNS the manager's ToolResult
+        # verbatim — so calling a node-manager is identical to calling any manager. Scope is the calling
+        # message's (already ScopeAdapter-narrowed) scope: the delegation inherits the caller's
+        # authority, never a re-minted one. The owning session (if any) carries onto the child.
+        parent_node = ctx.store.load(ctx.work_id).nodes.get(ctx.node_id)
+        parent_session = (parent_node.payload.get("session_id") if parent_node else None)
+        result = discharge_node(ctx.store, ctx.work_id, child_id, manager_name=self.manager_name,
+                                scope_context=tool_message.scope_context,
+                                session_id=parent_session)
         child = ctx.store.load(ctx.work_id).nodes.get(child_id)
         status = child.status if child else "unknown"
         logger.info("[node-handoff] %s ran on child node %s -> %s", self.manager_name, child_id, status)
